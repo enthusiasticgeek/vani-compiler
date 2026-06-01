@@ -5492,6 +5492,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closures #528-#531: scalar-broadcast arithmetic.
+            if matches!(name.as_str(),
+                "vec_add_scalar" | "vec_sub_scalar"
+                | "vec_mul_scalar" | "vec_div_scalar") {
+                let op = name.strip_prefix("vec_").unwrap();
+                let xs = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_vec_i64 @intent_vec_int64_t_{}(%intent_vec_i64* {}, i64 {})\n",
+                    dest, op, xs, v
+                ));
+                return dest;
+            }
             // Closure #399: vec_dot(ref xs, ref ys) -> i64.
             if name == "vec_dot" {
                 let xs = emit_expr(&args[0], ctx, out);
@@ -12727,6 +12741,159 @@ pub(crate) fn emit_intent_vec_int64_utility_definitions(out: &mut String) {
             p = prefix,
         ));
         out.push_str(&format!("  br label %{p}_head\n", p = prefix));
+        out.push_str(&format!("{p}_fin:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_r1 = insertvalue %intent_vec_i64 %{p}_r0, i64 %{p}_len, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_r2 = insertvalue %intent_vec_i64 %{p}_r1, i64 %{p}_len, 2\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  ret %intent_vec_i64 %{p}_r2\n",
+            p = prefix,
+        ));
+        out.push_str("}\n\n");
+    }
+
+    // ---- Closures #528-#531: scalar-broadcast arithmetic on Vec<i64>.
+    // Each transforms xs[i] op v where v is a broadcast scalar.
+    // div_scalar guards against v == 0 by returning an empty Vec.
+    for (op, prefix, ir_op, guards_zero) in [
+        ("add_scalar", "vesa", "add",  false),
+        ("sub_scalar", "vess", "sub",  false),
+        ("mul_scalar", "vesm", "mul",  false),
+        ("div_scalar", "vesd", "sdiv", true),
+    ].iter() {
+        out.push_str(&format!(
+            "define %intent_vec_i64 @intent_vec_int64_t_{op}(%intent_vec_i64* %xs, i64 %v) {{\n",
+            op = op,
+        ));
+        out.push_str(&format!(
+            "  %{p}_lp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_len = load i64, i64* %{p}_lp\n",
+            p = prefix,
+        ));
+        if *guards_zero {
+            out.push_str(&format!(
+                "  %{p}_zero = icmp eq i64 %v, 0\n",
+                p = prefix,
+            ));
+            out.push_str(&format!(
+                "  br i1 %{p}_zero, label %{p}_ret_empty, label %{p}_check_len\n",
+                p = prefix,
+            ));
+            out.push_str(&format!("{p}_check_len:\n", p = prefix));
+        }
+        out.push_str(&format!(
+            "  %{p}_empty = icmp eq i64 %{p}_len, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br i1 %{p}_empty, label %{p}_ret_empty, label %{p}_alloc\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_ret_empty:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_e0 = insertvalue %intent_vec_i64 undef, i64* null, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_e1 = insertvalue %intent_vec_i64 %{p}_e0, i64 0, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_e2 = insertvalue %intent_vec_i64 %{p}_e1, i64 0, 2\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("  ret %intent_vec_i64 %{p}_e2\n", p = prefix));
+        out.push_str(&format!("{p}_alloc:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_bytes = mul i64 %{p}_len, 8\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_buf_i8 = call i8* @malloc(i64 %{p}_bytes)\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_buf = bitcast i8* %{p}_buf_i8 to i64*\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_dp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_src = load i64*, i64** %{p}_dp\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_i_p = alloca i64\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 0, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br label %{p}_head\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_head:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_i = load i64, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_done = icmp uge i64 %{p}_i, %{p}_len\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br i1 %{p}_done, label %{p}_fin, label %{p}_body\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_body:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_slot_src = getelementptr i64, i64* %{p}_src, i64 %{p}_i\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_x = load i64, i64* %{p}_slot_src\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_t = {ir_op} i64 %{p}_x, %v\n",
+            p = prefix, ir_op = ir_op,
+        ));
+        out.push_str(&format!(
+            "  %{p}_slot_dst = getelementptr i64, i64* %{p}_buf, i64 %{p}_i\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 %{p}_t, i64* %{p}_slot_dst\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_i_next = add i64 %{p}_i, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 %{p}_i_next, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br label %{p}_head\n",
+            p = prefix,
+        ));
         out.push_str(&format!("{p}_fin:\n", p = prefix));
         out.push_str(&format!(
             "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n",

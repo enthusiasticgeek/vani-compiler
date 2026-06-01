@@ -2499,6 +2499,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_negate"
                     || name == "vec_signum"
                     || name == "vec_square"
+                    || name == "vec_add_scalar"
+                    || name == "vec_sub_scalar"
+                    || name == "vec_mul_scalar"
+                    || name == "vec_div_scalar"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4859,6 +4863,55 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #528-#531: Vec<i64> scalar-broadcast arithmetic.\n\
+          *   add_scalar(xs, v): xs[i] + v\n\
+          *   sub_scalar(xs, v): xs[i] - v\n\
+          *   mul_scalar(xs, v): xs[i] * v\n\
+          *   div_scalar(xs, v): xs[i] / v  (returns empty Vec if v == 0) */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_add_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_add_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] + v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sub_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sub_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] - v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mul_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mul_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] * v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_div_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_div_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || v == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] / v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #524-#527: element-wise unary Vec<i64> transforms.\n\
           *   abs     — |xs[i]|  (LLONG_MIN stays LLONG_MIN, i.e. wraps as per llabs spec)\n\
@@ -9902,6 +9955,27 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "vec_square" => format!(
             "intent_vec_int64_t_square({})",
             emit_expr(&args[0])
+        ),
+        // Closures #528-#531: scalar-broadcast arithmetic.
+        "vec_add_scalar" => format!(
+            "intent_vec_int64_t_add_scalar({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_sub_scalar" => format!(
+            "intent_vec_int64_t_sub_scalar({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_mul_scalar" => format!(
+            "intent_vec_int64_t_mul_scalar({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_div_scalar" => format!(
+            "intent_vec_int64_t_div_scalar({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
         ),
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.
         "vec_dot" => format!(

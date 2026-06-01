@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_scalar_broadcast_typecheck_and_compile() {
+        // Closures #528-#531: scalar broadcast arithmetic.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let a: Vec<i64> = vec_add_scalar(ref xs, 5);
+              let s: Vec<i64> = vec_sub_scalar(ref xs, 5);
+              let m: Vec<i64> = vec_mul_scalar(ref xs, 2);
+              let d: Vec<i64> = vec_div_scalar(ref xs, 10);
+              return a[0] + s[0] + m[0] + d[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec scalar broadcast must type-check");
+        compile_to_llvm(source).expect("vec scalar broadcast must compile to LLVM");
+    }
+
+    #[test]
     fn vec_unary_transforms_typecheck_and_compile() {
         // Closures #524-#527: element-wise unary transforms.
         let source = r#"
