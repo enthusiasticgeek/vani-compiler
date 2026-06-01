@@ -2495,6 +2495,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_sliding_min"
                     || name == "vec_sliding_sum"
                     || name == "vec_sliding_product"
+                    || name == "vec_abs"
+                    || name == "vec_negate"
+                    || name == "vec_signum"
+                    || name == "vec_square"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4853,6 +4857,61 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20   acc = acc | xs->data[i];\n\
          \x20   v.data[i] = acc;\n\
          \x20 }\n\
+         \x20 v.len = xs->len;\n\
+         \x20 return v;\n\
+         }\n\
+         /* Closures #524-#527: element-wise unary Vec<i64> transforms.\n\
+          *   abs     — |xs[i]|  (LLONG_MIN stays LLONG_MIN, i.e. wraps as per llabs spec)\n\
+          *   negate  — -xs[i]\n\
+          *   signum  — -1/0/+1\n\
+          *   square  — xs[i] * xs[i] (may overflow; wrap is well-defined on signed i64 here) */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_abs(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_abs(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return v;\n\
+         \x20 v.capacity = xs->len;\n\
+         \x20 v.data = (int64_t*)malloc(v.capacity * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   int64_t x = xs->data[i];\n\
+         \x20   v.data[i] = x < 0 ? -x : x;\n\
+         \x20 }\n\
+         \x20 v.len = xs->len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_negate(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_negate(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return v;\n\
+         \x20 v.capacity = xs->len;\n\
+         \x20 v.data = (int64_t*)malloc(v.capacity * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) v.data[i] = -xs->data[i];\n\
+         \x20 v.len = xs->len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_signum(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_signum(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return v;\n\
+         \x20 v.capacity = xs->len;\n\
+         \x20 v.data = (int64_t*)malloc(v.capacity * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   int64_t x = xs->data[i];\n\
+         \x20   v.data[i] = (x > 0) - (x < 0);\n\
+         \x20 }\n\
+         \x20 v.len = xs->len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_square(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_square(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return v;\n\
+         \x20 v.capacity = xs->len;\n\
+         \x20 v.data = (int64_t*)malloc(v.capacity * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) v.data[i] = xs->data[i] * xs->data[i];\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
          }\n\
@@ -9826,6 +9885,23 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_int64_t_sliding_product({}, ({}))",
             emit_expr(&args[0]),
             emit_expr(&args[1])
+        ),
+        // Closures #524-#527: element-wise unary Vec<i64> transforms.
+        "vec_abs" => format!(
+            "intent_vec_int64_t_abs({})",
+            emit_expr(&args[0])
+        ),
+        "vec_negate" => format!(
+            "intent_vec_int64_t_negate({})",
+            emit_expr(&args[0])
+        ),
+        "vec_signum" => format!(
+            "intent_vec_int64_t_signum({})",
+            emit_expr(&args[0])
+        ),
+        "vec_square" => format!(
+            "intent_vec_int64_t_square({})",
+            emit_expr(&args[0])
         ),
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.
         "vec_dot" => format!(

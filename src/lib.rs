@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_unary_transforms_typecheck_and_compile() {
+        // Closures #524-#527: element-wise unary transforms.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(-3, 0, 5);
+              let a: Vec<i64> = vec_abs(ref xs);
+              let n: Vec<i64> = vec_negate(ref xs);
+              let s: Vec<i64> = vec_signum(ref xs);
+              let q: Vec<i64> = vec_square(ref xs);
+              return a[0] + n[0] + s[0] + q[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec unary transforms must type-check");
+        compile_to_llvm(source).expect("vec unary transforms must compile to LLVM");
+    }
+
+    #[test]
     fn vec_sliding_window_typecheck_and_compile() {
         // Closures #520-#523: vec_sliding_max/min/sum/product.
         let source = r#"
