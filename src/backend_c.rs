@@ -2540,6 +2540,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_merge_sorted"
                     || name == "vec_insert_sorted"
                     || name == "vec_is_sorted_unique"
+                    || name == "vec_range_span"
+                    || name == "vec_mode"
+                    || name == "vec_kth_smallest"
+                    || name == "vec_median"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4900,6 +4904,63 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #569-#572: sort-free analytics on Vec<i64>.\n\
+          *   range_span(xs): max - min, single pass. Empty → 0.\n\
+          *   mode(xs): most-common value; ties → smallest. O(n²). Empty → 0.\n\
+          *   kth_smallest(xs, k): the k-th smallest (0-indexed) via\n\
+          *     count-based O(n²). Returns -1 if k out of bounds.\n\
+          *   median(xs): lower median via kth_smallest((n-1)/2). Empty → 0. */\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_range_span(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_range_span(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len == 0) return 0;\n\
+         \x20 int64_t mn = xs->data[0], mx = xs->data[0];\n\
+         \x20 for (uint64_t i = 1; i < xs->len; i++) {\n\
+         \x20   int64_t v = xs->data[i];\n\
+         \x20   if (v < mn) mn = v;\n\
+         \x20   if (v > mx) mx = v;\n\
+         \x20 }\n\
+         \x20 return mx - mn;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_mode(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_mode(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len == 0) return 0;\n\
+         \x20 int64_t best_v = xs->data[0];\n\
+         \x20 int64_t best_c = 1;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   int64_t v = xs->data[i];\n\
+         \x20   int64_t c = 0;\n\
+         \x20   for (uint64_t j = 0; j < xs->len; j++) if (xs->data[j] == v) c++;\n\
+         \x20   if (c > best_c || (c == best_c && v < best_v)) {\n\
+         \x20     best_v = v;\n\
+         \x20     best_c = c;\n\
+         \x20   }\n\
+         \x20 }\n\
+         \x20 return best_v;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_kth_smallest(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_kth_smallest(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 if (!xs || xs->len == 0) return -1;\n\
+         \x20 if (k < 0 || k >= (int64_t)xs->len) return -1;\n\
+         \x20 /* For each candidate x in xs, fewer = #{xs[j] < x}, nm = #{xs[j] <= x}.\n\
+         \x20  * The k-th smallest is the value where fewer <= k < nm. */\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   int64_t x = xs->data[i];\n\
+         \x20   int64_t fewer = 0, nm = 0;\n\
+         \x20   for (uint64_t j = 0; j < xs->len; j++) {\n\
+         \x20     int64_t y = xs->data[j];\n\
+         \x20     if (y < x) fewer++;\n\
+         \x20     if (y <= x) nm++;\n\
+         \x20   }\n\
+         \x20   if (fewer <= k && k < nm) return x;\n\
+         \x20 }\n\
+         \x20 return -1; /* unreachable for non-empty xs */\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_median(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_median(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len == 0) return 0;\n\
+         \x20 int64_t k = (int64_t)((xs->len - 1) / 2);\n\
+         \x20 return intent_vec_int64_t_kth_smallest(xs, k);\n\
          }\n\
          /* Closures #566-#568: sort/merge helpers on Vec<i64>.\n\
           *   merge_sorted(xs, ys): O(n+m) two-pointer merge of two pre-sorted Vecs.\n\
@@ -10580,6 +10641,24 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "vec_is_sorted_unique" => format!(
             "intent_vec_int64_t_is_sorted_unique({})",
             emit_expr(&args[0])
+        ),
+        // Closures #569-#572: sort-free analytics.
+        "vec_range_span" => format!(
+            "intent_vec_int64_t_range_span({})",
+            emit_expr(&args[0])
+        ),
+        "vec_mode" => format!(
+            "intent_vec_int64_t_mode({})",
+            emit_expr(&args[0])
+        ),
+        "vec_median" => format!(
+            "intent_vec_int64_t_median({})",
+            emit_expr(&args[0])
+        ),
+        "vec_kth_smallest" => format!(
+            "intent_vec_int64_t_kth_smallest({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
         ),
         // Closures #546-#549: modular/bit-shift scalar broadcast.
         "vec_mod_scalar" | "vec_pow_scalar"

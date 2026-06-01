@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_tier_y_typecheck_and_compile() {
+        // Closures #569-#572: sort-free analytics.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(3, 1, 4, 1, 5);
+              let s: i64 = vec_range_span(ref xs);
+              let m: i64 = vec_mode(ref xs);
+              let med: i64 = vec_median(ref xs);
+              let k: i64 = vec_kth_smallest(ref xs, 2);
+              return s + m + med + k;
+            }
+        "#;
+        compile_to_c(source).expect("tier Y must type-check");
+        compile_to_llvm(source).expect("tier Y must compile to LLVM");
+    }
+
+    #[test]
     fn vec_tier_x_typecheck_and_compile() {
         // Closures #566-#568: sort/merge.
         let source = r#"
