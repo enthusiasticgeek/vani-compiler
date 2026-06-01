@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_tier_v_typecheck_and_compile() {
+        // Closures #562-#565: vec_count_distinct / vec_mean / vec_indices_of_value / vec_dedup_consecutive.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(3, 1, 4, 1, 5);
+              let n: i64 = vec_count_distinct(ref xs);
+              let m: i64 = vec_mean(ref xs);
+              let idx: Vec<i64> = vec_indices_of_value(ref xs, 1);
+              let d: Vec<i64> = vec_dedup_consecutive(ref xs);
+              return n + m + idx[0] + d[0];
+            }
+        "#;
+        compile_to_c(source).expect("tier V must type-check");
+        compile_to_llvm(source).expect("tier V must compile to LLVM");
+    }
+
+    #[test]
     fn vec_tier_u_typecheck_and_compile() {
         // Closures #558-#561: vec_diff / vec_pad_left / vec_pad_right / vec_replace_value.
         let source = r#"

@@ -2533,6 +2533,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_pad_left"
                     || name == "vec_pad_right"
                     || name == "vec_replace_value"
+                    || name == "vec_count_distinct"
+                    || name == "vec_indices_of_value"
+                    || name == "vec_dedup_consecutive"
+                    || name == "vec_mean"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4893,6 +4897,58 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #562-#565: analytics + dedup_consecutive.\n\
+          *   count_distinct(xs) -> i64: O(n^2) count of unique values\n\
+          *   indices_of_value(xs, v) -> Vec<i64>: all indices where xs[i] == v\n\
+          *   dedup_consecutive(xs) -> Vec<i64>: remove only adjacent duplicates\n\
+          *   mean(xs) -> i64: integer mean (sum/len); empty Vec → 0 */\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_count_distinct(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_count_distinct(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len == 0) return 0;\n\
+         \x20 int64_t c = 0;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   bool first = true;\n\
+         \x20   for (uint64_t j = 0; j < i; j++) if (xs->data[j] == xs->data[i]) { first = false; break; }\n\
+         \x20   if (first) c++;\n\
+         \x20 }\n\
+         \x20 return c;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_mean(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_int64_t_mean(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len == 0) return 0;\n\
+         \x20 int64_t acc = 0;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) acc += xs->data[i];\n\
+         \x20 return acc / (int64_t)xs->len;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_indices_of_value(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_indices_of_value(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 /* Count first, then allocate exactly. */\n\
+         \x20 uint64_t c = 0;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) if (xs->data[i] == v) c++;\n\
+         \x20 if (c == 0) return r;\n\
+         \x20 r.capacity = c;\n\
+         \x20 r.data = (int64_t*)malloc(c * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t k = 0;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) if (xs->data[i] == v) r.data[k++] = (int64_t)i;\n\
+         \x20 r.len = c;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_dedup_consecutive(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_dedup_consecutive(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(xs->len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 r.data[0] = xs->data[0];\n\
+         \x20 uint64_t out = 1;\n\
+         \x20 for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] != xs->data[i - 1]) r.data[out++] = xs->data[i];\n\
+         \x20 r.len = out;\n\
+         \x20 return r;\n\
          }\n\
          /* Closure #558: vec_diff(xs) -> Vec<i64> of first differences.\n\
           *   result[i] = xs[i+1] - xs[i], length = max(0, n-1). */\n\
@@ -10499,6 +10555,26 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // Closure #558: vec_diff(ref xs) -> Vec<i64>.
         "vec_diff" => format!(
             "intent_vec_int64_t_diff({})",
+            emit_expr(&args[0])
+        ),
+        // Closures #562 / #565: scalar reductions.
+        "vec_count_distinct" => format!(
+            "intent_vec_int64_t_count_distinct({})",
+            emit_expr(&args[0])
+        ),
+        "vec_mean" => format!(
+            "intent_vec_int64_t_mean({})",
+            emit_expr(&args[0])
+        ),
+        // Closure #563: vec_indices_of_value(ref xs, v) -> Vec<i64>.
+        "vec_indices_of_value" => format!(
+            "intent_vec_int64_t_indices_of_value({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #564: vec_dedup_consecutive(ref xs) -> Vec<i64>.
+        "vec_dedup_consecutive" => format!(
+            "intent_vec_int64_t_dedup_consecutive({})",
             emit_expr(&args[0])
         ),
         // Closures #559-#561: 3-arg fresh-Vec builders.
