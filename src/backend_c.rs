@@ -2521,6 +2521,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_pow_scalar"
                     || name == "vec_shl_scalar"
                     || name == "vec_shr_scalar"
+                    || name == "vec_rotate_left"
+                    || name == "vec_rotate_right"
+                    || name == "vec_shift_left"
+                    || name == "vec_shift_right"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4881,6 +4885,66 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #550-#553: positional rotations and shifts on Vec<i64>.\n\
+          *   rotate_left(xs, k): cyclic shift left by k; result[i] = xs[(i+k) mod n]\n\
+          *   rotate_right(xs, k): cyclic shift right by k; result[i] = xs[(i-k) mod n]\n\
+          *   shift_left(xs, k): non-cyclic; first n-k elements then k zeros; k >= n → all zeros\n\
+          *   shift_right(xs, k): non-cyclic; k zeros then first n-k elements; k >= n → all zeros\n\
+          *   k < 0 → empty Vec for all four. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_rotate_left(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_rotate_left(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t shift = (uint64_t)k % xs->len;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[(i + shift) % xs->len];\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_rotate_right(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_rotate_right(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t shift = (uint64_t)k % xs->len;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   uint64_t src = (i + xs->len - shift) % xs->len;\n\
+         \x20   r.data[i] = xs->data[src];\n\
+         \x20 }\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shift_left(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shift_left(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t shift = (uint64_t)k > xs->len ? xs->len : (uint64_t)k;\n\
+         \x20 uint64_t kept = xs->len - shift;\n\
+         \x20 for (uint64_t i = 0; i < kept; i++) r.data[i] = xs->data[i + shift];\n\
+         \x20 for (uint64_t i = kept; i < xs->len; i++) r.data[i] = 0;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shift_right(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shift_right(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t shift = (uint64_t)k > xs->len ? xs->len : (uint64_t)k;\n\
+         \x20 for (uint64_t i = 0; i < shift; i++) r.data[i] = 0;\n\
+         \x20 for (uint64_t i = shift; i < xs->len; i++) r.data[i] = xs->data[i - shift];\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #546-#549: modular/bit-shift scalar broadcast on Vec<i64>.\n\
           *   mod_scalar(xs, v): xs[i] mod v  (empty Vec if v == 0)\n\
@@ -10277,6 +10341,17 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // Closures #546-#549: modular/bit-shift scalar broadcast.
         "vec_mod_scalar" | "vec_pow_scalar"
         | "vec_shl_scalar" | "vec_shr_scalar" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, ({}))",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        // Closures #550-#553: positional rotations and shifts.
+        "vec_rotate_left" | "vec_rotate_right"
+        | "vec_shift_left" | "vec_shift_right" => {
             let op = name.strip_prefix("vec_").unwrap();
             format!(
                 "intent_vec_int64_t_{}({}, ({}))",

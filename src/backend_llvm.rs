@@ -5575,6 +5575,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closures #550-#553: positional rotations and shifts.
+            if matches!(name.as_str(),
+                "vec_rotate_left" | "vec_rotate_right"
+                | "vec_shift_left" | "vec_shift_right") {
+                let op = name.strip_prefix("vec_").unwrap();
+                let xs = emit_expr(&args[0], ctx, out);
+                let k = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_vec_i64 @intent_vec_int64_t_{}(%intent_vec_i64* {}, i64 {})\n",
+                    dest, op, xs, k
+                ));
+                return dest;
+            }
             // Closure #399: vec_dot(ref xs, ref ys) -> i64.
             if name == "vec_dot" {
                 let xs = emit_expr(&args[0], ctx, out);
@@ -12810,6 +12824,295 @@ pub(crate) fn emit_intent_vec_int64_utility_definitions(out: &mut String) {
             p = prefix,
         ));
         out.push_str(&format!("  br label %{p}_head\n", p = prefix));
+        out.push_str(&format!("{p}_fin:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_r1 = insertvalue %intent_vec_i64 %{p}_r0, i64 %{p}_len, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_r2 = insertvalue %intent_vec_i64 %{p}_r1, i64 %{p}_len, 2\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  ret %intent_vec_i64 %{p}_r2\n",
+            p = prefix,
+        ));
+        out.push_str("}\n\n");
+    }
+
+    // ---- Closures #550-#553: positional rotations and shifts.
+    // All 4 share the same outer skeleton (k<0 guard, len==0 guard,
+    // malloc buffer, outer index loop). The per-op logic computes
+    // the value to store at result[i] given (i, len, k).
+    //
+    // rotate_left:   src_idx = (i + (k mod n)) mod n; result[i] = xs[src_idx]
+    // rotate_right:  src_idx = (i + n - (k mod n)) mod n; result[i] = xs[src_idx]
+    // shift_left:    if i < n - clamped_k: result[i] = xs[i + clamped_k]; else 0
+    // shift_right:   if i < clamped_k: result[i] = 0; else result[i] = xs[i - clamped_k]
+    //
+    // clamped_k = min(k, n) for the shift ops, so k >= n yields all zeros.
+    for op in &["rotate_left", "rotate_right", "shift_left", "shift_right"] {
+        let prefix = match *op {
+            "rotate_left" => "vrl",
+            "rotate_right" => "vrr",
+            "shift_left" => "vsl",
+            "shift_right" => "vsr",
+            _ => unreachable!(),
+        };
+        out.push_str(&format!(
+            "define %intent_vec_i64 @intent_vec_int64_t_{op}(%intent_vec_i64* %xs, i64 %k) {{\n",
+            op = op,
+        ));
+        // k < 0 → empty
+        out.push_str(&format!(
+            "  %{p}_kbad = icmp slt i64 %k, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br i1 %{p}_kbad, label %{p}_ret_empty, label %{p}_check_len\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_check_len:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_lp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_len = load i64, i64* %{p}_lp\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_empty = icmp eq i64 %{p}_len, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br i1 %{p}_empty, label %{p}_ret_empty, label %{p}_alloc\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_ret_empty:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_e0 = insertvalue %intent_vec_i64 undef, i64* null, 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_e1 = insertvalue %intent_vec_i64 %{p}_e0, i64 0, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_e2 = insertvalue %intent_vec_i64 %{p}_e1, i64 0, 2\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("  ret %intent_vec_i64 %{p}_e2\n", p = prefix));
+        out.push_str(&format!("{p}_alloc:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_bytes = mul i64 %{p}_len, 8\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_buf_i8 = call i8* @malloc(i64 %{p}_bytes)\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_buf = bitcast i8* %{p}_buf_i8 to i64*\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_dp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_src = load i64*, i64** %{p}_dp\n",
+            p = prefix,
+        ));
+        // Precompute shift/clamped_k.
+        match *op {
+            "rotate_left" | "rotate_right" => {
+                // shift = k mod len (urem since both are non-negative here).
+                out.push_str(&format!(
+                    "  %{p}_shift = urem i64 %k, %{p}_len\n",
+                    p = prefix,
+                ));
+            }
+            "shift_left" | "shift_right" => {
+                // clamped_k = min(k, len)
+                out.push_str(&format!(
+                    "  %{p}_k_lt_len = icmp slt i64 %k, %{p}_len\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_shift = select i1 %{p}_k_lt_len, i64 %k, i64 %{p}_len\n",
+                    p = prefix,
+                ));
+            }
+            _ => unreachable!(),
+        }
+        out.push_str(&format!(
+            "  %{p}_i_p = alloca i64\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 0, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br label %{p}_head\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_head:\n", p = prefix));
+        out.push_str(&format!(
+            "  %{p}_i = load i64, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_done = icmp uge i64 %{p}_i, %{p}_len\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br i1 %{p}_done, label %{p}_fin, label %{p}_body\n",
+            p = prefix,
+        ));
+        out.push_str(&format!("{p}_body:\n", p = prefix));
+        // Per-op: compute the i64 value to store.
+        match *op {
+            "rotate_left" => {
+                // src_idx = (i + shift) % len
+                out.push_str(&format!(
+                    "  %{p}_sum = add i64 %{p}_i, %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_src_idx = urem i64 %{p}_sum, %{p}_len\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_slot_src = getelementptr i64, i64* %{p}_src, i64 %{p}_src_idx\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_val = load i64, i64* %{p}_slot_src\n",
+                    p = prefix,
+                ));
+            }
+            "rotate_right" => {
+                // src_idx = (i + len - shift) % len
+                out.push_str(&format!(
+                    "  %{p}_diff = sub i64 %{p}_len, %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_sum = add i64 %{p}_i, %{p}_diff\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_src_idx = urem i64 %{p}_sum, %{p}_len\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_slot_src = getelementptr i64, i64* %{p}_src, i64 %{p}_src_idx\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_val = load i64, i64* %{p}_slot_src\n",
+                    p = prefix,
+                ));
+            }
+            "shift_left" => {
+                // if i < len - shift: val = xs[i + shift]; else val = 0
+                out.push_str(&format!(
+                    "  %{p}_kept = sub i64 %{p}_len, %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_inrange = icmp ult i64 %{p}_i, %{p}_kept\n",
+                    p = prefix,
+                ));
+                // For OOB iterations, compute via the in-range index but
+                // dummy out. Branchless: select(inrange, xs[i+shift], 0).
+                // To avoid OOB load, compute src_idx = min(i + shift, len-1).
+                out.push_str(&format!(
+                    "  %{p}_idx_pre = add i64 %{p}_i, %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_len_minus_1 = sub i64 %{p}_len, 1\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_lt_end = icmp ult i64 %{p}_idx_pre, %{p}_len\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_idx = select i1 %{p}_lt_end, i64 %{p}_idx_pre, i64 %{p}_len_minus_1\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_slot_src = getelementptr i64, i64* %{p}_src, i64 %{p}_idx\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_loaded = load i64, i64* %{p}_slot_src\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_val = select i1 %{p}_inrange, i64 %{p}_loaded, i64 0\n",
+                    p = prefix,
+                ));
+            }
+            "shift_right" => {
+                // if i >= shift: val = xs[i - shift]; else val = 0
+                out.push_str(&format!(
+                    "  %{p}_inrange = icmp uge i64 %{p}_i, %{p}_shift\n",
+                    p = prefix,
+                ));
+                // src_idx = max(i - shift, 0) — but i - shift could underflow
+                // if i < shift. Use select with a safe fallback (0).
+                out.push_str(&format!(
+                    "  %{p}_idx_safe = select i1 %{p}_inrange, i64 %{p}_i, i64 %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_idx = sub i64 %{p}_idx_safe, %{p}_shift\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_slot_src = getelementptr i64, i64* %{p}_src, i64 %{p}_idx\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_loaded = load i64, i64* %{p}_slot_src\n",
+                    p = prefix,
+                ));
+                out.push_str(&format!(
+                    "  %{p}_val = select i1 %{p}_inrange, i64 %{p}_loaded, i64 0\n",
+                    p = prefix,
+                ));
+            }
+            _ => unreachable!(),
+        }
+        out.push_str(&format!(
+            "  %{p}_slot_dst = getelementptr i64, i64* %{p}_buf, i64 %{p}_i\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 %{p}_val, i64* %{p}_slot_dst\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  %{p}_i_next = add i64 %{p}_i, 1\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  store i64 %{p}_i_next, i64* %{p}_i_p\n",
+            p = prefix,
+        ));
+        out.push_str(&format!(
+            "  br label %{p}_head\n",
+            p = prefix,
+        ));
         out.push_str(&format!("{p}_fin:\n", p = prefix));
         out.push_str(&format!(
             "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n",

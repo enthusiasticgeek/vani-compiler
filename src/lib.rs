@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_rotate_shift_typecheck_and_compile() {
+        // Closures #550-#553: vec_rotate_left/right and vec_shift_left/right.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let rl: Vec<i64> = vec_rotate_left(ref xs, 2);
+              let rr: Vec<i64> = vec_rotate_right(ref xs, 2);
+              let sl: Vec<i64> = vec_shift_left(ref xs, 2);
+              let sr: Vec<i64> = vec_shift_right(ref xs, 2);
+              return rl[0] + rr[0] + sl[0] + sr[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec rotate/shift must type-check");
+        compile_to_llvm(source).expect("vec rotate/shift must compile to LLVM");
+    }
+
+    #[test]
     fn vec_modular_bitshift_typecheck_and_compile() {
         // Closures #546-#549: vec_mod_scalar / vec_pow_scalar / vec_shl_scalar / vec_shr_scalar.
         let source = r#"
