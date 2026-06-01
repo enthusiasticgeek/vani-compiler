@@ -2512,6 +2512,11 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_min_with_scalar"
                     || name == "vec_max_with_scalar"
                     || name == "vec_clamp_scalar"
+                    || name == "vec_add_pairwise"
+                    || name == "vec_sub_pairwise"
+                    || name == "vec_mul_pairwise"
+                    || name == "vec_min_pairwise"
+                    || name == "vec_max_pairwise"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4872,6 +4877,74 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #541-#545: element-wise binary ops between two Vec<i64>.\n\
+          *   add / sub / mul / min / max — result[i] = xs[i] op ys[i],\n\
+          *   length = min(len(xs), len(ys)). */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_add_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_add_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || !ys) return r;\n\
+         \x20 uint64_t n = xs->len < ys->len ? xs->len : ys->len;\n\
+         \x20 if (n == 0) return r;\n\
+         \x20 r.capacity = n;\n\
+         \x20 r.data = (int64_t*)malloc(n * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) r.data[i] = xs->data[i] + ys->data[i];\n\
+         \x20 r.len = n;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sub_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sub_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || !ys) return r;\n\
+         \x20 uint64_t n = xs->len < ys->len ? xs->len : ys->len;\n\
+         \x20 if (n == 0) return r;\n\
+         \x20 r.capacity = n;\n\
+         \x20 r.data = (int64_t*)malloc(n * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) r.data[i] = xs->data[i] - ys->data[i];\n\
+         \x20 r.len = n;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mul_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mul_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || !ys) return r;\n\
+         \x20 uint64_t n = xs->len < ys->len ? xs->len : ys->len;\n\
+         \x20 if (n == 0) return r;\n\
+         \x20 r.capacity = n;\n\
+         \x20 r.data = (int64_t*)malloc(n * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) r.data[i] = xs->data[i] * ys->data[i];\n\
+         \x20 r.len = n;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_min_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_min_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || !ys) return r;\n\
+         \x20 uint64_t n = xs->len < ys->len ? xs->len : ys->len;\n\
+         \x20 if (n == 0) return r;\n\
+         \x20 r.capacity = n;\n\
+         \x20 r.data = (int64_t*)malloc(n * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) r.data[i] = xs->data[i] < ys->data[i] ? xs->data[i] : ys->data[i];\n\
+         \x20 r.len = n;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_max_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_max_pairwise(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || !ys) return r;\n\
+         \x20 uint64_t n = xs->len < ys->len ? xs->len : ys->len;\n\
+         \x20 if (n == 0) return r;\n\
+         \x20 r.capacity = n;\n\
+         \x20 r.data = (int64_t*)malloc(n * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) r.data[i] = xs->data[i] > ys->data[i] ? xs->data[i] : ys->data[i];\n\
+         \x20 r.len = n;\n\
+         \x20 return r;\n\
          }\n\
          /* Closure #540: vec_clamp_scalar(ref xs, lo, hi).\n\
           * result[i] = (xs[i] < lo) ? lo : (xs[i] > hi) ? hi : xs[i]. */\n\
@@ -10126,6 +10199,18 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[1]),
             emit_expr(&args[2])
         ),
+        // Closures #541-#545: element-wise binary between two Vec<i64>.
+        "vec_add_pairwise" | "vec_sub_pairwise"
+        | "vec_mul_pairwise" | "vec_min_pairwise"
+        | "vec_max_pairwise" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, {})",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.
         "vec_dot" => format!(
             "intent_vec_int64_t_dot({}, {})",

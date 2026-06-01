@@ -16022,6 +16022,25 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_pairwise_binary_typecheck_and_compile() {
+        // Closures #541-#545: element-wise binary between two Vec<i64>.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 5, 3);
+              let ys: Vec<i64> = vec(2, 4, 7);
+              let a: Vec<i64> = vec_add_pairwise(ref xs, ref ys);
+              let s: Vec<i64> = vec_sub_pairwise(ref xs, ref ys);
+              let m: Vec<i64> = vec_mul_pairwise(ref xs, ref ys);
+              let mn: Vec<i64> = vec_min_pairwise(ref xs, ref ys);
+              let mx: Vec<i64> = vec_max_pairwise(ref xs, ref ys);
+              return a[0] + s[0] + m[0] + mn[0] + mx[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec pairwise binary must type-check");
+        compile_to_llvm(source).expect("vec pairwise binary must compile to LLVM");
+    }
+
+    #[test]
     fn vec_scalar_min_max_clamp_typecheck_and_compile() {
         // Closures #538/#539/#540: vec_min_with_scalar / vec_max_with_scalar / vec_clamp_scalar.
         let source = r#"
