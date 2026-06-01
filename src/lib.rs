@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn f64_tier_bb_typecheck_and_compile() {
+        // Closures #577-#581: f64 trig deg variants.
+        let source = r#"
+            fn main() -> i64 {
+              let a: f64 = f64_asin_deg(1.0);
+              let b: f64 = f64_acos_deg(0.0);
+              let s: f64 = f64_sec_deg(60.0);
+              let c: f64 = f64_csc_deg(30.0);
+              let t: f64 = f64_cot_deg(45.0);
+              return (a as i64) + (b as i64) + (s as i64) + (c as i64) + (t as i64);
+            }
+        "#;
+        compile_to_c(source).expect("tier BB must type-check");
+        compile_to_llvm(source).expect("tier BB must compile to LLVM");
+    }
+
+    #[test]
     fn i64_tier_aa_typecheck_and_compile() {
         // Closures #573-#576: i64_byte_at / set_byte / count_leading_ones / count_trailing_ones.
         let source = r#"

@@ -12589,6 +12589,29 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "(atan(({})) * 57.29577951308232)",
             emit_expr(&args[0])
         ),
+        // Closures #577/#578: asin/acos returning degrees.
+        "f64_asin_deg" => format!(
+            "(asin(({})) * 57.29577951308232)",
+            emit_expr(&args[0])
+        ),
+        "f64_acos_deg" => format!(
+            "(acos(({})) * 57.29577951308232)",
+            emit_expr(&args[0])
+        ),
+        // Closures #579/#580/#581: sec/csc/cot taking degrees.
+        "f64_sec_deg" => format!(
+            "(1.0 / cos(({}) * 0.017453292519943295))",
+            emit_expr(&args[0])
+        ),
+        "f64_csc_deg" => format!(
+            "(1.0 / sin(({}) * 0.017453292519943295))",
+            emit_expr(&args[0])
+        ),
+        "f64_cot_deg" => format!(
+            "(cos(({}) * 0.017453292519943295) / sin(({}) * 0.017453292519943295))",
+            emit_expr(&args[0]),
+            emit_expr(&args[0])
+        ),
         // Closure #491: RGB → grayscale via ITU-R BT.601 weights:
         //   Y = 0.299·R + 0.587·G + 0.114·B
         "f64_rgb_to_grayscale" => format!(

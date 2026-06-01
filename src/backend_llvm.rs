@@ -8192,6 +8192,53 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closures #577/#578: asin/acos returning degrees.
+            if name == "f64_asin_deg" || name == "f64_acos_deg" {
+                let x = emit_expr(&args[0], ctx, out);
+                let rad = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                let fn_name = if name == "f64_asin_deg" { "asin" } else { "acos" };
+                out.push_str(&format!(
+                    "  {} = call double @{}(double {})\n", rad, fn_name, x
+                ));
+                out.push_str(&format!(
+                    "  {} = fmul double {}, 0x404CA5DC1A63C1F8\n", dest, rad
+                ));
+                return dest;
+            }
+            // Closures #579/#580: sec_deg / csc_deg — multiply by π/180 then 1/cos or 1/sin.
+            if name == "f64_sec_deg" || name == "f64_csc_deg" {
+                let x = emit_expr(&args[0], ctx, out);
+                let radians = ctx.fresh_tmp();
+                let trig = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                let fn_name = if name == "f64_sec_deg" { "cos" } else { "sin" };
+                out.push_str(&format!(
+                    "  {} = fmul double {}, 0x3F91DF46A2529D39\n", radians, x
+                ));
+                out.push_str(&format!(
+                    "  {} = call double @{}(double {})\n", trig, fn_name, radians
+                ));
+                out.push_str(&format!(
+                    "  {} = fdiv double 1.0, {}\n", dest, trig
+                ));
+                return dest;
+            }
+            // Closure #581: cot_deg.
+            if name == "f64_cot_deg" {
+                let x = emit_expr(&args[0], ctx, out);
+                let radians = ctx.fresh_tmp();
+                let cx = ctx.fresh_tmp();
+                let sx = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = fmul double {}, 0x3F91DF46A2529D39\n", radians, x
+                ));
+                out.push_str(&format!("  {} = call double @cos(double {})\n", cx, radians));
+                out.push_str(&format!("  {} = call double @sin(double {})\n", sx, radians));
+                out.push_str(&format!("  {} = fdiv double {}, {}\n", dest, cx, sx));
+                return dest;
+            }
             // Closure #490: atan_deg(x) = atan(x) * (180/π).
             if name == "f64_atan_deg" {
                 let x = emit_expr(&args[0], ctx, out);
