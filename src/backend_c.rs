@@ -2529,6 +2529,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_disjoint"
                     || name == "vec_equal_set"
                     || name == "vec_equal_seq"
+                    || name == "vec_diff"
+                    || name == "vec_pad_left"
+                    || name == "vec_pad_right"
+                    || name == "vec_replace_value"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4889,6 +4893,87 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closure #558: vec_diff(xs) -> Vec<i64> of first differences.\n\
+          *   result[i] = xs[i+1] - xs[i], length = max(0, n-1). */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_diff(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_diff(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len < 2) return r;\n\
+         \x20 uint64_t out_len = xs->len - 1;\n\
+         \x20 r.capacity = out_len;\n\
+         \x20 r.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < out_len; i++) r.data[i] = xs->data[i + 1] - xs->data[i];\n\
+         \x20 r.len = out_len;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closures #559/#560: vec_pad_left / vec_pad_right(xs, target_len, fill).\n\
+          *   pad_left: if target_len > n, prepend (target_len - n) fill values;\n\
+          *             otherwise return a copy of xs (no truncation).\n\
+          *   pad_right: if target_len > n, append (target_len - n) fill values;\n\
+          *              otherwise return a copy. target_len < 0 → empty Vec. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pad_left(const intent_vec_int64_t* xs, int64_t target_len, int64_t fill) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pad_left(const intent_vec_int64_t* xs, int64_t target_len, int64_t fill) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (target_len < 0) return r;\n\
+         \x20 if (!xs) {\n\
+         \x20   if (target_len == 0) return r;\n\
+         \x20   r.capacity = (uint64_t)target_len;\n\
+         \x20   r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20   if (!r.data) abort();\n\
+         \x20   for (uint64_t i = 0; i < r.capacity; i++) r.data[i] = fill;\n\
+         \x20   r.len = r.capacity;\n\
+         \x20   return r;\n\
+         \x20 }\n\
+         \x20 uint64_t want = (uint64_t)target_len;\n\
+         \x20 uint64_t out_len = want > xs->len ? want : xs->len;\n\
+         \x20 if (out_len == 0) return r;\n\
+         \x20 r.capacity = out_len;\n\
+         \x20 r.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t pad = out_len - xs->len;\n\
+         \x20 for (uint64_t i = 0; i < pad; i++) r.data[i] = fill;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[pad + i] = xs->data[i];\n\
+         \x20 r.len = out_len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pad_right(const intent_vec_int64_t* xs, int64_t target_len, int64_t fill) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pad_right(const intent_vec_int64_t* xs, int64_t target_len, int64_t fill) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (target_len < 0) return r;\n\
+         \x20 if (!xs) {\n\
+         \x20   if (target_len == 0) return r;\n\
+         \x20   r.capacity = (uint64_t)target_len;\n\
+         \x20   r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20   if (!r.data) abort();\n\
+         \x20   for (uint64_t i = 0; i < r.capacity; i++) r.data[i] = fill;\n\
+         \x20   r.len = r.capacity;\n\
+         \x20   return r;\n\
+         \x20 }\n\
+         \x20 uint64_t want = (uint64_t)target_len;\n\
+         \x20 uint64_t out_len = want > xs->len ? want : xs->len;\n\
+         \x20 if (out_len == 0) return r;\n\
+         \x20 r.capacity = out_len;\n\
+         \x20 r.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i];\n\
+         \x20 for (uint64_t i = xs->len; i < out_len; i++) r.data[i] = fill;\n\
+         \x20 r.len = out_len;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closure #561: vec_replace_value(xs, old, new) — return fresh Vec\n\
+          * with every occurrence of `old` replaced by `new`. Length unchanged. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_replace_value(const intent_vec_int64_t* xs, int64_t old_v, int64_t new_v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_replace_value(const intent_vec_int64_t* xs, int64_t old_v, int64_t new_v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = (xs->data[i] == old_v) ? new_v : xs->data[i];\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #554-#557: dual-Vec<i64> bool predicates.\n\
           *   subset_of(xs, ys): every elt of xs appears somewhere in ys\n\
@@ -10409,6 +10494,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 op,
                 emit_expr(&args[0]),
                 emit_expr(&args[1])
+            )
+        }
+        // Closure #558: vec_diff(ref xs) -> Vec<i64>.
+        "vec_diff" => format!(
+            "intent_vec_int64_t_diff({})",
+            emit_expr(&args[0])
+        ),
+        // Closures #559-#561: 3-arg fresh-Vec builders.
+        "vec_pad_left" | "vec_pad_right" | "vec_replace_value" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, ({}), ({}))",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1]),
+                emit_expr(&args[2])
             )
         }
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.

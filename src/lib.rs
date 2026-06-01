@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_tier_u_typecheck_and_compile() {
+        // Closures #558-#561: vec_diff / vec_pad_left / vec_pad_right / vec_replace_value.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 3, 7);
+              let d: Vec<i64> = vec_diff(ref xs);
+              let pl: Vec<i64> = vec_pad_left(ref xs, 5, 0);
+              let pr: Vec<i64> = vec_pad_right(ref xs, 5, 0);
+              let rep: Vec<i64> = vec_replace_value(ref xs, 7, 99);
+              return d[0] + pl[0] + pr[0] + rep[0];
+            }
+        "#;
+        compile_to_c(source).expect("tier U must type-check");
+        compile_to_llvm(source).expect("tier U must compile to LLVM");
+    }
+
+    #[test]
     fn vec_dual_set_predicates_typecheck_and_compile() {
         // Closures #554-#557: vec_subset_of / vec_disjoint / vec_equal_set / vec_equal_seq.
         let source = r#"
