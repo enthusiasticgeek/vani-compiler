@@ -16022,6 +16022,29 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn str_tier_cc_typecheck_and_compile() {
+        // Closures #582-#587: str classifiers.
+        let source = r#"
+            fn main() -> i64 {
+              let a: bool = str_is_ascii("hello");
+              let d: bool = str_is_digit_only("123");
+              let p: bool = str_is_alpha_only("abc");
+              let n: bool = str_is_alphanumeric_only("a1");
+              let w: bool = str_is_whitespace_only("  ");
+              let e: bool = str_is_empty("");
+              return (if a { 1 } else { 0 })
+                   + (if d { 1 } else { 0 })
+                   + (if p { 1 } else { 0 })
+                   + (if n { 1 } else { 0 })
+                   + (if w { 1 } else { 0 })
+                   + (if e { 1 } else { 0 });
+            }
+        "#;
+        compile_to_c(source).expect("tier CC must type-check");
+        compile_to_llvm(source).expect("tier CC must compile to LLVM");
+    }
+
+    #[test]
     fn f64_tier_bb_typecheck_and_compile() {
         // Closures #577-#581: f64 trig deg variants.
         let source = r#"

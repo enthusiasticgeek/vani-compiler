@@ -8853,6 +8853,244 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // Closure #436: byte-level prefix/suffix.
             //   starts_with_byte: load s[0], compare to b
             //   (also handle empty string — s[0] == 0).
+            // Closure #587: str_is_empty(s) -> bool: s[0] == 0.
+            if name == "str_is_empty" {
+                let s = emit_expr(&args[0], ctx, out);
+                let b = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8, i8* {}\n", b, s));
+                out.push_str(&format!("  {} = icmp eq i8 {}, 0\n", dest, b));
+                return dest;
+            }
+            // Closures #582-#586: str classifiers (scan-and-bail).
+            // is_ascii: empty → true; per-byte: byte < 128.
+            // Others: empty → false; per-byte predicate varies.
+            if matches!(name.as_str(),
+                "str_is_ascii" | "str_is_digit_only"
+                | "str_is_alpha_only" | "str_is_alphanumeric_only"
+                | "str_is_whitespace_only") {
+                let s = emit_expr(&args[0], ctx, out);
+                // Use per-call unique labels (fresh_label keeps a counter)
+                // to avoid SSA collisions when this builtin is called
+                // multiple times in one function.
+                let check_first = ctx.fresh_label("strc_check_");
+                let body = ctx.fresh_label("strc_body_");
+                let advance = ctx.fresh_label("strc_advance_");
+                let after_term = ctx.fresh_label("strc_after_term_");
+                let true_block = ctx.fresh_label("strc_true_");
+                let false_block = ctx.fresh_label("strc_false_");
+                let empty_block = ctx.fresh_label("strc_empty_");
+                let exit_block = ctx.fresh_label("strc_exit_");
+                let empty_result = if name == "str_is_ascii" { "1" } else { "0" };
+                let dest = ctx.fresh_tmp();
+                let p_p = ctx.fresh_tmp();
+                let p = ctx.fresh_tmp();
+                let byte_val = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i8*\n", p_p));
+                out.push_str(&format!("  store i8* {}, i8** {}\n", s, p_p));
+                out.push_str(&format!("  br label %{}\n", check_first));
+                out.push_str(&format!("{}:\n", check_first));
+                let first_p = ctx.fresh_tmp();
+                let first_b = ctx.fresh_tmp();
+                let first_zero = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i8*, i8** {}\n", first_p, p_p));
+                out.push_str(&format!("  {} = load i8, i8* {}\n", first_b, first_p));
+                out.push_str(&format!("  {} = icmp eq i8 {}, 0\n", first_zero, first_b));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    first_zero, empty_block, body
+                ));
+                out.push_str(&format!("{}:\n  br label %{}\n",
+                    empty_block,
+                    if empty_result == "1" { &true_block } else { &false_block }));
+                out.push_str(&format!("{}:\n", body));
+                out.push_str(&format!("  {} = load i8*, i8** {}\n", p, p_p));
+                out.push_str(&format!("  {} = load i8, i8* {}\n", byte_val, p));
+                let is_terminator = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = icmp eq i8 {}, 0\n", is_terminator, byte_val
+                ));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_terminator, true_block, after_term
+                ));
+                out.push_str(&format!("{}:\n", after_term));
+                // Per-op predicate: compute %pred (i1).
+                // pred is "byte OK?". If !pred, jump to false_block; else advance.
+                let pred = ctx.fresh_tmp();
+                let byte_u32 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = zext i8 {} to i32\n", byte_u32, byte_val
+                ));
+                match name.as_str() {
+                    "str_is_ascii" => {
+                        out.push_str(&format!(
+                            "  {} = icmp ult i32 {}, 128\n", pred, byte_u32
+                        ));
+                    }
+                    "str_is_digit_only" => {
+                        let ge0 = ctx.fresh_tmp();
+                        let le9 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 48\n", ge0, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 57\n", le9, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", pred, ge0, le9
+                        ));
+                    }
+                    "str_is_alpha_only" => {
+                        let ge_up = ctx.fresh_tmp();
+                        let le_up = ctx.fresh_tmp();
+                        let is_up = ctx.fresh_tmp();
+                        let ge_lo = ctx.fresh_tmp();
+                        let le_lo = ctx.fresh_tmp();
+                        let is_lo = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 65\n", ge_up, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 90\n", le_up, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", is_up, ge_up, le_up
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 97\n", ge_lo, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 122\n", le_lo, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", is_lo, ge_lo, le_lo
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", pred, is_up, is_lo
+                        ));
+                    }
+                    "str_is_alphanumeric_only" => {
+                        let ge_d = ctx.fresh_tmp();
+                        let le_d = ctx.fresh_tmp();
+                        let is_d = ctx.fresh_tmp();
+                        let ge_up = ctx.fresh_tmp();
+                        let le_up = ctx.fresh_tmp();
+                        let is_up = ctx.fresh_tmp();
+                        let ge_lo = ctx.fresh_tmp();
+                        let le_lo = ctx.fresh_tmp();
+                        let is_lo = ctx.fresh_tmp();
+                        let dl = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 48\n", ge_d, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 57\n", le_d, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", is_d, ge_d, le_d
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 65\n", ge_up, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 90\n", le_up, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", is_up, ge_up, le_up
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp uge i32 {}, 97\n", ge_lo, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp ule i32 {}, 122\n", le_lo, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = and i1 {}, {}\n", is_lo, ge_lo, le_lo
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", dl, is_d, is_lo
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", pred, dl, is_up
+                        ));
+                    }
+                    "str_is_whitespace_only" => {
+                        let s_eq = ctx.fresh_tmp();
+                        let t_eq = ctx.fresh_tmp();
+                        let n_eq = ctx.fresh_tmp();
+                        let r_eq = ctx.fresh_tmp();
+                        let v_eq = ctx.fresh_tmp();
+                        let f_eq = ctx.fresh_tmp();
+                        let st = ctx.fresh_tmp();
+                        let stn = ctx.fresh_tmp();
+                        let stnr = ctx.fresh_tmp();
+                        let stnrv = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 32\n", s_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 9\n", t_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 10\n", n_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 13\n", r_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 11\n", v_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = icmp eq i32 {}, 12\n", f_eq, byte_u32
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", st, s_eq, t_eq
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", stn, st, n_eq
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", stnr, stn, r_eq
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", stnrv, stnr, v_eq
+                        ));
+                        out.push_str(&format!(
+                            "  {} = or i1 {}, {}\n", pred, stnrv, f_eq
+                        ));
+                    }
+                    _ => unreachable!(),
+                }
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    pred, advance, false_block
+                ));
+                out.push_str(&format!("{}:\n", advance));
+                let next_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr i8, i8* {}, i64 1\n", next_p, p
+                ));
+                out.push_str(&format!(
+                    "  store i8* {}, i8** {}\n", next_p, p_p
+                ));
+                out.push_str(&format!("  br label %{}\n", body));
+                // True/false blocks return their values via phi-less branches.
+                out.push_str(&format!("{}:\n", true_block));
+                let true_tmp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i1 0, 1\n", true_tmp));
+                out.push_str(&format!("  br label %{}\n", exit_block));
+                out.push_str(&format!("{}:\n", false_block));
+                let false_tmp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i1 0, 0\n", false_tmp));
+                out.push_str(&format!("  br label %{}\n", exit_block));
+                out.push_str(&format!("{}:\n", exit_block));
+                out.push_str(&format!(
+                    "  {} = phi i1 [ {}, %{} ], [ {}, %{} ]\n",
+                    dest, true_tmp, true_block, false_tmp, false_block
+                ));
+                return dest;
+            }
             if name == "str_starts_with_byte" {
                 let s = emit_expr(&args[0], ctx, out);
                 let b = emit_expr(&args[1], ctx, out);

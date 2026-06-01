@@ -12681,6 +12681,37 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // Closures #582-#587: str classifier predicates.
+        // is_empty: s[0] == 0.
+        "str_is_empty" => format!(
+            "(({})[0] == 0)",
+            emit_expr(&args[0])
+        ),
+        // is_ascii: every byte has high bit clear.
+        "str_is_ascii" => format!(
+            "({{ const char* __sa_s = ({}); bool __sa_r = true; for (const unsigned char* __sa_p = (const unsigned char*)__sa_s; *__sa_p; __sa_p++) if (*__sa_p > 127) {{ __sa_r = false; break; }} __sa_r; }})",
+            emit_expr(&args[0])
+        ),
+        // is_digit_only: non-empty and every byte in '0'..='9'.
+        "str_is_digit_only" => format!(
+            "({{ const char* __sd_s = ({}); bool __sd_r; if (!__sd_s[0]) __sd_r = false; else {{ __sd_r = true; for (const unsigned char* __sd_p = (const unsigned char*)__sd_s; *__sd_p; __sd_p++) if (*__sd_p < '0' || *__sd_p > '9') {{ __sd_r = false; break; }} }} __sd_r; }})",
+            emit_expr(&args[0])
+        ),
+        // is_alpha_only: non-empty and every byte in 'A'..='Z' or 'a'..='z'.
+        "str_is_alpha_only" => format!(
+            "({{ const char* __sap_s = ({}); bool __sap_r; if (!__sap_s[0]) __sap_r = false; else {{ __sap_r = true; for (const unsigned char* __sap_p = (const unsigned char*)__sap_s; *__sap_p; __sap_p++) {{ unsigned char __sap_c = *__sap_p; bool __sap_ok = (__sap_c >= 'A' && __sap_c <= 'Z') || (__sap_c >= 'a' && __sap_c <= 'z'); if (!__sap_ok) {{ __sap_r = false; break; }} }} }} __sap_r; }})",
+            emit_expr(&args[0])
+        ),
+        // is_alphanumeric_only: non-empty and every byte is ascii alphanumeric.
+        "str_is_alphanumeric_only" => format!(
+            "({{ const char* __san_s = ({}); bool __san_r; if (!__san_s[0]) __san_r = false; else {{ __san_r = true; for (const unsigned char* __san_p = (const unsigned char*)__san_s; *__san_p; __san_p++) {{ unsigned char __san_c = *__san_p; bool __san_ok = (__san_c >= '0' && __san_c <= '9') || (__san_c >= 'A' && __san_c <= 'Z') || (__san_c >= 'a' && __san_c <= 'z'); if (!__san_ok) {{ __san_r = false; break; }} }} }} __san_r; }})",
+            emit_expr(&args[0])
+        ),
+        // is_whitespace_only: non-empty and every byte is in " \t\n\r\v\f".
+        "str_is_whitespace_only" => format!(
+            "({{ const char* __sw_s = ({}); bool __sw_r; if (!__sw_s[0]) __sw_r = false; else {{ __sw_r = true; for (const unsigned char* __sw_p = (const unsigned char*)__sw_s; *__sw_p; __sw_p++) {{ unsigned char __sw_c = *__sw_p; bool __sw_ok = (__sw_c == ' ' || __sw_c == '\\t' || __sw_c == '\\n' || __sw_c == '\\r' || __sw_c == 11 || __sw_c == 12); if (!__sw_ok) {{ __sw_r = false; break; }} }} }} __sw_r; }})",
+            emit_expr(&args[0])
+        ),
         // Closure #454: count ASCII decimal-digit bytes in s.
         "str_count_ascii_digits" => format!(
             "({{ const char* __cdg_s = ({}); int64_t __cdg_n = 0; for (const char* __cdg_p = __cdg_s; *__cdg_p != 0; __cdg_p++) {{ unsigned char __cdg_c = (unsigned char)*__cdg_p; if (__cdg_c >= 48 && __cdg_c <= 57) __cdg_n += 1; }} __cdg_n; }})",
