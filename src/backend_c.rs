@@ -2491,6 +2491,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_is_sorted_asc"
                     || name == "vec_is_sorted_desc"
                     || name == "vec_is_palindrome"
+                    || name == "vec_sliding_max"
+                    || name == "vec_sliding_min"
+                    || name == "vec_sliding_sum"
+                    || name == "vec_sliding_product"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4850,6 +4854,77 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20   v.data[i] = acc;\n\
          \x20 }\n\
          \x20 v.len = xs->len;\n\
+         \x20 return v;\n\
+         }\n\
+         /* Closures #520-#523: vec_sliding_max/min/sum/product.\n\
+          * Rolling window of size k over Vec<i64>; returns a fresh\n\
+          * Vec<i64> of length n-k+1. Empty result when n < k or k <= 0.\n\
+          * v1 implementation: O(n*k) per window, simple loop.\n\
+          * O(n) deque/segment-tree algorithms are a future optimization. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_max(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_max(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || k <= 0 || (uint64_t)k > xs->len) return v;\n\
+         \x20 uint64_t out_len = xs->len - (uint64_t)k + 1;\n\
+         \x20 v.capacity = out_len;\n\
+         \x20 v.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < out_len; i++) {\n\
+         \x20   int64_t m = xs->data[i];\n\
+         \x20   for (int64_t j = 1; j < k; j++) if (xs->data[i + (uint64_t)j] > m) m = xs->data[i + (uint64_t)j];\n\
+         \x20   v.data[i] = m;\n\
+         \x20 }\n\
+         \x20 v.len = out_len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_min(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_min(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || k <= 0 || (uint64_t)k > xs->len) return v;\n\
+         \x20 uint64_t out_len = xs->len - (uint64_t)k + 1;\n\
+         \x20 v.capacity = out_len;\n\
+         \x20 v.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < out_len; i++) {\n\
+         \x20   int64_t m = xs->data[i];\n\
+         \x20   for (int64_t j = 1; j < k; j++) if (xs->data[i + (uint64_t)j] < m) m = xs->data[i + (uint64_t)j];\n\
+         \x20   v.data[i] = m;\n\
+         \x20 }\n\
+         \x20 v.len = out_len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_sum(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_sum(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || k <= 0 || (uint64_t)k > xs->len) return v;\n\
+         \x20 uint64_t out_len = xs->len - (uint64_t)k + 1;\n\
+         \x20 v.capacity = out_len;\n\
+         \x20 v.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 int64_t acc = 0;\n\
+         \x20 for (int64_t j = 0; j < k; j++) acc += xs->data[(uint64_t)j];\n\
+         \x20 v.data[0] = acc;\n\
+         \x20 for (uint64_t i = 1; i < out_len; i++) {\n\
+         \x20   acc = acc - xs->data[i - 1] + xs->data[i + (uint64_t)k - 1];\n\
+         \x20   v.data[i] = acc;\n\
+         \x20 }\n\
+         \x20 v.len = out_len;\n\
+         \x20 return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_product(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_sliding_product(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t v; v.data = (int64_t*)0; v.len = 0; v.capacity = 0;\n\
+         \x20 if (!xs || k <= 0 || (uint64_t)k > xs->len) return v;\n\
+         \x20 uint64_t out_len = xs->len - (uint64_t)k + 1;\n\
+         \x20 v.capacity = out_len;\n\
+         \x20 v.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < out_len; i++) {\n\
+         \x20   int64_t p = 1;\n\
+         \x20   for (int64_t j = 0; j < k; j++) p = p * xs->data[i + (uint64_t)j];\n\
+         \x20   v.data[i] = p;\n\
+         \x20 }\n\
+         \x20 v.len = out_len;\n\
          \x20 return v;\n\
          }\n\
          /* Closures #516-#519: Vec<i64> predicates.\n\
@@ -9730,6 +9805,27 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "vec_is_palindrome" => format!(
             "intent_vec_int64_t_is_palindrome({})",
             emit_expr(&args[0])
+        ),
+        // Closures #520-#523: sliding window reductions.
+        "vec_sliding_max" => format!(
+            "intent_vec_int64_t_sliding_max({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_sliding_min" => format!(
+            "intent_vec_int64_t_sliding_min({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_sliding_sum" => format!(
+            "intent_vec_int64_t_sliding_sum({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_sliding_product" => format!(
+            "intent_vec_int64_t_sliding_product({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
         ),
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.
         "vec_dot" => format!(

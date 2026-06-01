@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_sliding_window_typecheck_and_compile() {
+        // Closures #520-#523: vec_sliding_max/min/sum/product.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 5, 3, 2, 4, 6);
+              let mx: Vec<i64> = vec_sliding_max(ref xs, 3);
+              let mn: Vec<i64> = vec_sliding_min(ref xs, 3);
+              let su: Vec<i64> = vec_sliding_sum(ref xs, 3);
+              let pr: Vec<i64> = vec_sliding_product(ref xs, 3);
+              return mx[0] + mn[0] + su[0] + pr[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec sliding window must type-check");
+        compile_to_llvm(source).expect("vec sliding window must compile to LLVM");
+    }
+
+    #[test]
     fn vec_predicates_typecheck_and_compile() {
         // Closures #516-#519: vec_all_equal / vec_is_sorted_asc /
         // vec_is_sorted_desc / vec_is_palindrome.
