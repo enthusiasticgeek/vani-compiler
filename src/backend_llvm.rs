@@ -5589,6 +5589,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closures #554-#557: dual-vec bool predicates.
+            if matches!(name.as_str(),
+                "vec_subset_of" | "vec_disjoint"
+                | "vec_equal_set" | "vec_equal_seq") {
+                let op = name.strip_prefix("vec_").unwrap();
+                let xs = emit_expr(&args[0], ctx, out);
+                let ys = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i1 @intent_vec_int64_t_{}(%intent_vec_i64* {}, %intent_vec_i64* {})\n",
+                    dest, op, xs, ys
+                ));
+                return dest;
+            }
             // Closure #399: vec_dot(ref xs, ref ys) -> i64.
             if name == "vec_dot" {
                 let xs = emit_expr(&args[0], ctx, out);
@@ -12843,6 +12857,160 @@ pub(crate) fn emit_intent_vec_int64_utility_definitions(out: &mut String) {
         ));
         out.push_str("}\n\n");
     }
+
+    // ---- Closures #554-#557: dual-Vec<i64> bool predicates.
+
+    // vec_equal_seq: length-aware iter compare.
+    out.push_str("define i1 @intent_vec_int64_t_equal_seq(%intent_vec_i64* %xs, %intent_vec_i64* %ys) {\n");
+    out.push_str("  %veseq_xlp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n");
+    out.push_str("  %veseq_xlen = load i64, i64* %veseq_xlp\n");
+    out.push_str("  %veseq_ylp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 1\n");
+    out.push_str("  %veseq_ylen = load i64, i64* %veseq_ylp\n");
+    out.push_str("  %veseq_eqlen = icmp eq i64 %veseq_xlen, %veseq_ylen\n");
+    out.push_str("  br i1 %veseq_eqlen, label %veseq_setup, label %veseq_false\n");
+    out.push_str("veseq_false:\n");
+    out.push_str("  ret i1 0\n");
+    out.push_str("veseq_true:\n");
+    out.push_str("  ret i1 1\n");
+    out.push_str("veseq_setup:\n");
+    out.push_str("  %veseq_xdp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n");
+    out.push_str("  %veseq_xsrc = load i64*, i64** %veseq_xdp\n");
+    out.push_str("  %veseq_ydp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 0\n");
+    out.push_str("  %veseq_ysrc = load i64*, i64** %veseq_ydp\n");
+    out.push_str("  %veseq_i_p = alloca i64\n");
+    out.push_str("  store i64 0, i64* %veseq_i_p\n");
+    out.push_str("  br label %veseq_head\n");
+    out.push_str("veseq_head:\n");
+    out.push_str("  %veseq_i = load i64, i64* %veseq_i_p\n");
+    out.push_str("  %veseq_done = icmp uge i64 %veseq_i, %veseq_xlen\n");
+    out.push_str("  br i1 %veseq_done, label %veseq_true, label %veseq_body\n");
+    out.push_str("veseq_body:\n");
+    out.push_str("  %veseq_xs = getelementptr i64, i64* %veseq_xsrc, i64 %veseq_i\n");
+    out.push_str("  %veseq_xv = load i64, i64* %veseq_xs\n");
+    out.push_str("  %veseq_ys = getelementptr i64, i64* %veseq_ysrc, i64 %veseq_i\n");
+    out.push_str("  %veseq_yv = load i64, i64* %veseq_ys\n");
+    out.push_str("  %veseq_neq = icmp ne i64 %veseq_xv, %veseq_yv\n");
+    out.push_str("  br i1 %veseq_neq, label %veseq_false, label %veseq_next\n");
+    out.push_str("veseq_next:\n");
+    out.push_str("  %veseq_i_inc = add i64 %veseq_i, 1\n");
+    out.push_str("  store i64 %veseq_i_inc, i64* %veseq_i_p\n");
+    out.push_str("  br label %veseq_head\n");
+    out.push_str("}\n\n");
+
+    // vec_subset_of: nested O(n*m) — every elt of xs found in ys.
+    out.push_str("define i1 @intent_vec_int64_t_subset_of(%intent_vec_i64* %xs, %intent_vec_i64* %ys) {\n");
+    out.push_str("  %vesub_xlp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n");
+    out.push_str("  %vesub_xlen = load i64, i64* %vesub_xlp\n");
+    out.push_str("  %vesub_x_empty = icmp eq i64 %vesub_xlen, 0\n");
+    out.push_str("  br i1 %vesub_x_empty, label %vesub_true, label %vesub_setup\n");
+    out.push_str("vesub_true:\n  ret i1 1\n");
+    out.push_str("vesub_false:\n  ret i1 0\n");
+    out.push_str("vesub_setup:\n");
+    out.push_str("  %vesub_ylp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 1\n");
+    out.push_str("  %vesub_ylen = load i64, i64* %vesub_ylp\n");
+    out.push_str("  %vesub_xdp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n");
+    out.push_str("  %vesub_xsrc = load i64*, i64** %vesub_xdp\n");
+    out.push_str("  %vesub_ydp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 0\n");
+    out.push_str("  %vesub_ysrc = load i64*, i64** %vesub_ydp\n");
+    out.push_str("  %vesub_i_p = alloca i64\n");
+    out.push_str("  store i64 0, i64* %vesub_i_p\n");
+    out.push_str("  br label %vesub_outer\n");
+    out.push_str("vesub_outer:\n");
+    out.push_str("  %vesub_i = load i64, i64* %vesub_i_p\n");
+    out.push_str("  %vesub_outer_done = icmp uge i64 %vesub_i, %vesub_xlen\n");
+    out.push_str("  br i1 %vesub_outer_done, label %vesub_true, label %vesub_outer_body\n");
+    out.push_str("vesub_outer_body:\n");
+    out.push_str("  %vesub_xs = getelementptr i64, i64* %vesub_xsrc, i64 %vesub_i\n");
+    out.push_str("  %vesub_xv = load i64, i64* %vesub_xs\n");
+    out.push_str("  %vesub_j_p = alloca i64\n");
+    out.push_str("  %vesub_found_p = alloca i1\n");
+    out.push_str("  store i64 0, i64* %vesub_j_p\n");
+    out.push_str("  store i1 0, i1* %vesub_found_p\n");
+    out.push_str("  br label %vesub_inner\n");
+    out.push_str("vesub_inner:\n");
+    out.push_str("  %vesub_j = load i64, i64* %vesub_j_p\n");
+    out.push_str("  %vesub_inner_done = icmp uge i64 %vesub_j, %vesub_ylen\n");
+    out.push_str("  br i1 %vesub_inner_done, label %vesub_inner_fin, label %vesub_inner_body\n");
+    out.push_str("vesub_inner_body:\n");
+    out.push_str("  %vesub_ys = getelementptr i64, i64* %vesub_ysrc, i64 %vesub_j\n");
+    out.push_str("  %vesub_yv = load i64, i64* %vesub_ys\n");
+    out.push_str("  %vesub_eq = icmp eq i64 %vesub_xv, %vesub_yv\n");
+    out.push_str("  br i1 %vesub_eq, label %vesub_inner_hit, label %vesub_inner_next\n");
+    out.push_str("vesub_inner_hit:\n");
+    out.push_str("  store i1 1, i1* %vesub_found_p\n");
+    out.push_str("  br label %vesub_inner_fin\n");
+    out.push_str("vesub_inner_next:\n");
+    out.push_str("  %vesub_j_inc = add i64 %vesub_j, 1\n");
+    out.push_str("  store i64 %vesub_j_inc, i64* %vesub_j_p\n");
+    out.push_str("  br label %vesub_inner\n");
+    out.push_str("vesub_inner_fin:\n");
+    out.push_str("  %vesub_found = load i1, i1* %vesub_found_p\n");
+    out.push_str("  br i1 %vesub_found, label %vesub_outer_next, label %vesub_false\n");
+    out.push_str("vesub_outer_next:\n");
+    out.push_str("  %vesub_i_inc = add i64 %vesub_i, 1\n");
+    out.push_str("  store i64 %vesub_i_inc, i64* %vesub_i_p\n");
+    out.push_str("  br label %vesub_outer\n");
+    out.push_str("}\n\n");
+
+    // vec_disjoint: nested O(n*m) — no elt appears in both.
+    out.push_str("define i1 @intent_vec_int64_t_disjoint(%intent_vec_i64* %xs, %intent_vec_i64* %ys) {\n");
+    out.push_str("  %vedis_xlp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n");
+    out.push_str("  %vedis_xlen = load i64, i64* %vedis_xlp\n");
+    out.push_str("  %vedis_ylp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 1\n");
+    out.push_str("  %vedis_ylen = load i64, i64* %vedis_ylp\n");
+    out.push_str("  %vedis_x_empty = icmp eq i64 %vedis_xlen, 0\n");
+    out.push_str("  %vedis_y_empty = icmp eq i64 %vedis_ylen, 0\n");
+    out.push_str("  %vedis_either_empty = or i1 %vedis_x_empty, %vedis_y_empty\n");
+    out.push_str("  br i1 %vedis_either_empty, label %vedis_true, label %vedis_setup\n");
+    out.push_str("vedis_true:\n  ret i1 1\n");
+    out.push_str("vedis_false:\n  ret i1 0\n");
+    out.push_str("vedis_setup:\n");
+    out.push_str("  %vedis_xdp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n");
+    out.push_str("  %vedis_xsrc = load i64*, i64** %vedis_xdp\n");
+    out.push_str("  %vedis_ydp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 0\n");
+    out.push_str("  %vedis_ysrc = load i64*, i64** %vedis_ydp\n");
+    out.push_str("  %vedis_i_p = alloca i64\n");
+    out.push_str("  store i64 0, i64* %vedis_i_p\n");
+    out.push_str("  br label %vedis_outer\n");
+    out.push_str("vedis_outer:\n");
+    out.push_str("  %vedis_i = load i64, i64* %vedis_i_p\n");
+    out.push_str("  %vedis_outer_done = icmp uge i64 %vedis_i, %vedis_xlen\n");
+    out.push_str("  br i1 %vedis_outer_done, label %vedis_true, label %vedis_outer_body\n");
+    out.push_str("vedis_outer_body:\n");
+    out.push_str("  %vedis_xs = getelementptr i64, i64* %vedis_xsrc, i64 %vedis_i\n");
+    out.push_str("  %vedis_xv = load i64, i64* %vedis_xs\n");
+    out.push_str("  %vedis_j_p = alloca i64\n");
+    out.push_str("  store i64 0, i64* %vedis_j_p\n");
+    out.push_str("  br label %vedis_inner\n");
+    out.push_str("vedis_inner:\n");
+    out.push_str("  %vedis_j = load i64, i64* %vedis_j_p\n");
+    out.push_str("  %vedis_inner_done = icmp uge i64 %vedis_j, %vedis_ylen\n");
+    out.push_str("  br i1 %vedis_inner_done, label %vedis_inner_fin, label %vedis_inner_body\n");
+    out.push_str("vedis_inner_body:\n");
+    out.push_str("  %vedis_ys = getelementptr i64, i64* %vedis_ysrc, i64 %vedis_j\n");
+    out.push_str("  %vedis_yv = load i64, i64* %vedis_ys\n");
+    out.push_str("  %vedis_eq = icmp eq i64 %vedis_xv, %vedis_yv\n");
+    out.push_str("  br i1 %vedis_eq, label %vedis_false, label %vedis_inner_next\n");
+    out.push_str("vedis_inner_next:\n");
+    out.push_str("  %vedis_j_inc = add i64 %vedis_j, 1\n");
+    out.push_str("  store i64 %vedis_j_inc, i64* %vedis_j_p\n");
+    out.push_str("  br label %vedis_inner\n");
+    out.push_str("vedis_inner_fin:\n");
+    out.push_str("  %vedis_i_inc = add i64 %vedis_i, 1\n");
+    out.push_str("  store i64 %vedis_i_inc, i64* %vedis_i_p\n");
+    out.push_str("  br label %vedis_outer\n");
+    out.push_str("}\n\n");
+
+    // vec_equal_set: compose via two subset_of calls.
+    out.push_str("define i1 @intent_vec_int64_t_equal_set(%intent_vec_i64* %xs, %intent_vec_i64* %ys) {\n");
+    out.push_str("  %veqs_a = call i1 @intent_vec_int64_t_subset_of(%intent_vec_i64* %xs, %intent_vec_i64* %ys)\n");
+    out.push_str("  br i1 %veqs_a, label %veqs_check_b, label %veqs_false\n");
+    out.push_str("veqs_check_b:\n");
+    out.push_str("  %veqs_b = call i1 @intent_vec_int64_t_subset_of(%intent_vec_i64* %ys, %intent_vec_i64* %xs)\n");
+    out.push_str("  ret i1 %veqs_b\n");
+    out.push_str("veqs_false:\n");
+    out.push_str("  ret i1 0\n");
+    out.push_str("}\n\n");
 
     // ---- Closures #550-#553: positional rotations and shifts.
     // All 4 share the same outer skeleton (k<0 guard, len==0 guard,

@@ -2525,6 +2525,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_rotate_right"
                     || name == "vec_shift_left"
                     || name == "vec_shift_right"
+                    || name == "vec_subset_of"
+                    || name == "vec_disjoint"
+                    || name == "vec_equal_set"
+                    || name == "vec_equal_seq"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4885,6 +4889,42 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #554-#557: dual-Vec<i64> bool predicates.\n\
+          *   subset_of(xs, ys): every elt of xs appears somewhere in ys\n\
+          *   disjoint(xs, ys): no elt appears in both\n\
+          *   equal_set(xs, ys): xs and ys have the same set of elts (mult ignored)\n\
+          *     i.e. subset(xs, ys) and subset(ys, xs)\n\
+          *   equal_seq(xs, ys): same length, xs[i] == ys[i] for all i */\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_subset_of(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_subset_of(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 if (!xs || xs->len == 0) return true;\n\
+         \x20 if (!ys) return false;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   bool found = false;\n\
+         \x20   for (uint64_t j = 0; j < ys->len; j++) if (ys->data[j] == xs->data[i]) { found = true; break; }\n\
+         \x20   if (!found) return false;\n\
+         \x20 }\n\
+         \x20 return true;\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_disjoint(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_disjoint(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 if (!xs || !ys || xs->len == 0 || ys->len == 0) return true;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   for (uint64_t j = 0; j < ys->len; j++) if (ys->data[j] == xs->data[i]) return false;\n\
+         \x20 }\n\
+         \x20 return true;\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_equal_set(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_equal_set(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 return intent_vec_int64_t_subset_of(xs, ys) && intent_vec_int64_t_subset_of(ys, xs);\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_equal_seq(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_equal_seq(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 if (!xs || !ys) return false;\n\
+         \x20 if (xs->len != ys->len) return false;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) if (xs->data[i] != ys->data[i]) return false;\n\
+         \x20 return true;\n\
          }\n\
          /* Closures #550-#553: positional rotations and shifts on Vec<i64>.\n\
           *   rotate_left(xs, k): cyclic shift left by k; result[i] = xs[(i+k) mod n]\n\
@@ -10355,6 +10395,17 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             let op = name.strip_prefix("vec_").unwrap();
             format!(
                 "intent_vec_int64_t_{}({}, ({}))",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        // Closures #554-#557: dual-vec bool predicates.
+        "vec_subset_of" | "vec_disjoint"
+        | "vec_equal_set" | "vec_equal_seq" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, {})",
                 op,
                 emit_expr(&args[0]),
                 emit_expr(&args[1])

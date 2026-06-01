@@ -16022,6 +16022,28 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_dual_set_predicates_typecheck_and_compile() {
+        // Closures #554-#557: vec_subset_of / vec_disjoint / vec_equal_set / vec_equal_seq.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = vec(1, 2, 3, 4);
+              let zs: Vec<i64> = vec(5, 6, 7);
+              let sub: bool = vec_subset_of(ref xs, ref ys);
+              let dis: bool = vec_disjoint(ref xs, ref zs);
+              let same_set: bool = vec_equal_set(ref xs, ref xs);
+              let same_seq: bool = vec_equal_seq(ref xs, ref xs);
+              return (if sub { 1 } else { 0 })
+                   + (if dis { 1 } else { 0 })
+                   + (if same_set { 1 } else { 0 })
+                   + (if same_seq { 1 } else { 0 });
+            }
+        "#;
+        compile_to_c(source).expect("vec dual set predicates must type-check");
+        compile_to_llvm(source).expect("vec dual set predicates must compile to LLVM");
+    }
+
+    #[test]
     fn vec_rotate_shift_typecheck_and_compile() {
         // Closures #550-#553: vec_rotate_left/right and vec_shift_left/right.
         let source = r#"
