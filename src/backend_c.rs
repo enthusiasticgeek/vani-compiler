@@ -2517,6 +2517,10 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_mul_pairwise"
                     || name == "vec_min_pairwise"
                     || name == "vec_max_pairwise"
+                    || name == "vec_mod_scalar"
+                    || name == "vec_pow_scalar"
+                    || name == "vec_shl_scalar"
+                    || name == "vec_shr_scalar"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4877,6 +4881,65 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #546-#549: modular/bit-shift scalar broadcast on Vec<i64>.\n\
+          *   mod_scalar(xs, v): xs[i] mod v  (empty Vec if v == 0)\n\
+          *   pow_scalar(xs, k): xs[i] ^^ k via repeated multiply (empty if k < 0)\n\
+          *   shl_scalar(xs, k): xs[i] << k  (0..=63 valid; out-of-range → empty)\n\
+          *   shr_scalar(xs, k): xs[i] >> k  arithmetic right-shift (0..=63 valid) */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mod_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_mod_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || v == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] % v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_i64_pow_one(int64_t b, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED int64_t intent_vec_i64_pow_one(int64_t b, int64_t k) {\n\
+         \x20 int64_t r = 1;\n\
+         \x20 for (int64_t i = 0; i < k; i++) r = r * b;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pow_scalar(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_pow_scalar(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = intent_vec_i64_pow_one(xs->data[i], k);\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shl_scalar(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shl_scalar(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0 || k > 63) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   /* cast to unsigned to make the shift well-defined on negative inputs */\n\
+         \x20   uint64_t ux = (uint64_t)xs->data[i];\n\
+         \x20   r.data[i] = (int64_t)(ux << k);\n\
+         \x20 }\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shr_scalar(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_shr_scalar(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k < 0 || k > 63) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] >> k;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #541-#545: element-wise binary ops between two Vec<i64>.\n\
           *   add / sub / mul / min / max — result[i] = xs[i] op ys[i],\n\
@@ -10206,6 +10269,17 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             let op = name.strip_prefix("vec_").unwrap();
             format!(
                 "intent_vec_int64_t_{}({}, {})",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        // Closures #546-#549: modular/bit-shift scalar broadcast.
+        "vec_mod_scalar" | "vec_pow_scalar"
+        | "vec_shl_scalar" | "vec_shr_scalar" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, ({}))",
                 op,
                 emit_expr(&args[0]),
                 emit_expr(&args[1])

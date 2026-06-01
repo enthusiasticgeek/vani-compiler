@@ -16022,6 +16022,24 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_modular_bitshift_typecheck_and_compile() {
+        // Closures #546-#549: vec_mod_scalar / vec_pow_scalar / vec_shl_scalar / vec_shr_scalar.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 17, 25);
+              let m: Vec<i64> = vec_mod_scalar(ref xs, 7);
+              let p: Vec<i64> = vec_pow_scalar(ref xs, 2);
+              let ys: Vec<i64> = vec(1, 2, 4);
+              let l: Vec<i64> = vec_shl_scalar(ref ys, 3);
+              let r: Vec<i64> = vec_shr_scalar(ref ys, 1);
+              return m[0] + p[0] + l[0] + r[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec modular/bitshift must type-check");
+        compile_to_llvm(source).expect("vec modular/bitshift must compile to LLVM");
+    }
+
+    #[test]
     fn vec_pairwise_binary_typecheck_and_compile() {
         // Closures #541-#545: element-wise binary between two Vec<i64>.
         let source = r#"
