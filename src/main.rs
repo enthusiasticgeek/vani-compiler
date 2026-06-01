@@ -451,6 +451,8 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "str_first_byte" || name == "str_last_byte"
                 || name == "seed_rng" || name == "rand_i64"
                 || name == "rand_in_range"
+                || name == "rand_f64" || name == "rand_in_range_f64"
+                || name == "rand_bool" || name == "rand_choice"
                 || name == "hash_i64" || name == "hash_f64"
                 || name == "hash_str" || name == "hash_combine"
                 || name == "hash_combine_3"

@@ -11833,6 +11833,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[1])
             )
         }
+        // Closure #588: rand_f64() — uniform [0,1).
+        // Use 53 bits of the rng output and divide by 2^53 for exact [0,1).
+        "rand_f64" => "(((double)((uint64_t)intent_rng_next() >> 11)) / 9007199254740992.0)".to_string(),
+        // Closure #589: rand_in_range_f64(lo, hi) — uniform [lo, hi).
+        "rand_in_range_f64" => format!(
+            "({{ double __rfr_lo = ({}); double __rfr_hi = ({}); double __rfr_u = ((double)((uint64_t)intent_rng_next() >> 11)) / 9007199254740992.0; __rfr_lo + (__rfr_hi - __rfr_lo) * __rfr_u; }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #590: rand_bool() — uniform coin flip.
+        "rand_bool" => "((((uint64_t)intent_rng_next()) & 1ULL) != 0)".to_string(),
+        // Closure #591: rand_choice(ref xs) — pick uniformly; empty → -1.
+        "rand_choice" => format!(
+            "({{ const intent_vec_int64_t* __rc_xs = ({}); (__rc_xs->len == 0) ? (int64_t)-1 : __rc_xs->data[(uint64_t)intent_rng_next() % __rc_xs->len]; }})",
+            emit_expr(&args[0])
+        ),
         "pow" => {
             format!(
                 "pow(({}), ({}))",

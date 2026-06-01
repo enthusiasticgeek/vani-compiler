@@ -7204,6 +7204,124 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closure #588: rand_f64 — 53 bits / 2^53 for exact uniform [0,1).
+            if name == "rand_f64" {
+                let raw = ctx.fresh_tmp();
+                let shifted = ctx.fresh_tmp();
+                let as_dbl = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_rng_next()\n", raw
+                ));
+                out.push_str(&format!(
+                    "  {} = lshr i64 {}, 11\n", shifted, raw
+                ));
+                out.push_str(&format!(
+                    "  {} = uitofp i64 {} to double\n", as_dbl, shifted
+                ));
+                // 2^53 = 9007199254740992 = 0x4340000000000000
+                out.push_str(&format!(
+                    "  {} = fdiv double {}, 0x4340000000000000\n", dest, as_dbl
+                ));
+                return dest;
+            }
+            // Closure #589: rand_in_range_f64(lo, hi) — lo + (hi - lo) * u.
+            if name == "rand_in_range_f64" {
+                let lo = emit_expr(&args[0], ctx, out);
+                let hi = emit_expr(&args[1], ctx, out);
+                let raw = ctx.fresh_tmp();
+                let shifted = ctx.fresh_tmp();
+                let as_dbl = ctx.fresh_tmp();
+                let u = ctx.fresh_tmp();
+                let span = ctx.fresh_tmp();
+                let scaled = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_rng_next()\n", raw
+                ));
+                out.push_str(&format!(
+                    "  {} = lshr i64 {}, 11\n", shifted, raw
+                ));
+                out.push_str(&format!(
+                    "  {} = uitofp i64 {} to double\n", as_dbl, shifted
+                ));
+                out.push_str(&format!(
+                    "  {} = fdiv double {}, 0x4340000000000000\n", u, as_dbl
+                ));
+                out.push_str(&format!(
+                    "  {} = fsub double {}, {}\n", span, hi, lo
+                ));
+                out.push_str(&format!(
+                    "  {} = fmul double {}, {}\n", scaled, span, u
+                ));
+                out.push_str(&format!(
+                    "  {} = fadd double {}, {}\n", dest, lo, scaled
+                ));
+                return dest;
+            }
+            // Closure #590: rand_bool — low bit of rand_i64.
+            if name == "rand_bool" {
+                let raw = ctx.fresh_tmp();
+                let masked = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_rng_next()\n", raw
+                ));
+                out.push_str(&format!(
+                    "  {} = and i64 {}, 1\n", masked, raw
+                ));
+                out.push_str(&format!(
+                    "  {} = icmp ne i64 {}, 0\n", dest, masked
+                ));
+                return dest;
+            }
+            // Closure #591: rand_choice(ref xs) — pick uniformly; empty → -1.
+            if name == "rand_choice" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let lp = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let empty = ctx.fresh_tmp();
+                let empty_block = ctx.fresh_label("rc_empty_");
+                let nonempty_block = ctx.fresh_label("rc_nonempty_");
+                let exit_block = ctx.fresh_label("rc_exit_");
+                let raw = ctx.fresh_tmp();
+                let idx = ctx.fresh_tmp();
+                let dp = ctx.fresh_tmp();
+                let src = ctx.fresh_tmp();
+                let slot = ctx.fresh_tmp();
+                let val = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    lp, xs
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", n, lp));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", empty, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    empty, empty_block, nonempty_block
+                ));
+                out.push_str(&format!("{}:\n  br label %{}\n", empty_block, exit_block));
+                out.push_str(&format!("{}:\n", nonempty_block));
+                out.push_str(&format!("  {} = call i64 @intent_rng_next()\n", raw));
+                out.push_str(&format!("  {} = urem i64 {}, {}\n", idx, raw, n));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    dp, xs
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", src, dp));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", slot, src, idx
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", val, slot));
+                out.push_str(&format!("  br label %{}\n", exit_block));
+                out.push_str(&format!("{}:\n", exit_block));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ -1, %{} ], [ {}, %{} ]\n",
+                    dest, empty_block, val, nonempty_block
+                ));
+                return dest;
+            }
             // Math builtins (closure #299). Single-call
             // libm dispatch. abs is overloaded on the arg
             // type — i64 → @llabs, f64 → @fabs.
@@ -19754,6 +19872,8 @@ fn program_uses_rng(program: &TypedProgram) -> bool {
                 if matches!(
                     name.as_str(),
                     "seed_rng" | "rand_i64" | "rand_in_range"
+                    | "rand_f64" | "rand_in_range_f64"
+                    | "rand_bool" | "rand_choice"
                 ) {
                     return true;
                 }

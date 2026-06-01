@@ -16022,6 +16022,24 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn rand_tier_dd_typecheck_and_compile() {
+        // Closures #588-#591: rand_f64 / rand_in_range_f64 / rand_bool / rand_choice.
+        let source = r#"
+            fn main() -> i64 {
+              seed_rng(42 as u64);
+              let f: f64 = rand_f64();
+              let r: f64 = rand_in_range_f64(0.0, 1.0);
+              let b: bool = rand_bool();
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let c: i64 = rand_choice(ref xs);
+              return (f as i64) + (r as i64) + (if b { 1 } else { 0 }) + c;
+            }
+        "#;
+        compile_to_c(source).expect("tier DD must type-check");
+        compile_to_llvm(source).expect("tier DD must compile to LLVM");
+    }
+
+    #[test]
     fn str_tier_cc_typecheck_and_compile() {
         // Closures #582-#587: str classifiers.
         let source = r#"
