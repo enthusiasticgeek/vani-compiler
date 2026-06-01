@@ -16022,6 +16022,22 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_scalar_min_max_clamp_typecheck_and_compile() {
+        // Closures #538/#539/#540: vec_min_with_scalar / vec_max_with_scalar / vec_clamp_scalar.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(-5, 3, 12);
+              let mn: Vec<i64> = vec_min_with_scalar(ref xs, 5);
+              let mx: Vec<i64> = vec_max_with_scalar(ref xs, 5);
+              let cl: Vec<i64> = vec_clamp_scalar(ref xs, 0, 10);
+              return mn[0] + mx[0] + cl[0];
+            }
+        "#;
+        compile_to_c(source).expect("vec scalar min/max/clamp must type-check");
+        compile_to_llvm(source).expect("vec scalar min/max/clamp must compile to LLVM");
+    }
+
+    #[test]
     fn vec_comparison_masks_typecheck_and_compile() {
         // Closures #532-#537: scalar comparison masks.
         let source = r#"

@@ -2509,6 +2509,9 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_le_mask"
                     || name == "vec_gt_mask"
                     || name == "vec_ge_mask"
+                    || name == "vec_min_with_scalar"
+                    || name == "vec_max_with_scalar"
+                    || name == "vec_clamp_scalar"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4869,6 +4872,47 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closure #540: vec_clamp_scalar(ref xs, lo, hi).\n\
+          * result[i] = (xs[i] < lo) ? lo : (xs[i] > hi) ? hi : xs[i]. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_clamp_scalar(const intent_vec_int64_t* xs, int64_t lo, int64_t hi) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_clamp_scalar(const intent_vec_int64_t* xs, int64_t lo, int64_t hi) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   int64_t x = xs->data[i];\n\
+         \x20   r.data[i] = x < lo ? lo : (x > hi ? hi : x);\n\
+         \x20 }\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closures #538/#539: scalar min/max — element-wise floor/ceil.\n\
+          *   min_with_scalar(xs, v): elt-wise min(xs[i], v)\n\
+          *   max_with_scalar(xs, v): elt-wise max(xs[i], v) */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_min_with_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_min_with_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] < v ? xs->data[i] : v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_max_with_scalar(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_max_with_scalar(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(r.capacity * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) r.data[i] = xs->data[i] > v ? xs->data[i] : v;\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #532-#537: scalar comparison masks on Vec<i64>.\n\
           * Each returns a fresh Vec<i64> of 0/1 elements where 1\n\
@@ -10065,6 +10109,23 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[1])
             )
         }
+        // Closures #538/#539: scalar min/max.
+        "vec_min_with_scalar" | "vec_max_with_scalar" => {
+            let op = name.strip_prefix("vec_").unwrap();
+            format!(
+                "intent_vec_int64_t_{}({}, ({}))",
+                op,
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        // Closure #540: vec_clamp_scalar.
+        "vec_clamp_scalar" => format!(
+            "intent_vec_int64_t_clamp_scalar({}, ({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1]),
+            emit_expr(&args[2])
+        ),
         // Closure #399: vec_dot(ref xs, ref ys) -> i64.
         "vec_dot" => format!(
             "intent_vec_int64_t_dot({}, {})",
