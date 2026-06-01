@@ -5546,11 +5546,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // Closures #541-#545: element-wise binary between two Vec<i64>.
+            // Closures #541-#545 + #566: element-wise binary / merge between two Vec<i64>.
             if matches!(name.as_str(),
                 "vec_add_pairwise" | "vec_sub_pairwise"
                 | "vec_mul_pairwise" | "vec_min_pairwise"
-                | "vec_max_pairwise") {
+                | "vec_max_pairwise" | "vec_merge_sorted") {
                 let op = name.strip_prefix("vec_").unwrap();
                 let xs = emit_expr(&args[0], ctx, out);
                 let ys = emit_expr(&args[1], ctx, out);
@@ -5558,6 +5558,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call %intent_vec_i64 @intent_vec_int64_t_{}(%intent_vec_i64* {}, %intent_vec_i64* {})\n",
                     dest, op, xs, ys
+                ));
+                return dest;
+            }
+            // Closure #567: vec_insert_sorted(ref xs, v) -> Vec<i64>.
+            if name == "vec_insert_sorted" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_vec_i64 @intent_vec_int64_t_insert_sorted(%intent_vec_i64* {}, i64 {})\n",
+                    dest, xs, v
+                ));
+                return dest;
+            }
+            // Closure #568: vec_is_sorted_unique(ref xs) -> bool.
+            if name == "vec_is_sorted_unique" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i1 @intent_vec_int64_t_is_sorted_unique(%intent_vec_i64* {})\n",
+                    dest, xs
                 ));
                 return dest;
             }
@@ -12911,6 +12932,365 @@ pub(crate) fn emit_intent_vec_int64_utility_definitions(out: &mut String) {
             "  ret %intent_vec_i64 %{p}_r2\n",
             p = prefix,
         ));
+        out.push_str("}\n\n");
+    }
+
+    // ---- Closure #566: vec_merge_sorted — O(n+m) two-pointer merge.
+    {
+        let p = "vms";
+        out.push_str("define %intent_vec_i64 @intent_vec_int64_t_merge_sorted(%intent_vec_i64* %xs, %intent_vec_i64* %ys) {\n");
+        out.push_str(&format!(
+            "  %{p}_xlp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_xn = load i64, i64* %{p}_xlp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ylp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_yn = load i64, i64* %{p}_ylp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_total = add i64 %{p}_xn, %{p}_yn\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_zero = icmp eq i64 %{p}_total, 0\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_zero, label %{p}_ret_empty, label %{p}_alloc\n", p = p));
+        out.push_str(&format!("{p}_ret_empty:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_e0 = insertvalue %intent_vec_i64 undef, i64* null, 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_e1 = insertvalue %intent_vec_i64 %{p}_e0, i64 0, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_e2 = insertvalue %intent_vec_i64 %{p}_e1, i64 0, 2\n", p = p));
+        out.push_str(&format!("  ret %intent_vec_i64 %{p}_e2\n", p = p));
+        out.push_str(&format!("{p}_alloc:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_bytes = mul i64 %{p}_total, 8\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_buf_i8 = call i8* @malloc(i64 %{p}_bytes)\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_buf = bitcast i8* %{p}_buf_i8 to i64*\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_xdp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_xsrc = load i64*, i64** %{p}_xdp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ydp = getelementptr %intent_vec_i64, %intent_vec_i64* %ys, i32 0, i32 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ysrc = load i64*, i64** %{p}_ydp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i_p = alloca i64\n  store i64 0, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_j_p = alloca i64\n  store i64 0, i64* %{p}_j_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_k_p = alloca i64\n  store i64 0, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_merge_head\n", p = p));
+        // Merge loop: while i < xn && j < yn
+        out.push_str(&format!("{p}_merge_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i = load i64, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_j = load i64, i64* %{p}_j_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i_lt_xn = icmp ult i64 %{p}_i, %{p}_xn\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_j_lt_yn = icmp ult i64 %{p}_j, %{p}_yn\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_both = and i1 %{p}_i_lt_xn, %{p}_j_lt_yn\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_both, label %{p}_merge_body, label %{p}_drain_x_head\n", p = p));
+        out.push_str(&format!("{p}_merge_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_xs_slot = getelementptr i64, i64* %{p}_xsrc, i64 %{p}_i\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_xv = load i64, i64* %{p}_xs_slot\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ys_slot = getelementptr i64, i64* %{p}_ysrc, i64 %{p}_j\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_yv = load i64, i64* %{p}_ys_slot\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_x_le_y = icmp sle i64 %{p}_xv, %{p}_yv\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_chosen = select i1 %{p}_x_le_y, i64 %{p}_xv, i64 %{p}_yv\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_k = load i64, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dst = getelementptr i64, i64* %{p}_buf, i64 %{p}_k\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_chosen, i64* %{p}_dst\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_k_inc = add i64 %{p}_k, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_k_inc, i64* %{p}_k_p\n", p = p));
+        // Increment whichever pointer was chosen.
+        out.push_str(&format!(
+            "  %{p}_i_inc = add i64 %{p}_i, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_j_inc = add i64 %{p}_j, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_new_i = select i1 %{p}_x_le_y, i64 %{p}_i_inc, i64 %{p}_i\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_new_j = select i1 %{p}_x_le_y, i64 %{p}_j, i64 %{p}_j_inc\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_new_i, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_new_j, i64* %{p}_j_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_merge_head\n", p = p));
+        // Drain xs.
+        out.push_str(&format!("{p}_drain_x_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_di = load i64, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_di_done = icmp uge i64 %{p}_di, %{p}_xn\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_di_done, label %{p}_drain_y_head, label %{p}_drain_x_body\n", p = p));
+        out.push_str(&format!("{p}_drain_x_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dxs_slot = getelementptr i64, i64* %{p}_xsrc, i64 %{p}_di\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dxv = load i64, i64* %{p}_dxs_slot\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dk = load i64, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dxdst = getelementptr i64, i64* %{p}_buf, i64 %{p}_dk\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_dxv, i64* %{p}_dxdst\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dk_inc = add i64 %{p}_dk, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_dk_inc, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_di_inc = add i64 %{p}_di, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_di_inc, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_drain_x_head\n", p = p));
+        // Drain ys.
+        out.push_str(&format!("{p}_drain_y_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dj = load i64, i64* %{p}_j_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dj_done = icmp uge i64 %{p}_dj, %{p}_yn\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_dj_done, label %{p}_fin, label %{p}_drain_y_body\n", p = p));
+        out.push_str(&format!("{p}_drain_y_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dys_slot = getelementptr i64, i64* %{p}_ysrc, i64 %{p}_dj\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dyv = load i64, i64* %{p}_dys_slot\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dyk = load i64, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dydst = getelementptr i64, i64* %{p}_buf, i64 %{p}_dyk\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_dyv, i64* %{p}_dydst\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dyk_inc = add i64 %{p}_dyk, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_dyk_inc, i64* %{p}_k_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dj_inc = add i64 %{p}_dj, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_dj_inc, i64* %{p}_j_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_drain_y_head\n", p = p));
+        out.push_str(&format!("{p}_fin:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r1 = insertvalue %intent_vec_i64 %{p}_r0, i64 %{p}_total, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r2 = insertvalue %intent_vec_i64 %{p}_r1, i64 %{p}_total, 2\n", p = p));
+        out.push_str(&format!(
+            "  ret %intent_vec_i64 %{p}_r2\n", p = p));
+        out.push_str("}\n\n");
+    }
+
+    // ---- Closure #567: vec_insert_sorted — find insertion point + shift.
+    {
+        let p = "vis";
+        out.push_str("define %intent_vec_i64 @intent_vec_int64_t_insert_sorted(%intent_vec_i64* %xs, i64 %v) {\n");
+        out.push_str(&format!(
+            "  %{p}_lp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_n = load i64, i64* %{p}_lp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_outlen = add i64 %{p}_n, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_bytes = mul i64 %{p}_outlen, 8\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_buf_i8 = call i8* @malloc(i64 %{p}_bytes)\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_buf = bitcast i8* %{p}_buf_i8 to i64*\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_src = load i64*, i64** %{p}_dp\n", p = p));
+        // Find insertion index (first i where xs[i] >= v).
+        out.push_str(&format!(
+            "  %{p}_pos_p = alloca i64\n  store i64 %{p}_n, i64* %{p}_pos_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_si_p = alloca i64\n  store i64 0, i64* %{p}_si_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_scan_head\n", p = p));
+        out.push_str(&format!("{p}_scan_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_si = load i64, i64* %{p}_si_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_scan_done = icmp uge i64 %{p}_si, %{p}_n\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_scan_done, label %{p}_copy_head, label %{p}_scan_body\n", p = p));
+        out.push_str(&format!("{p}_scan_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ss = getelementptr i64, i64* %{p}_src, i64 %{p}_si\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_sv = load i64, i64* %{p}_ss\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ge = icmp sge i64 %{p}_sv, %v\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_ge, label %{p}_found, label %{p}_scan_next\n", p = p));
+        out.push_str(&format!("{p}_found:\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_si, i64* %{p}_pos_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_copy_head\n", p = p));
+        out.push_str(&format!("{p}_scan_next:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_si_inc = add i64 %{p}_si, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_si_inc, i64* %{p}_si_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_scan_head\n", p = p));
+        // Now copy: 0..pos from xs; pos = v; pos..n shifted to pos+1..n+1.
+        out.push_str(&format!("{p}_copy_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_pos = load i64, i64* %{p}_pos_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ci_p = alloca i64\n  store i64 0, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_phase1_head\n", p = p));
+        // Phase 1: copy xs[0..pos] to r[0..pos]
+        out.push_str(&format!("{p}_phase1_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ci = load i64, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p1_done = icmp uge i64 %{p}_ci, %{p}_pos\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_p1_done, label %{p}_write_v, label %{p}_phase1_body\n", p = p));
+        out.push_str(&format!("{p}_phase1_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_cs = getelementptr i64, i64* %{p}_src, i64 %{p}_ci\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_cv = load i64, i64* %{p}_cs\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_cd = getelementptr i64, i64* %{p}_buf, i64 %{p}_ci\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_cv, i64* %{p}_cd\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_ci_inc = add i64 %{p}_ci, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_ci_inc, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_phase1_head\n", p = p));
+        // Write v at r[pos]
+        out.push_str(&format!("{p}_write_v:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_vd = getelementptr i64, i64* %{p}_buf, i64 %{p}_pos\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %v, i64* %{p}_vd\n", p = p));
+        // Phase 2: copy xs[pos..n] to r[pos+1..n+1]
+        out.push_str(&format!(
+            "  store i64 %{p}_pos, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_phase2_head\n", p = p));
+        out.push_str(&format!("{p}_phase2_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_i = load i64, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_done = icmp uge i64 %{p}_p2_i, %{p}_n\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_p2_done, label %{p}_fin, label %{p}_phase2_body\n", p = p));
+        out.push_str(&format!("{p}_phase2_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_ss = getelementptr i64, i64* %{p}_src, i64 %{p}_p2_i\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_sv = load i64, i64* %{p}_p2_ss\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_di = add i64 %{p}_p2_i, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_dd = getelementptr i64, i64* %{p}_buf, i64 %{p}_p2_di\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_p2_sv, i64* %{p}_p2_dd\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_p2_inc = add i64 %{p}_p2_i, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_p2_inc, i64* %{p}_ci_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_phase2_head\n", p = p));
+        out.push_str(&format!("{p}_fin:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r0 = insertvalue %intent_vec_i64 undef, i64* %{p}_buf, 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r1 = insertvalue %intent_vec_i64 %{p}_r0, i64 %{p}_outlen, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_r2 = insertvalue %intent_vec_i64 %{p}_r1, i64 %{p}_outlen, 2\n", p = p));
+        out.push_str(&format!(
+            "  ret %intent_vec_i64 %{p}_r2\n", p = p));
+        out.push_str("}\n\n");
+    }
+
+    // ---- Closure #568: vec_is_sorted_unique — strictly ascending check.
+    {
+        let p = "visu";
+        out.push_str("define i1 @intent_vec_int64_t_is_sorted_unique(%intent_vec_i64* %xs) {\n");
+        out.push_str(&format!(
+            "  %{p}_lp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_n = load i64, i64* %{p}_lp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_short = icmp ult i64 %{p}_n, 2\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_short, label %{p}_true, label %{p}_setup\n", p = p));
+        out.push_str(&format!("{p}_true:\n  ret i1 1\n", p = p));
+        out.push_str(&format!("{p}_false:\n  ret i1 0\n", p = p));
+        out.push_str(&format!("{p}_setup:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_dp = getelementptr %intent_vec_i64, %intent_vec_i64* %xs, i32 0, i32 0\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_src = load i64*, i64** %{p}_dp\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i_p = alloca i64\n  store i64 1, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_head\n", p = p));
+        out.push_str(&format!("{p}_head:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i = load i64, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_done = icmp uge i64 %{p}_i, %{p}_n\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_done, label %{p}_true, label %{p}_body\n", p = p));
+        out.push_str(&format!("{p}_body:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_prev_i = sub i64 %{p}_i, 1\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_prev_s = getelementptr i64, i64* %{p}_src, i64 %{p}_prev_i\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_prev_v = load i64, i64* %{p}_prev_s\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_cur_s = getelementptr i64, i64* %{p}_src, i64 %{p}_i\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_cur_v = load i64, i64* %{p}_cur_s\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_bad = icmp sle i64 %{p}_cur_v, %{p}_prev_v\n", p = p));
+        out.push_str(&format!(
+            "  br i1 %{p}_bad, label %{p}_false, label %{p}_next\n", p = p));
+        out.push_str(&format!("{p}_next:\n", p = p));
+        out.push_str(&format!(
+            "  %{p}_i_inc = add i64 %{p}_i, 1\n", p = p));
+        out.push_str(&format!(
+            "  store i64 %{p}_i_inc, i64* %{p}_i_p\n", p = p));
+        out.push_str(&format!(
+            "  br label %{p}_head\n", p = p));
         out.push_str("}\n\n");
     }
 

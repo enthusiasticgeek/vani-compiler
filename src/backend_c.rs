@@ -2537,6 +2537,9 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_indices_of_value"
                     || name == "vec_dedup_consecutive"
                     || name == "vec_mean"
+                    || name == "vec_merge_sorted"
+                    || name == "vec_insert_sorted"
+                    || name == "vec_is_sorted_unique"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -4897,6 +4900,56 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 }\n\
          \x20 v.len = xs->len;\n\
          \x20 return v;\n\
+         }\n\
+         /* Closures #566-#568: sort/merge helpers on Vec<i64>.\n\
+          *   merge_sorted(xs, ys): O(n+m) two-pointer merge of two pre-sorted Vecs.\n\
+          *     If inputs aren't sorted ascending, the output won't be either —\n\
+          *     caller's responsibility.\n\
+          *   insert_sorted(xs, v): O(n) — find first index i where xs[i] >= v,\n\
+          *     return fresh Vec with v inserted at that index. Length n+1.\n\
+          *   is_sorted_unique(xs): true iff strictly ascending (no equal adjacent\n\
+          *     values). Empty/1-elt → true (vacuous). */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_merge_sorted(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_merge_sorted(const intent_vec_int64_t* xs, const intent_vec_int64_t* ys) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 uint64_t xn = xs ? xs->len : 0;\n\
+         \x20 uint64_t yn = ys ? ys->len : 0;\n\
+         \x20 uint64_t total = xn + yn;\n\
+         \x20 if (total == 0) return r;\n\
+         \x20 r.capacity = total;\n\
+         \x20 r.data = (int64_t*)malloc(total * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t i = 0, j = 0, k = 0;\n\
+         \x20 while (i < xn && j < yn) {\n\
+         \x20   if (xs->data[i] <= ys->data[j]) r.data[k++] = xs->data[i++];\n\
+         \x20   else r.data[k++] = ys->data[j++];\n\
+         \x20 }\n\
+         \x20 while (i < xn) r.data[k++] = xs->data[i++];\n\
+         \x20 while (j < yn) r.data[k++] = ys->data[j++];\n\
+         \x20 r.len = total;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_insert_sorted(const intent_vec_int64_t* xs, int64_t v) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_insert_sorted(const intent_vec_int64_t* xs, int64_t v) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 uint64_t n = xs ? xs->len : 0;\n\
+         \x20 uint64_t out_len = n + 1;\n\
+         \x20 r.capacity = out_len;\n\
+         \x20 r.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t insert_at = n;\n\
+         \x20 for (uint64_t i = 0; i < n; i++) if (xs->data[i] >= v) { insert_at = i; break; }\n\
+         \x20 for (uint64_t i = 0; i < insert_at; i++) r.data[i] = xs->data[i];\n\
+         \x20 r.data[insert_at] = v;\n\
+         \x20 for (uint64_t i = insert_at; i < n; i++) r.data[i + 1] = xs->data[i];\n\
+         \x20 r.len = out_len;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_is_sorted_unique(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED bool intent_vec_int64_t_is_sorted_unique(const intent_vec_int64_t* xs) {\n\
+         \x20 if (!xs || xs->len < 2) return true;\n\
+         \x20 for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] <= xs->data[i - 1]) return false;\n\
+         \x20 return true;\n\
          }\n\
          /* Closures #562-#565: analytics + dedup_consecutive.\n\
           *   count_distinct(xs) -> i64: O(n^2) count of unique values\n\
@@ -10510,7 +10563,7 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // Closures #541-#545: element-wise binary between two Vec<i64>.
         "vec_add_pairwise" | "vec_sub_pairwise"
         | "vec_mul_pairwise" | "vec_min_pairwise"
-        | "vec_max_pairwise" => {
+        | "vec_max_pairwise" | "vec_merge_sorted" => {
             let op = name.strip_prefix("vec_").unwrap();
             format!(
                 "intent_vec_int64_t_{}({}, {})",
@@ -10519,6 +10572,15 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[1])
             )
         }
+        "vec_insert_sorted" => format!(
+            "intent_vec_int64_t_insert_sorted({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_is_sorted_unique" => format!(
+            "intent_vec_int64_t_is_sorted_unique({})",
+            emit_expr(&args[0])
+        ),
         // Closures #546-#549: modular/bit-shift scalar broadcast.
         "vec_mod_scalar" | "vec_pow_scalar"
         | "vec_shl_scalar" | "vec_shr_scalar" => {

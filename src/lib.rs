@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_tier_x_typecheck_and_compile() {
+        // Closures #566-#568: sort/merge.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 3, 5);
+              let ys: Vec<i64> = vec(2, 4, 6);
+              let m: Vec<i64> = vec_merge_sorted(ref xs, ref ys);
+              let ins: Vec<i64> = vec_insert_sorted(ref xs, 4);
+              let su: bool = vec_is_sorted_unique(ref xs);
+              return m[0] + ins[0] + (if su { 1 } else { 0 });
+            }
+        "#;
+        compile_to_c(source).expect("tier X must type-check");
+        compile_to_llvm(source).expect("tier X must compile to LLVM");
+    }
+
+    #[test]
     fn vec_tier_v_typecheck_and_compile() {
         // Closures #562-#565: vec_count_distinct / vec_mean / vec_indices_of_value / vec_dedup_consecutive.
         let source = r#"
