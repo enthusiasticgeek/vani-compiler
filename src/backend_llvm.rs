@@ -8503,6 +8503,77 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closures #573-#576: bit/byte packing.
+            if name == "i64_byte_at" {
+                // byte_at(x, i) = (i < 0 || i > 7) ? 0 : ((x >> (i*8)) & 0xFF)
+                let x = emit_expr(&args[0], ctx, out);
+                let i = emit_expr(&args[1], ctx, out);
+                let lt = ctx.fresh_tmp();
+                let gt = ctx.fresh_tmp();
+                let bad = ctx.fresh_tmp();
+                let shift_amt = ctx.fresh_tmp();
+                let shifted = ctx.fresh_tmp();
+                let masked = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", lt, i));
+                out.push_str(&format!("  {} = icmp sgt i64 {}, 7\n", gt, i));
+                out.push_str(&format!("  {} = or i1 {}, {}\n", bad, lt, gt));
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", shift_amt, i));
+                out.push_str(&format!("  {} = lshr i64 {}, {}\n", shifted, x, shift_amt));
+                out.push_str(&format!("  {} = and i64 {}, 255\n", masked, shifted));
+                out.push_str(&format!("  {} = select i1 {}, i64 0, i64 {}\n", dest, bad, masked));
+                return dest;
+            }
+            if name == "i64_set_byte" {
+                // set_byte(x, i, b): if (i<0 || i>7) return x; clear byte i then OR in (b & 0xFF) << (i*8).
+                let x = emit_expr(&args[0], ctx, out);
+                let i = emit_expr(&args[1], ctx, out);
+                let b = emit_expr(&args[2], ctx, out);
+                let lt = ctx.fresh_tmp();
+                let gt = ctx.fresh_tmp();
+                let bad = ctx.fresh_tmp();
+                let shift_amt = ctx.fresh_tmp();
+                let mask_lo = ctx.fresh_tmp();
+                let mask = ctx.fresh_tmp();
+                let mask_not = ctx.fresh_tmp();
+                let cleared = ctx.fresh_tmp();
+                let b_masked = ctx.fresh_tmp();
+                let b_shifted = ctx.fresh_tmp();
+                let set_val = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", lt, i));
+                out.push_str(&format!("  {} = icmp sgt i64 {}, 7\n", gt, i));
+                out.push_str(&format!("  {} = or i1 {}, {}\n", bad, lt, gt));
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", shift_amt, i));
+                out.push_str(&format!("  {} = add i64 0, 255\n", mask_lo));
+                out.push_str(&format!("  {} = shl i64 {}, {}\n", mask, mask_lo, shift_amt));
+                out.push_str(&format!("  {} = xor i64 {}, -1\n", mask_not, mask));
+                out.push_str(&format!("  {} = and i64 {}, {}\n", cleared, x, mask_not));
+                out.push_str(&format!("  {} = and i64 {}, 255\n", b_masked, b));
+                out.push_str(&format!("  {} = shl i64 {}, {}\n", b_shifted, b_masked, shift_amt));
+                out.push_str(&format!("  {} = or i64 {}, {}\n", set_val, cleared, b_shifted));
+                out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", dest, bad, x, set_val));
+                return dest;
+            }
+            if name == "i64_count_leading_ones" || name == "i64_count_trailing_ones" {
+                // ~x; if ~x == 0 return 64; else clz/ctz(~x).
+                let x = emit_expr(&args[0], ctx, out);
+                let inv = ctx.fresh_tmp();
+                let is_zero = ctx.fresh_tmp();
+                let intrinsic = if name == "i64_count_leading_ones" {
+                    "llvm.ctlz.i64"
+                } else {
+                    "llvm.cttz.i64"
+                };
+                let count = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = xor i64 {}, -1\n", inv, x));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", is_zero, inv));
+                // Pass true as is_zero_undef so we can pre-guard via select.
+                out.push_str(&format!("  {} = call i64 @{}(i64 {}, i1 true)\n", count, intrinsic, inv));
+                out.push_str(&format!("  {} = select i1 {}, i64 64, i64 {}\n", dest, is_zero, count));
+                return dest;
+            }
             // Closure #479: test_bit returns bool.
             if name == "i64_test_bit" {
                 let n = emit_expr(&args[0], ctx, out);

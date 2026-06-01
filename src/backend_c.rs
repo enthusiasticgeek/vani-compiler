@@ -12370,6 +12370,31 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // Closure #573: i64_byte_at(x, i) — byte i (0..=7) of x as 0-255.
+        // Out-of-range i → 0 (defensive).
+        "i64_byte_at" => format!(
+            "({{ int64_t __bax = ({}); int64_t __bai = ({}); (int64_t)((__bai < 0 || __bai > 7) ? 0 : (((uint64_t)__bax >> (__bai * 8)) & 0xFFULL)); }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #574: i64_set_byte(x, i, b) — set byte i of x to (b & 0xFF).
+        // Out-of-range i → x unchanged (defensive).
+        "i64_set_byte" => format!(
+            "({{ int64_t __sbx = ({}); int64_t __sbi = ({}); int64_t __sbb = ({}); (__sbi < 0 || __sbi > 7) ? __sbx : (int64_t)(((uint64_t)__sbx & ~(0xFFULL << (__sbi * 8))) | (((uint64_t)__sbb & 0xFFULL) << (__sbi * 8))); }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1]),
+            emit_expr(&args[2])
+        ),
+        // Closures #575/#576: count leading/trailing ones — invert + count zeros.
+        // clz/ctz of 0 is UB; guard with the all-ones special case (~x == 0).
+        "i64_count_leading_ones" => format!(
+            "({{ uint64_t __cl = ~((uint64_t)({})); (int64_t)(__cl == 0 ? 64 : __builtin_clzll(__cl)); }})",
+            emit_expr(&args[0])
+        ),
+        "i64_count_trailing_ones" => format!(
+            "({{ uint64_t __ct = ~((uint64_t)({})); (int64_t)(__ct == 0 ? 64 : __builtin_ctzll(__ct)); }})",
+            emit_expr(&args[0])
+        ),
         // Closure #480: reverse_bits — bit-level reversal via
         // standard parallel-swap sequence.
         "i64_reverse_bits" => format!(

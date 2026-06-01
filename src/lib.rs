@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn i64_tier_aa_typecheck_and_compile() {
+        // Closures #573-#576: i64_byte_at / set_byte / count_leading_ones / count_trailing_ones.
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 305419896;
+              let b: i64 = i64_byte_at(x, 0);
+              let y: i64 = i64_set_byte(x, 0, 255);
+              let clo: i64 = i64_count_leading_ones(-1);
+              let cto: i64 = i64_count_trailing_ones(7);
+              return b + y + clo + cto;
+            }
+        "#;
+        compile_to_c(source).expect("tier AA must type-check");
+        compile_to_llvm(source).expect("tier AA must compile to LLVM");
+    }
+
+    #[test]
     fn vec_tier_y_typecheck_and_compile() {
         // Closures #569-#572: sort-free analytics.
         let source = r#"
