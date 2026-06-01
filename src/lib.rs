@@ -16022,6 +16022,25 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_comparison_masks_typecheck_and_compile() {
+        // Closures #532-#537: scalar comparison masks.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 5, 7);
+              let eq: Vec<i64> = vec_eq_mask(ref xs, 5);
+              let ne: Vec<i64> = vec_ne_mask(ref xs, 5);
+              let lt: Vec<i64> = vec_lt_mask(ref xs, 5);
+              let le: Vec<i64> = vec_le_mask(ref xs, 5);
+              let gt: Vec<i64> = vec_gt_mask(ref xs, 5);
+              let ge: Vec<i64> = vec_ge_mask(ref xs, 5);
+              return eq[1] + ne[0] + lt[0] + le[1] + gt[2] + ge[1];
+            }
+        "#;
+        compile_to_c(source).expect("vec comparison masks must type-check");
+        compile_to_llvm(source).expect("vec comparison masks must compile to LLVM");
+    }
+
+    #[test]
     fn vec_scalar_broadcast_typecheck_and_compile() {
         // Closures #528-#531: scalar broadcast arithmetic.
         let source = r#"
