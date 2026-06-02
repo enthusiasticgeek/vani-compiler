@@ -183,6 +183,12 @@ pub enum TokenKind {
     /// private. Top-level items (not inside any `module`) stay
     /// globally visible.
     Pub,
+    /// `region <name> { ... }` — opens a lexical region block.
+    /// Sugar for `{ let <name>: Region = region_new(); <body>; }`.
+    /// The bump-allocator arena is initialized at block entry
+    /// and freed at block exit via the existing scope-exit drop.
+    /// Layer 5 of the embedded-vāṇी unsafe plan (`unsafe.md`).
+    RegionKw,
     /// `unsafe(reason = "...") { ... }` — opens a lexically
     /// scoped block where raw-pointer / FFI primitives that
     /// the affine + Z3 surface can't verify are permitted. The
@@ -349,6 +355,10 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         // unsafe — tatsama Sanskrit-root form, shared across all
         // three languages. Layer 1.1 of the embedded plan.
         "असुरक्षित" => TokenKind::Unsafe,  // asurakṣita (Sanskrit/Hindi/Marathi: "unprotected")
+        // region — `kṣetra` is tatsama Sanskrit, works as a
+        // loanword in Hindi/Marathi. Layer 5 of the embedded
+        // plan.
+        "क्षेत्र" => TokenKind::RegionKw,  // kṣetra (Sanskrit/Hindi/Marathi: "region/area")
         _ => return None,
     };
     Some(kind)
@@ -483,6 +493,7 @@ fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::Module
             | TokenKind::Pub
             | TokenKind::Unsafe
+            | TokenKind::RegionKw
     )
 }
 
@@ -998,6 +1009,7 @@ impl<'a> Lexer<'a> {
             "pure" => TokenKind::Pure,
             "extern" => TokenKind::Extern,
             "unsafe" => TokenKind::Unsafe,
+            "region" => TokenKind::RegionKw,
             "parallel" => TokenKind::Parallel,
             "reduce" => TokenKind::Reduce,
             "with" => TokenKind::With,

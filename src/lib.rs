@@ -30201,6 +30201,86 @@ fn main() -> i64 {
     // the source Region is local. Zero runtime cost per deref.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 5 — `region <name> { ... }` block syntax.
+    // Sugar for `{ let <name>: Region = region_new(); <body>; }`
+    // with the block boundary providing the natural scope-exit
+    // drop. The no-escape dataflow on ArenaRef still fires.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn region_block_syntax_works_end_to_end() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              region arena {
+                let a = region_borrow_i64(mut ref arena, 42);
+                return aref_load(a);
+              }
+              return 0;
+            }
+        "#;
+        // This compiles cleanly because `aref_load(a)` returns
+        // a plain i64 (the lifetime annotation is on the
+        // reference, not the dereferenced value).
+        let _ = compile(source).expect("region block compiles");
+    }
+
+    #[test]
+    fn region_block_escape_rejected() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make_dangler() -> ArenaRef<i64> {
+              region arena {
+                let a = region_borrow_i64(mut ref arena, 42);
+                return a;
+              }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("ArenaRef escape from region block rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("ArenaRef")
+                && d.message.contains("cannot be returned")),
+            "expected ArenaRef no-escape diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn region_block_emits_drop_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              region r {
+                let _ = region_borrow_i64(mut ref r, 1);
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("region block compiles to C");
+        assert!(
+            c.contains("intent_region_drop(&"),
+            "expected scope-exit Region drop in C"
+        );
+    }
+
+    #[test]
+    fn region_devanagari_alias_parses() {
+        // `क्षेत्र` = kṣetra (Sanskrit/Hindi/Marathi: "region")
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            कार्य main() -> i64 {
+              क्षेत्र arena {
+                माना a = region_borrow_i64(बदल पहा arena, 7);
+                लिख aref_load(a);
+              }
+              पुनरागम 0;
+            }
+        "#;
+        let _ = compile(source).expect("Devanagari region keyword parses");
+    }
+
     #[test]
     fn region_borrow_returns_arena_ref() {
         let _guard = EmbeddedTargetGuard::embedded();

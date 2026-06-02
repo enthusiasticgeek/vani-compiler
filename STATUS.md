@@ -10,7 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 5 lifetime-tagged
+**Last updated:** 2026-06-02 (**Layer 5 `region <name> { ... }`
+block syntax shipped — Layer 5 is now ergonomically complete.**
+Added `region` (lowercase) as a structure keyword plus Devanagari
+alias `क्षेत्र` (kṣetra). The block desugars at parse time to a
+bare scope `{ let <name>: Region = region_new(); <body>; }` —
+the affine drop emission on Region fires automatically at the
+closing `}`, freeing the entire arena in one `free` call. No
+new AST node, no new checker pass; the existing
+scope-exit drop + ArenaRef no-escape dataflow handle everything.
+Smoke test (region block with two `region_borrow_i64` slots +
+`aref_store` + 2× `aref_load`) round-trips identically on both
+backends. Escape attempt (return ArenaRef from inside the
+block) rejected with the expected diagnostic. **4 new lib
+tests**: block syntax works end-to-end, escape rejected, drop
+emitted in C, Devanagari alias parses. **1622 lib + 54 parity
+green.** **unsafe.md is now fully done** — every layer + every
+sugar.)
+
+**Prior:** 2026-06-02 (**Layer 5 lifetime-tagged
 `ArenaRef<T>` shipped — unsafe.md plan is now FULLY COMPLETE.**
 Added `Type::ArenaRef(Box<Type>)` plus three new builtins:
 `region_borrow_i64(mut ref r, v) -> ArenaRef<i64>`, `aref_load(a)
@@ -299,7 +317,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1618 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1622 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

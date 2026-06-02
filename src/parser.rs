@@ -1940,6 +1940,8 @@ impl Parser {
             self.parse_task_join_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Unsafe)) {
             self.parse_unsafe_block_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::RegionKw)) {
+            self.parse_region_block_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Break)) {
             let token = self.bump();
             let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
@@ -2424,6 +2426,71 @@ impl Parser {
             name,
             body,
             span: task_tok.span.merge(close.span),
+        })
+    }
+
+    /// `region <name> { <body> }` — Layer 5 of `unsafe.md`.
+    /// Sugar that desugars at parse time to:
+    /// ```ignore
+    /// {                                 // bare block (fresh scope)
+    ///   let <name>: Region = region_new();
+    ///   <body>
+    ///   // Region's scope-exit drop frees the arena here.
+    /// }
+    /// ```
+    /// The bare-block scoping (already supported by the parser
+    /// via `{ ... }`) handles binding visibility and the affine
+    /// drop emission for Region. No new AST node is needed; the
+    /// existing scope-exit drop machinery does the work.
+    ///
+    /// ArenaRefs derived from `<name>` via `region_borrow_i64`
+    /// are local-origin and cannot escape the block — enforced
+    /// by Layer 1.2's no-escape dataflow, already extended to
+    /// cover `Type::ArenaRef` in the previous commit.
+    fn parse_region_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let region_tok =
+            self.expect_keyword("'region'", |k| matches!(k, TokenKind::RegionKw))?;
+        let name_tok = self.expect_ident()?;
+        let name = ident_text(name_tok);
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut body_stmts: Vec<Stmt> = Vec::new();
+        // First statement: `let <name>: Region = region_new();`
+        // Built by hand so it shares the region_tok span (so
+        // diagnostics point at the `region` keyword for any
+        // issue with the synthetic Let).
+        body_stmts.push(Stmt::Let {
+            name: name.clone(),
+            annotation: Some(Type::Region),
+            expr: Expr {
+                kind: ExprKind::Call {
+                    name: "region_new".to_string(),
+                    name_span: region_tok.span,
+                    args: Vec::new(),
+                },
+                span: region_tok.span,
+            },
+            span: region_tok.span,
+        });
+        // User-written body statements.
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            body_stmts.push(self.parse_stmt()?);
+        }
+        let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        let full_span = region_tok.span.merge(close.span);
+        // Wrap in `if true { ... }` — same desugaring the
+        // parser already uses for bare `{ ... }` statement
+        // blocks at `parse_stmt` line ~1894. This gives us
+        // a fresh scope so the synthetic Let's binding goes
+        // out of scope at the block's `}`, firing the Region
+        // drop.
+        Ok(Stmt::If {
+            cond: Expr {
+                kind: ExprKind::Bool(true),
+                span: region_tok.span,
+            },
+            then_body: body_stmts,
+            else_body: Vec::new(),
+            span: full_span,
         })
     }
 
