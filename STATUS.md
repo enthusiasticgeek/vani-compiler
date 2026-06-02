@@ -10,7 +10,28 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 5 `region <name> { ... }`
+**Last updated:** 2026-06-02 (**Safety-standard alignment arc
+planned in TODO.md — implementation scheduled next, before ARCs.**
+User-asked scope review (2026-06-02): "any MISRA / AUTOSAR /
+other standards items for maximum embedded safety." Plan
+landed at commit `bb5b78f`: two-tier attribute system with
+orthogonal feature primitives (`#[no_heap]`, `#[no_float]`,
+`#[no_recursion]`, `#[no_unsafe]`, `#[bounded_stack(bytes)]`,
+`#[wcet(cycles)]`, `#[interrupt]`, `#[deterministic_timing]`)
++ hardcoded standard composites (`#[misra_c_2012]`,
+`#[asil_d]`, `#[do178c_level_a]`, `#[iec_62304_class_c]`).
+Composition by union (most restrictive wins); per-fn opt-in
+plus global mode via `INTENT_NO_HEAP=1` and friends.
+**Compile-with-and-without parity locked**: without any tag,
+vāṇī behaves exactly as today; tags / env-vars are the only
+strictness levers. Three tiers (Tier 1 ~10h, Tier 2 ~25h,
+Tier 3 multi-day each). After Tier 1+2 land, vāṇī marketable
+as MISRA C 2012-aligned + ASIL-D / DO-178C / IEC 62304-
+feasible. **No code in this update — plan only.** Next: execute
+Tier 1 (deviations extractor + `#[no_heap]` + stack-depth)
+once user approves.)
+
+**Prior:** 2026-06-02 (**Layer 5 `region <name> { ... }`
 block syntax shipped — Layer 5 is now ergonomically complete.**
 Added `region` (lowercase) as a structure keyword plus Devanagari
 alias `क्षेत्र` (kṣetra). The block desugars at parse time to a

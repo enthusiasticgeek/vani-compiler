@@ -10,9 +10,11 @@
 - [vāṇī async / asyncio design](project_vani_async_design.md) — compiler-lowered state machines on arena; explicitly NOT Pin / self-references; depends on Level 3 closures
 - [vāṇī embedded position](project_vani_embedded_position.md) — explicit `unsafe { ... }` permitted on embedded build triples only; hosted rejects keyword at parse time; affine still active inside `unsafe`. Implementation plan now lives in `~/vani/unsafe.md`.
 - [User embedded background](user_embedded_background.md) — user comes from embedded systems; embedded is first-class planned target for vāṇī, not an afterthought
-- **External plan-of-record docs at `~/vani/`** (committed 2026-06-02):
-  - `~/vani/ARCS.md` — granular sub-step plan for Arcs 1-4 (Hash/Ord, Trie sparse, richer closures, wider HashMap K/V); time budgets + acceptance tests per sub-step; suggested order Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest.
-  - `~/vani/unsafe.md` — 5-layer hybrid embedded-safety plan: v1 generational handles (Handle<T> + Pool<T>) ships first; v2 region typing (`region { ... }` + `&'arena T`) queued for safety-critical certification (ASIL-D, DO-178C, IEC 62304). Two systems coexist; user picks per-type. Code written against Handle<T> stays valid forever.
+- [vāṇī safety-standard alignment](project_vani_safety_standards.md) — two-tier attribute family (`#[no_heap]` / `#[asil_d]` / etc.) bringing MISRA C 2012 / ISO 26262 ASIL-D / DO-178C Level A / IEC 62304 Class C feasibility. Compose by union; opt-in plus global env-var modes; compile-with-and-without parity. Scheduled before ARCs. Full plan in `~/vani/TODO.md` § *Safety-standard alignment*.
+- **External plan-of-record docs at `~/vani/`** (refreshed 2026-06-02):
+  - `~/vani/unsafe.md` — 5-layer embedded-safety plan. **✅ FULLY SHIPPED 2026-06-02** (every layer + sugar; 18 commits this session). The plan doc is preserved for historical/architecture reference.
+  - `~/vani/TODO.md` § *Safety-standard alignment* — **next arc** (Tier 1 → Tier 2 → Tier 3). Implementation gated on user approval; plan committed at `bb5b78f`.
+  - `~/vani/ARCS.md` — granular sub-step plan for Arcs 1-4. **Now sequenced AFTER safety-standard alignment** per 2026-06-02 user direction. Order: safety Tier 1 → Tier 2 → ARCs → safety Tier 3.
 
 <!--
 Consolidation note (2026-05-25):

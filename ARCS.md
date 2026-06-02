@@ -1,5 +1,19 @@
 # Multi-Session Arc Plan (Arcs 1–4)
 
+> **Sequenced after the safety-standard alignment arc.** See
+> [TODO.md](TODO.md) → *Safety-standard alignment*. Per the 2026-06-02
+> direction, MISRA / ASIL-D / DO-178C / IEC 62304 attribute work
+> (Tiers 1 → 2 → 3) lands before any ARC work begins. Reason: the
+> safety-standard primitives (`#[no_heap]`, stack-depth check, etc.)
+> may surface constraint violations in HashMap / Trie / closure
+> code paths that need to be addressed as part of the arcs
+> themselves — easier to design the arcs against the locked
+> standard surface than to retrofit later.
+>
+> Order: **safety-standard Tier 1** → **safety-standard Tier 2** →
+> **ARCs (Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest)** →
+> **safety-standard Tier 3**.
+
 Background: through closure #604 the bounded one-shot primitive surface
 is exhausted (tiers E–DD + W + Arc 0 — 108 closures). What remains are
 four arcs that genuinely require atomic multi-commit landings — each

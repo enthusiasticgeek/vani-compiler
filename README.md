@@ -621,8 +621,40 @@ justification per occurrence. Recommended prefix conventions for
 tooling: `"MMIO: ..."`, `"FFI: ..."`, `"DMA: ..."`,
 `"transmute: ..."`, `"vendor-SDK: ..."`.
 
-Plan-of-record: [unsafe.md](unsafe.md). Independent of and can
-interleave with the multi-session Arcs in [ARCS.md](ARCS.md).
+Plan-of-record: [unsafe.md](unsafe.md). Status (2026-06-02):
+**fully shipped** — Layers 1.1 / 1.2 / 1.3 / 2.1 / 2.2 / 3.1 /
+3.2 / 4.1 / 4.2 / 5 (foundation + lifetime-tagged `ArenaRef<T>` +
+`region <name> { ... }` block sugar) all on `main`.
+
+**Safety-standard alignment — scheduled next, before ARCs** (see
+[TODO.md](TODO.md) → *Safety-standard alignment*). Two-tier
+attribute system bringing MISRA C 2012, ISO 26262 ASIL-D,
+DO-178C Level A, and IEC 62304 Class C feasibility:
+
+- **Feature primitives** (orthogonal, composable): `#[no_heap]`,
+  `#[no_float]`, `#[no_recursion]`, `#[no_unsafe]`,
+  `#[bounded_stack(bytes = N)]`, `#[wcet(cycles = N)]`,
+  `#[interrupt]`, `#[deterministic_timing]`. Each enforces one
+  constraint compiler-side.
+- **Standard composites** (hardcoded aliases that expand to
+  primitive sets): `#[misra_c_2012]`, `#[asil_d]`,
+  `#[do178c_level_a]`, `#[iec_62304_class_c]`.
+- **Compose by union — most restrictive wins.** Composites set
+  a baseline; primitives tighten further.
+- **Opt-in by design.** Without any tag, vāṇี behaves exactly
+  as today (no compile-time perf or behavior change). With a
+  tag, the marked function is held to that standard's
+  constraints; with the matching global env var
+  (`INTENT_NO_HEAP=1`, …), the entire program is held.
+- **`intentc deviations` extractor** walks the IR/DWARF metadata
+  from `unsafe(reason = "…")` blocks and emits a structured
+  audit artifact (CSV / JSON / human-readable text) — directly
+  the deviation-record format safety reviewers need for
+  ASIL-D / DO-178C sign-off.
+
+Plan-of-record: [TODO.md](TODO.md) § *Safety-standard alignment*.
+After these land, ARC work (HashMap monomorph / Trie sparse /
+closures / wider K-V) resumes.
 
 ### Examples — what the compiler rejects
 
