@@ -30121,6 +30121,114 @@ fn main() -> i64 {
     // enforce the restriction once it lands.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 2.1b — `pool_new` / `pool_alloc` / `pool_get` /
+    // `pool_free` builtin signatures (checker-only; codegen lands
+    // in 2.1c). `compile()` runs the typechecker without invoking
+    // backend emission, so these tests verify the signatures
+    // without depending on the missing C / LLVM bundles.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn pool_new_returns_pool_i64() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("pool_new() typechecks");
+    }
+
+    #[test]
+    fn pool_alloc_returns_handle_i64() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h: Handle<i64> = pool_alloc(mut ref p, 42);
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("pool_alloc() typechecks");
+    }
+
+    #[test]
+    fn pool_get_returns_option_i64() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h: Handle<i64> = pool_alloc(mut ref p, 42);
+              let v = pool_get(ref p, h);
+              let result: i64 = option_unwrap_or(v, -1);
+              return result;
+            }
+        "#;
+        let _ = compile(source).expect("pool_get() typechecks");
+    }
+
+    #[test]
+    fn pool_free_typechecks() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h: Handle<i64> = pool_alloc(mut ref p, 42);
+              let _ = pool_free(mut ref p, h);
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("pool_free() typechecks");
+    }
+
+    #[test]
+    fn pool_alloc_requires_mut_ref() {
+        // pool_alloc is a mutating op — passing `ref` (immutable
+        // borrow) instead of `mut ref` must be rejected.
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h = pool_alloc(ref p, 42);
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("pool_alloc requires mut ref");
+        assert!(
+            errs.iter().any(|d| d.message.contains("mut ref")),
+            "expected `mut ref` diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn pool_get_accepts_immutable_ref() {
+        // pool_get is read-only — `ref` should suffice.
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h = pool_alloc(mut ref p, 42);
+              let v = pool_get(ref p, h);
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("pool_get accepts ref");
+    }
+
+    #[test]
+    fn pool_get_requires_handle_second_arg() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let v = pool_get(ref p, 7);
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("pool_get needs Handle<i64>");
+        assert!(
+            errs.iter().any(|d| d.message.contains("Handle<i64>")),
+            "expected Handle<i64> diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn pool_handle_types_parse_in_signature() {
         // No env-var guard needed — Pool / Handle are not raw

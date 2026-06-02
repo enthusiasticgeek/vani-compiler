@@ -10,7 +10,23 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 2.1a scaffolding shipped** —
+**Last updated:** 2026-06-02 (**Layer 2.1b shipped** —
+generational-handle builtins. `pool_new()` returns
+`Pool<i64>` (affine, owned), `pool_alloc(mut ref p, v)` returns
+`Handle<i64>`, `pool_get(ref p, h)` returns `Option<i64>`
+(`None` on generation mismatch = UAF / double-free), `pool_free(mut
+ref p, h)` bumps the generation and pushes the slot onto the
+free list. Mutating ops require `mut ref Pool<i64>`; `pool_get`
+accepts either `ref` or `mut ref`. `Option<i64>` auto-registered
+in the monomorphization pre-pass so users don't need to write
+the type. 8 new lib tests (each op's signature + the
+`mut ref` requirement + the Handle-second-arg requirement).
+**Codegen still missing** — `compile_to_c` / `compile_to_llvm`
+emit nonfunctional output for any program touching Pool/Handle.
+Layer 2.1c wires up the per-T C struct + helpers and the LLVM
+counterparts. **1575 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**Layer 2.1a scaffolding shipped** —
 type system support for `Pool<T>` and `Handle<T>`. AST variants
 `Type::Pool(Box<Type>)` (affine; owns slot array + generations +
 free list) and `Type::Handle(Box<Type>)` (Copy; `(slot_idx: u32,
@@ -119,7 +135,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1568 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1575 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,
