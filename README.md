@@ -522,6 +522,21 @@ genuinely cannot prove safe.
 Not a v1 commitment — recorded so the question doesn't get
 re-asked from scratch each session.
 
+**Memory-safety story inside `unsafe` (2026-06-02 hybrid plan).** A
+two-phase plan lives in [unsafe.md](unsafe.md). v1 (~22–31h, ~12
+commits) ships **generational handles** as the default safety net —
+`Handle<T>` is a `(slot_idx, generation)` pair; use-after-free is
+caught at runtime by the generation mismatch (~3–5 cycles per
+dereference on Cortex-M). v2 (~15–25h, ~8 commits, queued after v1
+stabilizes) adds **region typing** as a power-user opt-in for
+safety-critical certification (ASIL-D, DO-178C, IEC 62304) — zero
+runtime cost, compile-time use-after-free proof via `&'arena T`.
+The two coexist; users pick per-type. Code written against
+`Handle<T>` stays valid forever — no big-bang migration.
+
+Plan-of-record: [unsafe.md](unsafe.md). Independent of and can
+interleave with the multi-session Arcs in [ARCS.md](ARCS.md).
+
 ### Examples — what the compiler rejects
 
 These programs all **fail to compile**. The diagnostic text below

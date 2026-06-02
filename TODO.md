@@ -3,6 +3,19 @@
 Snapshot from 2026-05-18 after min/max reductions + parallelism docs
 refresh landed. Order is rough priority (size + payoff), not strict.
 
+**Top-of-queue planning docs (2026-06-02):**
+- [ARCS.md](ARCS.md) — granular sub-step plan for the 4 multi-session
+  arcs (Hash/Ord interface, Trie sparse children, richer closures,
+  wider HashMap K/V). Each sub-step has time budget + acceptance
+  test. Suggested order: Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest.
+- [unsafe.md](unsafe.md) — 5-layer plan for `unsafe { ... }` safety
+  in the embedded path. v1 ships generational handles; v2 queues
+  region typing for safety-critical certification. Independent of
+  ARCS.md; can interleave.
+- Through closure #604, the bounded one-shot primitive surface is
+  exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
+  future work flows through one of the two plan docs above.
+
 ## Design rationale (frequently re-asked questions)
 
 These decisions shape what's on the queue and what stays off it.
@@ -41,13 +54,28 @@ Full long-form discussion lives in README.md's "Design Philosophy
 
 ## Embedded targets — design considerations (2026-06-01)
 
-**Status: design discussion, not queued work.** Embedded (`no_std`,
-bare-metal, MCU) is a first-class planned target but is out of scope
-for v1. This section exists so the recurring question — *"can vāṇी
-target embedded, how is the explicit `unsafe` opt-in scoped, what
-needs to grow?"* — has a single resting place that future sessions
-can read instead of re-deriving the answer. Short summary lives in
-[README.md](README.md) → *Embedded targets — current position*.
+**Status (2026-06-02): design discussion graduated to a queued
+implementation plan.** Embedded (`no_std`, bare-metal, MCU) is a
+first-class planned target. Out of scope for v1 features (closures /
+HashMap / Trie), but the **`unsafe { ... }` safety story** has its
+own plan-of-record now:
+
+- [unsafe.md](unsafe.md) — 4-layer v1 (generational handles, ~22–31h,
+  ~12 commits) + v2 (region typing, ~15–25h, ~8 commits) plan.
+- v1 ships first: `Handle<T>` + `Pool<T>` as the default safety net
+  for pointer-shaped resources crossing `unsafe`. Runtime cost
+  ~3–5 cycles per deref on Cortex-M.
+- v2 adds `region { ... }` blocks with `&'arena T` pointers — zero
+  runtime cost, compile-time use-after-free proof. Queued for
+  safety-critical workloads (ASIL-D, DO-178C, IEC 62304).
+- The two coexist. User picks per-type. Code written against
+  `Handle<T>` keeps working forever.
+
+This section keeps the **design rationale** for "why permit `unsafe`
+at all on embedded" and the **typed-primitive wishlist** (Register,
+Mmio, interrupt fn, etc.) that aims to make `unsafe` rare. Short
+summary lives in [README.md](README.md) → *Embedded targets —
+current position*. Active sub-step list lives in [unsafe.md](unsafe.md).
 
 ### Position
 

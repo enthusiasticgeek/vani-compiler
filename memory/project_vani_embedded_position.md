@@ -1,8 +1,40 @@
 ---
 name: vani-embedded-position
-description: vāṇī's standing position on embedded targets — explicit `unsafe { ... }` opt-in for embedded build triples only, hosted stays fully checked. Recorded 2026-06-01.
+description: vāṇī's standing position on embedded targets — explicit `unsafe { ... }` opt-in for embedded build triples only, hosted stays fully checked. Recorded 2026-06-01; expanded 2026-06-02 with the unsafe.md memory-safety plan (Handle<T> v1, regions v2).
 metadata:
   type: project
+---
+
+**2026-06-02 update — plan-of-record for `unsafe`-block memory
+safety:** [~/vani/unsafe.md](../unsafe.md). Hybrid path chosen:
+
+- **v1 (ships first, ~22–31h, ~12 commits):** generational handles.
+  `Handle<T>` is a `(slot_idx, generation)` opaque ref; `Pool<T>` is
+  the backing slot pool. Use-after-free caught at runtime by
+  generation mismatch (~3–5 cycles per deref on Cortex-M).
+  Syntactically invisible to mainstream embedded users; low learning
+  curve. Plus compile-time layer (lexical unsafe containment,
+  no-escape on &local, Tainted<T> wrapper) + canaries + toolchain
+  flags.
+- **v2 (queued after v1 stabilizes, ~15–25h, ~8 commits):** region
+  typing. `region { ... }` blocks introduce arenas; `&'arena T`
+  pointers carry compile-time use-after-free proof at zero runtime
+  cost. Targeted at safety-critical certification (ASIL-D, DO-178C,
+  IEC 62304) where runtime checks aren't acceptable.
+- **Coexistence:** users pick per-type. Handle<T> is the
+  ergonomic default; `&'arena T` is the opt-in zero-cost path. Code
+  written against Handle<T> stays valid forever — no big-bang
+  migration. One-way Handle ↔ &'arena conversions allowed under
+  documented rules.
+- **Skipped intentionally:** Rust-style borrow checker (user has a
+  simpler one), garbage collector (user requirement), capability
+  tokens (overlaps with affine), ASAN/MSan (too heavy for embedded).
+
+The original *position* below stands unchanged — `unsafe` is
+embedded-only, hosted rejects at parse time, affine still runs
+inside `unsafe`. unsafe.md just adds the **how** for the
+pointer-safety story.
+
 ---
 
 **Fact:** vāṇī (`~/vani`) treats embedded (`no_std`, bare-metal,
