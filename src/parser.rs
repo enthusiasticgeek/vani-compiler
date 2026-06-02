@@ -1459,6 +1459,38 @@ impl Parser {
             let inner = self.parse_type()?;
             return Ok(Type::Ref(Box::new(inner)));
         }
+        // Raw pointer types — `*const T` and `*mut T`. Permitted
+        // syntactically anywhere a type appears; the checker
+        // enforces that they only live inside an
+        // `unsafe(reason = "...")` context (block or function).
+        // Layer 1.1+ of `unsafe.md`. The `*` token is `Star` —
+        // the same token used for binary multiplication; the
+        // parser disambiguates by position (type vs expr).
+        if matches!(self.current().kind, TokenKind::Star) {
+            self.bump(); // *
+            if self
+                .match_token(|k| matches!(k, TokenKind::Const))
+                .is_some()
+            {
+                let inner = self.parse_type()?;
+                return Ok(Type::Ptr(Box::new(inner)));
+            }
+            if self
+                .match_token(|k| matches!(k, TokenKind::Mut))
+                .is_some()
+            {
+                let inner = self.parse_type()?;
+                return Ok(Type::PtrMut(Box::new(inner)));
+            }
+            let span = self.current().span;
+            return Err(Diagnostic::new(
+                span,
+                "raw pointer type needs `*const T` or `*mut T` — \
+                 the mutability marker is mandatory so reviewers \
+                 can tell at a glance whether the pointer can be \
+                 written through (Layer 1.1+ of unsafe.md)",
+            ));
+        }
         // Friendly diagnostic if the source still uses the old
         // `&T` / `&mut T` shape.
         if matches!(self.current().kind, TokenKind::Amp | TokenKind::AndAnd) {

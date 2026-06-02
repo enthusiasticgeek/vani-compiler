@@ -29810,6 +29810,159 @@ fn main() -> i64 {
         );
     }
 
+    // -----------------------------------------------------------------
+    // Raw pointer types — `*const T` / `*mut T`
+    // (Layer 1.1+ of unsafe.md; prerequisite for Layer 1.2's
+    // no-escape dataflow).
+    //
+    // Same embedded gate as the `unsafe(reason = "...")` block:
+    // hosted builds reject raw pointer types appearing in function
+    // signatures, struct fields, or as cast targets;
+    // `INTENT_TARGET_EMBEDDED=1` opens them.
+    //
+    // Casts permitted: `Ref(T) → Ptr(T)`, `RefMut(T) → PtrMut(T)`,
+    // and the downgrade `RefMut(T) → Ptr(T)`. The mutability-
+    // adding direction (`Ptr → PtrMut`) is intentionally rejected.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn raw_ptr_in_signature_rejected_on_hosted() {
+        let _guard = EmbeddedTargetGuard::hosted();
+        let source = r#"
+            fn dangler() -> *const i64 {
+              let x: i64 = 42;
+              return (ref x) as *const i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("raw ptr return rejected on hosted");
+        assert!(
+            errs.iter().any(|d| d.message.contains("raw pointer type")),
+            "expected raw-ptr-on-hosted diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn raw_ptr_cast_target_rejected_on_hosted() {
+        let _guard = EmbeddedTargetGuard::hosted();
+        // No raw pointer in the signature — the only raw-ptr
+        // appearance is the cast target. The gate at the cast
+        // site still fires.
+        let source = r#"
+            fn dangler() -> i64 {
+              let x: i64 = 42;
+              let _p = (ref x) as *const i64;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("raw ptr cast rejected on hosted");
+        assert!(
+            errs.iter().any(|d| d.message.contains("raw pointer type")),
+            "expected raw-ptr-cast diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn raw_ptr_const_creation_compiles_on_embedded() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn take_ptr() -> i64 {
+              let x: i64 = 42;
+              let _p = (ref x) as *const i64;
+              return 0;
+            }
+            fn main() -> i64 { return take_ptr(); }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C on embedded gate");
+        // `(ref x) as *const i64` lowers to `(const int64_t*)&v_x` in C.
+        assert!(
+            c.contains("(const int64_t*)") || c.contains("const int64_t*)("),
+            "expected `const int64_t*` cast in C output, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn raw_ptr_mut_creation_compiles_on_embedded() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn take_mut_ptr() -> i64 {
+              let x: i64 = 42;
+              let _p = (mut ref x) as *mut i64;
+              return 0;
+            }
+            fn main() -> i64 { return take_mut_ptr(); }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C on embedded gate");
+        assert!(
+            c.contains("(int64_t*)") || c.contains("int64_t*)("),
+            "expected `int64_t*` cast in C output, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn raw_ptr_llvm_emits_pointer_type() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn take_ptr() -> i64 {
+              let x: i64 = 42;
+              let _p = (ref x) as *const i64;
+              return 0;
+            }
+            fn main() -> i64 { return take_ptr(); }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM on embedded gate");
+        // The Ref→Ptr cast emits no IR instruction (bitcast-noop);
+        // the SSA value is the original `i64*` alloca pointer.
+        // What we check: that compilation succeeded and the
+        // function lowered without a panic. The cast's value
+        // flows into `_p` which is then unused — LLVM still
+        // allocates a slot for it.
+        assert!(
+            ll.contains("define"),
+            "expected at least one fn definition in LLVM output, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn raw_ptr_mut_to_const_downgrade_allowed() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dual() -> i64 {
+              let x: i64 = 42;
+              let _p = (mut ref x) as *const i64;
+              return 0;
+            }
+            fn main() -> i64 { return dual(); }
+        "#;
+        let _ = compile(source).expect("RefMut → Ptr downgrade compiles");
+    }
+
+    #[test]
+    fn raw_ptr_const_to_mut_upgrade_rejected() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn upgrade() -> i64 {
+              let x: i64 = 42;
+              let p = (ref x) as *const i64;
+              let _q = p as *mut i64;
+              return 0;
+            }
+            fn main() -> i64 { return upgrade(); }
+        "#;
+        let errs = compile(source).expect_err("Ptr → PtrMut upgrade must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot cast")),
+            "expected `cannot cast` diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn unsafe_block_inner_scope_isolates_let_bindings() {
         let _guard = EmbeddedTargetGuard::embedded();

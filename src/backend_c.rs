@@ -9522,7 +9522,26 @@ fn emit_expr(expr: &TypedExpr) -> String {
         }
         TypedExprKind::Call { name, args, .. } => emit_call(name, args, &expr.ty),
         TypedExprKind::Cast { expr, ty } => {
-            format!("(({})({}))", c_leaf_type(ty), emit_expr(expr))
+            // Raw-pointer-target casts (`&x as *const T`,
+            // `&mut x as *mut T`) — Layer 1.1+ of `unsafe.md`.
+            // The target type's C spelling has a `*` after the
+            // pointee, so the cast operator wraps `(const T*)`
+            // or `(T*)` around the operand. The standard
+            // `c_leaf_type` path returns the
+            // `/* *const T */` placeholder for these — handle
+            // them here directly.
+            let cast_spell = match ty {
+                Type::Ptr(inner) => {
+                    let inner_decl = format_declarator(inner, "").trim_end().to_string();
+                    format!("const {}*", inner_decl)
+                }
+                Type::PtrMut(inner) => {
+                    let inner_decl = format_declarator(inner, "").trim_end().to_string();
+                    format!("{}*", inner_decl)
+                }
+                _ => c_leaf_type(ty).to_string(),
+            };
+            format!("(({})({}))", cast_spell, emit_expr(expr))
         }
         TypedExprKind::ArrayLit { elements } => {
             let array_ty = match &expr.ty {
@@ -13805,6 +13824,16 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // back to a generic two-pointer struct typedef so
         // the build doesn't break. Phase 1.
         Type::Object(_) => "intent_dyn",
+        // Raw pointers — `*const T` / `*mut T`. c_leaf_type
+        // returns &'static str so it can't synthesize the
+        // per-T spelling; callers that need the full
+        // declarator form (e.g. `int64_t const*`) route
+        // through `c_type_name` which knows to recurse into
+        // the pointee. The fallback placeholder keeps any
+        // leaf-only path emitting valid C. Layer 1.1+ of
+        // the unsafe plan.
+        Type::Ptr(_) => "/* *const T */",
+        Type::PtrMut(_) => "/* *mut T */",
     }
 }
 
@@ -13918,6 +13947,23 @@ fn format_declarator(ty: &Type, name: &str) -> String {
         // `c_leaf_type` via `other`).
         Type::Enum(ename) if ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(ename)) => {
             format!("{} {}", enum_c_name(ename), name)
+        }
+        Type::Ptr(inner) => {
+            // `*const T` lowers to a `const T*` (or `const
+            // intent_X*` for aggregate inners). For pointer-to-
+            // void style usage (struct etc.), recursion through
+            // `format_declarator` on the inner type with an
+            // empty name gives us a leaf storage spelling that
+            // we then prefix with `const ` and suffix with `*`.
+            // Layer 1.1+ of `unsafe.md`.
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("const {}* {}", inner_decl, name)
+        }
+        Type::PtrMut(inner) => {
+            // `*mut T` — same shape minus the `const`. Same
+            // recursion pattern. Layer 1.1+ of `unsafe.md`.
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("{}* {}", inner_decl, name)
         }
         Type::Ref(inner) => match &**inner {
             Type::Array { element, .. } => format!("const {}* {}", c_leaf_type(element), name),
@@ -14089,7 +14135,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14132,7 +14178,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => unreachable!("shift count must be an integer"),
     }
 }
 

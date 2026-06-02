@@ -9666,6 +9666,61 @@ fn validate_param_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diagnostic>)
         }
     }
     validate_array_element_type(ty, span, diagnostics);
+    // Raw pointers in safe function signatures gate to the
+    // embedded target. Layer 1.1+ of `unsafe.md`. Mirrors the
+    // `unsafe(reason = "...") { ... }` block-level gate: hosted
+    // builds reject by default; `INTENT_TARGET_EMBEDDED=1`
+    // opens it. Once the proper `--target embedded` flag
+    // ships, the env-var gate is replaced by a target-triple
+    // check.
+    validate_no_raw_ptr_on_hosted(ty, span, "function signature", diagnostics);
+}
+
+/// Reject `*const T` / `*mut T` types appearing in `ty`
+/// (recursively) when the embedded gate is off. Used by every
+/// type-position gateway: function param / return / field
+/// declarations / let annotations / cast targets. Layer 1.1+
+/// of the embedded-vāṇी unsafe plan.
+fn validate_no_raw_ptr_on_hosted(
+    ty: &Type,
+    span: Span,
+    context: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if std::env::var("INTENT_TARGET_EMBEDDED").ok().as_deref() == Some("1") {
+        return;
+    }
+    fn has_raw_ptr(t: &Type) -> bool {
+        match t {
+            Type::Ptr(_) | Type::PtrMut(_) => true,
+            Type::Ref(inner) | Type::RefMut(inner) | Type::Vec(inner)
+            | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+            | Type::Channel(inner, _) | Type::Deque(inner) | Type::HashSet(inner)
+            | Type::BTreeSet(inner) | Type::BinaryHeap(inner) | Type::Bst(inner) => {
+                has_raw_ptr(inner)
+            }
+            Type::HashMap(k, v) | Type::BTreeMap(k, v) => has_raw_ptr(k) || has_raw_ptr(v),
+            Type::Array { element, .. } => has_raw_ptr(element),
+            Type::Tuple(elements) => elements.iter().any(has_raw_ptr),
+            Type::FnPtr(params, ret) => {
+                params.iter().any(has_raw_ptr) || has_raw_ptr(ret)
+            }
+            Type::Apply { args, .. } => args.iter().any(has_raw_ptr),
+            _ => false,
+        }
+    }
+    if has_raw_ptr(ty) {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "raw pointer type `{}` not permitted in {} on hosted targets — \
+                 set `INTENT_TARGET_EMBEDDED=1` to opt in to embedded mode \
+                 (Layer 1.1 of `unsafe.md`; the `--target embedded` flag will \
+                 supersede the env-var gate)",
+                ty, context
+            ),
+        ));
+    }
 }
 
 /// Emit a "cannot move whole struct after partial move"
@@ -22401,6 +22456,12 @@ fn explicit_cast(
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
+    // Raw-pointer-target casts respect the embedded gate
+    // (`INTENT_TARGET_EMBEDDED=1`). Same rationale as the
+    // `unsafe(reason = "...")` block-level gate. Layer 1.1+ of
+    // `unsafe.md`. Catching the cast target is the principal
+    // way users introduce raw pointers (`&x as *const T`).
+    validate_no_raw_ptr_on_hosted(target, span, "cast target", diagnostics);
     if checked.ty() == target {
         let constant = checked.constant().cloned();
         return cast_expr(checked, target.clone(), constant, span);
@@ -22414,6 +22475,37 @@ fn explicit_cast(
     // diagnostic values. T1.3 follow-up.
     if matches!(checked.ty(), Type::Enum(_)) && target.is_integer() {
         return cast_expr(checked, target.clone(), None, span);
+    }
+
+    // Reference → raw pointer casts. Layer 1.1+ of the
+    // embedded-vāṇी unsafe plan (`unsafe.md`). The canonical way
+    // to create a raw pointer from a place: `&x as *const T` /
+    // `&mut x as *mut T`. The cast itself is permitted whenever
+    // a raw pointer type is in scope (the embedded gate already
+    // determines that at the type-resolution layer). Layer 1.2's
+    // no-escape dataflow tracks the origin (this cast's operand,
+    // when it's a local-binding `Ref`) and rejects return /
+    // heap-store of stack-derived pointers.
+    //
+    // Cast rules (v1):
+    // - `Ref(T) → Ptr(T)` — read-only view through a raw const ptr.
+    // - `RefMut(T) → PtrMut(T)` — mutable view.
+    // - `RefMut(T) → Ptr(T)` — downgrade to const.
+    // - `Ptr(T) → PtrMut(T)` is rejected — the cast direction
+    //   that *adds* mutation capability is a meaningful safety
+    //   downgrade and shouldn't be implicit. Users who want it
+    //   can go through `RefMut → PtrMut` from the source.
+    match (checked.ty(), target) {
+        (Type::Ref(a), Type::Ptr(b)) if a == b => {
+            return cast_expr(checked, target.clone(), None, span);
+        }
+        (Type::RefMut(a), Type::PtrMut(b)) if a == b => {
+            return cast_expr(checked, target.clone(), None, span);
+        }
+        (Type::RefMut(a), Type::Ptr(b)) if a == b => {
+            return cast_expr(checked, target.clone(), None, span);
+        }
+        _ => {}
     }
 
     if !checked.ty().is_numeric() || !target.is_numeric() {

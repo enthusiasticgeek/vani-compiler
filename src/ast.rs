@@ -797,6 +797,21 @@ pub enum Type {
     /// element type is i64; insert / contains / len / min / max.
     /// Level 4 #7. Closure #331.
     SkipList,
+    /// `*const T` — raw immutable pointer. Permitted only inside
+    /// an `unsafe(reason = "...")` context (block or function),
+    /// per Layer 1.1 of the embedded-vāṇी unsafe plan
+    /// (`unsafe.md`). Copy. The pointee is `T`; affine tracking
+    /// stops at the pointer boundary (the checker can't know
+    /// what's on the other side). Layer 1.2 adds the no-escape
+    /// dataflow that prevents a `*const T` derived from a stack
+    /// local from being returned, stored in a heap location, or
+    /// assigned to a global.
+    Ptr(Box<Type>),
+    /// `*mut T` — raw mutable pointer. Same gating + no-escape
+    /// rules as `Ptr`; the only difference is that `*mut T` can
+    /// be cast back to a `mut ref T` for inside-`unsafe`
+    /// mutation, while `*const T` cannot.
+    PtrMut(Box<Type>),
 }
 
 impl Type {
@@ -887,6 +902,12 @@ impl Type {
             | Type::Graph
             | Type::Trie
             | Type::SkipList => false,
+            // Raw pointers are Copy — they're machine words.
+            // The pointee's affinity is not tracked through the
+            // raw boundary (that's the whole point of `unsafe`).
+            // Layer 1.2's no-escape dataflow restricts where
+            // they can travel, not whether they Copy.
+            Type::Ptr(_) | Type::PtrMut(_) => true,
             Type::Ref(_) | Type::RefMut(_) => true,
             // Structs with at least one affine field (OwnedStr in v1)
             // are themselves affine — copying would alias the heap
@@ -906,7 +927,7 @@ impl Type {
             Type::I16 | Type::U16 => Some(16),
             Type::I32 | Type::U32 => Some(32),
             Type::I64 | Type::U64 => Some(64),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => None,
         }
     }
 
@@ -917,7 +938,7 @@ impl Type {
             Type::I32 => Some(i32::MIN as i128),
             Type::I64 => Some(i64::MIN as i128),
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => Some(0),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => None,
         }
     }
 
@@ -931,7 +952,7 @@ impl Type {
             Type::U16 => Some(u16::MAX as i128),
             Type::U32 => Some(u32::MAX as i128),
             Type::U64 => Some(u64::MAX as i128),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => None,
         }
     }
 
@@ -1022,6 +1043,8 @@ impl fmt::Display for Type {
             }
             Type::Param(name) => write!(formatter, "{}", name),
             Type::Object(iface) => write!(formatter, "dyn {}", iface),
+            Type::Ptr(inner) => write!(formatter, "*const {}", inner),
+            Type::PtrMut(inner) => write!(formatter, "*mut {}", inner),
         }
     }
 }

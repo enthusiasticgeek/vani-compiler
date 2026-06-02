@@ -287,6 +287,9 @@ fn llvm_byte_size(ty: &Type) -> u64 {
             4 + payload
         }
         Type::Param(_) | Type::Apply { .. } => 16, // generic; defensive
+        // Raw pointers are machine words — 8 bytes on 64-bit.
+        // Layer 1.1+ of unsafe.md.
+        Type::Ptr(_) | Type::PtrMut(_) => 8,
     }
 }
 
@@ -3578,13 +3581,20 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
         TypedExprKind::Cast { expr: inner, ty } => {
             let src_ty = inner.ty.clone();
             let v = emit_expr(inner, ctx, out);
-            let dest = ctx.fresh_tmp();
-            let src = llvm_type(&src_ty);
-            let dst = llvm_type(ty);
             let op = cast_opcode(&src_ty, ty);
+            // Early-out before calling `llvm_type` — for
+            // Ref→Ptr / RefMut→Ptr / RefMut→PtrMut casts
+            // (Layer 1.1+ of `unsafe.md`) the LLVM types are
+            // identical (`T*`), so no instruction is emitted
+            // and the SSA value flows through unchanged.
+            // `llvm_type` panics on aggregate / pointer types,
+            // so checking the opcode first avoids that path.
             if op == "bitcast-noop" {
                 return v;
             }
+            let dest = ctx.fresh_tmp();
+            let src = llvm_type(&src_ty);
+            let dst = llvm_type(ty);
             out.push_str(&format!("  {} = {} {} {} to {}\n", dest, op, src, v, dst));
             dest
         }
@@ -33008,6 +33018,11 @@ fn is_scalar(ty: &Type) -> bool {
         // `%intent_dyn_<Iface>` (a fat pointer).
         // Vtables Phase 3b.
         || matches!(ty, Type::Object(_))
+        // Raw pointers — `*const T` / `*mut T` — are
+        // machine-word scalars. The alloca holds a single
+        // pointer value, same uniform Let path as fn-ptrs.
+        // Layer 1.1+ of `unsafe.md`.
+        || matches!(ty, Type::Ptr(_) | Type::PtrMut(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33126,6 +33141,14 @@ fn llvm_type_string(ty: &Type) -> String {
         }
         Type::Vec(element) => vec_struct_name(element),
         Type::Ref(inner) | Type::RefMut(inner) => {
+            format!("{}*", llvm_type_string(inner))
+        }
+        // Raw pointers: `*const T` / `*mut T` both lower to
+        // `T*` at the LLVM IR level — LLVM's type system has
+        // no `const` (the type itself is identical;
+        // mutability is a source-language attribute). Layer
+        // 1.1+ of `unsafe.md`.
+        Type::Ptr(inner) | Type::PtrMut(inner) => {
             format!("{}*", llvm_type_string(inner))
         }
         // `Atomic<T>` storage is the futex/atomic-friendly
