@@ -255,18 +255,19 @@ below.
 
 vāṇī treats **memory and concurrency bugs as compile-time errors
 on the safe path** (hosted targets, and embedded code outside an
-explicit `unsafe { ... }` block — see *Embedded targets — current
-position* below). The runtime is meant to be boring: no garbage
-collector, no event loop, no allocator-dependent fault injection,
-no reference counting, no surprise rescheduling. Everything that
-would be a "this might crash at 3 AM in production" bug in a less
-strict language fails the type checker on the developer's laptop
-— with the embedded `unsafe` block as the single, opt-in, lexically
-scoped exception for operations the compiler genuinely cannot
-prove (raw MMIO outside typed primitives, inline asm, vendor SDK
-FFI). Affine ownership, move tracking, ISR / `parallel for` / `task`
-restrictions, and Drop emission stay active *inside* `unsafe` —
-the block only suspends pointer-safety and type-punning invariants.
+explicit `unsafe(reason = "...") { ... }` block — see *Embedded
+targets — current position* below). The runtime is meant to be
+boring: no garbage collector, no event loop, no allocator-dependent
+fault injection, no reference counting, no surprise rescheduling.
+Everything that would be a "this might crash at 3 AM in production"
+bug in a less strict language fails the type checker on the
+developer's laptop — with the embedded `unsafe(reason = "...")`
+block as the single, opt-in, lexically scoped exception for
+operations the compiler genuinely cannot prove (raw MMIO outside
+typed primitives, inline asm, vendor SDK FFI). Affine ownership,
+move tracking, ISR / `parallel for` / `task` restrictions, and Drop
+emission stay active *inside* `unsafe` — the block only suspends
+pointer-safety and type-punning invariants.
 
 ### What's caught at compile time
 
@@ -286,6 +287,55 @@ the block only suspends pointer-safety and type-punning invariants.
 | **Divide / shift / mod by zero** | ✅ (where SMT proves) | Same. |
 | **`assert` / `prove` / `requires` / `ensures` / `invariant`** | ✅ | Discharged by Z3 at check time. `prove` is the strict form (must hold); `ensures` is verified at every return path; `invariant` at loop entry, body, and exit. |
 
+**The table above describes the safe path only.** Inside an
+`unsafe(reason = "...") { ... }` block on an embedded target, the
+user takes responsibility for the listed invariants — raw pointer
+arithmetic, `transmute`-style reinterpretation, MMIO at ad-hoc
+addresses, and FFI into untyped vendor SDKs can all bypass these
+checks. The mitigations are documented in [unsafe.md](unsafe.md)
+and summarized below in *What runs inside `unsafe(reason = "...")`*.
+
+The affine layer (move tracking, Drop emission, ISR / parallel /
+task body restrictions) **stays active inside `unsafe`** — the
+block only suspends pointer-safety and type-punning invariants, not
+ownership. Everything else in the table that doesn't depend on
+those two stays enforced.
+
+### What runs inside `unsafe(reason = "...")` (the safety net)
+
+When you do reach for `unsafe(reason = "...")`, the language doesn't
+go quiet. The plan-of-record in [unsafe.md](unsafe.md) layers four
+mechanisms; v1 (Layers 1–4) ships first:
+
+| Layer | What it catches inside `unsafe` | Cost |
+|---|---|---|
+| **Lexical containment** (Layer 1.1) | Raw `*T` cannot appear in safe function signatures, struct fields, returns. Reviewers grep `unsafe(` to find every escape. | 0 (parse-time) |
+| **Mandatory reason clause** | Every block needs `unsafe(reason = "...")` with a non-empty string. The reason is part of the IR/DWARF metadata so certification tooling can extract a deviation-record report from the compiled artifact. | 0 (parse-time) |
+| **No-escape on `&local`** (Layer 1.2) | A raw pointer derived from a stack variable cannot return, store into heap, or escape via global. Catches "returns pointer to dead stack frame." | 0 (compile-time dataflow) |
+| **`Tainted<T>`** (Layer 1.3) | Values loaded through raw pointers are wrapped in `Tainted<T>`; storing tainted values into safe-typed slots requires explicit `assert_safe(x)`. Catches "unsafe data silently poisons safe code." | 0 (compile-time) |
+| **`Handle<T>` + `Pool<T>`** (Layer 2, v1 default) | Generational handles. Use-after-free and double-free are caught at runtime by generation mismatch on `pool.get(h)` → returns `None`. The blessed long-lived "pointer-like" type crossing safe/unsafe. | ~3–5 cycles per deref on Cortex-M |
+| **Canary words** (Layer 3.1) | `unsafe_alloc` brackets allocations with magic words; `unsafe_free` verifies. Catches buffer overruns and some double-frees at the moment of free. Debug-only; strippable. | ~16 bytes per alloc, free-time check |
+| **`BoundedPtr<T>`** (Layer 3.2) | Fat pointer carrying data + len + capacity. `BoundedPtr.get(i)` is bounds-checked; raw `.data` field is not. Opt-in inside unsafe. | 2× pointer width, +1 cmp per checked access |
+| **Stack canaries / ARM MTE** (Layer 4) | Stack smashing (`-fstack-protector-strong`) and HW-tagged use-after-free / overruns (ARMv8.5+ MTE). | 0–2 cycles per stack frame; free in HW |
+| **Region typing** (Layer 5, v2 future) | `region { ... }` blocks; `&'arena T` pointers carry compile-time use-after-free proof. For safety-critical certification (ASIL-D, DO-178C, IEC 62304). | 0 runtime cost (compile-time) |
+
+What `unsafe(reason = "...")` does **not** automatically catch:
+
+- **Heap leak.** Inside the block, `unsafe_alloc` without a matching
+  `unsafe_free` is a leak. The canary in Layer 3.1 verifies the
+  free is well-formed but doesn't tell you a free is missing. Use
+  `Handle<T>` / `Pool<T>` (Layer 2) when you can — pool drop
+  reclaims everything.
+- **Data races on raw aliased writes.** If you derive two `*mut T`
+  pointers to the same location and write through both from
+  different threads, neither the affine checker nor the v1 layers
+  catch this. The `unsafe(reason = "...")` keyword obligates you to
+  justify why this won't happen. v2 regions don't help here either.
+- **Type punning that the C/LLVM toolchain miscompiles.**
+  `transmute`-style casts inside `unsafe` are at the mercy of
+  strict-aliasing rules in the underlying C/LLVM compile. The reason
+  prefix `"transmute: ..."` flags these for special review.
+
 ### What runs (without you reaching for `unsafe`)
 
 vāṇी has **no `unsafe` block on hosted targets** (Linux / Windows /
@@ -294,12 +344,13 @@ The compiler doesn't trade safety for ergonomics anywhere — including
 for raw pointer arithmetic, mmap, syscalls, or FFI.
 
 The single exception is **embedded / bare-metal targets**, where an
-explicit `unsafe { ... }` block is the opt-in escape hatch for the
-narrow set of operations the compiler cannot prove safe (raw MMIO
-outside the typed `Register<T, ADDR>` primitive, inline assembly,
-platform intrinsics, custom linker-placed memory). The keyword has
-to be typed; the default is checked. Hosted builds reject `unsafe`
-entirely. See *Embedded targets — current position* below.
+explicit `unsafe(reason = "...") { ... }` block is the opt-in escape
+hatch for the narrow set of operations the compiler cannot prove
+safe (raw MMIO outside the typed `Register<T, ADDR>` primitive,
+inline assembly, platform intrinsics, custom linker-placed memory).
+The keyword has to be typed, the reason has to be filled in, and
+the default is checked. Hosted builds reject `unsafe` entirely. See
+*Embedded targets — current position* below.
 
 ### vāṇī vs Rust — ownership at a glance
 
@@ -359,10 +410,10 @@ by an existing primitive or **structurally avoided by the type system**:
 
 | Rust / C++ tool | What it solves | vāṇी's approach |
 |---|---|---|
-| `Box<T>` / `unique_ptr<T>` | Single-owner heap allocation | `Vec<T>` and `OwnedStr` already heap-allocate and own. There is no free-form `Box<T>` for arbitrary T — recursive data structures use index-based references into a `Vec` (see *Basic data structures* below). |
-| `Rc<T>` / `Arc<T>` / `shared_ptr<T>` | Reference-counted shared ownership | **Not available by design.** Shared ownership is unrepresentable in the type system. Producer / consumer parallelism uses `Channel<T, N>`. Shared mutable state across threads uses `Atomic<T>` references or `Mutex<T>` + `Guard<T>` — borrowed (not cloned) into each thread. |
+| `Box<T>` / `unique_ptr<T>` | Single-owner heap allocation | `Vec<T>` and `OwnedStr` already heap-allocate and own. There is no free-form `Box<T>` for arbitrary T — recursive data structures use index-based references into a `Vec`, or (once [unsafe.md](unsafe.md) Layer 2 ships) `Pool<T>` + `Handle<T>` for opaque single-owner indirection. See *Basic data structures* below. |
+| `Rc<T>` / `Arc<T>` / `shared_ptr<T>` | Reference-counted shared ownership | **Not available by design.** Shared *ownership* is unrepresentable. Producer / consumer parallelism uses `Channel<T, N>`. Shared mutable state across threads uses `Atomic<T>` references or `Mutex<T>` + `Guard<T>` — borrowed (not cloned) into each thread. Non-owning shared *references* are expressible via `Handle<T>` (Layer 2 in [unsafe.md](unsafe.md)) — the Pool owns; multiple Handles can name the same slot. |
 | `RefCell<T>` (interior mutability) | Mutate through a shared reference at runtime | **Not available by design.** vāṇी has no runtime borrow-checker — every aliasing rule fires at compile time. The need is mitigated by `mut ref T` parameters + mixed-place assignment (`xs[i].field = v;` writes through an index into a struct field in one statement). |
-| `Weak<T>` (cycle breaker) | Non-owning back-reference to break `Rc`/`Arc` cycles | **Unnecessary.** No `Rc`/`Arc` means no cycles can form. Single-owner affine types + second-class references produce a strict ownership tree — there is literally no way to construct a cyclic ownership graph in the type system. |
+| `Weak<T>` (cycle breaker) | Non-owning back-reference to break `Rc`/`Arc` cycles | **Not needed for ownership cycles** — single-owner affine types make a cyclic *ownership* graph unrepresentable in the type system. **For data-structure cycles** (parent ↔ child, observer pattern), the supported idioms are: (1) indices into a `Vec<T>` (always available); (2) `Handle<T>` into a `Pool<T>` (Layer 2 in [unsafe.md](unsafe.md), generation-checked so stale handles return `None` instead of dangling); (3) `&'arena T` inside a region block (Layer 5, v2, zero runtime cost for safety-critical workloads). None of these introduce reference-counting overhead. |
 
 ### What about cyclic data structures?
 
@@ -404,6 +455,26 @@ that fit naturally on a Vec (BFS, DFS, dependency graphs, ECS-style
 arrangements) the index pattern is often *more* idiomatic than the
 `Rc<RefCell<Node>>` shape Rust would use.
 
+**Two upcoming alternatives** (see [unsafe.md](unsafe.md)) when raw
+`i64` indices feel under-specified:
+
+1. **`Handle<T>` into a `Pool<T>`** (v1, Layer 2). Each handle is a
+   `(slot_idx, generation)` pair; deleting and recreating a slot
+   bumps the generation, so a stale handle's `pool.get(h)` returns
+   `None` instead of dangling. Same cache layout as the indexed-Vec
+   pattern but with type-safe slot opacity and runtime
+   use-after-free detection.
+
+2. **`region { ... }` blocks with `&'arena T` pointers** (v2,
+   Layer 5). Cycles are allowed between same-region allocations;
+   all references are tagged with the region's lifetime; the
+   compiler statically rejects any attempt to keep a reference
+   past the region's end. Zero runtime cost; for safety-critical
+   workloads (ASIL-D, DO-178C, IEC 62304).
+
+The `i64`-index idiom stays the v1 baseline. Handle<T> and regions
+are opt-in evolutions, not replacements.
+
 `dyn Iface` (closure #220–#228) covers the "heterogeneous collection
 without enumerating variants" use case that often pushes Rust users
 toward `Box<dyn Trait>`. vāṇी's `Vec<dyn Iface>` is a vector of
@@ -429,10 +500,12 @@ fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
   Rc to count.
 - **No `unsafe` escape hatch on hosted targets.** Every operation
   on Linux / Windows / macOS goes through the checked surface.
-  Embedded / bare-metal targets are the only place `unsafe { ... }`
-  is permitted — explicitly typed, narrowly scoped, and rejected
-  by the hosted-build path. See *Embedded targets — current
-  position* below.
+  Embedded / bare-metal targets are the only place
+  `unsafe(reason = "...") { ... }` is permitted — explicitly typed,
+  reason-string mandatory at parse time, narrowly scoped, and
+  rejected by the hosted-build path. See *Embedded targets —
+  current position* below and [unsafe.md](unsafe.md) for the
+  layered safety net.
 - **No exceptions / no stack unwinding.** Errors are values via
   payloaded enums (`Option`-like / `Result`-like) and propagated with
   `try`. `assert` triggers a deterministic `abort()`.
@@ -550,9 +623,18 @@ interleave with the multi-session Arcs in [ARCS.md](ARCS.md).
 
 ### Examples — what the compiler rejects
 
-These programs all **fail to compile**. The diagnostic text below
-each is what the user actually sees today (test-pinned in
-`src/lib.rs`).
+These programs all **fail to compile on the safe path** — i.e.
+outside any `unsafe(reason = "...") { ... }` block. The diagnostic
+text below each is what the user actually sees today (test-pinned
+in `src/lib.rs`).
+
+> **Caveat for embedded targets:** inside `unsafe(reason = "...")`,
+> raw `*T` operations can violate any of these invariants — the
+> user takes responsibility per the documented reason string.
+> Runtime safety nets in v1 (canaries, generational handles,
+> bounds checks) catch many but not all such bugs; see
+> *What runs inside `unsafe(reason = "...")`* above and
+> [unsafe.md](unsafe.md) for the full layered plan.
 
 #### Heap leak — impossible by construction
 
