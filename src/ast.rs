@@ -559,6 +559,16 @@ pub struct Function {
     /// on entry, decrements on exit, aborts if the counter
     /// exceeds N. `None` for unbounded fns (the common case).
     pub recursion_bound: Option<u64>,
+    /// T1.2 of the safety-standard alignment arc: set by the
+    /// parser when the function declaration is annotated
+    /// `#[no_heap]`. The post-check pass walks the call graph
+    /// transitively from this function and rejects any path
+    /// that reaches a heap-allocating builtin (Vec / Pool /
+    /// Region / HashMap / unsafe_alloc / etc.). MISRA C 2012
+    /// Rule 21.3 alignment. Also flipped on globally when the
+    /// env var `INTENT_NO_HEAP=1` is set, treating every
+    /// function as if it had the attribute.
+    pub no_heap: bool,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

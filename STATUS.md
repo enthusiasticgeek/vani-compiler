@@ -10,7 +10,28 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T1.1 of safety-standard arc
+**Last updated:** 2026-06-02 (**T1.2 of safety-standard arc
+shipped — `#[no_heap]` attribute + `INTENT_NO_HEAP=1` global
+mode.** Function attribute reject any code path (transitive
+via call graph) that reaches a heap-allocating builtin: Vec
+ops, OwnedStr producers, all affine containers, unsafe_alloc,
+pool_alloc, region_alloc/borrow, bptr_new. MISRA C 2012
+Rule 21.3 alignment. The transitive walker fixpoint-propagates
+the "allocates" flag through user-defined fn calls; diagnostics
+include the `via call to '<fn>'` chain so users can trace the
+violation. Production CLI reads `INTENT_NO_HEAP=1` once at
+process entry; library `compile()` skips the env-var read in
+`#[cfg(test)]` builds to prevent racing with parallel tests
+(1500+ tests would otherwise observe the global flip from
+unrelated test threads). Test-only API `compile_with_global_no_heap(src, true)`
+exercises the global path without env-var risk. **8 new lib
+tests** (direct vec rejected, pure arithmetic accepted,
+transitive alloc rejected, global mode rejects/accepts,
+OwnedStr concat rejected, stacked attributes compile, unknown
+attribute rejected). **1637 lib + 54 parity green.** Next:
+T1.3 stack-depth bound checker.)
+
+**Prior:** 2026-06-02 (**T1.1 of safety-standard arc
 shipped — `intentc deviations` extractor.** New CLI subcommand
 walks every `TypedStmt::UnsafeBlock { reason, ... }` and emits a
 structured deviation record in CSV / JSON / human-readable text
@@ -355,7 +376,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1629 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1637 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

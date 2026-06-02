@@ -5,6 +5,7 @@ pub mod backend_llvm;
 pub mod checker;
 pub mod deviations;
 pub mod diagnostic;
+pub mod safety;
 pub mod format;
 pub mod ir;
 pub mod lexer;
@@ -30215,6 +30216,166 @@ fn main() -> i64 {
     // structured records (file, line, prefix, reason,
     // function, target_standard) in CSV / JSON / text formats.
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // T1.2 — `#[no_heap]` attribute + INTENT_NO_HEAP=1 global mode.
+    // MISRA C 2012 Rule 21.3 alignment. Functions marked
+    // `#[no_heap]` (or every fn under the global mode) must not
+    // transitively reach any heap-allocating builtin.
+    // -----------------------------------------------------------------
+
+    /// Compile a source string + run `enforce_no_heap` with an
+    /// explicit `global` flag. Bypasses the env-var read in
+    /// `compile()` (gated to `#[cfg(not(test))]`) so global-mode
+    /// tests don't race with the other 1500+ tests running in
+    /// parallel. The function returns the union of typecheck
+    /// diagnostics and no_heap diagnostics — if either layer
+    /// rejects, the combined result is an Err.
+    fn compile_with_global_no_heap(
+        source: &str,
+        global: bool,
+    ) -> Result<crate::checker::CheckedProgram, Vec<crate::diagnostic::Diagnostic>> {
+        let mut diagnostics = Vec::new();
+        let checked = compile(source)?;
+        crate::safety::enforce_no_heap(&checked.ir, global, &mut diagnostics);
+        if diagnostics.is_empty() {
+            Ok(checked)
+        } else {
+            Err(diagnostics)
+        }
+    }
+
+    #[test]
+    fn no_heap_rejects_direct_vec_call() {
+        let source = r#"
+            #[no_heap]
+            fn bad() -> i64 {
+              let v = vec(1, 2, 3);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_heap] + vec() rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("heap-allocating")
+                && d.message.contains("#[no_heap]")),
+            "expected heap-rejection diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_heap_accepts_pure_arithmetic() {
+        let source = r#"
+            #[no_heap]
+            fn add(a: i64, b: i64) -> i64 {
+              return a + b;
+            }
+            fn main() -> i64 { return add(1, 2); }
+        "#;
+        let _ = compile(source).expect("#[no_heap] + arithmetic compiles");
+    }
+
+    #[test]
+    fn no_heap_rejects_transitive_alloc() {
+        // safe_caller calls allocates, which calls vec().
+        // Transitive walk catches the chain.
+        let source = r#"
+            fn allocates() -> i64 {
+              let v = vec(1, 2, 3);
+              return 0;
+            }
+            #[no_heap]
+            fn safe_caller() -> i64 {
+              return allocates();
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("transitive alloc rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("via call to 'allocates'")),
+            "expected transitive `via call to` diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_heap_global_mode_rejects_unannotated_fn() {
+        let source = r#"
+            fn whoops() -> i64 {
+              let v = vec(1, 2, 3);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile_with_global_no_heap(source, true)
+            .expect_err("global mode rejects vec()");
+        assert!(
+            errs.iter().any(|d| d.message.contains("INTENT_NO_HEAP=1")
+                && d.message.contains("global heap-free mode")),
+            "expected global-mode diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_heap_global_mode_accepts_pure_program() {
+        let source = r#"
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return add(1, 2); }
+        "#;
+        let _ = compile_with_global_no_heap(source, true)
+            .expect("global mode accepts pure program");
+    }
+
+    #[test]
+    fn no_heap_rejects_owned_str_concat() {
+        // OwnedStr concat via `+` is heap-allocating.
+        let source = r#"
+            #[no_heap]
+            fn bad() -> OwnedStr {
+              return "hello" + " world";
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_heap] + str concat rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("heap-allocating")),
+            "expected heap-rejection on str concat, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_heap_combines_with_bounded() {
+        // Both attributes stack — order shouldn't matter.
+        let source = r#"
+            #[bounded(8)] #[no_heap]
+            fn deep_safe(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return deep_safe(n - 1) + 1;
+            }
+            fn main() -> i64 { return deep_safe(3); }
+        "#;
+        let _ = compile(source).expect("stacked attributes compile");
+    }
+
+    #[test]
+    fn no_heap_unknown_attribute_rejected() {
+        let source = r#"
+            #[not_a_real_attribute]
+            fn bad() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("unknown attribute rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("unknown attribute")
+                && d.message.contains("`#[bounded(N)]`")
+                && d.message.contains("`#[no_heap]`")),
+            "expected unknown-attribute diagnostic listing recognized set, got: {:?}",
+            errs
+        );
+    }
 
     #[test]
     fn deviations_extracts_each_unsafe_block() {

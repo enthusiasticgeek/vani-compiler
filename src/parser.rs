@@ -1259,6 +1259,7 @@ impl Parser {
             span: fn_token.span.merge(close.span).merge(name_span),
             is_pure,
             is_extern: false,
+            no_heap: false,
             recursion_bound: None,
         })
     }
@@ -1272,44 +1273,64 @@ impl Parser {
     /// + return types are restricted to scalars / `Str` / `ref T`
     /// — affine types (Vec, OwnedStr, etc.) crossing the FFI
     /// boundary need explicit conversion helpers, not implicit.
-    /// Closure #286: parse `#[bounded(N)]` attribute then a
-    /// regular function declaration. The bound is attached
-    /// to the returned Function. Only `bounded` recognized
-    /// in v1; unknown attribute names get a clear "not
-    /// recognized" diagnostic.
+    /// Parse one-or-more `#[…]` attributes preceding a `fn`
+    /// declaration, then the function itself. Recognized
+    /// attributes:
+    /// - `#[bounded(N)]` — recursion-depth bound (closure
+    ///   #286). Sets `recursion_bound = Some(N)`.
+    /// - `#[no_heap]` — function (and transitive callees)
+    ///   must not allocate. T1.2 of the safety-standard
+    ///   alignment arc. Sets `no_heap = true`.
+    /// Multiple attributes stack — `#[bounded(10)] #[no_heap]
+    /// fn foo() { … }` is valid; constraints union.
     fn parse_attributed_fn(&mut self) -> Result<Function, Diagnostic> {
-        self.expect_keyword("'#'", |k| matches!(k, TokenKind::Hash))?;
-        self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
-        let attr_name_tok = self.expect_ident()?;
-        let attr_name = ident_text(attr_name_tok);
-        let bound_value: Option<u64> = if attr_name == "bounded" {
-            self.expect_keyword("'(' after `bounded`", |k| matches!(k, TokenKind::LParen))?;
-            let n_tok = self.bump();
-            let n = match n_tok.kind {
-                TokenKind::Int(v) if v >= 0 => v as u64,
-                _ => {
+        let mut bound_value: Option<u64> = None;
+        let mut no_heap = false;
+        while self.check(|k| matches!(k, TokenKind::Hash)) {
+            self.bump(); // consume `#`
+            self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
+            let attr_name_tok = self.expect_ident()?;
+            let attr_name = ident_text(attr_name_tok);
+            match attr_name.as_str() {
+                "bounded" => {
+                    self.expect_keyword(
+                        "'(' after `bounded`",
+                        |k| matches!(k, TokenKind::LParen),
+                    )?;
+                    let n_tok = self.bump();
+                    let n = match n_tok.kind {
+                        TokenKind::Int(v) if v >= 0 => v as u64,
+                        _ => {
+                            return Err(Diagnostic::new(
+                                n_tok.span,
+                                "expected a non-negative integer literal as the bound",
+                            ));
+                        }
+                    };
+                    self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+                    bound_value = Some(n);
+                }
+                "no_heap" => {
+                    no_heap = true;
+                }
+                other => {
                     return Err(Diagnostic::new(
-                        n_tok.span,
-                        "expected a non-negative integer literal as the bound",
+                        self.current().span,
+                        format!(
+                            "unknown attribute '#[{}]' — recognized in v1: \
+                             `#[bounded(N)]`, `#[no_heap]`",
+                            other
+                        ),
                     ));
                 }
-            };
-            self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
-            Some(n)
-        } else {
-            return Err(Diagnostic::new(
-                self.current().span,
-                format!(
-                    "unknown attribute '#[{}]' — only `#[bounded(N)]` is recognized in v1",
-                    attr_name
-                ),
-            ));
-        };
-        self.expect_keyword("']'", |k| matches!(k, TokenKind::RBracket))?;
+            }
+            self.expect_keyword("']'", |k| matches!(k, TokenKind::RBracket))?;
+        }
         // Continue with the fn declaration. Supports both
         // plain `fn` and `pure fn`.
         let mut f = self.parse_function()?;
         f.recursion_bound = bound_value;
+        f.no_heap = no_heap;
         Ok(f)
     }
 
@@ -1370,6 +1391,7 @@ impl Parser {
             body: Vec::new(),
             span: start.span.merge(semi.span),
             is_pure: false,
+            no_heap: false,
             is_extern: true,
             recursion_bound: None,
         })

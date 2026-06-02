@@ -66,6 +66,12 @@ pub struct TypedFunction {
     /// guard. None for the common case. Backends emit a
     /// thread-local depth counter check when set.
     pub recursion_bound: Option<u64>,
+    /// T1.2 of safety-standard arc: forwarded from
+    /// `ast::Function::no_heap`. The post-typecheck pass in
+    /// `safety::enforce_no_heap` reads this + the
+    /// `INTENT_NO_HEAP=1` env var to decide whether to flag
+    /// transitive heap-allocator calls.
+    pub no_heap: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

@@ -984,6 +984,29 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         ));
     }
 
+    // T1.2 of safety-standard alignment arc: enforce
+    // `#[no_heap]`. Runs after per-fn typechecking so the
+    // typed IR is settled. The global mode flag
+    // (`INTENT_NO_HEAP=1`) is consulted ONLY in non-test
+    // builds — under `cargo test`'s parallel harness, the
+    // process-global env var would race with the 1500+ other
+    // tests that don't take the lock. Per-fn `#[no_heap]`
+    // annotations always apply, both in test and production
+    // builds.
+    {
+        let typed_program_view = TypedProgram {
+            intents: Vec::new(),
+            functions: functions.clone(),
+            structs: Vec::new(),
+            enums: Vec::new(),
+        };
+        #[cfg(not(test))]
+        let global = crate::safety::global_no_heap_from_env();
+        #[cfg(test)]
+        let global = false;
+        crate::safety::enforce_no_heap(&typed_program_view, global, &mut diagnostics);
+    }
+
     if diagnostics.is_empty() {
         let intents = program
             .intents
@@ -1499,6 +1522,7 @@ fn lift_closures_in_block(
                         span: span_for_fn,
                         is_pure: false,
                         is_extern: false,
+                        no_heap: false,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2724,6 +2748,7 @@ fn lift_expr_anon_fn(
                 body: std::mem::take(body),
                 span,
                 is_pure: false,
+                        no_heap: false,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6757,6 +6782,7 @@ fn check_function(
             is_pure: function.is_pure,
             is_extern: false,
             recursion_bound: function.recursion_bound,
+            no_heap: function.no_heap,
             span: function.span,
         };
     }
@@ -6812,6 +6838,7 @@ fn check_function(
             is_pure: function.is_pure,
             is_extern: true,
             recursion_bound: None,
+            no_heap: false,
             span: function.span,
         };
     }
@@ -7053,6 +7080,7 @@ fn check_function(
         is_pure: function.is_pure,
         is_extern: false,
         recursion_bound: function.recursion_bound,
+        no_heap: function.no_heap,
         span: function.span,
     }
 }
