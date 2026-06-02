@@ -30194,6 +30194,136 @@ fn main() -> i64 {
     // refinement is a substantial follow-up.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 5 lifetime-tagged — `ArenaRef<T>` + `region_borrow_i64`
+    // + `aref_load` / `aref_store`. The no-escape pass (extended
+    // from Layer 1.2) rejects ArenaRef return / heap-store when
+    // the source Region is local. Zero runtime cost per deref.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn region_borrow_returns_arena_ref() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              let a: ArenaRef<i64> = region_borrow_i64(mut ref r, 42);
+              return aref_load(a);
+            }
+        "#;
+        let _ = compile(source).expect("region_borrow_i64 returns ArenaRef");
+    }
+
+    #[test]
+    fn aref_load_returns_raw_i64_no_tainted() {
+        // The whole point: ArenaRef bypasses Tainted because
+        // the lifetime binding IS the safety proof. aref_load
+        // returns plain i64, not Tainted<i64>.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              let a = region_borrow_i64(mut ref r, 7);
+              return aref_load(a) + 1;
+            }
+        "#;
+        let _ = compile(source).expect("aref_load returns i64 directly");
+    }
+
+    #[test]
+    fn arena_ref_to_local_region_cannot_escape_return() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dangler() -> ArenaRef<i64> {
+              let r: Region = region_new();
+              let a = region_borrow_i64(mut ref r, 42);
+              return a;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("ArenaRef escape via return rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("ArenaRef")
+                && d.message.contains("cannot be returned")),
+            "expected ArenaRef no-escape diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn arena_ref_via_binding_still_rejected() {
+        // Same escape attempt but with the ArenaRef flowing
+        // through a let-binding before the return. The taint
+        // propagation catches it.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dangler() -> ArenaRef<i64> {
+              let r: Region = region_new();
+              let a = region_borrow_i64(mut ref r, 42);
+              let b = a;
+              return b;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("ArenaRef via binding rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("ArenaRef")),
+            "expected ArenaRef diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn arena_ref_from_param_region_can_pass_through() {
+        // A Region passed in as a parameter outlives the
+        // callee's frame, so ArenaRefs derived from it can
+        // freely flow back out.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn store_in_region(r: mut ref Region, v: i64) -> ArenaRef<i64> {
+              return region_borrow_i64(r, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("ArenaRef from param Region passes through");
+    }
+
+    #[test]
+    fn aref_store_writes_through_arena_ref() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              let a = region_borrow_i64(mut ref r, 0);
+              let _ = aref_store(a, 99);
+              return aref_load(a);
+            }
+        "#;
+        let c = compile_to_c(source).expect("aref_store compiles to C");
+        assert!(
+            c.contains("(*("),
+            "expected `*(p)` write in C output"
+        );
+    }
+
+    #[test]
+    fn aref_emits_simple_load_in_llvm() {
+        // No bounds check, no canary check, no generation
+        // check — Layer 5's zero-runtime-cost dereference.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read(a: ArenaRef<i64>) -> i64 {
+              return aref_load(a);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("aref_load compiles to LLVM");
+        assert!(
+            ll.contains("load i64, i64*"),
+            "expected `load i64, i64*` in LLVM"
+        );
+    }
+
     #[test]
     fn region_new_returns_region() {
         let _guard = EmbeddedTargetGuard::embedded();

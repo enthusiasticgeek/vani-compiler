@@ -10,7 +10,35 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 5 v2 foundation shipped** —
+**Last updated:** 2026-06-02 (**Layer 5 lifetime-tagged
+`ArenaRef<T>` shipped — unsafe.md plan is now FULLY COMPLETE.**
+Added `Type::ArenaRef(Box<Type>)` plus three new builtins:
+`region_borrow_i64(mut ref r, v) -> ArenaRef<i64>`, `aref_load(a)
+-> i64`, `aref_store(a, v) -> i64`. The compile-time scope binding
+IS the safety proof: no Tainted wrapping, no canary check, no
+generation check, no bounds check — *zero runtime cost per
+deref*. Layer 1.2's no-escape dataflow extended to cover
+`Type::ArenaRef` — returning an ArenaRef tied to a local Region
+is rejected at compile time with a `Handle<T>`/`Pool<T>`
+recommendation; passing through a parameter Region works fine.
+Taint propagation handles ArenaRef flowing through let-bindings.
+Both backends emit `ArenaRef<i64>` as a plain `int64_t*` /
+`i64*` machine word; safety is purely compile-time. Smoke test
+(borrow two slots, store through one, load both) prints
+identical output on both backends. Escape attempt (return an
+ArenaRef tied to a local Region) is rejected with the right
+diagnostic. **7 new lib tests**: borrow returns ArenaRef,
+load returns plain i64 (not Tainted), escape via return
+rejected, escape via let-binding rejected, pass-through from
+param Region accepted, store emits `*p = v` in C, load emits
+`load i64, i64*` in LLVM. **1618 lib + 54 parity green.**
+**unsafe.md COMPLETE.** Layers 1.1, 1.2, 1.3, 2.1, 2.2, 3.1,
+3.2, 4.1, 4.2, 5 (foundation + lifetime-tagged pointers) all
+on `main`. Only the Layer 5 `region <name> { ... }` block-with-
+explicit-lifetime-name syntax is parked as ergonomic-only
+future work.)
+
+**Prior:** 2026-06-02 (**Layer 5 v2 foundation shipped** —
 `Region` bump-allocator arena. Affine type; scope-exit drop frees
 the entire arena in a single `free` call. V1 scaffolding ships
 the runtime story; the full Layer 5 design's `&'arena T`
@@ -271,7 +299,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1611 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1618 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

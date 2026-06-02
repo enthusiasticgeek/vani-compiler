@@ -12499,12 +12499,21 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "bptr_len" => format!("intent_bptr_i64_len({})", emit_expr(&args[0])),
         // Layer 5 v2 foundation of `unsafe.md` — Region ops.
         "region_new" => "intent_region_new()".to_string(),
-        "region_alloc_i64" => format!(
+        "region_alloc_i64" | "region_borrow_i64" => format!(
             "intent_region_alloc_i64({}, ({}))",
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
         "region_len" => format!("intent_region_len({})", emit_expr(&args[0])),
+        // Layer 5 lifetime-tagged ops — same machine semantics
+        // as raw load/store but no Tainted wrapping (the
+        // compile-time scope binding is the safety proof).
+        "aref_load" => format!("(*({}))", emit_expr(&args[0])),
+        "aref_store" => format!(
+            "((*({})) = ({}), (int64_t)0)",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
@@ -14426,6 +14435,10 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // `Region` — Layer 5 v2 foundation of `unsafe.md`.
         // Bump-allocator arena struct emitted by the bundle.
         Type::Region => "intent_region",
+        // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+        // Lowers to `int64_t*` (same as raw pointer); the
+        // safety is compile-time only.
+        Type::ArenaRef(_) => "int64_t*",
     }
 }
 
@@ -14739,7 +14752,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14782,7 +14795,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => unreachable!("shift count must be an integer"),
     }
 }
 

@@ -860,14 +860,30 @@ pub enum Type {
     /// O(1) "free" amortized over the entire region, no
     /// per-slot freelist bookkeeping.
     ///
-    /// V1 scaffolding: `region_alloc_i64(r, v)` returns a raw
-    /// `*mut i64` for the allocated slot. The full Layer 5
-    /// design returns `&'arena T` lifetime-tagged pointers
-    /// that statically prove use-after-free is impossible —
-    /// that's a substantial follow-up commit. Today's runtime
-    /// side is identical to what the lifetime-tagged version
-    /// will use; only the type-system refinement changes.
+    /// Two pointer flavors are produced by Region allocators:
+    /// - `region_alloc_i64(r, v) -> *mut i64` — raw pointer;
+    ///   user is responsible for not letting it escape. Used
+    ///   for backward compat / inside-`unsafe` arithmetic.
+    /// - `region_borrow_i64(r, v) -> ArenaRef<i64>` — the
+    ///   lifetime-tagged variant. The no-escape dataflow
+    ///   statically rejects ArenaRef returns/heap-stores; zero
+    ///   runtime cost per deref.
     Region,
+    /// `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+    /// Semantically a `*mut T` but bound to a `Region`'s scope
+    /// by the no-escape dataflow (Layer 1.2 extended to also
+    /// cover ArenaRef). Reading / writing through it is direct
+    /// (no Tainted wrapping, no canary check, no generation
+    /// check) — the compile-time scope binding IS the safety
+    /// proof.
+    ///
+    /// V1: T = i64. Copy at the value level (it's a view, not
+    /// an owner — the Region owns the underlying storage).
+    /// The full unsafe.md design names this `&'arena T`; the
+    /// `ArenaRef<T>` spelling avoids introducing lifetime-
+    /// parameter syntax into the type system while delivering
+    /// the same safety guarantee.
+    ArenaRef(Box<Type>),
 }
 
 impl Type {
@@ -982,6 +998,10 @@ impl Type {
             // pointer plus bounds; the underlying allocation is
             // owned separately. Same Copy story as Ref / RefMut.
             Type::BoundedPtr(_) => true,
+            // `ArenaRef<T>` is a view (Copy). The Region owns
+            // the storage; the ArenaRef is a thin lifetime-
+            // tagged pointer.
+            Type::ArenaRef(_) => true,
             // Raw pointers are Copy — they're machine words.
             // The pointee's affinity is not tracked through the
             // raw boundary (that's the whole point of `unsafe`).
@@ -1007,7 +1027,7 @@ impl Type {
             Type::I16 | Type::U16 => Some(16),
             Type::I32 | Type::U32 => Some(32),
             Type::I64 | Type::U64 => Some(64),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
         }
     }
 
@@ -1018,7 +1038,7 @@ impl Type {
             Type::I32 => Some(i32::MIN as i128),
             Type::I64 => Some(i64::MIN as i128),
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => Some(0),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
         }
     }
 
@@ -1032,7 +1052,7 @@ impl Type {
             Type::U16 => Some(u16::MAX as i128),
             Type::U32 => Some(u32::MAX as i128),
             Type::U64 => Some(u64::MAX as i128),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
         }
     }
 
@@ -1130,6 +1150,7 @@ impl fmt::Display for Type {
             Type::Tainted(inner) => write!(formatter, "Tainted<{}>", inner),
             Type::BoundedPtr(inner) => write!(formatter, "BoundedPtr<{}>", inner),
             Type::Region => write!(formatter, "Region"),
+            Type::ArenaRef(inner) => write!(formatter, "ArenaRef<{}>", inner),
         }
     }
 }

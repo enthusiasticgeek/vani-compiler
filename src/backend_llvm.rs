@@ -308,6 +308,9 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // `Region` — Layer 5 v2 foundation. Bump-allocator
         // arena struct {data, len, capacity} = 24 bytes.
         Type::Region => 24,
+        // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+        // Machine-word sized.
+        Type::ArenaRef(_) => 8,
     }
 }
 
@@ -7981,7 +7984,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            if name == "region_alloc_i64" {
+            if name == "region_alloc_i64" || name == "region_borrow_i64" {
                 let r = emit_expr(&args[0], ctx, out);
                 let v = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
@@ -7990,6 +7993,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     dest, r, v
                 ));
                 return dest;
+            }
+            // Layer 5 lifetime-tagged ops — same machine
+            // emission as raw load/store; safety is purely
+            // compile-time via the no-escape pass.
+            if name == "aref_load" {
+                let p = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load i64, i64* {}\n",
+                    dest, p
+                ));
+                return dest;
+            }
+            if name == "aref_store" {
+                let p = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                out.push_str(&format!(
+                    "  store i64 {}, i64* {}\n",
+                    v, p
+                ));
+                return "0".to_string();
             }
             if name == "region_len" {
                 let r = emit_expr(&args[0], ctx, out);
@@ -33692,6 +33716,9 @@ fn is_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::BoundedPtr(_))
         // `Region` — Layer 5 v2 foundation. Same struct shape.
         || matches!(ty, Type::Region)
+        // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+        // Machine word, same scalar Let path.
+        || matches!(ty, Type::ArenaRef(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33753,6 +33780,9 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         // Layer 5 v2 foundation — Region arena lowers to a
         // named struct.
         Type::Region => "%intent_region",
+        // Layer 5 lifetime-tagged pointer — lowers to `i64*`
+        // (same as raw pointer), safety is compile-time only.
+        Type::ArenaRef(_) => "i64*",
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",

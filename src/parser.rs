@@ -1723,6 +1723,15 @@ impl Parser {
                 self.bump();
                 return Ok(Type::Region);
             }
+            // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+            // Bound to a Region's scope by the no-escape pass.
+            if name == "ArenaRef" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::ArenaRef(Box::new(element)));
+            }
             if name == "Atomic" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
