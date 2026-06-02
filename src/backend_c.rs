@@ -4709,10 +4709,11 @@ pub(crate) fn emit_intent_option_f64_helpers_c(out: &mut String) {
 ///   vec_extend(mut ref xs, ref ys) -> i64    appends ys to xs;
 ///                                            returns new len
 ///   vec_concat(ref xs, ref ys)     -> Vec<i64>   fresh xs ++ ys
-/// Closure #593: detect any `vec_chunks` call to gate the
-/// `intent_vec_vec_int64_t_chunks` helper emission. The helper
-/// references `intent_vec_vec_int64_t` which is only declared
-/// when the program uses Vec<Vec<i64>>, so gating is required.
+/// Closures #593-#596: detect any vec_chunks / vec_windows /
+/// vec_flatten / vec_group_by_value call. All four helpers
+/// reference `intent_vec_vec_int64_t` (the nested-Vec struct)
+/// which is only declared when the program uses Vec<Vec<i64>>,
+/// so the helper emission must be gated.
 pub(crate) fn program_uses_vec_chunks(program: &TypedProgram) -> bool {
     // Substring-on-emitted-IR gate, like other on-demand helpers.
     // We can't directly inspect the typed program here without
@@ -4724,7 +4725,9 @@ pub(crate) fn program_uses_vec_chunks(program: &TypedProgram) -> bool {
     fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
         match &expr.kind {
             E::Call { name, args, .. } => {
-                if name == "vec_chunks" { return true; }
+                if matches!(name.as_str(),
+                    "vec_chunks" | "vec_windows" | "vec_flatten"
+                ) { return true; }
                 args.iter().any(expr_uses)
             }
             E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
@@ -4814,6 +4817,47 @@ pub(crate) fn emit_intent_vec_chunks_helper_c(out: &mut String) {
          \x20   r.data[i] = inner;\n\
          \x20 }\n\
          \x20 r.len = num_chunks;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closure #594: vec_windows(xs, k) — overlapping length-k windows. Empty if n<k or k<=0. */\n\
+         static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_windows(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_windows(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_vec_int64_t r; r.data = (intent_vec_int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || k <= 0 || (uint64_t)k > xs->len) return r;\n\
+         \x20 uint64_t uk = (uint64_t)k;\n\
+         \x20 uint64_t num = xs->len - uk + 1;\n\
+         \x20 r.capacity = num;\n\
+         \x20 r.data = (intent_vec_int64_t*)malloc(num * sizeof(intent_vec_int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < num; i++) {\n\
+         \x20   intent_vec_int64_t inner;\n\
+         \x20   inner.data = (int64_t*)malloc(uk * sizeof(int64_t));\n\
+         \x20   if (!inner.data) abort();\n\
+         \x20   for (uint64_t j = 0; j < uk; j++) inner.data[j] = xs->data[i + j];\n\
+         \x20   inner.len = uk;\n\
+         \x20   inner.capacity = uk;\n\
+         \x20   r.data[i] = inner;\n\
+         \x20 }\n\
+         \x20 r.len = num;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closure #595: vec_flatten(xss) — concatenate inner Vecs. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_flatten(const intent_vec_vec_int64_t* xss) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_flatten(const intent_vec_vec_int64_t* xss) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xss || xss->len == 0) return r;\n\
+         \x20 uint64_t total = 0;\n\
+         \x20 for (uint64_t i = 0; i < xss->len; i++) total += xss->data[i].len;\n\
+         \x20 if (total == 0) return r;\n\
+         \x20 r.capacity = total;\n\
+         \x20 r.data = (int64_t*)malloc(total * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t k = 0;\n\
+         \x20 for (uint64_t i = 0; i < xss->len; i++) {\n\
+         \x20   const intent_vec_int64_t* inner = &xss->data[i];\n\
+         \x20   for (uint64_t j = 0; j < inner->len; j++) r.data[k++] = inner->data[j];\n\
+         \x20 }\n\
+         \x20 r.len = total;\n\
          \x20 return r;\n\
          }\n\n"
     );
@@ -10834,11 +10878,20 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_int64_t_dedup_consecutive({})",
             emit_expr(&args[0])
         ),
-        // Closure #593: vec_chunks(ref xs, k) -> Vec<Vec<i64>>.
+        // Closures #593-#596: nested-Vec constructors.
         "vec_chunks" => format!(
             "intent_vec_vec_int64_t_chunks({}, ({}))",
             emit_expr(&args[0]),
             emit_expr(&args[1])
+        ),
+        "vec_windows" => format!(
+            "intent_vec_vec_int64_t_windows({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "vec_flatten" => format!(
+            "intent_vec_int64_t_flatten({})",
+            emit_expr(&args[0])
         ),
         // Closures #559-#561: 3-arg fresh-Vec builders.
         "vec_pad_left" | "vec_pad_right" | "vec_replace_value" => {

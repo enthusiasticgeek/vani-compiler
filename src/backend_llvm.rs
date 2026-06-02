@@ -5679,6 +5679,357 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closure #594: vec_windows(ref xs, k) -> Vec<Vec<i64>>.
+            // n-k+1 overlapping length-k windows. Empty if n<k or k<=0.
+            if name == "vec_windows" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let k = emit_expr(&args[1], ctx, out);
+                let head = ctx.fresh_label("vwin_head_");
+                let body_lbl = ctx.fresh_label("vwin_body_");
+                let copy_head = ctx.fresh_label("vwin_copy_head_");
+                let copy_body = ctx.fresh_label("vwin_copy_body_");
+                let copy_fin = ctx.fresh_label("vwin_copy_fin_");
+                let next_window = ctx.fresh_label("vwin_next_");
+                let empty_block = ctx.fresh_label("vwin_empty_");
+                let fin = ctx.fresh_label("vwin_fin_");
+                let xlp = ctx.fresh_tmp();
+                let xn = ctx.fresh_tmp();
+                let k_bad = ctx.fresh_tmp();
+                let too_big = ctx.fresh_tmp();
+                let any_empty = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    xlp, xs
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", xn, xlp));
+                out.push_str(&format!("  {} = icmp sle i64 {}, 0\n", k_bad, k));
+                out.push_str(&format!("  {} = icmp sgt i64 {}, {}\n", too_big, k, xn));
+                out.push_str(&format!("  {} = or i1 {}, {}\n", any_empty, k_bad, too_big));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", any_empty, empty_block, head
+                ));
+                out.push_str(&format!("{}:\n", empty_block));
+                out.push_str(&format!("  br label %{}\n", fin));
+                out.push_str(&format!("{}:\n", head));
+                // num = xn - k + 1
+                let xn_m_k = ctx.fresh_tmp();
+                let num = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sub i64 {}, {}\n", xn_m_k, xn, k));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", num, xn_m_k));
+                let bytes = ctx.fresh_tmp();
+                let buf_i8 = ctx.fresh_tmp();
+                let outer_buf = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 24\n", bytes, num));
+                out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buf_i8, bytes));
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to %intent_vec_i64*\n", outer_buf, buf_i8
+                ));
+                let xdp = ctx.fresh_tmp();
+                let xsrc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    xdp, xs
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", xsrc, xdp));
+                let i_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i64\n", i_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", i_p));
+                out.push_str(&format!("  br label %{}\n", body_lbl));
+                out.push_str(&format!("{}:\n", body_lbl));
+                let i = ctx.fresh_tmp();
+                let i_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", i, i_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", i_done, i, num));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", i_done, fin, next_window
+                ));
+                out.push_str(&format!("{}:\n", next_window));
+                let inner_bytes = ctx.fresh_tmp();
+                let inner_buf_i8 = ctx.fresh_tmp();
+                let inner_buf = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", inner_bytes, k));
+                out.push_str(&format!(
+                    "  {} = call i8* @malloc(i64 {})\n", inner_buf_i8, inner_bytes
+                ));
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to i64*\n", inner_buf, inner_buf_i8
+                ));
+                let j_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i64\n", j_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", j_p));
+                out.push_str(&format!("  br label %{}\n", copy_head));
+                out.push_str(&format!("{}:\n", copy_head));
+                let j = ctx.fresh_tmp();
+                let j_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", j, j_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", j_done, j, k));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", j_done, copy_fin, copy_body
+                ));
+                out.push_str(&format!("{}:\n", copy_body));
+                let src_idx = ctx.fresh_tmp();
+                let src_slot = ctx.fresh_tmp();
+                let val = ctx.fresh_tmp();
+                let dst_slot = ctx.fresh_tmp();
+                let j_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, {}\n", src_idx, i, j));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", src_slot, xsrc, src_idx
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", val, src_slot));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", dst_slot, inner_buf, j
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", val, dst_slot));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", j_inc, j));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", j_inc, j_p));
+                out.push_str(&format!("  br label %{}\n", copy_head));
+                out.push_str(&format!("{}:\n", copy_fin));
+                let outer_slot = ctx.fresh_tmp();
+                let inner_dp = ctx.fresh_tmp();
+                let inner_lp = ctx.fresh_tmp();
+                let inner_cp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i64 {}\n",
+                    outer_slot, outer_buf, i
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    inner_dp, outer_slot
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    inner_lp, outer_slot
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 2\n",
+                    inner_cp, outer_slot
+                ));
+                out.push_str(&format!("  store i64* {}, i64** {}\n", inner_buf, inner_dp));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", k, inner_lp));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", k, inner_cp));
+                let i_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_inc, i));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", i_inc, i_p));
+                out.push_str(&format!("  br label %{}\n", body_lbl));
+                out.push_str(&format!("{}:\n", fin));
+                let r0 = ctx.fresh_tmp();
+                let r1 = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let buf_phi = ctx.fresh_tmp();
+                let nc_phi = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi %intent_vec_i64* [ null, %{} ], [ {}, %{} ]\n",
+                    buf_phi, empty_block, outer_buf, body_lbl
+                ));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ 0, %{} ], [ {}, %{} ]\n",
+                    nc_phi, empty_block, num, body_lbl
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 undef, %intent_vec_i64* {}, 0\n",
+                    r0, buf_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 {}, 1\n", r1, r0, nc_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 {}, 2\n", r2, r1, nc_phi
+                ));
+                return r2;
+            }
+            // Closure #595: vec_flatten — inline IR. Two-pass: sum lengths, then copy.
+            if name == "vec_flatten" {
+                let xss = emit_expr(&args[0], ctx, out);
+                let count_head = ctx.fresh_label("vfl_chead_");
+                let count_body = ctx.fresh_label("vfl_cbody_");
+                let alloc_blk = ctx.fresh_label("vfl_alloc_");
+                let empty_blk = ctx.fresh_label("vfl_empty_");
+                let outer_head = ctx.fresh_label("vfl_ohead_");
+                let outer_body = ctx.fresh_label("vfl_obody_");
+                let inner_head = ctx.fresh_label("vfl_ihead_");
+                let inner_body = ctx.fresh_label("vfl_ibody_");
+                let inner_fin = ctx.fresh_label("vfl_ifin_");
+                let fin = ctx.fresh_label("vfl_fin_");
+                let lp = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let n_zero = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_vec_i64, %intent_vec_vec_i64* {}, i32 0, i32 1\n",
+                    lp, xss
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", n, lp));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", n_zero, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", n_zero, empty_blk, count_head
+                ));
+                out.push_str(&format!("{}:\n", empty_blk));
+                out.push_str(&format!("  br label %{}\n", fin));
+                // First pass: sum inner lengths.
+                let dp = ctx.fresh_tmp();
+                let osrc = ctx.fresh_tmp();
+                out.push_str(&format!("{}:\n", count_head));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_vec_i64, %intent_vec_vec_i64* {}, i32 0, i32 0\n",
+                    dp, xss
+                ));
+                out.push_str(&format!(
+                    "  {} = load %intent_vec_i64*, %intent_vec_i64** {}\n", osrc, dp
+                ));
+                let ci_p = ctx.fresh_tmp();
+                let total_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i64\n", ci_p));
+                out.push_str(&format!("  {} = alloca i64\n", total_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", ci_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", total_p));
+                out.push_str(&format!("  br label %{}\n", count_body));
+                out.push_str(&format!("{}:\n", count_body));
+                let ci = ctx.fresh_tmp();
+                let ci_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", ci, ci_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", ci_done, ci, n));
+                let count_step = ctx.fresh_label("vfl_cstep_");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", ci_done, alloc_blk, count_step
+                ));
+                out.push_str(&format!("{}:\n", count_step));
+                let inner_struct_p = ctx.fresh_tmp();
+                let inner_lp = ctx.fresh_tmp();
+                let inner_len = ctx.fresh_tmp();
+                let total_old = ctx.fresh_tmp();
+                let total_new = ctx.fresh_tmp();
+                let ci_inc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i64 {}\n",
+                    inner_struct_p, osrc, ci
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    inner_lp, inner_struct_p
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", inner_len, inner_lp));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", total_old, total_p));
+                out.push_str(&format!("  {} = add i64 {}, {}\n", total_new, total_old, inner_len));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", total_new, total_p));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", ci_inc, ci));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", ci_inc, ci_p));
+                out.push_str(&format!("  br label %{}\n", count_body));
+                // Allocate
+                out.push_str(&format!("{}:\n", alloc_blk));
+                let total = ctx.fresh_tmp();
+                let total_is_zero = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", total, total_p));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", total_is_zero, total));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    total_is_zero, empty_blk, outer_head
+                ));
+                let bytes = ctx.fresh_tmp();
+                let buf_i8 = ctx.fresh_tmp();
+                let buf = ctx.fresh_tmp();
+                let oi_p = ctx.fresh_tmp();
+                let k_p = ctx.fresh_tmp();
+                out.push_str(&format!("{}:\n", outer_head));
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", bytes, total));
+                out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buf_i8, bytes));
+                out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, buf_i8));
+                out.push_str(&format!("  {} = alloca i64\n", oi_p));
+                out.push_str(&format!("  {} = alloca i64\n", k_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", oi_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", k_p));
+                out.push_str(&format!("  br label %{}\n", outer_body));
+                out.push_str(&format!("{}:\n", outer_body));
+                let oi = ctx.fresh_tmp();
+                let oi_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", oi, oi_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", oi_done, oi, n));
+                let outer_step = ctx.fresh_label("vfl_ostep_");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", oi_done, fin, outer_step
+                ));
+                out.push_str(&format!("{}:\n", outer_step));
+                let inner_sp2 = ctx.fresh_tmp();
+                let inner_dp2 = ctx.fresh_tmp();
+                let inner_data = ctx.fresh_tmp();
+                let inner_lp2 = ctx.fresh_tmp();
+                let inner_len2 = ctx.fresh_tmp();
+                let j_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i64 {}\n",
+                    inner_sp2, osrc, oi
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    inner_dp2, inner_sp2
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", inner_data, inner_dp2));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    inner_lp2, inner_sp2
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", inner_len2, inner_lp2));
+                out.push_str(&format!("  {} = alloca i64\n", j_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", j_p));
+                out.push_str(&format!("  br label %{}\n", inner_head));
+                out.push_str(&format!("{}:\n", inner_head));
+                let j = ctx.fresh_tmp();
+                let j_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", j, j_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", j_done, j, inner_len2));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", j_done, inner_fin, inner_body
+                ));
+                out.push_str(&format!("{}:\n", inner_body));
+                let src_slot = ctx.fresh_tmp();
+                let val = ctx.fresh_tmp();
+                let k_val = ctx.fresh_tmp();
+                let dst_slot = ctx.fresh_tmp();
+                let k_inc = ctx.fresh_tmp();
+                let j_inc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", src_slot, inner_data, j
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", val, src_slot));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", k_val, k_p));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", dst_slot, buf, k_val
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", val, dst_slot));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", k_inc, k_val));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", k_inc, k_p));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", j_inc, j));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", j_inc, j_p));
+                out.push_str(&format!("  br label %{}\n", inner_head));
+                out.push_str(&format!("{}:\n", inner_fin));
+                let oi_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", oi_inc, oi));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", oi_inc, oi_p));
+                out.push_str(&format!("  br label %{}\n", outer_body));
+                out.push_str(&format!("{}:\n", fin));
+                let r0 = ctx.fresh_tmp();
+                let r1 = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let buf_phi = ctx.fresh_tmp();
+                let len_phi = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi i64* [ null, %{} ], [ {}, %{} ]\n",
+                    buf_phi, empty_blk, buf, outer_body
+                ));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ 0, %{} ], [ {}, %{} ]\n",
+                    len_phi, empty_blk, total, outer_body
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 undef, i64* {}, 0\n", r0, buf_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 1\n", r1, r0, len_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 2\n", r2, r1, len_phi
+                ));
+                return r2;
+            }
             // Closure #593: vec_chunks(ref xs, k) -> Vec<Vec<i64>>.
             // Inline expansion to avoid a separate helper definition that
             // would need its own gating on %intent_vec_vec_i64 emission.

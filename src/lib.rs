@@ -16022,6 +16022,23 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_windows_flatten_typecheck_and_compile() {
+        // Closures #594/#595: vec_windows / vec_flatten.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let wins: Vec<Vec<i64>> = vec_windows(ref xs, 3);
+              let n: i64 = len(wins) as i64;
+              let chunks: Vec<Vec<i64>> = vec_chunks(ref xs, 2);
+              let flat: Vec<i64> = vec_flatten(ref chunks);
+              return n + (len(flat) as i64);
+            }
+        "#;
+        compile_to_c(source).expect("vec_windows / vec_flatten must type-check");
+        compile_to_llvm(source).expect("vec_windows / vec_flatten must compile to LLVM");
+    }
+
+    #[test]
     fn vec_chunks_typecheck_and_compile() {
         // Closure #593: vec_chunks(xs, k) -> Vec<Vec<i64>> (Tier W).
         let source = r#"
