@@ -16,12 +16,17 @@ Implications for collaboration on vāṇī:
   (`no_std` mode, allocator dependence, stack budget, MMIO,
   interrupt safety, ISR calling conventions) rather than only the
   hosted-target view.
-- The user wants `unsafe { ... }` permitted **on embedded build
-  triples only**, gated to embedded by the parser. Hosted builds
-  reject the keyword at parse time. Inside `unsafe`, affine /
-  Drop / move tracking still runs — only pointer-safety and
-  type-punning invariants are suspended. See
-  [[vani-embedded-position]].
+- The user wants `unsafe(reason = "...") { ... }` permitted
+  **on embedded build triples only**, gated to embedded by the
+  parser. Hosted builds reject the keyword at parse time. The
+  `reason = "..."` clause is mandatory at parse time (locked
+  2026-06-02); the reason string is emitted as IR/DWARF metadata
+  so certification tooling (ASIL-D / DO-178C / IEC 62304) can
+  extract deviation records from the compiled artifact. Inside
+  `unsafe`, affine / Drop / move tracking still runs — only
+  pointer-safety and type-punning invariants are suspended. See
+  [[vani-embedded-position]] and `~/vani/unsafe.md` (4-layer v1
+  generational-handles plan + v2 region-typing plan).
 - Hardware-driver intuition (vendor SDKs, MMIO, ISRs, DMA
   buffers, linker sections, peripheral typestate, register-block
   layouts) is part of the user's mental model — references to
@@ -30,5 +35,8 @@ Implications for collaboration on vāṇī:
   ever" policy loses to FFI-into-C in practice (vendor SDKs,
   custom DMA controllers, peripherals the language doesn't model
   all need *some* raw load/store path). FFI escapes affine
-  tracking entirely, so a scoped `unsafe { ... }` is the *more*
-  auditable choice for irreducibly platform-specific operations.
+  tracking entirely, so a scoped
+  `unsafe(reason = "...") { ... }` is the *more* auditable choice
+  for irreducibly platform-specific operations — and the
+  parser-enforced reason clause makes every escape grep-able and
+  machine-extractable for certification review.
