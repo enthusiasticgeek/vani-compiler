@@ -30135,6 +30135,59 @@ fn main() -> i64 {
     // Pool / Handle compile to valid C / LLVM.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 2.2 — `Handle<T>` is the blessed escape from `unsafe`.
+    //
+    // Falls out of Layers 1.1 + 1.2 + 2: raw pointer types are
+    // gated to the embedded target, raw pointers derived from
+    // stack locals can't escape via return / heap store
+    // (Layer 1.2), and `Handle<T>` is the Copy, generationally-
+    // checked alternative for crossing function boundaries.
+    //
+    // No new code — these tests pin the standing position so
+    // future refactors can't accidentally erode it.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn handle_freely_escapes_function_boundary() {
+        // The supported pattern: a function that wraps an
+        // unsafe operation but returns the long-lived
+        // reference as a Handle<i64>, not a raw pointer.
+        let source = r#"
+            fn make_managed_value(p: mut ref Pool<i64>, v: i64) -> Handle<i64> {
+              return pool_alloc(p, v);
+            }
+            fn main() -> i64 {
+              let pool: Pool<i64> = pool_new();
+              let h = make_managed_value(mut ref pool, 42);
+              return option_unwrap_or(pool_get(ref pool, h), -1);
+            }
+        "#;
+        let _ = compile(source).expect("Handle escape via function return compiles");
+    }
+
+    #[test]
+    fn raw_ptr_to_local_still_rejected_when_handle_is_available() {
+        // Counterpart to the test above: even though Handle<i64>
+        // is the supported path, the no-escape check on raw
+        // pointers stays in force. Users can't bypass
+        // Handle<T> by returning a raw pointer to a local.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dangler() -> *const i64 {
+              let x: i64 = 42;
+              return (ref x) as *const i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("raw ptr to local must stay rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot be returned")),
+            "expected no-escape rejection, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn pool_program_emits_c_bundle() {
         let source = r#"
