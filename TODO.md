@@ -9,12 +9,18 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   wider HashMap K/V). Each sub-step has time budget + acceptance
   test. Suggested order: Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest.
 - [unsafe.md](unsafe.md) — 5-layer plan for `unsafe { ... }` safety
-  in the embedded path. v1 ships generational handles; v2 queues
-  region typing for safety-critical certification. Independent of
-  ARCS.md; can interleave.
+  in the embedded path. **✅ COMPLETE 2026-06-02.** Layers 1.1, 1.2,
+  1.3, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5 (foundation + lifetime-tagged
+  ArenaRef + region block syntax) all on `main`. 18 commits this
+  turn. 1622 lib + 54 parity green.
+- **Safety-standard alignment** (see *Safety-standard alignment* section
+  below) — `#[no_heap]` / `#[no_float]` / `#[asil_d]` / etc. attribute
+  family + `intentc deviations` extractor. **Scheduled before ARCs**
+  per user request 2026-06-02. Tier 1 + Tier 2 + Tier 3 listed below.
 - Through closure #604, the bounded one-shot primitive surface is
   exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
-  future work flows through one of the two plan docs above.
+  future work flows through one of the three plan docs/sections
+  above.
 
 ## Design rationale (frequently re-asked questions)
 
@@ -243,6 +249,231 @@ recorded for completeness.
   check on `ref T` arguments after they cross); a scoped
   `unsafe` block keeps the rest of the language's invariants
   intact and is the more auditable choice.
+
+## Safety-standard alignment (2026-06-02, scheduled before ARCs)
+
+User-asked scope: *"any other items from MISRA C / AUTOSAR /
+other standards we could include for maximum embedded safety."*
+unsafe.md's surface puts vāṇी in striking distance of MISRA C
+2012, ISO 26262 ASIL-D, DO-178C Level A, and IEC 62304 Class C
+certification feasibility. The remaining gap is largely (a) an
+extraction tool for the deviation metadata already in the IR
+and (b) a tag family that lets users opt fns into the standard's
+constraint sets.
+
+**Design**: two-tier attribute system.
+
+1. **Feature primitives** — orthogonal, composable:
+   - `#[no_heap]` — no allocator calls anywhere in the fn's
+     transitive call graph (Vec / OwnedStr / HashMap / HashSet /
+     BTreeSet / BTreeMap / BinaryHeap / Pool / Region / Deque /
+     Bst / Graph / Trie / SkipList / UnionFind / BloomFilter /
+     Channel / `unsafe_alloc`).
+   - `#[no_float]` — no f32 / f64 ops.
+   - `#[no_recursion]` — strict (vs the existing
+     `recursion_bound = N` for bounded variants).
+   - `#[no_unsafe]` — no `unsafe(reason = "…")` blocks in this
+     fn or its transitive callees.
+   - `#[bounded_stack(bytes = N)]` — declared stack budget; the
+     stack-depth checker proves it.
+   - `#[wcet(cycles = N)]` — declared worst-case execution time;
+     checker proves it.
+   - `#[interrupt]` — ISR calling convention (banned ops:
+     heap alloc, mutex_lock, recursive call into non-interrupt
+     fn, parallel-for, task spawn).
+   - `#[deterministic_timing]` — no data-dependent branches that
+     affect timing on the marked fn's hot path.
+   - `pure fn` (existing) — no side effects.
+
+2. **Standard-level composites** — hardcoded in the compiler:
+
+   | Composite | Expands to |
+   |---|---|
+   | `#[misra_c_2012]` | `no_heap, no_recursion, no_goto_implicit, no_setjmp` |
+   | `#[asil_d]` (ISO 26262) | `no_heap, no_recursion, bounded_stack, wcet, no_unsafe` |
+   | `#[do178c_level_a]` (avionics) | `no_heap, no_recursion, bounded_stack, wcet, deterministic_timing` |
+   | `#[iec_62304_class_c]` (medical) | `no_heap, no_unsafe, bounded_stack` |
+   | `#[autosar_cpp14]` | not applicable (C++-specific) |
+
+**Composition semantics**: **union — most restrictive wins.**
+`#[asil_d, no_float]` = composite's primitives ∪ `{no_float}`.
+Standard composites set a baseline; primitives tighten further.
+Two composites stack the same way: `#[asil_d, do178c_level_a]`
+yields the union.
+
+**Composite source**: hardcoded in the compiler for v1.
+Manifest override (vani.toml `[compliance]` section) is a
+future enhancement; not v1 scope.
+
+### Tier 1 — high cert value, ~10h total. **Implement first.**
+
+**1.1 `intentc deviations` extractor** (~2h)
+
+Walks the IR/DWARF metadata emitted by Layer 1.1's
+`unsafe(reason = "…")` blocks (already on `main` since commit
+`067da49`). Emits three artifact formats in parallel:
+- **CSV**: `file,line,prefix,reason,target_standard` —
+  spreadsheet-friendly review.
+- **JSON**: structured records — CI / audit pipeline
+  integration.
+- **Human-readable**: one deviation per line, `file:line
+  [prefix] reason (in <fn>, standard=<tag>)` — console.
+
+Each record includes the surrounding fn's standard tag (if any)
+in the `target_standard` column. `<fn>` reviewer can audit
+each block against the appropriate standard.
+
+CLI: `intentc deviations <path> [--format=csv|json|text]
+[--out=path]`. Default format text, default out is stdout.
+
+**1.2 `#[no_heap]` function attribute** (~3-4h)
+
+Compiler rejects any code path (transitive via call graph) that
+allocates. Banned calls: every heap-backed builtin listed in
+the primitives section above. `unsafe(reason = "…")` blocks
+inside don't escape the rule (`unsafe_alloc` is heap, period).
+
+Default behavior: opt-in via annotation. Global mode via
+`INTENT_NO_HEAP=1` env var (matches the existing
+`INTENT_TARGET_EMBEDDED` / `INTENT_TARGET_MTE` pattern) — when
+set, every fn behaves as if it had `#[no_heap]`. Useful for
+full safety-critical builds where the entire binary should be
+heap-free.
+
+Diagnostic on violation: "function 'X' is marked #[no_heap] but
+its body calls 'vec()' at <span>, which allocates. Refactor to
+use a `Region` arena (Layer 5 of unsafe.md) or pre-allocate at
+program start."
+
+**1.3 Stack-depth bound checker** (~5-7h)
+
+Per-function frame size estimate (sum of local sizes + spill).
+Walks the call graph; reports max stack depth per entry-point.
+Catches unbounded recursion + excessive stack use. ASIL-D
+mandatory. Already partially on TODO; promote to scheduled.
+
+CLI: `intentc stack-depth <path> [--entry=main] [--max=N]`.
+With `--max`, fails the build if any entry-point exceeds N
+bytes.
+
+Pairs with `#[bounded_stack(bytes = N)]` from Tier 3 — when
+both are present, the compiler ensures the declared budget is
+adequate.
+
+### Tier 2 — meaningful properties, ~25h total. **After Tier 1.**
+
+**2.1 `Mmio<T, ADDR>` typed primitive** (~6-8h)
+
+Already on unsafe.md TODO. Memory-mapped register at a fixed
+addr. Eliminates raw-ptr need for the most common MMIO use
+cases. Volatile-correct by construction (compiler emits
+`volatile` reads/writes; LLVM `volatile` flag set on the
+load/store IR).
+
+V1: T = i32 (32-bit register, the most common MMIO width).
+
+API:
+- `mmio_read<ADDR>() -> u32` — typed-address const expression
+- `mmio_write<ADDR>(value: u32) -> i64`
+
+**2.2 `#[interrupt]` calling convention** (~4-6h)
+
+Already on unsafe.md TODO. Marks an ISR. Banned inside the
+body: heap alloc, mutex_lock, recursive call into non-interrupt
+fn, parallel-for, task spawn.
+
+The composite tag set effectively becomes `#[no_heap, no_lock,
+no_recursion, no_spawn]` plus an ABI marker that emits the
+correct prologue/epilogue (preserve all caller-saved regs;
+on ARM: `__attribute__((interrupt))`; on x86: TBD).
+
+**2.3 `#[no_float]` attribute** (~1-2h)
+
+Function-level ban on f32 / f64 ops. Composable with
+`#[asil_d]`. Some cert levels disallow float in critical paths.
+
+**2.4 Cyclomatic complexity warning** (~2-3h)
+
+Per-function McCabe complexity. Warn (not error) if > N
+(configurable via env var `INTENT_MAX_COMPLEXITY`, default 15).
+MISRA 18.x adjacent.
+
+**2.5 `#[no_recursion]` strict variant** (~1-2h)
+
+Strict no-self-call variant of `recursion_bound = 0`.
+Composable with composites.
+
+**2.6 Pointer-arithmetic ban diagnostic** (~1h)
+
+Already enforced by absence of `+`/`-` operators on raw ptrs.
+Add explicit diagnostic ("raw pointer arithmetic is banned —
+MISRA C 2012 Rule 18.4. Use indices into a Vec or
+`BoundedPtr<T>` instead.") for clarity. MISRA 18.4.
+
+### Tier 3 — substantial arcs, deferred until 1+2 done.
+
+**3.1 `#[wcet(cycles = N)]` annotation + check** (multi-week)
+
+Static analysis bounds worst-case time. DO-178C Level A.
+Loops must have bounded iteration; recursion must be bounded.
+The bound is per-architecture (cycles are arch-specific); the
+checker uses a simple model (one cycle per instr; loop bound
+× body cycles).
+
+**3.2 `#[bounded_stack(bytes = N)]` declared budget** (~1-2 days)
+
+Combines with 1.3 stack checker. Explicit budget per
+entry-point. Compiler fails the build if measured stack depth
+exceeds the declared bytes.
+
+**3.3 Call-graph acyclicity proof** (~1-2 days)
+
+Fixpoint pass proves no cycles in the call graph (modulo
+explicit bounded recursion). For WCET. The existing
+`recursion_bound` machinery already catches direct recursion;
+the new pass catches mutual recursion.
+
+**3.4 `#[deterministic_timing]`** (~3-5 days)
+
+Reject data-dependent branches on the hot path of marked fns.
+DO-178C Level A timing-determinism rule. Detect: `if (data) {
+… } else { … }` where both branches have different cycle
+counts, on a fn marked with this attribute.
+
+**3.5 `pure fn` → MISRA 13.1/13.2 compliance proof** (~1 day)
+
+Tighten the existing purity check to formal MISRA "no
+side-effect-order dependence" rule. Today's purity check
+forbids visible side effects; the MISRA rule additionally
+requires no dependency between sub-expression evaluation
+orders.
+
+### Suggested execution order
+
+1. **Tier 1**: 1.1 deviations extractor → 1.2 `#[no_heap]` → 1.3
+   stack-depth. ~10h. Unblocks "MISRA C 2012 alignment" claim.
+2. **Tier 2**: 2.1 Mmio → 2.2 `#[interrupt]` → 2.3-2.6 small
+   primitives. ~25h. Unblocks "ASIL-D / DO-178C / IEC 62304
+   feasibility" claim.
+3. **Tier 3**: One arc at a time. Each is multi-day.
+4. **ARCs.md** (HashMap monomorph / Trie sparse / closures /
+   wider K-V): can interleave with Tier 2 / 3.
+
+### Standard tagging in the deviations report
+
+Each row of `intentc deviations` output includes:
+- `file` — source file
+- `line` — line number
+- `prefix` — reason prefix (MMIO / FFI / DMA / transmute /
+  vendor-SDK / other; from Layer 1.1's reason-string
+  convention)
+- `reason` — full reason text
+- `target_standard` — the enclosing fn's composite tag if any
+  (`misra_c_2012` / `asil_d` / `do178c_level_a` /
+  `iec_62304_class_c` / `none`)
+
+This lets a safety reviewer filter by standard target: "show
+me every ASIL-D deviation" → one query, structured output.
 
 ## Data structures + algorithms roadmap (2026-05-27)
 
