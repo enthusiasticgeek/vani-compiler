@@ -6098,6 +6098,223 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return r2;
             }
+            // Closure #603: vec_running_mean — cumulative sum / (i+1) per index.
+            if name == "vec_running_mean" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let head = ctx.fresh_label("vrm_head_");
+                let body_lbl = ctx.fresh_label("vrm_body_");
+                let empty_blk = ctx.fresh_label("vrm_empty_");
+                let alloc_blk = ctx.fresh_label("vrm_alloc_");
+                let fin = ctx.fresh_label("vrm_fin_");
+                let lp = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let n_zero = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    lp, xs
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", n, lp));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", n_zero, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", n_zero, empty_blk, alloc_blk
+                ));
+                out.push_str(&format!("{}:\n  br label %{}\n", empty_blk, fin));
+                out.push_str(&format!("{}:\n", alloc_blk));
+                let bytes = ctx.fresh_tmp();
+                let buf_i8 = ctx.fresh_tmp();
+                let buf = ctx.fresh_tmp();
+                let dp = ctx.fresh_tmp();
+                let src = ctx.fresh_tmp();
+                let acc_p = ctx.fresh_tmp();
+                let i_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", bytes, n));
+                out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buf_i8, bytes));
+                out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, buf_i8));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    dp, xs
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", src, dp));
+                out.push_str(&format!("  {} = alloca i64\n", acc_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", acc_p));
+                out.push_str(&format!("  {} = alloca i64\n", i_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", head));
+                let i = ctx.fresh_tmp();
+                let done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", i, i_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", done, i, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", done, fin, body_lbl
+                ));
+                out.push_str(&format!("{}:\n", body_lbl));
+                let s = ctx.fresh_tmp();
+                let v = ctx.fresh_tmp();
+                let acc_old = ctx.fresh_tmp();
+                let acc_new = ctx.fresh_tmp();
+                let i_plus_1 = ctx.fresh_tmp();
+                let mean = ctx.fresh_tmp();
+                let d = ctx.fresh_tmp();
+                let i_inc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", s, src, i
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", v, s));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", acc_old, acc_p));
+                out.push_str(&format!("  {} = add i64 {}, {}\n", acc_new, acc_old, v));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", acc_new, acc_p));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_plus_1, i));
+                out.push_str(&format!("  {} = sdiv i64 {}, {}\n", mean, acc_new, i_plus_1));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", d, buf, i
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", mean, d));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_inc, i));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", i_inc, i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", fin));
+                let r0 = ctx.fresh_tmp();
+                let r1 = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let buf_phi = ctx.fresh_tmp();
+                let len_phi = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi i64* [ null, %{} ], [ {}, %{} ]\n",
+                    buf_phi, empty_blk, buf, head
+                ));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ 0, %{} ], [ {}, %{} ]\n",
+                    len_phi, empty_blk, n, head
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 undef, i64* {}, 0\n", r0, buf_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 1\n", r1, r0, len_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 2\n", r2, r1, len_phi
+                ));
+                return r2;
+            }
+            // Closure #604: vec_intersperse — insert sep between elements.
+            if name == "vec_intersperse" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let sep = emit_expr(&args[1], ctx, out);
+                let head = ctx.fresh_label("vis2_head_");
+                let body_lbl = ctx.fresh_label("vis2_body_");
+                let empty_blk = ctx.fresh_label("vis2_empty_");
+                let alloc_blk = ctx.fresh_label("vis2_alloc_");
+                let write_sep_blk = ctx.fresh_label("vis2_sep_");
+                let skip_sep_blk = ctx.fresh_label("vis2_no_sep_");
+                let advance_blk = ctx.fresh_label("vis2_adv_");
+                let fin = ctx.fresh_label("vis2_fin_");
+                let lp = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let n_zero = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    lp, xs
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", n, lp));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", n_zero, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", n_zero, empty_blk, alloc_blk
+                ));
+                out.push_str(&format!("{}:\n  br label %{}\n", empty_blk, fin));
+                out.push_str(&format!("{}:\n", alloc_blk));
+                // out_len = 2*n - 1
+                let two_n = ctx.fresh_tmp();
+                let out_len = ctx.fresh_tmp();
+                let bytes = ctx.fresh_tmp();
+                let buf_i8 = ctx.fresh_tmp();
+                let buf = ctx.fresh_tmp();
+                let dp = ctx.fresh_tmp();
+                let src = ctx.fresh_tmp();
+                let i_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 2\n", two_n, n));
+                out.push_str(&format!("  {} = sub i64 {}, 1\n", out_len, two_n));
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", bytes, out_len));
+                out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buf_i8, bytes));
+                out.push_str(&format!("  {} = bitcast i8* {} to i64*\n", buf, buf_i8));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    dp, xs
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", src, dp));
+                out.push_str(&format!("  {} = alloca i64\n", i_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", head));
+                let i = ctx.fresh_tmp();
+                let done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", i, i_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", done, i, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", done, fin, body_lbl
+                ));
+                out.push_str(&format!("{}:\n", body_lbl));
+                let s = ctx.fresh_tmp();
+                let v = ctx.fresh_tmp();
+                let two_i = ctx.fresh_tmp();
+                let d = ctx.fresh_tmp();
+                let i_plus_1 = ctx.fresh_tmp();
+                let need_sep = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", s, src, i
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", v, s));
+                out.push_str(&format!("  {} = mul i64 {}, 2\n", two_i, i));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", d, buf, two_i
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", v, d));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_plus_1, i));
+                out.push_str(&format!("  {} = icmp ult i64 {}, {}\n", need_sep, i_plus_1, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", need_sep, write_sep_blk, skip_sep_blk
+                ));
+                out.push_str(&format!("{}:\n", write_sep_blk));
+                let two_i_p1 = ctx.fresh_tmp();
+                let sep_dst = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", two_i_p1, two_i));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", sep_dst, buf, two_i_p1
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", sep, sep_dst));
+                out.push_str(&format!("  br label %{}\n", advance_blk));
+                out.push_str(&format!("{}:\n  br label %{}\n", skip_sep_blk, advance_blk));
+                out.push_str(&format!("{}:\n", advance_blk));
+                let i_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_inc, i));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", i_inc, i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", fin));
+                let r0 = ctx.fresh_tmp();
+                let r1 = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let buf_phi = ctx.fresh_tmp();
+                let len_phi = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi i64* [ null, %{} ], [ {}, %{} ]\n",
+                    buf_phi, empty_blk, buf, head
+                ));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ 0, %{} ], [ {}, %{} ]\n",
+                    len_phi, empty_blk, out_len, head
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 undef, i64* {}, 0\n", r0, buf_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 1\n", r1, r0, len_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_i64 {}, i64 {}, 2\n", r2, r1, len_phi
+                ));
+                return r2;
+            }
             // Closure #595: vec_flatten — inline IR. Two-pass: sum lengths, then copy.
             if name == "vec_flatten" {
                 let xss = emit_expr(&args[0], ctx, out);
@@ -9595,6 +9812,234 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!("  {} = shl i64 {}, {}\n", b_shifted, b_masked, shift_amt));
                 out.push_str(&format!("  {} = or i64 {}, {}\n", set_val, cleared, b_shifted));
                 out.push_str(&format!("  {} = select i1 {}, i64 {}, i64 {}\n", dest, bad, x, set_val));
+                return dest;
+            }
+            // Closure #597: i64_parity — popcount(x) & 1.
+            if name == "i64_parity" {
+                let x = emit_expr(&args[0], ctx, out);
+                let pc = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = call i64 @llvm.ctpop.i64(i64 {})\n", pc, x));
+                out.push_str(&format!("  {} = and i64 {}, 1\n", dest, pc));
+                return dest;
+            }
+            // Closure #598: i64_mod_pos(x, m) — abs(m), then ((x mod m) + m) mod m.
+            // Branchless: use a safe divisor (max(m_abs, 1)) for the srem and
+            // select on the final result when m_abs is 0.
+            if name == "i64_mod_pos" {
+                let x = emit_expr(&args[0], ctx, out);
+                let m_in = emit_expr(&args[1], ctx, out);
+                let m_neg = ctx.fresh_tmp();
+                let m_is_neg = ctx.fresh_tmp();
+                let m_abs = ctx.fresh_tmp();
+                let m_zero = ctx.fresh_tmp();
+                let m_safe = ctx.fresh_tmp();
+                let r = ctx.fresh_tmp();
+                let r_plus = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sub i64 0, {}\n", m_neg, m_in));
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", m_is_neg, m_in));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n", m_abs, m_is_neg, m_neg, m_in
+                ));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", m_zero, m_abs));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 1, i64 {}\n", m_safe, m_zero, m_abs
+                ));
+                out.push_str(&format!("  {} = srem i64 {}, {}\n", r, x, m_safe));
+                out.push_str(&format!("  {} = add i64 {}, {}\n", r_plus, r, m_safe));
+                out.push_str(&format!("  {} = srem i64 {}, {}\n", r2, r_plus, m_safe));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 0, i64 {}\n", dest, m_zero, r2
+                ));
+                return dest;
+            }
+            // Closure #599: i64_cube_root — cbrt seed + fix-up loops.
+            if name == "i64_cube_root" {
+                let x = emit_expr(&args[0], ctx, out);
+                let x_neg = ctx.fresh_tmp();
+                let is_neg = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let nf = ctx.fresh_tmp();
+                let cf = ctx.fresh_tmp();
+                let r0 = ctx.fresh_tmp();
+                let r_neg = ctx.fresh_tmp();
+                let r_clamped = ctx.fresh_tmp();
+                let r_p = ctx.fresh_tmp();
+                let up_head = ctx.fresh_label("cbr_uh_");
+                let up_body = ctx.fresh_label("cbr_ub_");
+                let dn_head = ctx.fresh_label("cbr_dh_");
+                let dn_body = ctx.fresh_label("cbr_db_");
+                let post = ctx.fresh_label("cbr_post_");
+                out.push_str(&format!("  {} = sub i64 0, {}\n", x_neg, x));
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", is_neg, x));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n", n, is_neg, x_neg, x
+                ));
+                out.push_str(&format!("  {} = sitofp i64 {} to double\n", nf, n));
+                out.push_str(&format!("  {} = call double @cbrt(double {})\n", cf, nf));
+                out.push_str(&format!("  {} = fptosi double {} to i64\n", r0, cf));
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", r_neg, r0));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 0, i64 {}\n", r_clamped, r_neg, r0
+                ));
+                out.push_str(&format!("  {} = alloca i64\n", r_p));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", r_clamped, r_p));
+                out.push_str(&format!("  br label %{}\n", up_head));
+                out.push_str(&format!("{}:\n", up_head));
+                let r_u = ctx.fresh_tmp();
+                let r_u_p1 = ctx.fresh_tmp();
+                let rp1_sq = ctx.fresh_tmp();
+                let rp1_cube = ctx.fresh_tmp();
+                let up_cont = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", r_u, r_p));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", r_u_p1, r_u));
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", rp1_sq, r_u_p1, r_u_p1));
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", rp1_cube, rp1_sq, r_u_p1));
+                out.push_str(&format!("  {} = icmp sle i64 {}, {}\n", up_cont, rp1_cube, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", up_cont, up_body, dn_head
+                ));
+                out.push_str(&format!("{}:\n", up_body));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", r_u_p1, r_p));
+                out.push_str(&format!("  br label %{}\n", up_head));
+                out.push_str(&format!("{}:\n", dn_head));
+                let r_d = ctx.fresh_tmp();
+                let r_d_gt0 = ctx.fresh_tmp();
+                let r_d_sq = ctx.fresh_tmp();
+                let r_d_cube = ctx.fresh_tmp();
+                let r_d_too_big = ctx.fresh_tmp();
+                let dn_cont = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", r_d, r_p));
+                out.push_str(&format!("  {} = icmp sgt i64 {}, 0\n", r_d_gt0, r_d));
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", r_d_sq, r_d, r_d));
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", r_d_cube, r_d_sq, r_d));
+                out.push_str(&format!("  {} = icmp sgt i64 {}, {}\n", r_d_too_big, r_d_cube, n));
+                out.push_str(&format!("  {} = and i1 {}, {}\n", dn_cont, r_d_gt0, r_d_too_big));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", dn_cont, dn_body, post
+                ));
+                out.push_str(&format!("{}:\n", dn_body));
+                let r_d_m1 = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sub i64 {}, 1\n", r_d_m1, r_d));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", r_d_m1, r_p));
+                out.push_str(&format!("  br label %{}\n", dn_head));
+                out.push_str(&format!("{}:\n", post));
+                let r_final = ctx.fresh_tmp();
+                let r_final_neg = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", r_final, r_p));
+                out.push_str(&format!("  {} = sub i64 0, {}\n", r_final_neg, r_final));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n", dest, is_neg, r_final_neg, r_final
+                ));
+                return dest;
+            }
+            // Closure #600: f64_pow_int(base, k).
+            if name == "f64_pow_int" {
+                let base = emit_expr(&args[0], ctx, out);
+                let k = emit_expr(&args[1], ctx, out);
+                let k_neg = ctx.fresh_tmp();
+                let is_neg = ctx.fresh_tmp();
+                let n = ctx.fresh_tmp();
+                let acc_p = ctx.fresh_tmp();
+                let i_p = ctx.fresh_tmp();
+                let head = ctx.fresh_label("fpi_head_");
+                let body = ctx.fresh_label("fpi_body_");
+                let post = ctx.fresh_label("fpi_post_");
+                out.push_str(&format!("  {} = sub i64 0, {}\n", k_neg, k));
+                out.push_str(&format!("  {} = icmp slt i64 {}, 0\n", is_neg, k));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n", n, is_neg, k_neg, k
+                ));
+                out.push_str(&format!("  {} = alloca double\n", acc_p));
+                out.push_str(&format!("  store double 1.0, double* {}\n", acc_p));
+                out.push_str(&format!("  {} = alloca i64\n", i_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", head));
+                let i = ctx.fresh_tmp();
+                let done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", i, i_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", done, i, n));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", done, post, body
+                ));
+                out.push_str(&format!("{}:\n", body));
+                let acc_old = ctx.fresh_tmp();
+                let acc_new = ctx.fresh_tmp();
+                let i_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load double, double* {}\n", acc_old, acc_p));
+                out.push_str(&format!("  {} = fmul double {}, {}\n", acc_new, acc_old, base));
+                out.push_str(&format!("  store double {}, double* {}\n", acc_new, acc_p));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_inc, i));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", i_inc, i_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", post));
+                let r = ctx.fresh_tmp();
+                let r_inv = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load double, double* {}\n", r, acc_p));
+                out.push_str(&format!("  {} = fdiv double 1.0, {}\n", r_inv, r));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, double {}, double {}\n", dest, is_neg, r_inv, r
+                ));
+                return dest;
+            }
+            // Closure #601: f64_round_to_multiple.
+            if name == "f64_round_to_multiple" {
+                let x = emit_expr(&args[0], ctx, out);
+                let m = emit_expr(&args[1], ctx, out);
+                let m_bad = ctx.fresh_tmp();
+                let quot = ctx.fresh_tmp();
+                let rounded = ctx.fresh_tmp();
+                let scaled = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = fcmp ole double {}, 0.0\n", m_bad, m));
+                out.push_str(&format!("  {} = fdiv double {}, {}\n", quot, x, m));
+                out.push_str(&format!("  {} = call double @round(double {})\n", rounded, quot));
+                out.push_str(&format!("  {} = fmul double {}, {}\n", scaled, rounded, m));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, double {}, double {}\n", dest, m_bad, x, scaled
+                ));
+                return dest;
+            }
+            // Closure #602: f64_quadratic_root(a, b, c).
+            if name == "f64_quadratic_root" {
+                let a = emit_expr(&args[0], ctx, out);
+                let b = emit_expr(&args[1], ctx, out);
+                let c = emit_expr(&args[2], ctx, out);
+                let bb = ctx.fresh_tmp();
+                let ac4 = ctx.fresh_tmp();
+                let ac4f = ctx.fresh_tmp();
+                let disc = ctx.fresh_tmp();
+                let a_zero = ctx.fresh_tmp();
+                let disc_neg = ctx.fresh_tmp();
+                let bad = ctx.fresh_tmp();
+                let sq = ctx.fresh_tmp();
+                let nb = ctx.fresh_tmp();
+                let num = ctx.fresh_tmp();
+                let den = ctx.fresh_tmp();
+                let r = ctx.fresh_tmp();
+                let nan_val = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = fmul double {}, {}\n", bb, b, b));
+                out.push_str(&format!("  {} = fmul double {}, {}\n", ac4, a, c));
+                out.push_str(&format!("  {} = fmul double {}, 4.0\n", ac4f, ac4));
+                out.push_str(&format!("  {} = fsub double {}, {}\n", disc, bb, ac4f));
+                out.push_str(&format!("  {} = fcmp oeq double {}, 0.0\n", a_zero, a));
+                out.push_str(&format!("  {} = fcmp olt double {}, 0.0\n", disc_neg, disc));
+                out.push_str(&format!("  {} = or i1 {}, {}\n", bad, a_zero, disc_neg));
+                out.push_str(&format!("  {} = call double @sqrt(double {})\n", sq, disc));
+                out.push_str(&format!("  {} = fsub double 0.0, {}\n", nb, b));
+                out.push_str(&format!("  {} = fadd double {}, {}\n", num, nb, sq));
+                out.push_str(&format!("  {} = fmul double {}, 2.0\n", den, a));
+                out.push_str(&format!("  {} = fdiv double {}, {}\n", r, num, den));
+                out.push_str(&format!("  {} = fdiv double 0.0, 0.0\n", nan_val));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, double {}, double {}\n", dest, bad, nan_val, r
+                ));
                 return dest;
             }
             if name == "i64_count_leading_ones" || name == "i64_count_trailing_ones" {

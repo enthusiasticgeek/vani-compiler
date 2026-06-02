@@ -2550,6 +2550,8 @@ pub(crate) fn program_uses_graph_vec_builtin(program: &TypedProgram) -> bool {
                     || name == "vec_mode"
                     || name == "vec_kth_smallest"
                     || name == "vec_median"
+                    || name == "vec_running_mean"
+                    || name == "vec_intersperse"
                     || name == "vec_dot"
                     || name == "vec_intersect"
                     || name == "vec_difference"
@@ -5151,6 +5153,38 @@ pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
          \x20 if (!xs || xs->len == 0) return 0;\n\
          \x20 int64_t k = (int64_t)((xs->len - 1) / 2);\n\
          \x20 return intent_vec_int64_t_kth_smallest(xs, k);\n\
+         }\n\
+         /* Closure #603: vec_running_mean — running integer average per index. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_running_mean(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_running_mean(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 r.capacity = xs->len;\n\
+         \x20 r.data = (int64_t*)malloc(xs->len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 int64_t acc = 0;\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   acc += xs->data[i];\n\
+         \x20   r.data[i] = acc / (int64_t)(i + 1);\n\
+         \x20 }\n\
+         \x20 r.len = xs->len;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closure #604: vec_intersperse — insert sep between elements. */\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_intersperse(const intent_vec_int64_t* xs, int64_t sep) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_intersperse(const intent_vec_int64_t* xs, int64_t sep) {\n\
+         \x20 intent_vec_int64_t r; r.data = (int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 uint64_t out_len = xs->len * 2 - 1;\n\
+         \x20 r.capacity = out_len;\n\
+         \x20 r.data = (int64_t*)malloc(out_len * sizeof(int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < xs->len; i++) {\n\
+         \x20   r.data[i * 2] = xs->data[i];\n\
+         \x20   if (i + 1 < xs->len) r.data[i * 2 + 1] = sep;\n\
+         \x20 }\n\
+         \x20 r.len = out_len;\n\
+         \x20 return r;\n\
          }\n\
          /* Closures #566-#568: sort/merge helpers on Vec<i64>.\n\
           *   merge_sorted(xs, ys): O(n+m) two-pointer merge of two pre-sorted Vecs.\n\
@@ -10845,6 +10879,15 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_int64_t_median({})",
             emit_expr(&args[0])
         ),
+        "vec_running_mean" => format!(
+            "intent_vec_int64_t_running_mean({})",
+            emit_expr(&args[0])
+        ),
+        "vec_intersperse" => format!(
+            "intent_vec_int64_t_intersperse({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         "vec_kth_smallest" => format!(
             "intent_vec_int64_t_kth_smallest({}, ({}))",
             emit_expr(&args[0]),
@@ -12622,6 +12665,46 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "i64_count_trailing_ones" => format!(
             "({{ uint64_t __ct = ~((uint64_t)({})); (int64_t)(__ct == 0 ? 64 : __builtin_ctzll(__ct)); }})",
             emit_expr(&args[0])
+        ),
+        // Closure #597: i64_parity — odd popcount; xor of all bits.
+        "i64_parity" => format!(
+            "((int64_t)(__builtin_popcountll((uint64_t)({})) & 1))",
+            emit_expr(&args[0])
+        ),
+        // Closure #598: i64_mod_pos(x, m) — always-positive mod for m > 0.
+        // If m == 0 → returns 0 (defensive). If m < 0, undefined-but-defined: uses |m|.
+        "i64_mod_pos" => format!(
+            "({{ int64_t __mpx = ({}); int64_t __mpm = ({}); if (__mpm < 0) __mpm = -__mpm; (__mpm == 0) ? (int64_t)0 : (int64_t)(((__mpx % __mpm) + __mpm) % __mpm); }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #599: i64_cube_root — integer cube root.
+        // libm cbrt seeds, then fix-up loop nails the floor in case of f64 rounding.
+        "i64_cube_root" => format!(
+            "({{ int64_t __crx = ({}); int64_t __crn = __crx < 0 ? -__crx : __crx; int64_t __crr = (int64_t)cbrt((double)__crn); if (__crr < 0) __crr = 0; while ((__crr + 1) * (__crr + 1) * (__crr + 1) <= __crn) __crr++; while (__crr > 0 && __crr * __crr * __crr > __crn) __crr--; __crx < 0 ? -__crr : __crr; }})",
+            emit_expr(&args[0])
+        ),
+        // Closure #600: f64_pow_int(base, k) — integer-exponent power.
+        // k < 0 → 1 / pow(base, -k). k == 0 → 1.0.
+        "f64_pow_int" => format!(
+            "({{ double __fpb = ({}); int64_t __fpk = ({}); double __fpr = 1.0; int64_t __fpn = __fpk < 0 ? -__fpk : __fpk; for (int64_t __i = 0; __i < __fpn; __i++) __fpr *= __fpb; (__fpk < 0) ? (1.0 / __fpr) : __fpr; }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #601: f64_round_to_multiple(x, m) — round x to nearest multiple of m.
+        // m <= 0 → x unchanged.
+        "f64_round_to_multiple" => format!(
+            "({{ double __frx = ({}); double __frm = ({}); (__frm <= 0.0) ? __frx : (round(__frx / __frm) * __frm); }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        // Closure #602: f64_quadratic_root(a, b, c) — positive-discriminant root of ax^2 + bx + c.
+        // Returns (-b + sqrt(b^2 - 4ac)) / (2a). NaN on negative discriminant or a==0.
+        "f64_quadratic_root" => format!(
+            "({{ double __qra = ({}); double __qrb = ({}); double __qrc = ({}); double __disc = __qrb * __qrb - 4.0 * __qra * __qrc; (__qra == 0.0 || __disc < 0.0) ? (0.0 / 0.0) : ((-__qrb + sqrt(__disc)) / (2.0 * __qra)); }})",
+            emit_expr(&args[0]),
+            emit_expr(&args[1]),
+            emit_expr(&args[2])
         ),
         // Closure #480: reverse_bits — bit-level reversal via
         // standard parallel-swap sequence.

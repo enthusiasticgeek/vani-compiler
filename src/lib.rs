@@ -16022,6 +16022,31 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn arc0_typecheck_and_compile() {
+        // Closures #597-#604: Arc 0 — final 8 small items.
+        let source = r#"
+            fn main() -> i64 {
+              let p: i64 = i64_parity(7);
+              let neg7: i64 = 0 - 7;
+              let m: i64 = i64_mod_pos(neg7, 3);
+              let c: i64 = i64_cube_root(27);
+              let pi: f64 = f64_pow_int(2.0, 3);
+              let rm: f64 = f64_round_to_multiple(3.7, 0.5);
+              let neg3: f64 = 0.0 - 3.0;
+              let qr: f64 = f64_quadratic_root(1.0, neg3, 2.0);
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let rmean: Vec<i64> = vec_running_mean(ref xs);
+              let ip: Vec<i64> = vec_intersperse(ref xs, 0);
+              return p + m + c
+                   + (pi as i64) + (rm as i64) + (qr as i64)
+                   + rmean[0] + ip[0];
+            }
+        "#;
+        compile_to_c(source).expect("arc 0 must type-check");
+        compile_to_llvm(source).expect("arc 0 must compile to LLVM");
+    }
+
+    #[test]
     fn vec_group_by_value_typecheck_and_compile() {
         // Closure #596: vec_group_by_value — groups consecutive equal values.
         let source = r#"
