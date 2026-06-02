@@ -12135,6 +12135,18 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // are identity at runtime. Wrap the operand in parens
         // so any compound expression renders cleanly.
         "taint" | "assert_safe" => format!("({})", emit_expr(&args[0])),
+        // Layer 1.3 of `unsafe.md` — raw load/store. `raw_load`
+        // dereferences a `*const T` / `*mut T` to read; the
+        // value flows back wrapped in `Tainted<T>` at the type
+        // level. `raw_store` writes through a `*mut T`. The C
+        // emission is the straightforward `*p` / `*p = v`
+        // expression — the unsafe surface IS the C surface here.
+        "raw_load" => format!("(*({}))", emit_expr(&args[0])),
+        "raw_store" => format!(
+            "((*({})) = ({}), (int64_t)0)",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
@@ -14054,6 +14066,18 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
 
 fn c_type_name(ty: &Type) -> String {
     match ty {
+        // Layer 1.1+ of `unsafe.md` — raw pointer storage uses
+        // the full declarator form (`const T*` / `T*`), not the
+        // leaf-comment placeholder. Used by the let-binding
+        // path for `let p: *const i64 = ...;`.
+        Type::Ptr(inner) => {
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("const {}*", inner_decl)
+        }
+        Type::PtrMut(inner) => {
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("{}*", inner_decl)
+        }
         Type::Vec(element) => vec_c_struct(element),
         // Closure #239: arrays in return-type position are
         // spelled as the struct wrapper `intent_arr_ret_<N>_<T>`.

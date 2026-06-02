@@ -7933,6 +7933,28 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             if name == "taint" || name == "assert_safe" {
                 return emit_expr(&args[0], ctx, out);
             }
+            // Layer 1.3 of `unsafe.md` — raw load / store
+            // through a raw pointer. `raw_load` emits a plain
+            // `load i64, i64* %p`; `raw_store` emits a
+            // `store i64 %v, i64* %p`. V1: pointee = i64.
+            if name == "raw_load" {
+                let p = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load i64, i64* {}\n",
+                    dest, p
+                ));
+                return dest;
+            }
+            if name == "raw_store" {
+                let p = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                out.push_str(&format!(
+                    "  store i64 {}, i64* {}\n",
+                    v, p
+                ));
+                return "0".to_string();
+            }
             // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
             // builtins. Call outlined helpers emitted at module
             // scope by `emit_intent_pool_i64_helpers_llvm`.

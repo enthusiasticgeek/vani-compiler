@@ -30156,6 +30156,92 @@ fn main() -> i64 {
     // so the discipline is in place when deref lands.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 1.3 — `raw_load(p)` / `raw_store(p, v)` builtins.
+    // The canonical Tainted producer: `raw_load` reads through a
+    // raw pointer and wraps the value in `Tainted<T>`. `raw_store`
+    // writes through a `*mut T`.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn raw_load_returns_tainted() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read(p: *const i64) -> Tainted<i64> {
+              return raw_load(p);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("raw_load returns Tainted<i64>");
+    }
+
+    #[test]
+    fn raw_load_accepts_mut_pointer() {
+        // Reading through a *mut T is fine — taint discipline
+        // applies equally to mut and const pointers.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_mut(p: *mut i64) -> Tainted<i64> {
+              return raw_load(p);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("raw_load accepts *mut T");
+    }
+
+    #[test]
+    fn raw_store_rejects_const_pointer() {
+        // Storing through a *const T would violate const-
+        // correctness; the checker rejects it.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad_store(p: *const i64, v: i64) -> i64 {
+              return raw_store(p, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("raw_store on *const T rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("*mut T")),
+            "expected *mut requirement diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn raw_load_emits_c_deref() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read(p: *const i64) -> Tainted<i64> {
+              return raw_load(p);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("raw_load compiles to C");
+        assert!(
+            c.contains("(*("),
+            "expected `*(p)` deref expression in C, got snippet:\n{}",
+            &c[..c.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn raw_load_emits_llvm_load() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read(p: *const i64) -> Tainted<i64> {
+              return raw_load(p);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("raw_load compiles to LLVM");
+        assert!(
+            ll.contains("= load i64, i64*"),
+            "expected `load i64, i64*` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
     #[test]
     fn taint_wraps_i64_in_tainted_i64() {
         let source = r#"
