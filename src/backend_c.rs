@@ -13834,6 +13834,13 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // the unsafe plan.
         Type::Ptr(_) => "/* *const T */",
         Type::PtrMut(_) => "/* *mut T */",
+        // `Pool<T>` / `Handle<T>` — Layer 2 of `unsafe.md`.
+        // Per-T storage spellings (`intent_pool_<T>`,
+        // `intent_handle_<T>`) live in c_type_name once the
+        // codegen bundles land in Layer 2.1c. The placeholders
+        // keep the leaf-only fallback emitting valid C.
+        Type::Pool(_) => "intent_pool_i64",
+        Type::Handle(_) => "intent_handle_i64",
     }
 }
 
@@ -14135,7 +14142,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14178,7 +14185,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) => unreachable!("shift count must be an integer"),
     }
 }
 

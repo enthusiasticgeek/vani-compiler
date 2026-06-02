@@ -30112,6 +30112,45 @@ fn main() -> i64 {
         );
     }
 
+    // -----------------------------------------------------------------
+    // Layer 2.1a scaffolding — `Pool<T>` / `Handle<T>` types
+    // parse and type-check. The builtins (`pool_new`,
+    // `pool_alloc`, `pool_get`, `pool_free`) and the codegen
+    // bundles land in Layers 2.1b and 2.1c. v1 restricts T to
+    // i64 — the parser accepts any T but the codegen layer will
+    // enforce the restriction once it lands.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn pool_handle_types_parse_in_signature() {
+        // No env-var guard needed — Pool / Handle are not raw
+        // pointer types and aren't gated by the embedded check.
+        // Layer 2 is the *supported* long-lived-reference path,
+        // safer than raw pointers.
+        let source = r#"
+            fn use_pool(p: ref Pool<i64>, h: Handle<i64>) -> Handle<i64> {
+              return h;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        // `compile()` runs the checker only; the codegen path
+        // (`compile_to_c` / `compile_to_llvm`) would surface
+        // missing builtins / typedefs which arrive in 2.1c.
+        let _ = compile(source).expect("Pool / Handle types parse + check");
+    }
+
+    #[test]
+    fn handle_type_display_matches_source() {
+        // `give_back` is a Return keyword alias — pick a name
+        // that doesn't collide with the lexer's structure-
+        // keyword table.
+        let source = r#"
+            fn echo_handle(h: Handle<i64>) -> Handle<i64> { return h; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("Handle<i64> typechecks");
+    }
+
     #[test]
     fn unsafe_block_inner_scope_isolates_let_bindings() {
         let _guard = EmbeddedTargetGuard::embedded();

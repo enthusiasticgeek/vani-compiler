@@ -1676,6 +1676,23 @@ impl Parser {
                 self.bump();
                 return Ok(Type::SkipList);
             }
+            // `Pool<T>` and `Handle<T>` — Layer 2 of `unsafe.md`.
+            // The Pool is affine; the Handle is Copy. Builtins
+            // and codegen land in Layers 2.1b / 2.1c.
+            if name == "Pool" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::Pool(Box::new(element)));
+            }
+            if name == "Handle" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::Handle(Box::new(element)));
+            }
             if name == "Atomic" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;

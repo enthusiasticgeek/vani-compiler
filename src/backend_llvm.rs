@@ -290,6 +290,14 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // Raw pointers are machine words — 8 bytes on 64-bit.
         // Layer 1.1+ of unsafe.md.
         Type::Ptr(_) | Type::PtrMut(_) => 8,
+        // `Pool<T>` is a struct ({data, gen, free_list, len,
+        // cap, free_count}); generous 48-byte estimate.
+        // Layer 2 of `unsafe.md`. Storage spelling lives in
+        // codegen (Layer 2.1c).
+        Type::Pool(_) => 48,
+        // `Handle<T>` is {slot_idx: u32, generation: u32} —
+        // 8 bytes.
+        Type::Handle(_) => 8,
     }
 }
 
