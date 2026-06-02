@@ -534,6 +534,17 @@ runtime cost, compile-time use-after-free proof via `&'arena T`.
 The two coexist; users pick per-type. Code written against
 `Handle<T>` stays valid forever — no big-bang migration.
 
+**Keyword form: `unsafe(reason = "...") { ... }`** (decided
+2026-06-02). The reason clause is mandatory at parse time —
+empty strings rejected. The reason is stored on the AST, threaded
+through the IR, and emitted as DWARF / object-section metadata so
+certification tooling can extract a structured deviation-record
+report straight from the compiled artifact. Reviewers don't have
+to grep for `// SAFETY:` comments; the compiler enforces the
+justification per occurrence. Recommended prefix conventions for
+tooling: `"MMIO: ..."`, `"FFI: ..."`, `"DMA: ..."`,
+`"transmute: ..."`, `"vendor-SDK: ..."`.
+
 Plan-of-record: [unsafe.md](unsafe.md). Independent of and can
 interleave with the multi-session Arcs in [ARCS.md](ARCS.md).
 

@@ -70,6 +70,11 @@ own plan-of-record now:
   safety-critical workloads (ASIL-D, DO-178C, IEC 62304).
 - The two coexist. User picks per-type. Code written against
   `Handle<T>` keeps working forever.
+- **Keyword form (decided 2026-06-02): `unsafe(reason = "...") { ... }`.**
+  Reason clause mandatory at parse time. Stored on the AST, emitted
+  as IR/DWARF metadata so certification tooling extracts deviation
+  records from the compiled artifact. No `// SAFETY:` comment
+  convention — the justification is part of syntax, parser-enforced.
 
 This section keeps the **design rationale** for "why permit `unsafe`
 at all on embedded" and the **typed-primitive wishlist** (Register,

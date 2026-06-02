@@ -1,7 +1,7 @@
 # Embedded-vāṇī Unsafe + Memory-Safety Plan
 
 Goal: vāṇी usable in embedded systems where:
-- `unsafe { ... }` blocks are necessary (raw pointer arithmetic,
+- `unsafe(reason = "...") { ... }` blocks are necessary (raw pointer arithmetic,
   MMIO, DMA, hand-rolled allocators)
 - No garbage collector
 - Maximum catch of memory errors at compile time
@@ -33,35 +33,96 @@ Existing baseline (do not redo): affine ownership for Vec / OwnedStr
 
 ## Layer 1 — Compile-time, always on (zero runtime cost)
 
-### 1.1 Lexical `unsafe { ... }` containment
+### 1.1 Lexical `unsafe(reason = "...") { ... }` containment
 
 **What:** Raw pointer types (`*T`, `*mut T`) may only appear inside
-the body of a function marked `unsafe`, or inside an `unsafe { ... }`
-block. They cannot appear in a function's parameter or return type
-unless that function is itself `unsafe`. Same for struct/enum field
-declarations.
+the body of a function marked `unsafe(reason = "...")`, or inside an
+`unsafe(reason = "...") { ... }` block. They cannot appear in a
+function's parameter or return type unless that function is itself
+unsafe. Same for struct/enum field declarations.
+
+**The `reason = "..."` clause is mandatory at parse time.** Empty
+strings are rejected. The reason is part of the syntax — not a
+convention, not a comment. It's stored on the AST node, threaded
+through the IR, and emitted as machine-readable debug metadata so
+certification tooling can extract deviation records from the
+compiled artifact (target: ASIL-D / DO-178C / IEC 62304 deviation
+audit trails).
+
+**Why mandatory in-syntax reason vs. a `// SAFETY:` comment:**
+- Comments are stripped by the lexer and lost downstream — no IR
+  metadata, no machine-readable extraction.
+- Reasons-in-syntax cannot be silently deleted; they're part of the
+  AST. A reviewer who removes the reason gets a parse error.
+- The reason can be uniformized: certification toolchains emit
+  every deviation as a row in a structured report keyed by
+  (file, line, reason). Comments require ad-hoc parsing.
+- The user has stated preference for this form (2026-06-02).
 
 **Why:** Forces all raw-pointer manipulation to be syntactically
-located in code the reader knows to scrutinize. Mirrors Rust's
-unsafe-block discipline but stricter on type signatures.
+located in code the reader knows to scrutinize, AND forces a
+machine-readable justification per occurrence. Strictly safer than
+Rust's `unsafe { ... } // SAFETY: ...` convention because the
+justification is parser-enforced.
+
+**Reason-string rules (v1):**
+- Non-empty: `unsafe(reason = "")` is a parse error.
+- Bounded length: max 256 chars to keep IR metadata compact.
+- ASCII-printable; no control chars, no embedded newlines.
+- Recommended prefix conventions (not enforced) for certification
+  tooling: `"MMIO: ..."`, `"FFI: ..."`, `"DMA: ..."`,
+  `"transmute: ..."`, `"vendor-SDK: ..."`. Tooling can group by
+  prefix to surface deviation categories.
 
 **Files touched:**
-- `src/checker.rs` — add `is_unsafe_context: bool` to the checker
-  state; reject raw pointer types when false.
-- `src/ast.rs` — add `UnsafeBlock { body: Vec<Stmt> }` variant to
-  `Stmt`; parser already may have similar precedent.
+- `src/ast.rs` — add `UnsafeBlock { reason: String, body: Vec<Stmt> }`
+  variant to `Stmt`. Add `unsafe_reason: Option<String>` to `Function`
+  for `unsafe(reason = "...") fn` declarations.
+- `src/lexer.rs` / parser — recognize `unsafe(reason = "...")`
+  syntax; reject `unsafe` without the reason clause; reject empty
+  reason string.
+- `src/checker.rs` — add `is_unsafe_context: bool` to checker state;
+  reject raw pointer types when false.
+- `src/backend_c.rs` — emit each block's reason as a comment marker
+  + optionally a `.unsafe_deviations` section entry.
+- `src/backend_llvm.rs` — emit reason as DWARF `DW_AT_description`
+  or `!dbg` metadata on the IR for the block's first instruction;
+  enables `objdump` / `llvm-dwarfdump` extraction.
 
-**Estimate:** 2–3h. Single commit.
+**Estimate:** 3–4h (was 2–3h; +1h for reason plumbing through IR
+metadata). Single commit.
 
 **Acceptance:**
 ```vani
 fn safe_fn(p: *i64) -> i64 { ... }    // ERROR: raw pointer in safe sig
-unsafe fn ok_fn(p: *i64) -> i64 { ... } // OK
+unsafe(reason = "vendor-SDK: STM32 HAL callback signature")
+fn ok_fn(p: *i64) -> i64 { ... }       // OK
+
 fn another() {
   let x: i64 = 0;
-  unsafe { let p: *const i64 = &x as *const i64; }  // OK
+  // ERROR — `unsafe` without reason is a parse error:
+  unsafe { let p: *const i64 = &x as *const i64; }
+
+  // ERROR — empty reason:
+  unsafe(reason = "") { let p: *const i64 = &x as *const i64; }
+
+  // OK:
+  unsafe(reason = "MMIO: ad-hoc base address for GPIOA::ODR") {
+    let p: *const i64 = &x as *const i64;
+  }
 }
 ```
+
+**Deviation-record extraction (target):**
+```
+$ intentc build --report-deviations target/firmware.elf
+file                  line  prefix      reason
+src/hal_stm32f4.vani  142   vendor-SDK  STM32 HAL callback signature
+src/dma.vani          88    DMA         scatter-gather descriptor walk
+src/dma.vani          203   MMIO        DMA controller base register
+... 3 deviations total, 2 prefix categories
+```
+This is the artifact a safety-critical reviewer wants for sign-off.
 
 ### 1.2 No-escape analysis on `&local`
 
@@ -86,11 +147,13 @@ class of bug entirely at compile time.
 
 **Acceptance:**
 ```vani
-unsafe fn bad() -> *const i64 {
+unsafe(reason = "vendor-SDK: stack-pointer-returning prototype")
+fn bad() -> *const i64 {
   let x: i64 = 42;
   return &x as *const i64;  // ERROR: pointer to dead stack
 }
-unsafe fn ok(global: *const i64) -> *const i64 {
+unsafe(reason = "vendor-SDK: pass-through pointer thread")
+fn ok(global: *const i64) -> *const i64 {
   return global;            // OK: param pointer threaded through
 }
 ```
@@ -120,10 +183,14 @@ propagation pass).
 
 **Acceptance:**
 ```vani
-unsafe fn read_byte(p: *const u8) -> Tainted<u8> { return *p; }
+unsafe(reason = "MMIO: byte read at user-supplied addr")
+fn read_byte(p: *const u8) -> Tainted<u8> { return *p; }
+
 fn safe_caller(p: *const u8) {  // ERROR: *const in safe sig
 }
-unsafe fn safe_caller2(p: *const u8) -> i64 {
+
+unsafe(reason = "MMIO: bounded-region byte fetch")
+fn safe_caller2(p: *const u8) -> i64 {
   let b: Tainted<u8> = read_byte(p);
   let v: i64 = assert_safe(b) as i64;  // user vouches; release-mode
                                         // no-op, debug-mode panics if

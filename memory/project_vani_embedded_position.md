@@ -29,6 +29,16 @@ safety:** [~/vani/unsafe.md](../unsafe.md). Hybrid path chosen:
 - **Skipped intentionally:** Rust-style borrow checker (user has a
   simpler one), garbage collector (user requirement), capability
   tokens (overlaps with affine), ASAN/MSan (too heavy for embedded).
+- **Keyword form (decided 2026-06-02):**
+  `unsafe(reason = "...") { ... }` — mandatory non-empty reason
+  clause, parser-enforced. Reason stored on the AST and threaded
+  through IR/DWARF so certification tooling (ASIL-D, DO-178C,
+  IEC 62304) can extract deviation records from the compiled
+  artifact. NOT a `// SAFETY:` comment convention — the
+  justification is part of the syntax, can't be silently deleted.
+  Recommended reason-prefix conventions for tooling: `"MMIO: ..."`,
+  `"FFI: ..."`, `"DMA: ..."`, `"transmute: ..."`,
+  `"vendor-SDK: ..."`.
 
 The original *position* below stands unchanged — `unsafe` is
 embedded-only, hosted rejects at parse time, affine still runs
