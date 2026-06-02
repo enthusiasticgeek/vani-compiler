@@ -624,6 +624,11 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_bptr(program) {
         emit_intent_bptr_helpers_c_body(&mut body);
     }
+    // Layer 5 v2 foundation of `unsafe.md` — Region bump-
+    // allocator arena.
+    if program_uses_region(program) {
+        emit_intent_region_helpers_c_body(&mut body);
+    }
     if program_uses_i64_i64_hashmap(program) {
         let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
             r.borrow().contains_key("Option__i64")
@@ -926,6 +931,59 @@ fn emit_intent_deque_helpers_c_body(out: &mut String, has_option_i64: bool) {
 }
 
 /// Walk the program for any `HashSet<i64>` type usage.
+pub(crate) fn program_uses_region(program: &TypedProgram) -> bool {
+    fn ty_uses(ty: &Type) -> bool {
+        match ty {
+            Type::Region => true,
+            Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner) => ty_uses(inner),
+            _ => false,
+        }
+    }
+    fn expr_uses(e: &crate::ir::TypedExpr) -> bool {
+        use crate::ir::TypedExprKind as K;
+        if ty_uses(&e.ty) { return true; }
+        match &e.kind {
+            K::Call { name, args, .. } => {
+                matches!(name.as_str(), "region_new" | "region_alloc_i64" | "region_len")
+                    || args.iter().any(expr_uses)
+            }
+            K::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            K::Unary { expr, .. } | K::Cast { expr, .. } => expr_uses(expr),
+            _ => false,
+        }
+    }
+    fn stmt_uses(s: &crate::ir::TypedStmt) -> bool {
+        use crate::ir::TypedStmt as S;
+        match s {
+            S::Let { ty, expr, .. } | S::Reassign { ty, expr, .. } => {
+                ty_uses(ty) || expr_uses(expr)
+            }
+            S::Drop { ty, .. } => ty_uses(ty),
+            S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond) || then_body.iter().any(stmt_uses) || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => body.iter().any(stmt_uses),
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        if ty_uses(&f.return_type) { return true; }
+        for p in &f.params { if ty_uses(&p.ty) { return true; } }
+        if f.body.iter().any(stmt_uses) { return true; }
+    }
+    false
+}
+
 pub(crate) fn program_uses_bptr(program: &TypedProgram) -> bool {
     fn ty_uses(ty: &Type) -> bool {
         match ty {
@@ -1313,6 +1371,64 @@ fn emit_intent_bptr_helpers_c_body(out: &mut String) {
          }\n\
          static INTENT_UNUSED int64_t intent_bptr_i64_len(const intent_bptr_i64* bp) {\n\
          \x20 return (int64_t)bp->len;\n\
+         }\n\n",
+    );
+}
+
+/// Layer 5 v2 foundation of `unsafe.md` — `Region` bump-
+/// allocator arena helpers.
+///
+/// Struct layout: `{ int64_t* data; size_t len; size_t capacity; }`
+///
+/// `region_new`: zero-initializes the struct (lazy allocation —
+/// the first `region_alloc_i64` triggers the initial malloc).
+///
+/// `region_alloc_i64(r, v)`: if `len == capacity`, grow the
+/// buffer (double, starting from 8 slots). Write `v` into
+/// `data[len]`, increment `len`, return `data + len - 1`.
+///
+/// `region_drop`: a single `free` on the data buffer. Every
+/// allocation in the arena gets freed together; no per-slot
+/// bookkeeping. Deterministic O(1) regardless of allocation
+/// count.
+///
+/// Note that `data` may be reallocated as the arena grows.
+/// Pointers handed out by `region_alloc_i64` before a grow
+/// become stale after the grow — a hazard the full Layer 5
+/// design avoids via `&'arena T` lifetime tracking. This
+/// v1 scaffolding documents the hazard but doesn't yet
+/// prevent it; users must complete all allocations before
+/// using any returned pointers, OR set capacity up front via
+/// a future `region_with_capacity` builtin.
+fn emit_intent_region_helpers_c_body(out: &mut String) {
+    out.push_str(
+        "typedef struct { int64_t* data; size_t len; size_t capacity; } intent_region;\n\
+         static INTENT_UNUSED intent_region intent_region_new(void) {\n\
+         \x20 intent_region r;\n\
+         \x20 r.data = (int64_t*)0;\n\
+         \x20 r.len = 0; r.capacity = 0;\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED void intent_region_drop(intent_region* r) {\n\
+         \x20 if (r->data) free(r->data);\n\
+         \x20 r->data = (int64_t*)0;\n\
+         \x20 r->len = 0; r->capacity = 0;\n\
+         }\n\
+         static INTENT_UNUSED int64_t* intent_region_alloc_i64(intent_region* r, int64_t v) {\n\
+         \x20 if (r->len == r->capacity) {\n\
+         \x20   size_t new_cap = r->capacity == 0 ? 8 : r->capacity * 2;\n\
+         \x20   int64_t* new_data = (int64_t*)realloc(r->data, new_cap * sizeof(int64_t));\n\
+         \x20   if (!new_data) abort();\n\
+         \x20   r->data = new_data;\n\
+         \x20   r->capacity = new_cap;\n\
+         \x20 }\n\
+         \x20 r->data[r->len] = v;\n\
+         \x20 int64_t* slot = r->data + r->len;\n\
+         \x20 r->len++;\n\
+         \x20 return slot;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_region_len(const intent_region* r) {\n\
+         \x20 return (int64_t)r->len;\n\
          }\n\n",
     );
 }
@@ -8704,6 +8820,15 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
+            Type::Region => {
+                // Layer 5 v2 foundation of `unsafe.md` — single
+                // `free` on the bump buffer at scope exit.
+                // Every allocation handed out by this region
+                // becomes invalid simultaneously, by construction.
+                out.push_str("  intent_region_drop(&");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
             Type::Struct(struct_name) => {
                 // Auto-call the user's `Drop` impl when one
                 // exists. Two flavors:
@@ -12372,6 +12497,14 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[2])
         ),
         "bptr_len" => format!("intent_bptr_i64_len({})", emit_expr(&args[0])),
+        // Layer 5 v2 foundation of `unsafe.md` — Region ops.
+        "region_new" => "intent_region_new()".to_string(),
+        "region_alloc_i64" => format!(
+            "intent_region_alloc_i64({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "region_len" => format!("intent_region_len({})", emit_expr(&args[0])),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
@@ -14290,6 +14423,9 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // pointer struct emitted by the bundle when the
         // program actually uses it. V1: T = i64.
         Type::BoundedPtr(_) => "intent_bptr_i64",
+        // `Region` — Layer 5 v2 foundation of `unsafe.md`.
+        // Bump-allocator arena struct emitted by the bundle.
+        Type::Region => "intent_region",
     }
 }
 
@@ -14603,7 +14739,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14646,7 +14782,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region => unreachable!("shift count must be an integer"),
     }
 }
 

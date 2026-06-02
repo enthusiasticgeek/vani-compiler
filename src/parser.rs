@@ -1715,6 +1715,14 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::BoundedPtr(Box::new(element)));
             }
+            // `Region` — Layer 5 v2 foundation of `unsafe.md`.
+            // Bare name (no type params); the v1 scaffolding is
+            // bytes-only (`region_alloc_i64` is the only
+            // allocator; future commits can add per-T variants).
+            if name == "Region" {
+                self.bump();
+                return Ok(Type::Region);
+            }
             if name == "Atomic" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;

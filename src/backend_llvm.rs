@@ -305,6 +305,9 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Three
         // 8-byte fields: {data, len, capacity} = 24 bytes.
         Type::BoundedPtr(_) => 24,
+        // `Region` — Layer 5 v2 foundation. Bump-allocator
+        // arena struct {data, len, capacity} = 24 bytes.
+        Type::Region => 24,
     }
 }
 
@@ -787,7 +790,10 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("%intent_pool_i64 = type { i64*, i32*, i32*, i64, i64, i64 }\n");
     // Layer 3.2 of `unsafe.md` — BoundedPtr<i64>.
     //   { i64* data; i64 len; i64 capacity; } — 24 bytes
-    out.push_str("%intent_bptr_i64 = type { i64*, i64, i64 }\n\n");
+    out.push_str("%intent_bptr_i64 = type { i64*, i64, i64 }\n");
+    // Layer 5 v2 foundation of `unsafe.md` — Region bump arena.
+    //   { i64* data; i64 len; i64 capacity; } — 24 bytes
+    out.push_str("%intent_region = type { i64*, i64, i64 }\n\n");
 
     emit_intent_str_concat_definition(&mut out);
     emit_intent_str_trim_definition(&mut out);
@@ -1095,6 +1101,10 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> helpers.
     if crate::backend_c::program_uses_bptr(program) {
         emit_intent_bptr_i64_helpers_llvm(&mut out);
+    }
+    // Layer 5 v2 foundation of `unsafe.md` — Region bump arena.
+    if crate::backend_c::program_uses_region(program) {
+        emit_intent_region_helpers_llvm(&mut out);
     }
 
     // HashMap<i64, i64> helpers (closure #305).
@@ -1873,6 +1883,17 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
                     out.push_str(&format!(
                         "  call void @intent_pool_i64_drop(%intent_pool_i64* {})\n",
+                        addr
+                    ));
+                }
+                return;
+            }
+            // Layer 5 v2 foundation — Region Drop: single
+            // `free` on the bump buffer at scope exit.
+            if matches!(ty, Type::Region) {
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    out.push_str(&format!(
+                        "  call void @intent_region_drop(%intent_region* {})\n",
                         addr
                     ));
                 }
@@ -7950,6 +7971,34 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // forward the operand's SSA value.
             if name == "taint" || name == "assert_safe" {
                 return emit_expr(&args[0], ctx, out);
+            }
+            // Layer 5 v2 foundation of `unsafe.md` — Region ops.
+            if name == "region_new" {
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_region @intent_region_new()\n",
+                    dest
+                ));
+                return dest;
+            }
+            if name == "region_alloc_i64" {
+                let r = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64* @intent_region_alloc_i64(%intent_region* {}, i64 {})\n",
+                    dest, r, v
+                ));
+                return dest;
+            }
+            if name == "region_len" {
+                let r = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_region_len(%intent_region* {})\n",
+                    dest, r
+                ));
+                return dest;
             }
             // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> ops.
             // Helpers emitted at module scope by
@@ -27473,6 +27522,73 @@ fn emit_intent_skiplist_i64_helpers_llvm(out: &mut String, has_option_i64: bool)
     out.push_str("}\n\n");
 }
 
+/// Layer 5 v2 foundation of `unsafe.md` — `Region` bump-
+/// allocator arena helpers in LLVM IR. Mirror of
+/// `emit_intent_region_helpers_c_body`. Struct layout:
+///   `%intent_region = type { i64*, i64, i64 }` (data, len, capacity)
+fn emit_intent_region_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "define %intent_region @intent_region_new() {\n\
+         \x20 %r0 = insertvalue %intent_region undef, i64* null, 0\n\
+         \x20 %r1 = insertvalue %intent_region %r0, i64 0, 1\n\
+         \x20 %r2 = insertvalue %intent_region %r1, i64 0, 2\n\
+         \x20 ret %intent_region %r2\n\
+         }\n\
+         define void @intent_region_drop(%intent_region* %r) {\n\
+         \x20 %dp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 0\n\
+         \x20 %data = load i64*, i64** %dp\n\
+         \x20 %is_null = icmp eq i64* %data, null\n\
+         \x20 br i1 %is_null, label %rd_done, label %rd_free\n\
+         rd_free:\n\
+         \x20 %d_i8 = bitcast i64* %data to i8*\n\
+         \x20 call void @free(i8* %d_i8)\n\
+         \x20 br label %rd_done\n\
+         rd_done:\n\
+         \x20 store i64* null, i64** %dp\n\
+         \x20 %lp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 1\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 %cp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 2\n\
+         \x20 store i64 0, i64* %cp\n\
+         \x20 ret void\n\
+         }\n\
+         define i64* @intent_region_alloc_i64(%intent_region* %r, i64 %v) {\n\
+         \x20 %lp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 1\n\
+         \x20 %cp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 2\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %full = icmp eq i64 %len, %cap\n\
+         \x20 br i1 %full, label %ra_grow, label %ra_store\n\
+         ra_grow:\n\
+         \x20 %cap_zero = icmp eq i64 %cap, 0\n\
+         \x20 %dbl = mul i64 %cap, 2\n\
+         \x20 %new_cap = select i1 %cap_zero, i64 8, i64 %dbl\n\
+         \x20 %dp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 0\n\
+         \x20 %old_data = load i64*, i64** %dp\n\
+         \x20 %old_i8 = bitcast i64* %old_data to i8*\n\
+         \x20 %new_bytes = mul i64 %new_cap, 8\n\
+         \x20 %new_i8 = call i8* @realloc(i8* %old_i8, i64 %new_bytes)\n\
+         \x20 %new_data = bitcast i8* %new_i8 to i64*\n\
+         \x20 store i64* %new_data, i64** %dp\n\
+         \x20 store i64 %new_cap, i64* %cp\n\
+         \x20 br label %ra_store\n\
+         ra_store:\n\
+         \x20 %dp2 = getelementptr %intent_region, %intent_region* %r, i32 0, i32 0\n\
+         \x20 %data = load i64*, i64** %dp2\n\
+         \x20 %len2 = load i64, i64* %lp\n\
+         \x20 %slot = getelementptr i64, i64* %data, i64 %len2\n\
+         \x20 store i64 %v, i64* %slot\n\
+         \x20 %len_n = add i64 %len2, 1\n\
+         \x20 store i64 %len_n, i64* %lp\n\
+         \x20 ret i64* %slot\n\
+         }\n\
+         define i64 @intent_region_len(%intent_region* %r) {\n\
+         \x20 %lp = getelementptr %intent_region, %intent_region* %r, i32 0, i32 1\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 ret i64 %len\n\
+         }\n\n",
+    );
+}
+
 /// Layer 3.2 of `unsafe.md` — `BoundedPtr<i64>` fat pointer
 /// helpers in LLVM IR. Mirror of
 /// `emit_intent_bptr_helpers_c_body`. Struct layout:
@@ -33574,6 +33690,8 @@ fn is_scalar(ty: &Type) -> bool {
         // LLVM struct type, same scalar-let alloca pattern
         // as Pool / Handle.
         || matches!(ty, Type::BoundedPtr(_))
+        // `Region` — Layer 5 v2 foundation. Same struct shape.
+        || matches!(ty, Type::Region)
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33632,6 +33750,9 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> lowers to
         // a named struct.
         Type::BoundedPtr(_) => "%intent_bptr_i64",
+        // Layer 5 v2 foundation — Region arena lowers to a
+        // named struct.
+        Type::Region => "%intent_region",
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",

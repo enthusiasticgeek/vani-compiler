@@ -10,7 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 3.2 BoundedPtr<i64> shipped** —
+**Last updated:** 2026-06-02 (**Layer 5 v2 foundation shipped** —
+`Region` bump-allocator arena. Affine type; scope-exit drop frees
+the entire arena in a single `free` call. V1 scaffolding ships
+the runtime story; the full Layer 5 design's `&'arena T`
+lifetime-tagged pointer refinement is queued as a follow-up
+(today, `region_alloc_i64` returns raw `*mut i64`).
+Three builtins: `region_new()`, `region_alloc_i64(mut ref r, v)`,
+`region_len(ref r)`. Bundle gated on program usage; trivial
+main without Region produces no helpers. Smoke test (alloc 3
+i64 slots in a region, raw_load each through assert_safe, drop
+the arena at scope exit) round-trips identically on both
+backends. Performance-critical pattern: deterministic O(1)-per-
+region "free" amortized over the entire region — useful for
+hot loops and safety-critical workloads that need predictable
+timing. **7 new lib tests**: region_new returns Region,
+region_alloc returns *mut i64, mut-ref required for alloc,
+both backends emit the bundle, helpers not leaked, scope-exit
+drop emitted in C. **1611 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**Layer 3.2 BoundedPtr<i64> shipped** —
 v1 unsafe surface is now complete. `Type::BoundedPtr(Box<Type>)`
 plus four builtins (`bptr_new`, `bptr_get`, `bptr_set`,
 `bptr_len`). Fat pointer struct `{ data: *mut i64, len: u64,
@@ -252,7 +271,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1604 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1611 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

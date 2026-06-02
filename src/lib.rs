@@ -30186,6 +30186,124 @@ fn main() -> i64 {
     // returns `bool` (false on OOB, no store performed).
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 5 v2 foundation — `Region` bump-allocator arena.
+    // Affine; scope-exit drop frees the entire arena in one
+    // `free` call. V1 scaffolding returns raw `*mut i64`; the
+    // full Layer 5 `&'arena T` lifetime-tagged pointer
+    // refinement is a substantial follow-up.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn region_new_returns_region() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              return region_len(ref r);
+            }
+        "#;
+        let _ = compile(source).expect("region_new() returns Region");
+    }
+
+    #[test]
+    fn region_alloc_returns_mut_ptr_i64() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make(v: i64) -> i64 {
+              let r: Region = region_new();
+              let p: *mut i64 = region_alloc_i64(mut ref r, v);
+              return assert_safe(raw_load(p));
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("region_alloc returns *mut i64");
+    }
+
+    #[test]
+    fn region_alloc_requires_mut_ref() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad(v: i64) -> i64 {
+              let r: Region = region_new();
+              let p = region_alloc_i64(ref r, v);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("region_alloc on ref rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("mut ref")),
+            "expected mut-ref diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn region_emits_helper_bundle_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              return region_len(ref r);
+            }
+        "#;
+        let c = compile_to_c(source).expect("Region compiles to C");
+        assert!(
+            c.contains("intent_region_new")
+                && c.contains("intent_region_drop")
+                && c.contains("intent_region_alloc_i64"),
+            "expected Region helpers in C bundle"
+        );
+    }
+
+    #[test]
+    fn region_emits_helper_bundle_in_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              return region_len(ref r);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Region compiles to LLVM");
+        assert!(
+            ll.contains("%intent_region = type")
+                && ll.contains("@intent_region_new")
+                && ll.contains("@intent_region_drop"),
+            "expected Region type decl + helpers in LLVM"
+        );
+    }
+
+    #[test]
+    fn region_helpers_not_emitted_when_unused() {
+        let source = r#"
+            fn main() -> i64 { return 42; }
+        "#;
+        let c = compile_to_c(source).expect("trivial main compiles");
+        assert!(
+            !c.contains("intent_region_new"),
+            "Region helpers leaked into a program that doesn't use them"
+        );
+    }
+
+    #[test]
+    fn region_drop_emitted_at_scope_exit_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let r: Region = region_new();
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Region compiles");
+        assert!(
+            c.contains("intent_region_drop(&"),
+            "expected scope-exit drop call in C, got snippet:\n{}",
+            &c[c.len().saturating_sub(2000)..]
+        );
+    }
+
     #[test]
     fn bptr_new_returns_bounded_ptr_i64() {
         let _guard = EmbeddedTargetGuard::embedded();
