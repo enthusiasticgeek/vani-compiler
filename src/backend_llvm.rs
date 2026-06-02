@@ -7933,6 +7933,42 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             if name == "taint" || name == "assert_safe" {
                 return emit_expr(&args[0], ctx, out);
             }
+            // Layer 3.1 of `unsafe.md` — heap allocation.
+            // `unsafe_alloc(n)` → `calloc(n, 8)` cast to
+            // i64*. `unsafe_free(p)` → `free(p)`, returns
+            // literal 0 (dummy).
+            if name == "unsafe_alloc" {
+                let n = emit_expr(&args[0], ctx, out);
+                let bytes = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = mul i64 {}, 8\n",
+                    bytes, n
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @calloc(i64 {}, i64 1)\n",
+                    raw, bytes
+                ));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to i64*\n",
+                    dest, raw
+                ));
+                return dest;
+            }
+            if name == "unsafe_free" {
+                let p = emit_expr(&args[0], ctx, out);
+                let i8p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast i64* {} to i8*\n",
+                    i8p, p
+                ));
+                out.push_str(&format!(
+                    "  call void @free(i8* {})\n",
+                    i8p
+                ));
+                return "0".to_string();
+            }
             // Layer 1.3 of `unsafe.md` — raw load / store
             // through a raw pointer. `raw_load` emits a plain
             // `load i64, i64* %p`; `raw_store` emits a

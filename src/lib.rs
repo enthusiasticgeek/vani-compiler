@@ -30163,6 +30163,97 @@ fn main() -> i64 {
     // writes through a `*mut T`.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 3.1 — `unsafe_alloc(n)` / `unsafe_free(p)` builtins.
+    // Heap allocation inside unsafe. The canary instrumentation
+    // (debug-mode magic words around the allocation) is a
+    // separate follow-up; this commit ships the raw allocator
+    // first.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn unsafe_alloc_returns_mut_ptr_i64() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make_buffer(n: i64) -> *mut i64 {
+              return unsafe_alloc(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("unsafe_alloc returns *mut i64");
+    }
+
+    #[test]
+    fn unsafe_free_requires_mut_ptr() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad_free(p: *const i64) -> i64 {
+              return unsafe_free(p);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("unsafe_free on *const T rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("*mut i64")),
+            "expected *mut i64 requirement, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_alloc_emits_calloc_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make_buffer(n: i64) -> *mut i64 {
+              return unsafe_alloc(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("unsafe_alloc compiles to C");
+        assert!(
+            c.contains("calloc"),
+            "expected calloc in C output, got snippet:\n{}",
+            &c[..c.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn unsafe_alloc_emits_calloc_in_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make_buffer(n: i64) -> *mut i64 {
+              return unsafe_alloc(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("unsafe_alloc compiles to LLVM");
+        assert!(
+            ll.contains("call i8* @calloc"),
+            "expected `call i8* @calloc` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn unsafe_alloc_in_safe_signature_rejected_on_hosted() {
+        // The return type `*mut i64` triggers the
+        // raw-ptr-on-hosted gate without even reaching the
+        // unsafe_alloc check itself.
+        let _guard = EmbeddedTargetGuard::hosted();
+        let source = r#"
+            fn make_buffer(n: i64) -> *mut i64 {
+              return unsafe_alloc(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("raw ptr return on hosted rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("raw pointer type")),
+            "expected raw-ptr-on-hosted diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn raw_load_returns_tainted() {
         let _guard = EmbeddedTargetGuard::embedded();

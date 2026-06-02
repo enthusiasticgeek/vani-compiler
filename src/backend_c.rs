@@ -12147,6 +12147,18 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // Layer 3.1 of `unsafe.md` — heap allocation. `calloc`
+        // gives us zero-initialized slots (saves a memset and
+        // catches programs that read uninitialized memory).
+        // `unsafe_free` returns 0 as the dummy void value.
+        "unsafe_alloc" => format!(
+            "((int64_t*)calloc((size_t)({}), sizeof(int64_t)))",
+            emit_expr(&args[0])
+        ),
+        "unsafe_free" => format!(
+            "(free((void*)({})), (int64_t)0)",
+            emit_expr(&args[0])
+        ),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
