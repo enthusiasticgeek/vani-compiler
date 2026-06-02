@@ -10,7 +10,27 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 2.1b shipped** —
+**Last updated:** 2026-06-02 (**Layer 2.1c shipped — generational
+handles fully operational end-to-end.** Tree-C bundle emits
+`intent_pool_i64` / `intent_handle_i64` structs + 5 helpers
+(`pool_i64_new`, `pool_i64_alloc`, `pool_i64_get`, `pool_i64_free`,
+`pool_i64_drop`) gated on program usage. Tree-LLVM bundle mirrors
+the C in IR (`%intent_pool_i64 = type { i64*, i32*, i32*, i64,
+i64, i64 }`; `%intent_handle_i64 = type { i32, i32 }`) with
+hand-written IR for each operation. `Drop` emission frees the
+three heap arrays at Pool scope exit; Handle is Copy and has no
+Drop. Both backends route `pool_get` through the auto-registered
+`Enum_Option__i64` so users get `Some(value) / None` semantics
+(None = use-after-free / double-free caught at the generation
+check). Smoke test (`/tmp/pool_test.vani` via `intentc run`)
+confirms the round trip works: alloc → get returns Some(42) →
+free → get on stale handle returns None → re-alloc reuses the
+slot with a bumped generation. **3 new lib tests** (C bundle
+emitted + LLVM bundle emitted + UAF scenario typechecks).
+**1578 lib + 54 parity green.** Layer 2 of `unsafe.md`
+complete — the load-bearing safety net is live.)
+
+**Prior:** 2026-06-02 (**Layer 2.1b shipped** —
 generational-handle builtins. `pool_new()` returns
 `Pool<i64>` (affine, owned), `pool_alloc(mut ref p, v)` returns
 `Handle<i64>`, `pool_get(ref p, h)` returns `Option<i64>`
@@ -135,7 +155,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1575 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1578 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

@@ -601,6 +601,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_i64_hashset(program) {
         emit_intent_hashset_helpers_c_body(&mut body);
     }
+    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> helpers.
+    // The bundle's `pool_get` returns `Enum_Option__i64`; the
+    // `Option__i64` monomorph is auto-registered by the
+    // pool_get-uses-Option pre-pass in checker.rs, so the
+    // typedef is in scope by the time this bundle is emitted.
+    if program_uses_i64_pool(program) {
+        emit_intent_pool_helpers_c_body(&mut body);
+    }
     if program_uses_i64_i64_hashmap(program) {
         let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
             r.borrow().contains_key("Option__i64")
@@ -903,6 +911,49 @@ fn emit_intent_deque_helpers_c_body(out: &mut String, has_option_i64: bool) {
 }
 
 /// Walk the program for any `HashSet<i64>` type usage.
+pub(crate) fn program_uses_i64_pool(program: &TypedProgram) -> bool {
+    fn ty_uses(ty: &Type) -> bool {
+        match ty {
+            Type::Pool(element) if matches!(**element, Type::I64) => true,
+            Type::Handle(element) if matches!(**element, Type::I64) => true,
+            Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner) => ty_uses(inner),
+            _ => false,
+        }
+    }
+    fn stmt_uses(s: &crate::ir::TypedStmt) -> bool {
+        use crate::ir::TypedStmt as S;
+        match s {
+            S::Let { ty, .. } | S::Reassign { ty, .. } | S::Drop { ty, .. } => ty_uses(ty),
+            S::If { then_body, else_body, .. } => {
+                then_body.iter().any(stmt_uses) || else_body.iter().any(stmt_uses)
+            }
+            S::While { body, .. } | S::For { body, .. } | S::ForIter { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        if ty_uses(&f.return_type) {
+            return true;
+        }
+        for p in &f.params {
+            if ty_uses(&p.ty) {
+                return true;
+            }
+        }
+        for s in &f.body {
+            if stmt_uses(s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 pub(crate) fn program_uses_i64_hashset(program: &TypedProgram) -> bool {
     fn ty_uses(ty: &Type) -> bool {
         match ty {
@@ -947,6 +998,125 @@ fn stmt_uses_i64_hashset(stmt: &crate::ir::TypedStmt) -> bool {
         }
         _ => false,
     }
+}
+
+/// Layer 2 of `unsafe.md` — `Pool<i64>` / `Handle<i64>`
+/// runtime helpers. Generational slot pool.
+///
+/// `intent_pool_i64`: `{ int64_t* slots; uint32_t* generations;
+///                       uint32_t* free_list; size_t len;
+///                       size_t capacity; size_t free_count; }`.
+/// `intent_handle_i64`: `{ uint32_t slot_idx; uint32_t generation; }`
+/// (8 bytes total — same machine width as a pointer on 64-bit).
+///
+/// Operations:
+/// - `pool_new` zero-inits the struct (all pointers NULL).
+/// - `pool_alloc` reuses a free-list slot when available; else
+///   appends a new slot (doubling capacity on demand). Every
+///   newly-allocated-or-reused slot has its generation set to
+///   the next nonzero value (starting at 1; zero is reserved
+///   for "this slot has never been allocated"). Returns
+///   `{slot_idx, generation}` — the handle.
+/// - `pool_get` checks `slot_idx < len && generations[slot_idx]
+///   == handle.generation`. On match → `Option::Some(value)`. On
+///   mismatch → `Option::None` (the load-bearing UAF /
+///   double-free signal).
+/// - `pool_free` checks the same generation predicate. On match,
+///   bumps the slot's generation (so any surviving handle to
+///   the slot will see a mismatch next time) and pushes the
+///   `slot_idx` onto `free_list`. On mismatch → silent no-op
+///   (double-free is harmless).
+/// - `intent_pool_i64_drop` frees the three heap arrays at
+///   scope exit (affine).
+///
+/// The Option<i64> return depends on the `Enum_Option__i64`
+/// typedef having been emitted by the enum-bundle pass. Same
+/// pattern as hashmap_get / btreeset_min / etc. The
+/// `has_option_i64` flag at the call site gates the bundle
+/// (and inhibits emission if Option<i64> isn't in the
+/// program — the bundle's `pool_get` returns Option<i64>, so
+/// without that decl in the registry, the program never
+/// actually exercises `pool_get` and we can omit it
+/// safely... but for simplicity we always emit the bundle
+/// when Pool<i64>/Handle<i64> appears, and rely on the
+/// Option__i64 monomorph being auto-registered by the
+/// pool_get-uses-Option pre-pass).
+fn emit_intent_pool_helpers_c_body(out: &mut String) {
+    out.push_str(
+        "typedef struct { uint32_t slot_idx; uint32_t generation; } intent_handle_i64;\n\
+         typedef struct { int64_t* slots; uint32_t* generations; uint32_t* free_list; size_t len; size_t capacity; size_t free_count; } intent_pool_i64;\n\
+         static INTENT_UNUSED intent_pool_i64 intent_pool_i64_new(void) {\n\
+         \x20 intent_pool_i64 p;\n\
+         \x20 p.slots = (int64_t*)0;\n\
+         \x20 p.generations = (uint32_t*)0;\n\
+         \x20 p.free_list = (uint32_t*)0;\n\
+         \x20 p.len = 0; p.capacity = 0; p.free_count = 0;\n\
+         \x20 return p;\n\
+         }\n\
+         static INTENT_UNUSED void intent_pool_i64_drop(intent_pool_i64* p) {\n\
+         \x20 if (p->slots) free(p->slots);\n\
+         \x20 if (p->generations) free(p->generations);\n\
+         \x20 if (p->free_list) free(p->free_list);\n\
+         \x20 p->slots = (int64_t*)0; p->generations = (uint32_t*)0; p->free_list = (uint32_t*)0;\n\
+         \x20 p->len = 0; p->capacity = 0; p->free_count = 0;\n\
+         }\n\
+         static INTENT_UNUSED void intent_pool_i64__grow(intent_pool_i64* p) {\n\
+         \x20 size_t new_cap = p->capacity == 0 ? 4 : p->capacity * 2;\n\
+         \x20 int64_t* slots = (int64_t*)realloc(p->slots, new_cap * sizeof(int64_t));\n\
+         \x20 uint32_t* gens = (uint32_t*)realloc(p->generations, new_cap * sizeof(uint32_t));\n\
+         \x20 uint32_t* freelist = (uint32_t*)realloc(p->free_list, new_cap * sizeof(uint32_t));\n\
+         \x20 if (!slots || !gens || !freelist) abort();\n\
+         \x20 /* Zero the newly-grown generation slots so the\n\
+         \x20  * first allocation into them starts at gen=1. */\n\
+         \x20 for (size_t i = p->capacity; i < new_cap; i++) gens[i] = 0;\n\
+         \x20 p->slots = slots; p->generations = gens; p->free_list = freelist;\n\
+         \x20 p->capacity = new_cap;\n\
+         }\n\
+         static INTENT_UNUSED intent_handle_i64 intent_pool_i64_alloc(intent_pool_i64* p, int64_t v) {\n\
+         \x20 intent_handle_i64 h;\n\
+         \x20 if (p->free_count > 0) {\n\
+         \x20   /* Reuse a free slot. Generation was bumped at\n\
+         \x20    * free time; just write the value back. */\n\
+         \x20   p->free_count--;\n\
+         \x20   uint32_t idx = p->free_list[p->free_count];\n\
+         \x20   p->slots[idx] = v;\n\
+         \x20   h.slot_idx = idx;\n\
+         \x20   h.generation = p->generations[idx];\n\
+         \x20   return h;\n\
+         \x20 }\n\
+         \x20 if (p->len == p->capacity) intent_pool_i64__grow(p);\n\
+         \x20 uint32_t idx = (uint32_t)p->len;\n\
+         \x20 p->slots[idx] = v;\n\
+         \x20 /* Fresh slot: bump generation from 0 to 1 so the\n\
+         \x20  * handle distinguishes from the never-allocated\n\
+         \x20  * sentinel. */\n\
+         \x20 p->generations[idx] = 1;\n\
+         \x20 p->len++;\n\
+         \x20 h.slot_idx = idx;\n\
+         \x20 h.generation = 1;\n\
+         \x20 return h;\n\
+         }\n\
+         static INTENT_UNUSED Enum_Option__i64 intent_pool_i64_get(const intent_pool_i64* p, intent_handle_i64 h) {\n\
+         \x20 Enum_Option__i64 r;\n\
+         \x20 if (h.slot_idx >= p->len || p->generations[h.slot_idx] != h.generation) {\n\
+         \x20   r.tag = 1; r.payload = 0; /* Option::None */\n\
+         \x20   return r;\n\
+         \x20 }\n\
+         \x20 r.tag = 0; /* Option::Some */\n\
+         \x20 r.payload = p->slots[h.slot_idx];\n\
+         \x20 return r;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_pool_i64_free(intent_pool_i64* p, intent_handle_i64 h) {\n\
+         \x20 /* Generation check turns double-free into a\n\
+         \x20  * silent no-op (and use-after-free in pool_get\n\
+         \x20  * into a None). */\n\
+         \x20 if (h.slot_idx >= p->len || p->generations[h.slot_idx] != h.generation) return 0;\n\
+         \x20 p->generations[h.slot_idx]++;\n\
+         \x20 p->free_list[p->free_count] = h.slot_idx;\n\
+         \x20 p->free_count++;\n\
+         \x20 return 0;\n\
+         }\n\n",
+    );
 }
 
 /// Data-structures roadmap Level 2 — HashSet<i64> runtime
@@ -8326,6 +8496,16 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
+            Type::Pool(_) => {
+                // Layer 2 of `unsafe.md` — affine handle: free
+                // the three heap arrays (slots / generations /
+                // free_list) at scope exit. The struct itself
+                // is stack-allocated; only the arrays live on
+                // the heap.
+                out.push_str("  intent_pool_i64_drop(&");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
             Type::Struct(struct_name) => {
                 // Auto-call the user's `Drop` impl when one
                 // exists. Two flavors:
@@ -11950,6 +12130,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        "pool_new" => "intent_pool_i64_new()".to_string(),
+        "pool_alloc" => format!(
+            "intent_pool_i64_alloc({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "pool_get" => format!(
+            "intent_pool_i64_get({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "pool_free" => format!(
+            "intent_pool_i64_free({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         "hashset_new" => "intent_hashset_i64_new()".to_string(),
         "hashset_insert" => format!(
             "intent_hashset_i64_insert({}, ({}))",
@@ -13835,10 +14031,10 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         Type::Ptr(_) => "/* *const T */",
         Type::PtrMut(_) => "/* *mut T */",
         // `Pool<T>` / `Handle<T>` — Layer 2 of `unsafe.md`.
-        // Per-T storage spellings (`intent_pool_<T>`,
-        // `intent_handle_<T>`) live in c_type_name once the
-        // codegen bundles land in Layer 2.1c. The placeholders
-        // keep the leaf-only fallback emitting valid C.
+        // V1: T = i64 only, so the leaf spelling is fixed at
+        // the i64 form. The bundle (`emit_intent_pool_helpers_c_body`)
+        // emits the typedef + helpers when the program uses
+        // Pool / Handle, gated by `program_uses_i64_pool`.
         Type::Pool(_) => "intent_pool_i64",
         Type::Handle(_) => "intent_handle_i64",
     }

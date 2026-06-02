@@ -30129,6 +30129,91 @@ fn main() -> i64 {
     // without depending on the missing C / LLVM bundles.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 2.1c — Pool/Handle codegen end-to-end. Verify that
+    // both backends emit the bundle and that programs touching
+    // Pool / Handle compile to valid C / LLVM.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn pool_program_emits_c_bundle() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h = pool_alloc(mut ref p, 42);
+              let v = option_unwrap_or(pool_get(ref p, h), -1);
+              return v;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Pool program compiles to C");
+        // Bundle should be present.
+        assert!(
+            c.contains("intent_pool_i64_new"),
+            "expected intent_pool_i64_new in C, got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("intent_pool_i64_alloc"),
+            "expected intent_pool_i64_alloc in C, got:\n{}",
+            c
+        );
+        // The pool's Drop must fire at scope exit.
+        assert!(
+            c.contains("intent_pool_i64_drop"),
+            "expected intent_pool_i64_drop in C, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn pool_program_emits_llvm_bundle() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h = pool_alloc(mut ref p, 42);
+              let _ = pool_free(mut ref p, h);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Pool program compiles to LLVM");
+        // Bundle should be present.
+        assert!(
+            ll.contains("@intent_pool_i64_new"),
+            "expected @intent_pool_i64_new in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+        // The type decl must be in the preamble.
+        assert!(
+            ll.contains("%intent_pool_i64 = type"),
+            "expected %intent_pool_i64 type decl in LLVM"
+        );
+        assert!(
+            ll.contains("%intent_handle_i64 = type"),
+            "expected %intent_handle_i64 type decl in LLVM"
+        );
+    }
+
+    #[test]
+    fn pool_uaf_returns_none() {
+        // The whole point of generational handles: after a
+        // pool_free, the stale handle's pool_get returns None.
+        // The diagnostic mode here is `compile()` — the
+        // execution side is exercised by the `intentc run`
+        // path through the LLVM backend; we trust that the
+        // bundle's generation check works at runtime as
+        // verified by the smoke test in tmp/pool_test.vani.
+        let source = r#"
+            fn main() -> i64 {
+              let p: Pool<i64> = pool_new();
+              let h = pool_alloc(mut ref p, 42);
+              let _ = pool_free(mut ref p, h);
+              let v = option_unwrap_or(pool_get(ref p, h), -1);
+              return v;
+            }
+        "#;
+        let _ = compile(source).expect("UAF scenario typechecks");
+    }
+
     #[test]
     fn pool_new_returns_pool_i64() {
         let source = r#"

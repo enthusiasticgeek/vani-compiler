@@ -771,7 +771,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // SkipList<i64> (closure #331 + tail tracker in #341):
     //   0..6 as in #331 (keys, forward, node_levels, rng_state, num_nodes, capacity, num_keys)
     //   7: tail_node (i64) — index of the rightmost (highest-key) node, -1 if empty
-    out.push_str("%intent_skiplist_i64 = type { i64*, i32*, i32*, i64, i64, i64, i64, i64 }\n\n");
+    out.push_str("%intent_skiplist_i64 = type { i64*, i32*, i32*, i64, i64, i64, i64, i64 }\n");
+    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>.
+    //   intent_handle_i64: { i32 slot_idx; i32 generation; } — 8 bytes total.
+    //   intent_pool_i64:   { i64* slots; i32* generations; i32* free_list;
+    //                        i64 len; i64 capacity; i64 free_count; }
+    out.push_str("%intent_handle_i64 = type { i32, i32 }\n");
+    out.push_str("%intent_pool_i64 = type { i64*, i32*, i32*, i64, i64, i64 }\n\n");
 
     emit_intent_str_concat_definition(&mut out);
     emit_intent_str_trim_definition(&mut out);
@@ -1059,6 +1065,14 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // HashSet<i64> helpers (closure #304). Gated on actual use.
     if crate::backend_c::program_uses_i64_hashset(program) {
         emit_intent_hashset_i64_helpers_llvm(&mut out);
+    }
+
+    // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>.
+    // Gated on actual use. `pool_get` returns `Enum_Option__i64`,
+    // so the Option__i64 monomorph's typedef must precede the
+    // bundle in IR order.
+    if crate::backend_c::program_uses_i64_pool(program) {
+        emit_intent_pool_i64_helpers_llvm(&mut out);
     }
 
     // HashMap<i64, i64> helpers (closure #305).
@@ -1825,6 +1839,18 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
                     out.push_str(&format!(
                         "  call void @intent_hashset_i64_drop(%intent_hashset_i64* {})\n",
+                        addr
+                    ));
+                }
+                return;
+            }
+            // Layer 2 of `unsafe.md` — Pool<i64> Drop: free the
+            // three heap arrays (slots / generations / free_list)
+            // at scope exit. Handle<T> is Copy and has no Drop.
+            if matches!(ty, Type::Pool(_)) {
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    out.push_str(&format!(
+                        "  call void @intent_pool_i64_drop(%intent_pool_i64* {})\n",
                         addr
                     ));
                 }
@@ -7894,6 +7920,47 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call %Enum_Option__i64 @intent_skiplist_i64_{}(%intent_skiplist_i64* {})\n",
                     dest, suffix, sl
+                ));
+                return dest;
+            }
+            // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
+            // builtins. Call outlined helpers emitted at module
+            // scope by `emit_intent_pool_i64_helpers_llvm`.
+            if name == "pool_new" {
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_pool_i64 @intent_pool_i64_new()\n",
+                    dest
+                ));
+                return dest;
+            }
+            if name == "pool_alloc" {
+                let p = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_handle_i64 @intent_pool_i64_alloc(%intent_pool_i64* {}, i64 {})\n",
+                    dest, p, v
+                ));
+                return dest;
+            }
+            if name == "pool_get" {
+                let p = emit_expr(&args[0], ctx, out);
+                let h = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %Enum_Option__i64 @intent_pool_i64_get(%intent_pool_i64* {}, %intent_handle_i64 {})\n",
+                    dest, p, h
+                ));
+                return dest;
+            }
+            if name == "pool_free" {
+                let p = emit_expr(&args[0], ctx, out);
+                let h = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_pool_i64_free(%intent_pool_i64* {}, %intent_handle_i64 {})\n",
+                    dest, p, h
                 ));
                 return dest;
             }
@@ -27291,6 +27358,225 @@ fn emit_intent_skiplist_i64_helpers_llvm(out: &mut String, has_option_i64: bool)
     out.push_str("}\n\n");
 }
 
+/// Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> runtime
+/// helpers in LLVM IR. Mirror of the C bundle in
+/// `backend_c.rs`'s `emit_intent_pool_helpers_c_body`.
+///
+/// Struct layouts:
+/// - `%intent_pool_i64 = type { i64*, i32*, i32*, i64, i64, i64 }`
+///   fields: slots, generations, free_list, len, capacity, free_count
+/// - `%intent_handle_i64 = type { i32, i32 }`
+///   fields: slot_idx, generation
+///
+/// `Enum_Option__i64` is `{ i32 tag; i64 payload }` (auto-
+/// registered by the pool_get-uses-Option pre-pass). Tag 0 =
+/// Some, tag 1 = None.
+fn emit_intent_pool_i64_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "define %intent_pool_i64 @intent_pool_i64_new() {\n\
+         \x20 %r0 = insertvalue %intent_pool_i64 undef, i64* null, 0\n\
+         \x20 %r1 = insertvalue %intent_pool_i64 %r0, i32* null, 1\n\
+         \x20 %r2 = insertvalue %intent_pool_i64 %r1, i32* null, 2\n\
+         \x20 %r3 = insertvalue %intent_pool_i64 %r2, i64 0, 3\n\
+         \x20 %r4 = insertvalue %intent_pool_i64 %r3, i64 0, 4\n\
+         \x20 %r5 = insertvalue %intent_pool_i64 %r4, i64 0, 5\n\
+         \x20 ret %intent_pool_i64 %r5\n\
+         }\n\
+         define void @intent_pool_i64_drop(%intent_pool_i64* %p) {\n\
+         \x20 %sp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 0\n\
+         \x20 %gp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 1\n\
+         \x20 %fp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 2\n\
+         \x20 %slots = load i64*, i64** %sp\n\
+         \x20 %gens = load i32*, i32** %gp\n\
+         \x20 %fl = load i32*, i32** %fp\n\
+         \x20 %s_null = icmp eq i64* %slots, null\n\
+         \x20 br i1 %s_null, label %dr_check_g, label %dr_free_s\n\
+         dr_free_s:\n\
+         \x20 %s_i8 = bitcast i64* %slots to i8*\n\
+         \x20 call void @free(i8* %s_i8)\n\
+         \x20 br label %dr_check_g\n\
+         dr_check_g:\n\
+         \x20 %g_null = icmp eq i32* %gens, null\n\
+         \x20 br i1 %g_null, label %dr_check_f, label %dr_free_g\n\
+         dr_free_g:\n\
+         \x20 %g_i8 = bitcast i32* %gens to i8*\n\
+         \x20 call void @free(i8* %g_i8)\n\
+         \x20 br label %dr_check_f\n\
+         dr_check_f:\n\
+         \x20 %f_null = icmp eq i32* %fl, null\n\
+         \x20 br i1 %f_null, label %dr_done, label %dr_free_f\n\
+         dr_free_f:\n\
+         \x20 %f_i8 = bitcast i32* %fl to i8*\n\
+         \x20 call void @free(i8* %f_i8)\n\
+         \x20 br label %dr_done\n\
+         dr_done:\n\
+         \x20 store i64* null, i64** %sp\n\
+         \x20 store i32* null, i32** %gp\n\
+         \x20 store i32* null, i32** %fp\n\
+         \x20 %lp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 3\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 %cp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 4\n\
+         \x20 store i64 0, i64* %cp\n\
+         \x20 %fc = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %fc\n\
+         \x20 ret void\n\
+         }\n\
+         define internal void @intent_pool_i64__grow(%intent_pool_i64* %p) {\n\
+         \x20 %sp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 0\n\
+         \x20 %gp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 1\n\
+         \x20 %fp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 2\n\
+         \x20 %cp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 4\n\
+         \x20 %old_slots = load i64*, i64** %sp\n\
+         \x20 %old_gens = load i32*, i32** %gp\n\
+         \x20 %old_fl = load i32*, i32** %fp\n\
+         \x20 %old_cap = load i64, i64* %cp\n\
+         \x20 %is_zero = icmp eq i64 %old_cap, 0\n\
+         \x20 %dbl = mul i64 %old_cap, 2\n\
+         \x20 %new_cap = select i1 %is_zero, i64 4, i64 %dbl\n\
+         \x20 %slots_i8 = bitcast i64* %old_slots to i8*\n\
+         \x20 %gens_i8 = bitcast i32* %old_gens to i8*\n\
+         \x20 %fl_i8 = bitcast i32* %old_fl to i8*\n\
+         \x20 %slot_bytes = mul i64 %new_cap, 8\n\
+         \x20 %gen_bytes = mul i64 %new_cap, 4\n\
+         \x20 %fl_bytes = mul i64 %new_cap, 4\n\
+         \x20 %new_slots_i8 = call i8* @realloc(i8* %slots_i8, i64 %slot_bytes)\n\
+         \x20 %new_gens_i8 = call i8* @realloc(i8* %gens_i8, i64 %gen_bytes)\n\
+         \x20 %new_fl_i8 = call i8* @realloc(i8* %fl_i8, i64 %fl_bytes)\n\
+         \x20 %new_slots = bitcast i8* %new_slots_i8 to i64*\n\
+         \x20 %new_gens = bitcast i8* %new_gens_i8 to i32*\n\
+         \x20 %new_fl = bitcast i8* %new_fl_i8 to i32*\n\
+         \x20 ; Zero newly-grown generation slots so the first\n\
+         \x20 ; allocation into them starts at gen=1.\n\
+         \x20 %zi_p = alloca i64\n\
+         \x20 store i64 %old_cap, i64* %zi_p\n\
+         \x20 br label %gz_loop\n\
+         gz_loop:\n\
+         \x20 %zi = load i64, i64* %zi_p\n\
+         \x20 %zi_cont = icmp slt i64 %zi, %new_cap\n\
+         \x20 br i1 %zi_cont, label %gz_body, label %gz_done\n\
+         gz_body:\n\
+         \x20 %gcell = getelementptr i32, i32* %new_gens, i64 %zi\n\
+         \x20 store i32 0, i32* %gcell\n\
+         \x20 %zi_n = add i64 %zi, 1\n\
+         \x20 store i64 %zi_n, i64* %zi_p\n\
+         \x20 br label %gz_loop\n\
+         gz_done:\n\
+         \x20 store i64* %new_slots, i64** %sp\n\
+         \x20 store i32* %new_gens, i32** %gp\n\
+         \x20 store i32* %new_fl, i32** %fp\n\
+         \x20 store i64 %new_cap, i64* %cp\n\
+         \x20 ret void\n\
+         }\n\
+         define %intent_handle_i64 @intent_pool_i64_alloc(%intent_pool_i64* %p, i64 %v) {\n\
+         \x20 %sp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 0\n\
+         \x20 %gp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 1\n\
+         \x20 %fp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 2\n\
+         \x20 %lp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 4\n\
+         \x20 %fcp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 5\n\
+         \x20 %fc = load i64, i64* %fcp\n\
+         \x20 %has_free = icmp ugt i64 %fc, 0\n\
+         \x20 br i1 %has_free, label %al_reuse, label %al_check_grow\n\
+         al_reuse:\n\
+         \x20 %fc_dec = sub i64 %fc, 1\n\
+         \x20 store i64 %fc_dec, i64* %fcp\n\
+         \x20 %fl1 = load i32*, i32** %fp\n\
+         \x20 %fl_cell = getelementptr i32, i32* %fl1, i64 %fc_dec\n\
+         \x20 %ridx = load i32, i32* %fl_cell\n\
+         \x20 %ridx64 = zext i32 %ridx to i64\n\
+         \x20 %sl1 = load i64*, i64** %sp\n\
+         \x20 %sl_cell = getelementptr i64, i64* %sl1, i64 %ridx64\n\
+         \x20 store i64 %v, i64* %sl_cell\n\
+         \x20 %gens1 = load i32*, i32** %gp\n\
+         \x20 %gen_cell = getelementptr i32, i32* %gens1, i64 %ridx64\n\
+         \x20 %rgen = load i32, i32* %gen_cell\n\
+         \x20 %rh0 = insertvalue %intent_handle_i64 undef, i32 %ridx, 0\n\
+         \x20 %rh1 = insertvalue %intent_handle_i64 %rh0, i32 %rgen, 1\n\
+         \x20 ret %intent_handle_i64 %rh1\n\
+         al_check_grow:\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %full = icmp eq i64 %len, %cap\n\
+         \x20 br i1 %full, label %al_grow, label %al_append\n\
+         al_grow:\n\
+         \x20 call void @intent_pool_i64__grow(%intent_pool_i64* %p)\n\
+         \x20 br label %al_append\n\
+         al_append:\n\
+         \x20 %len2 = load i64, i64* %lp\n\
+         \x20 %idx32 = trunc i64 %len2 to i32\n\
+         \x20 %sl2 = load i64*, i64** %sp\n\
+         \x20 %sl_cell2 = getelementptr i64, i64* %sl2, i64 %len2\n\
+         \x20 store i64 %v, i64* %sl_cell2\n\
+         \x20 %gens2 = load i32*, i32** %gp\n\
+         \x20 %gen_cell2 = getelementptr i32, i32* %gens2, i64 %len2\n\
+         \x20 store i32 1, i32* %gen_cell2\n\
+         \x20 %len_n = add i64 %len2, 1\n\
+         \x20 store i64 %len_n, i64* %lp\n\
+         \x20 %nh0 = insertvalue %intent_handle_i64 undef, i32 %idx32, 0\n\
+         \x20 %nh1 = insertvalue %intent_handle_i64 %nh0, i32 1, 1\n\
+         \x20 ret %intent_handle_i64 %nh1\n\
+         }\n\
+         define %Enum_Option__i64 @intent_pool_i64_get(%intent_pool_i64* %p, %intent_handle_i64 %h) {\n\
+         \x20 %slot_idx = extractvalue %intent_handle_i64 %h, 0\n\
+         \x20 %h_gen = extractvalue %intent_handle_i64 %h, 1\n\
+         \x20 %slot64 = zext i32 %slot_idx to i64\n\
+         \x20 %lp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 3\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %oob = icmp uge i64 %slot64, %len\n\
+         \x20 br i1 %oob, label %gt_none, label %gt_check_gen\n\
+         gt_check_gen:\n\
+         \x20 %gp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 1\n\
+         \x20 %gens = load i32*, i32** %gp\n\
+         \x20 %gen_cell = getelementptr i32, i32* %gens, i64 %slot64\n\
+         \x20 %cur_gen = load i32, i32* %gen_cell\n\
+         \x20 %gen_match = icmp eq i32 %cur_gen, %h_gen\n\
+         \x20 br i1 %gen_match, label %gt_some, label %gt_none\n\
+         gt_some:\n\
+         \x20 %sp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 0\n\
+         \x20 %slots = load i64*, i64** %sp\n\
+         \x20 %sl_cell = getelementptr i64, i64* %slots, i64 %slot64\n\
+         \x20 %val = load i64, i64* %sl_cell\n\
+         \x20 %s0 = insertvalue %Enum_Option__i64 undef, i32 0, 0\n\
+         \x20 %s1 = insertvalue %Enum_Option__i64 %s0, i64 %val, 1\n\
+         \x20 ret %Enum_Option__i64 %s1\n\
+         gt_none:\n\
+         \x20 %n0 = insertvalue %Enum_Option__i64 undef, i32 1, 0\n\
+         \x20 %n1 = insertvalue %Enum_Option__i64 %n0, i64 0, 1\n\
+         \x20 ret %Enum_Option__i64 %n1\n\
+         }\n\
+         define i64 @intent_pool_i64_free(%intent_pool_i64* %p, %intent_handle_i64 %h) {\n\
+         \x20 %slot_idx = extractvalue %intent_handle_i64 %h, 0\n\
+         \x20 %h_gen = extractvalue %intent_handle_i64 %h, 1\n\
+         \x20 %slot64 = zext i32 %slot_idx to i64\n\
+         \x20 %lp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 3\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %oob = icmp uge i64 %slot64, %len\n\
+         \x20 br i1 %oob, label %fr_noop, label %fr_check_gen\n\
+         fr_check_gen:\n\
+         \x20 %gp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 1\n\
+         \x20 %gens = load i32*, i32** %gp\n\
+         \x20 %gen_cell = getelementptr i32, i32* %gens, i64 %slot64\n\
+         \x20 %cur_gen = load i32, i32* %gen_cell\n\
+         \x20 %gen_match = icmp eq i32 %cur_gen, %h_gen\n\
+         \x20 br i1 %gen_match, label %fr_bump, label %fr_noop\n\
+         fr_bump:\n\
+         \x20 %new_gen = add i32 %cur_gen, 1\n\
+         \x20 store i32 %new_gen, i32* %gen_cell\n\
+         \x20 %fcp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 5\n\
+         \x20 %fc = load i64, i64* %fcp\n\
+         \x20 %fp = getelementptr %intent_pool_i64, %intent_pool_i64* %p, i32 0, i32 2\n\
+         \x20 %fl = load i32*, i32** %fp\n\
+         \x20 %fl_cell = getelementptr i32, i32* %fl, i64 %fc\n\
+         \x20 store i32 %slot_idx, i32* %fl_cell\n\
+         \x20 %fc_n = add i64 %fc, 1\n\
+         \x20 store i64 %fc_n, i64* %fcp\n\
+         \x20 br label %fr_noop\n\
+         fr_noop:\n\
+         \x20 ret i64 0\n\
+         }\n\n",
+    );
+}
+
 /// Data-structures roadmap Level 2 — HashSet<i64> runtime
 /// helpers. Open-addressing linear probing with empty(0) /
 /// occupied(1) tags. Grow doubles capacity at 50% load.
@@ -33031,6 +33317,12 @@ fn is_scalar(ty: &Type) -> bool {
         // pointer value, same uniform Let path as fn-ptrs.
         // Layer 1.1+ of `unsafe.md`.
         || matches!(ty, Type::Ptr(_) | Type::PtrMut(_))
+        // `Pool<T>` and `Handle<T>` — Layer 2 of `unsafe.md`.
+        // Both lower to named LLVM struct types (`%intent_pool_i64`
+        // / `%intent_handle_i64`); the uniform scalar Let path
+        // alloc-and-stores the struct value just like
+        // `Channel<T, N>` does.
+        || matches!(ty, Type::Pool(_) | Type::Handle(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33075,6 +33367,11 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         Type::Graph => "%intent_graph",
         Type::Trie => "%intent_trie",
         Type::SkipList => "%intent_skiplist_i64",
+        // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
+        // lower to named struct types declared in the module
+        // preamble. Same shape as HashSet / Channel / etc.
+        Type::Pool(_) => "%intent_pool_i64",
+        Type::Handle(_) => "%intent_handle_i64",
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",
