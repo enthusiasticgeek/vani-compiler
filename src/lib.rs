@@ -3,6 +3,7 @@ pub mod backend;
 pub mod backend_c;
 pub mod backend_llvm;
 pub mod checker;
+pub mod deviations;
 pub mod diagnostic;
 pub mod format;
 pub mod ir;
@@ -30207,6 +30208,173 @@ fn main() -> i64 {
     // with the block boundary providing the natural scope-exit
     // drop. The no-escape dataflow on ArenaRef still fires.
     // -----------------------------------------------------------------
+
+    // -----------------------------------------------------------------
+    // T1.1 — `intentc deviations` extractor. Walks the
+    // `TypedStmt::UnsafeBlock { reason, ... }` nodes and emits
+    // structured records (file, line, prefix, reason,
+    // function, target_standard) in CSV / JSON / text formats.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn deviations_extracts_each_unsafe_block() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn first() -> i64 {
+              unsafe(reason = "MMIO: GPIOA::ODR write") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn second() -> i64 {
+              unsafe(reason = "FFI: vendor SDK callback") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("two unsafe blocks compile");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        assert_eq!(deviations.len(), 2, "expected 2 deviations, got {:?}", deviations);
+        assert_eq!(deviations[0].prefix, "MMIO");
+        assert_eq!(deviations[0].reason, "MMIO: GPIOA::ODR write");
+        assert_eq!(deviations[0].function, "first");
+        assert_eq!(deviations[1].prefix, "FFI");
+        assert_eq!(deviations[1].function, "second");
+        // Standard is "none" in v1; will populate when composites
+        // land in T1.4+.
+        assert_eq!(deviations[0].target_standard, "none");
+    }
+
+    #[test]
+    fn deviations_csv_format_well_formed() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn f() -> i64 {
+              unsafe(reason = "DMA: descriptor walk") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        let csv = crate::deviations::format_csv(&deviations);
+        assert!(csv.starts_with("file,line,column,prefix,reason,function,target_standard\n"));
+        assert!(csv.contains(",DMA,DMA: descriptor walk,f,none\n"));
+    }
+
+    #[test]
+    fn deviations_csv_escapes_commas() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn f() -> i64 {
+              unsafe(reason = "ad-hoc tweak, no category") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        let csv = crate::deviations::format_csv(&deviations);
+        // Reason contains a comma — must be quote-escaped.
+        assert!(
+            csv.contains("\"ad-hoc tweak, no category\""),
+            "expected quoted comma-containing reason in CSV, got:\n{}",
+            csv
+        );
+    }
+
+    #[test]
+    fn deviations_json_format_well_formed() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn f() -> i64 {
+              unsafe(reason = "transmute: punning bit pattern") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        let json = crate::deviations::format_json(&deviations);
+        assert!(json.starts_with("{\"deviations\":["));
+        assert!(json.contains("\"prefix\":\"transmute\""));
+        assert!(json.contains("\"function\":\"f\""));
+        assert!(json.contains("\"target_standard\":\"none\""));
+        assert!(json.ends_with("]}\n"));
+    }
+
+    #[test]
+    fn deviations_unknown_prefix_is_other() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn f() -> i64 {
+              unsafe(reason = "startup tweak that doesn't fit a category") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        assert_eq!(deviations[0].prefix, "other");
+    }
+
+    #[test]
+    fn deviations_empty_program_yields_nothing() {
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("trivial main compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        assert!(deviations.is_empty());
+        let text = crate::deviations::format_text(&deviations);
+        assert_eq!(text, "no unsafe deviations found\n");
+    }
+
+    #[test]
+    fn deviations_walks_nested_blocks() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // An unsafe block nested inside an if-body. The walker
+        // must recurse.
+        let source = r#"
+            fn f(c: bool) -> i64 {
+              if c {
+                unsafe(reason = "MMIO: conditional write") {
+                  let _ = 0;
+                }
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let deviations = crate::deviations::extract_deviations(&checked.ir, &map);
+        assert_eq!(deviations.len(), 1);
+        assert_eq!(deviations[0].prefix, "MMIO");
+    }
 
     #[test]
     fn region_block_syntax_works_end_to_end() {

@@ -773,6 +773,15 @@ COMMANDS:
                                           type checking.
     ir <file.vani>                      Dump the typed IR (debug). Runs the
                                           checker; what the backends see.
+    deviations <file.vani> [--format=<csv|json|text>] [--out=<file>]
+                                          Extract every `unsafe(reason = \"...\")`
+                                          block as a structured deviation record.
+                                          The audit artifact for ASIL-D / DO-178C /
+                                          IEC 62304 / MISRA sign-off. Default
+                                          --format=text writes a human-readable
+                                          summary to stdout; --format=csv / json
+                                          produce machine-readable formats. With
+                                          --out, writes to that file instead.
     fmt <path>... [--check|--in-place]
                                           Pretty-print canonical source.
                                           // comments are preserved. Paths
@@ -1073,6 +1082,70 @@ fn run() -> Result<ExitCode, String> {
             let file = required_file(&args, 2, "ir")?;
             let checked = compile_path_or_report(&file)?;
             println!("{:#?}", checked.ir);
+            Ok(ExitCode::SUCCESS)
+        }
+        "deviations" => {
+            // T1.1 of the safety-standard alignment arc: extract
+            // every `unsafe(reason = "…")` block as a structured
+            // deviation record. The artifact reviewers need for
+            // ASIL-D / DO-178C / IEC 62304 / MISRA sign-off.
+            //
+            // Usage: intentc deviations <path> [--format=csv|json|text] [--out=<file>]
+            // Defaults: --format=text, --out=stdout.
+            let mut format = "text";
+            let mut out_path: Option<String> = None;
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if let Some(value) = arg.strip_prefix("--out=") {
+                    out_path = Some(value.to_string());
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'deviations' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'deviations' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let deviations = vani::deviations::extract_deviations(
+                &checked.ir,
+                &file_map,
+            );
+            let output = match format {
+                "csv" => vani::deviations::format_csv(&deviations),
+                "json" => vani::deviations::format_json(&deviations),
+                _ => vani::deviations::format_text(&deviations),
+            };
+            match out_path {
+                Some(p) => {
+                    fs::write(&p, &output).map_err(|e| {
+                        format!("failed to write '{}': {}", p, e)
+                    })?;
+                }
+                None => print!("{}", output),
+            }
             Ok(ExitCode::SUCCESS)
         }
         "test" => {
