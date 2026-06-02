@@ -6,6 +6,7 @@ pub mod checker;
 pub mod deviations;
 pub mod diagnostic;
 pub mod safety;
+pub mod stack_depth;
 pub mod format;
 pub mod ir;
 pub mod lexer;
@@ -30243,6 +30244,133 @@ fn main() -> i64 {
         } else {
             Err(diagnostics)
         }
+    }
+
+    // -----------------------------------------------------------------
+    // T1.3 — Stack-depth bound checker (`intentc stack-depth`).
+    // Per-function frame size estimate + call-graph traversal
+    // for max depth per entry-point. Recursion handling:
+    // `#[bounded(N)]` caps at N+1 frames; unbounded recursion
+    // (direct or via cycle) is reported as UNBOUNDED.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn stack_depth_leaf_function_frame() {
+        let source = r#"
+            fn leaf() -> i64 {
+              let x: i64 = 1;
+              return x;
+            }
+            fn main() -> i64 { return leaf(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let leaf = report.frames.iter().find(|f| f.name == "leaf").unwrap();
+        // 1 local i64 = 8 bytes + 32-byte prologue = 40 bytes.
+        assert!(
+            leaf.frame_bytes >= 32,
+            "expected at least the 32-byte prologue, got {}",
+            leaf.frame_bytes
+        );
+    }
+
+    #[test]
+    fn stack_depth_propagates_through_call_chain() {
+        let source = r#"
+            fn leaf() -> i64 { return 1; }
+            fn mid() -> i64 { return leaf(); }
+            fn main() -> i64 { return mid(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let main = report.entries.iter().find(|e| e.name == "main").unwrap();
+        let leaf = report.entries.iter().find(|e| e.name == "leaf").unwrap();
+        // main's depth must be strictly greater than leaf's
+        // (it accumulates mid + leaf on the call chain).
+        assert!(main.max_depth_bytes.unwrap() > leaf.max_depth_bytes.unwrap());
+        assert_eq!(main.chain, vec!["main", "mid", "leaf"]);
+    }
+
+    #[test]
+    fn stack_depth_bounded_recursion_caps_depth() {
+        let source = r#"
+            #[bounded(4)]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1) + 1;
+            }
+            fn main() -> i64 { return rec(3); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let rec = report.entries.iter().find(|e| e.name == "rec").unwrap();
+        // Bounded — depth is Some(_), not None.
+        assert!(
+            rec.max_depth_bytes.is_some(),
+            "bounded recursion should produce a bounded depth"
+        );
+    }
+
+    #[test]
+    fn stack_depth_unbounded_recursion_reports_none() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              return rec(n - 1) + 1;
+            }
+            fn main() -> i64 { return rec(3); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let rec = report.entries.iter().find(|e| e.name == "rec").unwrap();
+        assert_eq!(rec.max_depth_bytes, None);
+        assert!(rec.chain.iter().any(|c| c.contains("unbounded")));
+    }
+
+    #[test]
+    fn stack_depth_max_flag_detects_violation() {
+        let source = r#"
+            fn leaf() -> i64 {
+              let a: i64 = 0;
+              let b: i64 = 0;
+              let c: i64 = 0;
+              return a + b + c;
+            }
+            fn main() -> i64 { return leaf(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        // Set max to 1 byte — every entry-point should exceed.
+        let (out, failure) = crate::stack_depth::format_text(&report, Some(1));
+        assert!(failure, "expected --max=1 to flag at least one violation");
+        assert!(out.contains("EXCEEDS"));
+    }
+
+    #[test]
+    fn stack_depth_entry_filter_narrows_output() {
+        let source = r#"
+            fn one() -> i64 { return 1; }
+            fn two() -> i64 { return 2; }
+            fn main() -> i64 { return one() + two(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, Some("main"));
+        // Only "main" should appear in entries.
+        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.entries[0].name, "main");
+    }
+
+    #[test]
+    fn stack_depth_json_format_well_formed() {
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let json = crate::stack_depth::format_json(&report);
+        assert!(json.starts_with("{\"frames\":["));
+        assert!(json.contains("\"entries\":["));
+        assert!(json.contains("\"name\":\"main\""));
+        assert!(json.ends_with("]}\n"));
     }
 
     #[test]

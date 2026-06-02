@@ -782,6 +782,15 @@ COMMANDS:
                                           summary to stdout; --format=csv / json
                                           produce machine-readable formats. With
                                           --out, writes to that file instead.
+    stack-depth <file.vani> [--format=<csv|json|text>] [--max=<bytes>] [--entry=<fn>]
+                                          Per-function frame-size estimates +
+                                          max stack depth reachable from each
+                                          entry-point. Detects unbounded
+                                          recursion (or recursion via cycle).
+                                          With --max=<bytes>, exits 1 if any
+                                          entry-point exceeds the budget (or
+                                          is unbounded). With --entry=<fn>,
+                                          only reports for that entry-point.
     fmt <path>... [--check|--in-place]
                                           Pretty-print canonical source.
                                           // comments are preserved. Paths
@@ -1083,6 +1092,82 @@ fn run() -> Result<ExitCode, String> {
             let checked = compile_path_or_report(&file)?;
             println!("{:#?}", checked.ir);
             Ok(ExitCode::SUCCESS)
+        }
+        "stack-depth" => {
+            // T1.3 of safety-standard arc: per-function frame
+            // size estimates + max stack depth per entry-point.
+            // Usage: intentc stack-depth <path>
+            //          [--format=csv|json|text]
+            //          [--max=<bytes>]
+            //          [--entry=<fn>]
+            // Fails (exit 1) if --max is set and any entry-point
+            // exceeds it (or is unbounded).
+            let mut format = "text";
+            let mut max_bytes: Option<u64> = None;
+            let mut entry: Option<String> = None;
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if let Some(value) = arg.strip_prefix("--max=") {
+                    max_bytes = Some(value.parse::<u64>().map_err(|_| {
+                        format!("--max=<bytes> expects a non-negative integer, got '{}'", value)
+                    })?);
+                } else if let Some(value) = arg.strip_prefix("--entry=") {
+                    entry = Some(value.to_string());
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'stack-depth' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'stack-depth' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, _file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let report = vani::stack_depth::compute_stack_depths(
+                &checked.ir,
+                entry.as_deref(),
+            );
+            match format {
+                "csv" => {
+                    print!("{}", vani::stack_depth::format_csv(&report));
+                    Ok(ExitCode::SUCCESS)
+                }
+                "json" => {
+                    print!("{}", vani::stack_depth::format_json(&report));
+                    Ok(ExitCode::SUCCESS)
+                }
+                _ => {
+                    let (out, failure) =
+                        vani::stack_depth::format_text(&report, max_bytes);
+                    print!("{}", out);
+                    if failure {
+                        Ok(ExitCode::from(1))
+                    } else {
+                        Ok(ExitCode::SUCCESS)
+                    }
+                }
+            }
         }
         "deviations" => {
             // T1.1 of the safety-standard alignment arc: extract

@@ -10,7 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T1.2 of safety-standard arc
+**Last updated:** 2026-06-02 (**T1.3 of safety-standard arc
+shipped — Tier 1 COMPLETE.** Stack-depth bound checker via new
+`intentc stack-depth <path> [--max=<bytes>] [--entry=<fn>]
+[--format=text|json|csv]` subcommand. Per-function frame size
+estimate (sum of local-binding sizes + 32-byte prologue
+overhead, using a curated type → byte-size table) + call-graph
+traversal from each entry-point. Recursion handling:
+`#[bounded(N)]` caps at (N+1) frame copies; unbounded recursion
+(direct self-call or via cycle) reports `UNBOUNDED` and exits 1
+under `--max`. ASIL-D mandatory bound. Outputs match the
+established three-format pattern (text default, JSON for CI,
+CSV for spreadsheet review). **7 new lib tests** plus end-to-
+end smoke (multi-fn call chain, bounded vs unbounded recursion,
+--max violation detection, --entry filter, JSON well-formed).
+**1644 lib + 54 parity green.** **Tier 1 of safety-standard
+arc complete.** Continuing into Tier 2 (Mmio + #[interrupt] +
+#[no_float] + complexity warn + #[no_recursion] strict +
+ptr-arith diagnostic) per the locked execution order.)
+
+**Prior:** 2026-06-02 (**T1.2 of safety-standard arc
 shipped — `#[no_heap]` attribute + `INTENT_NO_HEAP=1` global
 mode.** Function attribute reject any code path (transitive
 via call graph) that reaches a heap-allocating builtin: Vec
@@ -376,7 +395,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1637 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1644 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,
