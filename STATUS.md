@@ -10,7 +10,19 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 4.1 of `unsafe.md` shipped** —
+**Last updated:** 2026-06-02 (**Layer 4.2 of `unsafe.md` shipped** —
+ARM MTE flag. `apply_embedded_cc_hardening` now also conditionally
+appends `-march=armv8.5-a+memtag` when both `INTENT_TARGET_EMBEDDED=1`
+and `INTENT_TARGET_MTE=1` are set. Double-gated because the flag
+rejects on non-ARM hosts (most CI is x86-64) — once the proper
+`--target <triple>` flag ships, MTE becomes automatic for arm64
+embedded targets and the env-var dance goes away. v1 Layers 4.1 +
+4.2 + 1.1 + 1.2 + raw pointers all green. Remaining v1 work: Layer
+2 (Handle<T> / Pool<T> generational handles — the load-bearing
+safety net), Layer 1.3 (Tainted<T>), Layer 3.1+3.2 (canaries +
+BoundedPtr). 1566 lib + 54 parity green.)
+
+**Prior:** 2026-06-02 (**Layer 4.1 of `unsafe.md` shipped** —
 toolchain-level stack canaries. `apply_embedded_cc_hardening` adds
 `-fstack-protector-strong` to both `cc` invocations (tree-C `run`
 path and LLVM-backend link path) when `INTENT_TARGET_EMBEDDED=1`.

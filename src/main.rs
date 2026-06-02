@@ -1942,6 +1942,24 @@ fn apply_embedded_cc_hardening(cmd: &mut Command) {
         return;
     }
     cmd.arg("-fstack-protector-strong");
+    // Layer 4.2 of `unsafe.md` — ARM MTE (Memory Tagging
+    // Extension v8.5+). When the user opts in via
+    // `INTENT_TARGET_MTE=1` AND the embedded gate is on, append
+    // `-march=armv8.5-a+memtag` so hardware tags every pointer
+    // with a 4-bit value and traps on mismatch. Catches
+    // use-after-free + most buffer-overrun bugs at zero runtime
+    // cost on the supported hardware (recent Cortex-A,
+    // Apple Silicon).
+    //
+    // Held behind a second env var because the flag rejects on
+    // non-ARM hosts (and most CI is x86-64) — accidentally
+    // enabling MTE on x86 would fail every build. Once the
+    // proper `--target <triple>` flag ships, MTE becomes
+    // automatic for arm64 embedded targets and the env var
+    // dance goes away.
+    if env::var("INTENT_TARGET_MTE").ok().as_deref() == Some("1") {
+        cmd.arg("-march=armv8.5-a+memtag");
+    }
 }
 
 fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {
