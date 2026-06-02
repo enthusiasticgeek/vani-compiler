@@ -5679,6 +5679,204 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closure #593: vec_chunks(ref xs, k) -> Vec<Vec<i64>>.
+            // Inline expansion to avoid a separate helper definition that
+            // would need its own gating on %intent_vec_vec_i64 emission.
+            if name == "vec_chunks" {
+                let xs = emit_expr(&args[0], ctx, out);
+                let k = emit_expr(&args[1], ctx, out);
+                let head = ctx.fresh_label("vch_head_");
+                let body_lbl = ctx.fresh_label("vch_body_");
+                let copy_head = ctx.fresh_label("vch_copy_head_");
+                let copy_body = ctx.fresh_label("vch_copy_body_");
+                let copy_fin = ctx.fresh_label("vch_copy_fin_");
+                let next_chunk = ctx.fresh_label("vch_next_");
+                let empty_block = ctx.fresh_label("vch_empty_");
+                let fin = ctx.fresh_label("vch_fin_");
+                // Load xs len.
+                let xlp = ctx.fresh_tmp();
+                let xn = ctx.fresh_tmp();
+                let k_bad = ctx.fresh_tmp();
+                let xn_zero = ctx.fresh_tmp();
+                let any_empty = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    xlp, xs
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", xn, xlp));
+                out.push_str(&format!("  {} = icmp sle i64 {}, 0\n", k_bad, k));
+                out.push_str(&format!("  {} = icmp eq i64 {}, 0\n", xn_zero, xn));
+                out.push_str(&format!("  {} = or i1 {}, {}\n", any_empty, k_bad, xn_zero));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", any_empty, empty_block, head
+                ));
+                // Empty path: return all-zero %intent_vec_vec_i64.
+                out.push_str(&format!("{}:\n", empty_block));
+                let e0 = ctx.fresh_tmp();
+                let e1 = ctx.fresh_tmp();
+                let e2 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 undef, %intent_vec_i64* null, 0\n", e0
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 0, 1\n", e1, e0
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 0, 2\n", e2, e1
+                ));
+                out.push_str(&format!("  br label %{}\n", fin));
+                out.push_str(&format!("{}:\n", head));
+                // num_chunks = (xn + k - 1) / k  (k > 0 guaranteed here).
+                let xn_pk_m1 = ctx.fresh_tmp();
+                let k_minus_1 = ctx.fresh_tmp();
+                let num_chunks = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sub i64 {}, 1\n", k_minus_1, k));
+                out.push_str(&format!("  {} = add i64 {}, {}\n", xn_pk_m1, xn, k_minus_1));
+                out.push_str(&format!("  {} = sdiv i64 {}, {}\n", num_chunks, xn_pk_m1, k));
+                // Allocate outer buffer (num_chunks * 24 bytes).
+                let bytes = ctx.fresh_tmp();
+                let buf_i8 = ctx.fresh_tmp();
+                let outer_buf = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 24\n", bytes, num_chunks));
+                out.push_str(&format!("  {} = call i8* @malloc(i64 {})\n", buf_i8, bytes));
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to %intent_vec_i64*\n", outer_buf, buf_i8
+                ));
+                // Load xs.data ptr once.
+                let xdp = ctx.fresh_tmp();
+                let xsrc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    xdp, xs
+                ));
+                out.push_str(&format!("  {} = load i64*, i64** {}\n", xsrc, xdp));
+                // Outer loop over chunks.
+                let i_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i64\n", i_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", i_p));
+                out.push_str(&format!("  br label %{}\n", body_lbl));
+                out.push_str(&format!("{}:\n", body_lbl));
+                let i = ctx.fresh_tmp();
+                let i_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", i, i_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", i_done, i, num_chunks));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", i_done, fin, next_chunk
+                ));
+                out.push_str(&format!("{}:\n", next_chunk));
+                // start = i * k; end = min(start+k, xn); clen = end - start.
+                let start = ctx.fresh_tmp();
+                let end_pre = ctx.fresh_tmp();
+                let end_cap = ctx.fresh_tmp();
+                let end = ctx.fresh_tmp();
+                let clen = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", start, i, k));
+                out.push_str(&format!("  {} = add i64 {}, {}\n", end_pre, start, k));
+                out.push_str(&format!("  {} = icmp ugt i64 {}, {}\n", end_cap, end_pre, xn));
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 {}\n", end, end_cap, xn, end_pre
+                ));
+                out.push_str(&format!("  {} = sub i64 {}, {}\n", clen, end, start));
+                // Allocate inner buf and copy elements.
+                let inner_bytes = ctx.fresh_tmp();
+                let inner_buf_i8 = ctx.fresh_tmp();
+                let inner_buf = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, 8\n", inner_bytes, clen));
+                out.push_str(&format!(
+                    "  {} = call i8* @malloc(i64 {})\n", inner_buf_i8, inner_bytes
+                ));
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to i64*\n", inner_buf, inner_buf_i8
+                ));
+                let j_p = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca i64\n", j_p));
+                out.push_str(&format!("  store i64 0, i64* {}\n", j_p));
+                out.push_str(&format!("  br label %{}\n", copy_head));
+                out.push_str(&format!("{}:\n", copy_head));
+                let j = ctx.fresh_tmp();
+                let j_done = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", j, j_p));
+                out.push_str(&format!("  {} = icmp uge i64 {}, {}\n", j_done, j, clen));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", j_done, copy_fin, copy_body
+                ));
+                out.push_str(&format!("{}:\n", copy_body));
+                let src_idx = ctx.fresh_tmp();
+                let src_slot = ctx.fresh_tmp();
+                let val = ctx.fresh_tmp();
+                let dst_slot = ctx.fresh_tmp();
+                let j_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, {}\n", src_idx, start, j));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", src_slot, xsrc, src_idx
+                ));
+                out.push_str(&format!("  {} = load i64, i64* {}\n", val, src_slot));
+                out.push_str(&format!(
+                    "  {} = getelementptr i64, i64* {}, i64 {}\n", dst_slot, inner_buf, j
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", val, dst_slot));
+                out.push_str(&format!("  {} = add i64 {}, 1\n", j_inc, j));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", j_inc, j_p));
+                out.push_str(&format!("  br label %{}\n", copy_head));
+                out.push_str(&format!("{}:\n", copy_fin));
+                // Write the inner struct (3 fields) into outer.data[i].
+                let outer_slot = ctx.fresh_tmp();
+                let inner_dp = ctx.fresh_tmp();
+                let inner_lp = ctx.fresh_tmp();
+                let inner_cp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i64 {}\n",
+                    outer_slot, outer_buf, i
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
+                    inner_dp, outer_slot
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 1\n",
+                    inner_lp, outer_slot
+                ));
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 2\n",
+                    inner_cp, outer_slot
+                ));
+                out.push_str(&format!("  store i64* {}, i64** {}\n", inner_buf, inner_dp));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", clen, inner_lp));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", clen, inner_cp));
+                let i_inc = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", i_inc, i));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", i_inc, i_p));
+                out.push_str(&format!("  br label %{}\n", body_lbl));
+                // Final: construct the outer struct via insertvalue.
+                out.push_str(&format!("{}:\n", fin));
+                let r0 = ctx.fresh_tmp();
+                let r1 = ctx.fresh_tmp();
+                let r2 = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                // Use phi to pick between empty-path buf (null/0) and built-up buf.
+                let buf_phi = ctx.fresh_tmp();
+                let nc_phi = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi %intent_vec_i64* [ null, %{} ], [ {}, %{} ]\n",
+                    buf_phi, empty_block, outer_buf, body_lbl
+                ));
+                out.push_str(&format!(
+                    "  {} = phi i64 [ 0, %{} ], [ {}, %{} ]\n",
+                    nc_phi, empty_block, num_chunks, body_lbl
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 undef, %intent_vec_i64* {}, 0\n",
+                    r0, buf_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 {}, 1\n", r1, r0, nc_phi
+                ));
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_vec_vec_i64 {}, i64 {}, 2\n", r2, r1, nc_phi
+                ));
+                let _ = (e0, e1, e2, dest);
+                return r2;
+            }
             // Closure #564: vec_dedup_consecutive(ref xs) -> Vec<i64>.
             if name == "vec_dedup_consecutive" {
                 let xs = emit_expr(&args[0], ctx, out);

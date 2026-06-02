@@ -526,6 +526,12 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_graph_vec_builtin(program) {
         emit_intent_vec_int64_utility_helpers_c(&mut body);
     }
+    // Closure #593: vec_chunks builds Vec<Vec<i64>>. Gated separately
+    // because the helper references intent_vec_vec_int64_t which is
+    // only emitted when the program uses Vec<Vec<i64>>.
+    if program_uses_vec_chunks(program) {
+        emit_intent_vec_chunks_helper_c(&mut body);
+    }
 
     // Closure #357: Option<i64> ergonomics — unwrap_or /
     // is_some / is_none. Emit when Option__i64 is in the
@@ -4703,6 +4709,116 @@ pub(crate) fn emit_intent_option_f64_helpers_c(out: &mut String) {
 ///   vec_extend(mut ref xs, ref ys) -> i64    appends ys to xs;
 ///                                            returns new len
 ///   vec_concat(ref xs, ref ys)     -> Vec<i64>   fresh xs ++ ys
+/// Closure #593: detect any `vec_chunks` call to gate the
+/// `intent_vec_vec_int64_t_chunks` helper emission. The helper
+/// references `intent_vec_vec_int64_t` which is only declared
+/// when the program uses Vec<Vec<i64>>, so gating is required.
+pub(crate) fn program_uses_vec_chunks(program: &TypedProgram) -> bool {
+    // Substring-on-emitted-IR gate, like other on-demand helpers.
+    // We can't directly inspect the typed program here without
+    // re-traversing — but since the helper is small and only
+    // matters when the symbol literally appears, we just walk
+    // function bodies looking for any "vec_chunks" name.
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        match &expr.kind {
+            E::Call { name, args, .. } => {
+                if name == "vec_chunks" { return true; }
+                args.iter().any(expr_uses)
+            }
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            E::IfExpr { cond, then_value, else_value } => {
+                expr_uses(cond) || expr_uses(then_value) || expr_uses(else_value)
+            }
+            E::Match { scrutinee, arms } => {
+                expr_uses(scrutinee) || arms.iter().any(|a| expr_uses(&a.body))
+            }
+            E::Block { stmts, tail } => {
+                stmts.iter().any(stmt_walk) || expr_uses(tail)
+            }
+            _ => false,
+        }
+    }
+    fn stmt_walk(s: &S) -> bool {
+        match s {
+            S::Let { expr, .. }
+            | S::Reassign { expr, .. }
+            | S::Return { expr }
+            | S::Assert { expr, .. }
+            | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|it| match it {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body, .. } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_walk)
+                    || else_body.iter().any(stmt_walk)
+            }
+            S::While { cond, body, .. } => {
+                expr_uses(cond) || body.iter().any(stmt_walk)
+            }
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_walk)
+            }
+            S::ForIter { body, .. } => body.iter().any(stmt_walk),
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        if f.body.iter().any(stmt_walk) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Emit the vec_chunks helper. References intent_vec_vec_int64_t,
+/// which is only in scope when the program uses Vec<Vec<i64>>.
+pub(crate) fn emit_intent_vec_chunks_helper_c(out: &mut String) {
+    out.push_str(
+        "static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_chunks(const intent_vec_int64_t* xs, int64_t k) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_chunks(const intent_vec_int64_t* xs, int64_t k) {\n\
+         \x20 intent_vec_vec_int64_t r; r.data = (intent_vec_int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0 || k <= 0) return r;\n\
+         \x20 uint64_t uk = (uint64_t)k;\n\
+         \x20 uint64_t num_chunks = (xs->len + uk - 1) / uk;\n\
+         \x20 r.capacity = num_chunks;\n\
+         \x20 r.data = (intent_vec_int64_t*)malloc(num_chunks * sizeof(intent_vec_int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < num_chunks; i++) {\n\
+         \x20   uint64_t start = i * uk;\n\
+         \x20   uint64_t end = start + uk;\n\
+         \x20   if (end > xs->len) end = xs->len;\n\
+         \x20   uint64_t clen = end - start;\n\
+         \x20   intent_vec_int64_t inner;\n\
+         \x20   inner.data = (int64_t*)malloc(clen * sizeof(int64_t));\n\
+         \x20   if (!inner.data) abort();\n\
+         \x20   for (uint64_t j = 0; j < clen; j++) inner.data[j] = xs->data[start + j];\n\
+         \x20   inner.len = clen;\n\
+         \x20   inner.capacity = clen;\n\
+         \x20   r.data[i] = inner;\n\
+         \x20 }\n\
+         \x20 r.len = num_chunks;\n\
+         \x20 return r;\n\
+         }\n\n"
+    );
+}
+
 pub(crate) fn emit_intent_vec_int64_utility_helpers_c(out: &mut String) {
     out.push_str(
         "static INTENT_UNUSED intent_vec_int64_t intent_vec_int64_t_range(int64_t lo, int64_t hi) INTENT_UNUSED;\n\
@@ -10717,6 +10833,12 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "vec_dedup_consecutive" => format!(
             "intent_vec_int64_t_dedup_consecutive({})",
             emit_expr(&args[0])
+        ),
+        // Closure #593: vec_chunks(ref xs, k) -> Vec<Vec<i64>>.
+        "vec_chunks" => format!(
+            "intent_vec_vec_int64_t_chunks({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
         ),
         // Closures #559-#561: 3-arg fresh-Vec builders.
         "vec_pad_left" | "vec_pad_right" | "vec_replace_value" => {

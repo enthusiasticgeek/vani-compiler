@@ -16022,6 +16022,20 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_chunks_typecheck_and_compile() {
+        // Closure #593: vec_chunks(xs, k) -> Vec<Vec<i64>> (Tier W).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let chunks: Vec<Vec<i64>> = vec_chunks(ref xs, 2);
+              return len(chunks) as i64;
+            }
+        "#;
+        compile_to_c(source).expect("vec_chunks must type-check");
+        compile_to_llvm(source).expect("vec_chunks must compile to LLVM");
+    }
+
+    #[test]
     fn rand_normal_typecheck_and_compile() {
         // Closure #592: rand_normal() — Box-Muller standard normal.
         let source = r#"
