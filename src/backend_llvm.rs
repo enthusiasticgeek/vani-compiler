@@ -302,6 +302,9 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // machine representation as the underlying T.
         // V1: only Tainted<i64> is producible.
         Type::Tainted(inner) => llvm_byte_size(inner),
+        // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Three
+        // 8-byte fields: {data, len, capacity} = 24 bytes.
+        Type::BoundedPtr(_) => 24,
     }
 }
 
@@ -781,7 +784,10 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     //   intent_pool_i64:   { i64* slots; i32* generations; i32* free_list;
     //                        i64 len; i64 capacity; i64 free_count; }
     out.push_str("%intent_handle_i64 = type { i32, i32 }\n");
-    out.push_str("%intent_pool_i64 = type { i64*, i32*, i32*, i64, i64, i64 }\n\n");
+    out.push_str("%intent_pool_i64 = type { i64*, i32*, i32*, i64, i64, i64 }\n");
+    // Layer 3.2 of `unsafe.md` — BoundedPtr<i64>.
+    //   { i64* data; i64 len; i64 capacity; } — 24 bytes
+    out.push_str("%intent_bptr_i64 = type { i64*, i64, i64 }\n\n");
 
     emit_intent_str_concat_definition(&mut out);
     emit_intent_str_trim_definition(&mut out);
@@ -1085,6 +1091,10 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // magic words.
     if crate::backend_c::program_uses_unsafe_alloc(program) {
         emit_intent_unsafe_alloc_helpers_llvm(&mut out);
+    }
+    // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> helpers.
+    if crate::backend_c::program_uses_bptr(program) {
+        emit_intent_bptr_i64_helpers_llvm(&mut out);
     }
 
     // HashMap<i64, i64> helpers (closure #305).
@@ -7940,6 +7950,50 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // forward the operand's SSA value.
             if name == "taint" || name == "assert_safe" {
                 return emit_expr(&args[0], ctx, out);
+            }
+            // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> ops.
+            // Helpers emitted at module scope by
+            // `emit_intent_bptr_i64_helpers_llvm`.
+            if name == "bptr_new" {
+                let p = emit_expr(&args[0], ctx, out);
+                let len = emit_expr(&args[1], ctx, out);
+                let cap = emit_expr(&args[2], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %intent_bptr_i64 @intent_bptr_i64_new(i64* {}, i64 {}, i64 {})\n",
+                    dest, p, len, cap
+                ));
+                return dest;
+            }
+            if name == "bptr_get" {
+                let bp = emit_expr(&args[0], ctx, out);
+                let i = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %Enum_Option__i64 @intent_bptr_i64_get(%intent_bptr_i64* {}, i64 {})\n",
+                    dest, bp, i
+                ));
+                return dest;
+            }
+            if name == "bptr_set" {
+                let bp = emit_expr(&args[0], ctx, out);
+                let i = emit_expr(&args[1], ctx, out);
+                let v = emit_expr(&args[2], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i1 @intent_bptr_i64_set(%intent_bptr_i64* {}, i64 {}, i64 {})\n",
+                    dest, bp, i, v
+                ));
+                return dest;
+            }
+            if name == "bptr_len" {
+                let bp = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_bptr_i64_len(%intent_bptr_i64* {})\n",
+                    dest, bp
+                ));
+                return dest;
             }
             // Layer 3.1 of `unsafe.md` — canary-protected
             // heap allocation. Routes through helper bundle
@@ -27419,6 +27473,69 @@ fn emit_intent_skiplist_i64_helpers_llvm(out: &mut String, has_option_i64: bool)
     out.push_str("}\n\n");
 }
 
+/// Layer 3.2 of `unsafe.md` — `BoundedPtr<i64>` fat pointer
+/// helpers in LLVM IR. Mirror of
+/// `emit_intent_bptr_helpers_c_body`. Struct layout:
+///   `%intent_bptr_i64 = type { i64*, i64, i64 }` (data, len, capacity)
+fn emit_intent_bptr_i64_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "define %intent_bptr_i64 @intent_bptr_i64_new(i64* %p, i64 %len, i64 %cap) {\n\
+         \x20 ; Clamp negative len/cap to 0 (matches the C side's defensive cast).\n\
+         \x20 %len_neg = icmp slt i64 %len, 0\n\
+         \x20 %len_clamped = select i1 %len_neg, i64 0, i64 %len\n\
+         \x20 %cap_neg = icmp slt i64 %cap, 0\n\
+         \x20 %cap_clamped = select i1 %cap_neg, i64 0, i64 %cap\n\
+         \x20 %r0 = insertvalue %intent_bptr_i64 undef, i64* %p, 0\n\
+         \x20 %r1 = insertvalue %intent_bptr_i64 %r0, i64 %len_clamped, 1\n\
+         \x20 %r2 = insertvalue %intent_bptr_i64 %r1, i64 %cap_clamped, 2\n\
+         \x20 ret %intent_bptr_i64 %r2\n\
+         }\n\
+         define %Enum_Option__i64 @intent_bptr_i64_get(%intent_bptr_i64* %bp, i64 %i) {\n\
+         \x20 %neg = icmp slt i64 %i, 0\n\
+         \x20 br i1 %neg, label %bg_none, label %bg_check_upper\n\
+         bg_check_upper:\n\
+         \x20 %lp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 1\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %oob = icmp uge i64 %i, %len\n\
+         \x20 br i1 %oob, label %bg_none, label %bg_some\n\
+         bg_some:\n\
+         \x20 %dp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 0\n\
+         \x20 %data = load i64*, i64** %dp\n\
+         \x20 %cell = getelementptr i64, i64* %data, i64 %i\n\
+         \x20 %val = load i64, i64* %cell\n\
+         \x20 %s0 = insertvalue %Enum_Option__i64 undef, i32 0, 0\n\
+         \x20 %s1 = insertvalue %Enum_Option__i64 %s0, i64 %val, 1\n\
+         \x20 ret %Enum_Option__i64 %s1\n\
+         bg_none:\n\
+         \x20 %n0 = insertvalue %Enum_Option__i64 undef, i32 1, 0\n\
+         \x20 %n1 = insertvalue %Enum_Option__i64 %n0, i64 0, 1\n\
+         \x20 ret %Enum_Option__i64 %n1\n\
+         }\n\
+         define i1 @intent_bptr_i64_set(%intent_bptr_i64* %bp, i64 %i, i64 %v) {\n\
+         \x20 %neg = icmp slt i64 %i, 0\n\
+         \x20 br i1 %neg, label %bs_false, label %bs_check_upper\n\
+         bs_check_upper:\n\
+         \x20 %lp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 1\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 %oob = icmp uge i64 %i, %len\n\
+         \x20 br i1 %oob, label %bs_false, label %bs_store\n\
+         bs_store:\n\
+         \x20 %dp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 0\n\
+         \x20 %data = load i64*, i64** %dp\n\
+         \x20 %cell = getelementptr i64, i64* %data, i64 %i\n\
+         \x20 store i64 %v, i64* %cell\n\
+         \x20 ret i1 true\n\
+         bs_false:\n\
+         \x20 ret i1 false\n\
+         }\n\
+         define i64 @intent_bptr_i64_len(%intent_bptr_i64* %bp) {\n\
+         \x20 %lp = getelementptr %intent_bptr_i64, %intent_bptr_i64* %bp, i32 0, i32 1\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 ret i64 %len\n\
+         }\n\n",
+    );
+}
+
 /// Layer 3.1 of `unsafe.md` — canary-protected heap allocator
 /// in LLVM IR. Mirror of `emit_intent_unsafe_alloc_helpers_c_body`.
 /// Each allocation gets a 24-byte overhead:
@@ -33453,6 +33570,10 @@ fn is_scalar(ty: &Type) -> bool {
         // machine layout as the inner T (taint is a
         // type-level tag only). V1: T = i64.
         || matches!(ty, Type::Tainted(_))
+        // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Named
+        // LLVM struct type, same scalar-let alloca pattern
+        // as Pool / Handle.
+        || matches!(ty, Type::BoundedPtr(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33508,6 +33629,9 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         // recurse to `llvm_type(inner)` once Tainted wraps
         // more types.
         Type::Tainted(_) => "i64",
+        // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> lowers to
+        // a named struct.
+        Type::BoundedPtr(_) => "%intent_bptr_i64",
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",

@@ -617,6 +617,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_unsafe_alloc(program) {
         emit_intent_unsafe_alloc_helpers_c_body(&mut body);
     }
+    // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> fat pointer.
+    // The `bptr_get` builtin returns `Enum_Option__i64`; the
+    // auto-register pre-pass in checker.rs ensures the
+    // Option__i64 typedef is materialized before this bundle.
+    if program_uses_bptr(program) {
+        emit_intent_bptr_helpers_c_body(&mut body);
+    }
     if program_uses_i64_i64_hashmap(program) {
         let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
             r.borrow().contains_key("Option__i64")
@@ -919,6 +926,59 @@ fn emit_intent_deque_helpers_c_body(out: &mut String, has_option_i64: bool) {
 }
 
 /// Walk the program for any `HashSet<i64>` type usage.
+pub(crate) fn program_uses_bptr(program: &TypedProgram) -> bool {
+    fn ty_uses(ty: &Type) -> bool {
+        match ty {
+            Type::BoundedPtr(_) => true,
+            Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner) => ty_uses(inner),
+            _ => false,
+        }
+    }
+    fn expr_uses(e: &crate::ir::TypedExpr) -> bool {
+        use crate::ir::TypedExprKind as K;
+        if ty_uses(&e.ty) { return true; }
+        match &e.kind {
+            K::Call { name, args, .. } => {
+                matches!(name.as_str(), "bptr_new" | "bptr_get" | "bptr_set" | "bptr_len")
+                    || args.iter().any(expr_uses)
+            }
+            K::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            K::Unary { expr, .. } | K::Cast { expr, .. } => expr_uses(expr),
+            _ => false,
+        }
+    }
+    fn stmt_uses(s: &crate::ir::TypedStmt) -> bool {
+        use crate::ir::TypedStmt as S;
+        match s {
+            S::Let { ty, expr, .. } | S::Reassign { ty, expr, .. } => {
+                ty_uses(ty) || expr_uses(expr)
+            }
+            S::Drop { ty, .. } => ty_uses(ty),
+            S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond) || then_body.iter().any(stmt_uses) || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => body.iter().any(stmt_uses),
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        if ty_uses(&f.return_type) { return true; }
+        for p in &f.params { if ty_uses(&p.ty) { return true; } }
+        if f.body.iter().any(stmt_uses) { return true; }
+    }
+    false
+}
+
 pub(crate) fn program_uses_unsafe_alloc(program: &TypedProgram) -> bool {
     fn expr_uses(e: &crate::ir::TypedExpr) -> bool {
         use crate::ir::TypedExprKind as K;
@@ -1218,6 +1278,41 @@ fn emit_intent_unsafe_alloc_helpers_c_body(out: &mut String) {
          \x20 }\n\
          \x20 free(base);\n\
          \x20 return 0;\n\
+         }\n\n",
+    );
+}
+
+/// Layer 3.2 of `unsafe.md` — `BoundedPtr<i64>` fat pointer
+/// helpers. The struct wraps a raw pointer with its bounds:
+///   { int64_t* data; uint64_t len; uint64_t capacity; }
+///
+/// `bptr_get` / `bptr_set` are bounds-checked at runtime
+/// against `len`. Out-of-bounds reads return `Option::None`;
+/// out-of-bounds writes return `false` with no store performed.
+/// `capacity` is recorded for future-resize APIs (Layer 3.2+
+/// could add `bptr_with_capacity` / `bptr_push` patterns) but
+/// not yet exercised — `len` is the active bound for v1.
+fn emit_intent_bptr_helpers_c_body(out: &mut String) {
+    out.push_str(
+        "typedef struct { int64_t* data; uint64_t len; uint64_t capacity; } intent_bptr_i64;\n\
+         static INTENT_UNUSED intent_bptr_i64 intent_bptr_i64_new(int64_t* p, int64_t len, int64_t capacity) {\n\
+         \x20 intent_bptr_i64 bp;\n\
+         \x20 bp.data = p;\n\
+         \x20 bp.len = (uint64_t)(len < 0 ? 0 : len);\n\
+         \x20 bp.capacity = (uint64_t)(capacity < 0 ? 0 : capacity);\n\
+         \x20 return bp;\n\
+         }\n\
+         static INTENT_UNUSED Enum_Option__i64 intent_bptr_i64_get(const intent_bptr_i64* bp, int64_t i) {\n\
+         \x20 Enum_Option__i64 r;\n\
+         \x20 if (i < 0 || (uint64_t)i >= bp->len) { r.tag = 1; r.payload = 0; return r; }\n\
+         \x20 r.tag = 0; r.payload = bp->data[i]; return r;\n\
+         }\n\
+         static INTENT_UNUSED bool intent_bptr_i64_set(intent_bptr_i64* bp, int64_t i, int64_t v) {\n\
+         \x20 if (i < 0 || (uint64_t)i >= bp->len) return false;\n\
+         \x20 bp->data[i] = v; return true;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_bptr_i64_len(const intent_bptr_i64* bp) {\n\
+         \x20 return (int64_t)bp->len;\n\
          }\n\n",
     );
 }
@@ -12258,6 +12353,25 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // verify both at free time.
         "unsafe_alloc" => format!("intent_unsafe_alloc({})", emit_expr(&args[0])),
         "unsafe_free" => format!("intent_unsafe_free({})", emit_expr(&args[0])),
+        // Layer 3.2 of `unsafe.md` — BoundedPtr<i64> ops.
+        "bptr_new" => format!(
+            "intent_bptr_i64_new({}, ({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1]),
+            emit_expr(&args[2])
+        ),
+        "bptr_get" => format!(
+            "intent_bptr_i64_get({}, ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "bptr_set" => format!(
+            "intent_bptr_i64_set({}, ({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1]),
+            emit_expr(&args[2])
+        ),
+        "bptr_len" => format!("intent_bptr_i64_len({})", emit_expr(&args[0])),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
@@ -14172,6 +14286,10 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // `Tainted<i64>` is producible, so the leaf spelling
         // is fixed at `int64_t`.
         Type::Tainted(_) => "int64_t",
+        // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Fat
+        // pointer struct emitted by the bundle when the
+        // program actually uses it. V1: T = i64.
+        Type::BoundedPtr(_) => "intent_bptr_i64",
     }
 }
 
@@ -14485,7 +14603,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14528,7 +14646,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) => unreachable!("shift count must be an integer"),
     }
 }
 

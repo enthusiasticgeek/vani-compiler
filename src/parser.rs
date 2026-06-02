@@ -1705,6 +1705,16 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Tainted(Box::new(element)));
             }
+            // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Fat
+            // pointer with runtime bounds checks on the
+            // indexed-access path.
+            if name == "BoundedPtr" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::BoundedPtr(Box::new(element)));
+            }
             if name == "Atomic" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;

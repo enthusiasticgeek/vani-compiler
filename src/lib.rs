@@ -30179,6 +30179,102 @@ fn main() -> i64 {
     // both canaries and aborts on mismatch.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 3.2 — `BoundedPtr<T>` fat pointer. Wraps a raw
+    // pointer with len/capacity for runtime bounds checks.
+    // `bptr_get` returns `Option<i64>` (None on OOB); `bptr_set`
+    // returns `bool` (false on OOB, no store performed).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn bptr_new_returns_bounded_ptr_i64() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make(p: *mut i64, n: i64) -> BoundedPtr<i64> {
+              return bptr_new(p, n, n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("bptr_new returns BoundedPtr<i64>");
+    }
+
+    #[test]
+    fn bptr_get_returns_option_i64() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read(bp: ref BoundedPtr<i64>, i: i64) -> i64 {
+              return option_unwrap_or(bptr_get(bp, i), -1);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("bptr_get returns Option<i64>");
+    }
+
+    #[test]
+    fn bptr_set_requires_mut_ref() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad_write(bp: ref BoundedPtr<i64>, i: i64, v: i64) -> bool {
+              return bptr_set(bp, i, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("bptr_set on ref rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("mut ref")),
+            "expected mut-ref diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bptr_emits_helper_bundle_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make(p: *mut i64, n: i64) -> BoundedPtr<i64> {
+              return bptr_new(p, n, n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("BoundedPtr compiles to C");
+        assert!(
+            c.contains("intent_bptr_i64 ") || c.contains("intent_bptr_i64_new"),
+            "expected intent_bptr_i64 typedef + helper in C"
+        );
+    }
+
+    #[test]
+    fn bptr_emits_helper_bundle_in_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn make(p: *mut i64, n: i64) -> BoundedPtr<i64> {
+              return bptr_new(p, n, n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("BoundedPtr compiles to LLVM");
+        assert!(
+            ll.contains("%intent_bptr_i64 = type"),
+            "expected %intent_bptr_i64 type decl in LLVM"
+        );
+        assert!(
+            ll.contains("@intent_bptr_i64_new"),
+            "expected @intent_bptr_i64_new helper in LLVM"
+        );
+    }
+
+    #[test]
+    fn bptr_helpers_not_emitted_when_unused() {
+        let source = r#"
+            fn main() -> i64 { return 42; }
+        "#;
+        let c = compile_to_c(source).expect("trivial main compiles");
+        assert!(
+            !c.contains("intent_bptr_i64_new"),
+            "BoundedPtr helpers leaked into program that doesn't use them"
+        );
+    }
+
     #[test]
     fn unsafe_alloc_routes_through_canary_helper_in_c() {
         let _guard = EmbeddedTargetGuard::embedded();
