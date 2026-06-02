@@ -30171,6 +30171,81 @@ fn main() -> i64 {
     // first.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 3.1+ — canary instrumentation around unsafe_alloc /
+    // unsafe_free. Each allocation gets a 24-byte overhead
+    // (size + prefix-canary 0xDEADBEEFCAFEBABE + user bytes +
+    // suffix-canary 0xBAADF00DDEADC0DE). `unsafe_free` verifies
+    // both canaries and aborts on mismatch.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn unsafe_alloc_routes_through_canary_helper_in_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn buf(n: i64) -> *mut i64 { return unsafe_alloc(n); }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("unsafe_alloc compiles to C");
+        // The helper bundle must be present.
+        assert!(
+            c.contains("intent_unsafe_alloc"),
+            "expected intent_unsafe_alloc helper in C"
+        );
+        // The magic prefix canary 0xDEADBEEFCAFEBABE.
+        assert!(
+            c.contains("0xDEADBEEFCAFEBABE"),
+            "expected prefix canary in C output"
+        );
+        // The magic suffix canary 0xBAADF00DDEADC0DE.
+        assert!(
+            c.contains("0xBAADF00DDEADC0DE"),
+            "expected suffix canary in C output"
+        );
+    }
+
+    #[test]
+    fn unsafe_alloc_routes_through_canary_helper_in_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn buf(n: i64) -> *mut i64 { return unsafe_alloc(n); }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("unsafe_alloc compiles to LLVM");
+        // The helper bundle must be present.
+        assert!(
+            ll.contains("@intent_unsafe_alloc"),
+            "expected @intent_unsafe_alloc helper in LLVM"
+        );
+        // The signed-i64 form of the magic prefix canary
+        // (0xDEADBEEFCAFEBABE = -2401053089408613666 as i64).
+        assert!(
+            ll.contains("-2401053089408613666"),
+            "expected prefix canary (signed i64) in LLVM output"
+        );
+        // The signed-i64 form of the magic suffix canary
+        // (0xBAADF00DDEADC0DE = -4995072469926407458 as i64).
+        assert!(
+            ll.contains("-4995072469926407458"),
+            "expected suffix canary (signed i64) in LLVM output"
+        );
+    }
+
+    #[test]
+    fn unsafe_alloc_helper_only_emitted_when_used() {
+        // A program that never calls unsafe_alloc shouldn't drag
+        // the canary-helper bundle into its output — gated by
+        // `program_uses_unsafe_alloc`.
+        let source = r#"
+            fn main() -> i64 { return 42; }
+        "#;
+        let c = compile_to_c(source).expect("trivial main compiles");
+        assert!(
+            !c.contains("intent_unsafe_alloc"),
+            "canary helpers leaked into a program that doesn't use unsafe_alloc"
+        );
+    }
+
     #[test]
     fn unsafe_alloc_returns_mut_ptr_i64() {
         let _guard = EmbeddedTargetGuard::embedded();

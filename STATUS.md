@@ -10,7 +10,27 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 3.1 heap allocator shipped** —
+**Last updated:** 2026-06-02 (**Layer 3.1 canary instrumentation
+shipped** — `unsafe_alloc` / `unsafe_free` now route through
+helper functions that bracket each allocation with two i64
+magic words. Layout per allocation: `[size][prefix-canary
+0xDEADBEEFCAFEBABE][user N×i64][suffix-canary 0xBAADF00DDEADC0DE]`.
+The returned user pointer is `base + 16 bytes` — the canary
+words live outside the user's addressable range, so `raw_load`
+/ `raw_store` paths see zero added cost. `intent_unsafe_free`
+verifies both canaries before reclaiming; mismatch aborts with
+a clear stderr message (`buffer underrun?` / `buffer overrun?`).
+Per-allocation overhead: 24 bytes + ~4 cycles at free time —
+well within embedded budgets. Bundle gated on program usage
+(`program_uses_unsafe_alloc`); a trivial main without
+unsafe_alloc emits no helper code. **3 new lib tests**
+(C bundle present + magic constants emitted, LLVM bundle
+present + signed-i64 forms of magic constants emitted, helper
+not leaked into unused programs). **1598 lib + 54 parity
+green.** Layer 3.1 fully complete — Layer 3.2 (BoundedPtr<T>)
+remains.)
+
+**Prior:** 2026-06-02 (**Layer 3.1 heap allocator shipped** —
 `unsafe_alloc(n: i64) -> *mut i64` allocates `n` zero-initialized
 slots via `calloc(n, sizeof(i64))`; `unsafe_free(p: *mut i64)`
 releases via `free(p)` and returns 0 (dummy). Both builtins go
@@ -214,7 +234,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1595 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1598 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

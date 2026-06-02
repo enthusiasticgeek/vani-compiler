@@ -1079,6 +1079,14 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         emit_intent_pool_i64_helpers_llvm(&mut out);
     }
 
+    // Layer 3.1 of `unsafe.md` — canary-protected heap
+    // allocator. Gated on program usage. Helpers wrap
+    // calloc/free and bracket the allocation with two i64
+    // magic words.
+    if crate::backend_c::program_uses_unsafe_alloc(program) {
+        emit_intent_unsafe_alloc_helpers_llvm(&mut out);
+    }
+
     // HashMap<i64, i64> helpers (closure #305).
     if crate::backend_c::program_uses_i64_i64_hashmap(program) {
         let has_option_i64 = LLVM_ENUM_PAYLOAD_REGISTRY.with(|r| {
@@ -7933,41 +7941,26 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             if name == "taint" || name == "assert_safe" {
                 return emit_expr(&args[0], ctx, out);
             }
-            // Layer 3.1 of `unsafe.md` — heap allocation.
-            // `unsafe_alloc(n)` → `calloc(n, 8)` cast to
-            // i64*. `unsafe_free(p)` → `free(p)`, returns
-            // literal 0 (dummy).
+            // Layer 3.1 of `unsafe.md` — canary-protected
+            // heap allocation. Routes through helper bundle
+            // emitted by `emit_intent_unsafe_alloc_helpers_llvm`.
             if name == "unsafe_alloc" {
                 let n = emit_expr(&args[0], ctx, out);
-                let bytes = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = mul i64 {}, 8\n",
-                    bytes, n
-                ));
-                let raw = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = call i8* @calloc(i64 {}, i64 1)\n",
-                    raw, bytes
-                ));
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = bitcast i8* {} to i64*\n",
-                    dest, raw
+                    "  {} = call i64* @intent_unsafe_alloc(i64 {})\n",
+                    dest, n
                 ));
                 return dest;
             }
             if name == "unsafe_free" {
                 let p = emit_expr(&args[0], ctx, out);
-                let i8p = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = bitcast i64* {} to i8*\n",
-                    i8p, p
+                    "  {} = call i64 @intent_unsafe_free(i64* {})\n",
+                    dest, p
                 ));
-                out.push_str(&format!(
-                    "  call void @free(i8* {})\n",
-                    i8p
-                ));
-                return "0".to_string();
+                return dest;
             }
             // Layer 1.3 of `unsafe.md` — raw load / store
             // through a raw pointer. `raw_load` emits a plain
@@ -27424,6 +27417,71 @@ fn emit_intent_skiplist_i64_helpers_llvm(out: &mut String, has_option_i64: bool)
     out.push_str("  store i64 -1, i64* %slc_tp\n");
     out.push_str("  ret i64 %slc_prior\n");
     out.push_str("}\n\n");
+}
+
+/// Layer 3.1 of `unsafe.md` — canary-protected heap allocator
+/// in LLVM IR. Mirror of `emit_intent_unsafe_alloc_helpers_c_body`.
+/// Each allocation gets a 24-byte overhead:
+///   [ size: i64 ][ prefix-canary: i64 ][ user N×i64 ][ suffix-canary: i64 ]
+/// The user pointer returned is `base + 16 bytes`. Free walks
+/// back, checks both canaries, aborts on mismatch.
+fn emit_intent_unsafe_alloc_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "define i64* @intent_unsafe_alloc(i64 %n) {\n\
+         \x20 %neg = icmp slt i64 %n, 0\n\
+         \x20 br i1 %neg, label %ua_abort, label %ua_ok\n\
+         ua_abort:\n\
+         \x20 call void @abort()\n\
+         \x20 unreachable\n\
+         ua_ok:\n\
+         \x20 %plus_three = add i64 %n, 3\n\
+         \x20 %total_bytes = mul i64 %plus_three, 8\n\
+         \x20 %raw = call i8* @calloc(i64 %total_bytes, i64 1)\n\
+         \x20 %null = icmp eq i8* %raw, null\n\
+         \x20 br i1 %null, label %ua_abort, label %ua_init\n\
+         ua_init:\n\
+         \x20 %base = bitcast i8* %raw to i64*\n\
+         \x20 ; base[0] = n\n\
+         \x20 %s0 = getelementptr i64, i64* %base, i64 0\n\
+         \x20 store i64 %n, i64* %s0\n\
+         \x20 ; base[1] = prefix canary 0xDEADBEEFCAFEBABE\n\
+         \x20 %s1 = getelementptr i64, i64* %base, i64 1\n\
+         \x20 store i64 -2401053089408613666, i64* %s1\n\
+         \x20 ; base[n+2] = suffix canary 0xBAADF00DDEADC0DE\n\
+         \x20 %np2 = add i64 %n, 2\n\
+         \x20 %s_suf = getelementptr i64, i64* %base, i64 %np2\n\
+         \x20 store i64 -4995072469926407458, i64* %s_suf\n\
+         \x20 %user = getelementptr i64, i64* %base, i64 2\n\
+         \x20 ret i64* %user\n\
+         }\n\
+         define i64 @intent_unsafe_free(i64* %p) {\n\
+         \x20 %is_null = icmp eq i64* %p, null\n\
+         \x20 br i1 %is_null, label %uf_done, label %uf_check\n\
+         uf_check:\n\
+         \x20 %base_off = getelementptr i64, i64* %p, i64 -2\n\
+         \x20 %size_p = getelementptr i64, i64* %base_off, i64 0\n\
+         \x20 %n = load i64, i64* %size_p\n\
+         \x20 %prefix_p = getelementptr i64, i64* %base_off, i64 1\n\
+         \x20 %prefix = load i64, i64* %prefix_p\n\
+         \x20 %prefix_ok = icmp eq i64 %prefix, -2401053089408613666\n\
+         \x20 br i1 %prefix_ok, label %uf_check_suffix, label %uf_corrupt\n\
+         uf_check_suffix:\n\
+         \x20 %np2 = add i64 %n, 2\n\
+         \x20 %suffix_p = getelementptr i64, i64* %base_off, i64 %np2\n\
+         \x20 %suffix = load i64, i64* %suffix_p\n\
+         \x20 %suffix_ok = icmp eq i64 %suffix, -4995072469926407458\n\
+         \x20 br i1 %suffix_ok, label %uf_free, label %uf_corrupt\n\
+         uf_free:\n\
+         \x20 %base_i8 = bitcast i64* %base_off to i8*\n\
+         \x20 call void @free(i8* %base_i8)\n\
+         \x20 br label %uf_done\n\
+         uf_corrupt:\n\
+         \x20 call void @abort()\n\
+         \x20 unreachable\n\
+         uf_done:\n\
+         \x20 ret i64 0\n\
+         }\n\n",
+    );
 }
 
 /// Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64> runtime

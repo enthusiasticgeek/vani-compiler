@@ -609,6 +609,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if program_uses_i64_pool(program) {
         emit_intent_pool_helpers_c_body(&mut body);
     }
+    // Layer 3.1 of `unsafe.md` — canary-protected heap
+    // allocator. Gated on program usage. Always-on canaries
+    // (no debug/release distinction yet); cost is ~24 bytes
+    // per allocation + ~4 cycles at free time, well within
+    // embedded budgets.
+    if program_uses_unsafe_alloc(program) {
+        emit_intent_unsafe_alloc_helpers_c_body(&mut body);
+    }
     if program_uses_i64_i64_hashmap(program) {
         let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
             r.borrow().contains_key("Option__i64")
@@ -911,6 +919,45 @@ fn emit_intent_deque_helpers_c_body(out: &mut String, has_option_i64: bool) {
 }
 
 /// Walk the program for any `HashSet<i64>` type usage.
+pub(crate) fn program_uses_unsafe_alloc(program: &TypedProgram) -> bool {
+    fn expr_uses(e: &crate::ir::TypedExpr) -> bool {
+        use crate::ir::TypedExprKind as K;
+        match &e.kind {
+            K::Call { name, args, .. } => {
+                name == "unsafe_alloc" || name == "unsafe_free"
+                    || args.iter().any(expr_uses)
+            }
+            K::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            K::Unary { expr, .. } | K::Cast { expr, .. } => expr_uses(expr),
+            _ => false,
+        }
+    }
+    fn stmt_uses(s: &crate::ir::TypedStmt) -> bool {
+        use crate::ir::TypedStmt as S;
+        match s {
+            S::Let { expr, .. } | S::Reassign { expr, .. } => expr_uses(expr),
+            S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => body.iter().any(stmt_uses),
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    program.functions.iter().any(|f| f.body.iter().any(stmt_uses))
+}
+
 pub(crate) fn program_uses_i64_pool(program: &TypedProgram) -> bool {
     fn ty_uses(ty: &Type) -> bool {
         match ty {
@@ -1114,6 +1161,62 @@ fn emit_intent_pool_helpers_c_body(out: &mut String) {
          \x20 p->generations[h.slot_idx]++;\n\
          \x20 p->free_list[p->free_count] = h.slot_idx;\n\
          \x20 p->free_count++;\n\
+         \x20 return 0;\n\
+         }\n\n",
+    );
+}
+
+/// Layer 3.1 of `unsafe.md` — canary-protected heap
+/// allocator. Replaces the prior inline-calloc lowering of
+/// `unsafe_alloc` / `unsafe_free` with helper calls so the
+/// canary words land at consistent offsets.
+///
+/// Memory layout per allocation:
+///   [ size: i64 ][ MAGIC_PREFIX: i64 ][ user N×i64 ][ MAGIC_SUFFIX: i64 ]
+///    ^base       ^base+8              ^base+16      ^base+16+N*8
+///
+/// The returned user pointer is `base + 16`. `unsafe_free`
+/// walks back to `base`, verifies both canaries, then frees.
+/// A mismatch on either canary aborts the program with a clear
+/// diagnostic — the call site is the most recent thing in the
+/// stack trace, which is exactly what an incident reviewer
+/// wants.
+///
+/// Cost analysis (Cortex-M / x86-64 64-bit):
+/// - +24 bytes per allocation (8 size + 8 prefix-canary +
+///   8 suffix-canary).
+/// - ~4 cycles per `unsafe_free` (two i64 loads + two
+///   comparisons + the existing `free` call).
+/// - Zero cost on the read/write path — `raw_load` /
+///   `raw_store` go straight through the user pointer; the
+///   canary words live outside that addressable range.
+fn emit_intent_unsafe_alloc_helpers_c_body(out: &mut String) {
+    out.push_str(
+        "#define INTENT_UNSAFE_ALLOC_PREFIX_CANARY ((int64_t)0xDEADBEEFCAFEBABEULL)\n\
+         #define INTENT_UNSAFE_ALLOC_SUFFIX_CANARY ((int64_t)0xBAADF00DDEADC0DEULL)\n\
+         static INTENT_UNUSED int64_t* intent_unsafe_alloc(int64_t n) {\n\
+         \x20 if (n < 0) abort();\n\
+         \x20 size_t total = ((size_t)n + 3) * sizeof(int64_t);\n\
+         \x20 int64_t* base = (int64_t*)calloc(total, 1);\n\
+         \x20 if (!base) abort();\n\
+         \x20 base[0] = n;\n\
+         \x20 base[1] = INTENT_UNSAFE_ALLOC_PREFIX_CANARY;\n\
+         \x20 base[n + 2] = INTENT_UNSAFE_ALLOC_SUFFIX_CANARY;\n\
+         \x20 return base + 2;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_unsafe_free(int64_t* p) {\n\
+         \x20 if (!p) return 0;\n\
+         \x20 int64_t* base = p - 2;\n\
+         \x20 int64_t n = base[0];\n\
+         \x20 if (base[1] != INTENT_UNSAFE_ALLOC_PREFIX_CANARY) {\n\
+         \x20   fprintf(stderr, \"intent: unsafe_alloc prefix canary corrupted (buffer underrun?)\\n\");\n\
+         \x20   abort();\n\
+         \x20 }\n\
+         \x20 if (base[n + 2] != INTENT_UNSAFE_ALLOC_SUFFIX_CANARY) {\n\
+         \x20   fprintf(stderr, \"intent: unsafe_alloc suffix canary corrupted (buffer overrun?)\\n\");\n\
+         \x20   abort();\n\
+         \x20 }\n\
+         \x20 free(base);\n\
          \x20 return 0;\n\
          }\n\n",
     );
@@ -12147,18 +12250,14 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
-        // Layer 3.1 of `unsafe.md` — heap allocation. `calloc`
-        // gives us zero-initialized slots (saves a memset and
-        // catches programs that read uninitialized memory).
-        // `unsafe_free` returns 0 as the dummy void value.
-        "unsafe_alloc" => format!(
-            "((int64_t*)calloc((size_t)({}), sizeof(int64_t)))",
-            emit_expr(&args[0])
-        ),
-        "unsafe_free" => format!(
-            "(free((void*)({})), (int64_t)0)",
-            emit_expr(&args[0])
-        ),
+        // Layer 3.1 of `unsafe.md` — canary-protected heap
+        // allocation. Routes through `intent_unsafe_alloc` /
+        // `intent_unsafe_free` helpers emitted by
+        // `emit_intent_unsafe_alloc_helpers_c_body`. The helpers
+        // bracket each allocation with two i64 magic words and
+        // verify both at free time.
+        "unsafe_alloc" => format!("intent_unsafe_alloc({})", emit_expr(&args[0])),
+        "unsafe_free" => format!("intent_unsafe_free({})", emit_expr(&args[0])),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
