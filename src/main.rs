@@ -455,7 +455,7 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "rand_bool" || name == "rand_choice"
                 || name == "rand_normal"
                 || name == "vec_chunks" || name == "vec_windows"
-                || name == "vec_flatten"
+                || name == "vec_flatten" || name == "vec_group_by_value"
                 || name == "hash_i64" || name == "hash_f64"
                 || name == "hash_str" || name == "hash_combine"
                 || name == "hash_combine_3"

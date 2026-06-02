@@ -4727,6 +4727,7 @@ pub(crate) fn program_uses_vec_chunks(program: &TypedProgram) -> bool {
             E::Call { name, args, .. } => {
                 if matches!(name.as_str(),
                     "vec_chunks" | "vec_windows" | "vec_flatten"
+                    | "vec_group_by_value"
                 ) { return true; }
                 args.iter().any(expr_uses)
             }
@@ -4839,6 +4840,35 @@ pub(crate) fn emit_intent_vec_chunks_helper_c(out: &mut String) {
          \x20   r.data[i] = inner;\n\
          \x20 }\n\
          \x20 r.len = num;\n\
+         \x20 return r;\n\
+         }\n\
+         /* Closure #596: vec_group_by_value(xs) — group consecutive equal values. */\n\
+         static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_group_by_value(const intent_vec_int64_t* xs) INTENT_UNUSED;\n\
+         static INTENT_UNUSED intent_vec_vec_int64_t intent_vec_vec_int64_t_group_by_value(const intent_vec_int64_t* xs) {\n\
+         \x20 intent_vec_vec_int64_t r; r.data = (intent_vec_int64_t*)0; r.len = 0; r.capacity = 0;\n\
+         \x20 if (!xs || xs->len == 0) return r;\n\
+         \x20 /* Two-pass: count groups, allocate, then fill. */\n\
+         \x20 uint64_t ng = 1;\n\
+         \x20 for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] != xs->data[i-1]) ng++;\n\
+         \x20 r.capacity = ng;\n\
+         \x20 r.data = (intent_vec_int64_t*)malloc(ng * sizeof(intent_vec_int64_t));\n\
+         \x20 if (!r.data) abort();\n\
+         \x20 uint64_t gi = 0;\n\
+         \x20 uint64_t run_start = 0;\n\
+         \x20 for (uint64_t i = 1; i <= xs->len; i++) {\n\
+         \x20   if (i == xs->len || xs->data[i] != xs->data[i-1]) {\n\
+         \x20     uint64_t rlen = i - run_start;\n\
+         \x20     intent_vec_int64_t inner;\n\
+         \x20     inner.data = (int64_t*)malloc(rlen * sizeof(int64_t));\n\
+         \x20     if (!inner.data) abort();\n\
+         \x20     for (uint64_t j = 0; j < rlen; j++) inner.data[j] = xs->data[run_start + j];\n\
+         \x20     inner.len = rlen;\n\
+         \x20     inner.capacity = rlen;\n\
+         \x20     r.data[gi++] = inner;\n\
+         \x20     run_start = i;\n\
+         \x20   }\n\
+         \x20 }\n\
+         \x20 r.len = ng;\n\
          \x20 return r;\n\
          }\n\
          /* Closure #595: vec_flatten(xss) — concatenate inner Vecs. */\n\
@@ -10888,6 +10918,10 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_vec_int64_t_windows({}, ({}))",
             emit_expr(&args[0]),
             emit_expr(&args[1])
+        ),
+        "vec_group_by_value" => format!(
+            "intent_vec_vec_int64_t_group_by_value({})",
+            emit_expr(&args[0])
         ),
         "vec_flatten" => format!(
             "intent_vec_int64_t_flatten({})",

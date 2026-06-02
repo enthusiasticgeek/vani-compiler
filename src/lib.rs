@@ -16022,6 +16022,20 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_group_by_value_typecheck_and_compile() {
+        // Closure #596: vec_group_by_value — groups consecutive equal values.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 1, 2, 3, 3);
+              let groups: Vec<Vec<i64>> = vec_group_by_value(ref xs);
+              return len(groups) as i64;
+            }
+        "#;
+        compile_to_c(source).expect("vec_group_by_value must type-check");
+        compile_to_llvm(source).expect("vec_group_by_value must compile to LLVM");
+    }
+
+    #[test]
     fn vec_windows_flatten_typecheck_and_compile() {
         // Closures #594/#595: vec_windows / vec_flatten.
         let source = r#"
