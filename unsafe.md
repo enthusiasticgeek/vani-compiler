@@ -7,11 +7,23 @@ Goal: vāṇी usable in embedded systems where:
 - Maximum catch of memory errors at compile time
 - Cheap runtime checks where compile-time can't reach
 
-Pick chosen at design time: **generational handles** over region
-typing. Generational handles add a small runtime cost (~1 load + 1
-cmp per dereference) but are syntactically invisible; region typing
-is purely compile-time but requires lifetime annotations on every
-pointer-holding type, which raises the bar for embedded engineers.
+Picked at design time: **hybrid path** — generational handles ship
+first (v1) for the mainstream embedded user; region typing lands
+later (v2) as a power-user option for safety-critical workloads.
+
+**Why hybrid:** generational handles are syntactically invisible
+(low learning curve) but cost ~3–5 cycles per dereference on
+Cortex-M and don't give compile-time use-after-free proof. Region
+typing gives zero-cost-abstraction + compile-time guarantees but
+requires the user to write lifetime annotations. Most embedded
+engineers want the first; safety-critical (ASIL-D, DO-178C,
+IEC 62304) requires the second. Both compile down to similar code
+shapes once the user picks a stance per type.
+
+**Decision sequencing:** Layers 1–4 ship generational handles first
+(weeks). Layer 5 (regions) is queued for after — once Handle<T> is
+proven in the wild and we have user feedback on what region syntax
+should feel like.
 
 Existing baseline (do not redo): affine ownership for Vec / OwnedStr
 / Atomic / Mutex / Guard / Channel / Task. Lightweight borrow checker
@@ -277,9 +289,6 @@ use-after-free and most buffer-overrun bugs at zero runtime cost.
 
 ## Skipped intentionally
 
-- **Region typing.** Picked generational handles instead. Two
-  techniques solving the same problem (use-after-free); doubling up
-  doubles the implementation cost without doubling the catch rate.
 - **Full Rust-style borrow checker.** You said you have a simpler
   variant — keep it; don't rebuild.
 - **Garbage collector.** Out of scope by user requirement.
@@ -289,9 +298,107 @@ use-after-free and most buffer-overrun bugs at zero runtime cost.
   generational handle combination covers the common cases at a
   fraction of the cost.
 
+(Region typing is **deferred to Layer 5**, not skipped — see below.)
+
+---
+
+## Layer 5 — Region typing (future, after Layer 1–4 ship)
+
+**Status:** queued for after generational handles ship and stabilize.
+Not gated by any Arc work. Adds a **second** pointer-safety mechanism
+alongside Handle<T>; the two coexist (Handle for the 90% case,
+`&'arena T` for hot loops and safety-critical workloads). The user
+picks per-type.
+
+**Goal:** allow zero-runtime-cost pointer derefs with compile-time
+use-after-free guarantee. Necessary for safety-critical embedded
+(ASIL-D automotive, DO-178C avionics, IEC 62304 medical) where:
+- runtime checks can't be relied on to catch all UAF before
+  certification, and
+- every cycle is budgeted
+
+**Design sketch (v0, will refine before implementation):**
+
+```vani
+// Region introduced by a scope block. All allocations inside
+// the block carry the region's lifetime.
+region {
+  let mut arena: Region;
+  let p: &'arena Node = arena.alloc(Node { ... });
+  // ... use p freely; no runtime check, no taint.
+}
+// `p` cannot escape the region block; checker enforces.
+```
+
+**Key rules:**
+- `&'r T` is a pointer with a region tag `'r`.
+- A `&'r T` cannot be stored into a slot whose lifetime exceeds `'r`.
+- A `region { ... }` block introduces a fresh `'r`; allocations are
+  bump-pointer in v1, free at block exit.
+- No generation counter, no slot lookup, no taint propagation.
+- Affine ownership still applies to the Region itself (one owner per
+  arena).
+
+**Files touched (estimate):**
+- `src/ast.rs` — add `'lifetime` parameter to `Type::Ref` and
+  `Type::Ptr`; add `region { ... }` statement.
+- `src/checker.rs` — region inference + lifetime-bound enforcement
+  on stores/returns. Largest piece of work.
+- `src/backend_c.rs` — emit per-region bump allocator struct + bulk
+  free at scope exit.
+- `src/backend_llvm.rs` — same.
+- Lifetime annotations on existing standard library helpers as
+  opt-in (most stay Handle-based; performance-critical ones get
+  region variants).
+
+### Sub-steps (rough estimate, ~15–25h across ~8 commits)
+
+1. **5.1 — Parser: `region { ... }` block + `'name` lifetime tokens. (~2h)**
+2. **5.2 — AST: `Type::Ref(lifetime, inner)`. (~1h)**
+3. **5.3 — Checker: region scope tracking + lifetime inference. (~5–7h)**
+4. **5.4 — Checker: lifetime-bound store/return enforcement. (~3–4h)**
+5. **5.5 — C backend: bump-allocator emission for regions. (~3h)**
+6. **5.6 — LLVM backend: same. (~3h)**
+7. **5.7 — Stdlib opt-in lifetime-annotated variants for hot Vec / Trie ops. (~2h)**
+8. **5.8 — Safety-critical example: ring buffer using regions, cross-backend parity. (~1h)**
+
+**Acceptance:**
+```vani
+region {
+  let arena: Region;
+  let head: &'arena Node = arena.alloc(Node::new());
+  // ... build a tree of nodes, all referencing each other via
+  //     &'arena. Zero runtime cost per deref. Compile-time use-
+  //     after-free check.
+}
+// head, arena, and all allocations dropped together here.
+```
+
+If a user writes a function that returns `&'a Node` for some `'a`
+that exceeds the calling region's lifetime, the checker rejects it
+at compile time — same class of guarantee Rust provides, scoped to
+the regions feature.
+
+**Interop with generational handles:**
+- A function can accept `Handle<T>` OR `&'a T` at the API boundary.
+- Conversions allowed only one-way: `&'a T → Handle<T>` requires
+  the value to be moved into a Pool (consuming the borrow).
+- The other direction (`Handle<T> → &'a T`) requires a `pool.get(h)`
+  call and the resulting `&'a T` is bounded by the pool's region.
+
+**Why this isn't ready to ship now:**
+- Generational handles are simpler and unblock 90% of embedded use
+  today. Ship that first.
+- Region syntax / semantics deserve user feedback before we lock it
+  in. Better to evolve the API with one user community than two.
+- Region typing benefits compound with experience writing
+  lifetime-annotated code; embedded engineers will need ramp time.
+
 ---
 
 ## Suggested implementation order
+
+### v1 — generational handles (mainstream embedded)
 
 1. **Layer 1.1** — Lexical `unsafe` containment (2–3h)
 2. **Layer 1.2** — No-escape on `&local` (3–4h)
@@ -303,20 +410,40 @@ use-after-free and most buffer-overrun bugs at zero runtime cost.
 8. **Layer 3.2** — `BoundedPtr<T>` fat pointer (3h)
 9. **Layer 4.2** — ARM MTE flag (1h)
 
-**Total estimated effort:** 22–31 hours across ~12 commits.
+**v1 estimated effort:** 22–31 hours across ~12 commits.
+
+### v2 — region typing (safety-critical opt-in)
+
+10. **Layer 5.1–5.8** — Region typing (15–25h across ~8 commits)
+
+**Sequencing constraint:** v1 must ship + stabilize first. We want
+real user feedback on Handle<T> ergonomics before locking in region
+syntax. Estimate v1 → v2 gap: weeks-to-months of usage.
+
+**Combined total:** 37–56 hours across ~20 commits, across two
+shipping phases.
 
 ---
 
 ## Cross-cutting decisions
 
-- **Tainted<T>** and **Handle<T>** are the only two new types that
-  cross safe/unsafe. Document this explicitly in the language guide.
-- **`unsafe`** is the only escape hatch. No "trusted libs," no
-  privileged crates.
+- **Tainted<T>**, **Handle<T>**, and (later) **`&'arena T`** are the
+  blessed types that cross safe/unsafe. Document this explicitly in
+  the language guide.
+- **`unsafe`** is the only escape hatch for raw pointers. No
+  "trusted libs," no privileged crates.
 - **Release mode** strips: canaries (Layer 3.1), taint runtime
   checks (Layer 1.3's `assert_safe`), bounds checks on `BoundedPtr`
-  (Layer 3.2). Generational handles (Layer 2) stay on — they're
-  the load-bearing safety net.
+  (Layer 3.2). Generational handles (Layer 2) stay on — they're the
+  load-bearing safety net. Region pointers (Layer 5) are compile-
+  time only, nothing to strip.
+- **Two-tier safety mental model:** Handle<T> is the default,
+  ergonomic, runtime-checked path. `&'arena T` is the opt-in,
+  zero-cost, compile-time-proven path for hot loops and safety-
+  critical workloads. Users pick per-type, not per-program.
+- **Migration story:** code written against Handle<T> stays valid
+  forever; users can selectively migrate hot paths to regions when
+  the perf budget demands it. No big-bang rewrite.
 
 ---
 
@@ -331,6 +458,22 @@ ordering:
    safety net before any unsafe-heavy embedded examples ship.
 3. Layers 3–4 can land any time after.
 4. Arc 2 (trie sparse children) can land in parallel — independent.
+5. Layer 5 (regions) waits for v1 (Layers 1–4) to ship and gather
+   real-world feedback. Don't start before that.
 
 Arc 1 (HashMap monomorphization) is the long pole; this safety work
 shouldn't gate it.
+
+## Safety-critical readiness checklist
+
+Once Layer 5 ships, vāṇी can credibly claim suitability for:
+- **ASIL-D automotive** (ISO 26262) — needs compile-time UAF proof
+  (regions) + canaries + taint
+- **DO-178C avionics** (Level A) — same plus deterministic timing
+  (regions, no runtime gen-check tax)
+- **IEC 62304 medical** (Class C) — same plus auditable allocation
+  sites (regions make allocator boundaries explicit)
+
+Until Layer 5 ships, vāṇी is positioned for **mainstream embedded /
+IoT / consumer firmware / robotics** — substantially safer than
+C/C++ but not certifiable for the categories above.
