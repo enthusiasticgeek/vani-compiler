@@ -12130,6 +12130,11 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // Layer 1.3 of `unsafe.md` — `Tainted<T>` is purely a
+        // type-level discipline; both `taint` and `assert_safe`
+        // are identity at runtime. Wrap the operand in parens
+        // so any compound expression renders cleanly.
+        "taint" | "assert_safe" => format!("({})", emit_expr(&args[0])),
         "pool_new" => "intent_pool_i64_new()".to_string(),
         "pool_alloc" => format!(
             "intent_pool_i64_alloc({}, ({}))",
@@ -14037,6 +14042,13 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // Pool / Handle, gated by `program_uses_i64_pool`.
         Type::Pool(_) => "intent_pool_i64",
         Type::Handle(_) => "intent_handle_i64",
+        // `Tainted<T>` — Layer 1.3 of `unsafe.md`. At codegen
+        // time the taint is purely a type-level discipline;
+        // the underlying value has the same machine
+        // representation as the wrapped T. V1: only
+        // `Tainted<i64>` is producible, so the leaf spelling
+        // is fixed at `int64_t`.
+        Type::Tainted(_) => "int64_t",
     }
 }
 
@@ -14338,7 +14350,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -14381,7 +14393,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) => unreachable!("shift count must be an integer"),
     }
 }
 

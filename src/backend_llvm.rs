@@ -298,6 +298,10 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // `Handle<T>` is {slot_idx: u32, generation: u32} —
         // 8 bytes.
         Type::Handle(_) => 8,
+        // `Tainted<T>` — Layer 1.3 of `unsafe.md`. Same
+        // machine representation as the underlying T.
+        // V1: only Tainted<i64> is producible.
+        Type::Tainted(inner) => llvm_byte_size(inner),
     }
 }
 
@@ -7922,6 +7926,12 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     dest, suffix, sl
                 ));
                 return dest;
+            }
+            // Layer 1.3 of `unsafe.md` — `taint` and
+            // `assert_safe` are identity at runtime; just
+            // forward the operand's SSA value.
+            if name == "taint" || name == "assert_safe" {
+                return emit_expr(&args[0], ctx, out);
             }
             // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
             // builtins. Call outlined helpers emitted at module
@@ -33323,6 +33333,10 @@ fn is_scalar(ty: &Type) -> bool {
         // alloc-and-stores the struct value just like
         // `Channel<T, N>` does.
         || matches!(ty, Type::Pool(_) | Type::Handle(_))
+        // `Tainted<T>` — Layer 1.3 of `unsafe.md`. Same
+        // machine layout as the inner T (taint is a
+        // type-level tag only). V1: T = i64.
+        || matches!(ty, Type::Tainted(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -33372,6 +33386,12 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         // preamble. Same shape as HashSet / Channel / etc.
         Type::Pool(_) => "%intent_pool_i64",
         Type::Handle(_) => "%intent_handle_i64",
+        // Layer 1.3 of `unsafe.md` — `Tainted<T>` shares the
+        // inner type's LLVM representation. V1 inner is always
+        // i64; return that directly. A future commit could
+        // recurse to `llvm_type(inner)` once Tainted wraps
+        // more types.
+        Type::Tainted(_) => "i64",
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",

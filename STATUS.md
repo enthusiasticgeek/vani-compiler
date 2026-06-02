@@ -10,7 +10,21 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 2.2 codified** — Handle<T> as
+**Last updated:** 2026-06-02 (**Layer 1.3 wrapper machinery
+shipped** — `Type::Tainted<T>` plus the `taint(v)` / `assert_safe(t)`
+builtin pair. Storing a `Tainted<T>` value into a `T`-typed slot is
+rejected by the type checker — users have to wrap with `assert_safe()`
+to vouch for the invariant. V1 restricts T to i64 (matches Pool /
+Handle scope). The wrapper is purely a type-level discipline; both
+backends emit identity codegen (Tainted shares its inner T's machine
+representation). The canonical producer of tainted values — `*p`
+raw-pointer deref — is queued for a follow-up commit; today's only
+path is the explicit `taint(v)` bootstrap builtin. 5 new lib tests:
+taint+strip round-trip, assert_safe lowers to inner type, Tainted
++ i64 arithmetic rejected, assert_safe on safe i64 rejected, end-to-
+end LLVM compile. **1585 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**Layer 2.2 codified** — Handle<T> as
 the blessed escape from unsafe. No new code; falls out of Layers
 1.1 + 1.2 + 2. Two acceptance tests pin the standing position:
 (a) a function can freely return Handle<i64> across the boundary
@@ -165,7 +179,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1580 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1585 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

@@ -30148,6 +30148,91 @@ fn main() -> i64 {
     // future refactors can't accidentally erode it.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Layer 1.3 — `Tainted<T>` wrapper + `taint(v)` / `assert_safe(t)`
+    // builtins. V1 restricts T to i64. The `*p` raw-pointer
+    // deref operator (the canonical Tainted producer) is queued
+    // as a follow-up; this commit ships the wrapper machinery
+    // so the discipline is in place when deref lands.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn taint_wraps_i64_in_tainted_i64() {
+        let source = r#"
+            fn main() -> i64 {
+              let t: Tainted<i64> = taint(42);
+              return assert_safe(t);
+            }
+        "#;
+        let _ = compile(source).expect("taint() + assert_safe() typecheck");
+    }
+
+    #[test]
+    fn assert_safe_strips_taint_to_inner_type() {
+        let source = r#"
+            fn double_strip(t: Tainted<i64>) -> i64 {
+              return assert_safe(t) * 2;
+            }
+            fn main() -> i64 {
+              return double_strip(taint(7));
+            }
+        "#;
+        let c = compile_to_c(source).expect("Tainted i64 round-trip compiles to C");
+        // `Tainted<i64>` lowers to `int64_t` (taint is type-only).
+        assert!(
+            c.contains("int64_t"),
+            "expected int64_t representation, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn tainted_value_cannot_be_used_as_i64_without_assert_safe() {
+        // Direct use of a Tainted<i64> in an i64-typed slot
+        // (here: arithmetic) must be rejected. The user has to
+        // wrap with assert_safe() to vouch for the value.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Tainted<i64> = taint(5);
+              return t + 1;
+            }
+        "#;
+        let errs = compile(source).expect_err("Tainted<i64> + i64 must be rejected");
+        assert!(
+            !errs.is_empty(),
+            "expected some type-mismatch diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn assert_safe_rejects_non_tainted_argument() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 7;
+              return assert_safe(x);
+            }
+        "#;
+        let errs = compile(source).expect_err("assert_safe on safe i64 must reject");
+        assert!(
+            errs.iter().any(|d| d.message.contains("Tainted")),
+            "expected Tainted-required diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn tainted_runs_end_to_end() {
+        let source = r#"
+            fn main() -> i64 {
+              let t = taint(42);
+              return assert_safe(t);
+            }
+        "#;
+        // Verify the LLVM emit path too (`intentc run` default).
+        let _ll = compile_to_llvm(source).expect("Tainted round-trip compiles to LLVM");
+    }
+
     #[test]
     fn handle_freely_escapes_function_boundary() {
         // The supported pattern: a function that wraps an

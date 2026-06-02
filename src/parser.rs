@@ -1693,6 +1693,18 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Handle(Box::new(element)));
             }
+            // `Tainted<T>` — Layer 1.3 of `unsafe.md`. Wrapper
+            // produced by raw-pointer deref (`*p`) once that
+            // operator lands; for now the only producer is
+            // the explicit `taint(v)` builtin (intended as a
+            // testing/bootstrapping hook for the wrapper).
+            if name == "Tainted" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::Tainted(Box::new(element)));
+            }
             if name == "Atomic" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
