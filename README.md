@@ -257,8 +257,11 @@ vāṇī treats **memory and concurrency bugs as compile-time errors
 on the safe path** (hosted targets, and embedded code outside an
 explicit `unsafe(reason = "...") { ... }` block — see *Embedded
 targets — current position* below). The runtime is meant to be
-boring: no garbage collector, no event loop, no allocator-dependent
-fault injection, no reference counting, no surprise rescheduling.
+boring: no garbage collector, no event loop today (async / event
+loop is queued — compiler-lowered state machines on an arena, not
+Rust-style `Pin`; see [TODO.md](TODO.md) *Async / asyncio*), no
+allocator-dependent fault injection, no reference counting, no
+surprise rescheduling.
 Everything that would be a "this might crash at 3 AM in production"
 bug in a less strict language fails the type checker on the
 developer's laptop — with the embedded `unsafe(reason = "...")`

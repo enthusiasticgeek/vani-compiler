@@ -839,9 +839,10 @@ the mixed-payload-enum drop-dispatch follow-up, **before** Level
 
 User asked for async / asyncio on the roadmap. The current
 concurrency story is **real-thread `task` + `join`** plus shared
-state via `Atomic` / `Mutex` / `Channel`. The README under *Memory
-& runtime model* still says "No async / await / coroutines"; that
-becomes "**queued — see TODO.md**" with this entry.
+state via `Atomic` / `Mutex` / `Channel`, and **blocking I/O
+through that thread pool**. The README *Memory & runtime model*
+section is in sync: async / await / event loop / `Future<T>` are
+all flagged **queued** with this entry as the design of record.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style async with Pin / self-references).**
@@ -1032,8 +1033,9 @@ which moved to #353.)
   borrowed view).
 - Wider K/V widths: `HashMap<Str, V>` / `HashMap<i64, Str>`.
 - Expression-body anon-fn shorthand (depends on #353).
-- `async` (deferred until concrete need; coroutines vs poll
-  + runtime undecided).
+- (async is no longer here — see the full *Async / asyncio —
+  concurrency arc* section above; design is locked, execution
+  waits on Level 3 closures.)
 - **Kosh** package-manager arc (`kosh.toml`, resolver +
   lockfile, registry + CLI, stdlib-as-kosh) — multi-session.
 - Devanagari SOV word order + 3-way Sanskrit/Hindi/Marathi
