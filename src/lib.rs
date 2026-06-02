@@ -16022,6 +16022,20 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn rand_normal_typecheck_and_compile() {
+        // Closure #592: rand_normal() — Box-Muller standard normal.
+        let source = r#"
+            fn main() -> i64 {
+              seed_rng(7 as u64);
+              let n: f64 = rand_normal();
+              return n as i64;
+            }
+        "#;
+        compile_to_c(source).expect("rand_normal must type-check");
+        compile_to_llvm(source).expect("rand_normal must compile to LLVM");
+    }
+
+    #[test]
     fn rand_tier_dd_typecheck_and_compile() {
         // Closures #588-#591: rand_f64 / rand_in_range_f64 / rand_bool / rand_choice.
         let source = r#"

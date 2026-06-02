@@ -11849,6 +11849,9 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "({{ const intent_vec_int64_t* __rc_xs = ({}); (__rc_xs->len == 0) ? (int64_t)-1 : __rc_xs->data[(uint64_t)intent_rng_next() % __rc_xs->len]; }})",
             emit_expr(&args[0])
         ),
+        // Closure #592: rand_normal() — standard normal N(0,1) via Box-Muller.
+        // u1 guarded > 0 by re-sampling if it lands at exactly 0 (vanishingly rare).
+        "rand_normal" => "({ double __rn_u1; do { __rn_u1 = ((double)((uint64_t)intent_rng_next() >> 11)) / 9007199254740992.0; } while (__rn_u1 == 0.0); double __rn_u2 = ((double)((uint64_t)intent_rng_next() >> 11)) / 9007199254740992.0; sqrt(-2.0 * log(__rn_u1)) * cos(6.283185307179586 * __rn_u2); })".to_string(),
         "pow" => {
             format!(
                 "pow(({}), ({}))",

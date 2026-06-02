@@ -7275,6 +7275,74 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            // Closure #592: rand_normal() — standard normal via Box-Muller.
+            // u1 = rand_f64() (guard != 0 with re-sample loop), u2 = rand_f64().
+            // z = sqrt(-2 * log(u1)) * cos(2π * u2)
+            if name == "rand_normal" {
+                let head = ctx.fresh_label("rn_head_");
+                let body = ctx.fresh_label("rn_body_");
+                let u1_p = ctx.fresh_tmp();
+                let raw1 = ctx.fresh_tmp();
+                let shifted1 = ctx.fresh_tmp();
+                let as_dbl1 = ctx.fresh_tmp();
+                let u1 = ctx.fresh_tmp();
+                let is_zero = ctx.fresh_tmp();
+                let raw2 = ctx.fresh_tmp();
+                let shifted2 = ctx.fresh_tmp();
+                let as_dbl2 = ctx.fresh_tmp();
+                let u2 = ctx.fresh_tmp();
+                let log_u1 = ctx.fresh_tmp();
+                let neg2_log = ctx.fresh_tmp();
+                let sqrt_part = ctx.fresh_tmp();
+                let two_pi_u2 = ctx.fresh_tmp();
+                let cos_part = ctx.fresh_tmp();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = alloca double\n", u1_p));
+                out.push_str(&format!("  br label %{}\n", head));
+                out.push_str(&format!("{}:\n", head));
+                out.push_str(&format!("  {} = call i64 @intent_rng_next()\n", raw1));
+                out.push_str(&format!("  {} = lshr i64 {}, 11\n", shifted1, raw1));
+                out.push_str(&format!("  {} = uitofp i64 {} to double\n", as_dbl1, shifted1));
+                let u1_inline = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = fdiv double {}, 0x4340000000000000\n", u1_inline, as_dbl1
+                ));
+                out.push_str(&format!(
+                    "  store double {}, double* {}\n", u1_inline, u1_p
+                ));
+                out.push_str(&format!(
+                    "  {} = fcmp oeq double {}, 0.0\n", is_zero, u1_inline
+                ));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n", is_zero, head, body
+                ));
+                out.push_str(&format!("{}:\n", body));
+                out.push_str(&format!("  {} = load double, double* {}\n", u1, u1_p));
+                out.push_str(&format!("  {} = call i64 @intent_rng_next()\n", raw2));
+                out.push_str(&format!("  {} = lshr i64 {}, 11\n", shifted2, raw2));
+                out.push_str(&format!("  {} = uitofp i64 {} to double\n", as_dbl2, shifted2));
+                out.push_str(&format!(
+                    "  {} = fdiv double {}, 0x4340000000000000\n", u2, as_dbl2
+                ));
+                out.push_str(&format!("  {} = call double @log(double {})\n", log_u1, u1));
+                out.push_str(&format!(
+                    "  {} = fmul double {}, -2.0\n", neg2_log, log_u1
+                ));
+                out.push_str(&format!(
+                    "  {} = call double @sqrt(double {})\n", sqrt_part, neg2_log
+                ));
+                // 2π = 6.283185307179586 = 0x401921FB54442D18
+                out.push_str(&format!(
+                    "  {} = fmul double {}, 0x401921FB54442D18\n", two_pi_u2, u2
+                ));
+                out.push_str(&format!(
+                    "  {} = call double @cos(double {})\n", cos_part, two_pi_u2
+                ));
+                out.push_str(&format!(
+                    "  {} = fmul double {}, {}\n", dest, sqrt_part, cos_part
+                ));
+                return dest;
+            }
             // Closure #591: rand_choice(ref xs) — pick uniformly; empty → -1.
             if name == "rand_choice" {
                 let xs = emit_expr(&args[0], ctx, out);
@@ -19873,7 +19941,7 @@ fn program_uses_rng(program: &TypedProgram) -> bool {
                     name.as_str(),
                     "seed_rng" | "rand_i64" | "rand_in_range"
                     | "rand_f64" | "rand_in_range_f64"
-                    | "rand_bool" | "rand_choice"
+                    | "rand_bool" | "rand_choice" | "rand_normal"
                 ) {
                     return true;
                 }
