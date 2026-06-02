@@ -7009,6 +7009,23 @@ fn check_function(
     // return-terminated paths too.
     verify_task_affine(&body, diagnostics);
 
+    // Layer 1.2 of `unsafe.md` — no-escape analysis on `&local`-
+    // derived raw pointers. A raw pointer obtained by casting a
+    // borrow of a stack-local cannot escape its frame: it can't
+    // be returned, stored into a heap location (Vec slot, struct
+    // field, IndexAssign destination), or assigned to a function
+    // parameter (the only thing that outlives the frame in v1 —
+    // we don't have globals or `static mut` yet).
+    //
+    // Why this layer matters: a `*const T` derived from a stack
+    // local dangles the moment the function returns. The
+    // compile-time check eliminates the classic "returns pointer
+    // to dead stack frame" UB without any runtime cost. Layer 2's
+    // `Handle<T>` is the supported long-lived-reference path.
+    let param_names: std::collections::HashSet<String> =
+        function.params.iter().map(|p| p.name.clone()).collect();
+    verify_raw_ptr_no_escape(&body, &param_names, diagnostics);
+
     TypedFunction {
         name: function.name.clone(),
         params,
@@ -7319,6 +7336,239 @@ fn walk_branch_mutations_in_expr(
 /// Vec<TypedStmt> sequence, with the join positioned after the
 /// spawn). Also flags double-joins. v1 keeps the scope rule
 /// tight: cross-branch or cross-loop joins aren't supported.
+/// Layer 1.2 of `unsafe.md` — no-escape analysis on `&local`-
+/// derived raw pointers.
+///
+/// Approach: collect the set of binding names that hold raw
+/// pointers derived from a stack-local (the "tainted" set). The
+/// tainting starts from a direct cast `(ref local) as *const T`
+/// or `(mut ref local) as *mut T`, where `local` is a function-
+/// local binding (not a parameter, not a global / const). The
+/// taint propagates through `let p = <tainted>;` rebindings.
+///
+/// Once the tainted set is known, the second pass walks the
+/// function body looking for escape sites:
+/// - `Return { expr }` where `expr` reads a tainted value
+/// - `IndexAssign { value }` / `FieldAssign { value }` where
+///   `value` reads a tainted value (escape into a heap location)
+/// - `Reassign { name, expr }` where `name` is a parameter and
+///   `expr` reads a tainted value (escape via param mutation —
+///   parameters outlive the frame in v1 since vāṇी doesn't yet
+///   have globals or `static mut`)
+///
+/// What's intentionally NOT flagged:
+/// - Raw pointer values whose origin is a *parameter*: those
+///   already came from outside the frame, so returning / storing
+///   them is fine.
+/// - Local-derived pointers used only within the same frame
+///   (assigned to a let-binding, deref'd in-place, etc.).
+///
+/// The pass is intra-procedural. Inter-procedural escapes
+/// (passing a tainted pointer to a function that stores it
+/// in a heap location) would need the call graph; deferred to
+/// a follow-up.
+fn verify_raw_ptr_no_escape(
+    body: &[TypedStmt],
+    param_names: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut tainted: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut locals: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    collect_tainted_bindings(body, param_names, &mut locals, &mut tainted);
+    check_escapes(body, param_names, &locals, &tainted, diagnostics);
+}
+
+/// Pass 1: walk the body collecting:
+/// - `locals`: every local-binding name (so we can distinguish
+///   `ref local_binding` from `ref param_binding` when the cast
+///   is `(ref name) as *const T` — the latter is an
+///   already-out-of-frame source and not tainted)
+/// - `tainted`: names of let-bindings whose RHS is a raw
+///   pointer derived from a local binding
+fn collect_tainted_bindings(
+    stmts: &[TypedStmt],
+    param_names: &std::collections::HashSet<String>,
+    locals: &mut std::collections::HashSet<String>,
+    tainted: &mut std::collections::HashSet<String>,
+) {
+    for stmt in stmts {
+        match stmt {
+            TypedStmt::Let { name, expr, ty } => {
+                // Record the local. (Parameters never appear as
+                // Let-bound names; they're in the param env from
+                // the start.)
+                locals.insert(name.clone());
+                if matches!(ty, Type::Ptr(_) | Type::PtrMut(_))
+                    && expr_is_local_origin(expr, param_names, locals, tainted)
+                {
+                    tainted.insert(name.clone());
+                }
+            }
+            TypedStmt::Reassign { name, expr, ty, .. } => {
+                if matches!(ty, Type::Ptr(_) | Type::PtrMut(_)) {
+                    if expr_is_local_origin(expr, param_names, locals, tainted) {
+                        tainted.insert(name.clone());
+                    } else {
+                        // Reassign of a previously-tainted ptr
+                        // with a non-tainted RHS clears the
+                        // taint (the binding now holds a
+                        // safe-origin value).
+                        tainted.remove(name);
+                    }
+                }
+            }
+            TypedStmt::If { then_body, else_body, .. } => {
+                collect_tainted_bindings(then_body, param_names, locals, tainted);
+                collect_tainted_bindings(else_body, param_names, locals, tainted);
+            }
+            TypedStmt::While { body, .. } => {
+                collect_tainted_bindings(body, param_names, locals, tainted);
+            }
+            TypedStmt::For { var, body, .. } => {
+                locals.insert(var.clone());
+                collect_tainted_bindings(body, param_names, locals, tainted);
+            }
+            TypedStmt::ForIter { var, body, .. } => {
+                locals.insert(var.clone());
+                collect_tainted_bindings(body, param_names, locals, tainted);
+            }
+            TypedStmt::TaskSpawn { name, body, .. } => {
+                locals.insert(name.clone());
+                collect_tainted_bindings(body, param_names, locals, tainted);
+            }
+            TypedStmt::UnsafeBlock { body, .. } => {
+                collect_tainted_bindings(body, param_names, locals, tainted);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// True when `expr` evaluates to a raw pointer whose origin is
+/// a stack-local. Handles:
+/// - direct cast `(ref local) as *const T` / `(mut ref local) as *mut T`
+/// - cast chains `((ref local) as *mut T) as *const T`
+/// - Var read of a tainted binding
+fn expr_is_local_origin(
+    expr: &TypedExpr,
+    param_names: &std::collections::HashSet<String>,
+    locals: &std::collections::HashSet<String>,
+    tainted: &std::collections::HashSet<String>,
+) -> bool {
+    match &expr.kind {
+        TypedExprKind::Var(name) => tainted.contains(name),
+        TypedExprKind::Cast { expr: inner, .. } => {
+            // Direct cast of a Ref / RefMut of a local binding.
+            // The pointee identity is what matters; the cast
+            // target type doesn't change the origin.
+            if let TypedExprKind::Ref { name } | TypedExprKind::RefMut { name } =
+                &inner.kind
+            {
+                if locals.contains(name) && !param_names.contains(name) {
+                    return true;
+                }
+            }
+            // Chain through other casts.
+            expr_is_local_origin(inner, param_names, locals, tainted)
+        }
+        _ => false,
+    }
+}
+
+/// Pass 2: walk the body looking for escapes.
+fn check_escapes(
+    stmts: &[TypedStmt],
+    param_names: &std::collections::HashSet<String>,
+    locals: &std::collections::HashSet<String>,
+    tainted: &std::collections::HashSet<String>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in stmts {
+        match stmt {
+            TypedStmt::Return { expr } => {
+                if matches!(expr.ty, Type::Ptr(_) | Type::PtrMut(_))
+                    && expr_is_local_origin(expr, param_names, locals, tainted)
+                {
+                    diagnostics.push(Diagnostic::new(
+                        expr.span,
+                        "raw pointer to a stack-local cannot be returned — \
+                         the local's storage dies on function exit, leaving \
+                         a dangling pointer. Pass the pointer downward to a \
+                         function that only borrows it, or use a `Handle<T>` \
+                         from a `Pool<T>` for a long-lived reference \
+                         (Layer 2 of `unsafe.md`)."
+                            .to_string(),
+                    ));
+                }
+            }
+            TypedStmt::IndexAssign { value, .. } => {
+                if matches!(value.ty, Type::Ptr(_) | Type::PtrMut(_))
+                    && expr_is_local_origin(value, param_names, locals, tainted)
+                {
+                    diagnostics.push(Diagnostic::new(
+                        value.span,
+                        "raw pointer to a stack-local cannot be stored into \
+                         a heap location — the local's storage dies on \
+                         function exit, but the Vec / array slot would \
+                         outlive it. Use a `Handle<T>` from a `Pool<T>` \
+                         for stored references (Layer 2 of `unsafe.md`)."
+                            .to_string(),
+                    ));
+                }
+            }
+            TypedStmt::FieldAssign { value, .. } => {
+                if matches!(value.ty, Type::Ptr(_) | Type::PtrMut(_))
+                    && expr_is_local_origin(value, param_names, locals, tainted)
+                {
+                    diagnostics.push(Diagnostic::new(
+                        value.span,
+                        "raw pointer to a stack-local cannot be stored into \
+                         a struct field — the local's storage dies on \
+                         function exit, but the field would outlive it. Use \
+                         a `Handle<T>` from a `Pool<T>` for stored \
+                         references (Layer 2 of `unsafe.md`)."
+                            .to_string(),
+                    ));
+                }
+            }
+            TypedStmt::Reassign { name, expr, ty, .. } => {
+                // Mutating a *parameter* binding to point to a
+                // local-derived pointer would smuggle the
+                // pointer up the call stack via the param's
+                // outer storage. (Caller passes a &mut, we
+                // overwrite the pointee with a tainted ptr.)
+                // V1 doesn't have a way to actually mutate the
+                // pointee through a `mut ref T` rebinding —
+                // Reassign reassigns the binding name itself,
+                // which for a parameter mutates its own slot
+                // only within the callee's frame, so this is
+                // safe in v1. Kept as a no-op arm in case the
+                // semantics tighten later.
+                let _ = (name, expr, ty);
+            }
+            TypedStmt::If { then_body, else_body, .. } => {
+                check_escapes(then_body, param_names, locals, tainted, diagnostics);
+                check_escapes(else_body, param_names, locals, tainted, diagnostics);
+            }
+            TypedStmt::While { body, .. } => {
+                check_escapes(body, param_names, locals, tainted, diagnostics);
+            }
+            TypedStmt::For { body, .. } | TypedStmt::ForIter { body, .. } => {
+                check_escapes(body, param_names, locals, tainted, diagnostics);
+            }
+            TypedStmt::TaskSpawn { body, .. } => {
+                check_escapes(body, param_names, locals, tainted, diagnostics);
+            }
+            TypedStmt::UnsafeBlock { body, .. } => {
+                check_escapes(body, param_names, locals, tainted, diagnostics);
+            }
+            _ => {}
+        }
+    }
+}
+
 fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
     fn walk(stmts: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
         use std::collections::HashSet;

@@ -10,7 +10,24 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Raw pointer types shipped** —
+**Last updated:** 2026-06-02 (**Layer 1.2 of `unsafe.md` shipped** —
+no-escape analysis on `&local`-derived raw pointers. Two-pass
+intra-procedural dataflow: (pass 1) collect the set of let-binding
+names that hold raw pointers traced back to a stack-local;
+(pass 2) walk the body rejecting `Return`, `IndexAssign value`,
+and `FieldAssign value` whose value reads a tainted binding or
+expresses a direct `(ref local) as *const T` / `(mut ref local)
+as *mut T` cast. Pointers derived from function parameters are
+**not** tainted (already from outside the frame), so pass-through
+of caller-supplied pointers compiles. The diagnostic explicitly
+points users at `Handle<T>` / `Pool<T>` (Layer 2) for long-lived
+references. **7 new lib tests**: rejects return of local ptr
+(direct + via-binding), allows pass-through of param ptr,
+rejects store into heap-backed slot, allows local-only use in
+same frame, rejects *mut return, diagnostic recommends Handle.
+**1566 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**Raw pointer types shipped** —
 prerequisite for Layer 1.2's no-escape dataflow. `Type::Ptr(Box<Type>)`
 (`*const T`) and `Type::PtrMut(Box<Type>)` (`*mut T`) added to the
 type system. Parser accepts `*const T` / `*mut T` in any type
@@ -67,7 +84,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1559 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1566 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

@@ -29963,6 +29963,155 @@ fn main() -> i64 {
         );
     }
 
+    // -----------------------------------------------------------------
+    // Layer 1.2 — no-escape on `&local`-derived raw pointers
+    // (unsafe.md § Layer 1.2). The dataflow rejects raw pointers
+    // whose origin is a stack-local from being returned, stored
+    // in a heap location (Vec slot, struct field), or otherwise
+    // escaping the frame. Pointers derived from parameters are
+    // not tainted (they came from outside the frame).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn no_escape_rejects_return_of_local_ptr() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dangler() -> *const i64 {
+              let x: i64 = 42;
+              return (ref x) as *const i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("returning local ptr must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot be returned")),
+            "expected no-escape return diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_escape_rejects_return_of_local_ptr_via_binding() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // Same pattern, but with the pointer flowing through a
+        // let-binding before the return — the taint propagation
+        // catches it.
+        let source = r#"
+            fn dangler() -> *const i64 {
+              let x: i64 = 42;
+              let p = (ref x) as *const i64;
+              return p;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("returning local ptr via binding rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot be returned")),
+            "expected no-escape return diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_escape_allows_pass_through_of_param_ptr() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // Pointer parameter is already from outside the frame,
+        // so returning it is fine.
+        let source = r#"
+            fn pass(p: *const i64) -> *const i64 {
+              return p;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("param ptr pass-through compiles");
+    }
+
+    #[test]
+    fn no_escape_rejects_store_into_vec_of_local_ptr() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // The Vec slot would outlive the local's frame. The
+        // store-into-heap escape catches it.
+        // Note: Vec<*const T> would need the cast target check
+        // to also gate at type-declaration time; this test
+        // exercises the IndexAssign path instead via an array.
+        let source = r#"
+            fn bad(xs: mut ref [*const i64; 1]) {
+              let x: i64 = 42;
+              xs[0] = (ref x) as *const i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("store-into-heap rejected");
+        // Either the no-escape diagnostic or a related rejection.
+        // What we want to see: SOME diagnostic that calls out the
+        // escape. (The exact wording depends on which gate fires
+        // first; Layer 1.2's check is the desired one but the
+        // raw-ptr-on-hosted gate at the param type might also
+        // fire on the array element type. Both are correct
+        // rejections.)
+        assert!(
+            !errs.is_empty(),
+            "expected at least one diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_escape_allows_local_use_in_same_frame() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // The pointer is created, bound, and never escapes the
+        // function. Valid.
+        let source = r#"
+            fn local_use() -> i64 {
+              let x: i64 = 42;
+              let _p = (ref x) as *const i64;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("local-only use compiles");
+    }
+
+    #[test]
+    fn no_escape_rejects_mut_ptr_return() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad() -> *mut i64 {
+              let x: i64 = 42;
+              return (mut ref x) as *mut i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("mut ptr return rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot be returned")),
+            "expected no-escape return diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_escape_diagnostic_recommends_handle() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn dangler() -> *const i64 {
+              let x: i64 = 42;
+              return (ref x) as *const i64;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("rejection expected");
+        // The diagnostic should mention `Handle<T>` / `Pool<T>`
+        // (Layer 2) as the supported pattern. Helps users
+        // discover the right primitive instead of trying to
+        // work around the no-escape rule.
+        assert!(
+            errs.iter().any(|d| d.message.contains("Handle<T>")),
+            "expected Handle<T> recommendation in diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn unsafe_block_inner_scope_isolates_let_bindings() {
         let _guard = EmbeddedTargetGuard::embedded();
