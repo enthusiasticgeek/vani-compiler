@@ -236,6 +236,20 @@ pub enum TypedStmt {
     TaskJoin {
         name: String,
     },
+    /// `unsafe(reason = "...") { <body> }` — lexically scoped
+    /// block. The `reason` string is mandatory at parse time
+    /// and is emitted as machine-readable debug metadata in
+    /// both backends so certification tooling (ASIL-D /
+    /// DO-178C / IEC 62304) can extract deviation records from
+    /// the compiled artifact. Layer 1.1 of the embedded-vāṇी
+    /// unsafe plan (`unsafe.md`). The body is checked
+    /// recursively as if it were the surrounding block — for
+    /// v1 of Layer 1.1, no language construct yet requires the
+    /// unsafe context (raw pointer types land in Layer 1.2+).
+    UnsafeBlock {
+        reason: String,
+        body: Vec<TypedStmt>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

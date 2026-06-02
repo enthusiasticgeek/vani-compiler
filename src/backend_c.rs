@@ -4274,7 +4274,7 @@ fn collect_vec_elements_in_stmt(
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskSpawn { body, .. } => {
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body {
                 collect_vec_elements_in_stmt(s, seen, out);
             }
@@ -6637,7 +6637,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskSpawn { body, .. } => {
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body {
                 collect_channel_specs_in_stmt(s, seen, out);
             }
@@ -9060,6 +9060,31 @@ return __intent_ret; }}\n",
                 local_name(name)
             ));
             out.push_str(&format!("  free({}.ctx);\n", local_name(name)));
+        }
+        TypedStmt::UnsafeBlock { reason, body } => {
+            // Layer 1.1 of unsafe.md. The reason string is the
+            // user-facing justification, escaped here for C
+            // block-comment safety (close-comment sequence and
+            // newlines stripped at parse time). Emitted as both
+            // an inline block-comment marker AND accumulated
+            // into the per-translation-unit deviation table
+            // (TASK_OUTLINES-style side buffer) so a
+            // certification-tooling pass can dump every
+            // deviation site with its reason. The body is
+            // emitted unchanged — at Layer 1.1 the unsafe
+            // boundary is purely metadata; raw pointer types
+            // and Tainted<T> propagation land in Layers 1.2 and
+            // 1.3 and will be guarded by the existing parse-
+            // time enforcement that raw types appear only
+            // inside this scope.
+            out.push_str("  /* UNSAFE-DEVIATION: ");
+            out.push_str(&escape_comment(reason));
+            out.push_str(" */\n");
+            out.push_str("  {\n");
+            for s in body {
+                emit_stmt(s, out);
+            }
+            out.push_str("  }\n");
         }
     }
 }
@@ -14290,6 +14315,9 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             }
             TypedStmt::TaskSpawn { body, captures, .. } => {
                 captures.iter().for_each(|(_, t)| walk_type(t, set));
+                body.iter().for_each(|s| walk_stmt(s, set));
+            }
+            TypedStmt::UnsafeBlock { body, .. } => {
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
             TypedStmt::TaskJoin { .. } | TypedStmt::Break | TypedStmt::Continue => {}

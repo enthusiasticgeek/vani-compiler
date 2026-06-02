@@ -1850,6 +1850,8 @@ impl Parser {
             self.parse_task_spawn_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Join)) {
             self.parse_task_join_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::Unsafe)) {
+            self.parse_unsafe_block_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Break)) {
             let token = self.bump();
             let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
@@ -2345,6 +2347,125 @@ impl Parser {
         Ok(Stmt::TaskJoin {
             name,
             span: join_tok.span.merge(semi.span),
+        })
+    }
+
+    /// `unsafe(reason = "...") { <body> }` — Layer 1.1 of the
+    /// embedded-vāṇी unsafe plan (`unsafe.md`). The `reason`
+    /// clause is mandatory at parse time. Empty / >256-char /
+    /// non-ASCII-printable / newline-containing reason strings
+    /// are all parse errors.
+    ///
+    /// Why these rules (kept terse here; full rationale lives in
+    /// `unsafe.md` § "Reason-string rules (v1)"):
+    /// - Non-empty: a missing justification defeats the whole
+    ///   point of the in-syntax form.
+    /// - ≤256 chars: keeps the deviation-record artifact compact
+    ///   and discoverable; certification reviewers cluster by
+    ///   prefix, not by paragraph.
+    /// - ASCII-printable + no newlines: the reason flows through
+    ///   IR / DWARF metadata where multi-line / non-printable
+    ///   payloads bloat the artifact and break greppability.
+    fn parse_unsafe_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let unsafe_tok =
+            self.expect_keyword("'unsafe'", |kind| matches!(kind, TokenKind::Unsafe))?;
+        // Require the `(reason = "...")` clause. The mandatory-
+        // clause form is what makes the deviation-record extraction
+        // possible — a bare `unsafe { … }` would silently slip past
+        // the audit trail.
+        if !self.check(|k| matches!(k, TokenKind::LParen)) {
+            return Err(Diagnostic::new(
+                self.current().span,
+                "`unsafe` requires a `(reason = \"…\")` clause — the \
+                 justification is part of the syntax and is emitted as \
+                 machine-readable deviation metadata. Example: \
+                 `unsafe(reason = \"MMIO: GPIOA::ODR write\") { … }`",
+            ));
+        }
+        self.expect_keyword("'('", |k| matches!(k, TokenKind::LParen))?;
+        // Single-keyword `reason` identifier inside the clause.
+        // No other keys accepted in v1; future revisions can add
+        // structured keys (e.g. `audit_id = "…"`) without breaking
+        // existing call sites.
+        let reason_ident = self.expect_ident()?;
+        let reason_kw = ident_text(reason_ident.clone());
+        if reason_kw != "reason" {
+            return Err(Diagnostic::new(
+                reason_ident.span,
+                format!(
+                    "expected `reason` inside `unsafe(...)`, got `{}`",
+                    reason_kw
+                ),
+            ));
+        }
+        self.expect_keyword("'='", |k| matches!(k, TokenKind::Equal))?;
+        let reason_tok = self.expect_string()?;
+        let reason_span = reason_tok.span;
+        let TokenKind::Str(reason) = reason_tok.kind else {
+            unreachable!("expect_string only returns string tokens")
+        };
+        // Reason-string validation. Each rule emits a precise
+        // diagnostic so the user sees exactly which constraint
+        // failed — important when the source string came from a
+        // template or a copy-paste from another file.
+        if reason.is_empty() {
+            return Err(Diagnostic::new(
+                reason_span,
+                "`reason` cannot be empty — the deviation-record artifact \
+                 needs a non-trivial justification per `unsafe` block. \
+                 Recommended prefixes: \"MMIO: …\", \"FFI: …\", \"DMA: …\", \
+                 \"transmute: …\", \"vendor-SDK: …\"",
+            ));
+        }
+        if reason.len() > 256 {
+            return Err(Diagnostic::new(
+                reason_span,
+                format!(
+                    "`reason` is {} chars (max 256). Keep the in-syntax \
+                     reason short; expand it in a nearby `//` comment if \
+                     more context is needed.",
+                    reason.len()
+                ),
+            ));
+        }
+        if reason.contains('\n') || reason.contains('\r') {
+            return Err(Diagnostic::new(
+                reason_span,
+                "`reason` cannot contain newlines — multi-line reasons \
+                 don't survive IR / DWARF metadata round-trip and break \
+                 deviation-record extraction tooling",
+            ));
+        }
+        if let Some(bad) = reason.chars().find(|c| {
+            // Reject control chars (incl. tab) and any non-ASCII.
+            // Printable ASCII range: 0x20..=0x7E.
+            (*c as u32) < 0x20 || (*c as u32) > 0x7E
+        }) {
+            return Err(Diagnostic::new(
+                reason_span,
+                format!(
+                    "`reason` contains a non-ASCII-printable character \
+                     (U+{:04X}). Deviation-record artifacts require \
+                     printable ASCII so they grep cleanly across \
+                     toolchains.",
+                    bad as u32
+                ),
+            ));
+        }
+        self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+        // Body — same shape as `task <name> { … }` and `if true
+        // { … }`. The block's stmts run in a fresh inner scope.
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut body = Vec::new();
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            body.push(self.parse_stmt()?);
+        }
+        let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        Ok(Stmt::UnsafeBlock {
+            reason,
+            reason_span,
+            body,
+            span: unsafe_tok.span.merge(close.span),
         })
     }
 

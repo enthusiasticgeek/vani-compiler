@@ -269,6 +269,15 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         }
         TypedStmt::TaskSpawn { body, .. } => stmts_ssa_supported(body, extra_reject),
         TypedStmt::TaskJoin { .. } => true,
+        // `unsafe(reason = "...")` blocks route through the tree
+        // backends in v1 of Layer 1.1 — the tree backends emit the
+        // reason as machine-readable deviation metadata, while the
+        // SSA backends drop unknown HintKind variants silently
+        // today. Wiring SSA emission for `HintKind::UnsafeBegin`
+        // is a small follow-up; not needed for the v1 acceptance
+        // tests (none of the Arc-or-Layer roadmap targets routes
+        // unsafe-bearing functions through SSA today).
+        TypedStmt::UnsafeBlock { .. } => false,
         TypedStmt::IndexAssign { base_ty, index, value, .. } => {
             ssa_type_supported(base_ty)
                 && expr_ssa_supported(index)

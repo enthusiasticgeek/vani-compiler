@@ -1227,6 +1227,23 @@ pub enum Stmt {
         name: String,
         span: Span,
     },
+    /// `unsafe(reason = "...") { <body> }` — lexically scoped
+    /// block where raw-pointer / FFI primitives that the affine +
+    /// Z3 surface can't verify are permitted. `reason` is
+    /// mandatory at parse time (non-empty, ≤256 chars,
+    /// ASCII-printable, no embedded newlines). The reason is
+    /// emitted as machine-readable debug metadata in both
+    /// backends so certification tooling (ASIL-D / DO-178C /
+    /// IEC 62304) can extract deviation records from the
+    /// compiled artifact. Embedded-target only — hosted builds
+    /// reject this construct at parse time. Layer 1.1 of
+    /// `unsafe.md`.
+    UnsafeBlock {
+        reason: String,
+        reason_span: Span,
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -1248,7 +1265,8 @@ impl Stmt {
             | Stmt::For { span, .. }
             | Stmt::ForIter { span, .. }
             | Stmt::TaskSpawn { span, .. }
-            | Stmt::TaskJoin { span, .. } => *span,
+            | Stmt::TaskJoin { span, .. }
+            | Stmt::UnsafeBlock { span, .. } => *span,
         }
     }
 }

@@ -1056,6 +1056,18 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             out.push_str(name);
             out.push_str(";\n");
         }
+        Stmt::UnsafeBlock { reason, body, span, .. } => {
+            out.push_str(&pad);
+            out.push_str("unsafe(reason = \"");
+            out.push_str(&escape_string(reason));
+            out.push_str("\") {\n");
+            for s in body {
+                format_stmt(s, depth + 1, ctx, out);
+            }
+            ctx.drain_to(span.end, depth + 1, out);
+            out.push_str(&pad);
+            out.push_str("}\n");
+        }
     }
     // Single attach point covering every statement variant: if the
     // next pending comment lies on the same source line as the end
@@ -1598,6 +1610,11 @@ mod tests {
                 }
                 Stmt::TaskJoin { span, .. } => {
                     *span = crate::span::Span::new(0, 0);
+                }
+                Stmt::UnsafeBlock { body, span, reason_span, .. } => {
+                    zero_stmts(body);
+                    *span = crate::span::Span::new(0, 0);
+                    *reason_span = crate::span::Span::new(0, 0);
                 }
             }
         }

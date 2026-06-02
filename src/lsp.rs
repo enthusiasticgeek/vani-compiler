@@ -1692,7 +1692,7 @@ fn walk_stmt(
             walk_expr(object, offset, best);
             walk_expr(value, offset, best);
         }
-        TypedStmt::TaskSpawn { body, .. } => {
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
             for s in body {
                 walk_stmt(s, offset, best);
             }

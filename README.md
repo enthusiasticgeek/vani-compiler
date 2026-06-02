@@ -312,8 +312,8 @@ mechanisms; v1 (Layers 1–4) ships first:
 
 | Layer | What it catches inside `unsafe` | Cost |
 |---|---|---|
-| **Lexical containment** (Layer 1.1) | Raw `*T` cannot appear in safe function signatures, struct fields, returns. Reviewers grep `unsafe(` to find every escape. | 0 (parse-time) |
-| **Mandatory reason clause** | Every block needs `unsafe(reason = "...")` with a non-empty string. The reason is part of the IR/DWARF metadata so certification tooling can extract a deviation-record report from the compiled artifact. | 0 (parse-time) |
+| **Lexical containment** (Layer 1.1, ✅ **shipped 2026-06-02**) | The `unsafe(reason = "...") { ... }` block parses, type-checks, and the reason flows through both backends as machine-readable deviation metadata (`/* UNSAFE-DEVIATION: ... */` in tree-C; `; UNSAFE-DEVIATION: ...` in tree-LLVM IR). Reviewers grep these markers to find every escape. Raw `*T` types land in Layer 1.2+ and plug into the boundary already in place. | 0 (parse-time) |
+| **Mandatory reason clause** (Layer 1.1, ✅ **shipped 2026-06-02**) | Parser enforces: non-empty, ≤256 chars, ASCII-printable, no embedded newlines. Empty / missing / oversized / non-ASCII / multi-line reasons are parse errors. Hosted builds reject the construct by default; `INTENT_TARGET_EMBEDDED=1` opens it until the `--target embedded` flag lands. | 0 (parse-time) |
 | **No-escape on `&local`** (Layer 1.2) | A raw pointer derived from a stack variable cannot return, store into heap, or escape via global. Catches "returns pointer to dead stack frame." | 0 (compile-time dataflow) |
 | **`Tainted<T>`** (Layer 1.3) | Values loaded through raw pointers are wrapped in `Tainted<T>`; storing tainted values into safe-typed slots requires explicit `assert_safe(x)`. Catches "unsafe data silently poisons safe code." | 0 (compile-time) |
 | **`Handle<T>` + `Pool<T>`** (Layer 2, v1 default) | Generational handles. Use-after-free and double-free are caught at runtime by generation mismatch on `pool.get(h)` → returns `None`. The blessed long-lived "pointer-like" type crossing safe/unsafe. | ~3–5 cycles per deref on Cortex-M |

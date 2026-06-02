@@ -1198,6 +1198,7 @@ fn compute_indirect_locks(
             }
             Stmt::ForIter { body, .. } => walk_stmts(body, param_names, signatures, out),
             Stmt::TaskSpawn { body, .. } => walk_stmts(body, param_names, signatures, out),
+            Stmt::UnsafeBlock { body, .. } => walk_stmts(body, param_names, signatures, out),
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
         }
     }
@@ -2051,6 +2052,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
                 || body.iter().any(|s| stmt_mentions_var(s, name))
         }
         S::TaskSpawn { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
+        S::UnsafeBlock { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => false,
     }
 }
@@ -2192,6 +2194,11 @@ fn walk_stmt_for_captures(
         S::ForIter { var, collection, body, .. } => {
             check_var_capture(collection, bound, env, top_level_names, captures, seen);
             bound.insert(var.clone());
+            for s in body {
+                walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen);
+            }
+        }
+        S::UnsafeBlock { body, .. } => {
             for s in body {
                 walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen);
             }
@@ -2375,6 +2382,11 @@ fn rename_vars_in_stmt(
                 rename_vars_in_stmt(s, rename);
             }
         }
+        S::UnsafeBlock { body, .. } => {
+            for s in body {
+                rename_vars_in_stmt(s, rename);
+            }
+        }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
     }
 }
@@ -2519,7 +2531,7 @@ fn rewrite_closure_calls_in_stmt(
                 rewrite_closure_calls_in_stmt(s, closures);
             }
         }
-        S::ForIter { body, .. } | S::TaskSpawn { body, .. } => {
+        S::ForIter { body, .. } | S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
             for s in body {
                 rewrite_closure_calls_in_stmt(s, closures);
             }
@@ -2677,7 +2689,7 @@ fn lift_stmt_anon_fn(
                 lift_stmt_anon_fn(s, counter, hoisted);
             }
         }
-        S::ForIter { body, .. } | S::TaskSpawn { body, .. } => {
+        S::ForIter { body, .. } | S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
             for s in body {
                 lift_stmt_anon_fn(s, counter, hoisted);
             }
@@ -3799,7 +3811,9 @@ fn resolve_enum_types_in_stmt(
                 resolve_enum_types_in_stmt(s, enums);
             }
         }
-        Stmt::ForIter { body, .. } | Stmt::TaskSpawn { body, .. } => {
+        Stmt::ForIter { body, .. }
+        | Stmt::TaskSpawn { body, .. }
+        | Stmt::UnsafeBlock { body, .. } => {
             for s in body {
                 resolve_enum_types_in_stmt(s, enums);
             }
@@ -4169,7 +4183,9 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                 sub_aliases_in_stmt(s, aliases);
             }
         }
-        Stmt::ForIter { body, .. } | Stmt::TaskSpawn { body, .. } => {
+        Stmt::ForIter { body, .. }
+        | Stmt::TaskSpawn { body, .. }
+        | Stmt::UnsafeBlock { body, .. } => {
             for s in body {
                 sub_aliases_in_stmt(s, aliases);
             }
@@ -9359,6 +9375,74 @@ fn check_one_stmt(
                 info_mut.moved = Some(*span);
             }
             body.push(TypedStmt::TaskJoin { name: name.clone() });
+            false
+        }
+        Stmt::UnsafeBlock {
+            reason,
+            reason_span: _,
+            body: inner_body,
+            span,
+        } => {
+            // Layer 1.1 of the embedded-vāṇी unsafe plan. The
+            // parser has already enforced the reason-string rules
+            // (non-empty, ≤256 chars, ASCII-printable, no
+            // embedded newlines). At this point the only thing
+            // the checker has to do is recurse into the body in
+            // a fresh inner scope and emit the typed wrapper so
+            // the backends can stamp the reason as machine-
+            // readable deviation metadata.
+            //
+            // No language construct yet *requires* the unsafe
+            // context — raw pointer types (Layer 1.2+) and the
+            // Tainted<T> wrapper (Layer 1.3) land in follow-up
+            // commits and will read this scope's
+            // `is_unsafe_context` flag (threaded as a future
+            // field on Env). For now, the block is a recognized
+            // syntactic boundary that propagates reason metadata
+            // through the IR — that alone unblocks ASIL-D /
+            // DO-178C / IEC 62304 deviation-audit tooling.
+            //
+            // Hosted-only gate: vāṇी v1 ships hosted only. Until
+            // a target-triple flag lands, the embedded gate is
+            // a stop-gap env-var check. With `INTENT_TARGET_EMBEDDED=1`
+            // set, the block is permitted (so the feature can be
+            // exercised end-to-end today). Without it, the
+            // checker emits the rejection diagnostic — which
+            // matches the standing position recorded in
+            // README.md ("hosted rejects at parse time").
+            // Replacing the env-var gate with a proper
+            // target-triple check is the first thing the
+            // embedded-target arc does.
+            if std::env::var("INTENT_TARGET_EMBEDDED").ok().as_deref() != Some("1") {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    "`unsafe(reason = \"…\")` is gated to embedded build \
+                     targets — current vāṇī builds default to hosted, \
+                     which rejects the construct (README: *Embedded \
+                     targets — current position*). Set `INTENT_TARGET_EMBEDDED=1` \
+                     to opt in until the `--target embedded` flag ships.",
+                ));
+            }
+            env.push_scope();
+            let mut typed_body: Vec<TypedStmt> = Vec::new();
+            let mut inner_facts = smt_facts.clone();
+            let _terminated = check_stmt_list(
+                inner_body,
+                env,
+                signatures,
+                function,
+                loops,
+                &mut inner_facts,
+                &mut typed_body,
+                diagnostics,
+            );
+            emit_current_scope_drops(env, &mut typed_body, diagnostics);
+            env.pop_scope();
+
+            body.push(TypedStmt::UnsafeBlock {
+                reason: reason.clone(),
+                body: typed_body,
+            });
             false
         }
         Stmt::LetTuple {
@@ -15544,6 +15628,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                 }
                 Stmt::ForIter { body, .. } => walk(body, param_names, locks),
                 Stmt::TaskSpawn { body, .. } => walk(body, param_names, locks),
+                Stmt::UnsafeBlock { body, .. } => walk(body, param_names, locks),
                 Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
             }
         }
@@ -23667,7 +23752,8 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::For { .. }
         | TypedStmt::ForIter { .. }
         | TypedStmt::TaskSpawn { .. }
-        | TypedStmt::TaskJoin { .. } => vec![],
+        | TypedStmt::TaskJoin { .. }
+        | TypedStmt::UnsafeBlock { .. } => vec![],
     }
 }
 
@@ -23813,6 +23899,16 @@ fn verify_pure_body(
                             ),
                         ));
                     }
+                }
+                TypedStmt::UnsafeBlock { body, .. } => {
+                    // A nested `unsafe(reason = "...")` block inside
+                    // a pure context surfaces its body's purity via
+                    // recursion. `unsafe` itself doesn't make a body
+                    // impure — Layer 1.1 doesn't admit any
+                    // language construct that would; once raw
+                    // pointers land in Layer 1.2+, those will
+                    // separately be impure.
+                    walk(body, signatures, context, diagnostics);
                 }
                 TypedStmt::Drop { .. } | TypedStmt::Continue => {}
             }

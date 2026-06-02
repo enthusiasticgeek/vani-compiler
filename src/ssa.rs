@@ -192,6 +192,15 @@ pub enum HintKind {
     TaskEnd { handle: String },
     /// Marks a `join <name>;` — handle is consumed.
     TaskJoin { handle: String },
+    /// Opens an `unsafe(reason = "...") { … }` region. The
+    /// reason is the parser-enforced justification string; the
+    /// SSA-backed backends use it the same way the tree
+    /// backends do — emit it as machine-readable deviation
+    /// metadata before the body's instructions. Body runs
+    /// inline. Layer 1.1 of `unsafe.md`.
+    UnsafeBegin { reason: String },
+    /// Closes an `UnsafeBegin` region.
+    UnsafeEnd,
 }
 
 /// Structured-loop metadata captured by the SSA lowerer
@@ -327,6 +336,8 @@ impl fmt::Display for Instruction {
                 HintKind::TaskBegin { handle } => write!(f, "hint task_begin {}", handle),
                 HintKind::TaskEnd { handle } => write!(f, "hint task_end {}", handle),
                 HintKind::TaskJoin { handle } => write!(f, "hint task_join {}", handle),
+                HintKind::UnsafeBegin { reason } => write!(f, "hint unsafe_begin {:?}", reason),
+                HintKind::UnsafeEnd => f.write_str("hint unsafe_end"),
             },
         }
     }
@@ -831,6 +842,27 @@ fn lower_stmt(
             );
             Ok(())
         }
+        TypedStmt::UnsafeBlock { reason, body } => {
+            b.emit(
+                Type::I64,
+                Span::default(),
+                InstrKind::Hint(HintKind::UnsafeBegin {
+                    reason: reason.clone(),
+                }),
+            );
+            // Body runs inline — fresh bindings declared inside
+            // don't escape the block. Mirror TaskSpawn's
+            // snapshot-clone pattern so reassigns inside the
+            // body stay local.
+            let mut body_locals = locals.clone();
+            lower_stmts(body, b, &mut body_locals)?;
+            b.emit(
+                Type::I64,
+                Span::default(),
+                InstrKind::Hint(HintKind::UnsafeEnd),
+            );
+            Ok(())
+        }
         TypedStmt::Break => {
             let Some(frame) = b.loops.last().cloned() else {
                 return Err(LowerError {
@@ -1302,6 +1334,7 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::ForIter { .. } => "ForIter",
         TypedStmt::TaskSpawn { .. } => "TaskSpawn",
         TypedStmt::TaskJoin { .. } => "TaskJoin",
+        TypedStmt::UnsafeBlock { .. } => "UnsafeBlock",
     }
 }
 

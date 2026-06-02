@@ -183,6 +183,18 @@ pub enum TokenKind {
     /// private. Top-level items (not inside any `module`) stay
     /// globally visible.
     Pub,
+    /// `unsafe(reason = "...") { ... }` — opens a lexically
+    /// scoped block where raw-pointer / FFI primitives that
+    /// the affine + Z3 surface can't verify are permitted. The
+    /// `reason = "..."` clause is mandatory at parse time; the
+    /// reason string is threaded through the IR and emitted as
+    /// machine-readable debug metadata so certification tooling
+    /// (ASIL-D / DO-178C / IEC 62304) can extract deviation
+    /// records from the compiled artifact. Embedded build
+    /// triples only — hosted builds reject this keyword at
+    /// parse time. Layer 1.1 of the embedded-vāṇी unsafe plan
+    /// (`unsafe.md`).
+    Unsafe,
     Eof,
 }
 
@@ -334,6 +346,9 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "प्रयास" => TokenKind::Try,        // prayās (Sanskrit/Hindi/Marathi: "attempt")
         "नियोग" => TokenKind::Task,        // niyog (Sanskrit/Hindi/Marathi: "assignment/task")
         "संयोजन" => TokenKind::Join,       // saṁyojan (Sanskrit/Hindi/Marathi: "joining")
+        // unsafe — tatsama Sanskrit-root form, shared across all
+        // three languages. Layer 1.1 of the embedded plan.
+        "असुरक्षित" => TokenKind::Unsafe,  // asurakṣita (Sanskrit/Hindi/Marathi: "unprotected")
         _ => return None,
     };
     Some(kind)
@@ -467,6 +482,7 @@ fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::Try
             | TokenKind::Module
             | TokenKind::Pub
+            | TokenKind::Unsafe
     )
 }
 
@@ -981,6 +997,7 @@ impl<'a> Lexer<'a> {
             "fn" => TokenKind::Fn,
             "pure" => TokenKind::Pure,
             "extern" => TokenKind::Extern,
+            "unsafe" => TokenKind::Unsafe,
             "parallel" => TokenKind::Parallel,
             "reduce" => TokenKind::Reduce,
             "with" => TokenKind::With,

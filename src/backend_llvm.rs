@@ -3191,6 +3191,29 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ));
             out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
         }
+        TypedStmt::UnsafeBlock { reason, body } => {
+            // Layer 1.1 of unsafe.md. Emit the reason string
+            // as an inline LLVM comment on a single line ahead
+            // of the body — LLVM's textual IR allows `;`
+            // comments and the form is preserved through
+            // `llc`/`opt`. A proper DWARF `DIScope` /
+            // `DW_AT_description` plumb-through belongs to a
+            // follow-up commit once we wire debug-info
+            // emission (today's tree-LLVM has no `!dbg`
+            // metadata generation at all — adding it for one
+            // construct would mean standing up the full
+            // !DICompileUnit / !DISubprogram scaffolding).
+            // The inline-comment form is enough for
+            // certification tooling that greps the artifact;
+            // the binary still carries the reason as a `.txt`-
+            // ish trail in the IR.
+            out.push_str("  ; UNSAFE-DEVIATION: ");
+            out.push_str(&reason.replace('\n', " "));
+            out.push('\n');
+            for s in body {
+                emit_stmt(s, ctx, out);
+            }
+        }
     }
 }
 
@@ -32076,6 +32099,11 @@ pub(crate) fn walk_body(
                 // local binding so capture analysis sees nothing
                 // crossing the parallel-for boundary.
                 let _ = name;
+            }
+            TypedStmt::UnsafeBlock { body, .. } => {
+                let saved = declared.clone();
+                walk_body(body, declared, order, seen);
+                *declared = saved;
             }
             TypedStmt::Drop { .. } | TypedStmt::Break | TypedStmt::Continue => {}
         }

@@ -29581,4 +29581,261 @@ fn main() -> i64 {
         );
     }
 
+    // -----------------------------------------------------------------
+    // Layer 1.1 — `unsafe(reason = "...") { ... }` block tests
+    // (embedded-vāṇी unsafe plan, `unsafe.md` § Layer 1.1)
+    //
+    // The reason-string rules are the parser-enforced contract:
+    // mandatory non-empty, ≤256 chars, ASCII-printable, no
+    // newlines. Each rule has its own diagnostic + its own test.
+    //
+    // The host gate (default-deny, `INTENT_TARGET_EMBEDDED=1` to
+    // permit) is exercised by saving/restoring the env var around
+    // every test. The reason this matters: the tree backends'
+    // deviation-record emission only fires when the checker
+    // accepts the block — so we need the embedded gate flipped
+    // ON to verify backend output.
+    // -----------------------------------------------------------------
+
+    /// Helper: scope-guard the embedded env var so a test can
+    /// flip it on and have it restored at scope exit even on
+    /// panic. Without this, a failing assert leaves the env var
+    /// set and corrupts later tests in the same process.
+    ///
+    /// `cargo test` runs lib tests in parallel by default, and
+    /// the env var is process-global — so we also serialize
+    /// every env-var-sensitive test through a static `Mutex`.
+    /// Without that lock, the default-deny test races with the
+    /// embedded-on tests and sees the wrong value.
+    struct EmbeddedTargetGuard {
+        previous: Option<String>,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn env_lock() -> &'static std::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    impl EmbeddedTargetGuard {
+        fn embedded() -> Self {
+            // Take the lock so concurrent env-var-sensitive
+            // tests run one at a time.
+            let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let previous = std::env::var("INTENT_TARGET_EMBEDDED").ok();
+            std::env::set_var("INTENT_TARGET_EMBEDDED", "1");
+            Self { previous, _guard: guard }
+        }
+
+        fn hosted() -> Self {
+            let guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+            let previous = std::env::var("INTENT_TARGET_EMBEDDED").ok();
+            std::env::remove_var("INTENT_TARGET_EMBEDDED");
+            Self { previous, _guard: guard }
+        }
+    }
+
+    impl Drop for EmbeddedTargetGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var("INTENT_TARGET_EMBEDDED", v),
+                None => std::env::remove_var("INTENT_TARGET_EMBEDDED"),
+            }
+        }
+    }
+
+    #[test]
+    fn unsafe_bare_keyword_rejected_without_reason_clause() {
+        let source = r#"
+            fn main() -> i64 {
+              unsafe {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("bare `unsafe {` must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("requires a `(reason")),
+            "expected reason-clause-required diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_empty_reason_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "") {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("empty reason must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cannot be empty")),
+            "expected empty-reason diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_oversized_reason_rejected() {
+        // 257-char reason — one past the parser-enforced cap.
+        let long_reason = "MMIO: ".to_string() + &"x".repeat(251);
+        assert_eq!(long_reason.len(), 257);
+        let source = format!(
+            r#"
+            fn main() -> i64 {{
+              unsafe(reason = "{}") {{
+                let x: i64 = 1;
+              }}
+              return 0;
+            }}
+            "#,
+            long_reason
+        );
+        let errs = compile(&source).expect_err("oversized reason must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("max 256")),
+            "expected oversize-reason diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_non_ascii_reason_rejected() {
+        // Devanagari char in reason — disallowed because reason
+        // flows through IR / DWARF metadata where non-ASCII
+        // payloads break greppability across toolchains.
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "MMIO: कक") {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("non-ASCII reason must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("non-ASCII-printable")),
+            "expected non-ASCII-reason diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_block_rejected_on_hosted_default() {
+        // Default hosted build (no `INTENT_TARGET_EMBEDDED=1`)
+        // must reject the construct. The guard holds a static
+        // Mutex so this test serializes against the
+        // `EmbeddedTargetGuard::embedded()` tests.
+        let _guard = EmbeddedTargetGuard::hosted();
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "MMIO: GPIOA::ODR") {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("hosted build must reject unsafe block");
+        assert!(
+            errs.iter().any(|d| {
+                d.message.contains("gated to embedded build targets")
+                    || d.message.contains("INTENT_TARGET_EMBEDDED")
+            }),
+            "expected hosted-rejection diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn unsafe_c_backend_emits_deviation_marker() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "MMIO: GPIOA::ODR write") {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C with embedded gate on");
+        assert!(
+            c.contains("/* UNSAFE-DEVIATION: MMIO: GPIOA::ODR write */"),
+            "expected deviation marker in C output, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn unsafe_llvm_backend_emits_deviation_marker() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "FFI: vendor SDK callback") {
+                let x: i64 = 1;
+              }
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("compiles to LLVM with embedded gate on");
+        assert!(
+            ll.contains("; UNSAFE-DEVIATION: FFI: vendor SDK callback"),
+            "expected deviation marker in LLVM output, got:\n{}",
+            ll
+        );
+    }
+
+    #[test]
+    fn unsafe_devanagari_alias_parses() {
+        // Confirm the Devanagari alias `असुरक्षित` (asurakṣita)
+        // produces the same AST shape as English `unsafe`.
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            कार्य main() -> i64 {
+              असुरक्षित(reason = "MMIO: hindi-alias test") {
+                माना x: i64 = 1;
+              }
+              पुनरागम 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Devanagari unsafe compiles to C");
+        assert!(
+            c.contains("/* UNSAFE-DEVIATION: MMIO: hindi-alias test */"),
+            "expected deviation marker, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn unsafe_block_inner_scope_isolates_let_bindings() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        // A binding declared inside the unsafe block must not
+        // be visible outside it (mirrors task / if-block scope).
+        let source = r#"
+            fn main() -> i64 {
+              unsafe(reason = "MMIO: scope test") {
+                let inner: i64 = 7;
+                prove inner == 7;
+              }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("inner-scope binding accepted");
+
+        let leaked = r#"
+            fn main() -> i64 {
+              unsafe(reason = "MMIO: scope test") {
+                let inner: i64 = 7;
+              }
+              return inner;
+            }
+        "#;
+        let errs = compile(leaked).expect_err("inner binding must not leak");
+        let _ = errs; // Any scope-related diagnostic is acceptable.
+    }
+
 }
