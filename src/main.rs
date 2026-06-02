@@ -1523,6 +1523,14 @@ fn run_program(path: &Path, link_args: &[String]) -> Result<ExitCode, String> {
     cmd.arg(&c_path)
         .arg("-std=c11")
         .arg("-O2");
+    // Layer 4.1 of `unsafe.md` — stack canaries. Opt-in via the
+    // same embedded gate as Layer 1.1 / 1.2. `-fstack-protector-
+    // strong` catches stack-smashing in any function with
+    // buffers, allocas, or string operations at ~2 instructions
+    // per frame. Free defense-in-depth when the build target is
+    // embedded; held back from default hosted builds so we
+    // don't perturb the existing parity / perf baseline.
+    apply_embedded_cc_hardening(&mut cmd);
     // Link pthread on POSIX so the `task` lowering's
     // pthread_create / pthread_join references resolve.
     // glibc folds -lpthread into libc on modern systems;
@@ -1883,6 +1891,9 @@ fn build_program_llvm(
     } else {
         link_cmd.arg("-fopenmp");
     }
+    // Layer 4.1 of `unsafe.md` — same toolchain hardening on
+    // the LLVM-backend link path. See `apply_embedded_cc_hardening`.
+    apply_embedded_cc_hardening(&mut link_cmd);
     // FFI follow-up: user-supplied link inputs follow the vāṇī
     // object so symbol resolution sees vāṇī's `extern "C" fn` call
     // sites first and then the providing object/library.
@@ -1905,6 +1916,32 @@ fn build_program_llvm(
         ));
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Layer 4.1 of `unsafe.md` — add toolchain-level hardening
+/// flags to a `cc` / `clang` invocation when the embedded gate
+/// is on (`INTENT_TARGET_EMBEDDED=1`). The flags applied today:
+///
+/// - `-fstack-protector-strong` — emits a stack canary on every
+///   function that has a buffer, alloca, or string operation,
+///   catching the classic "smash the canary, overwrite the
+///   return address" exploit class. Cost: ~2 instructions per
+///   protected frame. The `-strong` variant balances coverage
+///   vs perf (vs `-fstack-protector-all` which protects every
+///   single frame).
+///
+/// Gated to embedded so hosted parity / perf baseline doesn't
+/// shift. The proper `--target embedded` flag will eventually
+/// replace the env-var gate.
+///
+/// Layer 4.2 (ARM MTE) is a separate flag added on a different
+/// path (`-march=armv8.5-a+memtag`) since it's hardware-
+/// gated; that's a follow-up.
+fn apply_embedded_cc_hardening(cmd: &mut Command) {
+    if env::var("INTENT_TARGET_EMBEDDED").ok().as_deref() != Some("1") {
+        return;
+    }
+    cmd.arg("-fstack-protector-strong");
 }
 
 fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {

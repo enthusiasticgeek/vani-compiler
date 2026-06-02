@@ -10,7 +10,17 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Layer 1.2 of `unsafe.md` shipped** —
+**Last updated:** 2026-06-02 (**Layer 4.1 of `unsafe.md` shipped** —
+toolchain-level stack canaries. `apply_embedded_cc_hardening` adds
+`-fstack-protector-strong` to both `cc` invocations (tree-C `run`
+path and LLVM-backend link path) when `INTENT_TARGET_EMBEDDED=1`.
+Gated to embedded so hosted parity / perf baseline doesn't shift.
+The `-strong` variant balances coverage vs perf (protects frames
+with buffers / allocas / string ops at ~2 instructions per
+protected frame). Layer 4.2 (ARM MTE) and Layer 1.3 (Tainted<T>)
+remain queued. 1566 lib + 54 parity green.)
+
+**Prior:** 2026-06-02 (**Layer 1.2 of `unsafe.md` shipped** —
 no-escape analysis on `&local`-derived raw pointers. Two-pass
 intra-procedural dataflow: (pass 1) collect the set of let-binding
 names that hold raw pointers traced back to a stack-local;
