@@ -10,7 +10,53 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4 COMPLETE — `HashMap<Vec<i64>, V>`
+**Last updated:** 2026-06-03 (**post-ARC-4 polish + ledger close-out**).
+
+Session 2026-06-03 shipped: all 6 ARC 4 sub-arcs cross-backend
+(4.1–4.6), then closed the now-actionable polish queue (items
+0–5):
+- **Item 0** — markdown ledger refresh (Arcs 1–4 marked
+  complete; new sequenced ledger for Arcs 5–10).
+- **Item 1** — Vtables Vec<dyn Iface> element hoist: non-Var
+  call/struct/literal sources now compile cleanly via the
+  shared `__dyn_src_*` synthetic-let prelude (checker hoists,
+  C backend's Let-stmt unfold broadens to recognize the
+  prelude pattern, LLVM already worked).
+- **Item 2** — Closure A drop-dispatch lib test added (per-
+  variant `switch (tag)` drop for `Result<Vec, OwnedStr>`-
+  shape mixed-payload enums; both backends already had the
+  codegen).
+- **Items 3, 4, 5** turned out to already be on `main`
+  (`try_vec` = closure #284, nested arrays = closure #291
+  Phases 3+4, `#[bounded(N)]` = closures #286 + #289).
+- **Arc 5 audit**: 3 of 4 sub-steps (5a non-Copy capture-by-
+  value, 5b `[ref xs]` capture-by-ref, 5d reassign + sibling
+  name reuse) all already on `main`. Only 5c (closure-as-
+  value across fn boundaries) genuinely remains.
+
+**Test ledger:** 1791 lib + 54 parity green at end of session.
+
+**Forward queue** (per [TODO.md](TODO.md) + [ARCS.md](ARCS.md)):
+all multi-session L-tier arcs. Each warrants its own focused
+session — they don't decompose into mechanical cross-backend
+sub-arcs the way Arc 4 did.
+
+- **Arc 5c** — Closure-as-value across fn boundaries (env-
+  struct + fn-ptr pair = `Closure<Args, Ret>` type). ~5-6h.
+  Unblocks Arc 8 (Async).
+- **Arc 6** — Generic type declarations (`EnumDecl`/`StructDecl`
+  gain `type_params`; first-class `Option<T>`/`Result<T,E>`/
+  `Future<T>`). ~15-20h. Independent.
+- **Arc 7** — FFI ABI lowering (per-platform classifier;
+  struct-by-value across `extern "C"`). ~10-15h. Independent.
+- **Arc 8** — Async / asyncio (state-machine codegen, event
+  loop, non-blocking I/O). ~30-40h. Deps: 5c + 6.
+- **Arc 9** — Kosh package manager (phase c-d first as small
+  beachhead). ~40h+.
+- **Arc 10** — Devanagari SOV grammar fit. Soft-blocked on
+  grammar consultant.
+
+**Prior:** 2026-06-03 (**ARC 4 COMPLETE — `HashMap<Vec<i64>, V>`
 finishes the wider K-V matrix on both backends.** All six ARC 4
 sub-arcs (4.1 OwnedStr K, 4.2 OwnedStr V with i64 K, 4.3
 OwnedStr K + OwnedStr V, 4.4 (i64,…,i64) tuple K, 4.5 f64 K,
