@@ -10,7 +10,34 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**Standard composites shipped —
+**Last updated:** 2026-06-02 (**T2.1 of safety-standard arc
+shipped — MMIO volatile load/store. Tier 2 COMPLETE.** Two new
+builtins `mmio_read_u32(addr: i64) -> u32` and
+`mmio_write_u32(addr: i64, v: u32) -> i64`. V1 covers u32-width
+registers (most common width on ARM Cortex-M and similar
+embedded targets); larger widths are a Tier 3 extension. Both
+backends emit a `volatile` qualifier on the load/store — tree-C
+spells the access as `(*((const volatile uint32_t*)((uintptr_t)addr)))`
+(read) / `((*((volatile uint32_t*)((uintptr_t)addr))) = v,
+(int64_t)0)` (write); tree-LLVM emits `inttoptr` from the
+i64 address to `i32*`, then `load volatile i32, i32* ..., align 4`
+/ `store volatile i32 v, i32* ..., align 4`. LLVM preserves
+`volatile` across optimization passes — required for peripheral
+registers where the act of reading clears interrupt-pending
+flags and writes can latch state. Surrounded by an
+`unsafe(reason = "MMIO: ...")` block, the deviations extractor
+captures the access in the audit artifact with
+`target_standard` populated from the enclosing fn's composite
+tag. SSA backends (the path used by `intentc emit/run`) also
+received the volatile arms in addition to the legacy tree
+backends. **8 new lib tests** (typecheck for each builtin,
+volatile in C output, volatile + inttoptr in LLVM output,
+arg-count violations for both). **1673 lib + 54 parity green.**
+**Tier 2 of safety-standard arc complete.** Next: Tier 3 (WCET
+budgets, bounded_stack annotations, call-graph acyclicity proof,
+deterministic_timing, `pure fn` → MISRA 13.x tightening).)
+
+**Prior:** 2026-06-02 (**Standard composites shipped —
 `#[misra_c_2012]` / `#[asil_d]` / `#[do178c_level_a]` /
 `#[iec_62304_class_c]`.** Each is a hardcoded alias that expands
 to the primitive constraint set the standard requires (v1: all

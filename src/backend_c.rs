@@ -12470,6 +12470,20 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // T2.1 of safety-standard arc — MMIO volatile load/store.
+        // `volatile` qualifier prevents the compiler from
+        // coalescing, reordering, or eliding accesses. The i64
+        // address is cast through `uintptr_t` to satisfy ISO C
+        // strict-aliasing on integer-to-pointer conversion.
+        "mmio_read_u32" => format!(
+            "(*((const volatile uint32_t*)((uintptr_t)({}))))",
+            emit_expr(&args[0])
+        ),
+        "mmio_write_u32" => format!(
+            "((*((volatile uint32_t*)((uintptr_t)({})))) = ({}), (int64_t)0)",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         // Layer 3.1 of `unsafe.md` — canary-protected heap
         // allocation. Routes through `intent_unsafe_alloc` /
         // `intent_unsafe_free` helpers emitted by

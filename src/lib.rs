@@ -31719,6 +31719,138 @@ fn main() -> i64 {
         );
     }
 
+    // T2.1 of the safety-standard arc — MMIO volatile load/store.
+
+    #[test]
+    fn mmio_read_u32_typechecks() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u32 {
+              return mmio_read_u32(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("mmio_read_u32 typechecks");
+    }
+
+    #[test]
+    fn mmio_write_u32_typechecks() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn write_reg(addr: i64, v: u32) -> i64 {
+              return mmio_write_u32(addr, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("mmio_write_u32 typechecks");
+    }
+
+    #[test]
+    fn mmio_read_u32_emits_volatile_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u32 {
+              return mmio_read_u32(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("mmio_read_u32 compiles to C");
+        assert!(
+            c.contains("volatile uint32_t*"),
+            "expected `volatile uint32_t*` cast in C, got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_write_u32_emits_volatile_c() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn write_reg(addr: i64, v: u32) -> i64 {
+              return mmio_write_u32(addr, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("mmio_write_u32 compiles to C");
+        assert!(
+            c.contains("volatile uint32_t*"),
+            "expected `volatile uint32_t*` cast in C, got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_read_u32_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn read_reg(addr: i64) -> u32 {
+              return mmio_read_u32(addr);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_read_u32 compiles to LLVM");
+        assert!(
+            ll.contains("load volatile i32"),
+            "expected `load volatile i32` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        assert!(
+            ll.contains("inttoptr i64"),
+            "expected `inttoptr i64 ... to i32*` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_write_u32_emits_volatile_llvm() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn write_reg(addr: i64, v: u32) -> i64 {
+              return mmio_write_u32(addr, v);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("mmio_write_u32 compiles to LLVM");
+        assert!(
+            ll.contains("store volatile i32"),
+            "expected `store volatile i32` in LLVM, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mmio_read_u32_rejects_wrong_arg_count() {
+        let source = r#"
+            fn main() -> i64 {
+              let v: u32 = mmio_read_u32();
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("mmio_read_u32 with 0 args must fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("mmio_read_u32")
+                && d.message.contains("argument")),
+            "expected arg-count diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn mmio_write_u32_rejects_wrong_arg_count() {
+        let source = r#"
+            fn main() -> i64 {
+              return mmio_write_u32(0x4000_0000);
+            }
+        "#;
+        let errs = compile(source).expect_err("mmio_write_u32 with 1 arg must fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("mmio_write_u32")
+                && d.message.contains("argument")),
+            "expected arg-count diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn taint_wraps_i64_in_tainted_i64() {
         let source = r#"

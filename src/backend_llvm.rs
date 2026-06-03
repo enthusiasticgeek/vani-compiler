@@ -8111,6 +8111,41 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return "0".to_string();
             }
+            // T2.1 of safety-standard arc — MMIO volatile load /
+            // store. `inttoptr` materializes the i32* from the
+            // i64 address, then `load volatile i32` / `store
+            // volatile i32` emits the volatile memory op. LLVM
+            // preserves volatile across optimization passes —
+            // no coalescing, no reordering across other volatile
+            // ops, no elision. `align 4` matches the u32 width.
+            if name == "mmio_read_u32" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i32*\n",
+                    ptr, addr
+                ));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load volatile i32, i32* {}, align 4\n",
+                    dest, ptr
+                ));
+                return dest;
+            }
+            if name == "mmio_write_u32" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i32*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  store volatile i32 {}, i32* {}, align 4\n",
+                    v, ptr
+                ));
+                return "0".to_string();
+            }
             // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
             // builtins. Call outlined helpers emitted at module
             // scope by `emit_intent_pool_i64_helpers_llvm`.

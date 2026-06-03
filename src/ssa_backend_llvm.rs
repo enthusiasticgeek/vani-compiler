@@ -4153,6 +4153,44 @@ fn emit_instr(
                 ));
                 return Ok(());
             }
+            // T2.1 of safety-standard arc — MMIO volatile load /
+            // store. `inttoptr` materializes an `i32*` from the
+            // i64 address, then a `load volatile i32` /
+            // `store volatile i32` instruction is emitted. LLVM
+            // preserves `volatile` semantics through optimizers.
+            if name == "mmio_read_u32" {
+                let addr = operand_str(&args[0]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i32*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  %v_{} = load volatile i32, i32* {}, align 4\n",
+                    instr.result.0, ptr
+                ));
+                return Ok(());
+            }
+            if name == "mmio_write_u32" {
+                let addr = operand_str(&args[0]);
+                let v = operand_str(&args[1]);
+                let ptr = format!("%v_{}.ptr", instr.result.0);
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i32*\n",
+                    ptr, addr
+                ));
+                out.push_str(&format!(
+                    "  store volatile i32 {}, i32* {}, align 4\n",
+                    v, ptr
+                ));
+                // Result is i64 (0) — bind the SSA result so
+                // downstream uses still resolve.
+                out.push_str(&format!(
+                    "  %v_{} = add i64 0, 0\n",
+                    instr.result.0
+                ));
+                return Ok(());
+            }
             // Vec builtins call through the shared runtime
             // helpers emitted in the module preamble.
             if matches!(name.as_str(), "vec" | "push" | "set" | "clone") {

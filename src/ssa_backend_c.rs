@@ -2223,6 +2223,41 @@ fn emit_instr(
                 writeln!(out, "  v_{} = {};", instr.result.0, cloned).unwrap();
                 return Ok(());
             }
+            // T2.1 of safety-standard arc — MMIO volatile load /
+            // store. `volatile` qualifier prevents the compiler
+            // from coalescing, reordering, or eliding accesses.
+            // The i64 address routes through `uintptr_t` to
+            // satisfy ISO C strict-aliasing on int-to-pointer.
+            if name == "mmio_read_u32" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_read_u32 expects 1 arg".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = (*((const volatile uint32_t*)((uintptr_t)({}))));",
+                    instr.result.0,
+                    c_operand(addr)
+                )
+                .unwrap();
+                return Ok(());
+            }
+            if name == "mmio_write_u32" {
+                let addr = args.first().ok_or_else(|| EmitError {
+                    message: "mmio_write_u32 expects 2 args".to_string(),
+                })?;
+                let val = args.get(1).ok_or_else(|| EmitError {
+                    message: "mmio_write_u32 expects 2 args".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = ((*((volatile uint32_t*)((uintptr_t)({})))) = ({}), (int64_t)0);",
+                    instr.result.0,
+                    c_operand(addr),
+                    c_operand(val)
+                )
+                .unwrap();
+                return Ok(());
+            }
             // Closure #269: extern "C" fns call with the bare
             // C-ABI name (no `fn_` prefix).
             let is_extern = crate::backend_c::C_EXTERN_FN_REGISTRY
