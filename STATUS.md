@@ -10,7 +10,21 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**`intentc audit-pack` extended
+**Last updated:** 2026-06-03 (**Remaining-work breakdown +
+sequenced ledger added to ARCS.md and TODO.md.** The open Arc
+1.4–1.7 and Arc 4 work is now structured as 21 granular sub-
+steps with explicit dependencies (Arc 1.4a → 1.4b → 1.4c → 1.4d
+→ 1.4e → 1.4f → 1.5a-e → 1.7a-d → 4.1-4.6). Each sub-step lists
+effort, depends-on, and acceptance criterion so future sessions
+can pick up at any sub-step without re-planning. Total
+remaining work: ~32h across ~50 commits if all pursued.
+TODO.md's "Top-of-queue planning docs" reflects the current
+state — safety-standard arc COMPLETE, Arcs 2/3 COMPLETE, Arc 1
+partial, Arc 4 open. ARCS.md leads with a "Remaining work —
+sequenced sub-step breakdown" section + a cross-dependency
+graph. **1759 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**`intentc audit-pack` extended
 with at-a-glance Summary table.** Follow-up to the audit-pack
 capstone. The Markdown output now leads with a Summary section
 formatted as a 6-row table — unsafe deviations count, max stack

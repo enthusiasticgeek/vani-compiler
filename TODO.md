@@ -3,20 +3,42 @@
 Snapshot from 2026-05-18 after min/max reductions + parallelism docs
 refresh landed. Order is rough priority (size + payoff), not strict.
 
-**Top-of-queue planning docs (2026-06-02):**
+**Top-of-queue planning docs (2026-06-03):**
 - [ARCS.md](ARCS.md) — granular sub-step plan for the 4 multi-session
-  arcs (Hash/Ord interface, Trie sparse children, richer closures,
-  wider HashMap K/V). Each sub-step has time budget + acceptance
-  test. Suggested order: Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest.
+  arcs. **Current state:** Arc 2 ✅ COMPLETE, Arc 3 ✅ COMPLETE,
+  Arc 1 partial (1.1/1.2/1.3/1.6 shipped; 1.4–1.7 open),
+  Arc 4 open. See the "Remaining work — sequenced sub-step
+  breakdown" section at the top of [ARCS.md](ARCS.md) for the
+  granular task ledger with dependencies. The seven `intentc`
+  audit CLIs (deviations, stack-depth, acyclicity, hashmap-usage,
+  complexity, safety-attrs, audit-pack) all shipped this session.
 - [unsafe.md](unsafe.md) — 5-layer plan for `unsafe { ... }` safety
   in the embedded path. **✅ COMPLETE 2026-06-02.** Layers 1.1, 1.2,
   1.3, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5 (foundation + lifetime-tagged
-  ArenaRef + region block syntax) all on `main`. 18 commits this
-  turn. 1622 lib + 54 parity green.
+  ArenaRef + region block syntax) all on `main`. 18 commits.
 - **Safety-standard alignment** (see *Safety-standard alignment* section
-  below) — `#[no_heap]` / `#[no_float]` / `#[asil_d]` / etc. attribute
-  family + `intentc deviations` extractor. **Scheduled before ARCs**
-  per user request 2026-06-02. Tier 1 + Tier 2 + Tier 3 listed below.
+  below) — **✅ COMPLETE 2026-06-03.** All three tiers + four
+  standard composites on `main`. Tier 1 (1.1 deviations / 1.2
+  `#[no_heap]` / 1.3 stack-depth), Tier 2 (2.1 MMIO / 2.2-2.6
+  primitives + composites), Tier 3 (3.1 `#[bounded_stack]` /
+  3.2 `#[wcet]` / 3.3 acyclicity / 3.4 `#[deterministic_timing]`
+  / 3.5 MISRA 13.5).
+
+**Open work — sequenced ledger** (~32h across ~50 commits if all pursued):
+
+1. **Arc 1.4 + 1.5** (per-(K, V) HashMap bundle, both backends) —
+   11 sub-steps, ~11h. Sub-steps 1.4a (Option<V> mono), 1.4b
+   (checker relax), 1.4c (C bundle param), 1.4d (C prologue),
+   1.4e (C tree dispatch), 1.4f (C SSA dispatch), 1.5a (LLVM
+   bundle), 1.5b (LLVM prologue), 1.5c (LLVM tree), 1.5d (LLVM
+   SSA), 1.5e (parity tests).
+2. **Arc 1.7** (`HashMap<UserStruct, V>`) — 4 sub-steps, ~5h.
+   Gates on Arc 1.4+1.5.
+3. **Arc 4** (wider K-V) — six (K, V) pairs at ~3h each, ~16h
+   total. Gates on Arc 1.4+1.5. Pairs in priority order:
+   `HashMap<OwnedStr, i64>` → `HashMap<i64, OwnedStr>` →
+   `HashMap<OwnedStr, OwnedStr>` → `HashMap<Tuple<i64,i64>, V>`
+   → `HashMap<f64, V>` → `HashMap<Vec<i64>, V>`.
 - Through closure #604, the bounded one-shot primitive surface is
   exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
   future work flows through one of the three plan docs/sections

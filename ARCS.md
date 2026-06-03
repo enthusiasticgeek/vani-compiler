@@ -1,17 +1,109 @@
 # Multi-Session Arc Plan (Arcs 1–4)
 
-> **Status (2026-06-03):** the safety-standard alignment arc
-> (Tiers 1 → 2 → 3 + four standard composites) is **shipped on
-> `main`**. See [STATUS.md](STATUS.md) for the per-commit ledger
-> and [TODO.md](TODO.md) → *Safety-standard alignment* for the
-> sealed-historical plan. ARC work is now active. Active sub-step:
-> **Arc 1.2 — Hash bound enforcement on user struct keys.**
->
-> Order (executed): safety-standard Tier 1 ✓ → Tier 2 ✓ → Tier 3
-> ✓ → **ARCs (Arc 1 → Arc 2 → Arc 3 → Arc 4)**. The originally-
-> planned interleave (Arc 2 → Arc 1 → …) was simplified to a
-> straight-through Arc 1 → 2 → 3 → 4 traversal so each arc's
-> design can build on the previous arc's landed surface.
+> **Status (2026-06-03):** safety-standard alignment arc
+> ✅ COMPLETE, Arc 2 ✅ COMPLETE, Arc 3 ✅ COMPLETE, Arc 1 partial.
+> The seven `intentc` audit CLIs (deviations, stack-depth,
+> acyclicity, hashmap-usage, complexity, safety-attrs,
+> audit-pack) all shipped this session. See [STATUS.md](STATUS.md)
+> for the per-commit ledger. **Remaining open: Arc 1.4–1.7 and
+> Arc 4.**
+
+## Remaining work — sequenced sub-step breakdown
+
+The remaining open work is broken down here into individually-
+landable sub-steps with explicit dependencies. Each sub-step
+should leave the test suite green after its commit. Order is
+top-to-bottom — earlier sub-steps gate later ones.
+
+### Sequence 1: Arc 1.4 + 1.5 — per-(K, V) HashMap bundle, both backends
+
+Goal: `let m: HashMap<i64, V> = hashmap_new()` works for V any
+scalar (i32, u32, u64). Foundation for Arc 1.7 + Arc 4.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 1.4a | Option<V> auto-monomorphization for non-i64 V in `walk_expr_for_search_builtins` (use let-annotation's V instead of hardcoded i64 for hashmap_get/insert/remove) | ~1h | — |
+| 1.4b | `check_hashmap_builtin` relaxation: accept scalar (K, V), coerce key/value to actual K/V, return `Option<V>` mangled by V | ~1h | 1.4a |
+| 1.4c | Parameterized C bundle: `emit_intent_hashmap_pair_c_body(K, V)` produces per-(K, V) struct + helpers (legacy `intent_hashmap_i64_i64` stays for backwards compat) | ~2h | 1.4b |
+| 1.4d | C backend prologue: walk `collect_hashmap_pairs(program)`, emit per-pair bundle for each non-(i64, i64) pair | ~30m | 1.4c |
+| 1.4e | C backend tree `emit_call` dispatch: read receiver's (K, V), pick the right bundle prefix | ~30m | 1.4d |
+| 1.4f | C backend SSA `emit_call` dispatch: mirror 1.4e in `ssa_backend_c.rs` | ~30m | 1.4d |
+| 1.5a | Parameterized LLVM bundle: mirror 1.4c in LLVM IR (apply ARC 2.3 success pattern) | ~3h | 1.4f (atomic with 1.5b-d) |
+| 1.5b | LLVM backend prologue: walk pairs, emit per-pair bundle | ~30m | 1.5a |
+| 1.5c | LLVM backend tree `emit_call` dispatch | ~30m | 1.5a |
+| 1.5d | LLVM backend SSA `emit_call` dispatch in `ssa_backend_llvm.rs` | ~30m | 1.5a |
+| 1.5e | Cross-backend parity tests: `HashMap<i64, u32>`, `HashMap<i64, u64>`, `HashMap<i64, i32>` insert/get/contains/remove round-trip | ~1h | 1.5d |
+
+**Subtotal: ~11h, 11 commits.** Acceptance: scalar V variants
+round-trip cross-backend.
+
+### Sequence 2: Arc 1.7 — `HashMap<UserStruct, V>` end-to-end
+
+Goal: user-defined struct K with `implement Hash for K`.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 1.7a | Bundle hash-call dispatch: when K is struct, the bundle's `__hash_key` calls user's `fn_<K>__hash` instead of FNV-1a | ~1.5h | 1.5e |
+| 1.7b | Bundle equality dispatch: when K is struct, compare field-by-field using the existing struct-`==` machinery | ~1h | 1.7a |
+| 1.7c | LLVM mirror of 1.7a-b: emit `@fn_<K>__hash` call + IR struct-eq | ~2h | 1.7b |
+| 1.7d | End-to-end: `HashMap<Score, i64>` round-trip test + cross-backend parity | ~30m | 1.7c |
+
+**Subtotal: ~5h, 4 commits.** Acceptance: `HashMap<Score, i64>`
+round-trips, with Score defining its own Hash impl.
+
+### Sequence 3: Arc 4 — wider K-V (non-Copy V or non-i64 K)
+
+Goal: cover the high-value (K, V) pairs the language community
+asks for. Each pair lands as its own ~3–5-commit increment.
+
+| # | Pair | Effort | Depends on |
+|---|---|---|---|
+| 4.1 | `HashMap<OwnedStr, i64>` — string key with custom hash + strcmp equality | ~3h | 1.5e |
+| 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot | ~3h | 1.5e |
+| 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
+| 4.4 | `HashMap<Tuple<i64, i64>, V>` — tuple K via `hash_combine` | ~3h | 1.5e + Tuple E sugar |
+| 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) | ~2h | 1.5e |
+| 4.6 | `HashMap<Vec<i64>, V>` — Vec K (affine move-in semantics) | ~3h | 4.1 |
+
+**Subtotal: ~16h, ~30 commits.** Acceptance per pair: insert,
+get, contains_key, remove, len, clear all round-trip
+cross-backend.
+
+### Cross-dependency graph (textual)
+
+```
+                    [shipped 2026-06-03]
+                          ↓
+                Arc 1.1 / 1.2 / 1.3 / 1.6
+                Arc 2 (all)
+                Arc 3 (all)
+                7 audit CLIs
+                          ↓
+        ┌────────────── Arc 1.4-1.5 ──────────────┐
+        │  (per-(K, V) bundle, atomic landing)    │
+        └──────────────────────────────────────────┘
+                ↓                            ↓
+        Arc 1.7 (struct K)         Arc 4 (wider K/V)
+                ↓                            ↓
+                └─→ "HashMap is fully generic" ←─┘
+```
+
+### Order (executed so far) → suggested continuation
+
+Order executed: safety-standard Tier 1 ✓ → Tier 2 ✓ → Tier 3
+✓ → Arc 2 ✓ → Arc 3 ✓ → Arc 1 partial (1.1, 1.2, 1.3, 1.6)
+→ audit CLI family ✓.
+
+Suggested continuation order:
+
+1. **Arc 1.4a → 1.4b → 1.4c → 1.4d → 1.4e → 1.4f** (scalar-V C
+   backend; ~5h)
+2. **Arc 1.5a-e** (LLVM mirror + parity tests; ~6h)
+3. **Arc 1.7a-d** (struct K; ~5h, unblocked by Arc 1.4+1.5)
+4. **Arc 4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6** (each
+   independent once 1.4+1.5 land)
+
+Total remaining: ~32h across ~50 commits if all pursued.
 
 Background: through closure #604 the bounded one-shot primitive surface
 is exhausted (tiers E–DD + W + Arc 0 — 108 closures). What remains are
