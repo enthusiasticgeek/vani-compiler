@@ -10,7 +10,20 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**`intentc audit-pack` shipped —
+**Last updated:** 2026-06-03 (**`intentc audit-pack` extended
+with at-a-glance Summary table.** Follow-up to the audit-pack
+capstone. The Markdown output now leads with a Summary section
+formatted as a 6-row table — unsafe deviations count, max stack
+depth (or UNBOUNDED), cycle count + violation count, HashMap
+shape count, max McCabe score, count of safety-tagged
+functions. Computed up-front from each per-fact report, so the
+reviewer sees the key numbers at the top without scrolling.
+Rest of the document is unchanged (six sections, one per
+per-fact report). Smoke-tested with a mixed-annotation program
+— rows render correctly (`120 bytes`, `1` shape, `4` max
+complexity, `2 of 4` tagged). **1759 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**`intentc audit-pack` shipped —
 meta CLI that bundles all 6 audit reports into a Markdown
 document.** Capstone of the audit-CLI family. New CLI:
 `intentc audit-pack <path> [--out=report.md] [--max-stack=<bytes>]
