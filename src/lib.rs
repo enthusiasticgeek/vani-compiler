@@ -5,6 +5,7 @@ pub mod backend_llvm;
 pub mod checker;
 pub mod acyclicity;
 pub mod deviations;
+pub mod hashmap_bundle;
 pub mod diagnostic;
 pub mod safety;
 pub mod stack_depth;
@@ -30966,6 +30967,91 @@ fn main() -> i64 {
             "expected duplicate-fn diagnostic, got: {:?}",
             errs
         );
+    }
+
+    // ARC 1.3 — HashMap (K, V) pair collector.
+
+    #[test]
+    fn hashmap_collector_finds_single_pair() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return hashmap_len(ref m);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].tag, "intent_hashmap_int64_t_int64_t");
+        assert_eq!(pairs[0].key, crate::ast::Type::I64);
+        assert_eq!(pairs[0].value, crate::ast::Type::I64);
+    }
+
+    #[test]
+    fn hashmap_collector_dedups_repeated_pair() {
+        // The same (i64, i64) pair appears across multiple
+        // function signatures — the collector returns it once.
+        let source = r#"
+            fn build() -> HashMap<i64, i64> {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return m;
+            }
+            fn count(m: HashMap<i64, i64>) -> i64 {
+              return hashmap_len(ref m);
+            }
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = build();
+              return count(m);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        assert_eq!(pairs.len(), 1);
+    }
+
+    #[test]
+    fn hashmap_collector_finds_struct_key_pair() {
+        // Hash bound (ARC 1.2) is satisfied; the bundle ops
+        // (insert/len/...) are NOT exercised — that restriction
+        // is lifted in ARC 1.4/1.5. Just the `let` annotation +
+        // `hashmap_new()` is enough to materialize the type.
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect(
+            "struct-K HashMap type-checks once Hash impl exists",
+        );
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].tag, "intent_hashmap_Score_int64_t");
+    }
+
+    #[test]
+    fn hashmap_collector_orders_inner_pair_before_outer() {
+        // Nested HashMap — `HashMap<i64, HashMap<i64, i64>>`
+        // returns the inner pair first (so a backend bundle
+        // emitter can rely on the dependency ordering).
+        let source = r#"
+            fn main() -> i64 {
+              let outer: HashMap<i64, HashMap<i64, i64>> = hashmap_new();
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("nested HashMap type-checks");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].tag, "intent_hashmap_int64_t_int64_t");
+        assert_eq!(pairs[1].tag, "intent_hashmap_int64_t_hm_int64_t_int64_t");
     }
 
     // ARC 1.2 — Hash bound enforcement on user struct keys.

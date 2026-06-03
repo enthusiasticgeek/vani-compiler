@@ -10,7 +10,27 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.2 shipped — Hash bound
+**Last updated:** 2026-06-03 (**ARC 1.3 shipped — HashMap (K, V)
+pair collector.** Third sub-step of the HashMap monomorphization
+arc. New `src/hashmap_bundle.rs` module with the
+`collect_hashmap_pairs(program)` API. Walks every type position
+in a typed program (function signatures, function bodies, struct
+fields, nested types) and returns a deduped, topologically-
+ordered list of `HashMapPair { key, value, tag }` — the
+inner pair of `HashMap<i64, HashMap<i64, i64>>` lands before the
+outer so future bundle emitters can rely on the dependency
+ordering. Mangled tags follow the
+`intent_hashmap_<K_tag>_<V_tag>` scheme; struct K spells as the
+struct name verbatim, scalars use their C-leaf names, nested
+HashMap collapses to `hm_<K>_<V>`. ARC 1.4 (C bundle emission)
+and ARC 1.5 (LLVM bundle emission) will consume this list to
+drive per-(K, V) helper synthesis. **4 new lib tests** (single-
+pair finding, dedup across multiple uses, struct-key pair
+discovery, inner-before-outer ordering for nested HashMap).
+**1725 lib + 54 parity green.** ARC 1.4 / 1.5 (atomic pair —
+per-(K, V) C + LLVM bundle emission) is next.)
+
+**Prior:** 2026-06-03 (**ARC 1.2 shipped — Hash bound
 enforcement on user struct keys.** Second sub-step of the
 HashMap monomorphization arc. `validate_array_element_type` (the
 shared type-validation helper called by Let annotations, function
