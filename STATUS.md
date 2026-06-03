@@ -10,7 +10,60 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4.2 COMPLETE — `HashMap<i64, OwnedStr>`
+**Last updated:** 2026-06-03 (**ARC 4.3 COMPLETE — `HashMap<OwnedStr, OwnedStr>`
+end-to-end on both backends.** Both K and V heap-owned by the
+map. Composition of ARC 4.1 (K=OwnedStr) and ARC 4.2
+(V=OwnedStr): drop walks free both per occupied slot; insert
+clones both K and V (strlen + malloc + memcpy each); duplicate
+K keeps the stored K and swaps in a fresh V clone (returning
+prior V to caller); remove frees the stored K and transfers
+the stored V pointer out via Option<OwnedStr>; get clones the
+stored V.
+
+4.3 checker relaxation: `check_hashmap_builtin` accepts
+V=OwnedStr when K is i64 *or* OwnedStr (composing 4.2 + 4.1
+acceptance).
+
+4.3 (C bundle): new `emit_intent_hashmap_pair_c_body_strk_strv`
+emits per-(OwnedStr, OwnedStr) bundle with prefix
+`intent_hashmap_owned_str_owned_str`. Both keys and values are
+`char**` arrays. Drop/clear walk frees both K and V per slot.
+Insert clones K and V (separate malloc+memcpy per axis);
+duplicate K extracts old V (returned), stores clone of new V.
+Remove frees K, transfers V pointer out, tombstones slot. Get
+clones the stored V.
+
+4.3 (LLVM bundle): `emit_intent_hashmap_pair_llvm_strk_strv`
+mirrors the C side. Bundle struct
+`{i8**, i8**, i8*, i64, i64, i64}`. Equality via `strcmp`;
+hash via FNV-1a byte loop. Drop loops free both K and V;
+clear mirrors. Insert clones both via `strlen + malloc + memcpy`;
+duplicate path returns prior V in Option payload. Remove
+frees K, transfers V out, nulls slot pointers.
+
+4.3 dispatch: prologue match handles `(Type::OwnedStr,
+Type::OwnedStr)` arm before the K-only `(Type::OwnedStr, _)`
+arm on both backends, so the str-str bundle is preferred for
+that pair.
+
+4.3 (end-to-end): `examples/hashmap_strstr.vani` exercises
+insert (with overwrite that triggers duplicate-K + V-swap) /
+contains_key / remove / len. Identical stdout on both
+backends; no leaks under default malloc. Added to parity
+test list.
+
+**2 new lib tests** covering:
+  - both backends compile HashMap<OwnedStr, OwnedStr> with the
+    `intent_hashmap_owned_str_owned_str` bundle prefix
+  - C bundle emits per-slot `free(m->keys[i])` +
+    `free(m->values[i])` (both-axes drop walk) and both
+    `char* k_owned = malloc(nk+1)` + `char* v_owned = malloc(nv+1)`
+    in insert
+
+**1787 lib + 58 parity green. Only ARC 4.6 remains in the
+wider K-V arc.**
+
+**Prior:** 2026-06-03 (**ARC 4.2 COMPLETE — `HashMap<i64, OwnedStr>`
 end-to-end on both backends.** i64 keys, OwnedStr values. Map
 clones each V internally on insert (same affine-system
 workaround as ARC 4.1 K=OwnedStr — strlen + malloc + memcpy);

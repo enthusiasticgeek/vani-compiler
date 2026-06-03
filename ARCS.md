@@ -60,7 +60,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 |---|---|---|---|
 | 4.1 | `HashMap<OwnedStr, V>` — string key with FNV-1a + strcmp equality ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
 | 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
-| 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
+| 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes ✅ **SHIPPED 2026-06-03** | ~2h | 4.1 + 4.2 |
 | 4.4 | `HashMap<Tuple<i64, …, i64>, V>` — tuple K via `hash_combine` ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e + Tuple E sugar |
 | 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) ✅ **SHIPPED 2026-06-03** | ~2h | 1.5e |
 | 4.6 | `HashMap<Vec<i64>, V>` — Vec K (affine move-in semantics) | ~3h | 4.1 |
@@ -434,8 +434,15 @@ For each new (K, V) pair:
    - LLVM mirror: same shape, V is `i8*` per slot.
    - Parity example: `examples/hashmap_strv.vani`.
 
-3. **4.3 — `HashMap<Str, Str>`. (~2h)**
-   - Both axes OwnedStr.
+3. **4.3 — `HashMap<OwnedStr, OwnedStr>`. (~2h)** ✅ **SHIPPED 2026-06-03**
+   - Both axes OwnedStr. Composition of 4.1 K + 4.2 V.
+   - C bundle prefix: `intent_hashmap_owned_str_owned_str`.
+     `char**` keys + `char**` values; drop/clear walks free
+     both per slot. Insert clones K and V; duplicate K swaps
+     V (returning prior); remove frees K + transfers V out;
+     get clones V.
+   - LLVM mirror: same shape, both axes are `i8*` per slot.
+   - Parity example: `examples/hashmap_strstr.vani`.
 
 4. **4.4 — `HashMap<Tuple<i64, …, i64>, V>`. (~3h)** ✅ **SHIPPED 2026-06-03**
    - Tuple keys use FNV-1a per-element hash_combine + pairwise

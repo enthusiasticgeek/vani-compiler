@@ -1183,6 +1183,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
                         &mut out, v_llvm, v_mangle, v_tag, v_size, has_option_v,
                     );
                 }
+                // ARC 4.3: OwnedStr K + OwnedStr V — both axes
+                // heap-owned; drop walks free both per slot.
+                (Type::OwnedStr, Type::OwnedStr) => {
+                    emit_intent_hashmap_pair_llvm_strk_strv(
+                        &mut out, v_mangle, has_option_v,
+                    );
+                }
                 // ARC 4.1: OwnedStr K bundle (FNV-1a byte hash +
                 // strcmp equality; map owns each key pointer).
                 (Type::OwnedStr, _) => {
@@ -23907,6 +23914,597 @@ fn emit_intent_hashmap_pair_llvm_strk(
          \x20 ret i64 %hmc_prior\n\
          }}\n\n",
         s = s, v = v_llvm,
+    ));
+}
+
+/// ARC 4.3 — parameterized LLVM HashMap bundle for K = OwnedStr,
+/// V = OwnedStr. Both K and V are heap-owned `i8*`; drop walks
+/// free both per occupied slot. _insert clones both K and V
+/// (strlen + malloc + memcpy each); duplicate K keeps the
+/// stored K and swaps in a fresh V clone, returning the prior
+/// V to caller via Option<OwnedStr>. _remove frees K and
+/// transfers V pointer out. _get clones the stored V.
+fn emit_intent_hashmap_pair_llvm_strk_strv(
+    out: &mut String,
+    v_mangle: &str,
+    has_option_v: bool,
+) {
+    let s = "intent_hashmap_owned_str_owned_str";
+    let opt_v = format!("Enum_Option__{}", v_mangle);
+    out.push_str(&format!("%{s} = type {{ i8**, i8**, i8*, i64, i64, i64 }}\n", s = s));
+    out.push_str(&format!(
+        "define %{s} @{s}_new() {{\n\
+         \x20 %r0 = insertvalue %{s} undef, i8** null, 0\n\
+         \x20 %r1 = insertvalue %{s} %r0, i8** null, 1\n\
+         \x20 %r2 = insertvalue %{s} %r1, i8* null, 2\n\
+         \x20 %r3 = insertvalue %{s} %r2, i64 0, 3\n\
+         \x20 %r4 = insertvalue %{s} %r3, i64 0, 4\n\
+         \x20 %r5 = insertvalue %{s} %r4, i64 0, 5\n\
+         \x20 ret %{s} %r5\n\
+         }}\n\
+         define void @{s}_drop(%{s}* %m) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %keys = load i8**, i8*** %kpp\n\
+         \x20 %vals = load i8**, i8*** %vpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %k_null = icmp eq i8** %keys, null\n\
+         \x20 br i1 %k_null, label %d_v_outer, label %d_walk_init\n\
+         d_walk_init:\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 0, i64* %i_p\n\
+         \x20 br label %d_walk_loop\n\
+         d_walk_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %cont = icmp slt i64 %i, %cap\n\
+         \x20 br i1 %cont, label %d_walk_body, label %d_fk\n\
+         d_walk_body:\n\
+         \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %is_occ = icmp eq i8 %oval, 1\n\
+         \x20 br i1 %is_occ, label %d_walk_do, label %d_walk_next\n\
+         d_walk_do:\n\
+         \x20 %kcell = getelementptr i8*, i8** %keys, i64 %i\n\
+         \x20 %kv = load i8*, i8** %kcell\n\
+         \x20 %kv_null = icmp eq i8* %kv, null\n\
+         \x20 br i1 %kv_null, label %d_walk_freev, label %d_walk_freek\n\
+         d_walk_freek:\n\
+         \x20 call void @free(i8* %kv)\n\
+         \x20 br label %d_walk_freev\n\
+         d_walk_freev:\n\
+         \x20 %vcell_d = getelementptr i8*, i8** %vals, i64 %i\n\
+         \x20 %vv = load i8*, i8** %vcell_d\n\
+         \x20 %vv_null = icmp eq i8* %vv, null\n\
+         \x20 br i1 %vv_null, label %d_walk_next, label %d_walk_freev_call\n\
+         d_walk_freev_call:\n\
+         \x20 call void @free(i8* %vv)\n\
+         \x20 br label %d_walk_next\n\
+         d_walk_next:\n\
+         \x20 %i_n = add i64 %i, 1\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %d_walk_loop\n\
+         d_fk:\n\
+         \x20 %k_i8 = bitcast i8** %keys to i8*\n\
+         \x20 call void @free(i8* %k_i8)\n\
+         \x20 br label %d_v_outer\n\
+         d_v_outer:\n\
+         \x20 %v_null = icmp eq i8** %vals, null\n\
+         \x20 br i1 %v_null, label %d_o, label %d_fv\n\
+         d_fv:\n\
+         \x20 %v_i8 = bitcast i8** %vals to i8*\n\
+         \x20 call void @free(i8* %v_i8)\n\
+         \x20 br label %d_o\n\
+         d_o:\n\
+         \x20 %o_null = icmp eq i8* %occ, null\n\
+         \x20 br i1 %o_null, label %d_done, label %d_fo\n\
+         d_fo:\n\
+         \x20 call void @free(i8* %occ)\n\
+         \x20 br label %d_done\n\
+         d_done:\n\
+         \x20 store i8** null, i8*** %kpp\n\
+         \x20 store i8** null, i8*** %vpp\n\
+         \x20 store i8* null, i8** %opp\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %tp_drop_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 store i64 0, i64* %cp\n\
+         \x20 store i64 0, i64* %tp_drop_hm\n\
+         \x20 ret void\n\
+         }}\n\
+         define internal i64 @{s}__hash_key(i8* %k) {{\n\
+         \x20 %h_p = alloca i64\n\
+         \x20 store i64 -3750763034362895579, i64* %h_p\n\
+         \x20 %p_p = alloca i8*\n\
+         \x20 store i8* %k, i8** %p_p\n\
+         \x20 br label %hk_loop\n\
+         hk_loop:\n\
+         \x20 %p = load i8*, i8** %p_p\n\
+         \x20 %ch = load i8, i8* %p\n\
+         \x20 %nz = icmp ne i8 %ch, 0\n\
+         \x20 br i1 %nz, label %hk_body, label %hk_done\n\
+         hk_body:\n\
+         \x20 %ch64 = zext i8 %ch to i64\n\
+         \x20 %h = load i64, i64* %h_p\n\
+         \x20 %hx = xor i64 %h, %ch64\n\
+         \x20 %hp = mul i64 %hx, 1099511628211\n\
+         \x20 store i64 %hp, i64* %h_p\n\
+         \x20 %p_n = getelementptr i8, i8* %p, i64 1\n\
+         \x20 store i8* %p_n, i8** %p_p\n\
+         \x20 br label %hk_loop\n\
+         hk_done:\n\
+         \x20 %final = load i64, i64* %h_p\n\
+         \x20 ret i64 %final\n\
+         }}\n\
+         define internal void @{s}__insert_owned_raw(%{s}* %m, i8* %k_owned, i8* %v_owned) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %keys = load i8**, i8*** %kpp\n\
+         \x20 %vals = load i8**, i8*** %vpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %mask = sub i64 %cap, 1\n\
+         \x20 %h = call i64 @{s}__hash_key(i8* %k_owned)\n\
+         \x20 %i0 = and i64 %h, %mask\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 %i0, i64* %i_p\n\
+         \x20 br label %ir_loop\n\
+         ir_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %is_empty = icmp eq i8 %oval, 0\n\
+         \x20 br i1 %is_empty, label %ir_store, label %ir_next\n\
+         ir_next:\n\
+         \x20 %i_p1 = add i64 %i, 1\n\
+         \x20 %i_n = and i64 %i_p1, %mask\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %ir_loop\n\
+         ir_store:\n\
+         \x20 %kcell2 = getelementptr i8*, i8** %keys, i64 %i\n\
+         \x20 %vcell2 = getelementptr i8*, i8** %vals, i64 %i\n\
+         \x20 store i8* %k_owned, i8** %kcell2\n\
+         \x20 store i8* %v_owned, i8** %vcell2\n\
+         \x20 store i8 1, i8* %ocell\n\
+         \x20 %old_len = load i64, i64* %lp\n\
+         \x20 %nl = add i64 %old_len, 1\n\
+         \x20 store i64 %nl, i64* %lp\n\
+         \x20 ret void\n\
+         }}\n",
+        s = s,
+    ));
+    out.push_str(&format!(
+        "define internal void @{s}__grow(%{s}* %m) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %old_keys = load i8**, i8*** %kpp\n\
+         \x20 %old_vals = load i8**, i8*** %vpp\n\
+         \x20 %old_occ = load i8*, i8** %opp\n\
+         \x20 %old_cap = load i64, i64* %cp\n\
+         \x20 %cap_zero = icmp eq i64 %old_cap, 0\n\
+         \x20 %cap_doubled = mul i64 %old_cap, 2\n\
+         \x20 %new_cap = select i1 %cap_zero, i64 8, i64 %cap_doubled\n\
+         \x20 %nk_bytes = mul i64 %new_cap, 8\n\
+         \x20 %nv_bytes = mul i64 %new_cap, 8\n\
+         \x20 %nk_i8 = call i8* @malloc(i64 %nk_bytes)\n\
+         \x20 %nk = bitcast i8* %nk_i8 to i8**\n\
+         \x20 %nv_i8 = call i8* @malloc(i64 %nv_bytes)\n\
+         \x20 %nv = bitcast i8* %nv_i8 to i8**\n\
+         \x20 %no = call i8* @calloc(i64 %new_cap, i64 1)\n\
+         \x20 store i8** %nk, i8*** %kpp\n\
+         \x20 store i8** %nv, i8*** %vpp\n\
+         \x20 store i8* %no, i8** %opp\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 store i64 %new_cap, i64* %cp\n\
+         \x20 %tp_grow_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %tp_grow_hm\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 0, i64* %i_p\n\
+         \x20 br label %g_loop\n\
+         g_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %cont = icmp slt i64 %i, %old_cap\n\
+         \x20 br i1 %cont, label %g_body, label %g_done\n\
+         g_body:\n\
+         \x20 %ocell = getelementptr i8, i8* %old_occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %is_occ = icmp eq i8 %oval, 1\n\
+         \x20 br i1 %is_occ, label %g_reinsert, label %g_next\n\
+         g_reinsert:\n\
+         \x20 %kcell = getelementptr i8*, i8** %old_keys, i64 %i\n\
+         \x20 %kv = load i8*, i8** %kcell\n\
+         \x20 %vcell = getelementptr i8*, i8** %old_vals, i64 %i\n\
+         \x20 %vv = load i8*, i8** %vcell\n\
+         \x20 call void @{s}__insert_owned_raw(%{s}* %m, i8* %kv, i8* %vv)\n\
+         \x20 br label %g_next\n\
+         g_next:\n\
+         \x20 %i_n = add i64 %i, 1\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %g_loop\n\
+         g_done:\n\
+         \x20 %ok_null = icmp eq i8** %old_keys, null\n\
+         \x20 br i1 %ok_null, label %g_v, label %g_fk\n\
+         g_fk:\n\
+         \x20 %ok_i8 = bitcast i8** %old_keys to i8*\n\
+         \x20 call void @free(i8* %ok_i8)\n\
+         \x20 br label %g_v\n\
+         g_v:\n\
+         \x20 %ov_null = icmp eq i8** %old_vals, null\n\
+         \x20 br i1 %ov_null, label %g_o, label %g_fv\n\
+         g_fv:\n\
+         \x20 %ov_i8 = bitcast i8** %old_vals to i8*\n\
+         \x20 call void @free(i8* %ov_i8)\n\
+         \x20 br label %g_o\n\
+         g_o:\n\
+         \x20 %oo_null = icmp eq i8* %old_occ, null\n\
+         \x20 br i1 %oo_null, label %g_ret, label %g_fo\n\
+         g_fo:\n\
+         \x20 call void @free(i8* %old_occ)\n\
+         \x20 br label %g_ret\n\
+         g_ret:\n\
+         \x20 ret void\n\
+         }}\n\
+         define i1 @{s}_contains_key(%{s}* %m, i8* %k) {{\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %is_zero = icmp eq i64 %cap, 0\n\
+         \x20 br i1 %is_zero, label %ck_no, label %ck_probe\n\
+         ck_probe:\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %mask = sub i64 %cap, 1\n\
+         \x20 %keys = load i8**, i8*** %kpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %h = call i64 @{s}__hash_key(i8* %k)\n\
+         \x20 %i0 = and i64 %h, %mask\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 %i0, i64* %i_p\n\
+         \x20 br label %ck_loop\n\
+         ck_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %empty = icmp eq i8 %oval, 0\n\
+         \x20 br i1 %empty, label %ck_no, label %ck_test_occ\n\
+         ck_test_occ:\n\
+         \x20 %is_occ_ck = icmp eq i8 %oval, 1\n\
+         \x20 br i1 %is_occ_ck, label %ck_check, label %ck_next\n\
+         ck_check:\n\
+         \x20 %kcell = getelementptr i8*, i8** %keys, i64 %i\n\
+         \x20 %kv = load i8*, i8** %kcell\n\
+         \x20 %cmp = call i32 @strcmp(i8* %kv, i8* %k)\n\
+         \x20 %eq = icmp eq i32 %cmp, 0\n\
+         \x20 br i1 %eq, label %ck_yes, label %ck_next\n\
+         ck_next:\n\
+         \x20 %i_p1 = add i64 %i, 1\n\
+         \x20 %i_n = and i64 %i_p1, %mask\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %ck_loop\n\
+         ck_yes:\n\
+         \x20 ret i1 true\n\
+         ck_no:\n\
+         \x20 ret i1 false\n\
+         }}\n\
+         define i64 @{s}_len(%{s}* %m) {{\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 ret i64 %len\n\
+         }}\n",
+        s = s,
+    ));
+    if has_option_v {
+        out.push_str(&format!(
+            "define %{opt} @{s}_get(%{s}* %m, i8* %k) {{\n\
+             \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %cap = load i64, i64* %cp\n\
+             \x20 %is_zero = icmp eq i64 %cap, 0\n\
+             \x20 br i1 %is_zero, label %g_none, label %g_probe\n\
+             g_probe:\n\
+             \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %mask = sub i64 %cap, 1\n\
+             \x20 %keys = load i8**, i8*** %kpp\n\
+             \x20 %vals = load i8**, i8*** %vpp\n\
+             \x20 %occ = load i8*, i8** %opp\n\
+             \x20 %h = call i64 @{s}__hash_key(i8* %k)\n\
+             \x20 %i0 = and i64 %h, %mask\n\
+             \x20 %i_p = alloca i64\n\
+             \x20 store i64 %i0, i64* %i_p\n\
+             \x20 br label %g_loop\n\
+             g_loop:\n\
+             \x20 %i = load i64, i64* %i_p\n\
+             \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+             \x20 %oval = load i8, i8* %ocell\n\
+             \x20 %empty = icmp eq i8 %oval, 0\n\
+             \x20 br i1 %empty, label %g_none, label %g_test_occ\n\
+             g_test_occ:\n\
+             \x20 %is_occ_g = icmp eq i8 %oval, 1\n\
+             \x20 br i1 %is_occ_g, label %g_check, label %g_next\n\
+             g_check:\n\
+             \x20 %kcell = getelementptr i8*, i8** %keys, i64 %i\n\
+             \x20 %kv = load i8*, i8** %kcell\n\
+             \x20 %cmp = call i32 @strcmp(i8* %kv, i8* %k)\n\
+             \x20 %eq = icmp eq i32 %cmp, 0\n\
+             \x20 br i1 %eq, label %g_some, label %g_next\n\
+             g_next:\n\
+             \x20 %i_p1 = add i64 %i, 1\n\
+             \x20 %i_n = and i64 %i_p1, %mask\n\
+             \x20 store i64 %i_n, i64* %i_p\n\
+             \x20 br label %g_loop\n\
+             g_some:\n\
+             \x20 %vcell = getelementptr i8*, i8** %vals, i64 %i\n\
+             \x20 %vv = load i8*, i8** %vcell\n\
+             \x20 %vlen = call i64 @strlen(i8* %vv)\n\
+             \x20 %vlen_p1 = add i64 %vlen, 1\n\
+             \x20 %v_copy = call i8* @malloc(i64 %vlen_p1)\n\
+             \x20 %v_done = call i8* @memcpy(i8* %v_copy, i8* %vv, i64 %vlen_p1)\n\
+             \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2 = insertvalue %{opt} %r1, i8* %v_copy, 1\n\
+             \x20 ret %{opt} %r2\n\
+             g_none:\n\
+             \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %n2 = insertvalue %{opt} %n1, i8* null, 1\n\
+             \x20 ret %{opt} %n2\n\
+             }}\n\
+             define %{opt} @{s}_insert(%{s}* %m, i8* %k, i8* %v) {{\n\
+             \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+             \x20 %tp_ins_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+             \x20 %cap = load i64, i64* %cp\n\
+             \x20 %len = load i64, i64* %lp\n\
+             \x20 %tomb = load i64, i64* %tp_ins_hm\n\
+             \x20 %cap_zero = icmp eq i64 %cap, 0\n\
+             \x20 %load_sum = add i64 %len, %tomb\n\
+             \x20 %load2 = mul i64 %load_sum, 2\n\
+             \x20 %need_grow_load = icmp uge i64 %load2, %cap\n\
+             \x20 %need = or i1 %cap_zero, %need_grow_load\n\
+             \x20 br i1 %need, label %ins_grow, label %ins_probe\n\
+             ins_grow:\n\
+             \x20 call void @{s}__grow(%{s}* %m)\n\
+             \x20 br label %ins_probe\n\
+             ins_probe:\n\
+             \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %cap2 = load i64, i64* %cp\n\
+             \x20 %mask = sub i64 %cap2, 1\n\
+             \x20 %keys = load i8**, i8*** %kpp\n\
+             \x20 %vals = load i8**, i8*** %vpp\n\
+             \x20 %occ = load i8*, i8** %opp\n\
+             \x20 %h = call i64 @{s}__hash_key(i8* %k)\n\
+             \x20 %i0 = and i64 %h, %mask\n\
+             \x20 %i_p = alloca i64\n\
+             \x20 store i64 %i0, i64* %i_p\n\
+             \x20 %first_tomb_p_hm = alloca i64\n\
+             \x20 store i64 -1, i64* %first_tomb_p_hm\n\
+             \x20 br label %ins_loop\n\
+             ins_loop:\n\
+             \x20 %i = load i64, i64* %i_p\n\
+             \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+             \x20 %oval = load i8, i8* %ocell\n\
+             \x20 %is_empty = icmp eq i8 %oval, 0\n\
+             \x20 br i1 %is_empty, label %ins_place, label %ins_test_occ\n\
+             ins_test_occ:\n\
+             \x20 %is_occ_ins = icmp eq i8 %oval, 1\n\
+             \x20 br i1 %is_occ_ins, label %ins_check_eq, label %ins_test_tomb\n\
+             ins_check_eq:\n\
+             \x20 %kcell = getelementptr i8*, i8** %keys, i64 %i\n\
+             \x20 %kv = load i8*, i8** %kcell\n\
+             \x20 %cmp = call i32 @strcmp(i8* %kv, i8* %k)\n\
+             \x20 %eq = icmp eq i32 %cmp, 0\n\
+             \x20 br i1 %eq, label %ins_update, label %ins_next\n\
+             ins_test_tomb:\n\
+             \x20 %ft_cur = load i64, i64* %first_tomb_p_hm\n\
+             \x20 %ft_unset = icmp eq i64 %ft_cur, -1\n\
+             \x20 br i1 %ft_unset, label %ins_record_tomb, label %ins_next\n\
+             ins_record_tomb:\n\
+             \x20 store i64 %i, i64* %first_tomb_p_hm\n\
+             \x20 br label %ins_next\n\
+             ins_next:\n\
+             \x20 %i_p1 = add i64 %i, 1\n\
+             \x20 %i_n = and i64 %i_p1, %mask\n\
+             \x20 store i64 %i_n, i64* %i_p\n\
+             \x20 br label %ins_loop\n\
+             ins_update:\n\
+             \x20 ; Duplicate K: keep existing K, swap in fresh V clone.\n\
+             \x20 %vcell_u = getelementptr i8*, i8** %vals, i64 %i\n\
+             \x20 %old_v = load i8*, i8** %vcell_u\n\
+             \x20 %nv_len = call i64 @strlen(i8* %v)\n\
+             \x20 %nv_len_p1 = add i64 %nv_len, 1\n\
+             \x20 %nv_owned = call i8* @malloc(i64 %nv_len_p1)\n\
+             \x20 %nv_copied = call i8* @memcpy(i8* %nv_owned, i8* %v, i64 %nv_len_p1)\n\
+             \x20 store i8* %nv_owned, i8** %vcell_u\n\
+             \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2 = insertvalue %{opt} %r1, i8* %old_v, 1\n\
+             \x20 ret %{opt} %r2\n\
+             ins_place:\n\
+             \x20 ; Clone both K and V before storage.\n\
+             \x20 %k_len = call i64 @strlen(i8* %k)\n\
+             \x20 %k_len_p1 = add i64 %k_len, 1\n\
+             \x20 %k_owned = call i8* @malloc(i64 %k_len_p1)\n\
+             \x20 %k_copied = call i8* @memcpy(i8* %k_owned, i8* %k, i64 %k_len_p1)\n\
+             \x20 %v_len = call i64 @strlen(i8* %v)\n\
+             \x20 %v_len_p1 = add i64 %v_len, 1\n\
+             \x20 %v_owned = call i8* @malloc(i64 %v_len_p1)\n\
+             \x20 %v_copied = call i8* @memcpy(i8* %v_owned, i8* %v, i64 %v_len_p1)\n\
+             \x20 %ft_f = load i64, i64* %first_tomb_p_hm\n\
+             \x20 %use_tomb_hm = icmp ne i64 %ft_f, -1\n\
+             \x20 br i1 %use_tomb_hm, label %ins_store_tomb, label %ins_store_empty\n\
+             ins_store_tomb:\n\
+             \x20 %tk = getelementptr i8*, i8** %keys, i64 %ft_f\n\
+             \x20 store i8* %k_owned, i8** %tk\n\
+             \x20 %tv = getelementptr i8*, i8** %vals, i64 %ft_f\n\
+             \x20 store i8* %v_owned, i8** %tv\n\
+             \x20 %to = getelementptr i8, i8* %occ, i64 %ft_f\n\
+             \x20 store i8 1, i8* %to\n\
+             \x20 %ot = load i64, i64* %tp_ins_hm\n\
+             \x20 %ot_dec = sub i64 %ot, 1\n\
+             \x20 store i64 %ot_dec, i64* %tp_ins_hm\n\
+             \x20 br label %ins_inc_len_hm\n\
+             ins_store_empty:\n\
+             \x20 %kcell2 = getelementptr i8*, i8** %keys, i64 %i\n\
+             \x20 store i8* %k_owned, i8** %kcell2\n\
+             \x20 %vcell2 = getelementptr i8*, i8** %vals, i64 %i\n\
+             \x20 store i8* %v_owned, i8** %vcell2\n\
+             \x20 store i8 1, i8* %ocell\n\
+             \x20 br label %ins_inc_len_hm\n\
+             ins_inc_len_hm:\n\
+             \x20 %old_len = load i64, i64* %lp\n\
+             \x20 %nl = add i64 %old_len, 1\n\
+             \x20 store i64 %nl, i64* %lp\n\
+             \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %n2 = insertvalue %{opt} %n1, i8* null, 1\n\
+             \x20 ret %{opt} %n2\n\
+             }}\n\
+             define %{opt} @{s}_remove(%{s}* %m, i8* %k) {{\n\
+             \x20 %cp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %cap_rm = load i64, i64* %cp_rm\n\
+             \x20 %is_zero_rm = icmp eq i64 %cap_rm, 0\n\
+             \x20 br i1 %is_zero_rm, label %hmr_none, label %hmr_probe\n\
+             hmr_probe:\n\
+             \x20 %kpp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %lp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+             \x20 %tp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+             \x20 %mask_rm = sub i64 %cap_rm, 1\n\
+             \x20 %keys_rm = load i8**, i8*** %kpp_rm\n\
+             \x20 %vals_rm = load i8**, i8*** %vpp_rm\n\
+             \x20 %occ_rm = load i8*, i8** %opp_rm\n\
+             \x20 %h_rm = call i64 @{s}__hash_key(i8* %k)\n\
+             \x20 %i0_rm = and i64 %h_rm, %mask_rm\n\
+             \x20 %i_p_rm = alloca i64\n\
+             \x20 store i64 %i0_rm, i64* %i_p_rm\n\
+             \x20 br label %hmr_loop\n\
+             hmr_loop:\n\
+             \x20 %i_rm = load i64, i64* %i_p_rm\n\
+             \x20 %ocell_rm = getelementptr i8, i8* %occ_rm, i64 %i_rm\n\
+             \x20 %oval_rm = load i8, i8* %ocell_rm\n\
+             \x20 %empty_rm = icmp eq i8 %oval_rm, 0\n\
+             \x20 br i1 %empty_rm, label %hmr_none, label %hmr_test_occ\n\
+             hmr_test_occ:\n\
+             \x20 %is_occ_rm = icmp eq i8 %oval_rm, 1\n\
+             \x20 br i1 %is_occ_rm, label %hmr_check_eq, label %hmr_next\n\
+             hmr_check_eq:\n\
+             \x20 %kcell_rm = getelementptr i8*, i8** %keys_rm, i64 %i_rm\n\
+             \x20 %kv_rm = load i8*, i8** %kcell_rm\n\
+             \x20 %cmp_rm = call i32 @strcmp(i8* %kv_rm, i8* %k)\n\
+             \x20 %eq_rm = icmp eq i32 %cmp_rm, 0\n\
+             \x20 br i1 %eq_rm, label %hmr_yes, label %hmr_next\n\
+             hmr_next:\n\
+             \x20 %i_p1_rm = add i64 %i_rm, 1\n\
+             \x20 %i_n_rm = and i64 %i_p1_rm, %mask_rm\n\
+             \x20 store i64 %i_n_rm, i64* %i_p_rm\n\
+             \x20 br label %hmr_loop\n\
+             hmr_yes:\n\
+             \x20 ; Free K; transfer V pointer ownership to caller.\n\
+             \x20 %vcell_rm = getelementptr i8*, i8** %vals_rm, i64 %i_rm\n\
+             \x20 %prev_v = load i8*, i8** %vcell_rm\n\
+             \x20 call void @free(i8* %kv_rm)\n\
+             \x20 store i8* null, i8** %kcell_rm\n\
+             \x20 store i8* null, i8** %vcell_rm\n\
+             \x20 store i8 2, i8* %ocell_rm\n\
+             \x20 %old_len_rm = load i64, i64* %lp_rm\n\
+             \x20 %nl_rm = sub i64 %old_len_rm, 1\n\
+             \x20 store i64 %nl_rm, i64* %lp_rm\n\
+             \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
+             \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
+             \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, i8* %prev_v, 1\n\
+             \x20 ret %{opt} %r2_rm\n\
+             hmr_none:\n\
+             \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, i8* null, 1\n\
+             \x20 ret %{opt} %nn2_rm\n\
+             }}\n",
+            s = s, opt = opt_v,
+        ));
+    }
+    out.push_str(&format!(
+        "define i64 @{s}_clear(%{s}* %m) {{\n\
+         \x20 %hmc_lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %hmc_prior = load i64, i64* %hmc_lp\n\
+         \x20 %hmc_kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %hmc_vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %hmc_opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %hmc_cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %hmc_keys = load i8**, i8*** %hmc_kpp\n\
+         \x20 %hmc_vals = load i8**, i8*** %hmc_vpp\n\
+         \x20 %hmc_occ = load i8*, i8** %hmc_opp\n\
+         \x20 %hmc_cap = load i64, i64* %hmc_cp\n\
+         \x20 %hmc_k_null = icmp eq i8** %hmc_keys, null\n\
+         \x20 br i1 %hmc_k_null, label %hmc_vfree, label %hmc_walk_init\n\
+         hmc_walk_init:\n\
+         \x20 %hmc_i_p = alloca i64\n\
+         \x20 store i64 0, i64* %hmc_i_p\n\
+         \x20 br label %hmc_walk_loop\n\
+         hmc_walk_loop:\n\
+         \x20 %hmc_i = load i64, i64* %hmc_i_p\n\
+         \x20 %hmc_cont = icmp slt i64 %hmc_i, %hmc_cap\n\
+         \x20 br i1 %hmc_cont, label %hmc_walk_body, label %hmc_fk\n\
+         hmc_walk_body:\n\
+         \x20 %hmc_ocell = getelementptr i8, i8* %hmc_occ, i64 %hmc_i\n\
+         \x20 %hmc_oval = load i8, i8* %hmc_ocell\n\
+         \x20 %hmc_is_occ = icmp eq i8 %hmc_oval, 1\n\
+         \x20 br i1 %hmc_is_occ, label %hmc_walk_do, label %hmc_walk_next\n\
+         hmc_walk_do:\n\
+         \x20 %hmc_kcell = getelementptr i8*, i8** %hmc_keys, i64 %hmc_i\n\
+         \x20 %hmc_kv = load i8*, i8** %hmc_kcell\n\
+         \x20 %hmc_kv_null = icmp eq i8* %hmc_kv, null\n\
+         \x20 br i1 %hmc_kv_null, label %hmc_walk_vcheck, label %hmc_walk_freek\n\
+         hmc_walk_freek:\n\
+         \x20 call void @free(i8* %hmc_kv)\n\
+         \x20 br label %hmc_walk_vcheck\n\
+         hmc_walk_vcheck:\n\
+         \x20 %hmc_vcell = getelementptr i8*, i8** %hmc_vals, i64 %hmc_i\n\
+         \x20 %hmc_vv = load i8*, i8** %hmc_vcell\n\
+         \x20 %hmc_vv_null = icmp eq i8* %hmc_vv, null\n\
+         \x20 br i1 %hmc_vv_null, label %hmc_walk_next, label %hmc_walk_freev\n\
+         hmc_walk_freev:\n\
+         \x20 call void @free(i8* %hmc_vv)\n\
+         \x20 br label %hmc_walk_next\n\
+         hmc_walk_next:\n\
+         \x20 %hmc_i_n = add i64 %hmc_i, 1\n\
+         \x20 store i64 %hmc_i_n, i64* %hmc_i_p\n\
+         \x20 br label %hmc_walk_loop\n\
+         hmc_fk:\n\
+         \x20 %hmc_k_i8 = bitcast i8** %hmc_keys to i8*\n\
+         \x20 call void @free(i8* %hmc_k_i8)\n\
+         \x20 br label %hmc_vfree\n\
+         hmc_vfree:\n\
+         \x20 %hmc_v_null = icmp eq i8** %hmc_vals, null\n\
+         \x20 br i1 %hmc_v_null, label %hmc_o, label %hmc_fv\n\
+         hmc_fv:\n\
+         \x20 %hmc_v_i8 = bitcast i8** %hmc_vals to i8*\n\
+         \x20 call void @free(i8* %hmc_v_i8)\n\
+         \x20 br label %hmc_o\n\
+         hmc_o:\n\
+         \x20 %hmc_o_null = icmp eq i8* %hmc_occ, null\n\
+         \x20 br i1 %hmc_o_null, label %hmc_done, label %hmc_fo\n\
+         hmc_fo:\n\
+         \x20 call void @free(i8* %hmc_occ)\n\
+         \x20 br label %hmc_done\n\
+         hmc_done:\n\
+         \x20 store i8** null, i8*** %hmc_kpp\n\
+         \x20 store i8** null, i8*** %hmc_vpp\n\
+         \x20 store i8* null, i8** %hmc_opp\n\
+         \x20 %hmc_tp = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %hmc_lp\n\
+         \x20 store i64 0, i64* %hmc_cp\n\
+         \x20 store i64 0, i64* %hmc_tp\n\
+         \x20 ret i64 %hmc_prior\n\
+         }}\n\n",
+        s = s,
     ));
 }
 

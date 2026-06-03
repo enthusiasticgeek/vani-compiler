@@ -31882,6 +31882,54 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 4.3 — HashMap<OwnedStr, OwnedStr>: both axes heap-
+    // owned; drop walks free both per slot. Composition of
+    // ARC 4.1 K + ARC 4.2 V semantics.
+
+    #[test]
+    fn hashmap_owned_str_owned_str_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, OwnedStr> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_owned_str_owned_str"),
+            "expected C str-str bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_owned_str_owned_str"),
+            "expected LLVM str-str bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_owned_str_owned_str_c_walks_both_axes() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, OwnedStr> → C");
+        // Drop walks free both K and V per slot.
+        assert!(
+            c.contains("free(m->keys[i])") && c.contains("free(m->values[i])"),
+            "expected per-slot free of both K and V"
+        );
+        // Insert clones both K and V (strlen+malloc+memcpy each).
+        assert!(
+            c.contains("char* k_owned = (char*)malloc(nk + 1)")
+                && c.contains("char* v_owned = (char*)malloc(nv + 1)"),
+            "expected both K and V clone allocations"
+        );
+    }
+
     // ARC 4.2 — HashMap<i64, OwnedStr>: V drop walks on
     // drop/clear/remove; _insert clones V internally; _insert
     // duplicate + _remove transfer prior V ownership to caller.

@@ -1,0 +1,44 @@
+// ARC 4.3 — HashMap<OwnedStr, OwnedStr>: string keys + string
+// values. Composition of ARC 4.1 (K=OwnedStr) and ARC 4.2
+// (V=OwnedStr): both axes heap-owned by the map, drop walks
+// free both per occupied slot, insert clones both K and V,
+// remove transfers V ownership to caller while freeing K.
+//
+// build & run:
+//   intentc run examples/hashmap_strstr.vani                   # LLVM backend
+//   intentc run examples/hashmap_strstr.vani --backend=c       # C backend
+
+intent "HashMap<OwnedStr, OwnedStr> — string-keyed, string-valued map (ARC 4.3)";
+
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, OwnedStr> = hashmap_new();
+
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(100));
+  let _ = hashmap_insert(mut ref m, i64_to_str(2), i64_to_str(200));
+
+  // Overwrite same K — duplicate path swaps V, prior V returned
+  // to caller (and dropped at scope exit).
+  let _ = hashmap_insert(mut ref m, i64_to_str(1), i64_to_str(999));
+
+  let lk1: OwnedStr = i64_to_str(1);
+  print "contains \"1\":", hashmap_contains_key(ref m, lk1);
+  let lk2: OwnedStr = i64_to_str(2);
+  print "contains \"2\":", hashmap_contains_key(ref m, lk2);
+  let lk_miss: OwnedStr = i64_to_str(42);
+  print "contains \"42\":", hashmap_contains_key(ref m, lk_miss);
+  print "len after overwrite (2):", hashmap_len(ref m);
+
+  let rk: OwnedStr = i64_to_str(1);
+  let r: Option<OwnedStr> = hashmap_remove(mut ref m, rk);
+  let took: bool = match r {
+    Option.Some(v) then true,
+    Option.None then false,
+  };
+  print "remove \"1\" (true):", took;
+
+  let ck: OwnedStr = i64_to_str(1);
+  print "contains \"1\" after remove:", hashmap_contains_key(ref m, ck);
+  print "len after remove (1):", hashmap_len(ref m);
+
+  return 0;
+}

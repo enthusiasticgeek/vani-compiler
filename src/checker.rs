@@ -22679,14 +22679,17 @@ fn check_hashmap_builtin(
         Type::I8 | Type::I16 | Type::I32 | Type::I64
             | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Bool
     );
-    // ARC 4.2: OwnedStr V — map clones each value internally
-    // on insert (sidesteps affine local-drop issue), drop /
-    // clear walk free each stored copy, _get returns a fresh
-    // clone, _insert / _remove transfer the prior stored V
-    // ownership back to the caller via Option<OwnedStr>.
-    // Only paired with K=i64 in v1 (4.2 scope); wider K is 4.3.
-    let v_is_owned_str_with_i64_k = matches!(v_ty, Type::OwnedStr) && matches!(k_ty, Type::I64);
-    let v_is_scalar = v_is_scalar_int || v_is_owned_str_with_i64_k;
+    // ARC 4.2: OwnedStr V with K=i64 — map clones each value
+    // internally on insert (sidesteps affine local-drop
+    // issue), drop / clear walk free each stored copy, _get
+    // returns a fresh clone, _insert / _remove transfer the
+    // prior stored V ownership back to the caller via
+    // Option<OwnedStr>.
+    // ARC 4.3: OwnedStr V with K=OwnedStr — same V semantics
+    // on top of the OwnedStr K bundle (drop walks both axes).
+    let v_is_owned_str_compatible_k = matches!(v_ty, Type::OwnedStr)
+        && matches!(k_ty, Type::I64 | Type::OwnedStr);
+    let v_is_scalar = v_is_scalar_int || v_is_owned_str_compatible_k;
     // ARC 1.7: allow struct K when both `implement Hash for K`
     // and `implement Eq for K` are in scope. The Hash bound was
     // checked earlier (in `validate_array_element_type` via ARC
