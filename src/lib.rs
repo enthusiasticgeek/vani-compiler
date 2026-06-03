@@ -31882,6 +31882,87 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 4.1 — HashMap<OwnedStr, V>: string keys via FNV-1a
+    // byte hash + strcmp equality. Bundle clones each key
+    // internally (matches Rust `m.insert(key.clone(), v)`).
+
+    #[test]
+    fn hashmap_owned_str_i64_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, i64> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_owned_str_int64_t"),
+            "expected C OwnedStr-K bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_owned_str_int64_t"),
+            "expected LLVM OwnedStr-K bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_owned_str_uses_strcmp_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("HashMap<OwnedStr, i64> → LLVM");
+        // Equality dispatches via `strcmp`.
+        assert!(
+            ll.contains("call i32 @strcmp"),
+            "expected strcmp call in OwnedStr-K LLVM bundle"
+        );
+        // Key cloning via strlen + malloc + memcpy.
+        assert!(
+            ll.contains("call i64 @strlen"),
+            "expected strlen call (insert clone path)"
+        );
+        assert!(
+            ll.contains("call i8* @memcpy"),
+            "expected memcpy call (insert clone path)"
+        );
+    }
+
+    #[test]
+    fn hashmap_owned_str_c_bundle_has_char_keys() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<OwnedStr, i64> = hashmap_new();
+              let k: OwnedStr = i64_to_str(1);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<OwnedStr, i64> → C");
+        // OwnedStr-K bundle keys field is `char**`.
+        assert!(
+            c.contains("char** keys"),
+            "expected `char** keys` in OwnedStr-K C bundle"
+        );
+        // Hash function takes `const char*`.
+        assert!(
+            c.contains("__hash_key(const char* k)"),
+            "expected `const char*` hash signature"
+        );
+        // Equality uses strcmp.
+        assert!(
+            c.contains("strcmp(m->keys[i], k)"),
+            "expected strcmp in OwnedStr-K C bundle"
+        );
+    }
+
     #[test]
     fn hashmap_f64_v_emits_c_double_keys() {
         let source = r#"

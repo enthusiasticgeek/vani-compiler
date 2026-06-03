@@ -10,7 +10,52 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4.5 COMPLETE — `HashMap<f64, V>`
+**Last updated:** 2026-06-03 (**ARC 4.1 COMPLETE — `HashMap<OwnedStr, V>`
+end-to-end on both backends.** String keys via FNV-1a byte hash
++ `strcmp` equality. Bundle clones each key internally
+(strlen + malloc + memcpy — C11-portable; no POSIX strdup
+dependency) so the caller retains ownership of the OwnedStr
+passed in. Matches Rust's `m.insert(key.clone(), v)`
+ergonomics; sidesteps the affine-system gap where local-drop
+isn't yet suppressed for OwnedStr moved into builtin args.
+
+4.1 checker relaxation: `check_hashmap_builtin` accepts K=OwnedStr
+alongside i64 / f64 / struct-with-Hash+Eq. Diagnostic
+enumerates all four admissible K shapes.
+
+4.1 (C bundle): `emit_intent_hashmap_pair_c_body_strk` emits
+per-(OwnedStr, V) bundle with prefix
+`intent_hashmap_owned_str_<V>`. Keys field is `char**`. Drop /
+clear walk all occupied slots and `free` each stored copy.
+`_insert` strlen-malloc-memcpy's the caller's pointer before
+storing. Duplicate-key path just swaps in the new value (no
+free of caller's k); `_remove` frees the stored key copy.
+
+4.1 (LLVM bundle): `emit_intent_hashmap_pair_llvm_strk` mirrors
+C bundle. Key type `i8*`; hash via byte-by-byte FNV-1a loop
+that walks the null-terminated string; equality via
+`call i32 @strcmp`. Insert clones via
+`strlen + malloc + memcpy` (memcpy is an LLVM intrinsic, no
+explicit declare needed). Dispatch helpers updated:
+`hashmap_llvm_dispatch` returns `intent_hashmap_owned_str_<V>`
+for OwnedStr K; `_with_k` returns `"i8*"` as the LLVM key type.
+
+4.1 (end-to-end): `examples/hashmap_str.vani` exercises
+insert / get / contains_key / remove / len with string keys
+"1", "2", "42". Identical stdout on both backends. Added to
+the parity test list.
+
+**3 new lib tests** covering:
+  - both backends compile HashMap<OwnedStr, i64> with the
+    `intent_hashmap_owned_str_int64_t` bundle prefix
+  - LLVM emits `call i32 @strcmp` for equality + `strlen` /
+    `memcpy` for the insert clone
+  - C bundle declares `char** keys` + `__hash_key(const char* k)`
+    + `strcmp(m->keys[i], k)`
+
+**1781 lib + 55 parity green.**
+
+**Prior:** 2026-06-03 (**ARC 4.5 COMPLETE — `HashMap<f64, V>`
 end-to-end on both backends.** f64 keys with built-in `==`
 equality (NaN keys unrecoverable, documented in unsafe.md) and
 reinterpret-bits FNV-1a hashing. Checker, C bundle, LLVM

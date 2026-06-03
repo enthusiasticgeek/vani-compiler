@@ -58,7 +58,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 
 | # | Pair | Effort | Depends on |
 |---|---|---|---|
-| 4.1 | `HashMap<OwnedStr, i64>` — string key with custom hash + strcmp equality | ~3h | 1.5e |
+| 4.1 | `HashMap<OwnedStr, V>` — string key with FNV-1a + strcmp equality ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
 | 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot | ~3h | 1.5e |
 | 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
 | 4.4 | `HashMap<Tuple<i64, i64>, V>` — tuple K via `hash_combine` | ~3h | 1.5e + Tuple E sugar |
@@ -407,11 +407,22 @@ For each new (K, V) pair:
 
 ### Specific pairs in priority order (~10–15h per pair)
 
-1. **4.1 — `HashMap<Str, i64>`. (~3h)**
+1. **4.1 — `HashMap<OwnedStr, V>`. (~3h)** ✅ **SHIPPED 2026-06-03**
    - Most-common use case (counters, name → ID maps).
-   - Str key hashing via existing `intent_hash_str`.
-   - Borrowed-Str keys vs OwnedStr keys: decide on a convention.
-     Probably OwnedStr (HashMap owns the key).
+   - Bundle clones the caller's OwnedStr internally via
+     strlen + malloc + memcpy — sidesteps the affine-system
+     gap where local drops aren't yet suppressed for
+     OwnedStr moved into builtin args. Caller retains
+     ownership; matches Rust's `m.insert(key.clone(), v)`.
+   - C bundle prefix: `intent_hashmap_owned_str_<V>`. Keys
+     field `char**`. Hash: FNV-1a byte loop. Equality:
+     `strcmp`. Insert duplicate-key path swaps in new value
+     without freeing caller's k. Remove + drop + clear free
+     each stored clone.
+   - LLVM mirror: equality via `call i32 @strcmp`, hash via
+     byte-by-byte FNV-1a loop reading `i8*` until null
+     terminator. memcpy auto-bound by LLVM (no declare).
+   - Parity example: `examples/hashmap_str.vani`.
 
 2. **4.2 — `HashMap<i64, Str>`. (~3h)**
    - V = OwnedStr; map drops free each value Str.

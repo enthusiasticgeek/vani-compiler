@@ -22695,13 +22695,19 @@ fn check_hashmap_builtin(
     // Caveat: NaN != NaN, so HashMap<f64, V> with NaN keys is
     // unrecoverable. Documented; user can guard with f64_is_nan.
     let k_is_f64 = matches!(k_ty, Type::F64);
-    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 {
+    // ARC 4.1: OwnedStr K — built-in FNV-1a byte hashing +
+    // strcmp equality. The map takes ownership of each key
+    // string; clear/drop walk frees them. Insert is affine:
+    // duplicate keys cause the *new* key to be freed and the
+    // old one to remain (Rust HashMap<String, V> semantics).
+    let k_is_owned_str = matches!(k_ty, Type::OwnedStr);
+    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 && !k_is_owned_str {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() supports `HashMap<i64, V>` / `HashMap<f64, V>` for scalar V, \
-                 or `HashMap<Struct, V>` when Struct implements both `Hash` and `Eq`; \
-                 got HashMap<{}, {}>",
+                "{}() supports `HashMap<i64, V>` / `HashMap<f64, V>` / \
+                 `HashMap<OwnedStr, V>` for scalar V, or `HashMap<Struct, V>` \
+                 when Struct implements both `Hash` and `Eq`; got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));

@@ -693,6 +693,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
                         &mut body, v_tag, v_tag, v_mangle, has_option_v,
                     );
                 }
+                // ARC 4.1: OwnedStr K — strcmp equality, FNV-1a
+                // byte hash. Map owns each key pointer; drop /
+                // clear walk all occupied slots and free them.
+                Type::OwnedStr => {
+                    emit_intent_hashmap_pair_c_body_strk(
+                        &mut body, v_tag, v_tag, v_mangle, has_option_v,
+                    );
+                }
                 Type::Struct(k_name) => {
                     let k_ctype = format!("Struct_{}", k_name);
                     emit_intent_hashmap_struct_pair_c_body(
@@ -2185,6 +2193,189 @@ fn emit_intent_hashmap_pair_c_body_f64k(
              \x20 while (m->occ[i] != 0) {{\n\
              \x20   if (m->occ[i] == 1 && m->keys[i] == k) {{\n\
              \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->occ[i] = 2;\n\
+             \x20     m->len--;\n\
+             \x20     m->tombstones++;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\n",
+            v_ctype = v_ctype, prefix = prefix, opt_v = opt_v,
+        ));
+    }
+}
+
+/// ARC 4.1 — `HashMap<OwnedStr, V>` for V scalar. The map
+/// owns each key pointer (via internal `strdup`) — `_drop` /
+/// `_clear` walk all occupied slots and `free()` the stored
+/// copies. The bundle clones internally because the language
+/// affine system doesn't yet suppress local drops for OwnedStr
+/// args moved into builtins; cloning makes the user-visible
+/// "drop the local after the call" semantics safe (no
+/// double-free), and matches Rust's `m.insert(key.clone(), v)`
+/// ergonomics. FNV-1a hash over the bytes; equality via
+/// `strcmp`.
+fn emit_intent_hashmap_pair_c_body_strk(
+    out: &mut String,
+    v_tag: &str,
+    v_ctype: &str,
+    option_v_mangle: &str,
+    has_option_v: bool,
+) {
+    let prefix = format!("intent_hashmap_owned_str_{}", v_tag);
+    let opt_v = format!("Enum_Option__{}", option_v_mangle);
+    out.push_str(&format!(
+        "typedef struct {{ char** keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
+         static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
+         \x20 {prefix} m;\n\
+         \x20 m.keys = (char**)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
+         \x20 m.len = 0; m.capacity = 0; m.tombstones = 0;\n\
+         \x20 return m;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}_drop({prefix}* m) {{\n\
+         \x20 if (m->keys) {{\n\
+         \x20   for (uint64_t i = 0; i < m->capacity; i++) {{\n\
+         \x20     if (m->occ[i] == 1 && m->keys[i]) free(m->keys[i]);\n\
+         \x20   }}\n\
+         \x20   free(m->keys);\n\
+         \x20 }}\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = 0; m->values = 0; m->occ = 0;\n\
+         \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
+         }}\n\
+         static INTENT_UNUSED uint64_t {prefix}__hash_key(const char* k) {{\n\
+         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
+         \x20 for (const char* p = k; *p; p++) {{\n\
+         \x20   h ^= (uint64_t)(unsigned char)(*p);\n\
+         \x20   h *= 0x100000001b3ULL;\n\
+         \x20 }}\n\
+         \x20 return h;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__insert_owned_raw({prefix}* m, char* k_owned, {v_ctype} v) {{\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k_owned) & mask;\n\
+         \x20 while (m->occ[i] == 1) {{\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 m->keys[i] = k_owned; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__grow({prefix}* m) {{\n\
+         \x20 uint64_t old_cap = m->capacity;\n\
+         \x20 char** old_keys = m->keys;\n\
+         \x20 {v_ctype}* old_values = m->values;\n\
+         \x20 uint8_t* old_occ = m->occ;\n\
+         \x20 uint64_t new_cap = old_cap == 0 ? 8 : old_cap * 2;\n\
+         \x20 m->keys = (char**)malloc(new_cap * sizeof(char*));\n\
+         \x20 m->values = ({v_ctype}*)malloc(new_cap * sizeof({v_ctype}));\n\
+         \x20 m->occ = (uint8_t*)calloc(new_cap, 1);\n\
+         \x20 if (!m->keys || !m->values || !m->occ) abort();\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = new_cap;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 for (uint64_t i = 0; i < old_cap; i++) {{\n\
+         \x20   if (old_occ[i] == 1) {prefix}__insert_owned_raw(m, old_keys[i], old_values[i]);\n\
+         \x20 }}\n\
+         \x20 if (old_keys) free(old_keys);\n\
+         \x20 if (old_values) free(old_values);\n\
+         \x20 if (old_occ) free(old_occ);\n\
+         }}\n\
+         static INTENT_UNUSED bool {prefix}_contains_key(const {prefix}* m, const char* k) {{\n\
+         \x20 if (m->capacity == 0) return false;\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] != 0) {{\n\
+         \x20   if (m->occ[i] == 1 && strcmp(m->keys[i], k) == 0) return true;\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 return false;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_len(const {prefix}* m) {{\n\
+         \x20 return (int64_t)m->len;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_clear({prefix}* m) {{\n\
+         \x20 int64_t prior = (int64_t)m->len;\n\
+         \x20 if (m->keys) {{\n\
+         \x20   for (uint64_t i = 0; i < m->capacity; i++) {{\n\
+         \x20     if (m->occ[i] == 1 && m->keys[i]) free(m->keys[i]);\n\
+         \x20   }}\n\
+         \x20   free(m->keys);\n\
+         \x20 }}\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = (char**)0;\n\
+         \x20 m->values = ({v_ctype}*)0;\n\
+         \x20 m->occ = (uint8_t*)0;\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = 0;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 return prior;\n\
+         }}\n",
+        v_ctype = v_ctype, prefix = prefix,
+    ));
+    if has_option_v {
+        // contains_key style probe for get; insert/remove free
+        // their respective key strings appropriately.
+        out.push_str(&format!(
+            "static INTENT_UNUSED {opt_v} {prefix}_get(const {prefix}* m, const char* k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && strcmp(m->keys[i], k) == 0) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, const char* k, {v_ctype} v) {{\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 {opt_v} r;\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 int64_t first_tomb = -1;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && strcmp(m->keys[i], k) == 0) {{\n\
+             \x20     /* Duplicate key — keep the existing key copy,\n\
+             \x20      * swap in the new value. Caller still owns k. */\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->values[i] = v;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   if (m->occ[i] == 2 && first_tomb == -1) first_tomb = (int64_t)i;\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 /* Clone the caller's key — affine system doesn't\n\
+             \x20  * yet suppress the local drop for OwnedStr moved\n\
+             \x20  * into builtin args, so cloning makes the user's\n\
+             \x20  * scope-exit free safe (no double-free). Inline\n\
+             \x20  * the strdup (POSIX-only otherwise) via malloc +\n\
+             \x20  * memcpy so the bundle is C11-pure. */\n\
+             \x20 size_t k_len = strlen(k);\n\
+             \x20 char* k_owned = (char*)malloc(k_len + 1);\n\
+             \x20 if (!k_owned) abort();\n\
+             \x20 memcpy(k_owned, k, k_len + 1);\n\
+             \x20 if (first_tomb != -1) {{\n\
+             \x20   uint64_t slot = (uint64_t)first_tomb;\n\
+             \x20   m->keys[slot] = k_owned; m->values[slot] = v; m->occ[slot] = 1;\n\
+             \x20   m->len++; m->tombstones--;\n\
+             \x20 }} else {{\n\
+             \x20   m->keys[i] = k_owned; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_remove({prefix}* m, const char* k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && strcmp(m->keys[i], k) == 0) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     free(m->keys[i]);\n\
+             \x20     m->keys[i] = 0;\n\
              \x20     m->occ[i] = 2;\n\
              \x20     m->len--;\n\
              \x20     m->tombstones++;\n\
@@ -11513,6 +11704,10 @@ fn hashmap_type_tag_c_owned(ty: &Type) -> String {
         Type::Bool => "bool".to_string(),
         // ARC 4.5: f64 K — bundle prefix `intent_hashmap_double_<V>`.
         Type::F64 => "double".to_string(),
+        // ARC 4.1: OwnedStr K — bundle prefix
+        // `intent_hashmap_owned_str_<V>`. Map owns each key
+        // pointer; FNV-1a byte hash + strcmp equality.
+        Type::OwnedStr => "owned_str".to_string(),
         // ARC 1.7: struct K — tag matches the C-emitted struct
         // typedef name (`Struct_<name>`).
         Type::Struct(name) => format!("Struct_{}", name),
