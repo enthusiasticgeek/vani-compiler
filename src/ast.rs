@@ -569,6 +569,22 @@ pub struct Function {
     /// env var `INTENT_NO_HEAP=1` is set, treating every
     /// function as if it had the attribute.
     pub no_heap: bool,
+    /// T2.3 of the safety-standard alignment arc: set by the
+    /// parser when the function declaration is annotated
+    /// `#[no_float]`. The post-check pass walks the function
+    /// body + transitive callees and rejects any expression
+    /// of type f32 / f64. Some certification levels disallow
+    /// floating-point in critical paths (deterministic
+    /// timing, no IEEE-754 corner cases on a target without
+    /// an FPU). Composable with other safety primitives.
+    pub no_float: bool,
+    /// T2.5 of the safety-standard alignment arc: set by the
+    /// parser when the function declaration is annotated
+    /// `#[no_recursion]`. Strict variant of the existing
+    /// `#[bounded(0)]` — explicitly rejects any self-call or
+    /// mutual-recursion cycle. Composable with `#[no_heap]`
+    /// for ASIL-D-style fns.
+    pub no_recursion: bool,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

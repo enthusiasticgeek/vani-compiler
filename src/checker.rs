@@ -1005,6 +1005,11 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         #[cfg(test)]
         let global = false;
         crate::safety::enforce_no_heap(&typed_program_view, global, &mut diagnostics);
+        // T2.3 / T2.5 — additional per-function safety
+        // attributes. No env-var global mode for these in v1;
+        // strict opt-in via the function annotation.
+        crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
+        crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
     }
 
     if diagnostics.is_empty() {
@@ -1523,6 +1528,8 @@ fn lift_closures_in_block(
                         is_pure: false,
                         is_extern: false,
                         no_heap: false,
+            no_float: false,
+            no_recursion: false,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2749,6 +2756,8 @@ fn lift_expr_anon_fn(
                 span,
                 is_pure: false,
                         no_heap: false,
+            no_float: false,
+            no_recursion: false,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6783,6 +6792,8 @@ fn check_function(
             is_extern: false,
             recursion_bound: function.recursion_bound,
             no_heap: function.no_heap,
+            no_float: function.no_float,
+            no_recursion: function.no_recursion,
             span: function.span,
         };
     }
@@ -6839,6 +6850,8 @@ fn check_function(
             is_extern: true,
             recursion_bound: None,
             no_heap: false,
+            no_float: false,
+            no_recursion: false,
             span: function.span,
         };
     }
@@ -7081,6 +7094,8 @@ fn check_function(
         is_extern: false,
         recursion_bound: function.recursion_bound,
         no_heap: function.no_heap,
+        no_float: function.no_float,
+        no_recursion: function.no_recursion,
         span: function.span,
     }
 }

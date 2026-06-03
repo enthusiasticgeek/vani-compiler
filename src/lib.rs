@@ -30254,6 +30254,127 @@ fn main() -> i64 {
     // (direct or via cycle) is reported as UNBOUNDED.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // T2.3 — `#[no_float]` attribute. Function (and transitive
+    // callees) must not use f32 / f64 anywhere — in signatures,
+    // local bindings, expressions, or struct/tuple fields.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn no_float_rejects_f64_param() {
+        let source = r#"
+            #[no_float]
+            fn bad(x: f64) -> f64 { return x; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_float] + f64 param rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("floating-point")
+                && d.message.contains("#[no_float]")),
+            "expected no_float diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_float_accepts_pure_integer() {
+        let source = r#"
+            #[no_float]
+            fn ok(x: i64) -> i64 { return x * 2; }
+            fn main() -> i64 { return ok(7); }
+        "#;
+        let _ = compile(source).expect("#[no_float] + i64 compiles");
+    }
+
+    #[test]
+    fn no_float_catches_local_binding() {
+        let source = r#"
+            #[no_float]
+            fn bad() -> i64 {
+              let pi: f64 = 3.14;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_float] + local f64 rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("floating-point")),
+            "expected diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // T2.5 — `#[no_recursion]` strict variant. Stricter than
+    // `#[bounded(0)]` because the diagnostic explicitly names
+    // recursion as the rejection reason and detects mutual
+    // recursion via cycle.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn no_recursion_rejects_self_call() {
+        let source = r#"
+            #[no_recursion]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1) + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_recursion] + self-call rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("recurses")
+                && d.message.contains("#[no_recursion]")),
+            "expected diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_recursion_accepts_iterative() {
+        let source = r#"
+            #[no_recursion]
+            fn iter(n: i64) -> i64 {
+              let mut: i64 = 0;
+              return mut + n;
+            }
+            fn main() -> i64 { return iter(5); }
+        "#;
+        // Note: "mut" is a reserved keyword, so this might fail.
+        // Use a normal name:
+        let source = r#"
+            #[no_recursion]
+            fn iter(n: i64) -> i64 {
+              let acc: i64 = 0;
+              return acc + n;
+            }
+            fn main() -> i64 { return iter(5); }
+        "#;
+        let _ = compile(source).expect("#[no_recursion] + iterative compiles");
+    }
+
+    #[test]
+    fn no_recursion_detects_mutual_recursion() {
+        // a calls b calls a — cycle of length 2.
+        let source = r#"
+            #[no_recursion]
+            fn a(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return b(n - 1);
+            }
+            fn b(n: i64) -> i64 {
+              return a(n - 1);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("mutual recursion rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("recurses")),
+            "expected diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn stack_depth_leaf_function_frame() {
         let source = r#"

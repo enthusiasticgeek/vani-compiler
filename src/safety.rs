@@ -286,6 +286,359 @@ fn walk_stmt(stmt: &TypedStmt, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<
     }
 }
 
+/// T2.3 — enforce `#[no_float]` per function. Walks the
+/// function body looking for any sub-expression of type
+/// `Type::F32` or `Type::F64` (or `Vec<Fxx>` / `Array<Fxx;N>`
+/// / `Tuple<…Fxx…>`); if found, emit a diagnostic. Transitive
+/// through user-defined fn calls (a `#[no_float]` fn can't
+/// call a fn that uses float internally because the callee's
+/// frame would compute floats on its stack — undermining the
+/// "no FPU touch" guarantee).
+pub fn enforce_no_float(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    let mut direct: HashMap<String, Option<FloatUse>> = HashMap::new();
+    let mut calls: HashMap<String, Vec<String>> = HashMap::new();
+    for f in &program.functions {
+        let mut float_use: Option<FloatUse> = None;
+        let mut local_calls: Vec<String> = Vec::new();
+        for p in &f.params {
+            if ty_uses_float(&p.ty) && float_use.is_none() {
+                float_use = Some(FloatUse {
+                    site: format!("parameter '{}' of type {}", p.name, p.ty),
+                    span: p.name_span,
+                    via: None,
+                });
+            }
+        }
+        if ty_uses_float(&f.return_type) && float_use.is_none() {
+            float_use = Some(FloatUse {
+                site: format!("return type {}", f.return_type),
+                span: f.span,
+                via: None,
+            });
+        }
+        for s in &f.body {
+            walk_stmt_for_float(s, &mut float_use, &mut local_calls);
+        }
+        direct.insert(f.name.clone(), float_use);
+        calls.insert(f.name.clone(), local_calls);
+    }
+    // Fixpoint propagation through call graph.
+    let mut transitive: HashMap<String, Option<FloatUse>> = direct.clone();
+    loop {
+        let mut changed = false;
+        let names: Vec<String> = transitive.keys().cloned().collect();
+        for name in &names {
+            if transitive.get(name).map(|o| o.is_some()).unwrap_or(false) {
+                continue;
+            }
+            let propagate = calls.get(name).and_then(|callees| {
+                callees.iter().find_map(|c| {
+                    transitive.get(c).and_then(|o| o.clone()).map(|u| FloatUse {
+                        site: u.site,
+                        span: u.span,
+                        via: Some(c.clone()),
+                    })
+                })
+            });
+            if let Some(u) = propagate {
+                transitive.insert(name.clone(), Some(u));
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    for f in &program.functions {
+        if !f.no_float {
+            continue;
+        }
+        if let Some(Some(u)) = transitive.get(&f.name) {
+            let via = u
+                .via
+                .as_ref()
+                .map(|c| format!(" via call to '{}'", c))
+                .unwrap_or_default();
+            diagnostics.push(Diagnostic::new(
+                u.span,
+                format!(
+                    "'{}' uses floating-point ({}){} — function is marked \
+                     `#[no_float]`. Use fixed-point arithmetic on i32 / i64 \
+                     for critical-path code.",
+                    f.name, u.site, via
+                ),
+            ));
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FloatUse {
+    site: String,
+    span: crate::span::Span,
+    via: Option<String>,
+}
+
+fn ty_uses_float(ty: &crate::ast::Type) -> bool {
+    use crate::ast::Type::*;
+    match ty {
+        F32 | F64 => true,
+        Vec(inner) | Ref(inner) | RefMut(inner) | Atomic(inner) | Mutex(inner)
+        | Guard(inner) | Channel(inner, _) | Tainted(inner)
+        | Ptr(inner) | PtrMut(inner) | Handle(inner) | Pool(inner)
+        | BoundedPtr(inner) | ArenaRef(inner)
+        | Deque(inner) | HashSet(inner) | BinaryHeap(inner) | BTreeSet(inner)
+        | Bst(inner) => ty_uses_float(inner),
+        HashMap(k, v) | BTreeMap(k, v) => ty_uses_float(k) || ty_uses_float(v),
+        Array { element, .. } => ty_uses_float(element),
+        Tuple(elements) => elements.iter().any(ty_uses_float),
+        FnPtr(params, ret) => params.iter().any(ty_uses_float) || ty_uses_float(ret),
+        Apply { args, .. } => args.iter().any(ty_uses_float),
+        _ => false,
+    }
+}
+
+fn walk_stmt_for_float(
+    stmt: &TypedStmt,
+    float_use: &mut Option<FloatUse>,
+    calls: &mut Vec<String>,
+) {
+    match stmt {
+        TypedStmt::Let { ty, expr, name } => {
+            if ty_uses_float(ty) && float_use.is_none() {
+                *float_use = Some(FloatUse {
+                    site: format!("local '{}' of type {}", name, ty),
+                    span: expr.span,
+                    via: None,
+                });
+            }
+            walk_expr_for_float(expr, float_use, calls);
+        }
+        TypedStmt::Reassign { ty, expr, .. } => {
+            if ty_uses_float(ty) && float_use.is_none() {
+                *float_use = Some(FloatUse {
+                    site: format!("reassignment of type {}", ty),
+                    span: expr.span,
+                    via: None,
+                });
+            }
+            walk_expr_for_float(expr, float_use, calls);
+        }
+        TypedStmt::Return { expr } | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } | TypedStmt::Discard { expr } => {
+            walk_expr_for_float(expr, float_use, calls);
+        }
+        TypedStmt::IndexAssign { value, .. } | TypedStmt::FieldAssign { value, .. } => {
+            walk_expr_for_float(value, float_use, calls);
+        }
+        TypedStmt::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    walk_expr_for_float(e, float_use, calls);
+                }
+            }
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            walk_expr_for_float(cond, float_use, calls);
+            for s in then_body { walk_stmt_for_float(s, float_use, calls); }
+            for s in else_body { walk_stmt_for_float(s, float_use, calls); }
+        }
+        TypedStmt::While { cond, body } => {
+            walk_expr_for_float(cond, float_use, calls);
+            for s in body { walk_stmt_for_float(s, float_use, calls); }
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            walk_expr_for_float(start, float_use, calls);
+            walk_expr_for_float(end, float_use, calls);
+            for s in body { walk_stmt_for_float(s, float_use, calls); }
+        }
+        TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. }
+        | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { walk_stmt_for_float(s, float_use, calls); }
+        }
+        _ => {}
+    }
+}
+
+fn walk_expr_for_float(
+    expr: &TypedExpr,
+    float_use: &mut Option<FloatUse>,
+    calls: &mut Vec<String>,
+) {
+    if ty_uses_float(&expr.ty) && float_use.is_none() {
+        *float_use = Some(FloatUse {
+            site: format!("expression of type {}", expr.ty),
+            span: expr.span,
+            via: None,
+        });
+    }
+    match &expr.kind {
+        TypedExprKind::Call { name, args, .. } => {
+            calls.push(name.clone());
+            for a in args { walk_expr_for_float(a, float_use, calls); }
+        }
+        TypedExprKind::Binary { left, right, .. } => {
+            walk_expr_for_float(left, float_use, calls);
+            walk_expr_for_float(right, float_use, calls);
+        }
+        TypedExprKind::Unary { expr, .. } | TypedExprKind::Cast { expr, .. } => {
+            walk_expr_for_float(expr, float_use, calls);
+        }
+        TypedExprKind::Index { array, index, .. } => {
+            walk_expr_for_float(array, float_use, calls);
+            walk_expr_for_float(index, float_use, calls);
+        }
+        TypedExprKind::ArrayLit { elements } | TypedExprKind::Tuple { elements } => {
+            for e in elements { walk_expr_for_float(e, float_use, calls); }
+        }
+        TypedExprKind::IfExpr { cond, then_value, else_value } => {
+            walk_expr_for_float(cond, float_use, calls);
+            walk_expr_for_float(then_value, float_use, calls);
+            walk_expr_for_float(else_value, float_use, calls);
+        }
+        TypedExprKind::Block { stmts, tail } => {
+            for s in stmts { walk_stmt_for_float(s, float_use, calls); }
+            walk_expr_for_float(tail, float_use, calls);
+        }
+        _ => {}
+    }
+}
+
+/// T2.5 — enforce `#[no_recursion]` strict. Detects direct
+/// self-call OR mutual recursion via cycle in the call graph.
+pub fn enforce_no_recursion(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    let mut calls: HashMap<String, Vec<String>> = HashMap::new();
+    let mut spans: HashMap<String, crate::span::Span> = HashMap::new();
+    for f in &program.functions {
+        let mut local_calls: Vec<String> = Vec::new();
+        for s in &f.body {
+            collect_calls(s, &mut local_calls);
+        }
+        calls.insert(f.name.clone(), local_calls);
+        spans.insert(f.name.clone(), f.span);
+    }
+    for f in &program.functions {
+        if !f.no_recursion {
+            continue;
+        }
+        // BFS from f.name; if we can reach f.name itself,
+        // there's a recursion path.
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut stack: Vec<(String, Vec<String>)> = vec![(f.name.clone(), vec![f.name.clone()])];
+        while let Some((cur, path)) = stack.pop() {
+            let Some(callees) = calls.get(&cur) else {
+                continue;
+            };
+            for callee in callees {
+                if callee == &f.name {
+                    // Found a path back to f.name.
+                    let mut chain = path.clone();
+                    chain.push(callee.clone());
+                    let via = if chain.len() > 2 {
+                        format!(" via {}", chain[1..chain.len() - 1].join(" -> "))
+                    } else {
+                        String::new()
+                    };
+                    diagnostics.push(Diagnostic::new(
+                        f.span,
+                        format!(
+                            "'{}' recurses{} — function is marked `#[no_recursion]`. \
+                             Refactor as an iterative loop (while / for) over a \
+                             bounded counter or accumulator.",
+                            f.name, via
+                        ),
+                    ));
+                    return;
+                }
+                if visited.insert(callee.clone()) {
+                    let mut new_path = path.clone();
+                    new_path.push(callee.clone());
+                    stack.push((callee.clone(), new_path));
+                }
+            }
+        }
+    }
+}
+
+fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
+    match stmt {
+        TypedStmt::Let { expr, .. }
+        | TypedStmt::Reassign { expr, .. }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr }
+        | TypedStmt::Discard { expr } => collect_expr_calls(expr, out),
+        TypedStmt::IndexAssign { value, .. } | TypedStmt::FieldAssign { value, .. } => {
+            collect_expr_calls(value, out);
+        }
+        TypedStmt::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    collect_expr_calls(e, out);
+                }
+            }
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            collect_expr_calls(cond, out);
+            for s in then_body { collect_calls(s, out); }
+            for s in else_body { collect_calls(s, out); }
+        }
+        TypedStmt::While { cond, body } => {
+            collect_expr_calls(cond, out);
+            for s in body { collect_calls(s, out); }
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            collect_expr_calls(start, out);
+            collect_expr_calls(end, out);
+            for s in body { collect_calls(s, out); }
+        }
+        TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. }
+        | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { collect_calls(s, out); }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_calls(expr: &TypedExpr, out: &mut Vec<String>) {
+    match &expr.kind {
+        TypedExprKind::Call { name, args, .. } => {
+            out.push(name.clone());
+            for a in args { collect_expr_calls(a, out); }
+        }
+        TypedExprKind::Binary { left, right, .. } => {
+            collect_expr_calls(left, out);
+            collect_expr_calls(right, out);
+        }
+        TypedExprKind::Unary { expr, .. } | TypedExprKind::Cast { expr, .. } => {
+            collect_expr_calls(expr, out);
+        }
+        TypedExprKind::Index { array, index, .. } => {
+            collect_expr_calls(array, out);
+            collect_expr_calls(index, out);
+        }
+        TypedExprKind::ArrayLit { elements } | TypedExprKind::Tuple { elements } => {
+            for e in elements { collect_expr_calls(e, out); }
+        }
+        TypedExprKind::IfExpr { cond, then_value, else_value } => {
+            collect_expr_calls(cond, out);
+            collect_expr_calls(then_value, out);
+            collect_expr_calls(else_value, out);
+        }
+        TypedExprKind::Block { stmts, tail } => {
+            for s in stmts { collect_calls(s, out); }
+            collect_expr_calls(tail, out);
+        }
+        TypedExprKind::Match { scrutinee, arms } => {
+            collect_expr_calls(scrutinee, out);
+            for a in arms { collect_expr_calls(&a.body, out); }
+        }
+        _ => {}
+    }
+}
+
 fn walk_expr(expr: &TypedExpr, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<String>) {
     match &expr.kind {
         TypedExprKind::Call { name, args, .. } => {

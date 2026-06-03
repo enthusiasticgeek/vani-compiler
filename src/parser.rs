@@ -1260,6 +1260,8 @@ impl Parser {
             is_pure,
             is_extern: false,
             no_heap: false,
+            no_float: false,
+            no_recursion: false,
             recursion_bound: None,
         })
     }
@@ -1286,6 +1288,8 @@ impl Parser {
     fn parse_attributed_fn(&mut self) -> Result<Function, Diagnostic> {
         let mut bound_value: Option<u64> = None;
         let mut no_heap = false;
+        let mut no_float = false;
+        let mut no_recursion = false;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
             self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
@@ -1310,15 +1314,16 @@ impl Parser {
                     self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
                     bound_value = Some(n);
                 }
-                "no_heap" => {
-                    no_heap = true;
-                }
+                "no_heap" => no_heap = true,
+                "no_float" => no_float = true,
+                "no_recursion" => no_recursion = true,
                 other => {
                     return Err(Diagnostic::new(
                         self.current().span,
                         format!(
                             "unknown attribute '#[{}]' — recognized in v1: \
-                             `#[bounded(N)]`, `#[no_heap]`",
+                             `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, \
+                             `#[no_recursion]`",
                             other
                         ),
                     ));
@@ -1331,6 +1336,8 @@ impl Parser {
         let mut f = self.parse_function()?;
         f.recursion_bound = bound_value;
         f.no_heap = no_heap;
+        f.no_float = no_float;
+        f.no_recursion = no_recursion;
         Ok(f)
     }
 
@@ -1392,6 +1399,8 @@ impl Parser {
             span: start.span.merge(semi.span),
             is_pure: false,
             no_heap: false,
+            no_float: false,
+            no_recursion: false,
             is_extern: true,
             recursion_bound: None,
         })

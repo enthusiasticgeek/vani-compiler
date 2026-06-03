@@ -72,6 +72,14 @@ pub struct TypedFunction {
     /// `INTENT_NO_HEAP=1` env var to decide whether to flag
     /// transitive heap-allocator calls.
     pub no_heap: bool,
+    /// T2.3 of safety-standard arc: forwarded from
+    /// `ast::Function::no_float`. Triggers the no-float pass
+    /// in `safety::enforce_no_float`.
+    pub no_float: bool,
+    /// T2.5 of safety-standard arc: forwarded from
+    /// `ast::Function::no_recursion`. Triggers the
+    /// no-recursion pass in `safety::enforce_no_recursion`.
+    pub no_recursion: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function
