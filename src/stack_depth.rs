@@ -258,7 +258,7 @@ fn stmt_local_bytes(stmt: &TypedStmt) -> u64 {
     }
 }
 
-fn stmt_callees(stmt: &TypedStmt, out: &mut Vec<String>) {
+pub(crate) fn stmt_callees(stmt: &TypedStmt, out: &mut Vec<String>) {
     match stmt {
         TypedStmt::Let { expr, .. }
         | TypedStmt::Reassign { expr, .. }

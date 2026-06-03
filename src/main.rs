@@ -791,6 +791,13 @@ COMMANDS:
                                           entry-point exceeds the budget (or
                                           is unbounded). With --entry=<fn>,
                                           only reports for that entry-point.
+    acyclicity <file.vani> [--format=<csv|json|text>]
+                                          Prove the call graph has no cycles
+                                          (modulo `#[bounded(N)]`-annotated
+                                          members). Catches mutual recursion
+                                          that single-fn checks miss. Required
+                                          by DO-178C / ASIL-D. Exit 1 on
+                                          violation.
     fmt <path>... [--check|--in-place]
                                           Pretty-print canonical source.
                                           // comments are preserved. Paths
@@ -1167,6 +1174,60 @@ fn run() -> Result<ExitCode, String> {
                         Ok(ExitCode::SUCCESS)
                     }
                 }
+            }
+        }
+        "acyclicity" => {
+            // T3.3 of the safety-standard alignment arc: prove the
+            // program's call graph has no cycles (modulo
+            // `#[bounded(N)]`-annotated members). Catches mutual
+            // recursion that single-function checks would miss.
+            //
+            // Usage: intentc acyclicity <path> [--format=csv|json|text]
+            // Exit 1 if any non-bounded cycle exists.
+            let mut format = "text";
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'acyclicity' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'acyclicity' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, _file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let report = vani::acyclicity::check_acyclicity(&checked.ir);
+            match format {
+                "csv" => print!("{}", vani::acyclicity::format_csv(&report)),
+                "json" => print!("{}", vani::acyclicity::format_json(&report)),
+                _ => print!("{}", vani::acyclicity::format_text(&report)),
+            }
+            if report.has_violations() {
+                Ok(ExitCode::from(1))
+            } else {
+                Ok(ExitCode::SUCCESS)
             }
         }
         "deviations" => {

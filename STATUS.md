@@ -10,7 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T3.2 of safety-standard arc
+**Last updated:** 2026-06-03 (**T3.3 of safety-standard arc
+shipped — `intentc acyclicity` subcommand + Tarjan's SCC pass.**
+Whole-program call-graph cycle detection. New CLI:
+`intentc acyclicity <path> [--format=text|json|csv]`. Builds the
+call graph from every non-extern function, runs an iterative
+(deep-recursion-safe) Tarjan's strongly-connected-components
+algorithm, and reports every non-trivial SCC plus every self-loop
+where the participating function lacks `#[bounded(N)]`. The exit
+code is 1 if any non-bounded cycle is found — a CI-friendly gate.
+Catches mutual recursion (`a -> b -> a`) that the single-fn
+`#[no_recursion]` check can only see when the annotated fn is
+inside the cycle. Required by DO-178C Level A and ASIL-D timing
+analysis (every call chain must terminate in bounded time).
+Output formats match the established three-format pattern
+(text default, JSON for CI, CSV for spreadsheet review).
+**8 new lib tests** (clean graph, direct self-call, bounded
+self-call exempt, mutual recursion, three-way cycle, all three
+output formats well-formed). **1697 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**T3.2 of safety-standard arc
 shipped — `#[wcet(cycles=N)]` attribute + cycle estimator.** Per-
 function worst-case execution time budget. Surface form:
 `#[wcet(cycles=N)]` with N a positive integer. The post-check

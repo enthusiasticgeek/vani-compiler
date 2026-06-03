@@ -3,6 +3,7 @@ pub mod backend;
 pub mod backend_c;
 pub mod backend_llvm;
 pub mod checker;
+pub mod acyclicity;
 pub mod deviations;
 pub mod diagnostic;
 pub mod safety;
@@ -30925,6 +30926,152 @@ fn main() -> i64 {
             fn main() -> i64 { return isr_like(); }
         "#;
         let _ = compile(source).expect("stacked attrs compose");
+    }
+
+    // T3.3 of the safety-standard arc — call-graph acyclicity.
+
+    #[test]
+    fn acyclicity_clean_graph_no_cycles() {
+        let source = r#"
+            fn a() -> i64 { return 1; }
+            fn b() -> i64 { return a(); }
+            fn c() -> i64 { return a() + b(); }
+            fn main() -> i64 { return c(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        assert!(report.cycles.is_empty());
+        assert!(!report.has_violations());
+    }
+
+    #[test]
+    fn acyclicity_detects_direct_self_call() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let checked = compile(source).expect("compiles (no #[no_recursion])");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        assert_eq!(report.cycles.len(), 1);
+        assert_eq!(report.cycles[0].members, vec!["rec"]);
+        assert!(!report.cycles[0].all_bounded);
+        assert!(report.has_violations());
+    }
+
+    #[test]
+    fn acyclicity_bounded_self_call_not_a_violation() {
+        let source = r#"
+            #[bounded(5)]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        // The cycle is reported, but flagged as bounded — not a violation.
+        assert_eq!(report.cycles.len(), 1);
+        assert!(report.cycles[0].all_bounded);
+        assert!(!report.has_violations());
+    }
+
+    #[test]
+    fn acyclicity_detects_mutual_recursion() {
+        let source = r#"
+            fn is_even(n: i64) -> bool {
+              if n == 0 { return true; }
+              return is_odd(n - 1);
+            }
+            fn is_odd(n: i64) -> bool {
+              if n == 0 { return false; }
+              return is_even(n - 1);
+            }
+            fn main() -> i64 {
+              if is_even(4) { return 1; }
+              return 0;
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        assert_eq!(report.cycles.len(), 1);
+        let members: Vec<&str> = report.cycles[0]
+            .members
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        assert!(members.contains(&"is_even") && members.contains(&"is_odd"));
+        assert!(!report.cycles[0].all_bounded);
+        assert!(report.has_violations());
+    }
+
+    #[test]
+    fn acyclicity_text_format_well_formed() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        let text = crate::acyclicity::format_text(&report);
+        assert!(text.contains("self-loop: rec"));
+        assert!(text.contains("[UNBOUNDED]"));
+        assert!(text.contains("1 cycle"));
+    }
+
+    #[test]
+    fn acyclicity_json_format_well_formed() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        let json = crate::acyclicity::format_json(&report);
+        assert!(json.starts_with("{\"cycles\":["));
+        assert!(json.contains("\"members\":[\"rec\"]"));
+        assert!(json.contains("\"violation\":true"));
+        assert!(json.ends_with("]}\n"));
+    }
+
+    #[test]
+    fn acyclicity_csv_format_well_formed() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        let csv = crate::acyclicity::format_csv(&report);
+        assert!(csv.starts_with("members,size,all_bounded,violation\n"));
+        assert!(csv.contains("rec,1,false,true"));
+    }
+
+    #[test]
+    fn acyclicity_three_way_mutual_cycle() {
+        let source = r#"
+            fn a() -> i64 { return b(); }
+            fn b() -> i64 { return c(); }
+            fn c() -> i64 { return a(); }
+            fn main() -> i64 { return a(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::acyclicity::check_acyclicity(&checked.ir);
+        assert_eq!(report.cycles.len(), 1);
+        assert_eq!(report.cycles[0].members.len(), 3);
+        assert!(report.has_violations());
     }
 
     // T3.2 of the safety-standard arc — #[wcet(cycles=N)].
