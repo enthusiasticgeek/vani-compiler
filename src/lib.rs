@@ -30928,6 +30928,136 @@ fn main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // T3.4 of the safety-standard arc — #[deterministic_timing].
+
+    #[test]
+    fn deterministic_timing_ok_for_straightline_fn() {
+        let source = r#"
+            #[deterministic_timing]
+            fn straight(x: i64) -> i64 {
+              let a: i64 = x + 1;
+              let b: i64 = a * 2;
+              return b;
+            }
+            fn main() -> i64 { return straight(5); }
+        "#;
+        let _ = compile(source).expect("straight-line fn compiles");
+    }
+
+    #[test]
+    fn deterministic_timing_rejects_while_loop() {
+        let source = r#"
+            #[deterministic_timing]
+            fn loops(x: i64) -> i64 {
+              let i: i64 = 0;
+              while i < x { i = i + 1; }
+              return i;
+            }
+            fn main() -> i64 { return loops(5); }
+        "#;
+        let errs = compile(source).expect_err("while rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("deterministic_timing")
+                && d.message.contains("while")),
+            "expected while-loop diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn deterministic_timing_rejects_unequal_if_arms() {
+        let source = r#"
+            #[deterministic_timing]
+            fn branch(x: i64) -> i64 {
+              if x > 0 {
+                let a: i64 = 1;
+                let b: i64 = 2;
+                let c: i64 = 3;
+                return a + b + c;
+              } else {
+                return 0;
+              }
+            }
+            fn main() -> i64 { return branch(5); }
+        "#;
+        let errs = compile(source).expect_err(
+            "if-arms with different cycle counts rejected",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("deterministic_timing")
+                && d.message.contains("unequal")),
+            "expected unequal-arms diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn deterministic_timing_ok_for_equal_arms() {
+        let source = r#"
+            #[deterministic_timing]
+            fn branch(x: i64) -> i64 {
+              if x > 0 {
+                let a: i64 = 1;
+                return a;
+              } else {
+                let b: i64 = 2;
+                return b;
+              }
+            }
+            fn main() -> i64 { return branch(5); }
+        "#;
+        let _ = compile(source).expect("equal-arm fn compiles");
+    }
+
+    #[test]
+    fn deterministic_timing_rejects_call_to_unannotated_fn() {
+        let source = r#"
+            fn helper(x: i64) -> i64 { return x + 1; }
+            #[deterministic_timing]
+            fn entry(x: i64) -> i64 { return helper(x); }
+            fn main() -> i64 { return entry(5); }
+        "#;
+        let errs = compile(source).expect_err(
+            "calling non-deterministic non-wcet fn rejected",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("deterministic_timing")
+                && d.message.contains("helper")),
+            "expected unannotated-callee diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn deterministic_timing_ok_with_wcet_annotated_callee() {
+        let source = r#"
+            #[wcet(cycles=50)]
+            fn helper(x: i64) -> i64 { return x + 1; }
+            #[deterministic_timing]
+            fn entry(x: i64) -> i64 { return helper(x); }
+            fn main() -> i64 { return entry(5); }
+        "#;
+        let _ = compile(source).expect(
+            "deterministic_timing fn can call wcet-annotated helper",
+        );
+    }
+
+    #[test]
+    fn deterministic_timing_ok_for_const_bounded_for() {
+        let source = r#"
+            #[deterministic_timing]
+            fn loops() -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 10 {
+                s = s + 1;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        let _ = compile(source).expect("const-bounded for compiles");
+    }
+
     // T3.3 of the safety-standard arc — call-graph acyclicity.
 
     #[test]

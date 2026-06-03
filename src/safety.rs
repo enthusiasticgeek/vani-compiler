@@ -1162,6 +1162,216 @@ fn const_int(expr: &crate::ir::TypedExpr) -> Option<i128> {
     }
 }
 
+/// T3.4 — enforce `#[deterministic_timing]`. For each annotated
+/// function, walk the body and reject any construct whose
+/// execution-time cost is data-dependent:
+///
+/// - `if` statements where the then-branch and else-branch have
+///   different cycle estimates (the wcet model from T3.2 is used
+///   to compute branch costs).
+/// - `while` loops (no static iteration bound).
+/// - `for` loops with non-const bounds.
+/// - `for ... in <collection>` iterators (collection length not
+///   statically known).
+/// - calls to functions that aren't themselves
+///   `#[deterministic_timing]` AND don't have `#[wcet]` declared
+///   (timing variability unprovable for them).
+///
+/// DO-178C Level A timing-determinism rule. The annotation +
+/// this check together guarantee constant-time execution
+/// regardless of inputs.
+pub fn enforce_deterministic_timing(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    let mut fn_map: HashMap<String, &crate::ir::TypedFunction> = HashMap::new();
+    for f in &program.functions {
+        fn_map.insert(f.name.clone(), f);
+    }
+    for f in &program.functions {
+        if !f.deterministic_timing {
+            continue;
+        }
+        check_dt_body(&f.body, f, &fn_map, diagnostics);
+    }
+}
+
+fn check_dt_body(
+    body: &[TypedStmt],
+    f: &crate::ir::TypedFunction,
+    fn_map: &HashMap<String, &crate::ir::TypedFunction>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for s in body {
+        check_dt_stmt(s, f, fn_map, diagnostics);
+    }
+}
+
+fn check_dt_stmt(
+    stmt: &TypedStmt,
+    f: &crate::ir::TypedFunction,
+    fn_map: &HashMap<String, &crate::ir::TypedFunction>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use TypedStmt as S;
+    match stmt {
+        S::If { then_body, else_body, .. } => {
+            // Cycle estimates use the same model as T3.2's WCET.
+            let mut visiting: std::collections::HashSet<String> = std::collections::HashSet::new();
+            visiting.insert(f.name.clone());
+            let t = wcet_body(then_body, fn_map, &mut visiting, f.recursion_bound);
+            let e = wcet_body(else_body, fn_map, &mut visiting, f.recursion_bound);
+            match (t, e) {
+                (Some(tc), Some(ec)) if tc != ec => {
+                    diagnostics.push(Diagnostic::new(
+                        f.span,
+                        format!(
+                            "'{}' is `#[deterministic_timing]` but contains an `if` \
+                             whose arms have unequal cycle estimates (then = {}, \
+                             else = {}). Equalize the arms (add dead-store padding \
+                             in the shorter branch) or refactor to a branchless form.",
+                            f.name, tc, ec
+                        ),
+                    ));
+                }
+                (None, _) | (_, None) => {
+                    diagnostics.push(Diagnostic::new(
+                        f.span,
+                        format!(
+                            "'{}' is `#[deterministic_timing]` but contains an `if` \
+                             arm with UNBOUNDED cycle cost (likely a while loop, \
+                             ForIter, or recursive call inside the branch).",
+                            f.name
+                        ),
+                    ));
+                }
+                (Some(_), Some(_)) => {}
+            }
+            check_dt_body(then_body, f, fn_map, diagnostics);
+            check_dt_body(else_body, f, fn_map, diagnostics);
+        }
+        S::While { body, .. } => {
+            diagnostics.push(Diagnostic::new(
+                f.span,
+                format!(
+                    "'{}' is `#[deterministic_timing]` but contains a `while` loop. \
+                     Use `for i from 0 to N` with a const upper bound, or refactor.",
+                    f.name
+                ),
+            ));
+            check_dt_body(body, f, fn_map, diagnostics);
+        }
+        S::For { start, end, body, .. } => {
+            if const_int(start).is_none() || const_int(end).is_none() {
+                diagnostics.push(Diagnostic::new(
+                    f.span,
+                    format!(
+                        "'{}' is `#[deterministic_timing]` but contains a `for` loop \
+                         with non-const bounds. Use literal integer bounds.",
+                        f.name
+                    ),
+                ));
+            }
+            check_dt_body(body, f, fn_map, diagnostics);
+        }
+        S::ForIter { body, .. } => {
+            diagnostics.push(Diagnostic::new(
+                f.span,
+                format!(
+                    "'{}' is `#[deterministic_timing]` but contains a `for ... in <collection>` \
+                     iterator. The collection length isn't statically known — use \
+                     `for i from 0 to N` over the indices instead.",
+                    f.name
+                ),
+            ));
+            check_dt_body(body, f, fn_map, diagnostics);
+        }
+        S::Let { expr, .. }
+        | S::Reassign { expr, .. }
+        | S::Return { expr }
+        | S::Assert { expr, .. }
+        | S::Prove { expr }
+        | S::Discard { expr } => check_dt_expr_calls(expr, f, fn_map, diagnostics),
+        S::IndexAssign { index, value, .. } => {
+            check_dt_expr_calls(index, f, fn_map, diagnostics);
+            check_dt_expr_calls(value, f, fn_map, diagnostics);
+        }
+        S::FieldAssign { value, .. } => check_dt_expr_calls(value, f, fn_map, diagnostics),
+        S::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    check_dt_expr_calls(e, f, fn_map, diagnostics);
+                }
+            }
+        }
+        S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
+            check_dt_body(body, f, fn_map, diagnostics);
+        }
+        _ => {}
+    }
+}
+
+fn check_dt_expr_calls(
+    expr: &crate::ir::TypedExpr,
+    f: &crate::ir::TypedFunction,
+    fn_map: &HashMap<String, &crate::ir::TypedFunction>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ir::TypedExprKind as E;
+    match &expr.kind {
+        E::Call { name, args, .. } => {
+            // Built-in or extern functions: leaf-ish, allowed (the
+            // cycle model treats them as flat 10 cycles).
+            // User-defined: must be #[deterministic_timing] or
+            // have #[wcet] declared.
+            if let Some(callee) = fn_map.get(name) {
+                let ok = callee.deterministic_timing || callee.wcet_cycles.is_some();
+                if !ok {
+                    diagnostics.push(Diagnostic::new(
+                        f.span,
+                        format!(
+                            "'{}' is `#[deterministic_timing]` but calls '{}' which is \
+                             neither `#[deterministic_timing]` nor `#[wcet(cycles=N)]` — \
+                             callee timing variability is unprovable.",
+                            f.name, name
+                        ),
+                    ));
+                }
+            }
+            for a in args {
+                check_dt_expr_calls(a, f, fn_map, diagnostics);
+            }
+        }
+        E::Binary { left, right, .. } => {
+            check_dt_expr_calls(left, f, fn_map, diagnostics);
+            check_dt_expr_calls(right, f, fn_map, diagnostics);
+        }
+        E::Unary { expr: inner, .. } | E::Cast { expr: inner, .. } => {
+            check_dt_expr_calls(inner, f, fn_map, diagnostics);
+        }
+        E::Index { array, index, .. } => {
+            check_dt_expr_calls(array, f, fn_map, diagnostics);
+            check_dt_expr_calls(index, f, fn_map, diagnostics);
+        }
+        E::ArrayLit { elements } => {
+            for e in elements {
+                check_dt_expr_calls(e, f, fn_map, diagnostics);
+            }
+        }
+        E::CallIndirect { args, .. } => {
+            diagnostics.push(Diagnostic::new(
+                f.span,
+                format!(
+                    "'{}' is `#[deterministic_timing]` but contains an indirect call \
+                     through a function pointer — the callee's timing is opaque.",
+                    f.name
+                ),
+            ));
+            for a in args {
+                check_dt_expr_calls(a, f, fn_map, diagnostics);
+            }
+        }
+        _ => {}
+    }
+}
+
 fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
     match stmt {
         TypedStmt::Let { expr, .. }

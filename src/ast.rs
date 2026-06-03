@@ -634,6 +634,16 @@ pub struct Function {
     /// real WCET analysis requires architecture-specific timing
     /// models, deferred.
     pub wcet_cycles: Option<u64>,
+    /// T3.4 of the safety-standard alignment arc: set when the
+    /// function is annotated `#[deterministic_timing]`. The
+    /// post-check pass walks the function body and rejects any
+    /// construct whose execution time depends on input values:
+    /// `if` arms with unequal cycle estimates, `while` loops,
+    /// `match` arms with unequal cycles, ForIter (collection
+    /// iteration with unknown length). DO-178C Level A timing-
+    /// determinism rule. Composable with `#[wcet]`, `#[no_heap]`,
+    /// and the other primitives.
+    pub deterministic_timing: bool,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

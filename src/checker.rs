@@ -1028,6 +1028,13 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // loops / unbounded recursion / ForIter / While / spawn,
         // exceeded budget when the static estimate > N.
         crate::safety::enforce_wcet(&typed_program_view, &mut diagnostics);
+        // T3.4 — `#[deterministic_timing]`. Reject branches with
+        // unequal arm cycles, while loops, non-const-bound for,
+        // collection iteration, and calls to non-deterministic
+        // / non-WCET-declared user functions. DO-178C Level A.
+        crate::safety::enforce_deterministic_timing(
+            &typed_program_view, &mut diagnostics,
+        );
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
@@ -1558,6 +1565,7 @@ fn lift_closures_in_block(
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
+            deterministic_timing: false,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2790,6 +2798,7 @@ fn lift_expr_anon_fn(
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
+            deterministic_timing: false,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6830,6 +6839,7 @@ fn check_function(
             safety_standard: function.safety_standard.clone(),
             bounded_stack: function.bounded_stack,
             wcet_cycles: function.wcet_cycles,
+            deterministic_timing: function.deterministic_timing,
             span: function.span,
         };
     }
@@ -6892,6 +6902,7 @@ fn check_function(
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
+            deterministic_timing: false,
             span: function.span,
         };
     }
@@ -7140,6 +7151,7 @@ fn check_function(
             safety_standard: function.safety_standard.clone(),
             bounded_stack: function.bounded_stack,
             wcet_cycles: function.wcet_cycles,
+            deterministic_timing: function.deterministic_timing,
         span: function.span,
     }
 }

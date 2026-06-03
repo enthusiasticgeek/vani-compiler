@@ -1266,6 +1266,7 @@ impl Parser {
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
+            deterministic_timing: false,
             recursion_bound: None,
         })
     }
@@ -1297,6 +1298,7 @@ impl Parser {
         let mut interrupt = false;
         let mut bounded_stack: Option<u64> = None;
         let mut wcet_cycles: Option<u64> = None;
+        let mut deterministic_timing = false;
         let mut safety_standard: Option<String> = None;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
@@ -1326,6 +1328,7 @@ impl Parser {
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
                 "interrupt" => interrupt = true,
+                "deterministic_timing" => deterministic_timing = true,
                 // T3.1: `#[bounded_stack(bytes=N)]` — declare a
                 // per-fn stack budget. The post-check pass runs
                 // the call-graph stack-depth estimator from this
@@ -1430,7 +1433,8 @@ impl Parser {
                             "unknown attribute '#[{}]' — recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
-                             `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`; \
+                             `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
+                             `#[deterministic_timing]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
                              `#[do178c_level_a]`, `#[iec_62304_class_c]`",
                             other
@@ -1465,6 +1469,7 @@ impl Parser {
         f.safety_standard = safety_standard;
         f.bounded_stack = bounded_stack;
         f.wcet_cycles = wcet_cycles;
+        f.deterministic_timing = deterministic_timing;
         Ok(f)
     }
 
@@ -1532,6 +1537,7 @@ impl Parser {
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
+            deterministic_timing: false,
             is_extern: true,
             recursion_bound: None,
         })

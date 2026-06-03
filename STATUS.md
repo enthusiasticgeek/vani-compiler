@@ -10,7 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**T3.3 of safety-standard arc
+**Last updated:** 2026-06-03 (**T3.4 of safety-standard arc
+shipped — `#[deterministic_timing]` attribute.** Function-level
+opt-in to constant-time execution. The post-check pass walks the
+body and rejects every construct whose cycle cost is data-
+dependent: `if` arms with unequal cycle estimates (uses the T3.2
+WCET model to compute branch costs), `while` loops, `for` loops
+with non-const bounds, `for ... in <collection>` iterators
+(collection length is opaque), indirect calls through fn-pointers,
+and calls into user-defined functions that aren't themselves
+`#[deterministic_timing]` AND don't have `#[wcet(cycles=N)]`
+declared. DO-178C Level A timing-determinism rule. Composes with
+all other primitives (no_heap, no_recursion, bounded_stack,
+wcet). **7 new lib tests** (straight-line OK, while-loop reject,
+unequal-arm reject, equal-arm OK, unannotated callee reject,
+wcet-annotated callee OK, const-bounded for OK). **1704 lib +
+54 parity green.** Tier 3: 4 of 5 done (T3.1/T3.2/T3.3/T3.4);
+only T3.5 (pure fn → MISRA 13.x tightening) remains.)
+
+**Prior:** 2026-06-03 (**T3.3 of safety-standard arc
 shipped — `intentc acyclicity` subcommand + Tarjan's SCC pass.**
 Whole-program call-graph cycle detection. New CLI:
 `intentc acyclicity <path> [--format=text|json|csv]`. Builds the

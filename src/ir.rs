@@ -103,6 +103,11 @@ pub struct TypedFunction {
     /// `safety::enforce_wcet` to verify the static cycle estimate
     /// stays within the declared budget.
     pub wcet_cycles: Option<u64>,
+    /// T3.4: deterministic-timing requirement, forwarded from
+    /// `ast::Function::deterministic_timing`. Read by
+    /// `safety::enforce_deterministic_timing` to reject branches
+    /// with unequal cycle estimates and data-dependent loops.
+    pub deterministic_timing: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function
