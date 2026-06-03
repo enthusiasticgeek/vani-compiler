@@ -33,32 +33,33 @@ closure-as-value type. Prerequisite for Arc 8 (async).
 
 **Remaining: Arc 5c only** (~5-6h, 1 commit).
 
-### Arc 6 — Generic type declarations
+### Arc 6 — Generic type declarations ✅ ALREADY SHIPPED
 
-Goal: `EnumDecl` / `StructDecl` gain `type_params: Vec<TypeParam>` so users can write `enum Result<T, E>` and `struct Pair<A, B>` directly. Mono pass walks declared type params alongside fn-level generics (closure #99). Ships `Option<T>` / `Result<T, E>` / `Future<T>` as user-visible generics rather than auto-monomorphized payload templates.
+Discovery 2026-06-03: closures #281 + #282 already landed
+this arc. `EnumDecl` / `StructDecl` carry `type_params: Vec<String>`;
+monomorphization pre-pass walks every `Type::Apply { name, args }`
+use-site and emits a concrete mangled decl per (template, args)
+tuple. `Option<T>` / `Result<T, E>` / `AllocError` are
+prelude-imported. Mixed-payload-type enum lift (closure #283)
+followed up to allow `Result<T, E>` with `T != E`.
 
-| # | Sub-step | Effort | Depends on |
-|---|---|---|---|
-| 6a | AST + parser — `type_params` field on `EnumDecl` / `StructDecl`; parser accepts `<T, U>` after the type name; checker registers the params in scope when walking the body | ~3-4h | — |
-| 6b | Mono pass extension — `monomorphize_program` walks struct/enum type-params at instantiation sites; per-instantiation `Struct_<Name>__<T>__<U>` / `Enum_<Name>__<T>__<U>` names | ~4-5h | 6a |
-| 6c | Built-in retrofit — migrate `Option<T>` / `Result<T, E>` from the auto-mono machinery to user-visible generic enum decls (in prelude); existing call sites keep working via the same mangling | ~3-4h | 6b |
-| 6d | Generic struct fields — `struct Pair<A, B> { fst: A, snd: B }`; field-type substitution at mono time | ~3-4h | 6b |
-| 6e | Round-trip example + lib tests — `examples/generic_types.vani` exercising `Pair<i64, OwnedStr>` + `Result<i64, OwnedStr>` on both backends | ~1h | 6d |
+### Arc 7 — FFI ABI lowering 🟡 PARTIALLY SHIPPED
 
-**Subtotal: ~15-20h, 5 commits.** Acceptance: user can declare `enum Result<T, E>` and use it cross-backend.
+Discovery 2026-06-03: closure #285 shipped the safe subset
+(SysV x86-64): all-integer-field structs ≤ 16 bytes pass by
+value cleanly across `extern "C"` boundaries. Floats, larger
+structs, tuples, and arrays are rejected with helpful
+`pass-by-ref` hints. Remaining work for the full classifier:
 
-### Arc 7 — FFI ABI lowering
+| # | Sub-step | Status |
+|---|---|---|
+| 7a | SysV x86-64 safe-subset classifier (integer-class ≤ 16 bytes) | ✅ shipped (closure #285) |
+| 7b | Float-class + mixed integer/float decomposition (full SysV classifier) | OPEN — ~3-4h |
+| 7c | Windows x64 ABI (different from SysV — single 64-bit register or sret) | OPEN — ~3-4h, gated on Windows CI |
+| 7d | AArch64 ABI (8 NGRN + 8 NSRN registers, HFA/HVA classes) | OPEN — ~3-4h, gated on ARM CI |
 
-Goal: pass small aggregates by value across `extern "C" fn` boundaries — today rejected with a `ref T` hint (#273). Per-platform ABI classifier handles SysV x86-64, Windows x64, and AArch64.
-
-| # | Sub-step | Effort | Depends on |
-|---|---|---|---|
-| 7a | ABI classifier — `abi::classify_param(ty, abi) -> ParamLowering` returns the per-platform decomposition (integer regs, float regs, memory) for each arg | ~3-4h | — |
-| 7b | C backend FFI lowering — `extern "C" fn` declarations + call-site struct decomposition use the classifier | ~3-4h | 7a |
-| 7c | LLVM backend FFI lowering — emit `byval` / `sret` / register-pair attributes as the classifier prescribes | ~3-4h | 7a |
-| 7d | Cross-platform parity tests — small-struct round-trip across the C-FFI boundary on Linux x86-64 (extend if Windows/ARM CI lands) | ~1-2h | 7c |
-
-**Subtotal: ~10-15h, 4 commits.** Acceptance: struct-by-value `extern "C"` calls work on Linux x86-64 baseline; Windows / ARM gated on CI availability.
+**Remaining: ~6-8h focused work** on full SysV float + mixed
+classes; Windows/ARM CI is the gating factor for 7c/7d.
 
 ### Arc 8 — Async / asyncio
 
@@ -79,19 +80,22 @@ Goal: compiler-lowered async state machines (no `Pin`, no self-references) — t
 
 ### Arc 9 — Kosh package manager
 
-Goal: `kosh.toml` manifest + resolver + registry workflow. Phase c-d (visibility + re-exports) is the small beachhead — closes namespace follow-ups without needing a registry.
+Discovery 2026-06-03: visibility + re-exports beachhead (phases
+c, d) already shipped (closures #257 + #258). Remaining work is
+the full package-manager arc (manifest, resolver, registry,
+stdlib-as-kosh) — separable into its own multi-session arc.
 
-| # | Sub-step | Effort | Depends on |
-|---|---|---|---|
-| 9c | `pub(kosh)` visibility tier — items visible inside the same kosh but not exported; per-module visibility bitmap extended | ~3-4h | — |
-| 9d | Re-exports `pub use foo::bar;` — parser admits `use` inside `module { }` blocks; re-export visibility tracked through flatten pass | ~3-4h | 9c |
-| 9a | `kosh.toml` manifest — name, version, entry module, dependencies (path / git / registry) | ~3-4h | — |
-| 9b | Resolver + lockfile — kosh dependency graph, cycle detection, `kosh.lock` | ~5-6h | 9a |
-| 9e | Registry + CLI — `intentc kosh add`, `kosh publish`; static index + tarballs | ~10-12h | 9b |
-| 9f | Stdlib as a kosh — move built-in helpers behind a `std` kosh; preamble emits only used helpers | ~4-5h | 9b |
-| 9g | Multi-file pipeline #14 absorbed — `use "path";` extends to multi-kosh with diamond-import dedup + cycle detection | (already done by 9b) | 9b |
+| # | Sub-step | Status |
+|---|---|---|
+| 9c | `pub(kosh)` visibility tier — bitmap recorded but no observable effect yet (waiting on the kosh boundary) | ✅ shipped (closure #258) |
+| 9d | Re-exports `pub use foo::bar;` — chained re-exports, collision diagnostics all work | ✅ shipped (closure #257) |
+| 9a | `kosh.toml` manifest — name, version, entry module, dependencies | OPEN — ~3-4h |
+| 9b | Resolver + lockfile — kosh dependency graph, cycle detection, `kosh.lock` | OPEN — ~5-6h |
+| 9e | Registry + CLI — `intentc kosh add`, `kosh publish` | OPEN — ~10-12h |
+| 9f | Stdlib as a kosh — move built-in helpers behind a `std` kosh | OPEN — ~4-5h |
+| 9g | Multi-file pipeline #14 — extends `use "path";` to multi-kosh | (absorbed by 9b) |
 
-**Subtotal: ~40h+, ~6 commits.** Acceptance: `intentc kosh add <name>` resolves a dep from the registry and compiles against it.
+**Remaining: ~25-30h** (full package manager arc).
 
 ### Arc 10 — Devanagari polish
 
