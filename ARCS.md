@@ -24,14 +24,14 @@ Goal: closures graduate from "Copy-only capture, callable in
 same fn" (Phases 1–3, shipped 2026-05-28) to a fully usable
 closure-as-value type. Prerequisite for Arc 8 (async).
 
-| # | Sub-step | Effort | Depends on |
-|---|---|---|---|
-| 5a | Non-Copy captures with move semantics — affine analysis at lift time; the captured binding becomes moved into the closure, scope-exit drop transfers | ~4-5h | — |
-| 5b | Capture-by-ref second-class closures — callable only within the captured ref's lifetime; lifetime tag plumbed through the lift pass | ~4-5h | 5a |
-| 5c | Closure-as-value across fn boundaries — env-struct + fn-ptr pair (`Closure<Args, Ret>`); passes as fn arg, return value, struct field, Vec element | ~5-6h | 5b |
-| 5d | Reassign closure bindings + name reuse across sibling scopes — lift pass tracks per-scope closure stacks; reassignment is a move + re-bind | ~2-3h | 5c |
+| # | Sub-step | Status |
+|---|---|---|
+| 5a | Non-Copy captures with move semantics | ✅ already shipped — single-call non-Copy captures work; multi-call correctly rejected by the affine system with a clean diagnostic |
+| 5b | Capture-by-ref second-class closures (`[ref xs]` syntax) | ✅ already shipped as ARC 3a — `closure_ref_capture_vec_*` tests pin behavior |
+| 5c | Closure-as-value across fn boundaries — env-struct + fn-ptr pair (`Closure<Args, Ret>`); passes as fn arg, return value, struct field, Vec element | **OPEN** — ~5-6h. Today, no-capture anonymous fns coerce to `fn(...)->...` pointers cleanly; **capture'd** anonymous fns are compile-time-only closure handles that fail when passed to higher-order fns. Needs new `Type::Closure(Args, Ret)`, env-struct synthesis at lift time, env-taking hoisted fn signature, and call dispatch via `closure.call(closure.env, args)` |
+| 5d | Reassign closure bindings + name reuse across sibling scopes | ✅ already shipped — verified via `let f = fn ...; f = fn ...` reassignment + name reuse across sibling `if` blocks |
 
-**Subtotal: ~15-20h, 4 commits.** Acceptance: `fn higher(f: Closure<i64, i64>) -> i64` works; non-Copy captures move correctly; reassignment compiles.
+**Remaining: Arc 5c only** (~5-6h, 1 commit).
 
 ### Arc 6 — Generic type declarations
 
