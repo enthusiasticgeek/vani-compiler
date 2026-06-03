@@ -1764,6 +1764,31 @@ impl Parser {
                 };
                 return Ok(Type::Object(iface_name));
             }
+            // Arc 5c: `Closure(T1, T2, …) -> R` — fat-pointer
+            // callable. Mirrors `fn(...) -> R` parsing but
+            // produces `Type::Closure` so the checker can
+            // distinguish closures from plain fn-pointers (the
+            // former carries an env, the latter doesn't).
+            if name == "Closure" {
+                self.bump(); // Closure
+                self.expect_keyword("'('", |kind| matches!(kind, TokenKind::LParen))?;
+                let mut params = Vec::new();
+                if !self.check(|kind| matches!(kind, TokenKind::RParen)) {
+                    loop {
+                        params.push(self.parse_type()?);
+                        if self
+                            .match_token(|kind| matches!(kind, TokenKind::Comma))
+                            .is_none()
+                        {
+                            break;
+                        }
+                    }
+                }
+                self.expect_keyword("')'", |kind| matches!(kind, TokenKind::RParen))?;
+                self.expect_keyword("'->'", |kind| matches!(kind, TokenKind::Arrow))?;
+                let ret = self.parse_type()?;
+                return Ok(Type::Closure(params, Box::new(ret)));
+            }
             if name == "Str" {
                 self.bump();
                 return Ok(Type::Str);

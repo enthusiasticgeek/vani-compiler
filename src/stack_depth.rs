@@ -218,6 +218,7 @@ fn type_size(ty: &Type) -> u64 {
         Ptr(_) | PtrMut(_) | ArenaRef(_) => 8,
         Handle(_) => 8,
         FnPtr(_, _) => 8,
+        Closure(_, _) => 16, // Arc 5c: env-ptr + call-ptr
         Task => 16,
         Condvar => 8,
         Atomic(inner) | Mutex(inner) | Guard(inner) => type_size(inner).max(8),

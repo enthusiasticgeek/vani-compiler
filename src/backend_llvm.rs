@@ -242,6 +242,7 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Str | Type::OwnedStr => 8, // char*
         Type::Ref(_) | Type::RefMut(_) => 8, // T*
         Type::FnPtr(_, _) => 8, // function pointer
+        Type::Closure(_, _) => 16, // Arc 5c: {env_ptr, call_ptr}
         Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
             // Atomic/Mutex/Guard storage matches inner type
             // size on the C side; LLVM follows.
