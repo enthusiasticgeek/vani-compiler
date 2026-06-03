@@ -635,6 +635,57 @@ pub fn emit_c(program: &TypedProgram) -> String {
         });
         emit_intent_hashmap_helpers_c_body(&mut body, has_option_i64);
     }
+    // ARC 1.4d: walk every HashMap<K, V> pair the collector
+    // found and emit a per-pair bundle for each non-(i64, i64)
+    // shape. The legacy (i64, i64) pair above stays — both
+    // emitters produce equivalent code for that case; the
+    // collector-driven path skips it to avoid duplicate
+    // definitions in the same translation unit.
+    {
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(program);
+        for p in &pairs {
+            // Skip the legacy pair — already emitted above.
+            if matches!(p.key, Type::I64) && matches!(p.value, Type::I64) {
+                continue;
+            }
+            // V1 scope: K must be i64; non-i64 K is rejected at
+            // the checker so this branch shouldn't fire.
+            if !matches!(p.key, Type::I64) {
+                continue;
+            }
+            let v_tag = match &p.value {
+                Type::I8 => "int8_t",
+                Type::I16 => "int16_t",
+                Type::I32 => "int32_t",
+                Type::I64 => "int64_t",
+                Type::U8 => "uint8_t",
+                Type::U16 => "uint16_t",
+                Type::U32 => "uint32_t",
+                Type::U64 => "uint64_t",
+                Type::Bool => "bool",
+                _ => continue,
+            };
+            let v_mangle = match &p.value {
+                Type::I8 => "i8",
+                Type::I16 => "i16",
+                Type::I32 => "i32",
+                Type::I64 => "i64",
+                Type::U8 => "u8",
+                Type::U16 => "u16",
+                Type::U32 => "u32",
+                Type::U64 => "u64",
+                Type::Bool => "bool",
+                _ => continue,
+            };
+            let opt_name = format!("Option__{}", v_mangle);
+            let has_option_v = ENUM_PAYLOAD_REGISTRY.with(|r| {
+                r.borrow().contains_key(&opt_name)
+            });
+            emit_intent_hashmap_pair_c_body(
+                &mut body, v_tag, v_tag, v_mangle, has_option_v,
+            );
+        }
+    }
     if program_uses_i64_btreeset(program) {
         let has_option_i64 = ENUM_PAYLOAD_REGISTRY.with(|r| {
             r.borrow().contains_key("Option__i64")
@@ -1632,6 +1683,172 @@ fn stmt_uses_i64_i64_hashmap(stmt: &crate::ir::TypedStmt) -> bool {
 /// `Option<i64>` and so are gated on the Option__i64 enum
 /// being registered. `hashmap_contains_key` / `_len` are
 /// always emitted.
+/// ARC 1.4c — parameterized HashMap bundle for K = i64, V = any
+/// scalar (i8/i16/i32/i64/u8/u16/u32/u64/bool). The legacy
+/// `intent_hashmap_i64_i64_*` bundle stays untouched for
+/// backwards-compat; this emitter produces additional per-(K, V)
+/// bundles named `intent_hashmap_int64_t_<V_tag>_*` (matching
+/// the collector's tag scheme from src/hashmap_bundle.rs).
+///
+/// Arguments:
+///   `v_tag`         — V's C-leaf identifier, e.g. "uint32_t"
+///   `v_ctype`       — same as v_tag (the C names happen to match)
+///   `option_v_mangle` — V's type_mangle suffix, e.g. "u32",
+///                      used in the `Enum_Option__<x>` name
+///   `has_option_v`  — whether the program registers Option<V>;
+///                     gates emission of get / insert / remove
+///                     (which return Option<V>)
+fn emit_intent_hashmap_pair_c_body(
+    out: &mut String,
+    v_tag: &str,
+    v_ctype: &str,
+    option_v_mangle: &str,
+    has_option_v: bool,
+) {
+    let prefix = format!("intent_hashmap_int64_t_{}", v_tag);
+    let opt_v = format!("Enum_Option__{}", option_v_mangle);
+    out.push_str(&format!(
+        "typedef struct {{ int64_t* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
+         static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
+         \x20 {prefix} m;\n\
+         \x20 m.keys = (int64_t*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
+         \x20 m.len = 0; m.capacity = 0; m.tombstones = 0;\n\
+         \x20 return m;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}_drop({prefix}* m) {{\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = 0; m->values = 0; m->occ = 0;\n\
+         \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
+         }}\n\
+         static INTENT_UNUSED uint64_t {prefix}__hash_key(int64_t k) {{\n\
+         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
+         \x20 uint64_t u = (uint64_t)k;\n\
+         \x20 for (int i = 0; i < 8; i++) {{\n\
+         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
+         \x20   h *= 0x100000001b3ULL;\n\
+         \x20 }}\n\
+         \x20 return h;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__insert_raw({prefix}* m, int64_t k, {v_ctype} v) {{\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] == 1) {{\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__grow({prefix}* m) {{\n\
+         \x20 uint64_t old_cap = m->capacity;\n\
+         \x20 int64_t* old_keys = m->keys;\n\
+         \x20 {v_ctype}* old_values = m->values;\n\
+         \x20 uint8_t* old_occ = m->occ;\n\
+         \x20 uint64_t new_cap = old_cap == 0 ? 8 : old_cap * 2;\n\
+         \x20 m->keys = (int64_t*)malloc(new_cap * sizeof(int64_t));\n\
+         \x20 m->values = ({v_ctype}*)malloc(new_cap * sizeof({v_ctype}));\n\
+         \x20 m->occ = (uint8_t*)calloc(new_cap, 1);\n\
+         \x20 if (!m->keys || !m->values || !m->occ) abort();\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = new_cap;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 for (uint64_t i = 0; i < old_cap; i++) {{\n\
+         \x20   if (old_occ[i] == 1) {prefix}__insert_raw(m, old_keys[i], old_values[i]);\n\
+         \x20 }}\n\
+         \x20 if (old_keys) free(old_keys);\n\
+         \x20 if (old_values) free(old_values);\n\
+         \x20 if (old_occ) free(old_occ);\n\
+         }}\n\
+         static INTENT_UNUSED bool {prefix}_contains_key(const {prefix}* m, int64_t k) {{\n\
+         \x20 if (m->capacity == 0) return false;\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] != 0) {{\n\
+         \x20   if (m->occ[i] == 1 && m->keys[i] == k) return true;\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 return false;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_len(const {prefix}* m) {{\n\
+         \x20 return (int64_t)m->len;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_clear({prefix}* m) {{\n\
+         \x20 int64_t prior = (int64_t)m->len;\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = (int64_t*)0;\n\
+         \x20 m->values = ({v_ctype}*)0;\n\
+         \x20 m->occ = (uint8_t*)0;\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = 0;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 return prior;\n\
+         }}\n",
+        v_ctype = v_ctype,
+        prefix = prefix,
+    ));
+    if has_option_v {
+        out.push_str(&format!(
+            "static INTENT_UNUSED {opt_v} {prefix}_get(const {prefix}* m, int64_t k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && m->keys[i] == k) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, int64_t k, {v_ctype} v) {{\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 {opt_v} r;\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 int64_t first_tomb = -1;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && m->keys[i] == k) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->values[i] = v;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   if (m->occ[i] == 2 && first_tomb == -1) first_tomb = (int64_t)i;\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 if (first_tomb != -1) {{\n\
+             \x20   uint64_t slot = (uint64_t)first_tomb;\n\
+             \x20   m->keys[slot] = k; m->values[slot] = v; m->occ[slot] = 1;\n\
+             \x20   m->len++; m->tombstones--;\n\
+             \x20 }} else {{\n\
+             \x20   m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_remove({prefix}* m, int64_t k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && m->keys[i] == k) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->occ[i] = 2;\n\
+             \x20     m->len--;\n\
+             \x20     m->tombstones++;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\n",
+            v_ctype = v_ctype,
+            prefix = prefix,
+            opt_v = opt_v,
+        ));
+    }
+}
+
 fn emit_intent_hashmap_helpers_c_body(out: &mut String, has_option_i64: bool) {
     out.push_str(
         "typedef struct { int64_t* keys; int64_t* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; } intent_hashmap_i64_i64;\n\
@@ -8856,8 +9073,14 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
-            Type::HashMap(_, _) => {
-                out.push_str("  intent_hashmap_i64_i64_drop(&");
+            Type::HashMap(k, v) => {
+                // ARC 1.4e: dispatch the drop call onto the
+                // right per-(K, V) bundle. Legacy (i64, i64)
+                // keeps the legacy prefix.
+                out.push_str(&format!(
+                    "  {}_drop(&",
+                    hashmap_prefix_from_kv(k, v),
+                ));
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
@@ -10888,6 +11111,59 @@ pub(crate) fn emit_tuple_bundle(elements: &[Type], out: &mut String) {
     out.push_str(&format!("}} {};\n", struct_name));
 }
 
+/// ARC 1.4e helper: derive the per-(K, V) HashMap bundle prefix
+/// from the HashMap type itself. The (i64, i64) case maps to the
+/// legacy bundle name so existing callers don't need migration.
+fn hashmap_prefix_from_kv(k: &Type, v: &Type) -> String {
+    let k_tag = hashmap_type_tag_c(k);
+    let v_tag = hashmap_type_tag_c(v);
+    // Legacy (i64, i64) bundle keeps its original name.
+    if matches!(k, Type::I64) && matches!(v, Type::I64) {
+        return "intent_hashmap_i64_i64".to_string();
+    }
+    format!("intent_hashmap_{}_{}", k_tag, v_tag)
+}
+
+/// Resolve the bundle prefix from a result type (used for
+/// `hashmap_new`, which has no receiver arg). Falls back to the
+/// legacy prefix if the type isn't HashMap (shouldn't happen in
+/// well-typed programs).
+fn hashmap_prefix_from_ty(ty: &Type) -> String {
+    match ty {
+        Type::HashMap(k, v) => hashmap_prefix_from_kv(k, v),
+        _ => "intent_hashmap_i64_i64".to_string(),
+    }
+}
+
+/// Resolve the bundle prefix from a receiver arg type (after
+/// stripping the Ref/RefMut wrapper). Used for the other
+/// hashmap_* builtins whose first arg is the map.
+fn hashmap_prefix_from_recv(ty: &Type) -> String {
+    let inner = match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => inner.as_ref(),
+        other => other,
+    };
+    hashmap_prefix_from_ty(inner)
+}
+
+/// Per-type C-leaf tag for use in HashMap bundle names. Mirrors
+/// the C-leaf type spelling so the emitter produces matching
+/// identifiers.
+fn hashmap_type_tag_c(ty: &Type) -> &'static str {
+    match ty {
+        Type::I8 => "int8_t",
+        Type::I16 => "int16_t",
+        Type::I32 => "int32_t",
+        Type::I64 => "int64_t",
+        Type::U8 => "uint8_t",
+        Type::U16 => "uint16_t",
+        Type::U32 => "uint32_t",
+        Type::U64 => "uint64_t",
+        Type::Bool => "bool",
+        _ => "i64",
+    }
+}
+
 fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
     match name {
         "min" => {
@@ -12514,34 +12790,47 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_skiplist_i64_max({})",
             emit_expr(&args[0])
         ),
-        "hashmap_new" => "intent_hashmap_i64_i64_new()".to_string(),
+        // ARC 1.4e: dispatch on the (K, V) types at the call
+        // site to pick the right bundle prefix. `hashmap_new`
+        // reads (K, V) from result_ty; other ops read from
+        // args[0].ty after stripping the Ref/RefMut. The
+        // legacy (i64, i64) shape always uses the legacy
+        // `intent_hashmap_i64_i64` prefix; non-(i64, i64) uses
+        // the per-pair `intent_hashmap_<K_tag>_<V_tag>` form.
+        "hashmap_new" => format!("{}_new()", hashmap_prefix_from_ty(result_ty)),
         "hashmap_insert" => format!(
-            "intent_hashmap_i64_i64_insert({}, ({}), ({}))",
+            "{}_insert({}, ({}), ({}))",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0]),
             emit_expr(&args[1]),
             emit_expr(&args[2])
         ),
         "hashmap_get" => format!(
-            "intent_hashmap_i64_i64_get({}, ({}))",
+            "{}_get({}, ({}))",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
         "hashmap_contains_key" => format!(
-            "intent_hashmap_i64_i64_contains_key({}, ({}))",
+            "{}_contains_key({}, ({}))",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
         "hashmap_remove" => format!(
-            "intent_hashmap_i64_i64_remove({}, ({}))",
+            "{}_remove({}, ({}))",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
         "hashmap_len" => format!(
-            "intent_hashmap_i64_i64_len({})",
+            "{}_len({})",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0])
         ),
         "hashmap_clear" => format!(
-            "intent_hashmap_i64_i64_clear({})",
+            "{}_clear({})",
+            hashmap_prefix_from_recv(&args[0].ty),
             emit_expr(&args[0])
         ),
         "hashset_remove" => format!(
@@ -14580,6 +14869,8 @@ fn c_type_name(ty: &Type) -> String {
         }
         Type::Atomic(element) => c_atomic_storage(element),
         Type::Channel(element, capacity) => c_channel_storage(element, *capacity),
+        // ARC 1.4e: per-(K, V) HashMap struct name.
+        Type::HashMap(k, v) => hashmap_prefix_from_kv(k, v),
         Type::Tuple(elements) => tuple_c_struct(elements),
         Type::Object(iface) => format!("intent_dyn_{}", iface),
         Type::Struct(name) => struct_c_name(name),

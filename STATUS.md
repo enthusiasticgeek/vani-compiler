@@ -10,7 +10,48 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.4a + 1.4b shipped —
+**Last updated:** 2026-06-03 (**ARC 1.4c + 1.4d + 1.4e shipped —
+per-(K, V) C bundle, prologue wiring, tree emit_call dispatch.**
+C backend now supports `HashMap<i64, V>` end-to-end for V in
+{i8, i16, i32, i64, u8, u16, u32, u64, bool}.
+
+1.4c: new `emit_intent_hashmap_pair_c_body(out, v_tag, v_ctype,
+option_v_mangle, has_option_v)` emits a per-(K, V) bundle with
+prefix `intent_hashmap_int64_t_<V_tag>`. The legacy
+`intent_hashmap_i64_i64_*` bundle stays untouched for
+backwards compat. Get/insert/remove emission gated on
+`has_option_v` (the Option<V> enum's presence in
+`ENUM_PAYLOAD_REGISTRY`).
+
+1.4d: C backend prologue walks `collect_hashmap_pairs(program)`
+and emits a per-pair bundle for each non-(i64, i64) shape. The
+legacy (i64, i64) is skipped here — already covered by the
+existing `program_uses_i64_i64_hashmap` branch.
+
+1.4e: `emit_call` dispatches on (K, V) extracted from the
+result-ty (`hashmap_new`) or args[0].ty (other ops). New
+helpers `hashmap_prefix_from_kv` / `_from_ty` / `_from_recv`
+produce the bundle prefix. `c_type_name` also extended with a
+HashMap arm so the binding's declared C type matches the per-
+pair struct. HashMap drop emission updated similarly.
+
+**End-to-end verified:** `let m: HashMap<i64, u32> = hashmap_new();
+hashmap_insert(mut ref m, 1, 100); return hashmap_len(ref m);`
+compiles + runs to exit 2 on the C backend. LLVM backend still
+on legacy path (1.5a-e pending).
+
+ARC 1.4a (Option<V> mono) had a second walker `collect_apply_in_stmt`
+that also needed the HashMap arm — patched. Also added a
+payload-eligibility check (V must be scalar/bool/Str/OwnedStr) so
+nested `HashMap<i64, HashMap<i64, i64>>` doesn't try to register
+the invalid `Option<HashMap<...>>`.
+
+**4 new lib tests** (HashMap<i64, u32/u64/i32> emit per-pair
+bundles, HashMap<i64, i64> keeps legacy prefix). **1767 lib + 54
+parity green.** Sub-arc 1.4 (C side) COMPLETE; 1.4f (SSA C
+dispatch) and 1.5a-e (LLVM mirror) remain.
+
+**Prior:** 2026-06-03 (**ARC 1.4a + 1.4b shipped —
 Option<V> auto-monomorphization + checker relaxation.** First
 two sub-steps of the per-(K, V) HashMap bundle arc.
 

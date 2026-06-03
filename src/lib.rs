@@ -31649,6 +31649,66 @@ fn main() -> i64 {
         assert_eq!(pairs[1].tag, "intent_hashmap_int64_t_hm_int64_t_int64_t");
     }
 
+    // ARC 1.4c+d+e — per-(K, V) C bundle round-trips for HashMap<i64, V>.
+
+    #[test]
+    fn hashmap_i64_u32_c_backend_emits_per_pair_bundle() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<i64, u32> → C");
+        // Per-pair bundle prefix appears, legacy prefix not used.
+        assert!(
+            c.contains("intent_hashmap_int64_t_uint32_t_new"),
+            "expected per-pair bundle, got snippet:\n{}",
+            &c[..c.len().min(4000)]
+        );
+    }
+
+    #[test]
+    fn hashmap_i64_u64_c_backend_emits_per_pair_bundle() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<i64, u64> → C");
+        assert!(c.contains("intent_hashmap_int64_t_uint64_t_new"));
+    }
+
+    #[test]
+    fn hashmap_i64_i32_c_backend_emits_per_pair_bundle() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<i64, i32> → C");
+        assert!(c.contains("intent_hashmap_int64_t_int32_t_new"));
+    }
+
+    #[test]
+    fn hashmap_legacy_i64_i64_still_uses_legacy_prefix() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("legacy HashMap<i64, i64> → C");
+        // Legacy bundle name still in use — backwards-compat.
+        assert!(c.contains("intent_hashmap_i64_i64_new"));
+    }
+
     // ARC 1.4b — checker accepts HashMap<i64, V> for scalar V.
 
     #[test]

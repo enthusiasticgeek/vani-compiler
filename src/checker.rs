@@ -5859,6 +5859,12 @@ fn monomorphize_type_decls_in_program(
             // = hashmap_new()` would force `Option<u32>` at the
             // typed-IR level without anyone declaring it. Same
             // for BTreeMap which also returns Option<V>.
+            //
+            // Only register Option<V> when V is a payload-eligible
+            // type — scalars/bool/OwnedStr/Str. Nested aggregates
+            // like Vec / HashMap / Tuple are not admitted as
+            // Option payload in v1; auto-registering them would
+            // produce a confusing later-stage diagnostic.
             Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
                 collect_apply_in_ty(
                     k, struct_templates, enum_templates,
@@ -5868,11 +5874,20 @@ fn monomorphize_type_decls_in_program(
                     v, struct_templates, enum_templates,
                     needed_structs, needed_enums,
                 );
-                let key = ("Option".to_string(), vec![(**v).clone()]);
-                if enum_templates.contains_key("Option")
-                    && !needed_enums.iter().any(|(n, a)| n == &key.0 && a == &key.1)
-                {
-                    needed_enums.push(key);
+                let v_ok_for_option = matches!(
+                    v.as_ref(),
+                    Type::I8 | Type::I16 | Type::I32 | Type::I64
+                        | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                        | Type::F32 | Type::F64 | Type::Bool
+                        | Type::Str | Type::OwnedStr
+                );
+                if v_ok_for_option {
+                    let key = ("Option".to_string(), vec![(**v).clone()]);
+                    if enum_templates.contains_key("Option")
+                        && !needed_enums.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                    {
+                        needed_enums.push(key);
+                    }
                 }
             }
             Type::Tuple(elements) => {
@@ -6381,6 +6396,29 @@ fn collect_apply_in_stmt(
                 }
                 Type::Array { element, .. } => rec(element, st, en, ns, ne),
                 Type::Channel(element, _) => rec(element, st, en, ns, ne),
+                // ARC 1.4a (parallel hook in the stmt walker):
+                // HashMap<K, V> auto-registers Option<V> when
+                // V is payload-eligible (see the prologue
+                // walker's note).
+                Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+                    rec(k, st, en, ns, ne);
+                    rec(v, st, en, ns, ne);
+                    let v_ok = matches!(
+                        v.as_ref(),
+                        Type::I8 | Type::I16 | Type::I32 | Type::I64
+                            | Type::U8 | Type::U16 | Type::U32 | Type::U64
+                            | Type::F32 | Type::F64 | Type::Bool
+                            | Type::Str | Type::OwnedStr
+                    );
+                    if v_ok {
+                        let key = ("Option".to_string(), vec![(**v).clone()]);
+                        if en.contains_key("Option")
+                            && !ne.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                        {
+                            ne.push(key);
+                        }
+                    }
+                }
                 Type::Tuple(elements) => {
                     for e in elements {
                         rec(e, st, en, ns, ne);
