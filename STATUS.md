@@ -46,14 +46,22 @@ type decls; closures #257/#258 for `pub use` re-exports +
   struct + fn-ptr pair = `Closure(args) -> R` type).
   - ✅ **Phase 1+2 shipped** (commit `67f16aa`): `Type::Closure(args, ret)`
     IR variant with Display + byte-size; parser accepts
-    `Closure(T1, T2, …) -> R` type syntax. 1791 lib green.
-  - 🟡 **Phase 3+ open** (~4-5h focused): lift-pass env-struct
-    synthesis + trampoline emission; `ExprKind::MakeClosure` +
-    `TypedExprKind::MakeClosure` variants (touching ~150 match
-    catch-alls across the codebase); checker MakeClosure
-    type-check + FnPtr → Closure auto-coercion; C backend
-    closure-struct typedef + indirect-call dispatch; LLVM
-    backend mirror. Unblocks Arc 8 (Async).
+    `Closure(T1, T2, …) -> R` type syntax.
+  - ✅ **Phase 3a shipped** (commit `8c409b4`): lift-pass
+    scaffolding — `hoisted_structs: &mut Vec<StructDecl>`
+    threaded through `lift_closures_in_block` +
+    `recurse_lift_closures_in_stmt`; `CLOSURE_MAKE_REGISTRY`
+    thread-local (name → trampoline + env-struct + capture
+    types + closure signature) added to `ast.rs`. Plumbing
+    is in place; synthesis bodies stay empty in this commit.
+  - 🟡 **Phase 3b+ open** (~3-5h focused): actual lift-pass
+    synthesis (env-struct decl + trampoline fn + magic
+    `__intent_make_closure_<N>` call substitution at the Let
+    RHS); checker recognition of the magic call name;
+    checker Call-on-Closure → CallIndirect-through-call-field
+    lowering; C + LLVM backend closure-struct typedef +
+    magic-call codegen + indirect-call dispatch. Unblocks
+    Arc 8 (Async).
 - **Arc 7 remainder** — full FFI classifier (float-class +
   mixed integer/float decomposition under SysV x86-64;
   Windows/ARM gated on CI availability). ~6-8h focused.
