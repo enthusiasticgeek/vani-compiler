@@ -31833,6 +31833,77 @@ fn main() -> i64 {
         assert!(ll.contains("intent_hashmap_i64_i64"));
     }
 
+    // ARC 4.5 — HashMap<f64, V>: K=f64 with built-in `==`
+    // (NaN keys unrecoverable, documented in unsafe.md) and
+    // reinterpret-bits FNV-1a hashing.
+
+    #[test]
+    fn hashmap_f64_i64_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<f64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 3.14, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<f64, i64> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<f64, i64> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_double_int64_t"),
+            "expected C f64-K bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_double_int64_t"),
+            "expected LLVM f64-K bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_f64_uses_fcmp_oeq_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<f64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1.5, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("HashMap<f64, i64> → LLVM");
+        // f64 K equality uses ordered floating-point compare —
+        // `fcmp oeq` returns false for NaN comparisons, which is
+        // the documented "NaN keys are unrecoverable" semantics.
+        assert!(
+            ll.contains("fcmp oeq double"),
+            "expected fcmp oeq for f64-K equality"
+        );
+        // Hash function reinterprets f64 bits as i64.
+        assert!(
+            ll.contains("bitcast double") && ll.contains("to i64"),
+            "expected bitcast-to-i64 in f64 hash function"
+        );
+    }
+
+    #[test]
+    fn hashmap_f64_v_emits_c_double_keys() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<f64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 2.71, 42);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<f64, i64> → C");
+        // f64-K C bundle has `double*` keys.
+        assert!(
+            c.contains("double* keys"),
+            "expected C f64-K bundle to declare double* keys field",
+        );
+        // Hash key signature on f64.
+        assert!(
+            c.contains("__hash_key(double k)"),
+            "expected C f64-K hash_key signature",
+        );
+    }
+
     // ARC 1.4c+d+e — per-(K, V) C bundle round-trips for HashMap<i64, V>.
 
     #[test]

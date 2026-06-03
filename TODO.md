@@ -38,7 +38,8 @@ refresh landed. Order is rough priority (size + payoff), not strict.
    total. Gates on Arc 1.4+1.5. Pairs in priority order:
    `HashMap<OwnedStr, i64>` → `HashMap<i64, OwnedStr>` →
    `HashMap<OwnedStr, OwnedStr>` → `HashMap<Tuple<i64,i64>, V>`
-   → `HashMap<f64, V>` → `HashMap<Vec<i64>, V>`.
+   → `HashMap<f64, V>` ✅ **shipped 2026-06-03 (ARC 4.5)**
+   → `HashMap<Vec<i64>, V>`.
 - Through closure #604, the bounded one-shot primitive surface is
   exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
   future work flows through one of the three plan docs/sections

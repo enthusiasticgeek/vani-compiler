@@ -62,7 +62,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 | 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot | ~3h | 1.5e |
 | 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
 | 4.4 | `HashMap<Tuple<i64, i64>, V>` — tuple K via `hash_combine` | ~3h | 1.5e + Tuple E sugar |
-| 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) | ~2h | 1.5e |
+| 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) ✅ **SHIPPED 2026-06-03** | ~2h | 1.5e |
 | 4.6 | `HashMap<Vec<i64>, V>` — Vec K (affine move-in semantics) | ~3h | 4.1 |
 
 **Subtotal: ~16h, ~30 commits.** Acceptance per pair: insert,
@@ -422,9 +422,13 @@ For each new (K, V) pair:
 4. **4.4 — `HashMap<Tuple<i64, i64>, V>`. (~3h)**
    - Tuple keys use `hash_pair` / `hash_combine` from Tier E.
 
-5. **4.5 — `HashMap<f64, V>`. (~2h)**
+5. **4.5 — `HashMap<f64, V>`. (~2h)** ✅ **SHIPPED 2026-06-03**
    - Caveat: NaN keys are never equal to themselves; document but
      don't special-case.
+   - C bundle prefix `intent_hashmap_double_<V>`, hash via memcpy
+     to u64 + FNV-1a; equality via native `==`.
+   - LLVM bundle uses `bitcast double to i64` + `fcmp oeq double`.
+   - Parity example: `examples/hashmap_f64.vani`.
 
 6. **4.6 — `HashMap<Vec<i64>, V>`. (~3h)**
    - Highly affine — Vec key moves in.

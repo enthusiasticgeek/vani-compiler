@@ -10,7 +10,50 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.7 COMPLETE — `HashMap<UserStruct, V>`
+**Last updated:** 2026-06-03 (**ARC 4.5 COMPLETE — `HashMap<f64, V>`
+end-to-end on both backends.** f64 keys with built-in `==`
+equality (NaN keys unrecoverable, documented in unsafe.md) and
+reinterpret-bits FNV-1a hashing. Checker, C bundle, LLVM
+bundle, dispatch helpers, parity example all in one atomic
+landing.
+
+4.5 checker relaxation: `check_hashmap_builtin` now also
+accepts `HashMap<f64, V>` (alongside `HashMap<i64, V>` and
+`HashMap<Struct, V>`). Diagnostic updated to mention all three
+admissible K shapes.
+
+4.5 (C bundle): new `emit_intent_hashmap_pair_c_body_f64k`
+emits per-(f64, V) bundle with prefix
+`intent_hashmap_double_<V>`. Hash function reinterprets f64
+bits via `memcpy` to a uint64 then FNV-1a's the 8 bytes
+(matches the i64-K hash for cross-key-shape distribution).
+Equality uses native `==` (so NaN keys are unrecoverable —
+inserted but never findable).
+
+4.5 (LLVM bundle): `emit_intent_hashmap_pair_llvm_f64k` mirrors
+the C side. Key type is `double`; hash function uses
+`bitcast double to i64` then the same FNV-1a loop. Equality
+uses `fcmp oeq` (ordered equality — NaN comparisons return
+false, matching the IEEE 754 + C semantics). Dispatch helpers
+extended: `hashmap_llvm_dispatch` returns
+`intent_hashmap_double_<V>` for f64 K; `_with_k` returns
+`"double"` as the LLVM key type.
+
+4.5 (end-to-end): `examples/hashmap_f64.vani` exercises
+new/insert/get/contains_key/remove/len with f64 keys
+3.14/2.71/42.0, identical stdout on both backends, added to
+parity test list.
+
+**3 new lib tests** covering:
+  - both backends compile HashMap<f64, i64> with the
+    `intent_hashmap_double_int64_t` bundle prefix
+  - LLVM emits `fcmp oeq double` for f64 K equality + `bitcast
+    double to i64` in the hash function
+  - C bundle declares `double* keys` and `__hash_key(double k)`
+
+**1778 lib + 55 parity green.**
+
+**Prior:** 2026-06-03 (**ARC 1.7 COMPLETE — `HashMap<UserStruct, V>`
 end-to-end on both backends.** All four sub-steps (1.7a struct-K
 hash dispatch / 1.7b struct-K equality / 1.7c LLVM mirror /
 1.7d round-trip + cross-backend parity) shipped in one atomic

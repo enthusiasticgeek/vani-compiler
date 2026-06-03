@@ -860,6 +860,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "graph_csr.vani",
         "hash.vani",
         "hashmap.vani",
+        "hashmap_f64.vani",
         "hashset.vani",
         "heap.vani",
         "hindi_keywords.vani",

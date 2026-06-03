@@ -365,6 +365,23 @@ use-after-free and most buffer-overrun bugs at zero runtime cost.
   generational handle combination covers the common cases at a
   fraction of the cost.
 
+### Documented gotcha — `HashMap<f64, V>` NaN keys (ARC 4.5)
+
+`HashMap<f64, V>` is supported as of 2026-06-03, but f64 keys
+inherit IEEE 754 equality semantics: **NaN != NaN**. Inserting
+a NaN key is allowed; **looking it up will always miss**, and
+that entry will leak until the map is dropped. The hash
+function reinterprets the bits (so all NaN bit-patterns hash
+to the same bucket), but equality uses `==` (C backend) /
+`fcmp oeq` (LLVM backend), which both return false for any NaN
+operand. The compiler does **not** reject NaN inserts — if you
+need NaN-safe maps, guard the insertion path with
+`f64_is_nan` and pick a sentinel (e.g. a canonical NaN slot).
+This matches Rust's `HashMap<f64, V>` ergonomics (which
+similarly requires the user to wrap with `OrderedFloat` or
+similar). The matching `HashMap<i64, V>` and
+`HashMap<Struct, V>` paths have no equivalent gotcha.
+
 (Region typing is **deferred to Layer 5**, not skipped — see below.)
 
 ---
