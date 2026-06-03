@@ -10,7 +10,18 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 3d shipped — `Vec<Tuple<...>>`
+**Last updated:** 2026-06-03 (**ARC 1.6 shipped — HashMap<i64, i64>
+regression sweep.** Documented as a single end-to-end lib test
+that exercises every legacy bundle op (`hashmap_new` + `_insert`
++ `_len` + `_remove` + `_clear`) in one program, compiling to
+both backends. The implicit regression coverage from running the
+full lib suite (1742 tests) on every commit has been load-bearing
+through ARC 1.1 / 1.2 / 1.3 — this new test names the gate
+explicitly so future ARC 1.4 / 1.5 work (per-(K, V) bundle
+emission) has a clean baseline to compare against. **1 new lib
+test.** **1742 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**ARC 3d shipped — `Vec<Tuple<...>>`
 in closure bodies; LLVM `vec_struct_tag` bug fix.** Final
 sub-track of the richer-closures arc. Smoke-testing closures that
 capture `Vec<(i64, i64)>` by reference and index into the tuples

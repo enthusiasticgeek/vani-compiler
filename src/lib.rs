@@ -30969,6 +30969,36 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 1.6 — regression sweep for HashMap<i64, i64>.
+
+    #[test]
+    fn hashmap_i64_i64_full_bundle_round_trip() {
+        // Exercises every legacy bundle op in a single program
+        // so the existing `intent_hashmap_i64_i64_*` C / LLVM
+        // bundle stays load-bearing through ARC 1.1 / 1.2 / 1.3
+        // (collector + Hash-bound + annotation-elaboration)
+        // changes. ARC 1.4/1.5 (per-(K, V) bundle emission) is
+        // a future cross-backend atomic landing — this test is
+        // the gate that confirms nothing breaks for the (i64,
+        // i64) baseline along the way.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              let _ = hashmap_insert(mut ref m, 2, 200);
+              let _ = hashmap_insert(mut ref m, 3, 300);
+              let n: i64 = hashmap_len(ref m);
+              let _ = hashmap_remove(mut ref m, 2);
+              let after: i64 = hashmap_len(ref m);
+              let _ = hashmap_clear(mut ref m);
+              return n * 100 + after;
+            }
+        "#;
+        let _ = compile(source).expect("legacy bundle compiles");
+        let _c = compile_to_c(source).expect("legacy bundle → C");
+        let _ll = compile_to_llvm(source).expect("legacy bundle → LLVM");
+    }
+
     // ARC 3d — Vec<Tuple<i64,i64>> in closure bodies.
 
     #[test]
