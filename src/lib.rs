@@ -30969,6 +30969,51 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 3d — Vec<Tuple<i64,i64>> in closure bodies.
+
+    #[test]
+    fn closure_indexes_into_vec_of_tuples() {
+        let source = r#"
+            fn main() -> i64 {
+              let pairs: Vec<(i64, i64)> = vec((1, 10), (2, 20), (3, 30));
+              let snd = fn(i: i64) -> i64 [ref pairs] { return pairs[i].1; };
+              return snd(1);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "ref-captured Vec<(i64, i64)> closure compiles",
+        );
+    }
+
+    #[test]
+    fn closure_vec_of_tuples_compiles_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let pairs: Vec<(i64, i64)> = vec((1, 10), (2, 20), (3, 30));
+              let snd = fn(i: i64) -> i64 [ref pairs] { return pairs[i].1; };
+              return snd(2);
+            }
+        "#;
+        // Both backends must lower the closure body that
+        // captures `Vec<(i64, i64)>` and indexes into it.
+        let _c = compile_to_c(source).expect("Vec<Tuple> closure → C");
+        let _ll = compile_to_llvm(source).expect("Vec<Tuple> closure → LLVM");
+    }
+
+    #[test]
+    fn closure_vec_of_tuples_first_field() {
+        let source = r#"
+            fn main() -> i64 {
+              let pairs: Vec<(i64, i64)> = vec((1, 10), (2, 20));
+              let fst = fn(i: i64) -> i64 [ref pairs] { return pairs[i].0; };
+              return fst(0);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "tuple .0 field access through closure compiles",
+        );
+    }
+
     // ARC 3c — .collect chain syntax.
 
     #[test]

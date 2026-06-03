@@ -10,7 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 3c shipped — `.collect()`
+**Last updated:** 2026-06-03 (**ARC 3d shipped — `Vec<Tuple<...>>`
+in closure bodies; LLVM `vec_struct_tag` bug fix.** Final
+sub-track of the richer-closures arc. Smoke-testing closures that
+capture `Vec<(i64, i64)>` by reference and index into the tuples
+surfaced a real LLVM backend bug: `vec_struct_tag` (which derives
+the per-(element-type) Vec helper name) had explicit arms for
+Struct / Enum / FnPtr / Object but fell through `Type::Tuple`,
+`Type::Vec`, and `Type::Array` to the panicking `llvm_type` arm.
+Added recursive arms that compose the inner type's tag — Tuple
+spells as `tuple_<e0>_<e1>_...`, nested Vec as `vec_<inner>`,
+Array as `arr_<len>_<element>`. Mirrors the C backend's already-
+correct tag derivation. **3 new lib tests** (Vec<(i64,i64)> index
++ .1 access, both-backends compile, tuple .0 field access).
+End-to-end smoke: both backends return exit 20 from `pairs[1].1`
+on `[(1,10),(2,20),(3,30)]`. **1741 lib + 54 parity green.** **ARC
+3 (richer closures) COMPLETE** — all four sub-tracks (3a
+capture-by-ref / 3b non-i64 elements / 3c .collect chain / 3d
+Vec<Tuple>) shipped. ARC 2 (Trie sparse) is next.)
+
+**Prior:** 2026-06-03 (**ARC 3c shipped — `.collect()`
 chain syntax.** Third sub-track of the richer-closures arc. New
 postfix `.collect()` is recognized as identity-on-Vec: vāṇी's
 combinators are eager (`.map(f)` already returns a fresh

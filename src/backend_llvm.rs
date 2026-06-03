@@ -32383,6 +32383,21 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // arm `llvm_type(Object)` panics ("use llvm_type_string
         // for aggregate type").
         Type::Object(name) => format!("intent_dyn_{}", name),
+        // ARC 3d: `Vec<Tuple<T1, T2, ...>>` element tag is a
+        // recursive composition. Without this arm
+        // `llvm_type(Tuple)` panics ("use llvm_type_string for
+        // aggregate type") — surfaced by closures that capture
+        // a `Vec<(i64, i64)>` by-ref and index into it.
+        Type::Tuple(elements) => {
+            let parts: Vec<String> = elements.iter().map(vec_struct_tag).collect();
+            format!("tuple_{}", parts.join("_"))
+        }
+        // Nested `Vec<Vec<T>>` and `Vec<Array<...>>` flatten
+        // through their inner tag recursively.
+        Type::Vec(inner) => format!("vec_{}", vec_struct_tag(inner)),
+        Type::Array { element: inner, length } => {
+            format!("arr_{}_{}", length, vec_struct_tag(inner))
+        }
         // Scalars + ref/atomic/channel go through the
         // existing leaf spelling, with `%`/`*`/space replaced
         // by `_` so the identifier stays well-formed.
