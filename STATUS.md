@@ -10,7 +10,23 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 3a shipped — capture-by-ref
+**Last updated:** 2026-06-03 (**ARC 3b verified shipped — non-i64
+element types in closure contexts.** Originally planned as a
+5-step landing for `Vec<Str>` / `Vec<f64>` etc. in closure
+bodies, but inspection revealed the constraint no longer exists
+at ship time: (a) Vec element-type parameterization landed in
+closure #291 (Vec<T> for non-Copy T), and (b) ARC 3a's `[ref xs]`
+capture mechanism unlocks the closure-side equation — non-Copy
+elements flow through closure bodies as `Ref<Vec<T>>` and the
+body's `xs[i]` / `len(xs)` / method calls all work via the
+existing Ref-param conventions. **4 new lib tests** pin the
+supported cases (f64 closure body, Vec<f64> ref-capture indexing,
+Vec<OwnedStr> ref-capture + len, f64 closure result inferred).
+**1734 lib + 54 parity green.** ARCS.md updated with the "already
+shipped — unlocked by 3a" annotation. ARC 3c (`.collect` chain
+syntax) is next in the closures arc.)
+
+**Prior:** 2026-06-03 (**ARC 3a shipped — capture-by-ref
 closures (all 5 sub-steps atomic).** First sub-track of the
 richer-closures arc. New surface syntax:
 `fn(p: T) -> R [ref name1, ref name2] { body }` — between the

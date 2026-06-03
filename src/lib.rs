@@ -30969,6 +30969,66 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 3b — non-i64 element types in closures.
+
+    #[test]
+    fn closure_body_f64_arithmetic_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: f64 = 3.14;
+              let scale = fn(v: f64) -> f64 { return v * 2.0; };
+              let r: f64 = scale(x);
+              return f64_trunc_to_i64(r);
+            }
+        "#;
+        let _ = compile(source).expect("f64 closure body compiles");
+    }
+
+    #[test]
+    fn closure_ref_capture_vec_f64_indexes() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let read = fn(i: i64) -> f64 [ref xs] { return xs[i]; };
+              let r: f64 = read(1);
+              return f64_trunc_to_i64(r);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "Vec<f64> ref-capture + index compiles",
+        );
+    }
+
+    #[test]
+    fn closure_ref_capture_vec_ownedstr_lens() {
+        // Inside the closure body, `xs` is already a
+        // `Ref<Vec<OwnedStr>>` (from the `[ref xs]` capture), so
+        // `len(xs)` works directly — no `ref xs` re-borrow.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<OwnedStr> = vec(i64_to_str(10), i64_to_str(200));
+              let count = fn() -> i64 [ref xs] { return len(xs) as i64; };
+              return count();
+            }
+        "#;
+        let _ = compile(source).expect(
+            "Vec<OwnedStr> ref-capture + len compiles",
+        );
+    }
+
+    #[test]
+    fn closure_body_returns_f64_inferred() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(0.5, 1.5);
+              let scale = fn(v: f64) -> f64 { return v + 0.5; };
+              let r: f64 = scale(xs[0]);
+              return f64_trunc_to_i64(r);
+            }
+        "#;
+        let _ = compile(source).expect("f64 closure result types correctly");
+    }
+
     // ARC 3a — capture-by-ref closures.
 
     #[test]

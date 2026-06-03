@@ -192,7 +192,7 @@ the test suite green between each.
 **Acceptance:** lambda that captures a borrowed `Vec<i64>` and reads
 from it without consuming compiles + runs cross-backend.
 
-### Sub-track 3b — Non-i64 element types (`Vec<Str>`, `Vec<f64>`, etc.) (~4–6h, 5 commits)
+### Sub-track 3b — ✅ ALREADY SHIPPED (unlocked by 3a). Non-i64 element types.
 
 1. **3b.1 — Type collector: register `Vec<Str>` / `Vec<f64>`. (~1h)**
    - Extend the collector to enumerate Str / f64 / OwnedStr as Vec
@@ -213,8 +213,17 @@ from it without consuming compiles + runs cross-backend.
 
 5. **3b.5 — End-to-end: `vec_map(xs: ref Vec<Str>, fn)` works. (~1h)**
 
-**Acceptance:** `vec_map(xs: ref Vec<Str>, |s| s)` round-trips
-cross-backend.
+**Acceptance (met 2026-06-03):** `Vec<f64>` and `Vec<OwnedStr>`
+work end-to-end through closure bodies. The Vec-element
+parameterization (closure #291's `Vec<T>` for non-Copy T)
+landed earlier; the closure side of the equation came together
+via ARC 3a's `[ref xs]` capture mechanism — non-Copy elements
+flow through closure bodies as `Ref<Vec<T>>` and the body's
+`xs[i]` / `len(xs)` / method calls all work via the existing
+Ref-param conventions. Specific 5-step ARCS plan was scoped
+against the i64-only constraint that turned out to no longer
+exist at ship time. New lib tests pin the supported cases (Vec
+f64 indexing, Vec OwnedStr len, f64 arithmetic in closure body).
 
 ### Sub-track 3c — `.collect` postfix syntax (~3–5h, 3 commits)
 
