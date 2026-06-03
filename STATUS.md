@@ -10,7 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.4c + 1.4d + 1.4e shipped —
+**Last updated:** 2026-06-03 (**ARC 1.4 — C-side per-(K, V)
+HashMap bundle COMPLETE.** All six C-side sub-steps (1.4a Option<V>
+mono / 1.4b checker relax / 1.4c parameterized bundle / 1.4d
+prologue wiring / 1.4e tree emit_call dispatch / 1.4f SSA no-op
+— hashmap programs fall back from SSA to tree path) shipped this
+session. `HashMap<i64, V>` for V in {i8, i16, i32, i64, u8, u16,
+u32, u64, bool} compiles + runs end-to-end on the C backend.
+LLVM backend still uses the legacy single-shape bundle —
+ARC 1.5a-e (~500-line LLVM IR mirror, comparable to ARC 2.3
+trie work) remains as the next focused chunk. Cross-backend
+parity still holds for the legacy `HashMap<i64, i64>` shape.
+**1767 lib + 54 parity green.**
+
+ARC 1.4f acknowledgment: the SSA C backend has no per-builtin
+HashMap dispatch — `ssa_path_supports` (in main.rs) rejects any
+program calling hashmap_* builtins, falling back to the tree
+backend. So 1.4f is automatic; the 1.4e tree dispatch covers
+both call paths.
+
+**Prior:** 2026-06-03 (**ARC 1.4c + 1.4d + 1.4e shipped —
 per-(K, V) C bundle, prologue wiring, tree emit_call dispatch.**
 C backend now supports `HashMap<i64, V>` end-to-end for V in
 {i8, i16, i32, i64, u8, u16, u32, u64, bool}.

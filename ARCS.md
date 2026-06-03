@@ -27,7 +27,7 @@ scalar (i32, u32, u64). Foundation for Arc 1.7 + Arc 4.
 | 1.4c | Parameterized C bundle: `emit_intent_hashmap_pair_c_body(K, V)` produces per-(K, V) struct + helpers (legacy `intent_hashmap_i64_i64` stays for backwards compat) | ~2h | 1.4b |
 | 1.4d | C backend prologue: walk `collect_hashmap_pairs(program)`, emit per-pair bundle for each non-(i64, i64) pair | ~30m | 1.4c |
 | 1.4e | C backend tree `emit_call` dispatch: read receiver's (K, V), pick the right bundle prefix | ~30m | 1.4d |
-| 1.4f | C backend SSA `emit_call` dispatch: mirror 1.4e in `ssa_backend_c.rs` | ~30m | 1.4d |
+| 1.4f | C backend SSA `emit_call` dispatch: **NO-OP** — `ssa_path_supports` (main.rs) rejects HashMap-using programs, falling back to the tree path. The 1.4e tree dispatch covers both. ✅ AUTOMATIC | — | 1.4d |
 | 1.5a | Parameterized LLVM bundle: mirror 1.4c in LLVM IR (apply ARC 2.3 success pattern) | ~3h | 1.4f (atomic with 1.5b-d) |
 | 1.5b | LLVM backend prologue: walk pairs, emit per-pair bundle | ~30m | 1.5a |
 | 1.5c | LLVM backend tree `emit_call` dispatch | ~30m | 1.5a |
