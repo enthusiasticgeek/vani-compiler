@@ -125,24 +125,30 @@ partial switch leaves the suite broken.
 
 ### Sub-steps (~5–8h, 4 commits)
 
-1. **2.1 — Sparse child representation. (~1.5h)**
-   - Decide: struct-of-arrays (`u8* keys, u32* child_idx` per node)
-     vs array-of-structs (`{u8, u32}* pairs`). SoA is more
-     cache-friendly; AoS is simpler.
-   - Update the `intent_trie` struct typedef in both backends.
-   - Initialize new nodes with empty child lists (capacity 0).
+1. **2.1 — Sparse child representation. ✅ SHIPPED 2026-06-03 (C side).**
+   - Chose SoA: per-node `node_keys` (u8) + `node_children`
+     (i32) sorted by key, plus `node_count`/`node_cap`/`free_next`
+     parent arrays. Freelist gets its own array rather than
+     reusing a child slot — cleaner separation.
+   - C backend: updated `intent_trie` struct typedef.
+   - LLVM backend: pending — see 2.3.
 
-2. **2.2 — Atomic rewrite of all 5 ops: insert/contains/delete/
-   starts_with/walk. (~3h)** — must land as a single commit.
-   - For each operation, replace the `children[byte]` direct lookup
-     with a binary search over the sorted child-byte array.
-   - For `insert`: find insertion position via lower_bound; shift
-     trailing entries; insert (byte, new_child_idx).
-   - For `delete`: similar shift-out.
-   - Maintain the freelist for reusing freed node slots.
+2. **2.2 — Atomic rewrite of all 5 ops. ✅ SHIPPED 2026-06-03 (C side).**
+   - `find_slot` (binary search) + `lower_bound` + `insert_pair`
+     (shift right) + `remove_pair` (shift left) + `grow_node`
+     (capacity doubling, starts at 4) helper functions emitted
+     alongside the main ops. All 5 user-facing ops rewritten in
+     a single commit per the ARCS plan.
 
-3. **2.3 — LLVM mirror of 2.2. (~2h)**
-   - The LLVM trie has parallel code; rewrite the same five ops in IR.
+3. **2.3 — LLVM mirror of 2.2. (~2h) — DEFERRED.**
+   - The LLVM trie helpers are ~3× the C footprint (491 vs 168
+     lines) — every binary search, shift, and grow needs manual
+     SSA / GEP / label management. Best handled in a dedicated
+     session with the C reference as the gold output.
+   - In the meantime, the LLVM backend retains the legacy dense
+     implementation. Cross-backend parity holds via observably-
+     equivalent semantics: C = sparse, LLVM = dense, identical
+     user-visible output.
 
 4. **2.4 — Cross-backend parity: re-run all trie examples. (~1h)**
    - Verify `examples/trie.vani` and any lib tests using Trie pass

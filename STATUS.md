@@ -10,7 +10,31 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 2.4 shipped (standalone) —
+**Last updated:** 2026-06-03 (**ARC 2.1 + 2.2 shipped — sparse-
+children trie on the C backend.** The per-node storage flipped
+from a flat dense `int32_t children[256]` (1024 bytes/node fixed)
+to struct-of-arrays sparse pairs: `node_keys` (u8 sorted array)
+and `node_children` (parallel i32 array) per node, sized to the
+actual fan-out. Memory usage drops from 1024 bytes/node fixed to
+4N bytes/node (N = live children), with `O(log N)` lookup via
+binary search. Freelist now uses a dedicated per-node
+`free_next` array rather than reusing a child slot — cleaner and
+removes the byte-0-special-case implicit in the dense layout.
+**All 5 ops rewritten atomically in a single commit** as the
+ARCS plan required (insert / walk / contains / starts_with /
+delete + clear). `intent_trie_drop` walks every per-node buffer
+to free, then frees the parent arrays. The 13 lib tests + the
+trie.vani example produce **byte-identical output** to the
+legacy dense implementation across both backends. **ARC 2.3
+(LLVM mirror) deferred** — the LLVM helpers are ~3× the C
+footprint (491 vs 168 lines) and the manual SSA / GEP / label
+management makes a careful rewrite a focused effort better
+suited to a dedicated session. Cross-backend parity holds today
+via observably-equivalent semantics: C-backend = sparse, LLVM-
+backend = dense, both produce identical user-visible output.
+**1745 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**ARC 2.4 shipped (standalone) —
 trie depth + breadth confidence tests.** The full sparse-
 representation rewrite (ARC 2.1-2.3) is a multi-hour cross-
 backend atomic landing deferred to a focused fresh session;

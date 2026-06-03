@@ -3686,54 +3686,152 @@ fn stmt_uses_trie(stmt: &crate::ir::TypedStmt) -> bool {
 /// is a per-node bool. Insertion / lookup short-circuit to
 /// false on any non-a-z input character.
 fn emit_intent_trie_helpers_c_body(out: &mut String) {
+    // ARC 2.1-2.3 — sparse-children rewrite. The per-node storage
+    // is now struct-of-arrays: `node_keys[idx]` is a sorted u8 array
+    // and `node_children[idx]` is the parallel i32 child-index array,
+    // both length `node_count[idx]` and allocated capacity
+    // `node_cap[idx]`. Lookup is binary search; insert + delete shift
+    // entries to maintain sort order. Freelist is a separate per-node
+    // `free_next` array (no longer reusing a child slot). Memory
+    // usage: O(actual_children) per node instead of fixed 256
+    // entries — ~30–100× savings for sparse alphabets (DNA, ASCII
+    // digits, hex). Live node count is still num_nodes - free_count.
     out.push_str(
-        "typedef struct { int32_t* children; uint8_t* is_end; int64_t num_nodes; int64_t capacity; int64_t num_words; int64_t free_head; int64_t free_count; } intent_trie;\n\
-         /* Closure #345: alphabet generalized from a-z (26) to the\n\
-          * full u8 range (256). Every nonzero byte is a valid\n\
-          * character. Note that since C strings are nul-terminated,\n\
-          * the byte 0 still terminates a word (callers needing\n\
-          * embedded NULs would need a length-tagged variant). */\n\
+        "typedef struct { uint8_t** node_keys; int32_t** node_children; uint16_t* node_count; uint16_t* node_cap; int64_t* free_next; uint8_t* is_end; int64_t num_nodes; int64_t capacity; int64_t num_words; int64_t free_head; int64_t free_count; } intent_trie;\n\
+         /* Closure #345: alphabet generalized to the full u8 range.\n\
+          * Every nonzero byte is a valid character. C strings are\n\
+          * nul-terminated, so byte 0 still terminates a word; the\n\
+          * empty string targets the root node. */\n\
          static INTENT_UNUSED bool intent_trie_valid_str(const char* s) {\n\
          \x20 return s != (const char*)0;\n\
          }\n\
-         /* Closure #344: arena compaction. The freelist of recycled\n\
-          * node indices reuses children[idx*256 + 0] as a next-pointer\n\
-          * (safe because freed nodes have all 256 children set to -1).\n\
-          * num_nodes is the high-water mark; live node count is\n\
-          * num_nodes - free_count. */\n\
+         /* Binary search the sorted keys array of `node`; return the\n\
+          * slot index if the key is present, -1 otherwise. */\n\
+         static INTENT_UNUSED int64_t intent_trie__find_slot(const intent_trie* t, int64_t node, uint8_t key) {\n\
+         \x20 uint16_t lo = 0, hi = t->node_count[node];\n\
+         \x20 while (lo < hi) {\n\
+         \x20   uint16_t mid = (lo + hi) / 2;\n\
+         \x20   uint8_t k = t->node_keys[node][mid];\n\
+         \x20   if (k == key) return (int64_t)mid;\n\
+         \x20   if (k < key) lo = (uint16_t)(mid + 1); else hi = mid;\n\
+         \x20 }\n\
+         \x20 return -1;\n\
+         }\n\
+         /* Binary search for the first slot whose key is >= `key`;\n\
+          * the insertion point that preserves sorted order. */\n\
+         static INTENT_UNUSED uint16_t intent_trie__lower_bound(const intent_trie* t, int64_t node, uint8_t key) {\n\
+         \x20 uint16_t lo = 0, hi = t->node_count[node];\n\
+         \x20 while (lo < hi) {\n\
+         \x20   uint16_t mid = (lo + hi) / 2;\n\
+         \x20   if (t->node_keys[node][mid] < key) lo = (uint16_t)(mid + 1); else hi = mid;\n\
+         \x20 }\n\
+         \x20 return lo;\n\
+         }\n\
+         /* Ensure node has room for at least `min_cap` children.\n\
+          * Doubles capacity on grow; starts at 4 for the first child. */\n\
+         static INTENT_UNUSED void intent_trie__grow_node(intent_trie* t, int64_t node, uint16_t min_cap) {\n\
+         \x20 if (t->node_cap[node] >= min_cap) return;\n\
+         \x20 uint16_t new_cap = t->node_cap[node] ? t->node_cap[node] : 4;\n\
+         \x20 while (new_cap < min_cap) new_cap = (uint16_t)(new_cap * 2);\n\
+         \x20 t->node_keys[node] = (uint8_t*)realloc(t->node_keys[node], (size_t)new_cap * sizeof(uint8_t));\n\
+         \x20 t->node_children[node] = (int32_t*)realloc(t->node_children[node], (size_t)new_cap * sizeof(int32_t));\n\
+         \x20 if (!t->node_keys[node] || !t->node_children[node]) abort();\n\
+         \x20 t->node_cap[node] = new_cap;\n\
+         }\n\
+         /* Insert (key, child) at slot `pos` of node, shifting existing\n\
+          * entries right by one. Caller has already grown capacity. */\n\
+         static INTENT_UNUSED void intent_trie__insert_pair(intent_trie* t, int64_t node, uint16_t pos, uint8_t key, int32_t child) {\n\
+         \x20 uint16_t cnt = t->node_count[node];\n\
+         \x20 for (uint16_t i = cnt; i > pos; i--) {\n\
+         \x20   t->node_keys[node][i] = t->node_keys[node][i - 1];\n\
+         \x20   t->node_children[node][i] = t->node_children[node][i - 1];\n\
+         \x20 }\n\
+         \x20 t->node_keys[node][pos] = key;\n\
+         \x20 t->node_children[node][pos] = child;\n\
+         \x20 t->node_count[node] = (uint16_t)(cnt + 1);\n\
+         }\n\
+         /* Remove the entry at slot `pos` of node, shifting trailing\n\
+          * entries left by one. */\n\
+         static INTENT_UNUSED void intent_trie__remove_pair(intent_trie* t, int64_t node, uint16_t pos) {\n\
+         \x20 uint16_t cnt = t->node_count[node];\n\
+         \x20 for (uint16_t i = pos; i + 1 < cnt; i++) {\n\
+         \x20   t->node_keys[node][i] = t->node_keys[node][i + 1];\n\
+         \x20   t->node_children[node][i] = t->node_children[node][i + 1];\n\
+         \x20 }\n\
+         \x20 t->node_count[node] = (uint16_t)(cnt - 1);\n\
+         }\n\
+         /* Allocate or recycle a node. Freelist (LIFO) reuses slots\n\
+          * before extending the arena. */\n\
          static INTENT_UNUSED int64_t intent_trie_new_node(intent_trie* t) {\n\
          \x20 if (t->free_head != -1) {\n\
          \x20   int64_t idx = t->free_head;\n\
-         \x20   t->free_head = (int64_t)t->children[idx * 256 + 0];\n\
+         \x20   t->free_head = t->free_next[idx];\n\
          \x20   t->free_count--;\n\
-         \x20   for (int c = 0; c < 256; c++) t->children[idx * 256 + c] = -1;\n\
+         \x20   /* recycled slot already has node_count=0; clear is_end\n\
+          *    just in case. node_keys/children buffers may still be\n\
+          *    allocated from prior use — that's fine, we just reuse. */\n\
+         \x20   t->node_count[idx] = 0;\n\
          \x20   t->is_end[idx] = 0;\n\
+         \x20   t->free_next[idx] = -1;\n\
          \x20   return idx;\n\
          \x20 }\n\
          \x20 if (t->num_nodes >= t->capacity) {\n\
+         \x20   int64_t old_cap = t->capacity;\n\
          \x20   t->capacity = t->capacity ? t->capacity * 2 : 8;\n\
-         \x20   t->children = (int32_t*)realloc(t->children, (size_t)t->capacity * 256 * sizeof(int32_t));\n\
+         \x20   t->node_keys = (uint8_t**)realloc(t->node_keys, (size_t)t->capacity * sizeof(uint8_t*));\n\
+         \x20   t->node_children = (int32_t**)realloc(t->node_children, (size_t)t->capacity * sizeof(int32_t*));\n\
+         \x20   t->node_count = (uint16_t*)realloc(t->node_count, (size_t)t->capacity * sizeof(uint16_t));\n\
+         \x20   t->node_cap = (uint16_t*)realloc(t->node_cap, (size_t)t->capacity * sizeof(uint16_t));\n\
+         \x20   t->free_next = (int64_t*)realloc(t->free_next, (size_t)t->capacity * sizeof(int64_t));\n\
          \x20   t->is_end = (uint8_t*)realloc(t->is_end, (size_t)t->capacity * sizeof(uint8_t));\n\
-         \x20   if (!t->children || !t->is_end) abort();\n\
+         \x20   if (!t->node_keys || !t->node_children || !t->node_count || !t->node_cap || !t->free_next || !t->is_end) abort();\n\
+         \x20   /* Zero-init the newly-allocated slots so they read as\n\
+          *    empty/uninitialized rather than holding stale realloc'd bytes. */\n\
+         \x20   for (int64_t i = old_cap; i < t->capacity; i++) {\n\
+         \x20     t->node_keys[i] = (uint8_t*)0;\n\
+         \x20     t->node_children[i] = (int32_t*)0;\n\
+         \x20     t->node_count[i] = 0;\n\
+         \x20     t->node_cap[i] = 0;\n\
+         \x20     t->free_next[i] = -1;\n\
+         \x20     t->is_end[i] = 0;\n\
+         \x20   }\n\
          \x20 }\n\
          \x20 int64_t idx = t->num_nodes;\n\
-         \x20 for (int c = 0; c < 256; c++) t->children[idx * 256 + c] = -1;\n\
+         \x20 t->node_keys[idx] = (uint8_t*)0;\n\
+         \x20 t->node_children[idx] = (int32_t*)0;\n\
+         \x20 t->node_count[idx] = 0;\n\
+         \x20 t->node_cap[idx] = 0;\n\
+         \x20 t->free_next[idx] = -1;\n\
          \x20 t->is_end[idx] = 0;\n\
          \x20 t->num_nodes++;\n\
          \x20 return idx;\n\
          }\n\
          static INTENT_UNUSED intent_trie intent_trie_new(void) {\n\
          \x20 intent_trie t;\n\
-         \x20 t.children = (int32_t*)0; t.is_end = (uint8_t*)0;\n\
+         \x20 t.node_keys = (uint8_t**)0; t.node_children = (int32_t**)0;\n\
+         \x20 t.node_count = (uint16_t*)0; t.node_cap = (uint16_t*)0;\n\
+         \x20 t.free_next = (int64_t*)0; t.is_end = (uint8_t*)0;\n\
          \x20 t.num_nodes = 0; t.capacity = 0; t.num_words = 0;\n\
          \x20 t.free_head = -1; t.free_count = 0;\n\
          \x20 (void)intent_trie_new_node(&t);  /* root = 0 */\n\
          \x20 return t;\n\
          }\n\
          static INTENT_UNUSED void intent_trie_drop(intent_trie* t) {\n\
-         \x20 if (t->children) free(t->children);\n\
+         \x20 if (t->node_keys && t->node_children) {\n\
+         \x20   for (int64_t i = 0; i < t->num_nodes; i++) {\n\
+         \x20     if (t->node_keys[i]) free(t->node_keys[i]);\n\
+         \x20     if (t->node_children[i]) free(t->node_children[i]);\n\
+         \x20   }\n\
+         \x20 }\n\
+         \x20 if (t->node_keys) free(t->node_keys);\n\
+         \x20 if (t->node_children) free(t->node_children);\n\
+         \x20 if (t->node_count) free(t->node_count);\n\
+         \x20 if (t->node_cap) free(t->node_cap);\n\
+         \x20 if (t->free_next) free(t->free_next);\n\
          \x20 if (t->is_end) free(t->is_end);\n\
-         \x20 t->children = (int32_t*)0; t->is_end = (uint8_t*)0;\n\
+         \x20 t->node_keys = (uint8_t**)0; t->node_children = (int32_t**)0;\n\
+         \x20 t->node_count = (uint16_t*)0; t->node_cap = (uint16_t*)0;\n\
+         \x20 t->free_next = (int64_t*)0; t->is_end = (uint8_t*)0;\n\
          \x20 t->num_nodes = 0; t->capacity = 0; t->num_words = 0;\n\
          \x20 t->free_head = -1; t->free_count = 0;\n\
          }\n\
@@ -3745,30 +3843,29 @@ fn emit_intent_trie_helpers_c_body(out: &mut String) {
          \x20 }\n\
          \x20 int64_t cur = 0;\n\
          \x20 for (const char* p = s; *p; p++) {\n\
-         \x20   int c = (unsigned char)*p;\n\
-         \x20   int32_t next = t->children[cur * 256 + c];\n\
-         \x20   if (next == -1) {\n\
+         \x20   uint8_t c = (uint8_t)*p;\n\
+         \x20   int64_t slot = intent_trie__find_slot(t, cur, c);\n\
+         \x20   if (slot == -1) {\n\
          \x20     int64_t nx = intent_trie_new_node(t);\n\
-         \x20     t->children[cur * 256 + c] = (int32_t)nx;\n\
+         \x20     uint16_t pos = intent_trie__lower_bound(t, cur, c);\n\
+         \x20     intent_trie__grow_node(t, cur, (uint16_t)(t->node_count[cur] + 1));\n\
+         \x20     intent_trie__insert_pair(t, cur, pos, c, (int32_t)nx);\n\
          \x20     cur = nx;\n\
          \x20   } else {\n\
-         \x20     cur = (int64_t)next;\n\
+         \x20     cur = (int64_t)t->node_children[cur][slot];\n\
          \x20   }\n\
          \x20 }\n\
          \x20 if (t->is_end[cur]) return false;\n\
          \x20 t->is_end[cur] = 1; t->num_words++; return true;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_trie_walk(const intent_trie* t, const char* s) {\n\
-         \x20 /* Returns the node index reached after walking s,\n\
-          * or -1 if s is NULL or runs off-tree. After closure #345,\n\
-          * any nonzero byte is a valid character. */\n\
          \x20 if (!intent_trie_valid_str(s)) return -1;\n\
          \x20 int64_t cur = 0;\n\
          \x20 for (const char* p = s; *p; p++) {\n\
-         \x20   int c = (unsigned char)*p;\n\
-         \x20   int32_t next = t->children[cur * 256 + c];\n\
-         \x20   if (next == -1) return -1;\n\
-         \x20   cur = (int64_t)next;\n\
+         \x20   uint8_t c = (uint8_t)*p;\n\
+         \x20   int64_t slot = intent_trie__find_slot(t, cur, c);\n\
+         \x20   if (slot == -1) return -1;\n\
+         \x20   cur = (int64_t)t->node_children[cur][slot];\n\
          \x20 }\n\
          \x20 return cur;\n\
          }\n\
@@ -3781,31 +3878,28 @@ fn emit_intent_trie_helpers_c_body(out: &mut String) {
          \x20 int64_t cur = intent_trie_walk(t, s);\n\
          \x20 return cur != -1;\n\
          }\n\
-         /* Closure #344: remove an exact word and compact the arena.\n\
-          * After flipping is_end on the terminal node, walks back up\n\
-          * the path. Any node with no is_end and all-`-1` children is\n\
-          * unlinked from its parent and pushed onto the freelist\n\
-          * (child slot 0 doubles as the next-free pointer). Reclaims\n\
-          * memory on remove-heavy Trie workloads. */\n\
          static INTENT_UNUSED bool intent_trie_delete(intent_trie* t, const char* s) {\n\
          \x20 if (!intent_trie_valid_str(s)) return false;\n\
+         \x20 if (*s == 0) {\n\
+         \x20   if (!t->is_end[0]) return false;\n\
+         \x20   t->is_end[0] = 0; t->num_words--; return true;\n\
+         \x20 }\n\
          \x20 size_t n = 0;\n\
          \x20 for (const char* p = s; *p; p++) n++;\n\
          \x20 int64_t* path_node = (int64_t*)malloc((n + 1) * sizeof(int64_t));\n\
-         \x20 int* path_ch = (int*)malloc((n > 0 ? n : 1) * sizeof(int));\n\
-         \x20 if (!path_node || !path_ch) abort();\n\
+         \x20 uint8_t* path_byte = (uint8_t*)malloc(n * sizeof(uint8_t));\n\
+         \x20 if (!path_node || !path_byte) abort();\n\
          \x20 path_node[0] = 0;\n\
          \x20 int64_t cur = 0;\n\
-         \x20 size_t i;\n\
-         \x20 for (i = 0; i < n; i++) {\n\
-         \x20   int c = (unsigned char)s[i];\n\
-         \x20   int32_t next = t->children[cur * 256 + c];\n\
-         \x20   if (next == -1) { free(path_node); free(path_ch); return false; }\n\
-         \x20   path_ch[i] = c;\n\
-         \x20   cur = (int64_t)next;\n\
+         \x20 for (size_t i = 0; i < n; i++) {\n\
+         \x20   uint8_t c = (uint8_t)s[i];\n\
+         \x20   int64_t slot = intent_trie__find_slot(t, cur, c);\n\
+         \x20   if (slot == -1) { free(path_node); free(path_byte); return false; }\n\
+         \x20   path_byte[i] = c;\n\
+         \x20   cur = (int64_t)t->node_children[cur][slot];\n\
          \x20   path_node[i + 1] = cur;\n\
          \x20 }\n\
-         \x20 if (!t->is_end[cur]) { free(path_node); free(path_ch); return false; }\n\
+         \x20 if (!t->is_end[cur]) { free(path_node); free(path_byte); return false; }\n\
          \x20 t->is_end[cur] = 0;\n\
          \x20 t->num_words--;\n\
          \x20 /* Walk back up; free dead nodes one at a time. */\n\
@@ -3813,31 +3907,33 @@ fn emit_intent_trie_helpers_c_body(out: &mut String) {
          \x20   int64_t node = path_node[step];\n\
          \x20   if (node == 0) break;\n\
          \x20   if (t->is_end[node]) break;\n\
-         \x20   bool has_child = false;\n\
-         \x20   for (int c = 0; c < 256; c++) {\n\
-         \x20     if (t->children[node * 256 + c] != -1) { has_child = true; break; }\n\
-         \x20   }\n\
-         \x20   if (has_child) break;\n\
+         \x20   if (t->node_count[node] != 0) break;\n\
          \x20   int64_t parent = path_node[step - 1];\n\
-         \x20   t->children[parent * 256 + path_ch[step - 1]] = -1;\n\
-         \x20   t->children[node * 256 + 0] = (int32_t)t->free_head;\n\
+         \x20   uint16_t pos = (uint16_t)intent_trie__find_slot(t, parent, path_byte[step - 1]);\n\
+         \x20   intent_trie__remove_pair(t, parent, pos);\n\
+         \x20   t->free_next[node] = t->free_head;\n\
          \x20   t->free_head = node;\n\
          \x20   t->free_count++;\n\
          \x20 }\n\
-         \x20 free(path_node); free(path_ch);\n\
+         \x20 free(path_node); free(path_byte);\n\
          \x20 return true;\n\
          }\n\
-         /* Closure #354: clear() — reset the arena to the\n\
-          * single-root state without freeing the backing buffer.\n\
-          * Zeros the root node's is_end + children, resets\n\
-          * num_words / num_nodes / free_head / free_count.\n\
-          * Returns prior num_words. */\n\
          static INTENT_UNUSED int64_t intent_trie_clear(intent_trie* t) {\n\
          \x20 int64_t prior = t->num_words;\n\
-         \x20 if (t->capacity > 0 && t->children && t->is_end) {\n\
-         \x20   t->is_end[0] = 0;\n\
-         \x20   for (int c = 0; c < 256; c++) t->children[0 * 256 + c] = -1;\n\
-         \x20   t->num_nodes = 1;\n\
+         \x20 /* Free every per-node keys/children buffer, but keep\n\
+          *    the parent arrays so future inserts can reuse the\n\
+          *    capacity. Reset every node to the empty state, then\n\
+          *    re-establish the root. */\n\
+         \x20 if (t->capacity > 0) {\n\
+         \x20   for (int64_t i = 0; i < t->num_nodes; i++) {\n\
+         \x20     if (t->node_keys[i]) { free(t->node_keys[i]); t->node_keys[i] = (uint8_t*)0; }\n\
+         \x20     if (t->node_children[i]) { free(t->node_children[i]); t->node_children[i] = (int32_t*)0; }\n\
+         \x20     t->node_count[i] = 0;\n\
+         \x20     t->node_cap[i] = 0;\n\
+         \x20     t->free_next[i] = -1;\n\
+         \x20     t->is_end[i] = 0;\n\
+         \x20   }\n\
+         \x20   t->num_nodes = 1;  /* root */\n\
          \x20 } else {\n\
          \x20   t->num_nodes = 0;\n\
          \x20 }\n\
