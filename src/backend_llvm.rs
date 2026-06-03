@@ -1129,6 +1129,39 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         });
         emit_intent_hashmap_i64_i64_helpers_llvm(&mut out, has_option_i64);
     }
+    // ARC 1.5b — walk the collector and emit per-pair LLVM
+    // bundles for non-(i64, i64) shapes. Mirror of the C
+    // backend's 1.4d wiring.
+    {
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(program);
+        for p in &pairs {
+            if matches!(p.key, Type::I64) && matches!(p.value, Type::I64) {
+                continue;
+            }
+            if !matches!(p.key, Type::I64) {
+                continue;
+            }
+            let (v_llvm, v_mangle, v_tag, v_size): (&str, &str, &str, u64) = match &p.value {
+                Type::I8 => ("i8", "i8", "int8_t", 1),
+                Type::I16 => ("i16", "i16", "int16_t", 2),
+                Type::I32 => ("i32", "i32", "int32_t", 4),
+                Type::I64 => ("i64", "i64", "int64_t", 8),
+                Type::U8 => ("i8", "u8", "uint8_t", 1),
+                Type::U16 => ("i16", "u16", "uint16_t", 2),
+                Type::U32 => ("i32", "u32", "uint32_t", 4),
+                Type::U64 => ("i64", "u64", "uint64_t", 8),
+                Type::Bool => ("i8", "bool", "bool", 1),
+                _ => continue,
+            };
+            let opt_name = format!("Option__{}", v_mangle);
+            let has_option_v = LLVM_ENUM_PAYLOAD_REGISTRY.with(|r| {
+                r.borrow().contains_key(&opt_name)
+            });
+            emit_intent_hashmap_pair_llvm(
+                &mut out, v_llvm, v_mangle, v_tag, v_size, has_option_v,
+            );
+        }
+    }
 
     // BTreeSet<i64> helpers (closure #306). Range query helper
     // (closure #346) requires intent_vec_int64_t; gated.
@@ -1914,11 +1947,12 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 }
                 return;
             }
-            if matches!(ty, Type::HashMap(_, _)) {
+            if let Type::HashMap(k, v) = ty {
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    let (prefix, _, _) = hashmap_llvm_dispatch(k, v);
                     out.push_str(&format!(
-                        "  call void @intent_hashmap_i64_i64_drop(%intent_hashmap_i64_i64* {})\n",
-                        addr
+                        "  call void @{p}_drop(%{p}* {})\n",
+                        addr, p = prefix
                     ));
                 }
                 return;
@@ -7402,71 +7436,85 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // HashMap<i64, i64> builtins (closure #305).
+            // ARC 1.5c — dispatch the HashMap call onto the right
+            // bundle prefix derived from the result/receiver type.
             if name == "hashmap_new" {
+                let (prefix, _v_llvm, _opt) = hashmap_llvm_dispatch_from_ty(&expr.ty);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call %intent_hashmap_i64_i64 @intent_hashmap_i64_i64_new()\n",
-                    dest
+                    "  {} = call %{p} @{p}_new()\n",
+                    dest, p = prefix
                 ));
                 return dest;
             }
             if name == "hashmap_insert" {
+                let recv_ty = &args[0].ty;
+                let (prefix, v_llvm, opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let k = emit_expr(&args[1], ctx, out);
                 let v = emit_expr(&args[2], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call %Enum_Option__i64 @intent_hashmap_i64_i64_insert(%intent_hashmap_i64_i64* {}, i64 {}, i64 {})\n",
-                    dest, m, k, v
+                    "  {} = call %{opt} @{p}_insert(%{p}* {}, i64 {}, {v} {})\n",
+                    dest, m, k, v, p = prefix, v = v_llvm, opt = opt
                 ));
                 return dest;
             }
             if name == "hashmap_get" {
+                let recv_ty = &args[0].ty;
+                let (prefix, _v_llvm, opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let k = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call %Enum_Option__i64 @intent_hashmap_i64_i64_get(%intent_hashmap_i64_i64* {}, i64 {})\n",
-                    dest, m, k
+                    "  {} = call %{opt} @{p}_get(%{p}* {}, i64 {})\n",
+                    dest, m, k, p = prefix, opt = opt
                 ));
                 return dest;
             }
             if name == "hashmap_contains_key" {
+                let recv_ty = &args[0].ty;
+                let (prefix, _v_llvm, _opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let k = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i1 @intent_hashmap_i64_i64_contains_key(%intent_hashmap_i64_i64* {}, i64 {})\n",
-                    dest, m, k
+                    "  {} = call i1 @{p}_contains_key(%{p}* {}, i64 {})\n",
+                    dest, m, k, p = prefix
                 ));
                 return dest;
             }
             if name == "hashmap_remove" {
+                let recv_ty = &args[0].ty;
+                let (prefix, _v_llvm, opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let k = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call %Enum_Option__i64 @intent_hashmap_i64_i64_remove(%intent_hashmap_i64_i64* {}, i64 {})\n",
-                    dest, m, k
+                    "  {} = call %{opt} @{p}_remove(%{p}* {}, i64 {})\n",
+                    dest, m, k, p = prefix, opt = opt
                 ));
                 return dest;
             }
             if name == "hashmap_len" {
+                let recv_ty = &args[0].ty;
+                let (prefix, _v_llvm, _opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @intent_hashmap_i64_i64_len(%intent_hashmap_i64_i64* {})\n",
-                    dest, m
+                    "  {} = call i64 @{p}_len(%{p}* {})\n",
+                    dest, m, p = prefix
                 ));
                 return dest;
             }
             if name == "hashmap_clear" {
+                let recv_ty = &args[0].ty;
+                let (prefix, _v_llvm, _opt) = hashmap_llvm_dispatch_from_recv(recv_ty);
                 let m = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @intent_hashmap_i64_i64_clear(%intent_hashmap_i64_i64* {})\n",
-                    dest, m
+                    "  {} = call i64 @{p}_clear(%{p}* {})\n",
+                    dest, m, p = prefix
                 ));
                 return dest;
             }
@@ -22206,6 +22254,528 @@ fn emit_intent_btreeset_i64_helpers_llvm(out: &mut String, has_option_i64: bool,
 /// linear probing. v1 (i64, i64) only; get / insert return
 /// Option<i64> and so are gated on Option__i64 being
 /// registered (the `has_option_i64` flag).
+/// ARC 1.5a — parameterized LLVM HashMap bundle. Mirror of the
+/// C-side `emit_intent_hashmap_pair_c_body`. K stays i64 in this
+/// v1 scope; V can be any scalar integer (i8/i16/i32/i64 + their
+/// unsigned variants + bool). Legacy `intent_hashmap_i64_i64_*`
+/// bundle (below) stays for backwards-compat — both can coexist
+/// in the same module.
+///
+/// Arguments:
+///   `v_llvm`   — LLVM type spelling, e.g. "i32"
+///   `v_mangle` — `Enum_Option__<x>` suffix, e.g. "u32"
+///   `v_tag`    — C-leaf style for the bundle prefix, e.g. "uint32_t"
+///   `v_size`   — byte width for malloc sizes (1, 2, 4, or 8)
+///   `has_option_v` — gates get/insert/remove emission
+fn emit_intent_hashmap_pair_llvm(
+    out: &mut String,
+    v_llvm: &str,
+    v_mangle: &str,
+    v_tag: &str,
+    v_size: u64,
+    has_option_v: bool,
+) {
+    let s = format!("intent_hashmap_int64_t_{}", v_tag);
+    let opt_v = format!("Enum_Option__{}", v_mangle);
+    // typedef the struct shape per (K=i64, V).
+    out.push_str(&format!("%{s} = type {{ i64*, {v}*, i8*, i64, i64, i64 }}\n", s = s, v = v_llvm));
+    // Constructors + drop + hash + insert_raw + grow + contains_key + len
+    out.push_str(&format!(
+        "define %{s} @{s}_new() {{\n\
+         \x20 %r0 = insertvalue %{s} undef, i64* null, 0\n\
+         \x20 %r1 = insertvalue %{s} %r0, {v}* null, 1\n\
+         \x20 %r2 = insertvalue %{s} %r1, i8* null, 2\n\
+         \x20 %r3 = insertvalue %{s} %r2, i64 0, 3\n\
+         \x20 %r4 = insertvalue %{s} %r3, i64 0, 4\n\
+         \x20 %r5 = insertvalue %{s} %r4, i64 0, 5\n\
+         \x20 ret %{s} %r5\n\
+         }}\n\
+         define void @{s}_drop(%{s}* %m) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %keys = load i64*, i64** %kpp\n\
+         \x20 %vals = load {v}*, {v}** %vpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %k_null = icmp eq i64* %keys, null\n\
+         \x20 br i1 %k_null, label %d_v, label %d_fk\n\
+         d_fk:\n\
+         \x20 %k_i8 = bitcast i64* %keys to i8*\n\
+         \x20 call void @free(i8* %k_i8)\n\
+         \x20 br label %d_v\n\
+         d_v:\n\
+         \x20 %v_null = icmp eq {v}* %vals, null\n\
+         \x20 br i1 %v_null, label %d_o, label %d_fv\n\
+         d_fv:\n\
+         \x20 %v_i8 = bitcast {v}* %vals to i8*\n\
+         \x20 call void @free(i8* %v_i8)\n\
+         \x20 br label %d_o\n\
+         d_o:\n\
+         \x20 %o_null = icmp eq i8* %occ, null\n\
+         \x20 br i1 %o_null, label %d_done, label %d_fo\n\
+         d_fo:\n\
+         \x20 call void @free(i8* %occ)\n\
+         \x20 br label %d_done\n\
+         d_done:\n\
+         \x20 store i64* null, i64** %kpp\n\
+         \x20 store {v}* null, {v}** %vpp\n\
+         \x20 store i8* null, i8** %opp\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %tp_drop_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 store i64 0, i64* %cp\n\
+         \x20 store i64 0, i64* %tp_drop_hm\n\
+         \x20 ret void\n\
+         }}\n\
+         define internal i64 @{s}__hash_key(i64 %k) {{\n\
+         \x20 %h_p = alloca i64\n\
+         \x20 store i64 -3750763034362895579, i64* %h_p\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 0, i64* %i_p\n\
+         \x20 br label %hk_loop\n\
+         hk_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %cont = icmp slt i64 %i, 8\n\
+         \x20 br i1 %cont, label %hk_body, label %hk_done\n\
+         hk_body:\n\
+         \x20 %sh = mul i64 %i, 8\n\
+         \x20 %shifted = lshr i64 %k, %sh\n\
+         \x20 %b = and i64 %shifted, 255\n\
+         \x20 %h = load i64, i64* %h_p\n\
+         \x20 %hx = xor i64 %h, %b\n\
+         \x20 %hp = mul i64 %hx, 1099511628211\n\
+         \x20 store i64 %hp, i64* %h_p\n\
+         \x20 %i_n = add i64 %i, 1\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %hk_loop\n\
+         hk_done:\n\
+         \x20 %final = load i64, i64* %h_p\n\
+         \x20 ret i64 %final\n\
+         }}\n\
+         define internal void @{s}__insert_raw(%{s}* %m, i64 %k, {v} %v) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %keys = load i64*, i64** %kpp\n\
+         \x20 %vals = load {v}*, {v}** %vpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %mask = sub i64 %cap, 1\n\
+         \x20 %h = call i64 @{s}__hash_key(i64 %k)\n\
+         \x20 %i0 = and i64 %h, %mask\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 %i0, i64* %i_p\n\
+         \x20 br label %ir_loop\n\
+         ir_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %is_empty = icmp eq i8 %oval, 0\n\
+         \x20 br i1 %is_empty, label %ir_store, label %ir_check_eq\n\
+         ir_check_eq:\n\
+         \x20 %kcell = getelementptr i64, i64* %keys, i64 %i\n\
+         \x20 %kv = load i64, i64* %kcell\n\
+         \x20 %eq = icmp eq i64 %kv, %k\n\
+         \x20 br i1 %eq, label %ir_update, label %ir_next\n\
+         ir_update:\n\
+         \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
+         \x20 store {v} %v, {v}* %vcell\n\
+         \x20 ret void\n\
+         ir_next:\n\
+         \x20 %i_p1 = add i64 %i, 1\n\
+         \x20 %i_n = and i64 %i_p1, %mask\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %ir_loop\n\
+         ir_store:\n\
+         \x20 %kcell2 = getelementptr i64, i64* %keys, i64 %i\n\
+         \x20 %vcell2 = getelementptr {v}, {v}* %vals, i64 %i\n\
+         \x20 store i64 %k, i64* %kcell2\n\
+         \x20 store {v} %v, {v}* %vcell2\n\
+         \x20 store i8 1, i8* %ocell\n\
+         \x20 %old_len = load i64, i64* %lp\n\
+         \x20 %nl = add i64 %old_len, 1\n\
+         \x20 store i64 %nl, i64* %lp\n\
+         \x20 ret void\n\
+         }}\n",
+        s = s, v = v_llvm,
+    ));
+    // Grow: parameterize the malloc byte size by v_size.
+    out.push_str(&format!(
+        "define internal void @{s}__grow(%{s}* %m) {{\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %old_keys = load i64*, i64** %kpp\n\
+         \x20 %old_vals = load {v}*, {v}** %vpp\n\
+         \x20 %old_occ = load i8*, i8** %opp\n\
+         \x20 %old_cap = load i64, i64* %cp\n\
+         \x20 %cap_zero = icmp eq i64 %old_cap, 0\n\
+         \x20 %cap_doubled = mul i64 %old_cap, 2\n\
+         \x20 %new_cap = select i1 %cap_zero, i64 8, i64 %cap_doubled\n\
+         \x20 %nk_bytes = mul i64 %new_cap, 8\n\
+         \x20 %nv_bytes = mul i64 %new_cap, {vsz}\n\
+         \x20 %nk_i8 = call i8* @malloc(i64 %nk_bytes)\n\
+         \x20 %nk = bitcast i8* %nk_i8 to i64*\n\
+         \x20 %nv_i8 = call i8* @malloc(i64 %nv_bytes)\n\
+         \x20 %nv = bitcast i8* %nv_i8 to {v}*\n\
+         \x20 %no = call i8* @calloc(i64 %new_cap, i64 1)\n\
+         \x20 store i64* %nk, i64** %kpp\n\
+         \x20 store {v}* %nv, {v}** %vpp\n\
+         \x20 store i8* %no, i8** %opp\n\
+         \x20 store i64 0, i64* %lp\n\
+         \x20 store i64 %new_cap, i64* %cp\n\
+         \x20 %tp_grow_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %tp_grow_hm\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 0, i64* %i_p\n\
+         \x20 br label %g_loop\n\
+         g_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %cont = icmp slt i64 %i, %old_cap\n\
+         \x20 br i1 %cont, label %g_body, label %g_done\n\
+         g_body:\n\
+         \x20 %ocell = getelementptr i8, i8* %old_occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %is_occ = icmp eq i8 %oval, 1\n\
+         \x20 br i1 %is_occ, label %g_reinsert, label %g_next\n\
+         g_reinsert:\n\
+         \x20 %kcell = getelementptr i64, i64* %old_keys, i64 %i\n\
+         \x20 %kv = load i64, i64* %kcell\n\
+         \x20 %vcell = getelementptr {v}, {v}* %old_vals, i64 %i\n\
+         \x20 %vv = load {v}, {v}* %vcell\n\
+         \x20 call void @{s}__insert_raw(%{s}* %m, i64 %kv, {v} %vv)\n\
+         \x20 br label %g_next\n\
+         g_next:\n\
+         \x20 %i_n = add i64 %i, 1\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %g_loop\n\
+         g_done:\n\
+         \x20 %ok_null = icmp eq i64* %old_keys, null\n\
+         \x20 br i1 %ok_null, label %g_v, label %g_fk\n\
+         g_fk:\n\
+         \x20 %ok_i8 = bitcast i64* %old_keys to i8*\n\
+         \x20 call void @free(i8* %ok_i8)\n\
+         \x20 br label %g_v\n\
+         g_v:\n\
+         \x20 %ov_null = icmp eq {v}* %old_vals, null\n\
+         \x20 br i1 %ov_null, label %g_o, label %g_fv\n\
+         g_fv:\n\
+         \x20 %ov_i8 = bitcast {v}* %old_vals to i8*\n\
+         \x20 call void @free(i8* %ov_i8)\n\
+         \x20 br label %g_o\n\
+         g_o:\n\
+         \x20 %oo_null = icmp eq i8* %old_occ, null\n\
+         \x20 br i1 %oo_null, label %g_ret, label %g_fo\n\
+         g_fo:\n\
+         \x20 call void @free(i8* %old_occ)\n\
+         \x20 br label %g_ret\n\
+         g_ret:\n\
+         \x20 ret void\n\
+         }}\n\
+         define i1 @{s}_contains_key(%{s}* %m, i64 %k) {{\n\
+         \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %cap = load i64, i64* %cp\n\
+         \x20 %is_zero = icmp eq i64 %cap, 0\n\
+         \x20 br i1 %is_zero, label %ck_no, label %ck_probe\n\
+         ck_probe:\n\
+         \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %mask = sub i64 %cap, 1\n\
+         \x20 %keys = load i64*, i64** %kpp\n\
+         \x20 %occ = load i8*, i8** %opp\n\
+         \x20 %h = call i64 @{s}__hash_key(i64 %k)\n\
+         \x20 %i0 = and i64 %h, %mask\n\
+         \x20 %i_p = alloca i64\n\
+         \x20 store i64 %i0, i64* %i_p\n\
+         \x20 br label %ck_loop\n\
+         ck_loop:\n\
+         \x20 %i = load i64, i64* %i_p\n\
+         \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+         \x20 %oval = load i8, i8* %ocell\n\
+         \x20 %empty = icmp eq i8 %oval, 0\n\
+         \x20 br i1 %empty, label %ck_no, label %ck_test_occ\n\
+         ck_test_occ:\n\
+         \x20 %is_occ_ck = icmp eq i8 %oval, 1\n\
+         \x20 br i1 %is_occ_ck, label %ck_check, label %ck_next\n\
+         ck_check:\n\
+         \x20 %kcell = getelementptr i64, i64* %keys, i64 %i\n\
+         \x20 %kv = load i64, i64* %kcell\n\
+         \x20 %eq = icmp eq i64 %kv, %k\n\
+         \x20 br i1 %eq, label %ck_yes, label %ck_next\n\
+         ck_next:\n\
+         \x20 %i_p1 = add i64 %i, 1\n\
+         \x20 %i_n = and i64 %i_p1, %mask\n\
+         \x20 store i64 %i_n, i64* %i_p\n\
+         \x20 br label %ck_loop\n\
+         ck_yes:\n\
+         \x20 ret i1 true\n\
+         ck_no:\n\
+         \x20 ret i1 false\n\
+         }}\n\
+         define i64 @{s}_len(%{s}* %m) {{\n\
+         \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %len = load i64, i64* %lp\n\
+         \x20 ret i64 %len\n\
+         }}\n",
+        s = s, v = v_llvm, vsz = v_size,
+    ));
+    // get / insert / remove return Option<V> — gated on
+    // has_option_v (the program registered the enum).
+    if has_option_v {
+        out.push_str(&format!(
+            "define %{opt} @{s}_get(%{s}* %m, i64 %k) {{\n\
+             \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %cap = load i64, i64* %cp\n\
+             \x20 %is_zero = icmp eq i64 %cap, 0\n\
+             \x20 br i1 %is_zero, label %g_none, label %g_probe\n\
+             g_probe:\n\
+             \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %mask = sub i64 %cap, 1\n\
+             \x20 %keys = load i64*, i64** %kpp\n\
+             \x20 %vals = load {v}*, {v}** %vpp\n\
+             \x20 %occ = load i8*, i8** %opp\n\
+             \x20 %h = call i64 @{s}__hash_key(i64 %k)\n\
+             \x20 %i0 = and i64 %h, %mask\n\
+             \x20 %i_p = alloca i64\n\
+             \x20 store i64 %i0, i64* %i_p\n\
+             \x20 br label %g_loop\n\
+             g_loop:\n\
+             \x20 %i = load i64, i64* %i_p\n\
+             \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+             \x20 %oval = load i8, i8* %ocell\n\
+             \x20 %empty = icmp eq i8 %oval, 0\n\
+             \x20 br i1 %empty, label %g_none, label %g_test_occ\n\
+             g_test_occ:\n\
+             \x20 %is_occ_g = icmp eq i8 %oval, 1\n\
+             \x20 br i1 %is_occ_g, label %g_check, label %g_next\n\
+             g_check:\n\
+             \x20 %kcell = getelementptr i64, i64* %keys, i64 %i\n\
+             \x20 %kv = load i64, i64* %kcell\n\
+             \x20 %eq = icmp eq i64 %kv, %k\n\
+             \x20 br i1 %eq, label %g_some, label %g_next\n\
+             g_next:\n\
+             \x20 %i_p1 = add i64 %i, 1\n\
+             \x20 %i_n = and i64 %i_p1, %mask\n\
+             \x20 store i64 %i_n, i64* %i_p\n\
+             \x20 br label %g_loop\n\
+             g_some:\n\
+             \x20 %vcell = getelementptr {v}, {v}* %vals, i64 %i\n\
+             \x20 %vv = load {v}, {v}* %vcell\n\
+             \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {v} %vv, 1\n\
+             \x20 ret %{opt} %r2\n\
+             g_none:\n\
+             \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 ret %{opt} %n2\n\
+             }}\n\
+             define %{opt} @{s}_insert(%{s}* %m, i64 %k, {v} %v) {{\n\
+             \x20 %cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+             \x20 %tp_ins_hm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+             \x20 %cap = load i64, i64* %cp\n\
+             \x20 %len = load i64, i64* %lp\n\
+             \x20 %tomb = load i64, i64* %tp_ins_hm\n\
+             \x20 %cap_zero = icmp eq i64 %cap, 0\n\
+             \x20 %load_sum = add i64 %len, %tomb\n\
+             \x20 %load2 = mul i64 %load_sum, 2\n\
+             \x20 %need_grow_load = icmp uge i64 %load2, %cap\n\
+             \x20 %need = or i1 %cap_zero, %need_grow_load\n\
+             \x20 br i1 %need, label %ins_grow, label %ins_probe\n\
+             ins_grow:\n\
+             \x20 call void @{s}__grow(%{s}* %m)\n\
+             \x20 br label %ins_probe\n\
+             ins_probe:\n\
+             \x20 %kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %cap2 = load i64, i64* %cp\n\
+             \x20 %mask = sub i64 %cap2, 1\n\
+             \x20 %keys = load i64*, i64** %kpp\n\
+             \x20 %vals = load {v}*, {v}** %vpp\n\
+             \x20 %occ = load i8*, i8** %opp\n\
+             \x20 %h = call i64 @{s}__hash_key(i64 %k)\n\
+             \x20 %i0 = and i64 %h, %mask\n\
+             \x20 %i_p = alloca i64\n\
+             \x20 store i64 %i0, i64* %i_p\n\
+             \x20 %first_tomb_p_hm = alloca i64\n\
+             \x20 store i64 -1, i64* %first_tomb_p_hm\n\
+             \x20 br label %ins_loop\n\
+             ins_loop:\n\
+             \x20 %i = load i64, i64* %i_p\n\
+             \x20 %ocell = getelementptr i8, i8* %occ, i64 %i\n\
+             \x20 %oval = load i8, i8* %ocell\n\
+             \x20 %is_empty = icmp eq i8 %oval, 0\n\
+             \x20 br i1 %is_empty, label %ins_place, label %ins_test_occ\n\
+             ins_test_occ:\n\
+             \x20 %is_occ_ins = icmp eq i8 %oval, 1\n\
+             \x20 br i1 %is_occ_ins, label %ins_check_eq, label %ins_test_tomb\n\
+             ins_check_eq:\n\
+             \x20 %kcell = getelementptr i64, i64* %keys, i64 %i\n\
+             \x20 %kv = load i64, i64* %kcell\n\
+             \x20 %eq = icmp eq i64 %kv, %k\n\
+             \x20 br i1 %eq, label %ins_update, label %ins_next\n\
+             ins_test_tomb:\n\
+             \x20 %ft_cur = load i64, i64* %first_tomb_p_hm\n\
+             \x20 %ft_unset = icmp eq i64 %ft_cur, -1\n\
+             \x20 br i1 %ft_unset, label %ins_record_tomb, label %ins_next\n\
+             ins_record_tomb:\n\
+             \x20 store i64 %i, i64* %first_tomb_p_hm\n\
+             \x20 br label %ins_next\n\
+             ins_next:\n\
+             \x20 %i_p1 = add i64 %i, 1\n\
+             \x20 %i_n = and i64 %i_p1, %mask\n\
+             \x20 store i64 %i_n, i64* %i_p\n\
+             \x20 br label %ins_loop\n\
+             ins_update:\n\
+             \x20 %vcell_u = getelementptr {v}, {v}* %vals, i64 %i\n\
+             \x20 %old_v = load {v}, {v}* %vcell_u\n\
+             \x20 store {v} %v, {v}* %vcell_u\n\
+             \x20 %r1 = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2 = insertvalue %{opt} %r1, {v} %old_v, 1\n\
+             \x20 ret %{opt} %r2\n\
+             ins_place:\n\
+             \x20 %ft_f = load i64, i64* %first_tomb_p_hm\n\
+             \x20 %use_tomb_hm = icmp ne i64 %ft_f, -1\n\
+             \x20 br i1 %use_tomb_hm, label %ins_store_tomb, label %ins_store_empty\n\
+             ins_store_tomb:\n\
+             \x20 %tk = getelementptr i64, i64* %keys, i64 %ft_f\n\
+             \x20 store i64 %k, i64* %tk\n\
+             \x20 %tv = getelementptr {v}, {v}* %vals, i64 %ft_f\n\
+             \x20 store {v} %v, {v}* %tv\n\
+             \x20 %to = getelementptr i8, i8* %occ, i64 %ft_f\n\
+             \x20 store i8 1, i8* %to\n\
+             \x20 %ot = load i64, i64* %tp_ins_hm\n\
+             \x20 %ot_dec = sub i64 %ot, 1\n\
+             \x20 store i64 %ot_dec, i64* %tp_ins_hm\n\
+             \x20 br label %ins_inc_len_hm\n\
+             ins_store_empty:\n\
+             \x20 %kcell2 = getelementptr i64, i64* %keys, i64 %i\n\
+             \x20 store i64 %k, i64* %kcell2\n\
+             \x20 %vcell2 = getelementptr {v}, {v}* %vals, i64 %i\n\
+             \x20 store {v} %v, {v}* %vcell2\n\
+             \x20 store i8 1, i8* %ocell\n\
+             \x20 br label %ins_inc_len_hm\n\
+             ins_inc_len_hm:\n\
+             \x20 %old_len = load i64, i64* %lp\n\
+             \x20 %nl = add i64 %old_len, 1\n\
+             \x20 store i64 %nl, i64* %lp\n\
+             \x20 %n1 = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %n2 = insertvalue %{opt} %n1, {v} 0, 1\n\
+             \x20 ret %{opt} %n2\n\
+             }}\n\
+             define %{opt} @{s}_remove(%{s}* %m, i64 %k) {{\n\
+             \x20 %cp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+             \x20 %cap_rm = load i64, i64* %cp_rm\n\
+             \x20 %is_zero_rm = icmp eq i64 %cap_rm, 0\n\
+             \x20 br i1 %is_zero_rm, label %hmr_none, label %hmr_probe\n\
+             hmr_probe:\n\
+             \x20 %kpp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+             \x20 %vpp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+             \x20 %opp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+             \x20 %lp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+             \x20 %tp_rm = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+             \x20 %mask_rm = sub i64 %cap_rm, 1\n\
+             \x20 %keys_rm = load i64*, i64** %kpp_rm\n\
+             \x20 %vals_rm = load {v}*, {v}** %vpp_rm\n\
+             \x20 %occ_rm = load i8*, i8** %opp_rm\n\
+             \x20 %h_rm = call i64 @{s}__hash_key(i64 %k)\n\
+             \x20 %i0_rm = and i64 %h_rm, %mask_rm\n\
+             \x20 %i_p_rm = alloca i64\n\
+             \x20 store i64 %i0_rm, i64* %i_p_rm\n\
+             \x20 br label %hmr_loop\n\
+             hmr_loop:\n\
+             \x20 %i_rm = load i64, i64* %i_p_rm\n\
+             \x20 %ocell_rm = getelementptr i8, i8* %occ_rm, i64 %i_rm\n\
+             \x20 %oval_rm = load i8, i8* %ocell_rm\n\
+             \x20 %empty_rm = icmp eq i8 %oval_rm, 0\n\
+             \x20 br i1 %empty_rm, label %hmr_none, label %hmr_test_occ\n\
+             hmr_test_occ:\n\
+             \x20 %is_occ_rm = icmp eq i8 %oval_rm, 1\n\
+             \x20 br i1 %is_occ_rm, label %hmr_check_eq, label %hmr_next\n\
+             hmr_check_eq:\n\
+             \x20 %kcell_rm = getelementptr i64, i64* %keys_rm, i64 %i_rm\n\
+             \x20 %kv_rm = load i64, i64* %kcell_rm\n\
+             \x20 %eq_rm = icmp eq i64 %kv_rm, %k\n\
+             \x20 br i1 %eq_rm, label %hmr_yes, label %hmr_next\n\
+             hmr_next:\n\
+             \x20 %i_p1_rm = add i64 %i_rm, 1\n\
+             \x20 %i_n_rm = and i64 %i_p1_rm, %mask_rm\n\
+             \x20 store i64 %i_n_rm, i64* %i_p_rm\n\
+             \x20 br label %hmr_loop\n\
+             hmr_yes:\n\
+             \x20 %vcell_rm = getelementptr {v}, {v}* %vals_rm, i64 %i_rm\n\
+             \x20 %prev_v = load {v}, {v}* %vcell_rm\n\
+             \x20 store i8 2, i8* %ocell_rm\n\
+             \x20 %old_len_rm = load i64, i64* %lp_rm\n\
+             \x20 %nl_rm = sub i64 %old_len_rm, 1\n\
+             \x20 store i64 %nl_rm, i64* %lp_rm\n\
+             \x20 %old_tomb_rm = load i64, i64* %tp_rm\n\
+             \x20 %nt_rm = add i64 %old_tomb_rm, 1\n\
+             \x20 store i64 %nt_rm, i64* %tp_rm\n\
+             \x20 %r1_rm = insertvalue %{opt} undef, i32 0, 0\n\
+             \x20 %r2_rm = insertvalue %{opt} %r1_rm, {v} %prev_v, 1\n\
+             \x20 ret %{opt} %r2_rm\n\
+             hmr_none:\n\
+             \x20 %nn1_rm = insertvalue %{opt} undef, i32 1, 0\n\
+             \x20 %nn2_rm = insertvalue %{opt} %nn1_rm, {v} 0, 1\n\
+             \x20 ret %{opt} %nn2_rm\n\
+             }}\n",
+            s = s, v = v_llvm, opt = opt_v,
+        ));
+    }
+    // clear() — always emitted.
+    out.push_str(&format!(
+        "define i64 @{s}_clear(%{s}* %m) {{\n\
+         \x20 %hmc_lp = getelementptr %{s}, %{s}* %m, i32 0, i32 3\n\
+         \x20 %hmc_prior = load i64, i64* %hmc_lp\n\
+         \x20 %hmc_kpp = getelementptr %{s}, %{s}* %m, i32 0, i32 0\n\
+         \x20 %hmc_vpp = getelementptr %{s}, %{s}* %m, i32 0, i32 1\n\
+         \x20 %hmc_opp = getelementptr %{s}, %{s}* %m, i32 0, i32 2\n\
+         \x20 %hmc_keys = load i64*, i64** %hmc_kpp\n\
+         \x20 %hmc_vals = load {v}*, {v}** %hmc_vpp\n\
+         \x20 %hmc_occ = load i8*, i8** %hmc_opp\n\
+         \x20 %hmc_k_null = icmp eq i64* %hmc_keys, null\n\
+         \x20 br i1 %hmc_k_null, label %hmc_v, label %hmc_fk\n\
+         hmc_fk:\n\
+         \x20 %hmc_k_i8 = bitcast i64* %hmc_keys to i8*\n\
+         \x20 call void @free(i8* %hmc_k_i8)\n\
+         \x20 br label %hmc_v\n\
+         hmc_v:\n\
+         \x20 %hmc_v_null = icmp eq {v}* %hmc_vals, null\n\
+         \x20 br i1 %hmc_v_null, label %hmc_o, label %hmc_fv\n\
+         hmc_fv:\n\
+         \x20 %hmc_v_i8 = bitcast {v}* %hmc_vals to i8*\n\
+         \x20 call void @free(i8* %hmc_v_i8)\n\
+         \x20 br label %hmc_o\n\
+         hmc_o:\n\
+         \x20 %hmc_o_null = icmp eq i8* %hmc_occ, null\n\
+         \x20 br i1 %hmc_o_null, label %hmc_done, label %hmc_fo\n\
+         hmc_fo:\n\
+         \x20 call void @free(i8* %hmc_occ)\n\
+         \x20 br label %hmc_done\n\
+         hmc_done:\n\
+         \x20 store i64* null, i64** %hmc_kpp\n\
+         \x20 store {v}* null, {v}** %hmc_vpp\n\
+         \x20 store i8* null, i8** %hmc_opp\n\
+         \x20 %hmc_cp = getelementptr %{s}, %{s}* %m, i32 0, i32 4\n\
+         \x20 %hmc_tp = getelementptr %{s}, %{s}* %m, i32 0, i32 5\n\
+         \x20 store i64 0, i64* %hmc_lp\n\
+         \x20 store i64 0, i64* %hmc_cp\n\
+         \x20 store i64 0, i64* %hmc_tp\n\
+         \x20 ret i64 %hmc_prior\n\
+         }}\n\n",
+        s = s, v = v_llvm,
+    ));
+}
+
 fn emit_intent_hashmap_i64_i64_helpers_llvm(out: &mut String, has_option_i64: bool) {
     out.push_str(
         "define %intent_hashmap_i64_i64 @intent_hashmap_i64_i64_new() {\n\
@@ -34173,6 +34743,72 @@ fn is_scalar(ty: &Type) -> bool {
 /// operator's concern, not the type's, so `u64` and `i64` both map
 /// to `i64`. Float / aggregate types are stubbed pending those
 /// portions of the backend landing.
+/// ARC 1.5c helper — derive the per-(K, V) LLVM bundle dispatch
+/// triple `(struct_prefix, v_llvm_type, option_v_type)` for a
+/// HashMap type. Returns sensible defaults if `ty` is something
+/// else (callers should only call this on HashMap-typed exprs).
+fn hashmap_llvm_dispatch(k: &Type, v: &Type) -> (String, &'static str, String) {
+    // Legacy (i64, i64) keeps the legacy prefix.
+    if matches!(k, Type::I64) && matches!(v, Type::I64) {
+        return (
+            "intent_hashmap_i64_i64".to_string(),
+            "i64",
+            "Enum_Option__i64".to_string(),
+        );
+    }
+    let v_tag: &str = match v {
+        Type::I8 => "int8_t",
+        Type::I16 => "int16_t",
+        Type::I32 => "int32_t",
+        Type::I64 => "int64_t",
+        Type::U8 => "uint8_t",
+        Type::U16 => "uint16_t",
+        Type::U32 => "uint32_t",
+        Type::U64 => "uint64_t",
+        Type::Bool => "bool",
+        _ => "int64_t",
+    };
+    let v_llvm: &str = match v {
+        Type::I8 | Type::U8 | Type::Bool => "i8",
+        Type::I16 | Type::U16 => "i16",
+        Type::I32 | Type::U32 => "i32",
+        _ => "i64",
+    };
+    let v_mangle: &str = match v {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        Type::U8 => "u8",
+        Type::U16 => "u16",
+        Type::U32 => "u32",
+        Type::U64 => "u64",
+        Type::Bool => "bool",
+        _ => "i64",
+    };
+    let _ = k; // K is always i64 in v1 scope
+    (
+        format!("intent_hashmap_int64_t_{}", v_tag),
+        v_llvm,
+        format!("Enum_Option__{}", v_mangle),
+    )
+}
+
+fn hashmap_llvm_dispatch_from_ty(ty: &Type) -> (String, &'static str, String) {
+    match ty {
+        Type::HashMap(k, v) => hashmap_llvm_dispatch(k, v),
+        _ => hashmap_llvm_dispatch(&Type::I64, &Type::I64),
+    }
+}
+
+fn hashmap_llvm_dispatch_from_recv(ty: &Type) -> (String, &'static str, String) {
+    let inner = match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => inner.as_ref(),
+        other => other,
+    };
+    hashmap_llvm_dispatch_from_ty(inner)
+}
+
 pub(crate) fn llvm_type(ty: &Type) -> &'static str {
     match ty {
         Type::I8 | Type::U8 => "i8",
@@ -34322,6 +34958,11 @@ fn llvm_type_string(ty: &Type) -> String {
         // `Channel<T, N>` has its own struct type per (T, N).
         Type::Channel(element, capacity) => {
             llvm_channel_struct(element, *capacity)
+        }
+        // ARC 1.5c — per-(K, V) HashMap struct name.
+        Type::HashMap(k, v) => {
+            let (prefix, _, _) = hashmap_llvm_dispatch(k, v);
+            format!("%{}", prefix)
         }
         // `fn(T1, T2) -> R` lowers to the LLVM function-
         // pointer type `<ret> (<params>)*`.

@@ -10,7 +10,47 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.4 — C-side per-(K, V)
+**Last updated:** 2026-06-03 (**ARC 1.4 + ARC 1.5 COMPLETE —
+per-(K, V) HashMap bundle, both backends.** `HashMap<i64, V>`
+for V ∈ {i8, i16, i32, i64, u8, u16, u32, u64, bool} now
+compiles + runs end-to-end on **both** the C and LLVM backends
+with cross-backend parity preserved. Apply of the ARC 2.3 success
+pattern (mechanical translation with C as gold reference).
+
+ARC 1.5a: new `emit_intent_hashmap_pair_llvm(out, v_llvm, v_mangle,
+v_tag, v_size, has_option_v)` produces a per-(K=i64, V) LLVM
+bundle parallel to the C-side 1.4c. Struct typedef
+`%intent_hashmap_int64_t_<V_tag>` + new/drop/hash_key/insert_raw/
+grow/contains_key/len/clear. Get/insert/remove gated on
+has_option_v. K=i64 stays in v1 (hash function unchanged); V's
+LLVM type, byte size, and Option<V> mangled name parameterize.
+
+ARC 1.5b: LLVM prologue mirrors C-side 1.4d — walks
+`collect_hashmap_pairs(program)`, emits per-pair bundle for each
+non-(i64, i64) shape, skips (i64, i64) (legacy bundle covers it).
+
+ARC 1.5c: LLVM `emit_call` hashmap_* arms dispatch via three
+helpers (`hashmap_llvm_dispatch_from_kv` / `_from_ty` /
+`_from_recv`) that derive `(prefix, v_llvm, opt_v)` from the call
+site's type. `llvm_type_string` extended with HashMap arm so
+binding declarations use the right struct typename. HashMap drop
+emission updated similarly.
+
+ARC 1.5d: LLVM SSA no-op — same `ssa_path_supports` rejection
+applies (hashmap programs fall back to tree LLVM path).
+
+ARC 1.5e: **4 new lib tests** pin cross-backend parity —
+HashMap<i64, u32/u64/i32> produce per-pair LLVM bundles,
+HashMap<i64, i64> keeps the legacy LLVM prefix. End-to-end
+smoke: `HashMap<i64, u32>` returns exit 2 on both backends.
+Cross-backend parity sweep (54 tests) still green.
+
+**Sub-arc 1 status: HashMap monomorphization for scalar V is
+COMPLETE on both backends.** Only ARC 1.7 (struct K) and ARC 4
+(wider K, OwnedStr/Tuple/Vec V) remain. **1771 lib + 54 parity
+green.**
+
+**Prior:** 2026-06-03 (**ARC 1.4 — C-side per-(K, V)
 HashMap bundle COMPLETE.** All six C-side sub-steps (1.4a Option<V>
 mono / 1.4b checker relax / 1.4c parameterized bundle / 1.4d
 prologue wiring / 1.4e tree emit_call dispatch / 1.4f SSA no-op

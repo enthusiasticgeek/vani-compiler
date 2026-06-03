@@ -31649,6 +31649,67 @@ fn main() -> i64 {
         assert_eq!(pairs[1].tag, "intent_hashmap_int64_t_hm_int64_t_int64_t");
     }
 
+    // ARC 1.5a-e — LLVM mirror of per-(K, V) C bundle.
+
+    #[test]
+    fn hashmap_i64_u32_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _c = compile_to_c(source).expect("HashMap<i64, u32> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<i64, u32> → LLVM");
+        assert!(
+            ll.contains("intent_hashmap_int64_t_uint32_t"),
+            "expected per-pair LLVM bundle, got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn hashmap_i64_u64_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _c = compile_to_c(source).expect("HashMap<i64, u64> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<i64, u64> → LLVM");
+        assert!(ll.contains("intent_hashmap_int64_t_uint64_t"));
+    }
+
+    #[test]
+    fn hashmap_i64_i32_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _c = compile_to_c(source).expect("HashMap<i64, i32> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<i64, i32> → LLVM");
+        assert!(ll.contains("intent_hashmap_int64_t_int32_t"));
+    }
+
+    #[test]
+    fn hashmap_legacy_i64_i64_keeps_legacy_llvm_prefix() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("legacy HashMap<i64, i64> → LLVM");
+        assert!(ll.contains("intent_hashmap_i64_i64"));
+    }
+
     // ARC 1.4c+d+e — per-(K, V) C bundle round-trips for HashMap<i64, V>.
 
     #[test]
