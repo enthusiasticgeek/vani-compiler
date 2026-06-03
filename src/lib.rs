@@ -30260,6 +30260,107 @@ fn main() -> i64 {
     // local bindings, expressions, or struct/tuple fields.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // T2.6 — pointer-arithmetic ban diagnostic (MISRA C 2012
+    // Rule 18.4). Explicit MISRA-aware error message when
+    // users try `+`/`-` / shift / bitwise on `*const T` /
+    // `*mut T` operands. Comparison ops still allowed (== /
+    // != on pointers is legitimate).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn ptr_arith_add_rejected_with_misra_diagnostic() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad(p: *const i64) -> i64 {
+              let q = p + 1;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("pointer + int rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("MISRA C 2012 Rule 18.4")
+                && d.message.contains("BoundedPtr<T>")),
+            "expected MISRA 18.4 diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn ptr_arith_sub_rejected() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn bad(p: *mut i64) -> i64 {
+              let q = p - 1;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("pointer - int rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("MISRA C 2012 Rule 18.4")),
+            "expected MISRA diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // T2.4 — cyclomatic complexity warning. Opt-in via
+    // `INTENT_CHECK_COMPLEXITY=1` or `INTENT_MAX_COMPLEXITY=<N>`.
+    // Tests use the safety module directly to avoid env-var
+    // racing with the test harness (same pattern as
+    // `compile_with_global_no_heap`).
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn complexity_pass_runs_when_invoked_directly() {
+        let source = r#"
+            fn complex(a: i64, b: i64) -> i64 {
+              if a > 0 { if b > 0 { return 1; } }
+              if a < 0 { if b < 0 { return -1; } }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        // Set the env-var on this thread + verify the pass
+        // detects high complexity. The lock pattern matches
+        // the NoHeapGuard approach.
+        let _lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("INTENT_MAX_COMPLEXITY", "2");
+        let mut diagnostics = Vec::new();
+        crate::safety::enforce_complexity(&checked.ir, &mut diagnostics);
+        std::env::remove_var("INTENT_MAX_COMPLEXITY");
+        assert!(
+            diagnostics.iter().any(|d| d.message.contains("cyclomatic complexity")),
+            "expected complexity diagnostic, got: {:?}",
+            diagnostics
+        );
+    }
+
+    #[test]
+    fn complexity_pass_silent_without_opt_in() {
+        let source = r#"
+            fn complex(a: i64) -> i64 {
+              if a > 0 {
+                if a > 10 { return 1; }
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let mut diagnostics = Vec::new();
+        // No env var set — pass should produce zero diagnostics.
+        crate::safety::enforce_complexity(&checked.ir, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "expected no diagnostics without opt-in, got: {:?}",
+            diagnostics
+        );
+    }
+
     #[test]
     fn no_float_rejects_f64_param() {
         let source = r#"

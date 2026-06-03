@@ -286,6 +286,149 @@ fn walk_stmt(stmt: &TypedStmt, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<
     }
 }
 
+/// T2.4 — cyclomatic complexity (McCabe) warning. For each
+/// function, count: 1 (base) + every if/while/for/match-arm/
+/// && / ||. If > threshold (default 15, override via
+/// `INTENT_MAX_COMPLEXITY=<N>`), emit a warning-level
+/// diagnostic. Not a hard error — complex fns sometimes
+/// genuinely need their branches, but the report nudges
+/// users toward smaller fns.
+///
+/// MISRA 18.x adjacent. Not a MISRA rule per se but widely
+/// used as a complexity ceiling for safety-critical code
+/// review.
+pub fn enforce_complexity(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    // Opt-in only — emits diagnostics only when
+    // `INTENT_CHECK_COMPLEXITY=1` (or override via
+    // `INTENT_MAX_COMPLEXITY=<N>` which also enables it).
+    // Avoids surfacing the warning for the 1500+ existing
+    // functions in the test corpus that legitimately exceed
+    // the default threshold.
+    let opt_in = std::env::var("INTENT_CHECK_COMPLEXITY")
+        .ok()
+        .as_deref()
+        == Some("1")
+        || std::env::var("INTENT_MAX_COMPLEXITY").is_ok();
+    if !opt_in {
+        return;
+    }
+    let max: u64 = std::env::var("INTENT_MAX_COMPLEXITY")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(15);
+    for f in &program.functions {
+        if f.is_extern {
+            continue;
+        }
+        let mut count: u64 = 1;
+        for s in &f.body {
+            count += stmt_complexity(s);
+        }
+        if count > max {
+            diagnostics.push(Diagnostic::new(
+                f.span,
+                format!(
+                    "'{}' has cyclomatic complexity {} (over threshold {}). \
+                     Consider extracting helpers — high-branch fns are harder \
+                     to review against MISRA / ISO 26262 / DO-178C coverage \
+                     requirements. Threshold is configurable via \
+                     `INTENT_MAX_COMPLEXITY=<N>`.",
+                    f.name, count, max
+                ),
+            ));
+        }
+    }
+}
+
+fn stmt_complexity(stmt: &TypedStmt) -> u64 {
+    match stmt {
+        TypedStmt::If { cond, then_body, else_body } => {
+            let mut c = 1; // the `if` itself
+            c += expr_complexity(cond);
+            for s in then_body { c += stmt_complexity(s); }
+            for s in else_body { c += stmt_complexity(s); }
+            c
+        }
+        TypedStmt::While { cond, body } => {
+            let mut c = 1; // the `while`
+            c += expr_complexity(cond);
+            for s in body { c += stmt_complexity(s); }
+            c
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            let mut c = 1; // the `for`
+            c += expr_complexity(start);
+            c += expr_complexity(end);
+            for s in body { c += stmt_complexity(s); }
+            c
+        }
+        TypedStmt::ForIter { body, .. } => {
+            let mut c = 1;
+            for s in body { c += stmt_complexity(s); }
+            c
+        }
+        TypedStmt::Let { expr, .. }
+        | TypedStmt::Reassign { expr, .. }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr }
+        | TypedStmt::Discard { expr } => expr_complexity(expr),
+        TypedStmt::IndexAssign { value, .. } | TypedStmt::FieldAssign { value, .. } => {
+            expr_complexity(value)
+        }
+        TypedStmt::Print { items } => {
+            items.iter().map(|it| match it {
+                crate::ir::TypedPrintItem::Expr(e) => expr_complexity(e),
+                _ => 0,
+            }).sum()
+        }
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
+            body.iter().map(stmt_complexity).sum()
+        }
+        _ => 0,
+    }
+}
+
+fn expr_complexity(expr: &TypedExpr) -> u64 {
+    use crate::ast::BinaryOp;
+    match &expr.kind {
+        // && and || each add a branch point.
+        TypedExprKind::Binary { op, left, right, .. } => {
+            let extra = if matches!(op, BinaryOp::And | BinaryOp::Or) { 1 } else { 0 };
+            extra + expr_complexity(left) + expr_complexity(right)
+        }
+        TypedExprKind::Unary { expr, .. } | TypedExprKind::Cast { expr, .. } => {
+            expr_complexity(expr)
+        }
+        TypedExprKind::Match { scrutinee, arms } => {
+            // Each match arm contributes 1.
+            let mut c = arms.len() as u64;
+            c += expr_complexity(scrutinee);
+            for a in arms { c += expr_complexity(&a.body); }
+            c
+        }
+        TypedExprKind::IfExpr { cond, then_value, else_value } => {
+            1 + expr_complexity(cond) + expr_complexity(then_value)
+                + expr_complexity(else_value)
+        }
+        TypedExprKind::Call { args, .. } => {
+            args.iter().map(expr_complexity).sum()
+        }
+        TypedExprKind::Index { array, index, .. } => {
+            expr_complexity(array) + expr_complexity(index)
+        }
+        TypedExprKind::ArrayLit { elements } | TypedExprKind::Tuple { elements } => {
+            elements.iter().map(expr_complexity).sum()
+        }
+        TypedExprKind::Block { stmts, tail } => {
+            let mut c = stmts.iter().map(stmt_complexity).sum::<u64>();
+            c += expr_complexity(tail);
+            c
+        }
+        _ => 0,
+    }
+}
+
 /// T2.3 — enforce `#[no_float]` per function. Walks the
 /// function body looking for any sub-expression of type
 /// `Type::F32` or `Type::F64` (or `Vec<Fxx>` / `Array<Fxx;N>`

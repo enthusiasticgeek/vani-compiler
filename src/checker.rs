@@ -1010,6 +1010,12 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // strict opt-in via the function annotation.
         crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
+        // T2.4 — cyclomatic complexity warning. Opt-in via
+        // env vars (`INTENT_CHECK_COMPLEXITY=1` or
+        // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
+        // preserve compile-with-and-without parity.
+        #[cfg(not(test))]
+        crate::safety::enforce_complexity(&typed_program_view, &mut diagnostics);
     }
 
     if diagnostics.is_empty() {
@@ -13652,6 +13658,47 @@ fn check_binary(
     }
     let rhs = check_expr(right, env, signatures, diagnostics);
     let span = left.span.merge(right.span);
+
+    // T2.6 of safety-standard arc — pointer-arithmetic ban
+    // (MISRA C 2012 Rule 18.4). Detect operands of raw-pointer
+    // type and emit an explicit MISRA-aware diagnostic instead
+    // of the generic "no implicit promotion" error users would
+    // otherwise see. Applies to arithmetic, shift, and bitwise
+    // ops on `*const T` / `*mut T`. Comparison ops still
+    // fall through to the generic check (== / != on pointers
+    // is legitimate).
+    let is_arith_op = matches!(
+        op,
+        BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul
+            | BinaryOp::Div | BinaryOp::Rem | BinaryOp::Shl | BinaryOp::Shr
+            | BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor
+    );
+    let lhs_is_raw = matches!(*lhs.ty(), Type::Ptr(_) | Type::PtrMut(_));
+    let rhs_is_raw = matches!(*rhs.ty(), Type::Ptr(_) | Type::PtrMut(_));
+    if is_arith_op && (lhs_is_raw || rhs_is_raw) {
+        let kind = if lhs_is_raw && rhs_is_raw {
+            "both operands"
+        } else if lhs_is_raw {
+            "left operand"
+        } else {
+            "right operand"
+        };
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "pointer arithmetic on raw pointer ({} is a `*const T` / \
+                 `*mut T`) — MISRA C 2012 Rule 18.4 forbids `+`/`-` / shift / \
+                 bitwise on pointer types. Use indices into a `Vec<T>` or wrap \
+                 the pointer in `BoundedPtr<T>` (Layer 3.2 of `unsafe.md`) \
+                 and use `bptr_get(bp, i)` / `bptr_set(bp, i, v)` for \
+                 bounds-checked indexed access.",
+                kind
+            ),
+        ));
+        // Fall through; the generic checker will reject too,
+        // but we want OUR diagnostic to fire first so it's
+        // the prominent one in the report.
+    }
 
     match op {
         BinaryOp::Add => {
