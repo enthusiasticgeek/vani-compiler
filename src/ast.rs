@@ -1633,6 +1633,16 @@ pub enum ExprKind {
         body: Vec<Stmt>,
         /// Span of the `fn` keyword for error messages.
         fn_span: Span,
+        /// ARC 3a: explicit by-ref capture list. Names listed
+        /// here are captured as `Ref<T>` rather than by-value.
+        /// Surface syntax: `fn(p: T) -> R [ref name1, ref name2]
+        /// { body }`. Empty list means all captures are implicit
+        /// and by-value (the v1 default, preserved for backwards
+        /// compatibility). The lambda-lift pass uses this list
+        /// to decide which captured names get `Type::Ref(...)`
+        /// hoisted-param types and which call-sites pass
+        /// `ref name` instead of bare `name`.
+        ref_captures: Vec<String>,
     },
 }
 

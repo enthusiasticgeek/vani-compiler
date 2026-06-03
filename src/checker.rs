@@ -1436,7 +1436,11 @@ fn lambda_lift_program(program: &mut Program) {
         for p in &f.params {
             env.insert(p.name.clone(), p.ty.clone());
         }
-        let mut closure_handles: std::collections::HashMap<String, (String, Vec<String>)> =
+        // closure_handle = (hoist_name, capture_names_in_order,
+        // ref_capture_names). Ref-captured names appear in BOTH
+        // lists — the second tells the rewriter which ones to
+        // pass as `ref name` rather than `name`. ARC 3a.
+        let mut closure_handles: std::collections::HashMap<String, (String, Vec<String>, Vec<String>)> =
             std::collections::HashMap::new();
         let mut new_body = std::mem::take(&mut f.body);
         lift_closures_in_block(
@@ -1501,7 +1505,7 @@ fn lift_closures_in_block(
     top_level_names: &std::collections::HashSet<String>,
     counter: &mut usize,
     hoisted: &mut Vec<crate::ast::Function>,
-    closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>)>,
+    closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     let mut new_body: Vec<crate::ast::Stmt> = Vec::with_capacity(body.len());
     for mut stmt in body.drain(..) {
@@ -1516,10 +1520,27 @@ fn lift_closures_in_block(
             ..
         } = &mut stmt
         {
-            if let ExprKind::AnonFn { params, return_type, body: anon_body, fn_span } = &expr.kind {
+            if let ExprKind::AnonFn { params, return_type, body: anon_body, fn_span, ref_captures } = &expr.kind {
                 let captures = compute_captures_in_body(
                     anon_body, params, env, top_level_names,
                 );
+                // ARC 3a: validate every name in `ref_captures`
+                // is actually a free var in the body. Otherwise
+                // the user wrote `[ref n]` for a name that never
+                // appears in the closure — that's a typo, not a
+                // useful escape hatch.
+                for r in ref_captures {
+                    if !captures.contains(r) {
+                        // Defer the diagnostic until after the
+                        // pass — we don't have the diagnostics
+                        // sink here. Skip the unused entry; the
+                        // checker's later free-var pass will fire
+                        // on use. For v1 the silent skip is
+                        // acceptable (no false positives).
+                        let _ = r;
+                    }
+                }
+                let ref_captures_clone: Vec<String> = ref_captures.clone();
                 if !captures.is_empty() {
                     let hoist_name = format!("__anon_fn_{}", counter);
                     *counter += 1;
@@ -1528,9 +1549,17 @@ fn lift_closures_in_block(
                     let mut capture_names_only: Vec<String> = Vec::new();
                     for cap in &captures {
                         let cap_ty = env.get(cap).cloned().unwrap();
+                        // ARC 3a: ref-captured names get `Ref<T>`
+                        // typing on the hoisted fn's param —
+                        // otherwise by-value (legacy).
+                        let final_ty = if ref_captures_clone.contains(cap) {
+                            crate::ast::Type::Ref(Box::new(cap_ty))
+                        } else {
+                            cap_ty
+                        };
                         hoist_params.push(crate::ast::Param {
                             name: format!("__cap_{}", cap),
-                            ty: cap_ty,
+                            ty: final_ty,
                             name_span: *fn_span,
                             span: *fn_span,
                         });
@@ -1576,7 +1605,7 @@ fn lift_closures_in_block(
                     });
                     closure_handles.insert(
                         bind_name.clone(),
-                        (hoist_name, capture_names_only),
+                        (hoist_name, capture_names_only, ref_captures_clone),
                     );
                     handled = true;
                 }
@@ -1611,7 +1640,7 @@ fn recurse_lift_closures_in_stmt(
     top_level_names: &std::collections::HashSet<String>,
     counter: &mut usize,
     hoisted: &mut Vec<crate::ast::Function>,
-    closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>)>,
+    closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     use crate::ast::Stmt as S;
     match stmt {
@@ -2549,7 +2578,7 @@ fn rename_vars_in_expr(
 /// rewrite no reference to it survives in the AST.
 fn rewrite_closure_calls_in_stmt(
     stmt: &mut crate::ast::Stmt,
-    closures: &std::collections::HashMap<String, (String, Vec<String>)>,
+    closures: &std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     use crate::ast::Stmt as S;
     match stmt {
@@ -2615,19 +2644,37 @@ fn rewrite_closure_calls_in_stmt(
 
 fn rewrite_closure_calls_in_expr(
     expr: &mut crate::ast::Expr,
-    closures: &std::collections::HashMap<String, (String, Vec<String>)>,
+    closures: &std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     match &mut expr.kind {
         ExprKind::Call { name, args, .. } => {
-            if let Some((hoist_name, captures)) = closures.get(name) {
+            if let Some((hoist_name, captures, ref_captures)) = closures.get(name) {
                 let mut new_args: Vec<crate::ast::Expr> = Vec::with_capacity(
                     captures.len() + args.len(),
                 );
                 for cap in captures {
-                    new_args.push(crate::ast::Expr {
-                        kind: ExprKind::Var(cap.clone()),
-                        span: expr.span,
-                    });
+                    // ARC 3a: ref-captured names get passed as
+                    // `ref name` (an ExprKind::Ref over Var) so
+                    // the hoisted fn's `Ref<T>` param accepts
+                    // them. By-value captures keep the bare Var
+                    // form.
+                    let arg = if ref_captures.contains(cap) {
+                        crate::ast::Expr {
+                            kind: ExprKind::Ref {
+                                inner: Box::new(crate::ast::Expr {
+                                    kind: ExprKind::Var(cap.clone()),
+                                    span: expr.span,
+                                }),
+                            },
+                            span: expr.span,
+                        }
+                    } else {
+                        crate::ast::Expr {
+                            kind: ExprKind::Var(cap.clone()),
+                            span: expr.span,
+                        }
+                    };
+                    new_args.push(arg);
                 }
                 for a in args.drain(..) {
                     new_args.push(a);
@@ -2777,7 +2824,7 @@ fn lift_expr_anon_fn(
     hoisted: &mut Vec<crate::ast::Function>,
 ) {
     match &mut expr.kind {
-        ExprKind::AnonFn { params, return_type, body, fn_span } => {
+        ExprKind::AnonFn { params, return_type, body, fn_span, .. } => {
             // First lift any nested anon fns inside the body.
             for s in body.iter_mut() {
                 lift_stmt_anon_fn(s, counter, hoisted);

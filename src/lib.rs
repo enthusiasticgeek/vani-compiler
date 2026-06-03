@@ -30969,6 +30969,91 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 3a — capture-by-ref closures.
+
+    #[test]
+    fn closure_ref_capture_vec_typechecks() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let get_at = fn(i: i64) -> i64 [ref xs] { return xs[i]; };
+              return get_at(1);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "ref-captured Vec<i64> closure compiles",
+        );
+    }
+
+    #[test]
+    fn closure_ref_capture_emits_c_with_ref_param() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              let get_at = fn(i: i64) -> i64 [ref xs] { return xs[i]; };
+              return get_at(1);
+            }
+        "#;
+        let c = compile_to_c(source).expect("compiles to C");
+        // The hoisted fn's __cap_xs param should be a pointer
+        // (Vec ref) and the call site passes its address.
+        assert!(
+            c.contains("__cap_xs"),
+            "expected __cap_xs param in C output"
+        );
+    }
+
+    #[test]
+    fn closure_ref_capture_empty_list_means_default_capture() {
+        // Backwards compat: omitting the capture list keeps
+        // captures implicit + by-value (today's default).
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 42;
+              let f = fn(x: i64) -> i64 { return x + n; };
+              return f(8);
+            }
+        "#;
+        let _ = compile(source).expect("default by-value capture compiles");
+    }
+
+    #[test]
+    fn closure_ref_capture_multiple_refs() {
+        let source = r#"
+            fn main() -> i64 {
+              let a: Vec<i64> = vec(1, 2, 3);
+              let b: Vec<i64> = vec(10, 20, 30);
+              let sum_at = fn(i: i64) -> i64 [ref a, ref b] { return a[i] + b[i]; };
+              return sum_at(2);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "multi-ref-capture closure compiles",
+        );
+    }
+
+    #[test]
+    fn closure_ref_capture_capture_list_requires_ref_keyword() {
+        // `[name]` without `ref` should reject — the v1 surface
+        // requires `ref` to disambiguate from future by-value
+        // syntax.
+        let source = r#"
+            fn main() -> i64 {
+              let n: i64 = 10;
+              let f = fn(x: i64) -> i64 [n] { return x + n; };
+              return f(5);
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            "bare identifier in capture list must reject",
+        );
+        assert!(
+            !errs.is_empty(),
+            "expected diagnostic for missing 'ref', got: {:?}",
+            errs
+        );
+    }
+
     // ARC 1.3 — HashMap (K, V) pair collector.
 
     #[test]

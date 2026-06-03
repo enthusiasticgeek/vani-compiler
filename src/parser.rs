@@ -3838,6 +3838,11 @@ impl Parser {
                         return_type,
                         body,
                         fn_span: pipe_span,
+                        // |x| shorthand doesn't support explicit
+                        // capture lists — only the `fn(...)` long
+                        // form does. Implicit captures stay
+                        // by-value.
+                        ref_captures: Vec::new(),
                     },
                     span: pipe_span.merge(body_span),
                 })
@@ -3882,6 +3887,37 @@ impl Parser {
                     self.expect_keyword("'->'", |k| matches!(k, TokenKind::Arrow))?;
                     self.parse_type()?
                 };
+                // ARC 3a: optional explicit capture list
+                // `[ref name1, ref name2, ...]` between the
+                // return type and the body. Each entry names a
+                // free variable in the body that should be
+                // captured BY REFERENCE rather than by value.
+                // Backwards compatible: omitting the list keeps
+                // captures implicit + by-value (today's default).
+                let mut ref_captures: Vec<String> = Vec::new();
+                if self.check(|k| matches!(k, TokenKind::LBracket)) {
+                    self.bump(); // consume `[`
+                    if !self.check(|k| matches!(k, TokenKind::RBracket)) {
+                        loop {
+                            self.expect_keyword(
+                                "'ref' before captured identifier",
+                                |k| matches!(k, TokenKind::Ref),
+                            )?;
+                            let cap_tok = self.expect_ident()?;
+                            ref_captures.push(ident_text(cap_tok));
+                            if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
+                                break;
+                            }
+                            if self.check(|k| matches!(k, TokenKind::RBracket)) {
+                                break;
+                            }
+                        }
+                    }
+                    self.expect_keyword(
+                        "']' to close capture list",
+                        |k| matches!(k, TokenKind::RBracket),
+                    )?;
+                }
                 self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
                 let mut body: Vec<Stmt> = Vec::new();
                 while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
@@ -3912,6 +3948,7 @@ impl Parser {
                         return_type,
                         body,
                         fn_span,
+                        ref_captures,
                     },
                     span: fn_span.merge(close.span),
                 })

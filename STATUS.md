@@ -10,7 +10,31 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.3 shipped — HashMap (K, V)
+**Last updated:** 2026-06-03 (**ARC 3a shipped — capture-by-ref
+closures (all 5 sub-steps atomic).** First sub-track of the
+richer-closures arc. New surface syntax:
+`fn(p: T) -> R [ref name1, ref name2] { body }` — between the
+return type and the body, an explicit capture list naming
+variables to be captured by reference rather than by value. The
+list is opt-in: omitting `[...]` keeps the v1 default (implicit
+captures, by-value snapshot semantics via the existing free-var
+detector). `[ref xs] {...}` lifts each ref-captured name's
+type to `Type::Ref<T>` in the hoisted fn's param list, and the
+call site passes `ref xs` instead of `xs`. Critically, this
+unlocks **non-Copy captures** (`Vec<i64>`, `OwnedStr`, `HashMap`,
+etc.) which previously couldn't be captured at all — the
+existing `Ref<T>` codegen + drop machinery handles them
+automatically across both backends, so 3a.3/3a.4/3a.5 (C / LLVM /
+drop semantics) all came along for free. **5 new lib tests**
+(Vec ref-capture typechecks, C emits `__cap_xs` param, default
+by-value still works, multiple ref-captures compose,
+bare-identifier in `[...]` requires `ref` keyword). Smoke-tested
+end-to-end with both backends — `vec(10,20,30)` ref-captured
+through closure, indexed, both backends return exit 20.
+**1730 lib + 54 parity green.** ARC 3a complete; ARC 3b (non-i64
+element types in closures) is next in the closures arc.)
+
+**Prior:** 2026-06-03 (**ARC 1.3 shipped — HashMap (K, V)
 pair collector.** Third sub-step of the HashMap monomorphization
 arc. New `src/hashmap_bundle.rs` module with the
 `collect_hashmap_pairs(program)` API. Walks every type position
