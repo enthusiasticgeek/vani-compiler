@@ -1389,6 +1389,14 @@ fn validate_main(
 fn lambda_lift_program(program: &mut Program) {
     let mut counter: usize = 0;
     let mut hoisted: Vec<crate::ast::Function> = Vec::new();
+    // Arc 5c: parallel sink for env-struct decls synthesized
+    // by the lift pass. Each captured anon-fn becomes (a) its
+    // hoisted fn (the existing direct-call path) + (b) an
+    // env-struct + trampoline + magic-make-closure call so the
+    // binding can also be used as a Closure value. The lift
+    // pass pushes structs here; we append to program.structs
+    // at the end.
+    let mut hoisted_structs: Vec<crate::ast::StructDecl> = Vec::new();
 
     // Closure #314: build the set of names visible at the top
     // level (fns + consts + builtins). Used by `lift_let_capture_anon_fn`
@@ -1449,6 +1457,7 @@ fn lambda_lift_program(program: &mut Program) {
             &top_level_names,
             &mut counter,
             &mut hoisted,
+            &mut hoisted_structs,
             &mut closure_handles,
         );
         // Rewrite the whole body: every `Call { name = closure_handle }`
@@ -1475,6 +1484,7 @@ fn lambda_lift_program(program: &mut Program) {
         program.functions[idx] = f;
     }
     program.functions.extend(hoisted);
+    program.structs.extend(hoisted_structs);
 }
 
 /// Closure #314 helper: walk an anon fn body, return the
@@ -1505,6 +1515,7 @@ fn lift_closures_in_block(
     top_level_names: &std::collections::HashSet<String>,
     counter: &mut usize,
     hoisted: &mut Vec<crate::ast::Function>,
+    hoisted_structs: &mut Vec<crate::ast::StructDecl>,
     closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     let mut new_body: Vec<crate::ast::Stmt> = Vec::with_capacity(body.len());
@@ -1627,7 +1638,7 @@ fn lift_closures_in_block(
             env.insert(bind_name.clone(), ty.clone());
         }
         recurse_lift_closures_in_stmt(
-            &mut stmt, env, top_level_names, counter, hoisted, closure_handles,
+            &mut stmt, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
         );
         new_body.push(stmt);
     }
@@ -1640,21 +1651,22 @@ fn recurse_lift_closures_in_stmt(
     top_level_names: &std::collections::HashSet<String>,
     counter: &mut usize,
     hoisted: &mut Vec<crate::ast::Function>,
+    hoisted_structs: &mut Vec<crate::ast::StructDecl>,
     closure_handles: &mut std::collections::HashMap<String, (String, Vec<String>, Vec<String>)>,
 ) {
     use crate::ast::Stmt as S;
     match stmt {
         S::If { then_body, else_body, .. } => {
             lift_closures_in_block(
-                then_body, env, top_level_names, counter, hoisted, closure_handles,
+                then_body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
             lift_closures_in_block(
-                else_body, env, top_level_names, counter, hoisted, closure_handles,
+                else_body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
         }
         S::While { body, .. } => {
             lift_closures_in_block(
-                body, env, top_level_names, counter, hoisted, closure_handles,
+                body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
         }
         S::For { var, body, .. } => {
@@ -1662,12 +1674,12 @@ fn recurse_lift_closures_in_stmt(
             // closure that captures it.
             env.insert(var.clone(), crate::ast::Type::I64);
             lift_closures_in_block(
-                body, env, top_level_names, counter, hoisted, closure_handles,
+                body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
         }
         S::ForIter { body, .. } | S::TaskSpawn { body, .. } => {
             lift_closures_in_block(
-                body, env, top_level_names, counter, hoisted, closure_handles,
+                body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
         }
         // Statements without nested blocks need no recursion here.

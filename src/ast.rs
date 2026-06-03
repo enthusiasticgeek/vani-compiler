@@ -198,6 +198,16 @@ thread_local! {
     /// of the impl registries.
     pub(crate) static USER_DROP_BY_REF: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Arc 5c — registry of synthesized closure builders.
+    /// Key: magic-call name `__intent_make_closure_<N>`. Value:
+    /// `(trampoline_fn_name, env_struct_name, capture_types,
+    /// closure_args, closure_ret)`. The lift pass pushes one
+    /// entry per captured anon-fn binding; the checker reads
+    /// the entry to type-check the magic call as
+    /// `Type::Closure(args, ret)`; the backends read it again
+    /// to emit closure-struct construction.
+    pub(crate) static CLOSURE_MAKE_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, String, Vec<Type>, Vec<Type>, Type)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 pub fn set_user_drop_by_ref<I: IntoIterator<Item = String>>(names: I) {
