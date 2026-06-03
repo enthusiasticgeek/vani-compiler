@@ -1372,6 +1372,212 @@ fn check_dt_expr_calls(
     }
 }
 
+/// T3.5 — enforce MISRA C 2012 Rule 13.5: "The right hand
+/// operand of a logical `&&` or `||` operator shall not contain
+/// persistent side effects."
+///
+/// In vāṇी's static type system every function call could in
+/// principle have side effects (unless declared `pure`). MISRA
+/// 13.5 forbids RHS expressions that conditionally execute (via
+/// the short-circuit evaluation rule) and may have effects — the
+/// reason is that whether the side effect happens depends on the
+/// LHS value, making behaviour evaluation-order dependent.
+///
+/// This pass fires for functions that are either annotated
+/// `pure fn` or tagged with a standard composite that includes
+/// MISRA compliance (`#[misra_c_2012]`, `#[asil_d]`,
+/// `#[do178c_level_a]`, `#[iec_62304_class_c]`). It walks every
+/// expression and rejects any `&&` / `||` whose RHS contains a
+/// non-pure-non-builtin function call.
+///
+/// For pure fns the check is partially redundant (pure fns
+/// forbid impure calls entirely), but the targeted diagnostic
+/// gives a clearer MISRA-13.5 reason than the generic
+/// "calls to impure function" message.
+pub fn enforce_misra_13(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    let mut sig_pure: HashMap<String, bool> = HashMap::new();
+    for f in &program.functions {
+        sig_pure.insert(f.name.clone(), f.is_pure);
+    }
+    for f in &program.functions {
+        let in_scope = f.is_pure || f.safety_standard.is_some();
+        if !in_scope {
+            continue;
+        }
+        for s in &f.body {
+            check_misra_13_stmt(s, &f.name, &sig_pure, diagnostics);
+        }
+    }
+}
+
+fn check_misra_13_stmt(
+    stmt: &TypedStmt,
+    fn_name: &str,
+    sig_pure: &HashMap<String, bool>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use TypedStmt as S;
+    match stmt {
+        S::Let { expr, .. }
+        | S::Reassign { expr, .. }
+        | S::Return { expr }
+        | S::Assert { expr, .. }
+        | S::Prove { expr }
+        | S::Discard { expr } => check_misra_13_expr(expr, fn_name, sig_pure, diagnostics),
+        S::IndexAssign { index, value, .. } => {
+            check_misra_13_expr(index, fn_name, sig_pure, diagnostics);
+            check_misra_13_expr(value, fn_name, sig_pure, diagnostics);
+        }
+        S::FieldAssign { value, .. } => {
+            check_misra_13_expr(value, fn_name, sig_pure, diagnostics)
+        }
+        S::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    check_misra_13_expr(e, fn_name, sig_pure, diagnostics);
+                }
+            }
+        }
+        S::If { cond, then_body, else_body } => {
+            check_misra_13_expr(cond, fn_name, sig_pure, diagnostics);
+            for s in then_body {
+                check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
+            }
+            for s in else_body {
+                check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
+            }
+        }
+        S::While { cond, body } => {
+            check_misra_13_expr(cond, fn_name, sig_pure, diagnostics);
+            for s in body {
+                check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
+            }
+        }
+        S::For { start, end, body, .. } => {
+            check_misra_13_expr(start, fn_name, sig_pure, diagnostics);
+            check_misra_13_expr(end, fn_name, sig_pure, diagnostics);
+            for s in body {
+                check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
+            }
+        }
+        S::ForIter { body, .. }
+        | S::TaskSpawn { body, .. }
+        | S::UnsafeBlock { body, .. } => {
+            for s in body {
+                check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn check_misra_13_expr(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    sig_pure: &HashMap<String, bool>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ast::BinaryOp;
+    use crate::ir::TypedExprKind as E;
+    if let E::Binary { op, left, right, .. } = &expr.kind {
+        if matches!(op, BinaryOp::And | BinaryOp::Or) {
+            if expr_contains_impure_call(right, sig_pure) {
+                diagnostics.push(Diagnostic::new(
+                    right.span,
+                    format!(
+                        "MISRA 13.5: the right-hand operand of `{}` in '{}' contains \
+                         a function call — short-circuit evaluation makes the call's \
+                         side effect conditional on the LHS, producing evaluation-\
+                         order-dependent behaviour. Lift the call to a `let` binding \
+                         before the `{}`, or split the condition into separate `if` \
+                         statements.",
+                        op.display_symbol(),
+                        fn_name,
+                        op.display_symbol(),
+                    ),
+                ));
+            }
+        }
+    }
+    walk_misra_13_subexprs(expr, fn_name, sig_pure, diagnostics);
+}
+
+fn walk_misra_13_subexprs(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    sig_pure: &HashMap<String, bool>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ir::TypedExprKind as E;
+    match &expr.kind {
+        E::Binary { left, right, .. } => {
+            check_misra_13_expr(left, fn_name, sig_pure, diagnostics);
+            check_misra_13_expr(right, fn_name, sig_pure, diagnostics);
+        }
+        E::Unary { expr: inner, .. } | E::Cast { expr: inner, .. } => {
+            check_misra_13_expr(inner, fn_name, sig_pure, diagnostics);
+        }
+        E::Call { args, .. } => {
+            for a in args {
+                check_misra_13_expr(a, fn_name, sig_pure, diagnostics);
+            }
+        }
+        E::Index { array, index, .. } => {
+            check_misra_13_expr(array, fn_name, sig_pure, diagnostics);
+            check_misra_13_expr(index, fn_name, sig_pure, diagnostics);
+        }
+        E::ArrayLit { elements } => {
+            for e in elements {
+                check_misra_13_expr(e, fn_name, sig_pure, diagnostics);
+            }
+        }
+        E::CallIndirect { args, callee } => {
+            check_misra_13_expr(callee, fn_name, sig_pure, diagnostics);
+            for a in args {
+                check_misra_13_expr(a, fn_name, sig_pure, diagnostics);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn expr_contains_impure_call(
+    expr: &crate::ir::TypedExpr,
+    sig_pure: &HashMap<String, bool>,
+) -> bool {
+    use crate::ir::TypedExprKind as E;
+    match &expr.kind {
+        E::Call { name, args, .. } => {
+            let pure = sig_pure.get(name).copied().unwrap_or(false);
+            if !pure {
+                return true;
+            }
+            args.iter().any(|a| expr_contains_impure_call(a, sig_pure))
+        }
+        E::CallIndirect { .. } => {
+            // Indirect calls go through fn pointers — callee
+            // purity isn't statically resolvable. Conservative
+            // MISRA-13.5: treat as impure.
+            true
+        }
+        E::Binary { left, right, .. } => {
+            expr_contains_impure_call(left, sig_pure)
+                || expr_contains_impure_call(right, sig_pure)
+        }
+        E::Unary { expr: inner, .. } | E::Cast { expr: inner, .. } => {
+            expr_contains_impure_call(inner, sig_pure)
+        }
+        E::Index { array, index, .. } => {
+            expr_contains_impure_call(array, sig_pure)
+                || expr_contains_impure_call(index, sig_pure)
+        }
+        E::ArrayLit { elements } => {
+            elements.iter().any(|e| expr_contains_impure_call(e, sig_pure))
+        }
+        _ => false,
+    }
+}
+
 fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
     match stmt {
         TypedStmt::Let { expr, .. }

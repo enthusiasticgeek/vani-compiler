@@ -1035,6 +1035,12 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         crate::safety::enforce_deterministic_timing(
             &typed_program_view, &mut diagnostics,
         );
+        // T3.5 — MISRA C 2012 Rule 13.5 tightening. Reject
+        // function calls in the RHS of `&&` / `||` for pure fns
+        // and for fns tagged with a standard composite. Short-
+        // circuit evaluation makes the side effect conditional,
+        // creating evaluation-order-dependent behaviour.
+        crate::safety::enforce_misra_13(&typed_program_view, &mut diagnostics);
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to

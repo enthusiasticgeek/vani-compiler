@@ -30928,6 +30928,125 @@ fn main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // T3.5 of the safety-standard arc — MISRA 13.5 tightening.
+
+    #[test]
+    fn misra_13_5_rejects_impure_call_in_or_rhs() {
+        let source = r#"
+            fn might_have_effects(x: i64) -> bool { return x > 0; }
+            #[misra_c_2012]
+            fn classify(x: i64) -> bool {
+              return x == 0 || might_have_effects(x);
+            }
+            fn main() -> i64 {
+              if classify(0) { return 1; }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("impure call in || RHS rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("MISRA 13.5")),
+            "expected MISRA 13.5 diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn misra_13_5_rejects_impure_call_in_and_rhs() {
+        let source = r#"
+            fn check(x: i64) -> bool { return x > 0; }
+            #[asil_d]
+            fn guarded(x: i64) -> bool {
+              return x != 0 && check(x);
+            }
+            fn main() -> i64 {
+              if guarded(0) { return 1; }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("impure call in && RHS rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("MISRA 13.5")),
+            "expected MISRA 13.5 diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn misra_13_5_ok_for_pure_call_in_rhs() {
+        let source = r#"
+            pure fn safe(x: i64) -> bool { return x > 0; }
+            #[misra_c_2012]
+            fn guarded(x: i64) -> bool {
+              return x != 0 && safe(x);
+            }
+            fn main() -> i64 {
+              if guarded(5) { return 1; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("pure-fn call in && RHS is allowed");
+    }
+
+    #[test]
+    fn misra_13_5_ok_when_call_lifted_to_let() {
+        let source = r#"
+            fn might_effect(x: i64) -> bool { return x > 0; }
+            #[misra_c_2012]
+            fn guarded(x: i64) -> bool {
+              let pre: bool = might_effect(x);
+              return x != 0 && pre;
+            }
+            fn main() -> i64 {
+              if guarded(5) { return 1; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("lifted call OK in MISRA fn");
+    }
+
+    #[test]
+    fn misra_13_5_does_not_fire_on_unannotated_fn() {
+        let source = r#"
+            fn might_effect(x: i64) -> bool { return x > 0; }
+            fn no_annotation(x: i64) -> bool {
+              return x != 0 && might_effect(x);
+            }
+            fn main() -> i64 {
+              if no_annotation(5) { return 1; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("unannotated fn not affected");
+    }
+
+    #[test]
+    fn misra_13_5_fires_inside_nested_if() {
+        let source = r#"
+            fn helper(x: i64) -> bool { return x > 0; }
+            #[do178c_level_a]
+            fn complex(x: i64) -> bool {
+              if x < 0 {
+                return false;
+              } else {
+                return x == 0 || helper(x);
+              }
+            }
+            fn main() -> i64 {
+              if complex(5) { return 1; }
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            "MISRA 13.5 should also fire in nested branches",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("MISRA 13.5")),
+            "expected MISRA 13.5 diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // T3.4 of the safety-standard arc — #[deterministic_timing].
 
     #[test]

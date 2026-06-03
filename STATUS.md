@@ -10,7 +10,28 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**T3.4 of safety-standard arc
+**Last updated:** 2026-06-03 (**T3.5 of safety-standard arc
+shipped — MISRA C 2012 Rule 13.5 tightening. Tier 3 COMPLETE.**
+MISRA 13.5 says: "The right hand operand of a logical `&&` or
+`||` operator shall not contain persistent side effects." The
+short-circuit evaluation rule makes the RHS conditional on the
+LHS value, so a side-effecting RHS produces evaluation-order-
+dependent behaviour. The new `enforce_misra_13` pass fires for
+functions tagged with a standard composite (`#[misra_c_2012]` /
+`#[asil_d]` / `#[do178c_level_a]` / `#[iec_62304_class_c]`) or
+declared `pure fn`. It rejects any `&&` / `||` whose RHS contains
+a call to a non-pure function (or any `CallIndirect` — opaque
+callee). Diagnostic explicitly cites MISRA 13.5 and suggests
+the lift-to-let workaround. **6 new lib tests** (impure || RHS
+rejection, impure && RHS rejection, pure-fn RHS OK, lifted call
+OK, unannotated fn unaffected, nested-branch fires inside if).
+**1710 lib + 54 parity green.** **Tier 3 of safety-standard arc
+COMPLETE.** All five tiers (T3.1-T3.5) plus the four composites
+(misra_c_2012 / asil_d / do178c_level_a / iec_62304_class_c) are
+shipped; the safety-standard alignment arc is complete. ARCs 1-4
+(HashMap monomorph / Trie sparse / closures / wider K-V) next.)
+
+**Prior:** 2026-06-03 (**T3.4 of safety-standard arc
 shipped — `#[deterministic_timing]` attribute.** Function-level
 opt-in to constant-time execution. The post-check pass walks the
 body and rejects every construct whose cycle cost is data-
