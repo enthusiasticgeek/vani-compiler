@@ -30969,6 +30969,75 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 3c — .collect chain syntax.
+
+    #[test]
+    fn collect_on_map_chain_compiles() {
+        let source = r#"
+            fn double(x: i64) -> i64 { return x + x; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let doubled: Vec<i64> = xs.map(double).collect();
+              return doubled[2];
+            }
+        "#;
+        let _ = compile(source).expect(
+            "xs.map(f).collect() compiles",
+        );
+    }
+
+    #[test]
+    fn collect_on_filter_chain_compiles() {
+        let source = r#"
+            fn is_pos(x: i64) -> bool { return x > 0; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(-1, 2, -3, 4);
+              let pos: Vec<i64> = xs.filter(is_pos).collect();
+              return len(ref pos) as i64;
+            }
+        "#;
+        let _ = compile(source).expect(
+            "xs.filter(p).collect() compiles",
+        );
+    }
+
+    #[test]
+    fn collect_identity_on_vec_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let ys: Vec<i64> = xs.collect();
+              return ys[1];
+            }
+        "#;
+        let _ = compile(source).expect(
+            "xs.collect() identity on owned Vec compiles",
+        );
+    }
+
+    #[test]
+    fn collect_rejects_on_borrowed_vec() {
+        let source = r#"
+            fn read(xs: ref Vec<i64>) -> i64 {
+              let ys: Vec<i64> = xs.collect();
+              return ys[0];
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              return read(ref xs);
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            ".collect() on borrowed Vec should flag",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("collect")
+                && d.message.contains("borrowed")),
+            "expected collect-on-borrowed diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // ARC 3b — non-i64 element types in closures.
 
     #[test]

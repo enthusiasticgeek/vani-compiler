@@ -10,7 +10,28 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 3b verified shipped — non-i64
+**Last updated:** 2026-06-03 (**ARC 3c shipped — `.collect()`
+chain syntax.** Third sub-track of the richer-closures arc. New
+postfix `.collect()` is recognized as identity-on-Vec: vāṇी's
+combinators are eager (`.map(f)` already returns a fresh
+`Vec<T>`), so `xs.map(f).collect()` is sugar for `xs.map(f)`. The
+sugar terminates iterator-chain expressions in the Rust-familiar
+way without requiring a separate lazy-iterator runtime. Two
+handler sites: (a) the bare-Var Vec method-sugar path catches
+`xs.collect()` (identity); (b) the generic method-dispatch path
+catches `xs.map(f).collect()` (chained-call receiver — checks
+the receiver's typed type for `Vec<T>` and returns the checked
+receiver unchanged). `.collect()` on a borrowed `Ref<Vec<T>>`
+rejects with a clear diagnostic — would need an explicit clone
+to produce an owned Vec, out of v1 scope. **4 new lib tests**
+(map.collect, filter.collect, identity-on-Vec, borrowed-Vec
+rejection). Smoke-tested both backends with `xs.map(double).
+collect()` — both return exit 6 from index 2 of [2, 4, 6].
+**1738 lib + 54 parity green.** ARC 3 closures track: 3a + 3b +
+3c all shipped; 3d (Vec<Tuple<i64,i64>> closures) is the final
+sub-track.)
+
+**Prior:** 2026-06-03 (**ARC 3b verified shipped — non-i64
 element types in closure contexts.** Originally planned as a
 5-step landing for `Vec<Str>` / `Vec<f64>` etc. in closure
 bodies, but inspection revealed the constraint no longer exists

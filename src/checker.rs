@@ -11199,6 +11199,36 @@ fn check_expr(
                     })
                     .unwrap_or(false);
                 if is_vec {
+                    // ARC 3c: `.collect()` postfix is identity on
+                    // Vec (vāṇी's combinators are eager — `.map(f)`
+                    // already returns a fresh Vec<T>). The chain
+                    // `xs.map(f).collect()` is sugar for
+                    // `xs.map(f)`; collect just terminates the
+                    // chain explicitly for Rust-trained readers.
+                    // Receiver must be a fresh Vec (not a
+                    // borrowed Ref/RefMut Vec) — a borrowed Vec
+                    // can't be returned without a clone, which
+                    // collect doesn't perform in v1.
+                    if method == "collect" && args.is_empty() {
+                        match recv_ty_opt.as_ref() {
+                            Some(Type::Vec(_)) => {
+                                return check_expr(receiver, env, signatures, diagnostics);
+                            }
+                            Some(Type::Ref(_) | Type::RefMut(_)) => {
+                                // Borrowed Vec: would need a
+                                // clone to produce an owned Vec —
+                                // out of v1 scope.
+                                diagnostics.push(Diagnostic::new(
+                                    expr.span,
+                                    "`.collect()` on a borrowed `Vec<T>` needs an explicit clone — \
+                                     use `clone(xs).collect()` or drop the borrow first; \
+                                     `collect()` doesn't clone in v1.",
+                                ));
+                                return check_expr(receiver, env, signatures, diagnostics);
+                            }
+                            _ => {}
+                        }
+                    }
                     // `xs.len()` is the only Vec-method sugar that
                     // doesn't lower to a regular builtin Call — it
                     // produces `ExprKind::Len { array: xs }` directly,
@@ -11884,6 +11914,18 @@ fn check_expr(
                     None,
                     expr.span,
                 );
+            }
+            // ARC 3c: `.collect()` on any Vec<T> receiver
+            // (including chained-call results like
+            // `xs.map(f).collect()`) is identity — the chain
+            // already produces an owned Vec<T>. Handle BEFORE
+            // the "only struct/enum support methods" rejection
+            // so non-Var receivers (Call / MethodCall) reach
+            // the same identity path the bare-Var case takes.
+            if method == "collect" && args.is_empty() {
+                if matches!(&recv_ty, Type::Vec(_)) {
+                    return recv_checked;
+                }
             }
             let _ = recv_checked; // keep clippy happy; we re-check below
             // Build the mangled name: <TypeName>_<method>.
