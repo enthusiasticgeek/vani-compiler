@@ -34,16 +34,18 @@ backlog falls into two tiers: **now-actionable small/medium
 items** (no hard deps) and **multi-session arcs** (queued by
 dependency chain).
 
-### Now-actionable (no hard deps, smallest first)
+### Now-actionable — ALL SHIPPED (2026-06-03)
 
-| # | Item | Effort | Deps | Unlocks |
-|---|---|---|---|---|
-| 0 | **Bookkeeping refresh** — stale arc-status lines | S (~30m) | — | clear queue |
-| 1 | **Vtables non-Var coercion polish** — IR rewrite to hoist non-Var dyn-coerce sources into synthetic let | S (~1-2h) | — | closes dyn-dispatch arc |
-| 2 | **Closure A drop-dispatch finish** — per-variant drop for mixed-payload enums (`Result<Vec<i64>, OwnedStr>` scope-exit) on both backends + lib test | M (~3-4h) | — | Track 3 |
-| 3 | **Closure B `try_vec`** — `fn try_vec(n: u64) -> Result<Vec<i64>, AllocError>`; malloc-with-null-check codegen | S-M (~2h) | Track 2 | fallible-alloc primitive |
-| 4 | **#8 Nested arrays** — lift array-element-Copy + per-slot array-drop + clone_at + `ref xs[i]` borrow | M+ (~6-8h) | — | embedded ergonomics |
-| 5 | **#7 `#[bounded(N)]`** — first attribute syntax (`#` token + attribute parser + bounded-call analysis) | M+ (~4-6h) | — | safety-cert attribute family |
+| # | Item | Status |
+|---|---|---|
+| 0 | Bookkeeping refresh (ledger + arc-status lines) | ✅ shipped 2026-06-03 |
+| 1 | Vtables non-Var coercion polish (Vec<dyn> element hoist) | ✅ shipped 2026-06-03 (commit a46f940) |
+| 2 | Closure A drop-dispatch finish (mixed-payload enum drop + lib test) | ✅ shipped 2026-06-03 (commit 3788d1a) |
+| 3 | Closure B `try_vec` | ✅ already shipped (closure #284) |
+| 4 | #8 Nested arrays (Copy lift + per-slot drop + clone_at + ref xs[i]) | ✅ already shipped (closure #291 Phases 3+4) |
+| 5 | #7 `#[bounded(N)]` attribute | ✅ already shipped (closures #286 + #289) |
+
+**All now-actionable items closed.** Forward queue is multi-session Arcs 5–10.
 
 ### Multi-session arcs (sequenced by dependency)
 
