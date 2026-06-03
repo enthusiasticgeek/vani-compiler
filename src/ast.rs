@@ -611,6 +611,17 @@ pub struct Function {
     ///
     /// `None` for fns with no composite tag.
     pub safety_standard: Option<String>,
+    /// T3.1 of the safety-standard alignment arc: optional
+    /// per-function stack budget in bytes. Set when the function
+    /// declaration is annotated `#[bounded_stack(bytes=N)]`. The
+    /// post-check pass runs `stack_depth::compute_stack_depths`
+    /// from this function as entry-point and rejects if the
+    /// computed worst-case frame depth (or UNBOUNDED) exceeds
+    /// the bound. Required by ASIL-D for any critical-path
+    /// function (no unbounded stack growth). Composable with
+    /// `#[bounded(N)]` — the recursion bound caps frame copies,
+    /// the bounded_stack bound caps the total.
+    pub bounded_stack: Option<u64>,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

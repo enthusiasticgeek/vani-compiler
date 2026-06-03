@@ -875,6 +875,70 @@ pub fn enforce_no_recursion(program: &TypedProgram, diagnostics: &mut Vec<Diagno
     }
 }
 
+/// T3.1 — enforce `#[bounded_stack(bytes=N)]`. For each
+/// annotated function, run `stack_depth::compute_stack_depths`
+/// using the function as entry-point and verify the worst-case
+/// stack depth is bounded AND does not exceed N.
+///
+/// Failure modes:
+/// - Worst-case depth is unbounded (unbounded recursion via the
+///   call graph): hard error — the budget can't be honored.
+/// - Worst-case depth exceeds N: hard error with the deepest
+///   chain reported so the developer can identify the heavy
+///   caller.
+///
+/// ASIL-D and DO-178C Level A both require a bounded stack
+/// guarantee for every critical-path function. The annotation
+/// + this check together provide the audit trail.
+pub fn enforce_bounded_stack(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    use crate::stack_depth::compute_stack_depths;
+    for f in &program.functions {
+        let Some(bound) = f.bounded_stack else {
+            continue;
+        };
+        let report = compute_stack_depths(program, Some(&f.name));
+        let Some(entry) = report.entries.iter().find(|e| e.name == f.name) else {
+            // Should not happen — the entry is built from the
+            // same fn list. Defensive skip.
+            continue;
+        };
+        match entry.max_depth_bytes {
+            None => {
+                diagnostics.push(Diagnostic::new(
+                    f.span,
+                    format!(
+                        "'{}' has `#[bounded_stack(bytes={})]` but its worst-case \
+                         stack depth is UNBOUNDED — the call graph contains \
+                         unbounded recursion. Add `#[bounded(N)]` to the \
+                         recursive function or refactor to iteration.",
+                        f.name, bound
+                    ),
+                ));
+            }
+            Some(actual) if actual > bound => {
+                let chain = if entry.chain.is_empty() {
+                    f.name.clone()
+                } else {
+                    entry.chain.join(" -> ")
+                };
+                diagnostics.push(Diagnostic::new(
+                    f.span,
+                    format!(
+                        "'{}' exceeds its `#[bounded_stack(bytes={})]` budget — \
+                         worst-case stack depth is {} bytes via chain `{}`. \
+                         Reduce local-binding sizes, inline small leaf callees, \
+                         or raise the bound after re-auditing.",
+                        f.name, bound, actual, chain
+                    ),
+                ));
+            }
+            Some(_) => {
+                // Within budget — no diagnostic.
+            }
+        }
+    }
+}
+
 fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
     match stmt {
         TypedStmt::Let { expr, .. }

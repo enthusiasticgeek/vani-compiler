@@ -1018,6 +1018,11 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // `f.no_recursion = true` automatically when
         // `#[interrupt]` is present — see parser hook).
         crate::safety::enforce_interrupt(&typed_program_view, &mut diagnostics);
+        // T3.1 — `#[bounded_stack(bytes=N)]`. Runs the call-graph
+        // stack-depth estimator for each annotated function and
+        // verifies the worst-case bound is within budget. Unbounded
+        // recursion in the call graph also reports here.
+        crate::safety::enforce_bounded_stack(&typed_program_view, &mut diagnostics);
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
@@ -1546,6 +1551,7 @@ fn lift_closures_in_block(
             no_recursion: false,
             interrupt: false,
             safety_standard: None,
+            bounded_stack: None,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2776,6 +2782,7 @@ fn lift_expr_anon_fn(
             no_recursion: false,
             interrupt: false,
             safety_standard: None,
+            bounded_stack: None,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6814,6 +6821,7 @@ fn check_function(
             no_recursion: function.no_recursion,
             interrupt: function.interrupt,
             safety_standard: function.safety_standard.clone(),
+            bounded_stack: function.bounded_stack,
             span: function.span,
         };
     }
@@ -6874,6 +6882,7 @@ fn check_function(
             no_recursion: false,
             interrupt: false,
             safety_standard: None,
+            bounded_stack: None,
             span: function.span,
         };
     }
@@ -7120,6 +7129,7 @@ fn check_function(
         no_recursion: function.no_recursion,
             interrupt: function.interrupt,
             safety_standard: function.safety_standard.clone(),
+            bounded_stack: function.bounded_stack,
         span: function.span,
     }
 }

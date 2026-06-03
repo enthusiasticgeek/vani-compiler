@@ -30803,6 +30803,153 @@ fn main() -> i64 {
         assert!(json.ends_with("]}\n"));
     }
 
+    // T3.1 of the safety-standard arc — #[bounded_stack(bytes=N)].
+
+    #[test]
+    fn bounded_stack_ok_when_within_budget() {
+        let source = r#"
+            #[bounded_stack(bytes=1024)]
+            fn small() -> i64 {
+              let a: i64 = 1;
+              let b: i64 = 2;
+              return a + b;
+            }
+            fn main() -> i64 { return small(); }
+        "#;
+        let _ = compile(source).expect("bounded_stack within budget compiles");
+    }
+
+    #[test]
+    fn bounded_stack_rejects_over_budget() {
+        let source = r#"
+            #[bounded_stack(bytes=8)]
+            fn fat() -> i64 {
+              let a: i64 = 1;
+              let b: i64 = 2;
+              let c: i64 = 3;
+              let d: i64 = 4;
+              return a + b + c + d;
+            }
+            fn main() -> i64 { return fat(); }
+        "#;
+        let errs = compile(source).expect_err("over-budget fn must be rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("bounded_stack")
+                && d.message.contains("exceeds")),
+            "expected bounded_stack exceeded diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bounded_stack_rejects_unbounded_recursion() {
+        let source = r#"
+            #[bounded_stack(bytes=4096)]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            fn main() -> i64 { return rec(5); }
+        "#;
+        let errs = compile(source).expect_err(
+            "unbounded recursion must violate bounded_stack",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("bounded_stack")
+                && d.message.contains("UNBOUNDED")),
+            "expected UNBOUNDED diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bounded_stack_ok_with_bounded_recursion_within_budget() {
+        let source = r#"
+            #[bounded(3)]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            #[bounded_stack(bytes=4096)]
+            fn entry() -> i64 { return rec(2); }
+            fn main() -> i64 { return entry(); }
+        "#;
+        let _ = compile(source).expect(
+            "bounded recursion + sufficient stack budget compiles",
+        );
+    }
+
+    #[test]
+    fn bounded_stack_rejects_attr_with_zero() {
+        let source = r#"
+            #[bounded_stack(bytes=0)]
+            fn f() -> i64 { return 0; }
+            fn main() -> i64 { return f(); }
+        "#;
+        let errs = compile(source).expect_err(
+            "bytes=0 must reject at parse time (positive int required)",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("positive")),
+            "expected positive-int diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bounded_stack_unknown_key_rejected() {
+        let source = r#"
+            #[bounded_stack(kb=1)]
+            fn f() -> i64 { return 0; }
+            fn main() -> i64 { return f(); }
+        "#;
+        let errs = compile(source).expect_err(
+            "unknown key in `bounded_stack` must reject",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("bytes")),
+            "expected `bytes` key requirement diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn bounded_stack_attr_stacks_with_no_heap() {
+        let source = r#"
+            #[no_heap]
+            #[bounded_stack(bytes=2048)]
+            fn isr_like() -> i64 {
+              let a: i64 = 1;
+              return a;
+            }
+            fn main() -> i64 { return isr_like(); }
+        "#;
+        let _ = compile(source).expect("stacked attrs compose");
+    }
+
+    #[test]
+    fn bounded_stack_chain_shown_when_exceeded() {
+        let source = r#"
+            fn leaf() -> i64 {
+              let a: i64 = 1;
+              let b: i64 = 2;
+              let c: i64 = 3;
+              return a + b + c;
+            }
+            #[bounded_stack(bytes=8)]
+            fn entry() -> i64 { return leaf(); }
+            fn main() -> i64 { return entry(); }
+        "#;
+        let errs = compile(source).expect_err("budget exceeded must fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("entry")
+                && d.message.contains("leaf")
+                && d.message.contains("chain")),
+            "expected chain context in diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn no_heap_rejects_direct_vec_call() {
         let source = r#"

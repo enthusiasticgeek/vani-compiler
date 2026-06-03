@@ -1264,6 +1264,7 @@ impl Parser {
             no_recursion: false,
             interrupt: false,
             safety_standard: None,
+            bounded_stack: None,
             recursion_bound: None,
         })
     }
@@ -1293,6 +1294,7 @@ impl Parser {
         let mut no_float = false;
         let mut no_recursion = false;
         let mut interrupt = false;
+        let mut bounded_stack: Option<u64> = None;
         let mut safety_standard: Option<String> = None;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
@@ -1322,6 +1324,43 @@ impl Parser {
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
                 "interrupt" => interrupt = true,
+                // T3.1: `#[bounded_stack(bytes=N)]` — declare a
+                // per-fn stack budget. The post-check pass runs
+                // the call-graph stack-depth estimator from this
+                // fn as entry and verifies the worst-case bound.
+                "bounded_stack" => {
+                    self.expect_keyword(
+                        "'(' after `bounded_stack`",
+                        |k| matches!(k, TokenKind::LParen),
+                    )?;
+                    let key_tok = self.expect_ident()?;
+                    let key = ident_text(key_tok);
+                    if key != "bytes" {
+                        return Err(Diagnostic::new(
+                            self.current().span,
+                            format!(
+                                "expected `bytes` key in `#[bounded_stack(bytes=N)]`, got `{}`",
+                                key
+                            ),
+                        ));
+                    }
+                    self.expect_keyword(
+                        "'=' after `bytes`",
+                        |k| matches!(k, TokenKind::Equal),
+                    )?;
+                    let n_tok = self.bump();
+                    let n = match n_tok.kind {
+                        TokenKind::Int(v) if v > 0 => v as u64,
+                        _ => {
+                            return Err(Diagnostic::new(
+                                n_tok.span,
+                                "expected a positive integer literal as the byte bound",
+                            ));
+                        }
+                    };
+                    self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+                    bounded_stack = Some(n);
+                }
                 // Standard composite tags. Each names the
                 // target safety standard; the parser expands
                 // to the constraint set the standard requires
@@ -1351,7 +1390,8 @@ impl Parser {
                         format!(
                             "unknown attribute '#[{}]' — recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
-                             `#[no_float]`, `#[no_recursion]`, `#[interrupt]`; \
+                             `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
+                             `#[bounded_stack(bytes=N)]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
                              `#[do178c_level_a]`, `#[iec_62304_class_c]`",
                             other
@@ -1384,6 +1424,7 @@ impl Parser {
         f.no_recursion = no_recursion || interrupt || composite_no_recursion;
         f.interrupt = interrupt;
         f.safety_standard = safety_standard;
+        f.bounded_stack = bounded_stack;
         Ok(f)
     }
 
@@ -1449,6 +1490,7 @@ impl Parser {
             no_recursion: false,
             interrupt: false,
             safety_standard: None,
+            bounded_stack: None,
             is_extern: true,
             recursion_bound: None,
         })

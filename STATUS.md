@@ -10,7 +10,28 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T2.1 of safety-standard arc
+**Last updated:** 2026-06-02 (**T3.1 of safety-standard arc
+shipped — `#[bounded_stack(bytes=N)]` attribute.** Per-function
+worst-case stack budget. Surface form: `#[bounded_stack(bytes=N)]`
+where N is a positive integer literal. The post-check pass runs
+the existing T1.3 `stack_depth::compute_stack_depths` analysis
+using the annotated function as entry-point and rejects the
+program when (a) the call graph has unbounded recursion from
+that entry (depth = UNBOUNDED), or (b) the worst-case frame chain
+exceeds N. The deepest call chain is included in the diagnostic
+so the heavy caller is identifiable. ASIL-D and DO-178C Level A
+both mandate a bounded stack guarantee for critical-path
+functions; this attribute + the existing `intentc stack-depth`
+CLI together provide the audit trail. Composes cleanly with
+`#[bounded(N)]` (recursion bound caps frame copies) and the
+other Tier 1/2 primitives. **8 new lib tests** (within-budget OK,
+over-budget rejected, unbounded recursion rejected, bounded
+recursion within budget OK, bytes=0 parse rejection, unknown key
+rejection, stacks with #[no_heap], chain shown in diagnostic).
+**1681 lib + 54 parity green.** Starting Tier 3 of safety-
+standard arc.)
+
+**Prior:** 2026-06-02 (**T2.1 of safety-standard arc
 shipped — MMIO volatile load/store. Tier 2 COMPLETE.** Two new
 builtins `mmio_read_u32(addr: i64) -> u32` and
 `mmio_write_u32(addr: i64, v: u32) -> i64`. V1 covers u32-width

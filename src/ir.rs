@@ -92,6 +92,12 @@ pub struct TypedFunction {
     /// Read by the deviations extractor to populate the
     /// `target_standard` column per record.
     pub safety_standard: Option<String>,
+    /// T3.1: per-fn stack budget in bytes, forwarded from
+    /// `ast::Function::bounded_stack`. Read by
+    /// `safety::enforce_bounded_stack` to verify the function's
+    /// worst-case stack depth (via call-graph + frame-size
+    /// analysis) doesn't exceed the bound.
+    pub bounded_stack: Option<u64>,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function
