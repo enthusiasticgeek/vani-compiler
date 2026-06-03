@@ -10,7 +10,22 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T1.3 of safety-standard arc
+**Last updated:** 2026-06-02 (**Standard composites shipped —
+`#[misra_c_2012]` / `#[asil_d]` / `#[do178c_level_a]` /
+`#[iec_62304_class_c]`.** Each is a hardcoded alias that expands
+to the primitive constraint set the standard requires (v1: all
+four map to `{no_heap, no_recursion}` — the additional
+primitives `bounded_stack`, `wcet`, `deterministic_timing` are
+Tier 3 work). The composite tag string is preserved on the
+function and read by the deviations extractor to populate each
+row's `target_standard` column. Composites + primitives compose
+by union; two composites on the same fn rejected. **6 new lib
+tests** (composite expansion verified for each, target_standard
+populated, two-composite rejection, composite + primitive
+stack). Tier 2 progress: 5 of 6 shipped (T2.2/T2.3/T2.4/T2.5/T2.6);
+only T2.1 Mmio remains. **1665 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**T1.3 of safety-standard arc
 shipped — Tier 1 COMPLETE.** Stack-depth bound checker via new
 `intentc stack-depth <path> [--max=<bytes>] [--entry=<fn>]
 [--format=text|json|csv]` subcommand. Per-function frame size
@@ -395,7 +410,7 @@ closure count, lib test count, and parity remain at 1543 lib + 54
 parity green from the Arc 0 landing. Prior log preserved below.)
 
 **Prior:** 2026-06-02 (closures #597-#604 — **Arc 0**, the final 8 small one-shot primitives landed together as a single bounded effort. **i64 scalar:** `i64_parity(x)` popcount&1; `i64_mod_pos(x, m)` always-non-negative modulo with `abs(m)` (m==0 → 0); `i64_cube_root(x)` libm cbrt seed + fix-up loop. **f64 scalar:** `f64_pow_int(base, k)` repeated multiply (k<0 → 1/result; mixed-arg, special checker case to avoid the default-f64 coercion); `f64_round_to_multiple(x, m)` rounds x to nearest k*m (m≤0 → x unchanged); `f64_quadratic_root(a, b, c)` returns `(-b + sqrt(b²-4ac))/2a`, NaN on a==0 or negative discriminant. **Vec<i64>:** `vec_running_mean(xs)` cumulative integer average per index; `vec_intersperse(xs, sep)` inserts sep between elements (output length 2n-1). All cross-backend byte-identical with seeded determinism for the LLVM-backend `cbrt` path. **Arc 0 closes the bounded-primitive surface.** 1 new lib test. 1543 lib + 54 parity green.)
-**Test totals:** 1644 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
+**Test totals:** 1665 lib + 54 end-to-end + 11 vtables-phase3 + 2 user-drop-by-ref + 1 ssa-examples tests passing; the cross-backend parity runner covers all 90 examples under `examples/`. (Win32 LLVM dispatch adds 4 host-gated tests that fire on Windows hosts only — futex/WaitOnAddress, CreateThread for tasks, plus the CreateThread fan-out parallel-for tests in tree-LLVM and SSA-LLVM.)
 
 **Standing language decisions (carry across sessions):**
 - **Affine ownership** is the v1 model. Every container, algorithm,

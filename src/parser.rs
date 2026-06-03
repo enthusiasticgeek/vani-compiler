@@ -1263,6 +1263,7 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            safety_standard: None,
             recursion_bound: None,
         })
     }
@@ -1292,6 +1293,7 @@ impl Parser {
         let mut no_float = false;
         let mut no_recursion = false;
         let mut interrupt = false;
+        let mut safety_standard: Option<String> = None;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
             self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
@@ -1320,13 +1322,38 @@ impl Parser {
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
                 "interrupt" => interrupt = true,
+                // Standard composite tags. Each names the
+                // target safety standard; the parser expands
+                // to the constraint set the standard requires
+                // (set the underlying primitive bools below).
+                // The composite tag string is preserved so the
+                // deviations extractor can populate the
+                // `target_standard` column.
+                "misra_c_2012" | "asil_d" | "do178c_level_a"
+                | "iec_62304_class_c" => {
+                    if let Some(existing) = &safety_standard {
+                        return Err(Diagnostic::new(
+                            self.current().span,
+                            format!(
+                                "function already tagged for `{}` standard — \
+                                 stack additional primitives like `#[no_float]` \
+                                 to tighten constraints, but only one composite \
+                                 standard tag per function",
+                                existing
+                            ),
+                        ));
+                    }
+                    safety_standard = Some(attr_name.clone());
+                }
                 other => {
                     return Err(Diagnostic::new(
                         self.current().span,
                         format!(
                             "unknown attribute '#[{}]' — recognized in v1: \
-                             `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, \
-                             `#[no_recursion]`, `#[interrupt]`",
+                             primitives `#[bounded(N)]`, `#[no_heap]`, \
+                             `#[no_float]`, `#[no_recursion]`, `#[interrupt]`; \
+                             standard composites `#[misra_c_2012]`, `#[asil_d]`, \
+                             `#[do178c_level_a]`, `#[iec_62304_class_c]`",
                             other
                         ),
                     ));
@@ -1339,18 +1366,24 @@ impl Parser {
         let mut f = self.parse_function()?;
         f.recursion_bound = bound_value;
         f.no_float = no_float;
-        // `#[interrupt]` composite expansion: the ISR body
-        // must satisfy no_heap + no_recursion as part of its
-        // constraint set. Set the underlying flags so the
-        // existing passes (`enforce_no_heap`,
-        // `enforce_no_recursion`) fire with their tailored
-        // diagnostics in addition to the ISR-framed
-        // diagnostics from `enforce_interrupt`. The no_lock
-        // + no_spawn portions of the composite are checked
-        // directly by `enforce_interrupt`.
-        f.no_heap = no_heap || interrupt;
-        f.no_recursion = no_recursion || interrupt;
+        // Standard-composite expansion. Each named composite
+        // expands to a set of primitive constraints. V1 maps
+        // all four composites to the union of currently-
+        // shippable primitives (`no_heap` + `no_recursion`);
+        // the sets diverge as Tier 3 primitives land
+        // (`bounded_stack`, `wcet`, `deterministic_timing`).
+        // The composite NAME is preserved on `f.safety_standard`
+        // so the deviations extractor can label each record
+        // with its target standard.
+        let composite_no_heap = safety_standard.is_some();
+        let composite_no_recursion = safety_standard.is_some();
+        // `#[interrupt]` composite: no_heap + no_recursion +
+        // no_lock + no_spawn (last two enforced in
+        // `enforce_interrupt`).
+        f.no_heap = no_heap || interrupt || composite_no_heap;
+        f.no_recursion = no_recursion || interrupt || composite_no_recursion;
         f.interrupt = interrupt;
+        f.safety_standard = safety_standard;
         Ok(f)
     }
 
@@ -1415,6 +1448,7 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            safety_standard: None,
             is_extern: true,
             recursion_bound: None,
         })

@@ -30275,6 +30275,116 @@ fn main() -> i64 {
     // lock, or spawn worker threads / parallel-for.
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // Standard composites — `#[misra_c_2012]`, `#[asil_d]`,
+    // `#[do178c_level_a]`, `#[iec_62304_class_c]`. Each
+    // expands to a union of primitive constraints; v1 maps
+    // all four to `{no_heap, no_recursion}` since the
+    // additional primitives (`bounded_stack`, `wcet`,
+    // `deterministic_timing`) are Tier 3 work. The composite
+    // tag is preserved on the function so the deviations
+    // extractor can label each record with the standard.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn asil_d_composite_rejects_heap_alloc() {
+        let source = r#"
+            #[asil_d]
+            fn bad() -> i64 {
+              let v = vec(1, 2, 3);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[asil_d] + vec() rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("heap-allocating")
+                && d.message.contains("#[no_heap]")),
+            "expected composite to expand to #[no_heap], got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn misra_c_2012_composite_rejects_recursion() {
+        let source = r#"
+            #[misra_c_2012]
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1) + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[misra_c_2012] + recursion rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("recurses")
+                && d.message.contains("#[no_recursion]")),
+            "expected composite to expand to #[no_recursion], got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn composite_preserved_in_deviations_target_standard() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            #[asil_d]
+            fn critical() -> i64 {
+              unsafe(reason = "MMIO: control register") {
+                let _ = 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles under embedded gate");
+        let mut map = crate::diagnostic::FileMap::new();
+        map.push("<test>".to_string(), source.to_string(), 0);
+        let devs = crate::deviations::extract_deviations(&checked.ir, &map);
+        assert_eq!(devs.len(), 1);
+        assert_eq!(devs[0].target_standard, "asil_d");
+        assert_eq!(devs[0].function, "critical");
+    }
+
+    #[test]
+    fn do178c_and_iec_62304_composites_recognized() {
+        let source = r#"
+            #[do178c_level_a]
+            fn avionics(x: i64) -> i64 { return x; }
+            #[iec_62304_class_c]
+            fn medical(x: i64) -> i64 { return x; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("both composites compile");
+    }
+
+    #[test]
+    fn two_composite_tags_on_same_fn_rejected() {
+        let source = r#"
+            #[asil_d] #[misra_c_2012]
+            fn double_tagged(x: i64) -> i64 { return x; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("two composite tags rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("already tagged")),
+            "expected double-tag diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn composite_plus_primitive_stacks() {
+        // #[asil_d] expands to {no_heap, no_recursion}. Layering
+        // #[no_float] on top should still compose — both apply.
+        let source = r#"
+            #[asil_d] #[no_float]
+            fn strict(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("composite + primitive stacks");
+    }
+
     #[test]
     fn interrupt_accepts_simple_isr() {
         let source = r#"

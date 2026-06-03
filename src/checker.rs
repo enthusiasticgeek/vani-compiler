@@ -1545,6 +1545,7 @@ fn lift_closures_in_block(
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            safety_standard: None,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2774,6 +2775,7 @@ fn lift_expr_anon_fn(
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            safety_standard: None,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6811,6 +6813,7 @@ fn check_function(
             no_float: function.no_float,
             no_recursion: function.no_recursion,
             interrupt: function.interrupt,
+            safety_standard: function.safety_standard.clone(),
             span: function.span,
         };
     }
@@ -6870,6 +6873,7 @@ fn check_function(
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            safety_standard: None,
             span: function.span,
         };
     }
@@ -7115,6 +7119,7 @@ fn check_function(
         no_float: function.no_float,
         no_recursion: function.no_recursion,
             interrupt: function.interrupt,
+            safety_standard: function.safety_standard.clone(),
         span: function.span,
     }
 }

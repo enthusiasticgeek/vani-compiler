@@ -46,29 +46,33 @@ pub struct Deviation {
 }
 
 /// Walk every `TypedStmt::UnsafeBlock` in the program and
-/// build a `Deviation` for it. Function-level standard tags
-/// haven't landed yet — `target_standard` is always `"none"`
-/// in v1; future tier 1.4 commits read the tag here.
+/// build a `Deviation` for it. The enclosing function's
+/// `safety_standard` tag (from a `#[asil_d]` / `#[misra_c_2012]`
+/// / etc. composite annotation) populates the `target_standard`
+/// column on the resulting record. Functions with no composite
+/// tag get `target_standard = "none"`.
 pub fn extract_deviations(program: &TypedProgram, map: &FileMap) -> Vec<Deviation> {
     let mut out = Vec::new();
     for f in &program.functions {
-        walk_stmts(&f.body, &f.name, map, &mut out);
+        let standard = f
+            .safety_standard
+            .clone()
+            .unwrap_or_else(|| "none".to_string());
+        walk_stmts(&f.body, &f.name, &standard, map, &mut out);
     }
     out
 }
 
-fn walk_stmts(stmts: &[TypedStmt], fn_name: &str, map: &FileMap, out: &mut Vec<Deviation>) {
+fn walk_stmts(
+    stmts: &[TypedStmt],
+    fn_name: &str,
+    standard: &str,
+    map: &FileMap,
+    out: &mut Vec<Deviation>,
+) {
     for stmt in stmts {
         match stmt {
             TypedStmt::UnsafeBlock { reason, body } => {
-                // Span on TypedStmt::UnsafeBlock is not tracked
-                // explicitly (the body's first stmt span is the
-                // closest proxy); for v1 the deviation's span
-                // refers to the first statement inside the block.
-                // A future TypedStmt extension could carry the
-                // span directly. For now, fall back to the body's
-                // first stmt's span; if the block is empty, emit
-                // with line=0.
                 let span = first_stmt_span(body);
                 let (file, line, column) = resolve(span, map);
                 out.push(Deviation {
@@ -78,19 +82,19 @@ fn walk_stmts(stmts: &[TypedStmt], fn_name: &str, map: &FileMap, out: &mut Vec<D
                     prefix: prefix_of(reason),
                     reason: reason.clone(),
                     function: fn_name.to_string(),
-                    target_standard: "none".to_string(),
+                    target_standard: standard.to_string(),
                 });
-                walk_stmts(body, fn_name, map, out);
+                walk_stmts(body, fn_name, standard, map, out);
             }
             TypedStmt::If { then_body, else_body, .. } => {
-                walk_stmts(then_body, fn_name, map, out);
-                walk_stmts(else_body, fn_name, map, out);
+                walk_stmts(then_body, fn_name, standard, map, out);
+                walk_stmts(else_body, fn_name, standard, map, out);
             }
             TypedStmt::While { body, .. }
             | TypedStmt::For { body, .. }
             | TypedStmt::ForIter { body, .. }
             | TypedStmt::TaskSpawn { body, .. } => {
-                walk_stmts(body, fn_name, map, out);
+                walk_stmts(body, fn_name, standard, map, out);
             }
             _ => {}
         }

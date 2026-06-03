@@ -85,6 +85,13 @@ pub struct TypedFunction {
     /// pass (no_heap + no_recursion + no_lock + no_spawn)
     /// via `safety::enforce_interrupt`.
     pub interrupt: bool,
+    /// Standard composite tag forwarded from
+    /// `ast::Function::safety_standard`. Populated by the
+    /// parser when one of `#[misra_c_2012]`, `#[asil_d]`,
+    /// `#[do178c_level_a]`, `#[iec_62304_class_c]` is present.
+    /// Read by the deviations extractor to populate the
+    /// `target_standard` column per record.
+    pub safety_standard: Option<String>,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

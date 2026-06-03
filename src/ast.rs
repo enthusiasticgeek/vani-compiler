@@ -594,6 +594,23 @@ pub struct Function {
     /// parallel-for. Composable with other primitives — the
     /// union of constraints applies.
     pub interrupt: bool,
+    /// Safety-standard composite tag — names the standard the
+    /// function is intended to be compliant with. The parser
+    /// expands the tag into the primitive set the standard
+    /// requires (currently: `no_heap` + `no_recursion`;
+    /// expands as Tier 3 primitives land). The string is
+    /// preserved so the deviations extractor can populate the
+    /// `target_standard` column on each row.
+    ///
+    /// Recognized values (case-sensitive, the attribute name
+    /// as written in source):
+    /// - `"misra_c_2012"` — MISRA C 2012 alignment
+    /// - `"asil_d"` — ISO 26262 ASIL-D
+    /// - `"do178c_level_a"` — DO-178C Level A (avionics)
+    /// - `"iec_62304_class_c"` — IEC 62304 Class C (medical)
+    ///
+    /// `None` for fns with no composite tag.
+    pub safety_standard: Option<String>,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.
