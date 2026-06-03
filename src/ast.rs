@@ -585,6 +585,15 @@ pub struct Function {
     /// mutual-recursion cycle. Composable with `#[no_heap]`
     /// for ASIL-D-style fns.
     pub no_recursion: bool,
+    /// T2.2 of the safety-standard alignment arc: set by the
+    /// parser when the function declaration is annotated
+    /// `#[interrupt]`. Composite expanding to the constraint
+    /// set required for an ISR body: no heap allocation, no
+    /// recursion, no mutex_lock / condvar_wait (would block),
+    /// no task spawn (ISRs can't fork worker threads), no
+    /// parallel-for. Composable with other primitives — the
+    /// union of constraints applies.
+    pub interrupt: bool,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

@@ -30268,6 +30268,104 @@ fn main() -> i64 {
     // != on pointers is legitimate).
     // -----------------------------------------------------------------
 
+    // -----------------------------------------------------------------
+    // T2.2 — `#[interrupt]` calling convention. Composite that
+    // expands to no_heap + no_recursion + no_lock + no_spawn.
+    // ISR bodies cannot allocate, recurse, take a blocking
+    // lock, or spawn worker threads / parallel-for.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn interrupt_accepts_simple_isr() {
+        let source = r#"
+            #[interrupt]
+            fn isr(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("#[interrupt] + pure body compiles");
+    }
+
+    #[test]
+    fn interrupt_rejects_heap_alloc() {
+        let source = r#"
+            #[interrupt]
+            fn bad() -> i64 {
+              let v = vec(1, 2, 3);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[interrupt] + vec() rejected");
+        // The composite expansion sets `no_heap` so the no_heap
+        // pass produces the diagnostic.
+        assert!(
+            errs.iter().any(|d| d.message.contains("heap-allocating")
+                && d.message.contains("#[no_heap]")),
+            "expected no_heap diagnostic from composite expansion, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn interrupt_rejects_recursion() {
+        let source = r#"
+            #[interrupt]
+            fn isr_rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return isr_rec(n - 1) + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[interrupt] + recursion rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("recurses")
+                && d.message.contains("#[no_recursion]")),
+            "expected no_recursion diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn interrupt_rejects_mutex_lock() {
+        let source = r#"
+            #[interrupt]
+            fn isr_lock(m: mut ref Mutex<i64>) -> i64 {
+              let g = mutex_lock(m);
+              return guard_get(ref g);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[interrupt] + mutex_lock rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("blocking lock acquire")
+                && d.message.contains("#[interrupt]")),
+            "expected ISR-framed lock diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn interrupt_rejects_task_spawn() {
+        let source = r#"
+            #[interrupt]
+            fn isr_spawn() -> i64 {
+              task worker {
+                let _ = 0;
+              }
+              join worker;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[interrupt] + task rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("`task` spawn")
+                && d.message.contains("#[interrupt]")),
+            "expected ISR-framed task diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn ptr_arith_add_rejected_with_misra_diagnostic() {
         let _guard = EmbeddedTargetGuard::embedded();

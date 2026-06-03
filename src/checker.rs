@@ -1010,6 +1010,14 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // strict opt-in via the function annotation.
         crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
+        // T2.2 — `#[interrupt]` ISR calling convention. Local
+        // pass checks for blocking lock acquires + task spawn +
+        // parallel-for inside marked fns. The no_heap and
+        // no_recursion components piggyback on the dedicated
+        // passes above (the parser sets `f.no_heap = true` /
+        // `f.no_recursion = true` automatically when
+        // `#[interrupt]` is present — see parser hook).
+        crate::safety::enforce_interrupt(&typed_program_view, &mut diagnostics);
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
@@ -1536,6 +1544,7 @@ fn lift_closures_in_block(
                         no_heap: false,
             no_float: false,
             no_recursion: false,
+            interrupt: false,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2764,6 +2773,7 @@ fn lift_expr_anon_fn(
                         no_heap: false,
             no_float: false,
             no_recursion: false,
+            interrupt: false,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6800,6 +6810,7 @@ fn check_function(
             no_heap: function.no_heap,
             no_float: function.no_float,
             no_recursion: function.no_recursion,
+            interrupt: function.interrupt,
             span: function.span,
         };
     }
@@ -6858,6 +6869,7 @@ fn check_function(
             no_heap: false,
             no_float: false,
             no_recursion: false,
+            interrupt: false,
             span: function.span,
         };
     }
@@ -7102,6 +7114,7 @@ fn check_function(
         no_heap: function.no_heap,
         no_float: function.no_float,
         no_recursion: function.no_recursion,
+            interrupt: function.interrupt,
         span: function.span,
     }
 }

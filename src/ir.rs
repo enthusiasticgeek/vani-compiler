@@ -80,6 +80,11 @@ pub struct TypedFunction {
     /// `ast::Function::no_recursion`. Triggers the
     /// no-recursion pass in `safety::enforce_no_recursion`.
     pub no_recursion: bool,
+    /// T2.2 of safety-standard arc: forwarded from
+    /// `ast::Function::interrupt`. Triggers the composite
+    /// pass (no_heap + no_recursion + no_lock + no_spawn)
+    /// via `safety::enforce_interrupt`.
+    pub interrupt: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

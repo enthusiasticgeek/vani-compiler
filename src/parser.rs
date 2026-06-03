@@ -1262,6 +1262,7 @@ impl Parser {
             no_heap: false,
             no_float: false,
             no_recursion: false,
+            interrupt: false,
             recursion_bound: None,
         })
     }
@@ -1290,6 +1291,7 @@ impl Parser {
         let mut no_heap = false;
         let mut no_float = false;
         let mut no_recursion = false;
+        let mut interrupt = false;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
             self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
@@ -1317,13 +1319,14 @@ impl Parser {
                 "no_heap" => no_heap = true,
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
+                "interrupt" => interrupt = true,
                 other => {
                     return Err(Diagnostic::new(
                         self.current().span,
                         format!(
                             "unknown attribute '#[{}]' — recognized in v1: \
                              `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, \
-                             `#[no_recursion]`",
+                             `#[no_recursion]`, `#[interrupt]`",
                             other
                         ),
                     ));
@@ -1335,9 +1338,19 @@ impl Parser {
         // plain `fn` and `pure fn`.
         let mut f = self.parse_function()?;
         f.recursion_bound = bound_value;
-        f.no_heap = no_heap;
         f.no_float = no_float;
-        f.no_recursion = no_recursion;
+        // `#[interrupt]` composite expansion: the ISR body
+        // must satisfy no_heap + no_recursion as part of its
+        // constraint set. Set the underlying flags so the
+        // existing passes (`enforce_no_heap`,
+        // `enforce_no_recursion`) fire with their tailored
+        // diagnostics in addition to the ISR-framed
+        // diagnostics from `enforce_interrupt`. The no_lock
+        // + no_spawn portions of the composite are checked
+        // directly by `enforce_interrupt`.
+        f.no_heap = no_heap || interrupt;
+        f.no_recursion = no_recursion || interrupt;
+        f.interrupt = interrupt;
         Ok(f)
     }
 
@@ -1401,6 +1414,7 @@ impl Parser {
             no_heap: false,
             no_float: false,
             no_recursion: false,
+            interrupt: false,
             is_extern: true,
             recursion_bound: None,
         })
