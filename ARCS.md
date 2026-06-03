@@ -140,15 +140,22 @@ partial switch leaves the suite broken.
      alongside the main ops. All 5 user-facing ops rewritten in
      a single commit per the ARCS plan.
 
-3. **2.3 — LLVM mirror of 2.2. (~2h) — DEFERRED.**
-   - The LLVM trie helpers are ~3× the C footprint (491 vs 168
-     lines) — every binary search, shift, and grow needs manual
-     SSA / GEP / label management. Best handled in a dedicated
-     session with the C reference as the gold output.
-   - In the meantime, the LLVM backend retains the legacy dense
-     implementation. Cross-backend parity holds via observably-
-     equivalent semantics: C = sparse, LLVM = dense, identical
-     user-visible output.
+3. **2.3 — LLVM mirror of 2.2. ✅ SHIPPED 2026-06-03.**
+   - Full LLVM IR rewrite — 11-field struct (was 7), 5 new
+     helper functions (`__find_slot`, `__lower_bound`,
+     `__grow_node`, `__insert_pair`, `__remove_pair`), all
+     user-facing ops (`_new_node`, `_new`, `_drop`, `_insert`,
+     `_walk`, `_delete`, `_clear`) rewritten using them.
+   - Per-function label prefixes (fs_/lb_/gn_/ip_/rp_/tn_/tnu_/
+     td_/ti_/tw_/tc_/tsw_/tde_/trc_) avoid LLVM label collisions.
+   - Two existing lib tests (`trie_alphabet_accepts_full_u8_range`
+     pinned `mul i64 %cap_new, 1024`; `trie_compaction_extends_struct_and_emits_freelist`
+     pinned the 7-field shape) updated to match sparse-shape
+     invariants — they now pin the `__find_slot` helper and
+     the 11-field type respectively.
+   - Output byte-identical across both backends on the trie
+     example and all 13 lib tests; cross-backend parity sweep
+     passes.
 
 4. **2.4 — Cross-backend parity: re-run all trie examples. (~1h)**
    - Verify `examples/trie.vani` and any lib tests using Trie pass

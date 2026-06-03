@@ -10,7 +10,27 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 2.1 + 2.2 shipped — sparse-
+**Last updated:** 2026-06-03 (**ARC 2.3 shipped — sparse trie
+LLVM mirror. ARC 2 (Trie sparse) COMPLETE.** The LLVM trie
+implementation now mirrors the C-side sparse representation:
+11-field struct `{ i8**, i32**, i16*, i16*, i64*, i8*, i64×5 }`,
+five new helper functions (`intent_trie__find_slot`,
+`__lower_bound`, `__grow_node`, `__insert_pair`, `__remove_pair`),
+and all 5 user-facing ops rewritten in LLVM IR using them.
+Manual SSA + GEP threading throughout — careful per-function
+label prefixes (`fs_`, `lb_`, `gn_`, `ip_`, `rp_`, `tn_`, `tnu_`,
+`td_`, `ti_`, `tw_`, `tc_`, `tsw_`, `tde_`, `trc_`) to avoid label
+collisions in LLVM's per-function namespace. Two existing lib
+tests had pinned the legacy LLVM struct shape and 1024-byte
+realloc pattern — updated to match the new sparse-shape
+invariants. Trie example output is now byte-identical across
+both backends with the sparse implementation. Cross-backend
+parity sweep still green. **1745 lib + 54 parity green. ARC 2
+COMPLETE — both backends use sparse children, ~30–100× memory
+reduction for sparse alphabets vs the legacy dense 256-wide
+storage.**)
+
+**Prior:** 2026-06-03 (**ARC 2.1 + 2.2 shipped — sparse-
 children trie on the C backend.** The per-node storage flipped
 from a flat dense `int32_t children[256]` (1024 bytes/node fixed)
 to struct-of-arrays sparse pairs: `node_keys` (u8 sorted array)

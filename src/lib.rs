@@ -13934,9 +13934,14 @@ fn main() -> i64 {
         // Verify the per-node child stride is 256-wide (not 26)
         // — pin the byte-count in the LLVM grow path.
         let ll = compile_to_llvm(source).expect("u8 alphabet LLVM compile");
+        // ARC 2.3 (sparse children): the realloc byte counts
+        // in the per-node grow path are tied to the actual child
+        // count, not the 256-wide alphabet. Pin instead that the
+        // sparse machinery is wired in — `find_slot` (binary
+        // search) is the canonical use site for the u8 key column.
         assert!(
-            ll.contains("mul i64 %cap_new, 1024"),
-            "LLVM realloc byte size must be cap * 256 * 4 = 1024 * cap (was 104 for 26-wide)"
+            ll.contains("intent_trie__find_slot"),
+            "LLVM trie must use sparse find_slot helper"
         );
     }
 
@@ -13960,9 +13965,13 @@ fn main() -> i64 {
             "C struct must carry free_head + free_count fields"
         );
         let ll = compile_to_llvm(source).expect("trie compaction LLVM compile");
+        // ARC 2.3 (sparse children): the LLVM struct now has 11
+        // fields instead of 7. Three pointer arrays + three
+        // per-node-meta arrays + is_end + five i64 fields:
+        //   i8**, i32**, i16*, i16*, i64*, i8*, i64×5
         assert!(
-            ll.contains("%intent_trie = type { i32*, i8*, i64, i64, i64, i64, i64 }"),
-            "LLVM struct must be the 7-field shape: {{ i32*, i8*, i64, i64, i64, i64, i64 }}"
+            ll.contains("%intent_trie = type { i8**, i32**, i16*, i16*, i64*, i8*, i64, i64, i64, i64, i64 }"),
+            "LLVM struct must be the 11-field sparse shape; ARC 2.3"
         );
     }
 
