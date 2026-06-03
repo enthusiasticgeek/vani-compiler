@@ -10,7 +10,24 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.1 shipped — generic-context
+**Last updated:** 2026-06-03 (**Devanagari `main()` entry-point
+aliases + cross-markdown audit.** `fn मुख्य()` (mukhya — Sanskrit
+/ Hindi / Marathi "main / primary"), `fn प्रमुख()` (pramukh —
+"primary, foremost"), and `fn प्रधान()` (pradhan — "principal /
+chief", same word used in प्रधानमंत्री / Prime Minister) all
+canonicalize to `main` at parse time. Compiler emits the same
+`@fn_main` symbol regardless of the source spelling; declaring
+two of these forms in the same program is a duplicate-fn error.
+Adds an entry-point row to the Devanagari alias table in
+README.md. **4 new lib tests** plus an end-to-end smoke test
+(`fn मुख्य()` compiles, type-checks, and emits the expected
+LLVM `@fn_main` symbol). README.md / TODO.md / ARCS.md /
+unsafe.md audited: stale "scheduled" claims on the safety-
+standard alignment arc replaced with ✅ SHIPPED banners; Tier
+1/2/3 + standard composites + MMIO + ARC 1.1 cross-referenced
+into the historical plan record. **1717 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**ARC 1.1 shipped — generic-context
 `hashmap_new()` inference.** The first sub-step of the HashMap
 monomorphization arc. New helper `try_elaborate_empty_hashmap`
 mirrors the existing `try_elaborate_empty_vec` pattern: when

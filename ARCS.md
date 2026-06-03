@@ -1,18 +1,17 @@
 # Multi-Session Arc Plan (Arcs 1–4)
 
-> **Sequenced after the safety-standard alignment arc.** See
-> [TODO.md](TODO.md) → *Safety-standard alignment*. Per the 2026-06-02
-> direction, MISRA / ASIL-D / DO-178C / IEC 62304 attribute work
-> (Tiers 1 → 2 → 3) lands before any ARC work begins. Reason: the
-> safety-standard primitives (`#[no_heap]`, stack-depth check, etc.)
-> may surface constraint violations in HashMap / Trie / closure
-> code paths that need to be addressed as part of the arcs
-> themselves — easier to design the arcs against the locked
-> standard surface than to retrofit later.
+> **Status (2026-06-03):** the safety-standard alignment arc
+> (Tiers 1 → 2 → 3 + four standard composites) is **shipped on
+> `main`**. See [STATUS.md](STATUS.md) for the per-commit ledger
+> and [TODO.md](TODO.md) → *Safety-standard alignment* for the
+> sealed-historical plan. ARC work is now active. Active sub-step:
+> **Arc 1.2 — Hash bound enforcement on user struct keys.**
 >
-> Order: **safety-standard Tier 1** → **safety-standard Tier 2** →
-> **ARCs (Arc 2 → Arc 1 → Arc 4.1 → Arc 3a → rest)** →
-> **safety-standard Tier 3**.
+> Order (executed): safety-standard Tier 1 ✓ → Tier 2 ✓ → Tier 3
+> ✓ → **ARCs (Arc 1 → Arc 2 → Arc 3 → Arc 4)**. The originally-
+> planned interleave (Arc 2 → Arc 1 → …) was simplified to a
+> straight-through Arc 1 → 2 → 3 → 4 traversal so each arc's
+> design can build on the previous arc's landed surface.
 
 Background: through closure #604 the bounded one-shot primitive surface
 is exhausted (tiers E–DD + W + Arc 0 — 108 closures). What remains are
@@ -59,13 +58,18 @@ existing test suite simultaneously.
 
 ### Sub-steps (~10–15h, 7 commits)
 
-1. **1.1 — Generic-context `hashmap_new()`. (~1.5h)**
-   - Change `check_hashmap_builtin` to read the let-binding's type
-     annotation (the existing inference for `vec()` is the model)
-     and return `Type::HashMap(K, V)` accordingly.
-   - Fall back to `Type::HashMap(I64, I64)` when no annotation is
-     present (backwards-compatible default).
-   - **Test:** existing `HashMap<i64, i64>` examples keep working.
+1. **1.1 — Generic-context `hashmap_new()`. ✅ SHIPPED 2026-06-03.**
+   - New helper `try_elaborate_empty_hashmap` mirrors the existing
+     `try_elaborate_empty_vec` pattern: when the let-annotation is
+     `HashMap<K, V>`, the empty `hashmap_new()` call elaborates to
+     return `Type::HashMap(K, V)` from that annotation.
+   - The default (no annotation) returns
+     `Type::HashMap(I64, I64)` — backwards-compatible.
+   - Tests: 3 new lib tests pin (a) default i64/i64, (b) annotated
+     i64/i64 via the elaboration path, (c) non-default V correctly
+     binds the type AND surfaces the expected bundle-op restriction
+     diagnostic (the rest of the bundle is still hardcoded for
+     i64/i64 until 1.4/1.5 ship).
 
 2. **1.2 — `Hash` bound enforcement at type-check. (~1h)**
    - When `HashMap<K, V>` is instantiated with K = struct type,

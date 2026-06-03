@@ -250,7 +250,24 @@ recorded for completeness.
   `unsafe` block keeps the rest of the language's invariants
   intact and is the more auditable choice.
 
-## Safety-standard alignment (2026-06-02, scheduled before ARCs)
+## Safety-standard alignment — ✅ SHIPPED 2026-06-03
+
+> **Status: COMPLETE.** All three tiers + four standard
+> composites are on `main`. Tier 1 (T1.1 deviations extractor /
+> T1.2 `#[no_heap]` / T1.3 stack-depth CLI) shipped 2026-06-02.
+> Tier 2 (T2.1 MMIO volatile / T2.2 `#[interrupt]` /
+> T2.3 `#[no_float]` / T2.4 complexity warn / T2.5
+> `#[no_recursion]` / T2.6 ptr-arith ban) plus the four standard
+> composites shipped 2026-06-02. Tier 3 (T3.1
+> `#[bounded_stack(bytes=N)]` / T3.2 `#[wcet(cycles=N)]` /
+> T3.3 `intentc acyclicity` / T3.4 `#[deterministic_timing]` /
+> T3.5 MISRA 13.5 tightening) shipped 2026-06-03.
+>
+> Detailed status: see [STATUS.md](STATUS.md) ledger. The
+> design notes below remain as the historical plan record —
+> any deviation between plan and implementation reflects what
+> the v1 ship actually delivered. ARC work resumed; see
+> [ARCS.md](ARCS.md).
 
 User-asked scope: *"any other items from MISRA C / AUTOSAR /
 other standards we could include for maximum embedded safety."*
@@ -305,7 +322,7 @@ yields the union.
 Manifest override (vani.toml `[compliance]` section) is a
 future enhancement; not v1 scope.
 
-### Tier 1 — high cert value, ~10h total. **Implement first.**
+### Tier 1 — ✅ SHIPPED 2026-06-02. High cert value, ~10h total.
 
 **1.1 `intentc deviations` extractor** (~2h)
 
@@ -360,7 +377,7 @@ Pairs with `#[bounded_stack(bytes = N)]` from Tier 3 — when
 both are present, the compiler ensures the declared budget is
 adequate.
 
-### Tier 2 — meaningful properties, ~25h total. **After Tier 1.**
+### Tier 2 — ✅ SHIPPED 2026-06-02. Meaningful properties, ~25h total.
 
 **2.1 `Mmio<T, ADDR>` typed primitive** (~6-8h)
 
@@ -410,7 +427,16 @@ Add explicit diagnostic ("raw pointer arithmetic is banned —
 MISRA C 2012 Rule 18.4. Use indices into a Vec or
 `BoundedPtr<T>` instead.") for clarity. MISRA 18.4.
 
-### Tier 3 — substantial arcs, deferred until 1+2 done.
+### Tier 3 — ✅ SHIPPED 2026-06-03. Substantial arcs.
+
+> Note: the original estimates below (multi-week / multi-day) anticipated a more
+> exhaustive implementation. V1 shipped pragmatic, coarse-but-correct passes that
+> establish the audit trail and catch obvious violations — exhaustive
+> architecture-specific WCET, exhaustive data-dependency analysis, and full
+> MISRA 13.x coverage are deferred to Tier 4. The shipped surface is
+> sufficient for MISRA-C-2012 / ASIL-D / DO-178C Level A / IEC 62304 Class C
+> *feasibility*; certification-pack delivery is still a downstream
+> engineering project.
 
 **3.1 `#[wcet(cycles = N)]` annotation + check** (multi-week)
 
@@ -448,16 +474,25 @@ forbids visible side effects; the MISRA rule additionally
 requires no dependency between sub-expression evaluation
 orders.
 
-### Suggested execution order
+### Actual execution order (historical, as shipped)
 
-1. **Tier 1**: 1.1 deviations extractor → 1.2 `#[no_heap]` → 1.3
-   stack-depth. ~10h. Unblocks "MISRA C 2012 alignment" claim.
-2. **Tier 2**: 2.1 Mmio → 2.2 `#[interrupt]` → 2.3-2.6 small
-   primitives. ~25h. Unblocks "ASIL-D / DO-178C / IEC 62304
-   feasibility" claim.
-3. **Tier 3**: One arc at a time. Each is multi-day.
+1. **Tier 1** ✅ SHIPPED 2026-06-02: 1.1 deviations extractor →
+   1.2 `#[no_heap]` (with `INTENT_NO_HEAP=1` global mode) → 1.3
+   stack-depth CLI. Unblocked the "MISRA C 2012 alignment" claim.
+2. **Tier 2** ✅ SHIPPED 2026-06-02: 2.2 `#[interrupt]` →
+   2.3 `#[no_float]` → 2.4 complexity warn → 2.5 `#[no_recursion]`
+   → 2.6 ptr-arith ban → standard composites (`#[misra_c_2012]` /
+   `#[asil_d]` / `#[do178c_level_a]` / `#[iec_62304_class_c]`) →
+   2.1 MMIO (`mmio_read_u32` / `mmio_write_u32` volatile builtins).
+   Unblocked the "ASIL-D / DO-178C / IEC 62304 feasibility" claim.
+3. **Tier 3** ✅ SHIPPED 2026-06-03: 3.1 `#[bounded_stack(bytes=N)]`
+   → 3.2 `#[wcet(cycles=N)]` (coarse cycle estimator) →
+   3.3 `intentc acyclicity` (Tarjan SCC) → 3.4
+   `#[deterministic_timing]` → 3.5 MISRA 13.5 tightening for pure
+   fns + composites.
 4. **ARCs.md** (HashMap monomorph / Trie sparse / closures /
-   wider K-V): can interleave with Tier 2 / 3.
+   wider K-V): active now. ARC 1.1 (generic-context
+   `hashmap_new()` inference) landed 2026-06-03.
 
 ### Standard tagging in the deviations report
 

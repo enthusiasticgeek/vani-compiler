@@ -30928,6 +30928,46 @@ fn main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // Devanagari entry-point aliases — `मुख्य` / `प्रमुख` /
+    // `प्रधान` canonicalize to `main` at parse time.
+
+    #[test]
+    fn devanagari_main_alias_mukhya_compiles() {
+        let source = "fn मुख्य() -> i64 { return 0; }";
+        let _ = compile(source).expect("मुख्य canonicalizes to main");
+    }
+
+    #[test]
+    fn devanagari_main_alias_pramukh_compiles() {
+        let source = "fn प्रमुख() -> i64 { return 0; }";
+        let _ = compile(source).expect("प्रमुख canonicalizes to main");
+    }
+
+    #[test]
+    fn devanagari_main_alias_pradhan_compiles() {
+        let source = "fn प्रधान() -> i64 { return 0; }";
+        let _ = compile(source).expect("प्रधान canonicalizes to main");
+    }
+
+    #[test]
+    fn devanagari_main_alias_collides_with_main() {
+        // Both `main` and one of the Devanagari aliases declared
+        // in the same program is a duplicate — they're aliases
+        // for the same symbol.
+        let source = r#"
+            fn main() -> i64 { return 0; }
+            fn मुख्य() -> i64 { return 1; }
+        "#;
+        let errs = compile(source).expect_err(
+            "main + मुख्य must collide as duplicates",
+        );
+        assert!(
+            !errs.is_empty(),
+            "expected duplicate-fn diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // ARC 1.1 — generic-context hashmap_new() inference.
 
     #[test]

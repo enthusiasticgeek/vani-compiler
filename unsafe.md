@@ -463,32 +463,33 @@ the regions feature.
 
 ---
 
-## Suggested implementation order
+## Implementation status — ✅ ALL LAYERS SHIPPED 2026-06-02
 
-### v1 — generational handles (mainstream embedded)
+All v1 and v2 layers are on `main`. Layers 1.1 / 1.2 / 1.3 / 2.1 /
+2.2 / 3.1 / 3.2 / 4.1 / 4.2 / 5 (foundation + lifetime-tagged
+`ArenaRef<T>` + `region <name> { ... }` block sugar) — every layer
+of the original plan landed. The safety-standard alignment arc on
+top of this surface also shipped (Tier 1+2+3 — see
+[STATUS.md](STATUS.md) ledger and [TODO.md](TODO.md) §
+*Safety-standard alignment*). The historical order list is
+retained below for archival purposes.
 
-1. **Layer 1.1** — Lexical `unsafe` containment (2–3h)
-2. **Layer 1.2** — No-escape on `&local` (3–4h)
-3. **Layer 4.1** — Stack canaries via toolchain flag (30min, free win)
-4. **Layer 2.1a–2.1c** — `Handle<T>` type + Pool<T> codegen (5–7h)
-5. **Layer 3.1** — Canary words around unsafe alloc (2h)
-6. **Layer 1.3** — Taint bit on unsafe-derived values (4–5h)
-7. **Layer 2.2** — Handle as the only `unsafe` escape (1h)
-8. **Layer 3.2** — `BoundedPtr<T>` fat pointer (3h)
-9. **Layer 4.2** — ARM MTE flag (1h)
+### v1 historical sequence — generational handles (mainstream embedded)
 
-**v1 estimated effort:** 22–31 hours across ~12 commits.
+1. **Layer 1.1** ✅ Lexical `unsafe` containment
+2. **Layer 1.2** ✅ No-escape on `&local`
+3. **Layer 4.1** ✅ Stack canaries via toolchain flag
+4. **Layer 2.1a–2.1c** ✅ `Handle<T>` type + Pool<T> codegen
+5. **Layer 3.1** ✅ Canary words around unsafe alloc
+6. **Layer 1.3** ✅ Taint bit on unsafe-derived values
+7. **Layer 2.2** ✅ Handle as the only `unsafe` escape
+8. **Layer 3.2** ✅ `BoundedPtr<T>` fat pointer
+9. **Layer 4.2** ✅ ARM MTE flag
 
-### v2 — region typing (safety-critical opt-in)
+### v2 historical sequence — region typing (safety-critical opt-in)
 
-10. **Layer 5.1–5.8** — Region typing (15–25h across ~8 commits)
-
-**Sequencing constraint:** v1 must ship + stabilize first. We want
-real user feedback on Handle<T> ergonomics before locking in region
-syntax. Estimate v1 → v2 gap: weeks-to-months of usage.
-
-**Combined total:** 37–56 hours across ~20 commits, across two
-shipping phases.
+10. **Layer 5.1–5.8** ✅ Region typing — `ArenaRef<T>` lifetime-
+    tagged ops + `region <name> { ... }` block sugar all on `main`.
 
 ---
 

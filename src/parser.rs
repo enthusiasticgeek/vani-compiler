@@ -1065,7 +1065,17 @@ impl Parser {
         let fn_token = self.expect_keyword("'fn'", |kind| matches!(kind, TokenKind::Fn))?;
         let name_token = self.expect_ident()?;
         let name_span = name_token.span;
-        let name = ident_text(name_token);
+        // Devanagari surface (Phase 1) extension: the entry-point
+        // function can be spelled `main`, `मुख्य` (mukhya),
+        // `प्रमुख` (pramukh), or `प्रधान` (pradhan) — all common
+        // Sanskrit/Hindi/Marathi words for "main / primary /
+        // principal". The parser canonicalizes any of the
+        // Devanagari forms to `main` so the checker's entry-point
+        // lookup, the backends' symbol emission, and the runtime
+        // all keep treating `main` as the unique entry. A program
+        // that declares two of these forms (e.g. both `main` and
+        // `मुख्य`) errors at the existing duplicate-fn check.
+        let name = canonicalize_entry_point_name(ident_text(name_token));
 
         // Optional generic parameter list: `<T1, T2, …>` after
         // the fn name. Names recorded into `type_params`; the
@@ -4342,6 +4352,32 @@ fn ident_text(token: Token) -> String {
     match token.kind {
         TokenKind::Ident(name) => name,
         _ => unreachable!("expected identifier"),
+    }
+}
+
+/// Devanagari surface (Phase 1) entry-point aliases. The
+/// Sanskrit/Hindi/Marathi words for "main / primary / principal"
+/// canonicalize to the English `main` symbol so the rest of the
+/// compiler doesn't need to know that any of the alternative
+/// spellings exist.
+///
+/// Accepted forms:
+/// - `main` (English, unchanged)
+/// - `मुख्य` (mukhya — common across Sanskrit, Hindi, Marathi;
+///   the most natural rendering of "main / chief")
+/// - `प्रमुख` (pramukh — Sanskrit/Hindi/Marathi "primary,
+///   foremost"; also a common noun form for a head/leader)
+/// - `प्रधान` (pradhan — Sanskrit/Hindi/Marathi "principal /
+///   chief"; the same word used in "Prime Minister",
+///   प्रधानमंत्री)
+///
+/// A program that declares two of these forms (e.g. both `main`
+/// and `मुख्य`) errors at the existing duplicate-fn check —
+/// they're aliases for the SAME symbol, not parallel functions.
+fn canonicalize_entry_point_name(name: String) -> String {
+    match name.as_str() {
+        "main" | "मुख्य" | "प्रमुख" | "प्रधान" => "main".to_string(),
+        _ => name,
     }
 }
 

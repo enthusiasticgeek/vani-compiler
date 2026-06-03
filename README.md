@@ -349,7 +349,7 @@ for raw pointer arithmetic, mmap, syscalls, or FFI.
 The single exception is **embedded / bare-metal targets**, where an
 explicit `unsafe(reason = "...") { ... }` block is the opt-in escape
 hatch for the narrow set of operations the compiler cannot prove
-safe (raw MMIO outside the typed `Register<T, ADDR>` primitive,
+safe (raw MMIO outside the `mmio_read_u32` / `mmio_write_u32` builtins,
 inline assembly, platform intrinsics, custom linker-placed memory).
 The keyword has to be typed, the reason has to be filled in, and
 the default is checked. Hosted builds reject `unsafe` entirely. See
@@ -534,8 +534,9 @@ genuinely cannot prove safe.
   On embedded builds, `unsafe { ... }` is the **opt-in** path
   for the narrow set of operations the compiler cannot
   prove safe:
-  - Raw MMIO outside the typed `Register<T, ADDR>` primitive
-    (e.g. dynamically computed register addresses).
+  - Raw MMIO outside the `mmio_read_u32` / `mmio_write_u32`
+    builtins (e.g. wider register types or dynamically computed
+    register addresses).
   - Inline assembly and platform intrinsics.
   - `transmute`-style reinterpretation between layout-equivalent
     types (DMA buffer ↔ packed-struct view).
@@ -626,19 +627,30 @@ Plan-of-record: [unsafe.md](unsafe.md). Status (2026-06-02):
 3.2 / 4.1 / 4.2 / 5 (foundation + lifetime-tagged `ArenaRef<T>` +
 `region <name> { ... }` block sugar) all on `main`.
 
-**Safety-standard alignment — scheduled next, before ARCs** (see
-[TODO.md](TODO.md) → *Safety-standard alignment*). Two-tier
+**Safety-standard alignment — SHIPPED (2026-06-03).** Two-tier
 attribute system bringing MISRA C 2012, ISO 26262 ASIL-D,
-DO-178C Level A, and IEC 62304 Class C feasibility:
+DO-178C Level A, and IEC 62304 Class C feasibility. All three
+tiers + four standard composites are on `main`:
 
-- **Feature primitives** (orthogonal, composable): `#[no_heap]`,
-  `#[no_float]`, `#[no_recursion]`, `#[no_unsafe]`,
-  `#[bounded_stack(bytes = N)]`, `#[wcet(cycles = N)]`,
-  `#[interrupt]`, `#[deterministic_timing]`. Each enforces one
-  constraint compiler-side.
+- **Feature primitives** (orthogonal, composable, all shipped):
+  `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, `#[no_recursion]`,
+  `#[interrupt]`, `#[bounded_stack(bytes = N)]`,
+  `#[wcet(cycles = N)]`, `#[deterministic_timing]`. Each enforces
+  one constraint compiler-side via a dedicated `safety::enforce_*`
+  pass (call-graph fixpoint for `no_heap`, BFS cycle detection
+  for `no_recursion`, coarse cycle estimator for `wcet`, etc.).
 - **Standard composites** (hardcoded aliases that expand to
-  primitive sets): `#[misra_c_2012]`, `#[asil_d]`,
-  `#[do178c_level_a]`, `#[iec_62304_class_c]`.
+  primitive sets, all shipped): `#[misra_c_2012]`, `#[asil_d]`,
+  `#[do178c_level_a]`, `#[iec_62304_class_c]`. Two composite
+  tags on the same fn rejected (stack primitives instead).
+- **MISRA 13.5 tightening (T3.5):** `&&` / `||` whose RHS contains
+  a non-pure function call is rejected for `pure fn` and any
+  function with a standard-composite tag (short-circuit
+  evaluation would make the side effect order-dependent).
+- **MMIO volatile load/store (T2.1):** `mmio_read_u32(addr)` /
+  `mmio_write_u32(addr, v)` builtins emit a `volatile` qualifier
+  in both backends — required for peripheral registers where
+  reads clear IRQ flags and writes latch state.
 - **Compose by union — most restrictive wins.** Composites set
   a baseline; primitives tighten further.
 - **Opt-in by design.** Without any tag, vāṇี behaves exactly
@@ -646,15 +658,24 @@ DO-178C Level A, and IEC 62304 Class C feasibility:
   tag, the marked function is held to that standard's
   constraints; with the matching global env var
   (`INTENT_NO_HEAP=1`, …), the entire program is held.
-- **`intentc deviations` extractor** walks the IR/DWARF metadata
-  from `unsafe(reason = "…")` blocks and emits a structured
-  audit artifact (CSV / JSON / human-readable text) — directly
-  the deviation-record format safety reviewers need for
-  ASIL-D / DO-178C sign-off.
+- **Audit-artifact CLIs:**
+  - `intentc deviations <file>` walks every
+    `unsafe(reason = "…")` block and emits a structured record
+    (CSV / JSON / human-readable text) with each row tagged by
+    the enclosing fn's `target_standard`. The deviation-record
+    format ASIL-D / DO-178C reviewers need for sign-off.
+  - `intentc stack-depth <file> [--max=N] [--entry=fn]` — per-fn
+    frame-size estimates + call-graph max stack depth per
+    entry-point. Detects unbounded recursion; `--max` is a
+    CI-friendly hard gate.
+  - `intentc acyclicity <file>` (T3.3) — Tarjan SCC over the call
+    graph; reports every cycle. `#[bounded(N)]`-tagged self-loops
+    are exempt; everything else exits 1.
 
-Plan-of-record: [TODO.md](TODO.md) § *Safety-standard alignment*.
-After these land, ARC work (HashMap monomorph / Trie sparse /
-closures / wider K-V) resumes.
+Plan-of-record + sub-step ledger: [TODO.md](TODO.md) §
+*Safety-standard alignment*. ARC work is now active; ARC 1.1
+(generic-context `hashmap_new()` inference) landed alongside
+Tier 3 closing — see [ARCS.md](ARCS.md).
 
 ### Examples — what the compiler rejects
 
@@ -993,6 +1014,7 @@ language.
 | `ensures` | `सुनिश्चयति` *sunishchayati* | `निश्चित` *nishchit* | `निश्चित` *nishchit* |
 | `parallel for` | `समान्तर प्रति` *samāntara prati* | `समानांतर` *samānāntar* | `समांतर` *samāntar* |
 | `task` / `join` | `कार्य` *kārya* / `संयुज्` *saṁyuj* | `काम` *kām* / `जोड़ो` *joṛo* | `काम` *kām* / `जुळवा` *juḷvā* |
+| `fn main()` (entry-point name) | `मुख्य` *mukhya* / `प्रमुख` *pramukh* / `प्रधान` *pradhāna* | same | same |
 
 Pronunciation guide for the diacritics used in the romanizations:
 
