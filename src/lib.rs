@@ -31649,6 +31649,129 @@ fn main() -> i64 {
         assert_eq!(pairs[1].tag, "intent_hashmap_int64_t_hm_int64_t_int64_t");
     }
 
+    // ARC 1.7 — HashMap<UserStruct, V> end-to-end on both backends.
+
+    #[test]
+    fn hashmap_struct_key_typechecks_with_hash_and_eq_impls() {
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            interface Eq {
+              fn eq(self: Score, other: Score) -> bool;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            implement Eq for Score {
+              fn eq(self: Score, other: Score) -> bool { return self.val == other.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              let a: Score = Score { val: 1 };
+              let _ = hashmap_insert(mut ref m, a, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect("HashMap<Score, i64> type-checks");
+    }
+
+    #[test]
+    fn hashmap_struct_key_emits_per_pair_c_bundle() {
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            interface Eq {
+              fn eq(self: Score, other: Score) -> bool;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            implement Eq for Score {
+              fn eq(self: Score, other: Score) -> bool { return self.val == other.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              let a: Score = Score { val: 1 };
+              let _ = hashmap_insert(mut ref m, a, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<Score, i64> → C");
+        assert!(
+            c.contains("intent_hashmap_Struct_Score_int64_t_new"),
+            "expected struct-K bundle in C output"
+        );
+        // Bundle delegates hash to user fn.
+        assert!(c.contains("fn_Score_hash"));
+        // Bundle delegates equality to user fn.
+        assert!(c.contains("fn_Score_eq"));
+    }
+
+    #[test]
+    fn hashmap_struct_key_emits_per_pair_llvm_bundle() {
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            interface Eq {
+              fn eq(self: Score, other: Score) -> bool;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            implement Eq for Score {
+              fn eq(self: Score, other: Score) -> bool { return self.val == other.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              let a: Score = Score { val: 1 };
+              let _ = hashmap_insert(mut ref m, a, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("HashMap<Score, i64> → LLVM");
+        assert!(
+            ll.contains("intent_hashmap_Struct_Score_int64_t"),
+            "expected struct-K LLVM bundle"
+        );
+        // Hash dispatch goes through the user fn.
+        assert!(ll.contains("call i64 @fn_Score_hash"));
+        // Equality dispatch goes through the user fn.
+        assert!(ll.contains("call i1 @fn_Score_eq"));
+    }
+
+    #[test]
+    fn hashmap_struct_key_rejects_when_eq_impl_missing() {
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              let a: Score = Score { val: 1 };
+              let _ = hashmap_insert(mut ref m, a, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            "struct K without Eq impl must reject",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("Hash") && d.message.contains("Eq")),
+            "expected diagnostic mentioning both Hash and Eq, got: {:?}",
+            errs
+        );
+    }
+
     // ARC 1.5a-e — LLVM mirror of per-(K, V) C bundle.
 
     #[test]

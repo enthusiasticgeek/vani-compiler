@@ -10,7 +10,56 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.4 + ARC 1.5 COMPLETE —
+**Last updated:** 2026-06-03 (**ARC 1.7 COMPLETE — `HashMap<UserStruct, V>`
+end-to-end on both backends.** All four sub-steps (1.7a struct-K
+hash dispatch / 1.7b struct-K equality / 1.7c LLVM mirror /
+1.7d round-trip + cross-backend parity) shipped in one atomic
+landing.
+
+1.7 checker relaxation: `check_hashmap_builtin` now accepts
+`HashMap<Struct, V>` when both `implement Hash for Struct` and
+`implement Eq for Struct` are in scope. The Hash bound was
+already enforced in ARC 1.2; Eq is the new requirement for
+1.7's key-equality delegation. Improved diagnostic: "supports
+`HashMap<i64, V>` for scalar V, or `HashMap<Struct, V>` when
+Struct implements both `Hash` and `Eq`".
+
+1.7a/b (C bundle): new `emit_intent_hashmap_struct_pair_c_body`
+emits per-(Struct K, V) bundle with prefix
+`intent_hashmap_Struct_<K>_<V>`. Hash function calls the user's
+`fn_<K>_hash` (FNV-1a wrapped around the user's i64 hash so
+single-field structs still distribute). Key equality uses
+`fn_<K>_eq`. Struct K values are passed by value (vāṇी structs
+are Copy).
+
+1.7c (LLVM bundle): `emit_intent_hashmap_struct_pair_llvm`
+mirrors the C side. Struct types lower to `%Struct_<name>` in
+LLVM IR; `ptrtoint` on `getelementptr-of-null` computes the
+struct's runtime size for malloc. emit_call dispatch helpers
+extended to also return K's LLVM type for call-site
+parameterization.
+
+1.7d (end-to-end): `HashMap<Score, i64>` works on both
+backends. `Score` defines `Hash` + `Eq` impls returning i64 +
+bool. `hashmap_insert(mut ref m, Score{val:1}, 100)` works,
+`hashmap_len(ref m)` returns 2 after two inserts. Both
+backends return exit 2.
+
+**4 new lib tests**:
+  - type-checks with Hash + Eq impls
+  - C emits per-pair struct-K bundle delegating to fn_<K>_hash
+    + fn_<K>_eq
+  - LLVM emits per-pair struct-K bundle with the same delegation
+  - missing Eq impl rejected at the checker with a clear
+    diagnostic mentioning both interfaces
+
+**1775 lib + 54 parity green. ARC 1 COMPLETE** — HashMap
+monomorphization for scalar V (i8/i16/i32/i64/u8/u16/u32/u64/bool)
++ user struct K with Hash + Eq impls all work end-to-end
+cross-backend. Only ARC 4 (wider K-V — OwnedStr / Tuple / Vec /
+f64 / non-Copy V) remains open.
+
+**Prior:** 2026-06-03 (**ARC 1.4 + ARC 1.5 COMPLETE —
 per-(K, V) HashMap bundle, both backends.** `HashMap<i64, V>`
 for V ∈ {i8, i16, i32, i64, u8, u16, u32, u64, bool} now
 compiles + runs end-to-end on **both** the C and LLVM backends

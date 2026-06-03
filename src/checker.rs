@@ -22679,12 +22679,24 @@ fn check_hashmap_builtin(
         Type::I8 | Type::I16 | Type::I32 | Type::I64
             | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Bool
     );
-    if !matches!(k_ty, Type::I64) {
+    // ARC 1.7: allow struct K when both `implement Hash for K`
+    // and `implement Eq for K` are in scope. The Hash bound was
+    // checked earlier (in `validate_array_element_type` via ARC
+    // 1.2); here we additionally require Eq so the bundle's
+    // key-equality check can delegate.
+    let k_is_struct_with_hash_and_eq = match &k_ty {
+        Type::Struct(name) => {
+            let ifaces = crate::ast::ifaces_implemented_by(name);
+            ifaces.contains("Hash") && ifaces.contains("Eq")
+        }
+        _ => false,
+    };
+    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() supports `HashMap<i64, V>` for scalar V in v1, got HashMap<{}, {}> \
-                 (wider K types arrive in ARC 1.7 / Arc 4)",
+                "{}() supports `HashMap<i64, V>` for scalar V, or `HashMap<Struct, V>` \
+                 when Struct implements both `Hash` and `Eq`, got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));
@@ -22692,7 +22704,7 @@ fn check_hashmap_builtin(
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() supports `HashMap<i64, V>` for scalar V in v1, got HashMap<{}, {}>",
+                "{}() supports scalar V in v1, got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));

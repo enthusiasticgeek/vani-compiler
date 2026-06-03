@@ -648,11 +648,6 @@ pub fn emit_c(program: &TypedProgram) -> String {
             if matches!(p.key, Type::I64) && matches!(p.value, Type::I64) {
                 continue;
             }
-            // V1 scope: K must be i64; non-i64 K is rejected at
-            // the checker so this branch shouldn't fire.
-            if !matches!(p.key, Type::I64) {
-                continue;
-            }
             let v_tag = match &p.value {
                 Type::I8 => "int8_t",
                 Type::I16 => "int16_t",
@@ -681,9 +676,24 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let has_option_v = ENUM_PAYLOAD_REGISTRY.with(|r| {
                 r.borrow().contains_key(&opt_name)
             });
-            emit_intent_hashmap_pair_c_body(
-                &mut body, v_tag, v_tag, v_mangle, has_option_v,
-            );
+            // ARC 1.7: dispatch on K — scalar (i64) uses the
+            // scalar-K bundle; struct K uses the struct-K
+            // bundle (delegates hash + eq to user fns).
+            match &p.key {
+                Type::I64 => {
+                    emit_intent_hashmap_pair_c_body(
+                        &mut body, v_tag, v_tag, v_mangle, has_option_v,
+                    );
+                }
+                Type::Struct(k_name) => {
+                    let k_ctype = format!("Struct_{}", k_name);
+                    emit_intent_hashmap_struct_pair_c_body(
+                        &mut body, k_name, &k_ctype, v_tag, v_tag,
+                        v_mangle, has_option_v,
+                    );
+                }
+                _ => continue,
+            }
         }
     }
     if program_uses_i64_btreeset(program) {
@@ -1845,6 +1855,184 @@ fn emit_intent_hashmap_pair_c_body(
             v_ctype = v_ctype,
             prefix = prefix,
             opt_v = opt_v,
+        ));
+    }
+}
+
+/// ARC 1.7 — parameterized HashMap bundle for K = user struct,
+/// V = any scalar. The struct K must implement both `Hash` and
+/// `Eq` (checker enforces this). The bundle delegates:
+///   - hash function → user's `fn_<K>__hash(K)` returning i64
+///   - key equality → user's `fn_<K>__eq(K, K)` returning bool
+///
+/// `k_name`     — struct name, e.g. "Score"
+/// `k_ctype`    — full C-leaf type, e.g. "Struct_Score"
+/// `v_tag`      — V's C-leaf tag, e.g. "int64_t"
+/// `v_ctype`    — V's full C type spelling (same as v_tag for
+///                scalars)
+/// `option_v_mangle` — Option<V> enum suffix, e.g. "i64"
+/// `has_option_v` — gates get/insert/remove
+fn emit_intent_hashmap_struct_pair_c_body(
+    out: &mut String,
+    k_name: &str,
+    k_ctype: &str,
+    v_tag: &str,
+    v_ctype: &str,
+    option_v_mangle: &str,
+    has_option_v: bool,
+) {
+    let prefix = format!("intent_hashmap_Struct_{}_{}", k_name, v_tag);
+    let opt_v = format!("Enum_Option__{}", option_v_mangle);
+    // User-defined interface methods are emitted as
+    // `fn_<TypeName>_<method>` by the existing interface
+    // codegen (single underscore between type + method).
+    let hash_fn = format!("fn_{}_hash", k_name);
+    let eq_fn = format!("fn_{}_eq", k_name);
+    out.push_str(&format!(
+        "typedef struct {{ {k_ctype}* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
+         /* Declare the user-defined hash + eq fns; they may be\n\
+          * defined later in the same translation unit. */\n\
+         static int64_t {hash_fn}({k_ctype} self);\n\
+         static bool {eq_fn}({k_ctype} self, {k_ctype} other);\n\
+         static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
+         \x20 {prefix} m;\n\
+         \x20 m.keys = ({k_ctype}*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
+         \x20 m.len = 0; m.capacity = 0; m.tombstones = 0;\n\
+         \x20 return m;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}_drop({prefix}* m) {{\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = 0; m->values = 0; m->occ = 0;\n\
+         \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
+         }}\n\
+         static INTENT_UNUSED uint64_t {prefix}__hash_key({k_ctype} k) {{\n\
+         \x20 int64_t raw = {hash_fn}(k);\n\
+         \x20 /* FNV-1a over the raw i64 hash so struct hash\n\
+          *    impls that return e.g. a single field's value\n\
+          *    still distribute across the table. */\n\
+         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
+         \x20 uint64_t u = (uint64_t)raw;\n\
+         \x20 for (int i = 0; i < 8; i++) {{\n\
+         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
+         \x20   h *= 0x100000001b3ULL;\n\
+         \x20 }}\n\
+         \x20 return h;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__insert_raw({prefix}* m, {k_ctype} k, {v_ctype} v) {{\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] == 1) {{\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__grow({prefix}* m) {{\n\
+         \x20 uint64_t old_cap = m->capacity;\n\
+         \x20 {k_ctype}* old_keys = m->keys;\n\
+         \x20 {v_ctype}* old_values = m->values;\n\
+         \x20 uint8_t* old_occ = m->occ;\n\
+         \x20 uint64_t new_cap = old_cap == 0 ? 8 : old_cap * 2;\n\
+         \x20 m->keys = ({k_ctype}*)malloc(new_cap * sizeof({k_ctype}));\n\
+         \x20 m->values = ({v_ctype}*)malloc(new_cap * sizeof({v_ctype}));\n\
+         \x20 m->occ = (uint8_t*)calloc(new_cap, 1);\n\
+         \x20 if (!m->keys || !m->values || !m->occ) abort();\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = new_cap;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 for (uint64_t i = 0; i < old_cap; i++) {{\n\
+         \x20   if (old_occ[i] == 1) {prefix}__insert_raw(m, old_keys[i], old_values[i]);\n\
+         \x20 }}\n\
+         \x20 if (old_keys) free(old_keys);\n\
+         \x20 if (old_values) free(old_values);\n\
+         \x20 if (old_occ) free(old_occ);\n\
+         }}\n\
+         static INTENT_UNUSED bool {prefix}_contains_key(const {prefix}* m, {k_ctype} k) {{\n\
+         \x20 if (m->capacity == 0) return false;\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] != 0) {{\n\
+         \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) return true;\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 return false;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_len(const {prefix}* m) {{\n\
+         \x20 return (int64_t)m->len;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_clear({prefix}* m) {{\n\
+         \x20 int64_t prior = (int64_t)m->len;\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = ({k_ctype}*)0;\n\
+         \x20 m->values = ({v_ctype}*)0;\n\
+         \x20 m->occ = (uint8_t*)0;\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = 0;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 return prior;\n\
+         }}\n",
+        k_ctype = k_ctype, v_ctype = v_ctype,
+        prefix = prefix, hash_fn = hash_fn, eq_fn = eq_fn,
+    ));
+    if has_option_v {
+        out.push_str(&format!(
+            "static INTENT_UNUSED {opt_v} {prefix}_get(const {prefix}* m, {k_ctype} k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, {k_ctype} k, {v_ctype} v) {{\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 {opt_v} r;\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 int64_t first_tomb = -1;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->values[i] = v;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   if (m->occ[i] == 2 && first_tomb == -1) first_tomb = (int64_t)i;\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 if (first_tomb != -1) {{\n\
+             \x20   uint64_t slot = (uint64_t)first_tomb;\n\
+             \x20   m->keys[slot] = k; m->values[slot] = v; m->occ[slot] = 1;\n\
+             \x20   m->len++; m->tombstones--;\n\
+             \x20 }} else {{\n\
+             \x20   m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_remove({prefix}* m, {k_ctype} k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {eq_fn}(m->keys[i], k)) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->occ[i] = 2;\n\
+             \x20     m->len--;\n\
+             \x20     m->tombstones++;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\n",
+            k_ctype = k_ctype, v_ctype = v_ctype,
+            prefix = prefix, eq_fn = eq_fn, opt_v = opt_v,
         ));
     }
 }
@@ -11115,8 +11303,8 @@ pub(crate) fn emit_tuple_bundle(elements: &[Type], out: &mut String) {
 /// from the HashMap type itself. The (i64, i64) case maps to the
 /// legacy bundle name so existing callers don't need migration.
 fn hashmap_prefix_from_kv(k: &Type, v: &Type) -> String {
-    let k_tag = hashmap_type_tag_c(k);
-    let v_tag = hashmap_type_tag_c(v);
+    let k_tag = hashmap_type_tag_c_owned(k);
+    let v_tag = hashmap_type_tag_c_owned(v);
     // Legacy (i64, i64) bundle keeps its original name.
     if matches!(k, Type::I64) && matches!(v, Type::I64) {
         return "intent_hashmap_i64_i64".to_string();
@@ -11148,7 +11336,27 @@ fn hashmap_prefix_from_recv(ty: &Type) -> String {
 
 /// Per-type C-leaf tag for use in HashMap bundle names. Mirrors
 /// the C-leaf type spelling so the emitter produces matching
-/// identifiers.
+/// identifiers. Returns owned String because struct K paths
+/// synthesize names dynamically.
+fn hashmap_type_tag_c_owned(ty: &Type) -> String {
+    match ty {
+        Type::I8 => "int8_t".to_string(),
+        Type::I16 => "int16_t".to_string(),
+        Type::I32 => "int32_t".to_string(),
+        Type::I64 => "int64_t".to_string(),
+        Type::U8 => "uint8_t".to_string(),
+        Type::U16 => "uint16_t".to_string(),
+        Type::U32 => "uint32_t".to_string(),
+        Type::U64 => "uint64_t".to_string(),
+        Type::Bool => "bool".to_string(),
+        // ARC 1.7: struct K — tag matches the C-emitted struct
+        // typedef name (`Struct_<name>`).
+        Type::Struct(name) => format!("Struct_{}", name),
+        _ => "i64".to_string(),
+    }
+}
+
+#[allow(dead_code)]
 fn hashmap_type_tag_c(ty: &Type) -> &'static str {
     match ty {
         Type::I8 => "int8_t",
