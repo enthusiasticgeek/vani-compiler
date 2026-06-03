@@ -10,7 +10,24 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**T3.5 of safety-standard arc
+**Last updated:** 2026-06-03 (**ARC 1.1 shipped — generic-context
+`hashmap_new()` inference.** The first sub-step of the HashMap
+monomorphization arc. New helper `try_elaborate_empty_hashmap`
+mirrors the existing `try_elaborate_empty_vec` pattern: when
+`let m: HashMap<K, V> = hashmap_new()` is seen, the let-binding's
+type annotation drives the inferred return type instead of the
+hardcoded `HashMap<i64, i64>` default. The default (no
+annotation) is preserved for backwards compatibility. The other
+bundle ops (`hashmap_insert`/`get`/`len`/etc.) still restrict to
+(i64, i64) — that restriction is lifted in ARC 1.2-1.7 when the
+per-(K, V) bundle emission lands. **3 new lib tests** (default
+i64/i64 still works, annotated i64/i64 binds via the new path,
+non-default V correctly propagates as the binding type with the
+expected bundle-op restriction diagnostic). **1713 lib + 54
+parity green.** Tier 3 + safety-standard alignment arc COMPLETE;
+ARC work begun.)
+
+**Prior:** 2026-06-03 (**T3.5 of safety-standard arc
 shipped — MISRA C 2012 Rule 13.5 tightening. Tier 3 COMPLETE.**
 MISRA 13.5 says: "The right hand operand of a logical `&&` or
 `||` operator shall not contain persistent side effects." The

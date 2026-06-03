@@ -30928,6 +30928,75 @@ fn main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // ARC 1.1 — generic-context hashmap_new() inference.
+
+    #[test]
+    fn hashmap_new_default_returns_i64_i64() {
+        // Backwards-compatible: no annotation gives HashMap<i64, i64>.
+        let source = r#"
+            fn main() -> i64 {
+              let m = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect("default i64/i64 hashmap compiles");
+    }
+
+    #[test]
+    fn hashmap_new_with_i64_i64_annotation_still_compiles() {
+        // Annotation-elaboration takes the elaborated path; for
+        // the default (K=V=i64) the result must match the legacy
+        // path exactly so existing examples keep working.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "annotated HashMap<i64, i64> compiles",
+        );
+    }
+
+    #[test]
+    fn hashmap_new_with_non_default_annotation_produces_typed_binding() {
+        // ARC 1.1 isolates the `hashmap_new()` inference from the
+        // rest of the bundle ops. The binding type is correctly
+        // `HashMap<i64, u64>` (proves inference works), but
+        // `hashmap_insert`/etc. are still restricted to (i64, i64)
+        // until ARC 1.2-1.7 land — so this source must produce a
+        // type-restriction diagnostic on those ops, not on the
+        // `hashmap_new()` call itself.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            "non-default V should error at insert/len, not at hashmap_new",
+        );
+        // The error must NOT be the "expected HashMap<i64, u64>,
+        // got HashMap<i64, i64>" mismatch on the let binding —
+        // it must be the bundle-op restriction.
+        for d in &errs {
+            assert!(
+                !d.message.contains("expected") || !d.message.contains("got HashMap<i64, i64>"),
+                "let-binding type mismatch leaked through: {}",
+                d.message
+            );
+        }
+        assert!(
+            errs.iter().any(|d| d.message.contains("HashMap<i64, i64>")
+                && d.message.contains("only supports")),
+            "expected bundle-op restriction diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // T3.5 of the safety-standard arc — MISRA 13.5 tightening.
 
     #[test]

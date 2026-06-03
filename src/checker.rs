@@ -7854,6 +7854,12 @@ fn check_one_stmt(
                     try_elaborate_empty_vec(expr, annotation, diagnostics)
                 {
                     elaborated
+                } else if let Some(elaborated) =
+                    try_elaborate_empty_hashmap(expr, annotation, diagnostics)
+                {
+                    // ARC 1.1: `let m: HashMap<K, V> = hashmap_new();`
+                    // infers (K, V) from the annotation.
+                    elaborated
                 } else {
                     let raw = check_expr(expr, env, signatures, diagnostics);
                     coerce_checked(
@@ -16457,6 +16463,47 @@ fn try_elaborate_empty_vec(
             args: vec![],
         },
         Type::Vec(Box::new(element_ty)),
+        None,
+        expr.span,
+    ))
+}
+
+// ARC 1.1: generic-context `hashmap_new()` — read the binding's
+// type annotation to infer (K, V) when present. Otherwise the
+// fallback in `check_hashmap_builtin` returns
+// `HashMap<i64, i64>` (backwards-compatible default for code
+// that omits the annotation). Mirror of `try_elaborate_empty_vec`.
+fn try_elaborate_empty_hashmap(
+    expr: &Expr,
+    expected: &Type,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CheckedExpr> {
+    let ExprKind::Call { name, args, .. } = &expr.kind else {
+        return None;
+    };
+    if name != "hashmap_new" || !args.is_empty() {
+        return None;
+    }
+    let Type::HashMap(k_box, v_box) = expected else {
+        return None;
+    };
+    let k_ty = (**k_box).clone();
+    let v_ty = (**v_box).clone();
+    if matches!(k_ty, Type::Ref(_) | Type::RefMut(_))
+        || matches!(v_ty, Type::Ref(_) | Type::RefMut(_))
+    {
+        diagnostics.push(Diagnostic::new(
+            expr.span,
+            "HashMap K or V cannot be a reference type",
+        ));
+    }
+    Some(CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "hashmap_new".to_string(),
+            name_span: expr.span,
+            args: vec![],
+        },
+        Type::HashMap(Box::new(k_ty), Box::new(v_ty)),
         None,
         expr.span,
     ))
