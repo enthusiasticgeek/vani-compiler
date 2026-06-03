@@ -43,8 +43,17 @@ type decls; closures #257/#258 for `pub use` re-exports +
 `pub(kosh)` visibility tier):
 
 - **Arc 5c** — Closure-as-value across fn boundaries (env-
-  struct + fn-ptr pair = `Closure<Args, Ret>` type). ~5-6h.
-  Unblocks Arc 8 (Async). The smallest genuinely-open arc.
+  struct + fn-ptr pair = `Closure(args) -> R` type).
+  - ✅ **Phase 1+2 shipped** (commit `67f16aa`): `Type::Closure(args, ret)`
+    IR variant with Display + byte-size; parser accepts
+    `Closure(T1, T2, …) -> R` type syntax. 1791 lib green.
+  - 🟡 **Phase 3+ open** (~4-5h focused): lift-pass env-struct
+    synthesis + trampoline emission; `ExprKind::MakeClosure` +
+    `TypedExprKind::MakeClosure` variants (touching ~150 match
+    catch-alls across the codebase); checker MakeClosure
+    type-check + FnPtr → Closure auto-coercion; C backend
+    closure-struct typedef + indirect-call dispatch; LLVM
+    backend mirror. Unblocks Arc 8 (Async).
 - **Arc 7 remainder** — full FFI classifier (float-class +
   mixed integer/float decomposition under SysV x86-64;
   Windows/ARM gated on CI availability). ~6-8h focused.
