@@ -701,6 +701,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
                         &mut body, v_tag, v_tag, v_mangle, has_option_v,
                     );
                 }
+                // ARC 4.4: Tuple<i64, …, i64> K — hash_combine of
+                // per-element FNV-1a hashes; pairwise field eq.
+                // Elements are Copy so no drop walk.
+                Type::Tuple(els) if els.iter().all(|t| matches!(t, Type::I64)) => {
+                    emit_intent_hashmap_pair_c_body_tuple_i64k(
+                        &mut body, els.len(), v_tag, v_tag, v_mangle, has_option_v,
+                    );
+                }
                 Type::Struct(k_name) => {
                     let k_ctype = format!("Struct_{}", k_name);
                     emit_intent_hashmap_struct_pair_c_body(
@@ -2386,6 +2394,188 @@ fn emit_intent_hashmap_pair_c_body_strk(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\n",
             v_ctype = v_ctype, prefix = prefix, opt_v = opt_v,
+        ));
+    }
+}
+
+/// ARC 4.4 — `HashMap<(i64, i64, …, i64), V>` for V scalar.
+/// K elements are i64 (Copy) so no drop walk. Hash via
+/// hash_combine of element FNV-1a hashes; equality is pairwise
+/// field compare. Uses the existing `intent_tuple_<…>` struct
+/// typedef as the key cell type (already emitted by the tuple
+/// preamble whenever the program uses a tuple of that shape).
+fn emit_intent_hashmap_pair_c_body_tuple_i64k(
+    out: &mut String,
+    arity: usize,
+    v_tag: &str,
+    v_ctype: &str,
+    option_v_mangle: &str,
+    has_option_v: bool,
+) {
+    let prefix = format!("intent_hashmap_tup_{}_i64_{}", arity, v_tag);
+    // Element tags repeated: `intent_tuple_int64_t_int64_t…`.
+    let tuple_struct = {
+        let parts: Vec<&str> = (0..arity).map(|_| "int64_t").collect();
+        format!("intent_tuple_{}", parts.join("_"))
+    };
+    let opt_v = format!("Enum_Option__{}", option_v_mangle);
+    // Build the element-wise hash_combine: start with FNV
+    // offset basis; for each field, FNV-1a 8 bytes of that
+    // field into the running hash. Same byte distribution as
+    // the i64-K bundle, extended per-element.
+    let mut hash_body = String::new();
+    for i in 0..arity {
+        hash_body.push_str(&format!(
+            "\x20 {{\n\
+             \x20   uint64_t u{i} = (uint64_t)k._{i};\n\
+             \x20   for (int b = 0; b < 8; b++) {{\n\
+             \x20     h ^= (u{i} >> (b * 8)) & 0xffULL;\n\
+             \x20     h *= 0x100000001b3ULL;\n\
+             \x20   }}\n\
+             \x20 }}\n",
+            i = i
+        ));
+    }
+    // Build the element-wise equality: `k1._0 == k2._0 && k1._1 == k2._1`.
+    let eq_parts: Vec<String> = (0..arity)
+        .map(|i| format!("a._{i} == b._{i}", i = i))
+        .collect();
+    let eq_expr = if eq_parts.is_empty() { "1".to_string() } else { eq_parts.join(" && ") };
+    out.push_str(&format!(
+        "typedef struct {{ {tuple_struct}* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
+         static INTENT_UNUSED bool {prefix}__eq_key({tuple_struct} a, {tuple_struct} b) {{\n\
+         \x20 return {eq_expr};\n\
+         }}\n\
+         static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
+         \x20 {prefix} m;\n\
+         \x20 m.keys = ({tuple_struct}*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
+         \x20 m.len = 0; m.capacity = 0; m.tombstones = 0;\n\
+         \x20 return m;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}_drop({prefix}* m) {{\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = 0; m->values = 0; m->occ = 0;\n\
+         \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
+         }}\n\
+         static INTENT_UNUSED uint64_t {prefix}__hash_key({tuple_struct} k) {{\n\
+         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
+         {hash_body}\
+         \x20 return h;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__insert_raw({prefix}* m, {tuple_struct} k, {v_ctype} v) {{\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] == 1) {{\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__grow({prefix}* m) {{\n\
+         \x20 uint64_t old_cap = m->capacity;\n\
+         \x20 {tuple_struct}* old_keys = m->keys;\n\
+         \x20 {v_ctype}* old_values = m->values;\n\
+         \x20 uint8_t* old_occ = m->occ;\n\
+         \x20 uint64_t new_cap = old_cap == 0 ? 8 : old_cap * 2;\n\
+         \x20 m->keys = ({tuple_struct}*)malloc(new_cap * sizeof({tuple_struct}));\n\
+         \x20 m->values = ({v_ctype}*)malloc(new_cap * sizeof({v_ctype}));\n\
+         \x20 m->occ = (uint8_t*)calloc(new_cap, 1);\n\
+         \x20 if (!m->keys || !m->values || !m->occ) abort();\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = new_cap;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 for (uint64_t i = 0; i < old_cap; i++) {{\n\
+         \x20   if (old_occ[i] == 1) {prefix}__insert_raw(m, old_keys[i], old_values[i]);\n\
+         \x20 }}\n\
+         \x20 if (old_keys) free(old_keys);\n\
+         \x20 if (old_values) free(old_values);\n\
+         \x20 if (old_occ) free(old_occ);\n\
+         }}\n\
+         static INTENT_UNUSED bool {prefix}_contains_key(const {prefix}* m, {tuple_struct} k) {{\n\
+         \x20 if (m->capacity == 0) return false;\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] != 0) {{\n\
+         \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) return true;\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 return false;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_len(const {prefix}* m) {{\n\
+         \x20 return (int64_t)m->len;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_clear({prefix}* m) {{\n\
+         \x20 int64_t prior = (int64_t)m->len;\n\
+         \x20 if (m->keys) free(m->keys);\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = ({tuple_struct}*)0;\n\
+         \x20 m->values = ({v_ctype}*)0;\n\
+         \x20 m->occ = (uint8_t*)0;\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = 0;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 return prior;\n\
+         }}\n",
+        tuple_struct = tuple_struct, v_ctype = v_ctype, prefix = prefix,
+        hash_body = hash_body, eq_expr = eq_expr,
+    ));
+    if has_option_v {
+        out.push_str(&format!(
+            "static INTENT_UNUSED {opt_v} {prefix}_get(const {prefix}* m, {tuple_struct} k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, {tuple_struct} k, {v_ctype} v) {{\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 {opt_v} r;\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 int64_t first_tomb = -1;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->values[i] = v;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   if (m->occ[i] == 2 && first_tomb == -1) first_tomb = (int64_t)i;\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 if (first_tomb != -1) {{\n\
+             \x20   uint64_t slot = (uint64_t)first_tomb;\n\
+             \x20   m->keys[slot] = k; m->values[slot] = v; m->occ[slot] = 1;\n\
+             \x20   m->len++; m->tombstones--;\n\
+             \x20 }} else {{\n\
+             \x20   m->keys[i] = k; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_remove({prefix}* m, {tuple_struct} k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->occ[i] = 2;\n\
+             \x20     m->len--;\n\
+             \x20     m->tombstones++;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\n",
+            tuple_struct = tuple_struct, v_ctype = v_ctype, prefix = prefix, opt_v = opt_v,
         ));
     }
 }
@@ -11711,6 +11901,15 @@ fn hashmap_type_tag_c_owned(ty: &Type) -> String {
         // ARC 1.7: struct K — tag matches the C-emitted struct
         // typedef name (`Struct_<name>`).
         Type::Struct(name) => format!("Struct_{}", name),
+        // ARC 4.4: tuple K — tag flattens to `tup_<n>_i64` for an
+        // n-element i64 tuple, so the bundle prefix stays
+        // identifier-safe. Keeps shape distinct from
+        // `intent_tuple_<…>` (the standard tuple typedef name)
+        // so the two strings can coexist in the same translation
+        // unit without collision.
+        Type::Tuple(els) if els.iter().all(|t| matches!(t, Type::I64)) => {
+            format!("tup_{}_i64", els.len())
+        }
         _ => "i64".to_string(),
     }
 }

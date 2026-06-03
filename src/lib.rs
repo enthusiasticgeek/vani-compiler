@@ -31882,6 +31882,54 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 4.4 — HashMap<(i64, …), V>: tuple keys with FNV-1a
+    // per-element hash_combine + pairwise field equality.
+    // Elements are Copy (i64) so no drop walk.
+
+    #[test]
+    fn hashmap_tuple_i64_i64_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<(i64, i64), i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, (1, 2), 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<(i64,i64), i64> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<(i64,i64), i64> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_tup_2_i64_int64_t"),
+            "expected C Tuple-K (arity 2) bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_tup_2_i64_int64_t"),
+            "expected LLVM Tuple-K (arity 2) bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_tuple_i64_uses_eq_key_dispatch_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<(i64, i64), i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, (1, 2), 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("HashMap<(i64,i64), i64> → LLVM");
+        // Key equality dispatches via the bundle's __eq_key fn,
+        // which extracts both fields and ANDs the pairwise eq.
+        assert!(
+            ll.contains("__eq_key"),
+            "expected internal __eq_key helper for Tuple K"
+        );
+        // Hash function uses extractvalue + FNV-1a.
+        assert!(
+            ll.contains("extractvalue"),
+            "expected extractvalue calls in Tuple K hash"
+        );
+    }
+
     // ARC 4.1 — HashMap<OwnedStr, V>: string keys via FNV-1a
     // byte hash + strcmp equality. Bundle clones each key
     // internally (matches Rust `m.insert(key.clone(), v)`).

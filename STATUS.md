@@ -10,7 +10,49 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4.1 COMPLETE — `HashMap<OwnedStr, V>`
+**Last updated:** 2026-06-03 (**ARC 4.4 COMPLETE — `HashMap<(i64, …, i64), V>`
+end-to-end on both backends.** Tuple K with FNV-1a per-element
+hash_combine + pairwise field equality. Elements are Copy (i64)
+so no drop walk needed. Initially scoped to any-arity tuples
+of i64; wider element types (struct/OwnedStr) deferred.
+
+4.4 checker relaxation: `check_hashmap_builtin` accepts K=Tuple
+where every element is i64. Diagnostic enumerates all five
+admissible K shapes (i64 / f64 / OwnedStr / (i64, …, i64) /
+struct-with-Hash+Eq).
+
+4.4 (C bundle): `emit_intent_hashmap_pair_c_body_tuple_i64k`
+emits per-(Tuple, V) bundle with prefix
+`intent_hashmap_tup_<arity>_i64_<V>`. Keys field is a contiguous
+array of `intent_tuple_int64_t_…_int64_t` structs (reuses the
+existing tuple typedef machinery). Hash function FNV-1a's each
+i64 element's 8 bytes into the running hash. Equality is
+pairwise `==` over `_0`, `_1`, … fields chained with `&&`.
+
+4.4 (LLVM bundle): `emit_intent_hashmap_pair_llvm_tuple_i64k`
+mirrors the C side. Key type is the anonymous-struct literal
+`{i64, i64, …}`; keys field is a flat `{i64, …}*`. Hash uses
+`extractvalue` + FNV-1a loops per element. Equality is a
+helper `__eq_key` that extracts each field, icmp eq's them,
+and chains via `and`. Dispatch helpers updated:
+`hashmap_llvm_dispatch` produces `intent_hashmap_tup_<n>_i64_<V>`;
+`_with_k` returns `{i64, i64, …}` as the LLVM key type.
+
+4.4 (end-to-end): `examples/hashmap_tup.vani` exercises insert
+/ get / contains_key / remove / len with `(i64, i64)` keys —
+duplicate-insert overwrites value, distinct-bucket lookups
+miss, removes shrink length. Identical stdout on both backends.
+Added to the parity test list.
+
+**2 new lib tests** covering:
+  - both backends compile HashMap<(i64,i64), i64> with the
+    `intent_hashmap_tup_2_i64_int64_t` bundle prefix
+  - LLVM emits an internal `__eq_key` helper + `extractvalue`
+    calls for the per-element hash + equality dispatch
+
+**1783 lib + 56 parity green.**
+
+**Prior:** 2026-06-03 (**ARC 4.1 COMPLETE — `HashMap<OwnedStr, V>`
 end-to-end on both backends.** String keys via FNV-1a byte hash
 + `strcmp` equality. Bundle clones each key internally
 (strlen + malloc + memcpy — C11-portable; no POSIX strdup

@@ -22701,13 +22701,23 @@ fn check_hashmap_builtin(
     // duplicate keys cause the *new* key to be freed and the
     // old one to remain (Rust HashMap<String, V> semantics).
     let k_is_owned_str = matches!(k_ty, Type::OwnedStr);
-    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 && !k_is_owned_str {
+    // ARC 4.4: Tuple K where every element is i64 — hash via
+    // hash_combine, equality pairwise. Elements are Copy so no
+    // drop walk. Initially scoped to (i64, i64) but generalized
+    // here to any-arity tuple of i64. Wider element types
+    // (struct/OwnedStr) can come later.
+    let k_is_i64_tuple = match &k_ty {
+        Type::Tuple(els) => !els.is_empty() && els.iter().all(|t| matches!(t, Type::I64)),
+        _ => false,
+    };
+    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 && !k_is_owned_str && !k_is_i64_tuple {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
                 "{}() supports `HashMap<i64, V>` / `HashMap<f64, V>` / \
-                 `HashMap<OwnedStr, V>` for scalar V, or `HashMap<Struct, V>` \
-                 when Struct implements both `Hash` and `Eq`; got HashMap<{}, {}>",
+                 `HashMap<OwnedStr, V>` / `HashMap<(i64, …, i64), V>` for \
+                 scalar V, or `HashMap<Struct, V>` when Struct implements \
+                 both `Hash` and `Eq`; got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));

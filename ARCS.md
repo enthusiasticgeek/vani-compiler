@@ -61,7 +61,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 | 4.1 | `HashMap<OwnedStr, V>` — string key with FNV-1a + strcmp equality ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
 | 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot | ~3h | 1.5e |
 | 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
-| 4.4 | `HashMap<Tuple<i64, i64>, V>` — tuple K via `hash_combine` | ~3h | 1.5e + Tuple E sugar |
+| 4.4 | `HashMap<Tuple<i64, …, i64>, V>` — tuple K via `hash_combine` ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e + Tuple E sugar |
 | 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) ✅ **SHIPPED 2026-06-03** | ~2h | 1.5e |
 | 4.6 | `HashMap<Vec<i64>, V>` — Vec K (affine move-in semantics) | ~3h | 4.1 |
 
@@ -430,8 +430,17 @@ For each new (K, V) pair:
 3. **4.3 — `HashMap<Str, Str>`. (~2h)**
    - Both axes OwnedStr.
 
-4. **4.4 — `HashMap<Tuple<i64, i64>, V>`. (~3h)**
-   - Tuple keys use `hash_pair` / `hash_combine` from Tier E.
+4. **4.4 — `HashMap<Tuple<i64, …, i64>, V>`. (~3h)** ✅ **SHIPPED 2026-06-03**
+   - Tuple keys use FNV-1a per-element hash_combine + pairwise
+     field equality. Elements are Copy (i64) so no drop walk.
+   - C bundle prefix: `intent_hashmap_tup_<arity>_i64_<V>`.
+     Keys stored as contiguous array of `intent_tuple_<…>` structs.
+   - LLVM mirror: key type `{i64, i64, …}` (anonymous struct
+     literal). Hash via extractvalue + FNV-1a; equality via
+     internal `__eq_key` helper chaining icmp eq through and.
+   - Parity example: `examples/hashmap_tup.vani`.
+   - Wider element types (struct/OwnedStr) deferred to a future
+     ARC if needed; today's tuples are i64-only.
 
 5. **4.5 — `HashMap<f64, V>`. (~2h)** ✅ **SHIPPED 2026-06-03**
    - Caveat: NaN keys are never equal to themselves; document but
