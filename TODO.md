@@ -4,14 +4,14 @@ Snapshot from 2026-05-18 after min/max reductions + parallelism docs
 refresh landed. Order is rough priority (size + payoff), not strict.
 
 **Top-of-queue planning docs (2026-06-03):**
-- [ARCS.md](ARCS.md) — granular sub-step plan for the 4 multi-session
-  arcs. **Current state:** Arc 2 ✅ COMPLETE, Arc 3 ✅ COMPLETE,
-  Arc 1 partial (1.1/1.2/1.3/1.6 shipped; 1.4–1.7 open),
-  Arc 4 open. See the "Remaining work — sequenced sub-step
-  breakdown" section at the top of [ARCS.md](ARCS.md) for the
-  granular task ledger with dependencies. The seven `intentc`
-  audit CLIs (deviations, stack-depth, acyclicity, hashmap-usage,
-  complexity, safety-attrs, audit-pack) all shipped this session.
+- [ARCS.md](ARCS.md) — granular sub-step plan for the multi-session
+  arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE. Open
+  queue is **Arcs 5–10** (closures phase 4+, generic type decls,
+  FFI ABI, async, Kosh, Devanagari). See the unified "Open work
+  — sequenced ledger" below for the dependency + effort
+  ordering. The seven `intentc` audit CLIs (deviations,
+  stack-depth, acyclicity, hashmap-usage, complexity,
+  safety-attrs, audit-pack) all shipped 2026-06-03.
 - [unsafe.md](unsafe.md) — 5-layer plan for `unsafe { ... }` safety
   in the embedded path. **✅ COMPLETE 2026-06-02.** Layers 1.1, 1.2,
   1.3, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5 (foundation + lifetime-tagged
@@ -24,28 +24,65 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   3.2 `#[wcet]` / 3.3 acyclicity / 3.4 `#[deterministic_timing]`
   / 3.5 MISRA 13.5).
 
-**Open work — sequenced ledger** (~32h across ~50 commits if all pursued):
+---
 
-1. **Arc 1.4 + 1.5** (per-(K, V) HashMap bundle, both backends) —
-   11 sub-steps, ~11h. Sub-steps 1.4a (Option<V> mono), 1.4b
-   (checker relax), 1.4c (C bundle param), 1.4d (C prologue),
-   1.4e (C tree dispatch), 1.4f (C SSA dispatch), 1.5a (LLVM
-   bundle), 1.5b (LLVM prologue), 1.5c (LLVM tree), 1.5d (LLVM
-   SSA), 1.5e (parity tests).
-2. **Arc 1.7** (`HashMap<UserStruct, V>`) — 4 sub-steps, ~5h.
-   Gates on Arc 1.4+1.5.
-3. **Arc 4** (wider K-V) ✅ **COMPLETE 2026-06-03** — all six
-   (K, V) pairs ship cross-backend:
-   `HashMap<OwnedStr, V>` (ARC 4.1) +
-   `HashMap<i64, OwnedStr>` (ARC 4.2) +
-   `HashMap<OwnedStr, OwnedStr>` (ARC 4.3) +
-   `HashMap<Tuple<i64,…,i64>, V>` (ARC 4.4) +
-   `HashMap<f64, V>` (ARC 4.5) +
-   `HashMap<Vec<i64>, V>` (ARC 4.6).
+## Open work — unified sequenced ledger (2026-06-03)
+
+All four original arcs (1 HashMap monomorphization, 2 sparse
+trie, 3 richer closures, 4 wider K/V) shipped. The remaining
+backlog falls into two tiers: **now-actionable small/medium
+items** (no hard deps) and **multi-session arcs** (queued by
+dependency chain).
+
+### Now-actionable (no hard deps, smallest first)
+
+| # | Item | Effort | Deps | Unlocks |
+|---|---|---|---|---|
+| 0 | **Bookkeeping refresh** — stale arc-status lines | S (~30m) | — | clear queue |
+| 1 | **Vtables non-Var coercion polish** — IR rewrite to hoist non-Var dyn-coerce sources into synthetic let | S (~1-2h) | — | closes dyn-dispatch arc |
+| 2 | **Closure A drop-dispatch finish** — per-variant drop for mixed-payload enums (`Result<Vec<i64>, OwnedStr>` scope-exit) on both backends + lib test | M (~3-4h) | — | Track 3 |
+| 3 | **Closure B `try_vec`** — `fn try_vec(n: u64) -> Result<Vec<i64>, AllocError>`; malloc-with-null-check codegen | S-M (~2h) | Track 2 | fallible-alloc primitive |
+| 4 | **#8 Nested arrays** — lift array-element-Copy + per-slot array-drop + clone_at + `ref xs[i]` borrow | M+ (~6-8h) | — | embedded ergonomics |
+| 5 | **#7 `#[bounded(N)]`** — first attribute syntax (`#` token + attribute parser + bounded-call analysis) | M+ (~4-6h) | — | safety-cert attribute family |
+
+### Multi-session arcs (sequenced by dependency)
+
+| Arc | Item | Effort | Deps | Unlocks |
+|---|---|---|---|---|
+| **Arc 5** | **Closures Phase 4+** — (5a) non-Copy captures with move; (5b) capture-by-ref second-class; (5c) closure-as-value across fn boundaries (env-struct + fn-ptr pair); (5d) reassign + name reuse | L (~15-20h) | — | Arc 8 (Async) |
+| **Arc 6** | **Generic type decls** — `EnumDecl`/`StructDecl` gain `type_params`; mono pass walks them; ships `Result<T, E>`, `Future<T>`, `Option<T>` as first-class user-visible generics (not auto-mono) | L (~15-20h) | — | generic `try_vec`, Arc 8 |
+| **Arc 7** | **FFI ABI lowering #13** — per-platform classifier (SysV x86-64, Win64, AArch64) + per-backend struct decomposition by value | L (~10-15h) | — | C-FFI ergonomics |
+| **Arc 8** | **Async / asyncio** — state-machine codegen, event-loop runtime, non-blocking I/O primitives, `await` sugar (9 sub-steps as designed in the *Async / asyncio* section below) | L (~30-40h) | Arc 5 (closure-as-value) + Arc 6 (`Future<T>`) | async stdlib |
+| **Arc 9** | **Kosh package manager** — Phase c-d first (`pub(kosh)`, re-exports); then Phase a/b/e/f (`kosh.toml`, resolver+lockfile, registry, stdlib-as-kosh); absorbs #14 multi-file pipeline | L (~40h+) | parser tweak for `use` inside `module { }` | multi-package projects |
+| **Arc 10** | **Devanagari polish** — (10a) SOV grammar fit (per-language parser mode); (10b) Sanskrit/Hindi/Marathi alias-table completion for `Interface`/`Implement`/`Arrow` | L (multi-session) | grammar consultant (soft) | Devanagari ergonomics |
+
+### Dependency chain (textual)
+
+```
+                 [shipped — Arcs 1, 2, 3, 4]
+                          ↓
+            [Bookkeeping] [Vtables polish]   (independent, small)
+                          ↓
+                 [Closure A drop]  →  [Closure B try_vec]
+                          ↓
+                 [Nested arrays]  [#[bounded(N)]]   (independent, M+)
+                          ↓
+        ┌──── Arc 5 closures ────┐  ┌── Arc 6 generic types ──┐
+        │   phase 4 → 5 → 6 → 7  │  │   struct + enum + Result │
+        └────────────┬───────────┘  └──────────┬───────────────┘
+                     └───────── ↓ ─────────────┘
+                       Arc 8 async / asyncio
+                              ↓
+   Arc 7 FFI ABI  [independent]   Arc 9 Kosh   Arc 10 Devanagari
+```
+
+### Deferred indefinitely (kept for context)
+- **Cranelift backend** — fast JIT independent of LLVM; revisit after Arc 6
+- **Direct-asm x86_64 target** — teaching-path / tiny-target; not on critical path
+
 - Through closure #604, the bounded one-shot primitive surface is
   exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
-  future work flows through one of the three plan docs/sections
-  above.
+  future work flows through the ledger above.
 
 ## Design rationale (frequently re-asked questions)
 

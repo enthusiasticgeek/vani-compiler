@@ -6683,6 +6683,19 @@ fn literal_const_value(
 // Synthetic names use `__dyn_src_<N>` with a process-wide
 // AtomicUsize counter; guaranteed unique without threading
 // state through every caller.
+/// Shared synthetic-name allocator for dyn-coerce hoists. Used
+/// by both `make_dyn_coerce` (single-source) and the Vec<dyn>
+/// literal hoist (multi-source). Names like `__dyn_src_<N>` are
+/// recognized by the C backend's Let-stmt unfold so the
+/// synthetic lets get hoisted from a stmt-expr Block to the
+/// enclosing scope (stable lvalue for the fat pointer's data
+/// slot).
+fn dyn_src_synth_name() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static DYN_SRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("__dyn_src_{}", DYN_SRC_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
 fn make_dyn_coerce(
     value: TypedExpr,
     iface_name: String,
@@ -6690,8 +6703,6 @@ fn make_dyn_coerce(
     target_ty: Type,
     span: Span,
 ) -> TypedExpr {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    static DYN_SRC_COUNTER: AtomicUsize = AtomicUsize::new(0);
     let from_ty = value.ty.clone();
     if matches!(&value.kind, TypedExprKind::Var(_)) {
         return TypedExpr {
@@ -6707,10 +6718,7 @@ fn make_dyn_coerce(
             binding_decl_span: None,
         };
     }
-    let synth_name = format!(
-        "__dyn_src_{}",
-        DYN_SRC_COUNTER.fetch_add(1, Ordering::Relaxed)
-    );
+    let synth_name = dyn_src_synth_name();
     let var_ty = value.ty.clone();
     let value_span = value.span;
     let let_stmt = TypedStmt::Let {
@@ -16816,52 +16824,74 @@ fn check_vec_builtin(
             if let Some(set) = common {
                 if set.len() == 1 {
                     let iface_name = set.into_iter().next().unwrap();
+                    // Arc 5 polish: Vec<dyn Iface> elements need
+                    // a stable lvalue for the fat pointer's data
+                    // slot. For non-Var sources, build a synthetic
+                    // let-prelude before the vec(...) call so each
+                    // element address survives the surrounding
+                    // statement scope. The C backend's Let-stmt
+                    // unfold hoists `__dyn_src_*` prelude lets to
+                    // the outer scope.
+                    let mut prelude: Vec<TypedStmt> = Vec::new();
                     let mut coerced_args: Vec<TypedExpr> = Vec::with_capacity(typed.len());
                     for (idx, element) in typed.into_iter().enumerate() {
                         let type_name = names[idx].clone();
                         let elem_ty = element.expr.ty.clone();
-                        // Closure #276 v1: Vec literal elements
-                        // need a stable lvalue for the fat
-                        // pointer's data slot. The Let-RHS hoist
-                        // doesn't help here (the Block would land
-                        // as a call argument, where its stmt-expr
-                        // temps die before vec(...) consumes
-                        // them). Reject non-Var sources with a
-                        // clear let-bind hint; user materializes
-                        // the temp themselves.
-                        if !matches!(&element.expr.kind, TypedExprKind::Var(_)) {
-                            diagnostics.push(Diagnostic::new(
-                                args[idx].span,
-                                format!(
-                                    "Vec<dyn {iface}> elements must be let-bound \
-                                     variables (not call results / struct \
-                                     literals) — let-bind the source first: \
-                                     `let tmp = …; vec(tmp, …)`. \
-                                     Reason: the fat pointer's data slot needs \
-                                     a stable lvalue.",
-                                    iface = iface_name
-                                ),
-                            ));
-                        }
+                        let elem_span = args[idx].span;
+                        let source_expr = if matches!(
+                            &element.expr.kind,
+                            TypedExprKind::Var(_)
+                        ) {
+                            element.expr
+                        } else {
+                            let synth = dyn_src_synth_name();
+                            prelude.push(TypedStmt::Let {
+                                name: synth.clone(),
+                                ty: elem_ty.clone(),
+                                expr: element.expr,
+                            });
+                            TypedExpr {
+                                kind: TypedExprKind::Var(synth),
+                                ty: elem_ty.clone(),
+                                constant: None,
+                                span: elem_span,
+                                binding_decl_span: None,
+                            }
+                        };
                         coerced_args.push(TypedExpr {
                             kind: TypedExprKind::DynCoerce {
-                                value: Box::new(element.expr),
+                                value: Box::new(source_expr),
                                 iface_name: iface_name.clone(),
                                 from_type_name: type_name,
                                 from_ty: elem_ty,
                             },
                             ty: Type::Object(iface_name.clone()),
                             constant: None,
-                            span: args[idx].span,
+                            span: elem_span,
                             binding_decl_span: None,
                         });
                     }
-                    return CheckedExpr::new(
-                        TypedExprKind::Call {
+                    let vec_call = TypedExpr {
+                        kind: TypedExprKind::Call {
                             name: "vec".to_string(),
                             name_span: span,
                             args: coerced_args,
                         },
+                        ty: Type::Vec(Box::new(Type::Object(iface_name.clone()))),
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    };
+                    let result_kind = if prelude.is_empty() {
+                        vec_call.kind
+                    } else {
+                        TypedExprKind::Block {
+                            stmts: prelude,
+                            tail: Box::new(vec_call),
+                        }
+                    };
+                    return CheckedExpr::new(
+                        result_kind,
                         Type::Vec(Box::new(Type::Object(iface_name))),
                         None,
                         span,
@@ -24300,6 +24330,7 @@ fn coerce_checked(
         if let Type::Object(iface_name) = tgt_elem.as_ref() {
             if let TypedExprKind::Call { name, args, .. } = &checked.expr.kind {
                 if name == "vec" {
+                    let mut prelude: Vec<TypedStmt> = Vec::new();
                     let mut new_args: Vec<TypedExpr> = Vec::with_capacity(args.len());
                     let mut all_ok = true;
                     for elem in args.iter() {
@@ -24309,27 +24340,33 @@ fn coerce_checked(
                         };
                         match elem_type_name {
                             Some(tn) if crate::ast::iface_impl_exists(iface_name, &tn) => {
-                                // Closure #276 v1: same Vec-literal
-                                // restriction as the
-                                // common-iface-inference path above
-                                // (see `check_vec_builtin`). Non-Var
-                                // sources can't be hoisted into a
-                                // call argument without dangling
-                                // the synthetic temp.
-                                if !matches!(&elem.kind, TypedExprKind::Var(_)) {
-                                    diagnostics.push(Diagnostic::new(
-                                        elem.span,
-                                        format!(
-                                            "Vec<dyn {iface}> elements must be \
-                                             let-bound variables — let-bind \
-                                             the source first.",
-                                            iface = iface_name
-                                        ),
-                                    ));
-                                }
+                                // Arc 5 polish: hoist non-Var
+                                // sources into synthetic lets so
+                                // the fat pointer data slot points
+                                // to a stable lvalue.
+                                let source_expr = if matches!(
+                                    &elem.kind,
+                                    TypedExprKind::Var(_)
+                                ) {
+                                    elem.clone()
+                                } else {
+                                    let synth = dyn_src_synth_name();
+                                    prelude.push(TypedStmt::Let {
+                                        name: synth.clone(),
+                                        ty: elem.ty.clone(),
+                                        expr: elem.clone(),
+                                    });
+                                    TypedExpr {
+                                        kind: TypedExprKind::Var(synth),
+                                        ty: elem.ty.clone(),
+                                        constant: None,
+                                        span: elem.span,
+                                        binding_decl_span: None,
+                                    }
+                                };
                                 new_args.push(TypedExpr {
                                     kind: TypedExprKind::DynCoerce {
-                                        value: Box::new(elem.clone()),
+                                        value: Box::new(source_expr),
                                         iface_name: iface_name.clone(),
                                         from_type_name: tn,
                                         from_ty: elem.ty.clone(),
@@ -24344,12 +24381,27 @@ fn coerce_checked(
                         }
                     }
                     if all_ok {
-                        return CheckedExpr::new(
-                            TypedExprKind::Call {
+                        let vec_call = TypedExpr {
+                            kind: TypedExprKind::Call {
                                 name: "vec".to_string(),
                                 name_span: span,
                                 args: new_args,
                             },
+                            ty: target.clone(),
+                            constant: None,
+                            span,
+                            binding_decl_span: None,
+                        };
+                        let result_kind = if prelude.is_empty() {
+                            vec_call.kind
+                        } else {
+                            TypedExprKind::Block {
+                                stmts: prelude,
+                                tail: Box::new(vec_call),
+                            }
+                        };
+                        return CheckedExpr::new(
+                            result_kind,
                             target.clone(),
                             None,
                             span,

@@ -10100,19 +10100,25 @@ fn emit_params(function: &TypedFunction, out: &mut String) {
 fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
     match stmt {
         TypedStmt::Let { name, ty, expr } => {
-            // Closure #276: when the Let RHS is the
-            // synthetic-prelude Block emitted by
-            // `make_dyn_coerce` (one or more synthetic-let
-            // stmts followed by a DynCoerce tail), emit the
+            // Closure #276 + Arc 5 polish: when the Let RHS is
+            // the synthetic-prelude Block emitted by the dyn-
+            // coerce hoist (one or more `__dyn_src_*` lets
+            // followed by a DynCoerce tail OR a Vec(...) call
+            // whose args are DynCoerce wrappers), emit the
             // prelude stmts at the OUTER level so the temps'
             // storage lives for the enclosing block — not just
             // the GCC stmt-expr. Without this, `&__dyn_src`
             // would dangle by the time the fat pointer's data
-            // slot is read. Other Block-RHS shapes still go
-            // through the regular stmt-expr path so existing
-            // closures like #200 don't regress.
+            // slot is read. Recognized by name prefix so other
+            // Block-RHS shapes (closure #200, etc.) still go
+            // through the regular stmt-expr path.
             if let TypedExprKind::Block { stmts, tail } = &expr.kind {
-                if matches!(tail.kind, TypedExprKind::DynCoerce { .. }) {
+                let all_dyn_src_prelude = !stmts.is_empty()
+                    && stmts.iter().all(|s| matches!(
+                        s,
+                        TypedStmt::Let { name: n, .. } if n.starts_with("__dyn_src_")
+                    ));
+                if all_dyn_src_prelude {
                     for s in stmts {
                         emit_stmt(s, out);
                     }

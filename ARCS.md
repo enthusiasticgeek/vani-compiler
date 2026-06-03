@@ -1,12 +1,118 @@
-# Multi-Session Arc Plan (Arcs 1–4)
+# Multi-Session Arc Plan (Arcs 1–10)
 
-> **Status (2026-06-03):** safety-standard alignment arc
-> ✅ COMPLETE, Arc 2 ✅ COMPLETE, Arc 3 ✅ COMPLETE, Arc 1 partial.
-> The seven `intentc` audit CLIs (deviations, stack-depth,
-> acyclicity, hashmap-usage, complexity, safety-attrs,
-> audit-pack) all shipped this session. See [STATUS.md](STATUS.md)
-> for the per-commit ledger. **Remaining open: Arc 1.4–1.7 and
-> Arc 4.**
+> **Status (2026-06-03):** Arcs 1, 2, 3, 4 ✅ COMPLETE.
+> Safety-standard alignment arc ✅ COMPLETE. The seven `intentc`
+> audit CLIs (deviations, stack-depth, acyclicity,
+> hashmap-usage, complexity, safety-attrs, audit-pack) all
+> shipped. See [STATUS.md](STATUS.md) for the per-commit ledger.
+>
+> **Open queue: Arcs 5–10** (closures phase 4+, generic type
+> decls, FFI ABI, async, Kosh, Devanagari) plus a handful of
+> now-actionable small/medium items. See the
+> "Now-actionable" + "Multi-session arcs" tables in
+> [TODO.md](TODO.md) for the dependency-ordered ledger.
+
+## Arcs 5–10 — granular sub-step plan
+
+Below is the granular per-arc breakdown for the new multi-
+session work, mirroring the format used for Arcs 1–4. Each
+sub-step should leave the test suite green after its commit.
+
+### Arc 5 — Closures Phase 4+ (capture semantics expansion)
+
+Goal: closures graduate from "Copy-only capture, callable in
+same fn" (Phases 1–3, shipped 2026-05-28) to a fully usable
+closure-as-value type. Prerequisite for Arc 8 (async).
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 5a | Non-Copy captures with move semantics — affine analysis at lift time; the captured binding becomes moved into the closure, scope-exit drop transfers | ~4-5h | — |
+| 5b | Capture-by-ref second-class closures — callable only within the captured ref's lifetime; lifetime tag plumbed through the lift pass | ~4-5h | 5a |
+| 5c | Closure-as-value across fn boundaries — env-struct + fn-ptr pair (`Closure<Args, Ret>`); passes as fn arg, return value, struct field, Vec element | ~5-6h | 5b |
+| 5d | Reassign closure bindings + name reuse across sibling scopes — lift pass tracks per-scope closure stacks; reassignment is a move + re-bind | ~2-3h | 5c |
+
+**Subtotal: ~15-20h, 4 commits.** Acceptance: `fn higher(f: Closure<i64, i64>) -> i64` works; non-Copy captures move correctly; reassignment compiles.
+
+### Arc 6 — Generic type declarations
+
+Goal: `EnumDecl` / `StructDecl` gain `type_params: Vec<TypeParam>` so users can write `enum Result<T, E>` and `struct Pair<A, B>` directly. Mono pass walks declared type params alongside fn-level generics (closure #99). Ships `Option<T>` / `Result<T, E>` / `Future<T>` as user-visible generics rather than auto-monomorphized payload templates.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 6a | AST + parser — `type_params` field on `EnumDecl` / `StructDecl`; parser accepts `<T, U>` after the type name; checker registers the params in scope when walking the body | ~3-4h | — |
+| 6b | Mono pass extension — `monomorphize_program` walks struct/enum type-params at instantiation sites; per-instantiation `Struct_<Name>__<T>__<U>` / `Enum_<Name>__<T>__<U>` names | ~4-5h | 6a |
+| 6c | Built-in retrofit — migrate `Option<T>` / `Result<T, E>` from the auto-mono machinery to user-visible generic enum decls (in prelude); existing call sites keep working via the same mangling | ~3-4h | 6b |
+| 6d | Generic struct fields — `struct Pair<A, B> { fst: A, snd: B }`; field-type substitution at mono time | ~3-4h | 6b |
+| 6e | Round-trip example + lib tests — `examples/generic_types.vani` exercising `Pair<i64, OwnedStr>` + `Result<i64, OwnedStr>` on both backends | ~1h | 6d |
+
+**Subtotal: ~15-20h, 5 commits.** Acceptance: user can declare `enum Result<T, E>` and use it cross-backend.
+
+### Arc 7 — FFI ABI lowering
+
+Goal: pass small aggregates by value across `extern "C" fn` boundaries — today rejected with a `ref T` hint (#273). Per-platform ABI classifier handles SysV x86-64, Windows x64, and AArch64.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 7a | ABI classifier — `abi::classify_param(ty, abi) -> ParamLowering` returns the per-platform decomposition (integer regs, float regs, memory) for each arg | ~3-4h | — |
+| 7b | C backend FFI lowering — `extern "C" fn` declarations + call-site struct decomposition use the classifier | ~3-4h | 7a |
+| 7c | LLVM backend FFI lowering — emit `byval` / `sret` / register-pair attributes as the classifier prescribes | ~3-4h | 7a |
+| 7d | Cross-platform parity tests — small-struct round-trip across the C-FFI boundary on Linux x86-64 (extend if Windows/ARM CI lands) | ~1-2h | 7c |
+
+**Subtotal: ~10-15h, 4 commits.** Acceptance: struct-by-value `extern "C"` calls work on Linux x86-64 baseline; Windows / ARM gated on CI availability.
+
+### Arc 8 — Async / asyncio
+
+Goal: compiler-lowered async state machines (no `Pin`, no self-references) — the affine-compatible substitute for Rust async. Full design in [TODO.md §Async / asyncio](TODO.md#async--asyncio--concurrency-arc-2026-05-27-queued).
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 8a | `Future<T>` generic enum in prelude (via Arc 6) — `Ready(T)` / `Pending` variants | ~1-2h | Arc 6 |
+| 8b | `async fn` parser + checker — new keyword; body transforms to a state machine at check time; per-state frame structs in the IR | ~5-6h | Arc 5, 8a |
+| 8c | State-machine codegen — both backends emit the frame-arena + `poll(state) -> Poll<T>` dispatch | ~6-8h | 8b |
+| 8d | Event-loop runtime — small C runtime (epoll / kqueue / IOCP wrappers); linked like the existing thread / futex runtime | ~4-5h | 8c |
+| 8e | Non-blocking I/O primitives — file / TCP / timer / sleep as `async fn` in stdlib | ~5-6h | 8d |
+| 8f | `await` as statement-or-expression — desugar at state-machine boundary | ~3-4h | 8c |
+| 8g | Cancellation — `CancelToken` by-ref; primitives check at every suspend point | ~2-3h | 8e |
+| 8h | Example — `examples/async_io.vani` (timer fan-out + tiny TCP echo) + cross-backend parity | ~2h | 8g |
+
+**Subtotal: ~30-40h, 8 commits.** Acceptance: timer fan-out + TCP echo server both work cross-backend with identical stdout.
+
+### Arc 9 — Kosh package manager
+
+Goal: `kosh.toml` manifest + resolver + registry workflow. Phase c-d (visibility + re-exports) is the small beachhead — closes namespace follow-ups without needing a registry.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 9c | `pub(kosh)` visibility tier — items visible inside the same kosh but not exported; per-module visibility bitmap extended | ~3-4h | — |
+| 9d | Re-exports `pub use foo::bar;` — parser admits `use` inside `module { }` blocks; re-export visibility tracked through flatten pass | ~3-4h | 9c |
+| 9a | `kosh.toml` manifest — name, version, entry module, dependencies (path / git / registry) | ~3-4h | — |
+| 9b | Resolver + lockfile — kosh dependency graph, cycle detection, `kosh.lock` | ~5-6h | 9a |
+| 9e | Registry + CLI — `intentc kosh add`, `kosh publish`; static index + tarballs | ~10-12h | 9b |
+| 9f | Stdlib as a kosh — move built-in helpers behind a `std` kosh; preamble emits only used helpers | ~4-5h | 9b |
+| 9g | Multi-file pipeline #14 absorbed — `use "path";` extends to multi-kosh with diamond-import dedup + cycle detection | (already done by 9b) | 9b |
+
+**Subtotal: ~40h+, ~6 commits.** Acceptance: `intentc kosh add <name>` resolves a dep from the registry and compiles against it.
+
+### Arc 10 — Devanagari polish
+
+Goal: SOV (subject-object-verb) grammar fit so Devanagari source feels native to Indo-Aryan speakers. Soft-blocked on grammar consultant review.
+
+| # | Sub-step | Effort | Depends on |
+|---|---|---|---|
+| 10a | Per-language parser mode — `Devanagari` script lock from purity gate (#236) flips parser to SOV/postfix grammar | ~6-8h | grammar consultant |
+| 10b | For-loop SOV — `EXPR से EXPR तक VAR के लिए { ... }` (from-X to-Y for-VAR) | ~2-3h | 10a |
+| 10c | Postpositional `where` — `T Cmp है` for bound clauses | ~2-3h | 10a |
+| 10d | Return-type SOV — `f() : i64 फलन` instead of `fn f() -> i64` | ~2-3h | 10a |
+| 10e | Alias-table completion — Sanskrit/Hindi/Marathi entries for `Interface`/`Implement`/`Arrow` (`संविदा`, `कार्यान्वयन`, etc.); grammar-consultant validated | ~2-3h | grammar consultant |
+
+**Subtotal: ~15-20h, soft-blocked on grammar consultant.**
+
+---
+
+## Historical: Arcs 1–4 sub-step ledger
+
+The Arcs 1–4 sub-step breakdowns below are kept for reference.
+All four arcs are complete.
 
 ## Remaining work — sequenced sub-step breakdown
 
