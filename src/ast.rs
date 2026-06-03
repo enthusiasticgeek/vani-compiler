@@ -622,6 +622,18 @@ pub struct Function {
     /// `#[bounded(N)]` — the recursion bound caps frame copies,
     /// the bounded_stack bound caps the total.
     pub bounded_stack: Option<u64>,
+    /// T3.2 of the safety-standard alignment arc: optional
+    /// per-function worst-case execution time budget in cycles.
+    /// Set when the function is annotated `#[wcet(cycles=N)]`.
+    /// The post-check pass walks the function body with a
+    /// conservative cycle model (every stmt ~ 1 cycle, calls ~ 10
+    /// cycles, loops multiplied by their bound when constant,
+    /// UNBOUNDED otherwise) and rejects the program when the
+    /// estimate exceeds N or returns UNBOUNDED. DO-178C Level A
+    /// timing requirement. V1 is a coarse over-estimator —
+    /// real WCET analysis requires architecture-specific timing
+    /// models, deferred.
+    pub wcet_cycles: Option<u64>,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

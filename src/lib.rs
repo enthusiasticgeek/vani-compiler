@@ -30927,6 +30927,152 @@ fn main() -> i64 {
         let _ = compile(source).expect("stacked attrs compose");
     }
 
+    // T3.2 of the safety-standard arc — #[wcet(cycles=N)].
+
+    #[test]
+    fn wcet_ok_when_within_budget() {
+        let source = r#"
+            #[wcet(cycles=100)]
+            fn small() -> i64 {
+              let a: i64 = 1;
+              let b: i64 = 2;
+              return a + b;
+            }
+            fn main() -> i64 { return small(); }
+        "#;
+        let _ = compile(source).expect("wcet within budget compiles");
+    }
+
+    #[test]
+    fn wcet_rejects_unbounded_while() {
+        let source = r#"
+            #[wcet(cycles=1000)]
+            fn loops() -> i64 {
+              let i: i64 = 0;
+              while i < 10 {
+                i = i + 1;
+              }
+              return i;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        let errs = compile(source).expect_err("while loop must mark wcet UNBOUNDED");
+        assert!(
+            errs.iter().any(|d| d.message.contains("UNBOUNDED")
+                && d.message.contains("wcet")),
+            "expected UNBOUNDED diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_ok_for_const_bounded_for_loop() {
+        let source = r#"
+            #[wcet(cycles=2000)]
+            fn loops() -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 10 {
+                s = s + i;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        let _ = compile(source).expect(
+            "for loop with const bounds + sufficient budget compiles",
+        );
+    }
+
+    #[test]
+    fn wcet_rejects_over_budget_const_loop() {
+        let source = r#"
+            #[wcet(cycles=20)]
+            fn loops() -> i64 {
+              let s: i64 = 0;
+              for i from 0 to 100 {
+                s = s + i;
+              }
+              return s;
+            }
+            fn main() -> i64 { return loops(); }
+        "#;
+        let errs = compile(source).expect_err("over-budget const loop must fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("wcet")
+                && d.message.contains("exceeds")),
+            "expected wcet-exceeded diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_rejects_recursive_call_without_callee_budget() {
+        let source = r#"
+            fn rec(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return rec(n - 1);
+            }
+            #[wcet(cycles=10000)]
+            fn entry() -> i64 { return rec(5); }
+            fn main() -> i64 { return entry(); }
+        "#;
+        let errs = compile(source).expect_err(
+            "recursive callee without wcet budget must mark UNBOUNDED",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("UNBOUNDED")
+                && d.message.contains("wcet")),
+            "expected UNBOUNDED diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_uses_callee_declared_budget() {
+        let source = r#"
+            #[wcet(cycles=50)]
+            fn helper(x: i64) -> i64 { return x + 1; }
+            #[wcet(cycles=200)]
+            fn entry() -> i64 { return helper(7); }
+            fn main() -> i64 { return entry(); }
+        "#;
+        let _ = compile(source).expect(
+            "caller delegates WCET to callee's declared budget",
+        );
+    }
+
+    #[test]
+    fn wcet_rejects_zero_cycles() {
+        let source = r#"
+            #[wcet(cycles=0)]
+            fn f() -> i64 { return 0; }
+            fn main() -> i64 { return f(); }
+        "#;
+        let errs = compile(source).expect_err(
+            "cycles=0 must reject at parse time",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("positive")),
+            "expected positive-int diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn wcet_rejects_unknown_key() {
+        let source = r#"
+            #[wcet(ns=100)]
+            fn f() -> i64 { return 0; }
+            fn main() -> i64 { return f(); }
+        "#;
+        let errs = compile(source).expect_err("unknown key in wcet rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("cycles")),
+            "expected `cycles` key requirement diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     #[test]
     fn bounded_stack_chain_shown_when_exceeded() {
         let source = r#"

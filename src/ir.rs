@@ -98,6 +98,11 @@ pub struct TypedFunction {
     /// worst-case stack depth (via call-graph + frame-size
     /// analysis) doesn't exceed the bound.
     pub bounded_stack: Option<u64>,
+    /// T3.2: per-fn worst-case cycle budget, forwarded from
+    /// `ast::Function::wcet_cycles`. Read by
+    /// `safety::enforce_wcet` to verify the static cycle estimate
+    /// stays within the declared budget.
+    pub wcet_cycles: Option<u64>,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

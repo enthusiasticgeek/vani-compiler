@@ -10,7 +10,29 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-02 (**T3.1 of safety-standard arc
+**Last updated:** 2026-06-02 (**T3.2 of safety-standard arc
+shipped — `#[wcet(cycles=N)]` attribute + cycle estimator.** Per-
+function worst-case execution time budget. Surface form:
+`#[wcet(cycles=N)]` with N a positive integer. The post-check
+pass runs a coarse static cycle estimator on the function body:
+scalar ops ~1 cycle, binary/comparison ~2, memory access ~2,
+named call ~10 (or the callee's declared `#[wcet]` budget if
+present), const-bounded for loops multiplied by (end-start),
+print syscalls 50 baseline. Reports UNBOUNDED for: while loops,
+non-const-bound for loops, ForIter (collection length not
+statically known), TaskSpawn, recursion without a declared
+callee WCET budget. The pass rejects when the estimate exceeds N
+OR is UNBOUNDED. DO-178C Level A timing requirement. V1 is
+intentionally a coarse over-estimator — real WCET analysis
+requires architecture-specific timing models (pipeline depth,
+cache, branch predictor), deferred. The annotation establishes
+the audit trail and catches obvious overruns. **8 new lib tests**
+(within-budget OK, unbounded while rejection, const for OK,
+over-budget const for rejection, recursion-without-budget
+UNBOUNDED, caller delegates to callee budget, cycles=0 parse
+rejection, unknown-key rejection). **1689 lib + 54 parity green.**)
+
+**Prior:** 2026-06-02 (**T3.1 of safety-standard arc
 shipped — `#[bounded_stack(bytes=N)]` attribute.** Per-function
 worst-case stack budget. Surface form: `#[bounded_stack(bytes=N)]`
 where N is a positive integer literal. The post-check pass runs

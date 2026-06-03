@@ -1265,6 +1265,7 @@ impl Parser {
             interrupt: false,
             safety_standard: None,
             bounded_stack: None,
+            wcet_cycles: None,
             recursion_bound: None,
         })
     }
@@ -1295,6 +1296,7 @@ impl Parser {
         let mut no_recursion = false;
         let mut interrupt = false;
         let mut bounded_stack: Option<u64> = None;
+        let mut wcet_cycles: Option<u64> = None;
         let mut safety_standard: Option<String> = None;
         while self.check(|k| matches!(k, TokenKind::Hash)) {
             self.bump(); // consume `#`
@@ -1361,6 +1363,43 @@ impl Parser {
                     self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
                     bounded_stack = Some(n);
                 }
+                // T3.2: `#[wcet(cycles=N)]` — per-fn worst-case
+                // execution time budget. Post-check pass runs a
+                // coarse cycle estimator and rejects if the
+                // estimate exceeds N or returns UNBOUNDED.
+                "wcet" => {
+                    self.expect_keyword(
+                        "'(' after `wcet`",
+                        |k| matches!(k, TokenKind::LParen),
+                    )?;
+                    let key_tok = self.expect_ident()?;
+                    let key = ident_text(key_tok);
+                    if key != "cycles" {
+                        return Err(Diagnostic::new(
+                            self.current().span,
+                            format!(
+                                "expected `cycles` key in `#[wcet(cycles=N)]`, got `{}`",
+                                key
+                            ),
+                        ));
+                    }
+                    self.expect_keyword(
+                        "'=' after `cycles`",
+                        |k| matches!(k, TokenKind::Equal),
+                    )?;
+                    let n_tok = self.bump();
+                    let n = match n_tok.kind {
+                        TokenKind::Int(v) if v > 0 => v as u64,
+                        _ => {
+                            return Err(Diagnostic::new(
+                                n_tok.span,
+                                "expected a positive integer literal as the cycle bound",
+                            ));
+                        }
+                    };
+                    self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+                    wcet_cycles = Some(n);
+                }
                 // Standard composite tags. Each names the
                 // target safety standard; the parser expands
                 // to the constraint set the standard requires
@@ -1391,7 +1430,7 @@ impl Parser {
                             "unknown attribute '#[{}]' — recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
-                             `#[bounded_stack(bytes=N)]`; \
+                             `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
                              `#[do178c_level_a]`, `#[iec_62304_class_c]`",
                             other
@@ -1425,6 +1464,7 @@ impl Parser {
         f.interrupt = interrupt;
         f.safety_standard = safety_standard;
         f.bounded_stack = bounded_stack;
+        f.wcet_cycles = wcet_cycles;
         Ok(f)
     }
 
@@ -1491,6 +1531,7 @@ impl Parser {
             interrupt: false,
             safety_standard: None,
             bounded_stack: None,
+            wcet_cycles: None,
             is_extern: true,
             recursion_bound: None,
         })

@@ -1023,6 +1023,11 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // verifies the worst-case bound is within budget. Unbounded
         // recursion in the call graph also reports here.
         crate::safety::enforce_bounded_stack(&typed_program_view, &mut diagnostics);
+        // T3.2 — `#[wcet(cycles=N)]`. Coarse cycle estimator
+        // walks the fn body; reports UNBOUNDED for non-const-bound
+        // loops / unbounded recursion / ForIter / While / spawn,
+        // exceeded budget when the static estimate > N.
+        crate::safety::enforce_wcet(&typed_program_view, &mut diagnostics);
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to
@@ -1552,6 +1557,7 @@ fn lift_closures_in_block(
             interrupt: false,
             safety_standard: None,
             bounded_stack: None,
+            wcet_cycles: None,
                         recursion_bound: None,
                     });
                     closure_handles.insert(
@@ -2783,6 +2789,7 @@ fn lift_expr_anon_fn(
             interrupt: false,
             safety_standard: None,
             bounded_stack: None,
+            wcet_cycles: None,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -6822,6 +6829,7 @@ fn check_function(
             interrupt: function.interrupt,
             safety_standard: function.safety_standard.clone(),
             bounded_stack: function.bounded_stack,
+            wcet_cycles: function.wcet_cycles,
             span: function.span,
         };
     }
@@ -6883,6 +6891,7 @@ fn check_function(
             interrupt: false,
             safety_standard: None,
             bounded_stack: None,
+            wcet_cycles: None,
             span: function.span,
         };
     }
@@ -7130,6 +7139,7 @@ fn check_function(
             interrupt: function.interrupt,
             safety_standard: function.safety_standard.clone(),
             bounded_stack: function.bounded_stack,
+            wcet_cycles: function.wcet_cycles,
         span: function.span,
     }
 }
