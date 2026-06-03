@@ -36,25 +36,29 @@ Session 2026-06-03 shipped: all 6 ARC 4 sub-arcs cross-backend
 
 **Test ledger:** 1791 lib + 54 parity green at end of session.
 
-**Forward queue** (per [TODO.md](TODO.md) + [ARCS.md](ARCS.md)):
-all multi-session L-tier arcs. Each warrants its own focused
-session — they don't decompose into mechanical cross-backend
-sub-arcs the way Arc 4 did.
+**Forward queue** (per [TODO.md](TODO.md) + [ARCS.md](ARCS.md))
+after the deeper audit on 2026-06-03 revealed Arcs 6 and 9 c/d
+were also already on `main` (closures #281/#282 for generic
+type decls; closures #257/#258 for `pub use` re-exports +
+`pub(kosh)` visibility tier):
 
 - **Arc 5c** — Closure-as-value across fn boundaries (env-
   struct + fn-ptr pair = `Closure<Args, Ret>` type). ~5-6h.
-  Unblocks Arc 8 (Async).
-- **Arc 6** — Generic type declarations (`EnumDecl`/`StructDecl`
-  gain `type_params`; first-class `Option<T>`/`Result<T,E>`/
-  `Future<T>`). ~15-20h. Independent.
-- **Arc 7** — FFI ABI lowering (per-platform classifier;
-  struct-by-value across `extern "C"`). ~10-15h. Independent.
-- **Arc 8** — Async / asyncio (state-machine codegen, event
-  loop, non-blocking I/O). ~30-40h. Deps: 5c + 6.
-- **Arc 9** — Kosh package manager (phase c-d first as small
-  beachhead). ~40h+.
+  Unblocks Arc 8 (Async). The smallest genuinely-open arc.
+- **Arc 7 remainder** — full FFI classifier (float-class +
+  mixed integer/float decomposition under SysV x86-64;
+  Windows/ARM gated on CI availability). ~6-8h focused.
+- **Arc 8** — Async / asyncio. ~30-40h. Deps: Arc 5c.
+- **Arc 9 a/b/e/f** — full package manager (manifest,
+  resolver, registry, stdlib-as-kosh). ~25-30h.
 - **Arc 10** — Devanagari SOV grammar fit. Soft-blocked on
   grammar consultant.
+
+**Already shipped** (no work remaining):
+- Arc 5a/5b/5d (closure phase 4 + ARC 3a + reassign)
+- Arc 6 entire (generic type decls + prelude Option/Result)
+- Arc 7 safe subset (closure #285 — SysV ≤ 16 bytes integer)
+- Arc 9 c/d (visibility tier + `pub use` re-exports)
 
 **Prior:** 2026-06-03 (**ARC 4 COMPLETE — `HashMap<Vec<i64>, V>`
 finishes the wider K-V matrix on both backends.** All six ARC 4
