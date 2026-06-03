@@ -5852,6 +5852,29 @@ fn monomorphize_type_decls_in_program(
                 element, struct_templates, enum_templates,
                 needed_structs, needed_enums,
             ),
+            // ARC 1.4a: HashMap<K, V> instantiations register
+            // `Option<V>` for the monomorphic enum that
+            // hashmap_get / hashmap_insert / hashmap_remove
+            // return. Without this, a `let m: HashMap<i64, u32>
+            // = hashmap_new()` would force `Option<u32>` at the
+            // typed-IR level without anyone declaring it. Same
+            // for BTreeMap which also returns Option<V>.
+            Type::HashMap(k, v) | Type::BTreeMap(k, v) => {
+                collect_apply_in_ty(
+                    k, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                collect_apply_in_ty(
+                    v, struct_templates, enum_templates,
+                    needed_structs, needed_enums,
+                );
+                let key = ("Option".to_string(), vec![(**v).clone()]);
+                if enum_templates.contains_key("Option")
+                    && !needed_enums.iter().any(|(n, a)| n == &key.0 && a == &key.1)
+                {
+                    needed_enums.push(key);
+                }
+            }
             Type::Tuple(elements) => {
                 for e in elements {
                     collect_apply_in_ty(
@@ -22608,11 +22631,30 @@ fn check_hashmap_builtin(
             ),
         ));
     }
-    if !matches!(k_ty, Type::I64) || !matches!(v_ty, Type::I64) {
+    // ARC 1.4b: relax from (i64, i64)-only to (i64, V) where V
+    // is any scalar integer type. Wider K (u64, struct, OwnedStr)
+    // ships in ARC 1.7 / Arc 4. The per-(K, V) bundle emission
+    // wired in 1.4c–1.5e supplies the C/LLVM helpers that make
+    // these new types work end-to-end.
+    let v_is_scalar = matches!(
+        v_ty,
+        Type::I8 | Type::I16 | Type::I32 | Type::I64
+            | Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::Bool
+    );
+    if !matches!(k_ty, Type::I64) {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() only supports `HashMap<i64, i64>` in v1, got HashMap<{}, {}>",
+                "{}() supports `HashMap<i64, V>` for scalar V in v1, got HashMap<{}, {}> \
+                 (wider K types arrive in ARC 1.7 / Arc 4)",
+                name, k_ty, v_ty
+            ),
+        ));
+    } else if !v_is_scalar {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            format!(
+                "{}() supports `HashMap<i64, V>` for scalar V in v1, got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));
@@ -22625,7 +22667,7 @@ fn check_hashmap_builtin(
         let k_raw = check_expr(&args[1], env, signatures, diagnostics);
         let k = coerce_checked(
             k_raw,
-            &Type::I64,
+            &k_ty,
             args[1].span,
             "hashmap key",
             diagnostics,
@@ -22636,7 +22678,7 @@ fn check_hashmap_builtin(
         let v_raw = check_expr(&args[2], env, signatures, diagnostics);
         let v = coerce_checked(
             v_raw,
-            &Type::I64,
+            &v_ty,
             args[2].span,
             "hashmap value",
             diagnostics,
@@ -22645,7 +22687,7 @@ fn check_hashmap_builtin(
     }
     let ret_ty = match name {
         "hashmap_insert" | "hashmap_get" | "hashmap_remove" => {
-            Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
+            Type::Enum(mangle_generic_decl("Option", &[v_ty.clone()]))
         }
         "hashmap_contains_key" => Type::Bool,
         _ => Type::I64,

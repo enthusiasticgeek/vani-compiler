@@ -10,7 +10,34 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**Remaining-work breakdown +
+**Last updated:** 2026-06-03 (**ARC 1.4a + 1.4b shipped —
+Option<V> auto-monomorphization + checker relaxation.** First
+two sub-steps of the per-(K, V) HashMap bundle arc.
+
+1.4a: extended `collect_apply_in_ty` so any `Type::HashMap(K, V)`
+or `Type::BTreeMap(K, V)` annotation registers `Option<V>` as a
+needed monomorphic enum. Previously only `Option<i64>` was
+auto-registered (via the hard-coded path in
+`walk_expr_for_search_builtins`); now any V type used as a
+HashMap V triggers its own `Option<V>` instantiation. Backwards
+compatible — (i64, i64) was already registered.
+
+1.4b: relaxed `check_hashmap_builtin` from `(i64, i64)`-only to
+`HashMap<i64, V>` where V is any scalar (i8/i16/i32/i64/u8/u16/
+u32/u64/bool). Key coercion now uses the actual k_ty (still
+i64 in v1), value coercion uses v_ty, and the return type for
+get/insert/remove is `Option<V>` mangled by the actual V.
+Wider K types (u64, struct, OwnedStr) remain restricted —
+arrive in ARC 1.7 / Arc 4. **4 new lib tests**
+(HashMap<i64, u32>, HashMap<i64, i32>, HashMap<i64, bool>
+type-check; HashMap<u64, i64> still rejected with the
+upgraded diagnostic). One existing test was updated to reflect
+the new checker behaviour. **1763 lib + 54 parity green.**
+**Mid-arc state:** checker accepts the new shapes, but the
+per-(K, V) backend bundle still needs to land (ARC 1.4c–1.5e)
+before codegen succeeds for non-(i64, i64) shapes.)
+
+**Prior:** 2026-06-03 (**Remaining-work breakdown +
 sequenced ledger added to ARCS.md and TODO.md.** The open Arc
 1.4–1.7 and Arc 4 work is now structured as 21 granular sub-
 steps with explicit dependencies (Arc 1.4a → 1.4b → 1.4c → 1.4d

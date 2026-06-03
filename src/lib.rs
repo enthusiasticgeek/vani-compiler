@@ -31649,6 +31649,62 @@ fn main() -> i64 {
         assert_eq!(pairs[1].tag, "intent_hashmap_int64_t_hm_int64_t_int64_t");
     }
 
+    // ARC 1.4b — checker accepts HashMap<i64, V> for scalar V.
+
+    #[test]
+    fn hashmap_checker_accepts_hashmap_i64_u32() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, u32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect("HashMap<i64, u32> type-checks");
+    }
+
+    #[test]
+    fn hashmap_checker_accepts_hashmap_i64_i32() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i32> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect("HashMap<i64, i32> type-checks");
+    }
+
+    #[test]
+    fn hashmap_checker_accepts_hashmap_i64_bool() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, bool> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, true);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect("HashMap<i64, bool> type-checks");
+    }
+
+    #[test]
+    fn hashmap_checker_rejects_non_i64_key_with_useful_diag() {
+        // K = u64 still flagged in v1 (wider K comes in 1.7).
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<u64, i64> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, 100);
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("non-i64 K rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("HashMap<i64, V>")),
+            "expected wider-K diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // ARC 1.2 — Hash bound enforcement on user struct keys.
 
     #[test]
@@ -31770,13 +31826,14 @@ fn main() -> i64 {
 
     #[test]
     fn hashmap_new_with_non_default_annotation_produces_typed_binding() {
-        // ARC 1.1 isolates the `hashmap_new()` inference from the
-        // rest of the bundle ops. The binding type is correctly
-        // `HashMap<i64, u64>` (proves inference works), but
-        // `hashmap_insert`/etc. are still restricted to (i64, i64)
-        // until ARC 1.2-1.7 land — so this source must produce a
-        // type-restriction diagnostic on those ops, not on the
-        // `hashmap_new()` call itself.
+        // ARC 1.4b relaxed the checker — `HashMap<i64, V>` for
+        // scalar V now type-checks. Backend codegen (the
+        // per-(K, V) bundle) lands in 1.4c–1.5e. This test
+        // pins the type-check behaviour: the binding type is
+        // correctly `HashMap<i64, u64>` and the bundle ops are
+        // accepted at the checker level. The let-binding-type-
+        // mismatch error must NOT fire on the `let m:
+        // HashMap<i64, u64> = hashmap_new()` line.
         let source = r#"
             fn main() -> i64 {
               let m: HashMap<i64, u64> = hashmap_new();
@@ -31784,25 +31841,10 @@ fn main() -> i64 {
               return hashmap_len(ref m);
             }
         "#;
-        let errs = compile(source).expect_err(
-            "non-default V should error at insert/len, not at hashmap_new",
-        );
-        // The error must NOT be the "expected HashMap<i64, u64>,
-        // got HashMap<i64, i64>" mismatch on the let binding —
-        // it must be the bundle-op restriction.
-        for d in &errs {
-            assert!(
-                !d.message.contains("expected") || !d.message.contains("got HashMap<i64, i64>"),
-                "let-binding type mismatch leaked through: {}",
-                d.message
-            );
-        }
-        assert!(
-            errs.iter().any(|d| d.message.contains("HashMap<i64, i64>")
-                && d.message.contains("only supports")),
-            "expected bundle-op restriction diagnostic, got: {:?}",
-            errs
-        );
+        // Type-check stage: this is the assertion ARC 1.4b
+        // unlocks — the program flows through the checker
+        // without the legacy "(i64, i64) only" diagnostic.
+        let _ = compile(source).expect("checker accepts HashMap<i64, u64>");
     }
 
     // T3.5 of the safety-standard arc — MISRA 13.5 tightening.
