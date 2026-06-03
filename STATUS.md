@@ -10,7 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**Devanagari `main()` entry-point
+**Last updated:** 2026-06-03 (**ARC 1.2 shipped — Hash bound
+enforcement on user struct keys.** Second sub-step of the
+HashMap monomorphization arc. `validate_array_element_type` (the
+shared type-validation helper called by Let annotations, function
+params, etc.) extended: when the type is `HashMap<K, V>` and K is
+a user-defined struct, the validator looks up
+`iface_impl_exists("Hash", K_name)` and emits a clear diagnostic
+when no `implement Hash for K` block is in scope. Built-in K
+types (i64, u32, OwnedStr, etc.) get compiler-provided hashing
+unchanged. The diagnostic names the exact `implement Hash for K
+{ fn hash(self: ref Self) -> i64 { ... } }` template the user
+should write. Same validator also restated the existing reference-
+key/value ban. **4 new lib tests** (struct K without Hash impl
+rejected, struct K with Hash impl passes the bound check, i64 K
+unchanged, diagnostic walks user through the fix). **1721 lib +
+54 parity green.** ARC 1.3 (type collector for per-(K, V) bundle
+queue) is next.)
+
+**Prior:** 2026-06-03 (**Devanagari `main()` entry-point
 aliases + cross-markdown audit.** `fn मुख्य()` (mukhya — Sanskrit
 / Hindi / Marathi "main / primary"), `fn प्रमुख()` (pramukh —
 "primary, foremost"), and `fn प्रधान()` (pradhan — "principal /

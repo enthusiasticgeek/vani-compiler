@@ -30968,6 +30968,93 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 1.2 — Hash bound enforcement on user struct keys.
+
+    #[test]
+    fn hashmap_struct_key_without_hash_impl_rejected() {
+        let source = r#"
+            struct Score { val: i64 }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err(
+            "HashMap<Score, _> without `implement Hash for Score` rejected",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("must implement `Hash`")
+                && d.message.contains("Score")),
+            "expected Hash-bound diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn hashmap_struct_key_with_hash_impl_passes_bound_check() {
+        // The Hash bound check itself accepts the struct K once
+        // an `implement Hash for K` is in scope. The bundle ops
+        // still error on the (Score, i64) pair until ARC 1.4/1.5
+        // ship per-(K, V) emission — but the Hash-bound
+        // diagnostic from ARC 1.2 must NOT fire.
+        let source = r#"
+            interface Hash {
+              fn hash(self: Score) -> i64;
+            }
+            struct Score { val: i64 }
+            implement Hash for Score {
+              fn hash(self: Score) -> i64 { return self.val; }
+            }
+            fn main() -> i64 {
+              let m: HashMap<Score, i64> = hashmap_new();
+              return 0;
+            }
+        "#;
+        let errs = compile(source).err().unwrap_or_default();
+        for d in &errs {
+            assert!(
+                !d.message.contains("must implement `Hash`"),
+                "Hash-bound diagnostic should NOT fire when impl exists: {}",
+                d.message
+            );
+        }
+    }
+
+    #[test]
+    fn hashmap_i64_key_does_not_require_hash_impl() {
+        // Built-in K types (i64, u32, OwnedStr, etc.) get
+        // compiler-provided hashing — no `implement Hash` is
+        // required.
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return hashmap_len(ref m);
+            }
+        "#;
+        let _ = compile(source).expect(
+            "built-in K type does not require Hash impl",
+        );
+    }
+
+    #[test]
+    fn hashmap_struct_key_diagnostic_names_workaround() {
+        // The diagnostic must walk the user through how to fix
+        // it — naming the `implement Hash for K` template.
+        let source = r#"
+            struct Coord { x: i64, y: i64 }
+            fn main() -> i64 {
+              let m: HashMap<Coord, i64> = hashmap_new();
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("Hash bound diagnostic fires");
+        assert!(
+            errs.iter().any(|d| d.message.contains("implement Hash for Coord")),
+            "expected actionable workaround in diagnostic, got: {:?}",
+            errs
+        );
+    }
+
     // ARC 1.1 — generic-context hashmap_new() inference.
 
     #[test]

@@ -10049,6 +10049,31 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
             ));
         }
     }
+    // ARC 1.2: when K of `HashMap<K, V>` is a user-defined struct,
+    // require an `implement Hash for K` impl in scope. The other
+    // K types (i64, u32, OwnedStr, etc.) have compiler-provided
+    // hash bundles, so no impl is required for them.
+    if let Type::HashMap(k, v) = ty {
+        if let Type::Struct(name) = k.as_ref() {
+            if !crate::ast::iface_impl_exists("Hash", name) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "HashMap key type '{}' must implement `Hash` — add \
+                         `implement Hash for {} {{ fn hash(self: ref Self) -> i64 {{ ... }} }}` \
+                         in the same module as either `Hash` or `{}`.",
+                        name, name, name
+                    ),
+                ));
+            }
+        }
+        if k.is_ref() || v.is_ref() {
+            diagnostics.push(Diagnostic::new(
+                span,
+                "HashMap K or V cannot be a reference type",
+            ));
+        }
+    }
 }
 
 fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<Diagnostic>) {
