@@ -10,7 +10,24 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**`intentc hashmap-usage` subcommand
+**Last updated:** 2026-06-03 (**`intentc complexity` standalone
+audit CLI shipped — per-function McCabe scores as artifact.**
+T2.4 follow-up. The same cyclomatic-complexity counter that the
+existing `enforce_complexity` checker pass uses (opt-in via
+`INTENT_CHECK_COMPLEXITY=1` env var) is now also queryable
+standalone: `intentc complexity <path> [--max=N] [--format=text|json|csv]`.
+Per-function scores in declaration order, three output formats
+matching the established pattern. With `--max=N`, exits 1 if
+any function exceeds N — CI-friendly hard gate. Useful for
+MISRA / ISO 26262 / DO-178C reviews where complexity ceilings
+(typically 10-15) are part of the standard rubric. **5 new lib
+tests** (report walks all fns, text marks over-threshold, JSON
+well-formed, CSV header + rows, no-threshold means no
+violations). Smoke-tested end-to-end — `branchy()` scores 5 with
+default `--max`, scores 5 with `--max=3` and triggers exit 1.
+**1754 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**`intentc hashmap-usage` subcommand
 shipped — surfaces every HashMap<K, V> pair the program uses
 as an audit artifact.** New CLI: `intentc hashmap-usage <path>
 [--format=text|json|csv]`. Walks the typed program via the

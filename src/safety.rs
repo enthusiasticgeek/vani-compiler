@@ -1754,3 +1754,121 @@ fn walk_expr(expr: &TypedExpr, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<
     }
     let _ = std::mem::discriminant(&expr.kind); // silence unused-warning chance
 }
+
+// ---- T2.4 follow-up: per-function complexity report --------
+//
+// Surfaces the existing McCabe complexity counter as an audit
+// artifact via `intentc complexity` (mirrors the established
+// `deviations` / `stack-depth` / `acyclicity` / `hashmap-usage`
+// pattern). Useful for embedded teams reviewing MISRA / ISO
+// 26262 / DO-178C complexity ceilings against actual code.
+
+/// One row of the complexity report. Live functions only
+/// (extern fns excluded — they have no body to count).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnComplexity {
+    pub name: String,
+    pub score: u64,
+}
+
+/// Walk the typed program and compute the McCabe complexity
+/// score for every non-extern function. Returns one record per
+/// function in declaration order.
+pub fn compute_complexity_report(program: &TypedProgram) -> Vec<FnComplexity> {
+    let mut out: Vec<FnComplexity> = Vec::new();
+    for f in &program.functions {
+        if f.is_extern {
+            continue;
+        }
+        let mut count: u64 = 1;
+        for s in &f.body {
+            count += stmt_complexity(s);
+        }
+        out.push(FnComplexity { name: f.name.clone(), score: count });
+    }
+    out
+}
+
+/// Human-readable text format. Each line is one function with
+/// its score; functions over `threshold` get a `[OVER]` marker.
+/// Returns `(output, any_over)` so the CLI can set its exit
+/// code accordingly.
+pub fn format_complexity_text(report: &[FnComplexity], threshold: Option<u64>) -> (String, bool) {
+    let mut out = String::new();
+    let mut any_over = false;
+    for r in report {
+        let marker = match threshold {
+            Some(t) if r.score > t => {
+                any_over = true;
+                "[OVER] "
+            }
+            _ => "",
+        };
+        out.push_str(&format!("{}{}: {}\n", marker, r.name, r.score));
+    }
+    if let Some(t) = threshold {
+        let over = report.iter().filter(|r| r.score > t).count();
+        out.push_str(&format!(
+            "\n{} of {} fn{} exceed threshold {}\n",
+            over,
+            report.len(),
+            if report.len() == 1 { "" } else { "s" },
+            t,
+        ));
+    } else {
+        out.push_str(&format!("\n{} fn{} total\n",
+            report.len(),
+            if report.len() == 1 { "" } else { "s" }));
+    }
+    (out, any_over)
+}
+
+pub fn format_complexity_json(report: &[FnComplexity]) -> String {
+    let mut out = String::from("{\"functions\":[");
+    for (i, r) in report.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"name\":{},\"score\":{}}}",
+            json_string_local(&r.name),
+            r.score,
+        ));
+    }
+    out.push_str("]}\n");
+    out
+}
+
+pub fn format_complexity_csv(report: &[FnComplexity]) -> String {
+    let mut out = String::from("name,score\n");
+    for r in report {
+        out.push_str(&format!("{},{}\n", csv_escape_local(&r.name), r.score));
+    }
+    out
+}
+
+fn csv_escape_local(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        let escaped = s.replace('"', "\"\"");
+        format!("\"{}\"", escaped)
+    } else {
+        s.to_string()
+    }
+}
+
+fn json_string_local(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}

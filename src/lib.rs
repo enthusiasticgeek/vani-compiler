@@ -30978,6 +30978,95 @@ fn main() -> i64 {
         );
     }
 
+    // T2.4 follow-up — `intentc complexity` standalone audit CLI.
+
+    #[test]
+    fn complexity_report_walks_all_user_fns() {
+        let source = r#"
+            fn a() -> i64 { return 0; }
+            fn b(x: i64) -> i64 {
+              if x > 0 { return 1; }
+              return -1;
+            }
+            fn main() -> i64 { return a() + b(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_complexity_report(&checked.ir);
+        assert_eq!(report.len(), 3);
+        assert_eq!(report[0].name, "a");
+        assert_eq!(report[0].score, 1);
+        assert_eq!(report[1].name, "b");
+        assert!(report[1].score >= 2);  // 1 + if
+        assert_eq!(report[2].name, "main");
+    }
+
+    #[test]
+    fn complexity_text_format_marks_over_threshold() {
+        let source = r#"
+            fn complex(x: i64) -> i64 {
+              if x > 0 {
+                if x > 10 { return 100; }
+                return 10;
+              }
+              if x < 0 {
+                if x < -10 { return -100; }
+                return -10;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return complex(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_complexity_report(&checked.ir);
+        let (text, any_over) =
+            crate::safety::format_complexity_text(&report, Some(3));
+        assert!(any_over, "complex() should exceed threshold 3");
+        assert!(text.contains("[OVER] complex"));
+        assert!(text.contains("exceed threshold 3"));
+    }
+
+    #[test]
+    fn complexity_json_format_well_formed() {
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_complexity_report(&checked.ir);
+        let json = crate::safety::format_complexity_json(&report);
+        assert!(json.starts_with("{\"functions\":["));
+        assert!(json.contains("\"name\":\"main\""));
+        assert!(json.contains("\"score\":1"));
+        assert!(json.ends_with("]}\n"));
+    }
+
+    #[test]
+    fn complexity_csv_has_header_and_rows() {
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_complexity_report(&checked.ir);
+        let csv = crate::safety::format_complexity_csv(&report);
+        assert!(csv.starts_with("name,score\n"));
+        assert!(csv.contains("main,1"));
+    }
+
+    #[test]
+    fn complexity_no_threshold_means_no_violations() {
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              if x > 0 { return 0; } else { return 1; }
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_complexity_report(&checked.ir);
+        let (text, any_over) =
+            crate::safety::format_complexity_text(&report, None);
+        assert!(!any_over);
+        assert!(text.contains("1 fn total"));
+    }
+
     // ARC 1 follow-up — `intentc hashmap-usage` output formats.
 
     #[test]

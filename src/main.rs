@@ -798,6 +798,12 @@ COMMANDS:
                                           that single-fn checks miss. Required
                                           by DO-178C / ASIL-D. Exit 1 on
                                           violation.
+    complexity <file.vani> [--max=<N>] [--format=<csv|json|text>]
+                                          Per-function McCabe cyclomatic
+                                          complexity. With --max=<N>, exits 1
+                                          if any fn exceeds N. MISRA / ISO
+                                          26262 / DO-178C reviews use this as
+                                          the standard branch-depth ceiling.
     hashmap-usage <file.vani> [--format=<csv|json|text>]
                                           Surface every HashMap<K, V> pair the
                                           program uses, with the mangled bundle
@@ -1235,6 +1241,79 @@ fn run() -> Result<ExitCode, String> {
                 Ok(ExitCode::from(1))
             } else {
                 Ok(ExitCode::SUCCESS)
+            }
+        }
+        "complexity" => {
+            // T2.4 follow-up: surface McCabe cyclomatic complexity
+            // per function as an audit artifact. The same
+            // counter that the `enforce_complexity` checker pass
+            // uses (when opted in via env vars) is now also
+            // queryable standalone via the CLI. Useful for MISRA /
+            // ISO 26262 / DO-178C reviews against complexity
+            // ceilings.
+            //
+            // Usage: intentc complexity <path>
+            //          [--max=<N>] [--format=csv|json|text]
+            // With --max, exits 1 if any fn's score exceeds N.
+            let mut format = "text";
+            let mut max_score: Option<u64> = None;
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if let Some(value) = arg.strip_prefix("--max=") {
+                    max_score = Some(value.parse::<u64>().map_err(|_| {
+                        format!("--max=<N> expects a non-negative integer, got '{}'", value)
+                    })?);
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'complexity' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'complexity' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, _file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let report = vani::safety::compute_complexity_report(&checked.ir);
+            match format {
+                "csv" => {
+                    print!("{}", vani::safety::format_complexity_csv(&report));
+                    Ok(ExitCode::SUCCESS)
+                }
+                "json" => {
+                    print!("{}", vani::safety::format_complexity_json(&report));
+                    Ok(ExitCode::SUCCESS)
+                }
+                _ => {
+                    let (out, any_over) =
+                        vani::safety::format_complexity_text(&report, max_score);
+                    print!("{}", out);
+                    if any_over && max_score.is_some() {
+                        Ok(ExitCode::from(1))
+                    } else {
+                        Ok(ExitCode::SUCCESS)
+                    }
+                }
             }
         }
         "hashmap-usage" => {
