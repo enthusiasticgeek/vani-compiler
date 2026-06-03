@@ -732,6 +732,15 @@ pub fn emit_c(program: &TypedProgram) -> String {
                         &mut body, els.len(), v_tag, v_tag, v_mangle, has_option_v,
                     );
                 }
+                // ARC 4.6: Vec<i64> K — length-prefixed FNV-1a
+                // hash + len-then-memcmp equality. Map deep-
+                // clones each Vec's data array on insert; drop
+                // walks free each stored data buffer.
+                (Type::Vec(inner), _) if matches!(inner.as_ref(), Type::I64) => {
+                    emit_intent_hashmap_pair_c_body_vec_i64k(
+                        &mut body, v_tag, v_tag, v_mangle, has_option_v,
+                    );
+                }
                 (Type::Struct(k_name), _) => {
                     let k_ctype = format!("Struct_{}", k_name);
                     emit_intent_hashmap_struct_pair_c_body(
@@ -2982,6 +2991,204 @@ fn emit_intent_hashmap_pair_c_body_strk_strv(
              \x20 r.tag = 1; r.payload = (char*)0; return r;\n\
              }}\n\n",
             prefix = prefix, opt_v = opt_v,
+        ));
+    }
+}
+
+/// ARC 4.6 — `HashMap<Vec<i64>, V>` for V scalar. K is the
+/// existing `intent_vec_int64_t` struct (data + len + cap);
+/// map deep-clones the data array on insert (same affine
+/// workaround as ARC 4.1/4.2 — sidesteps local-drop double-
+/// free). Drop/clear walk frees each stored Vec's data
+/// buffer. Hash: FNV-1a over each i64's 8 bytes, prefixed by
+/// the length so empty/short Vec values disambiguate; same
+/// byte distribution as the i64-K bundle generalized.
+/// Equality: lengths-equal then byte memcmp of data.
+fn emit_intent_hashmap_pair_c_body_vec_i64k(
+    out: &mut String,
+    v_tag: &str,
+    v_ctype: &str,
+    option_v_mangle: &str,
+    has_option_v: bool,
+) {
+    let prefix = format!("intent_hashmap_vec_int64_t_{}", v_tag);
+    let opt_v = format!("Enum_Option__{}", option_v_mangle);
+    out.push_str(&format!(
+        "typedef struct {{ intent_vec_int64_t* keys; {v_ctype}* values; uint8_t* occ; uint64_t len; uint64_t capacity; uint64_t tombstones; }} {prefix};\n\
+         static INTENT_UNUSED bool {prefix}__eq_key(intent_vec_int64_t a, intent_vec_int64_t b) {{\n\
+         \x20 if (a.len != b.len) return false;\n\
+         \x20 if (a.len == 0) return true;\n\
+         \x20 return memcmp(a.data, b.data, (size_t)a.len * sizeof(int64_t)) == 0;\n\
+         }}\n\
+         static INTENT_UNUSED {prefix} {prefix}_new(void) {{\n\
+         \x20 {prefix} m;\n\
+         \x20 m.keys = (intent_vec_int64_t*)0; m.values = ({v_ctype}*)0; m.occ = (uint8_t*)0;\n\
+         \x20 m.len = 0; m.capacity = 0; m.tombstones = 0;\n\
+         \x20 return m;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}_drop({prefix}* m) {{\n\
+         \x20 if (m->keys) {{\n\
+         \x20   for (uint64_t i = 0; i < m->capacity; i++) {{\n\
+         \x20     if (m->occ[i] == 1 && m->keys[i].data) free(m->keys[i].data);\n\
+         \x20   }}\n\
+         \x20   free(m->keys);\n\
+         \x20 }}\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = 0; m->values = 0; m->occ = 0;\n\
+         \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
+         }}\n\
+         static INTENT_UNUSED uint64_t {prefix}__hash_key(intent_vec_int64_t k) {{\n\
+         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
+         \x20 /* Length-prefix so empty / shorter Vecs distribute. */\n\
+         \x20 {{\n\
+         \x20   uint64_t u_len = (uint64_t)k.len;\n\
+         \x20   for (int b = 0; b < 8; b++) {{\n\
+         \x20     h ^= (u_len >> (b * 8)) & 0xffULL;\n\
+         \x20     h *= 0x100000001b3ULL;\n\
+         \x20   }}\n\
+         \x20 }}\n\
+         \x20 for (int64_t e = 0; e < k.len; e++) {{\n\
+         \x20   uint64_t ue = (uint64_t)k.data[e];\n\
+         \x20   for (int b = 0; b < 8; b++) {{\n\
+         \x20     h ^= (ue >> (b * 8)) & 0xffULL;\n\
+         \x20     h *= 0x100000001b3ULL;\n\
+         \x20   }}\n\
+         \x20 }}\n\
+         \x20 return h;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__insert_owned_raw({prefix}* m, intent_vec_int64_t k_owned, {v_ctype} v) {{\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k_owned) & mask;\n\
+         \x20 while (m->occ[i] == 1) {{\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 m->keys[i] = k_owned; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+         }}\n\
+         static INTENT_UNUSED void {prefix}__grow({prefix}* m) {{\n\
+         \x20 uint64_t old_cap = m->capacity;\n\
+         \x20 intent_vec_int64_t* old_keys = m->keys;\n\
+         \x20 {v_ctype}* old_values = m->values;\n\
+         \x20 uint8_t* old_occ = m->occ;\n\
+         \x20 uint64_t new_cap = old_cap == 0 ? 8 : old_cap * 2;\n\
+         \x20 m->keys = (intent_vec_int64_t*)malloc(new_cap * sizeof(intent_vec_int64_t));\n\
+         \x20 m->values = ({v_ctype}*)malloc(new_cap * sizeof({v_ctype}));\n\
+         \x20 m->occ = (uint8_t*)calloc(new_cap, 1);\n\
+         \x20 if (!m->keys || !m->values || !m->occ) abort();\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = new_cap;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 for (uint64_t i = 0; i < old_cap; i++) {{\n\
+         \x20   if (old_occ[i] == 1) {prefix}__insert_owned_raw(m, old_keys[i], old_values[i]);\n\
+         \x20 }}\n\
+         \x20 if (old_keys) free(old_keys);\n\
+         \x20 if (old_values) free(old_values);\n\
+         \x20 if (old_occ) free(old_occ);\n\
+         }}\n\
+         static INTENT_UNUSED bool {prefix}_contains_key(const {prefix}* m, intent_vec_int64_t k) {{\n\
+         \x20 if (m->capacity == 0) return false;\n\
+         \x20 uint64_t mask = m->capacity - 1;\n\
+         \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+         \x20 while (m->occ[i] != 0) {{\n\
+         \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) return true;\n\
+         \x20   i = (i + 1) & mask;\n\
+         \x20 }}\n\
+         \x20 return false;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_len(const {prefix}* m) {{\n\
+         \x20 return (int64_t)m->len;\n\
+         }}\n\
+         static INTENT_UNUSED int64_t {prefix}_clear({prefix}* m) {{\n\
+         \x20 int64_t prior = (int64_t)m->len;\n\
+         \x20 if (m->keys) {{\n\
+         \x20   for (uint64_t i = 0; i < m->capacity; i++) {{\n\
+         \x20     if (m->occ[i] == 1 && m->keys[i].data) free(m->keys[i].data);\n\
+         \x20   }}\n\
+         \x20   free(m->keys);\n\
+         \x20 }}\n\
+         \x20 if (m->values) free(m->values);\n\
+         \x20 if (m->occ) free(m->occ);\n\
+         \x20 m->keys = (intent_vec_int64_t*)0;\n\
+         \x20 m->values = ({v_ctype}*)0;\n\
+         \x20 m->occ = (uint8_t*)0;\n\
+         \x20 m->len = 0;\n\
+         \x20 m->capacity = 0;\n\
+         \x20 m->tombstones = 0;\n\
+         \x20 return prior;\n\
+         }}\n",
+        v_ctype = v_ctype, prefix = prefix,
+    ));
+    if has_option_v {
+        out.push_str(&format!(
+            "static INTENT_UNUSED {opt_v} {prefix}_get(const {prefix}* m, intent_vec_int64_t k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{ r.tag = 0; r.payload = m->values[i]; return r; }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, intent_vec_int64_t k, {v_ctype} v) {{\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 {opt_v} r;\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 int64_t first_tomb = -1;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{\n\
+             \x20     /* Duplicate K — keep existing K clone, swap V. */\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     m->values[i] = v;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   if (m->occ[i] == 2 && first_tomb == -1) first_tomb = (int64_t)i;\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 /* Deep-clone the caller's Vec data buffer. */\n\
+             \x20 intent_vec_int64_t k_owned;\n\
+             \x20 k_owned.len = k.len;\n\
+             \x20 k_owned.capacity = k.len;\n\
+             \x20 if (k.len > 0) {{\n\
+             \x20   k_owned.data = (int64_t*)malloc((size_t)k.len * sizeof(int64_t));\n\
+             \x20   if (!k_owned.data) abort();\n\
+             \x20   memcpy(k_owned.data, k.data, (size_t)k.len * sizeof(int64_t));\n\
+             \x20 }} else {{\n\
+             \x20   k_owned.data = (int64_t*)0;\n\
+             \x20 }}\n\
+             \x20 if (first_tomb != -1) {{\n\
+             \x20   uint64_t slot = (uint64_t)first_tomb;\n\
+             \x20   m->keys[slot] = k_owned; m->values[slot] = v; m->occ[slot] = 1;\n\
+             \x20   m->len++; m->tombstones--;\n\
+             \x20 }} else {{\n\
+             \x20   m->keys[i] = k_owned; m->values[i] = v; m->occ[i] = 1; m->len++;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\
+             static INTENT_UNUSED {opt_v} {prefix}_remove({prefix}* m, intent_vec_int64_t k) {{\n\
+             \x20 {opt_v} r;\n\
+             \x20 if (m->capacity == 0) {{ r.tag = 1; r.payload = 0; return r; }}\n\
+             \x20 uint64_t mask = m->capacity - 1;\n\
+             \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
+             \x20 while (m->occ[i] != 0) {{\n\
+             \x20   if (m->occ[i] == 1 && {prefix}__eq_key(m->keys[i], k)) {{\n\
+             \x20     r.tag = 0; r.payload = m->values[i];\n\
+             \x20     if (m->keys[i].data) free(m->keys[i].data);\n\
+             \x20     m->keys[i].data = (int64_t*)0;\n\
+             \x20     m->keys[i].len = 0;\n\
+             \x20     m->keys[i].capacity = 0;\n\
+             \x20     m->occ[i] = 2;\n\
+             \x20     m->len--;\n\
+             \x20     m->tombstones++;\n\
+             \x20     return r;\n\
+             \x20   }}\n\
+             \x20   i = (i + 1) & mask;\n\
+             \x20 }}\n\
+             \x20 r.tag = 1; r.payload = 0; return r;\n\
+             }}\n\n",
+            v_ctype = v_ctype, prefix = prefix, opt_v = opt_v,
         ));
     }
 }
@@ -12315,6 +12522,12 @@ fn hashmap_type_tag_c_owned(ty: &Type) -> String {
         // unit without collision.
         Type::Tuple(els) if els.iter().all(|t| matches!(t, Type::I64)) => {
             format!("tup_{}_i64", els.len())
+        }
+        // ARC 4.6: Vec<i64> K — bundle prefix
+        // `intent_hashmap_vec_int64_t_<V>`. Keys field stores
+        // the existing `intent_vec_int64_t` typedef by value.
+        Type::Vec(inner) if matches!(inner.as_ref(), Type::I64) => {
+            "vec_int64_t".to_string()
         }
         _ => "i64".to_string(),
     }

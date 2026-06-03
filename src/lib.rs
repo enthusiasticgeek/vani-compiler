@@ -31882,6 +31882,55 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 4.6 — HashMap<Vec<i64>, V>: Vec K with deep clone on
+    // insert, length-prefixed FNV-1a hash, len-then-memcmp eq.
+
+    #[test]
+    fn hashmap_vec_i64_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<Vec<i64>, i64> = hashmap_new();
+              let k: Vec<i64> = vec(1, 2, 3);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<Vec<i64>, i64> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<Vec<i64>, i64> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_vec_int64_t_int64_t"),
+            "expected C Vec-K bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_vec_int64_t_int64_t"),
+            "expected LLVM Vec-K bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_vec_i64_c_clones_and_uses_memcmp() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<Vec<i64>, i64> = hashmap_new();
+              let k: Vec<i64> = vec(1, 2, 3);
+              let _ = hashmap_insert(mut ref m, k, 100);
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<Vec<i64>, i64> → C");
+        // Equality dispatches to a helper that checks lens
+        // and memcmp's the data buffers.
+        assert!(
+            c.contains("__eq_key") && c.contains("memcmp(a.data, b.data"),
+            "expected len-then-memcmp equality"
+        );
+        // Insert deep-clones the data array via malloc+memcpy.
+        assert!(
+            c.contains("k_owned.data = (int64_t*)malloc"),
+            "expected Vec data deep-clone allocation"
+        );
+    }
+
     // ARC 4.3 — HashMap<OwnedStr, OwnedStr>: both axes heap-
     // owned; drop walks free both per slot. Composition of
     // ARC 4.1 K + ARC 4.2 V semantics.

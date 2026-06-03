@@ -865,6 +865,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "hashmap_strstr.vani",
         "hashmap_strv.vani",
         "hashmap_tup.vani",
+        "hashmap_veck.vani",
         "hashset.vani",
         "heap.vani",
         "hindi_keywords.vani",

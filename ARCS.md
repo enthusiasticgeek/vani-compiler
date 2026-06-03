@@ -63,7 +63,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 | 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes ✅ **SHIPPED 2026-06-03** | ~2h | 4.1 + 4.2 |
 | 4.4 | `HashMap<Tuple<i64, …, i64>, V>` — tuple K via `hash_combine` ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e + Tuple E sugar |
 | 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) ✅ **SHIPPED 2026-06-03** | ~2h | 1.5e |
-| 4.6 | `HashMap<Vec<i64>, V>` — Vec K (affine move-in semantics) | ~3h | 4.1 |
+| 4.6 | `HashMap<Vec<i64>, V>` — Vec K (deep-clone semantics) ✅ **SHIPPED 2026-06-03** | ~3h | 4.1 |
 
 **Subtotal: ~16h, ~30 commits.** Acceptance per pair: insert,
 get, contains_key, remove, len, clear all round-trip
@@ -464,8 +464,21 @@ For each new (K, V) pair:
    - LLVM bundle uses `bitcast double to i64` + `fcmp oeq double`.
    - Parity example: `examples/hashmap_f64.vani`.
 
-6. **4.6 — `HashMap<Vec<i64>, V>`. (~3h)**
-   - Highly affine — Vec key moves in.
+6. **4.6 — `HashMap<Vec<i64>, V>`. (~3h)** ✅ **SHIPPED 2026-06-03**
+   - K stored by value as the existing `intent_vec_int64_t`
+     struct. Map deep-clones the data buffer on insert (same
+     affine workaround as 4.1/4.2/4.3 — caller retains
+     ownership of the Vec it passes).
+   - Hash: length-prefixed FNV-1a over each i64 element (so
+     empty + shorter Vecs distribute distinctly).
+   - Equality: lengths-equal then memcmp of data.
+   - C bundle prefix: `intent_hashmap_vec_int64_t_<V>`.
+     `intent_vec_int64_t*` keys array; drop walks free each
+     stored data buffer.
+   - LLVM mirror: key type `%intent_vec_i64`; equality via
+     internal `__eq_key` calling memcmp. memcmp declared once
+     in LLVM prologue.
+   - Parity example: `examples/hashmap_veck.vani`.
 
 **Acceptance per pair:** insert, get, contains_key, remove, len, clear
 all round-trip cross-backend.

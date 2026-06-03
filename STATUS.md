@@ -10,7 +10,47 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4.3 COMPLETE — `HashMap<OwnedStr, OwnedStr>`
+**Last updated:** 2026-06-03 (**ARC 4 COMPLETE — `HashMap<Vec<i64>, V>`
+finishes the wider K-V matrix on both backends.** All six ARC 4
+sub-arcs (4.1 OwnedStr K, 4.2 OwnedStr V with i64 K, 4.3
+OwnedStr K + OwnedStr V, 4.4 (i64,…,i64) tuple K, 4.5 f64 K,
+4.6 Vec<i64> K) are shipped.
+
+4.6 specifics: K is the existing `intent_vec_int64_t` /
+`%intent_vec_i64` struct stored by value per slot. Hash:
+length-prefixed FNV-1a over each i64 element (so empty +
+shorter Vecs distribute distinctly). Equality: lengths-equal
+then `memcmp` of data buffers. Map deep-clones the data array
+on insert via `malloc + memcpy` (same affine-system workaround
+used in 4.1/4.2/4.3); drop walks free each stored data buffer.
+Duplicate K keeps stored K's clone, swaps V (returns prior V
+to caller). Remove frees stored K's data, transfers V out,
+tombstones slot.
+
+4.6 dispatch: `hashmap_type_tag_c_owned` returns `vec_int64_t`
+for `Type::Vec(Type::I64)`; LLVM `hashmap_llvm_dispatch_with_k`
+returns `%intent_vec_i64`. Bundle prefix on both backends:
+`intent_hashmap_vec_int64_t_<V>`. LLVM prologue now declares
+`memcmp` so the bundle's equality call resolves.
+
+4.6 (end-to-end): `examples/hashmap_veck.vani` exercises
+insert (with overwrite triggering duplicate-K + V-swap) /
+get / contains_key / remove / len with `(1,2,3)` /
+`(4,5,6)` / shorter `(1,2)` Vec keys. Distinct-length
+lookups miss (proves length-prefix hashing). Identical
+stdout on both backends.
+
+**2 new lib tests** covering:
+  - both backends compile HashMap<Vec<i64>, i64> with the
+    `intent_hashmap_vec_int64_t_int64_t` bundle prefix
+  - C bundle dispatches equality through `__eq_key` (which
+    uses `memcmp(a.data, b.data, …)`) and clones K via
+    `malloc + memcpy` on insert
+
+**1789 lib + 59 parity green. ARC 4 fully complete: all six
+(K, V) shape combinations ship cross-backend.**
+
+**Prior:** 2026-06-03 (**ARC 4.3 COMPLETE — `HashMap<OwnedStr, OwnedStr>`
 end-to-end on both backends.** Both K and V heap-owned by the
 map. Composition of ARC 4.1 (K=OwnedStr) and ARC 4.2
 (V=OwnedStr): drop walks free both per occupied slot; insert

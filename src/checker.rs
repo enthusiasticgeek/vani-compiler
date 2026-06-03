@@ -22721,14 +22721,24 @@ fn check_hashmap_builtin(
         Type::Tuple(els) => !els.is_empty() && els.iter().all(|t| matches!(t, Type::I64)),
         _ => false,
     };
-    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 && !k_is_owned_str && !k_is_i64_tuple {
+    // ARC 4.6: Vec<i64> K — map clones each Vec on insert
+    // (deep-copy of data array; sidesteps affine-system gap
+    // for Vec moved into builtin args). Drop walks free each
+    // stored Vec's data buffer. Hash: length-prefixed FNV-1a
+    // over each i64; equality: len-then-memcmp.
+    let k_is_vec_i64 = match &k_ty {
+        Type::Vec(inner) => matches!(inner.as_ref(), Type::I64),
+        _ => false,
+    };
+    if !matches!(k_ty, Type::I64) && !k_is_struct_with_hash_and_eq && !k_is_f64 && !k_is_owned_str && !k_is_i64_tuple && !k_is_vec_i64 {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
                 "{}() supports `HashMap<i64, V>` / `HashMap<f64, V>` / \
-                 `HashMap<OwnedStr, V>` / `HashMap<(i64, …, i64), V>` for \
-                 scalar V, or `HashMap<Struct, V>` when Struct implements \
-                 both `Hash` and `Eq`; got HashMap<{}, {}>",
+                 `HashMap<OwnedStr, V>` / `HashMap<(i64, …, i64), V>` / \
+                 `HashMap<Vec<i64>, V>` for scalar V, or \
+                 `HashMap<Struct, V>` when Struct implements both \
+                 `Hash` and `Eq`; got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
         ));
