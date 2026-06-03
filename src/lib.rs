@@ -30969,6 +30969,79 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 2.4 — depth / breadth confidence tests for the trie.
+    // The full sparse-representation rewrite (ARC 2.1-2.3) is
+    // deferred to a focused fresh session; these tests proactively
+    // exercise the existing dense-children implementation at depth
+    // + branching, giving the eventual sparse rewrite a clear
+    // baseline to compare byte-for-byte against.
+
+    #[test]
+    fn trie_long_prefix_round_trip() {
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let _ = t.insert("supercalifragilisticexpialidocious");
+              let _ = t.insert("supercalifragilistic");
+              let _ = t.insert("super");
+              if !t.contains("supercalifragilisticexpialidocious") { return 1; }
+              if !t.contains("supercalifragilistic") { return 2; }
+              if !t.contains("super") { return 3; }
+              if t.contains("supercali") { return 4; }
+              if !t.starts_with("supercali") { return 5; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("long-prefix trie compiles");
+        let _c = compile_to_c(source).expect("long-prefix trie → C");
+        let _ll = compile_to_llvm(source).expect("long-prefix trie → LLVM");
+    }
+
+    #[test]
+    fn trie_wide_branching_round_trip() {
+        // Many siblings at the same depth — exercises the
+        // children-array per-node when populated heavily.
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let _ = t.insert("aa");
+              let _ = t.insert("ba");
+              let _ = t.insert("ca");
+              let _ = t.insert("da");
+              let _ = t.insert("ea");
+              let _ = t.insert("fa");
+              let _ = t.insert("ga");
+              let _ = t.insert("ha");
+              if t.len() != 8 { return 1; }
+              if !t.contains("ea") { return 2; }
+              if t.contains("e") { return 3; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("wide-branching trie compiles");
+        let _c = compile_to_c(source).expect("wide-branching trie → C");
+        let _ll = compile_to_llvm(source).expect("wide-branching trie → LLVM");
+    }
+
+    #[test]
+    fn trie_delete_with_shared_prefix_keeps_other_words() {
+        let source = r#"
+            fn main() -> i64 {
+              let t: Trie = trie_new();
+              let _ = t.insert("car");
+              let _ = t.insert("cart");
+              let _ = t.insert("card");
+              let _ = t.delete("car");
+              if t.contains("car") { return 1; }
+              if !t.contains("cart") { return 2; }
+              if !t.contains("card") { return 3; }
+              if !t.starts_with("car") { return 4; }
+              return 0;
+            }
+        "#;
+        let _ = compile(source).expect("shared-prefix delete compiles");
+    }
+
     // ARC 1.6 — regression sweep for HashMap<i64, i64>.
 
     #[test]

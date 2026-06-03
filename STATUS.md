@@ -10,7 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 1.6 shipped — HashMap<i64, i64>
+**Last updated:** 2026-06-03 (**ARC 2.4 shipped (standalone) —
+trie depth + breadth confidence tests.** The full sparse-
+representation rewrite (ARC 2.1-2.3) is a multi-hour cross-
+backend atomic landing deferred to a focused fresh session;
+this commit ships ARC 2.4's deliverable proactively against the
+existing dense-children implementation. Three new lib tests:
+(a) long-prefix round trip — 33-char `supercalifragilisticexpialidocious`
++ shorter prefixes, exercises walk depth on both backends;
+(b) wide-branching round trip — 8 sibling words at depth 1
+exercising the children-array per-node when populated heavily;
+(c) shared-prefix delete behavior — `car` deleted from a trie
+holding {car, cart, card} preserves cart/card and starts_with.
+These tests now anchor the regression gate for the eventual
+sparse-representation rewrite — when 2.1-2.3 land, this trio
+plus the existing example-driven trie tests must continue to
+pass byte-for-byte. **3 new lib tests.** **1745 lib + 54 parity
+green.**)
+
+**Prior:** 2026-06-03 (**ARC 1.6 shipped — HashMap<i64, i64>
 regression sweep.** Documented as a single end-to-end lib test
 that exercises every legacy bundle op (`hashmap_new` + `_insert`
 + `_len` + `_remove` + `_clear`) in one program, compiling to
