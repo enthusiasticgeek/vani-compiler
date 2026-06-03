@@ -798,6 +798,15 @@ COMMANDS:
                                           that single-fn checks miss. Required
                                           by DO-178C / ASIL-D. Exit 1 on
                                           violation.
+    safety-attrs <file.vani> [--format=<csv|json|text>]
+                                          Per-function listing of every
+                                          safety annotation (composite tags
+                                          + primitives + budgets). Reviewer-
+                                          friendly audit pack: one row per
+                                          fn, columns for each #[...] /
+                                          standard / budget. No exit-code
+                                          gate; pair with `complexity` /
+                                          `stack-depth` for full coverage.
     complexity <file.vani> [--max=<N>] [--format=<csv|json|text>]
                                           Per-function McCabe cyclomatic
                                           complexity. With --max=<N>, exits 1
@@ -1242,6 +1251,57 @@ fn run() -> Result<ExitCode, String> {
             } else {
                 Ok(ExitCode::SUCCESS)
             }
+        }
+        "safety-attrs" => {
+            // Cross-tier follow-up to the safety-standard arc:
+            // per-function listing of all safety annotations.
+            // Compliance reviewers can use this as the entry-
+            // point audit document — every fn's tag set
+            // (composite + primitives + budgets) in a single
+            // machine-readable view, instead of grepping source.
+            //
+            // Usage: intentc safety-attrs <path> [--format=text|json|csv]
+            let mut format = "text";
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'safety-attrs' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'safety-attrs' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, _file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let report = vani::safety::compute_safety_attrs_report(&checked.ir);
+            match format {
+                "csv" => print!("{}", vani::safety::format_safety_attrs_csv(&report)),
+                "json" => print!("{}", vani::safety::format_safety_attrs_json(&report)),
+                _ => print!("{}", vani::safety::format_safety_attrs_text(&report)),
+            }
+            Ok(ExitCode::SUCCESS)
         }
         "complexity" => {
             // T2.4 follow-up: surface McCabe cyclomatic complexity

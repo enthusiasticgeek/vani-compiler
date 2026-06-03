@@ -30978,6 +30978,79 @@ fn main() -> i64 {
         );
     }
 
+    // Safety-attrs audit CLI follow-up.
+
+    #[test]
+    fn safety_attrs_report_includes_composite_expansion() {
+        let source = r#"
+            #[asil_d]
+            fn critical() -> i64 { return 0; }
+            fn main() -> i64 { return critical(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_safety_attrs_report(&checked.ir);
+        let crit = report.iter().find(|r| r.name == "critical").unwrap();
+        assert_eq!(crit.safety_standard.as_deref(), Some("asil_d"));
+        // Composite expansion: #[asil_d] sets no_heap + no_recursion.
+        assert!(crit.no_heap);
+        assert!(crit.no_recursion);
+    }
+
+    #[test]
+    fn safety_attrs_report_carries_budgets() {
+        let source = r#"
+            #[bounded_stack(bytes=2048)]
+            #[wcet(cycles=500)]
+            fn budgeted() -> i64 { return 1; }
+            fn main() -> i64 { return budgeted(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_safety_attrs_report(&checked.ir);
+        let b = report.iter().find(|r| r.name == "budgeted").unwrap();
+        assert_eq!(b.bounded_stack_bytes, Some(2048));
+        assert_eq!(b.wcet_cycles, Some(500));
+    }
+
+    #[test]
+    fn safety_attrs_text_format_lists_all_attrs() {
+        let source = r#"
+            #[no_heap]
+            #[no_float]
+            fn embedded_safe() -> i64 { return 0; }
+            fn main() -> i64 { return embedded_safe(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_safety_attrs_report(&checked.ir);
+        let text = crate::safety::format_safety_attrs_text(&report);
+        assert!(text.contains("#[no_heap]"));
+        assert!(text.contains("#[no_float]"));
+        assert!(text.contains("embedded_safe:"));
+    }
+
+    #[test]
+    fn safety_attrs_pure_fn_reflected() {
+        let source = r#"
+            pure fn p(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 { return p(5); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_safety_attrs_report(&checked.ir);
+        let p = report.iter().find(|r| r.name == "p").unwrap();
+        assert!(p.is_pure);
+    }
+
+    #[test]
+    fn safety_attrs_unannotated_fn_listed_as_none() {
+        let source = r#"
+            fn casual() -> i64 { return 42; }
+            fn main() -> i64 { return casual(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::safety::compute_safety_attrs_report(&checked.ir);
+        let text = crate::safety::format_safety_attrs_text(&report);
+        assert!(text.contains("casual: (none)"));
+    }
+
     // T2.4 follow-up — `intentc complexity` standalone audit CLI.
 
     #[test]

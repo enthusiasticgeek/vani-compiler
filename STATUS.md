@@ -10,7 +10,41 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**`intentc complexity` standalone
+**Last updated:** 2026-06-03 (**`intentc safety-attrs` shipped —
+per-function listing of every safety annotation.** New CLI:
+`intentc safety-attrs <path> [--format=text|json|csv]`. One row
+per function with columns for every safety primitive
+(`#[no_heap]`, `#[no_float]`, `#[no_recursion]`, `#[interrupt]`,
+`#[deterministic_timing]`), composite standard tag
+(`#[misra_c_2012]` / `#[asil_d]` / `#[do178c_level_a]` /
+`#[iec_62304_class_c]`), budget annotations (`bounded_stack_bytes`,
+`wcet_cycles`, `bounded_recursion`), and the `is_pure` flag.
+Composite tag expansion is REFLECTED — `#[asil_d]` shows up on a
+function alongside its derived `#[no_heap]` + `#[no_recursion]`
+primitives, so reviewers see both the declared standard and its
+constraint set. Reviewer-facing audit pack — no exit-code gate
+(it's an artifact, not a check). Pair with `intentc complexity`,
+`intentc stack-depth`, `intentc deviations`, `intentc acyclicity`,
+`intentc hashmap-usage` for full coverage. **5 new lib tests**
+(composite expansion reflected, budgets carried, text format
+lists every annotation, pure fn reflected, unannotated fn shown
+as `(none)`). **1759 lib + 54 parity green.**
+
+The `intentc` CLI now has **six audit-artifact subcommands**
+following the established `--format=text|json|csv` pattern —
+together they cover the embedded / safety-critical review
+surface end-to-end:
+
+| CLI | Artifact |
+|---|---|
+| `deviations` | `unsafe(reason = "…")` block records |
+| `stack-depth` | Per-fn frame size + entry-point max depth |
+| `acyclicity` | Call-graph cycles (mutual recursion catcher) |
+| `hashmap-usage` | HashMap<K, V> pair instantiations |
+| `complexity` | Per-fn McCabe cyclomatic scores |
+| `safety-attrs` | Per-fn safety annotation set |)
+
+**Prior:** 2026-06-03 (**`intentc complexity` standalone
 audit CLI shipped — per-function McCabe scores as artifact.**
 T2.4 follow-up. The same cyclomatic-complexity counter that the
 existing `enforce_complexity` checker pass uses (opt-in via

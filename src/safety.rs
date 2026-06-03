@@ -1872,3 +1872,173 @@ fn json_string_local(s: &str) -> String {
     out.push('"');
     out
 }
+
+// ---- Safety-attribute report --------------------------------
+//
+// Surfaces the full safety-tag set per function as an audit
+// artifact via `intentc safety-attrs`. Mirrors the established
+// audit-CLI pattern. A compliance reviewer can see at a glance
+// which functions claim which standards / primitives, without
+// grepping source files.
+
+/// One row of the safety-attr report.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FnSafetyAttrs {
+    pub name: String,
+    /// Standard-composite tag if any (e.g. `"misra_c_2012"`,
+    /// `"asil_d"`, `"do178c_level_a"`, `"iec_62304_class_c"`).
+    pub safety_standard: Option<String>,
+    pub no_heap: bool,
+    pub no_float: bool,
+    pub no_recursion: bool,
+    pub interrupt: bool,
+    pub deterministic_timing: bool,
+    pub bounded_stack_bytes: Option<u64>,
+    pub wcet_cycles: Option<u64>,
+    pub bounded_recursion: Option<u64>,
+    pub is_pure: bool,
+}
+
+/// Build the per-function safety-attribute report. Non-extern
+/// functions only; extern fns have no body and their safety
+/// posture is opaque.
+pub fn compute_safety_attrs_report(program: &TypedProgram) -> Vec<FnSafetyAttrs> {
+    let mut out = Vec::new();
+    for f in &program.functions {
+        if f.is_extern {
+            continue;
+        }
+        out.push(FnSafetyAttrs {
+            name: f.name.clone(),
+            safety_standard: f.safety_standard.clone(),
+            no_heap: f.no_heap,
+            no_float: f.no_float,
+            no_recursion: f.no_recursion,
+            interrupt: f.interrupt,
+            deterministic_timing: f.deterministic_timing,
+            bounded_stack_bytes: f.bounded_stack,
+            wcet_cycles: f.wcet_cycles,
+            bounded_recursion: f.recursion_bound,
+            is_pure: f.is_pure,
+        });
+    }
+    out
+}
+
+pub fn format_safety_attrs_text(report: &[FnSafetyAttrs]) -> String {
+    if report.is_empty() {
+        return "no functions found\n".to_string();
+    }
+    let mut out = String::new();
+    for r in report {
+        let mut attrs: Vec<String> = Vec::new();
+        if let Some(s) = &r.safety_standard {
+            attrs.push(format!("#[{}]", s));
+        }
+        if r.is_pure { attrs.push("pure".to_string()); }
+        if r.no_heap { attrs.push("#[no_heap]".to_string()); }
+        if r.no_float { attrs.push("#[no_float]".to_string()); }
+        if r.no_recursion { attrs.push("#[no_recursion]".to_string()); }
+        if r.interrupt { attrs.push("#[interrupt]".to_string()); }
+        if r.deterministic_timing {
+            attrs.push("#[deterministic_timing]".to_string());
+        }
+        if let Some(b) = r.bounded_stack_bytes {
+            attrs.push(format!("#[bounded_stack(bytes={})]", b));
+        }
+        if let Some(w) = r.wcet_cycles {
+            attrs.push(format!("#[wcet(cycles={})]", w));
+        }
+        if let Some(rb) = r.bounded_recursion {
+            attrs.push(format!("#[bounded({})]", rb));
+        }
+        let attr_str = if attrs.is_empty() {
+            "(none)".to_string()
+        } else {
+            attrs.join(" ")
+        };
+        out.push_str(&format!("{}: {}\n", r.name, attr_str));
+    }
+    let tagged = report.iter().filter(|r| {
+        r.safety_standard.is_some() || r.no_heap || r.no_float
+            || r.no_recursion || r.interrupt || r.deterministic_timing
+            || r.bounded_stack_bytes.is_some() || r.wcet_cycles.is_some()
+            || r.bounded_recursion.is_some() || r.is_pure
+    }).count();
+    out.push_str(&format!(
+        "\n{} of {} fn{} carry at least one safety annotation\n",
+        tagged,
+        report.len(),
+        if report.len() == 1 { "" } else { "s" },
+    ));
+    out
+}
+
+pub fn format_safety_attrs_json(report: &[FnSafetyAttrs]) -> String {
+    let mut out = String::from("{\"functions\":[");
+    for (i, r) in report.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let standard = match &r.safety_standard {
+            Some(s) => json_string_local(s),
+            None => "null".to_string(),
+        };
+        let bs = match r.bounded_stack_bytes {
+            Some(b) => b.to_string(),
+            None => "null".to_string(),
+        };
+        let wc = match r.wcet_cycles {
+            Some(w) => w.to_string(),
+            None => "null".to_string(),
+        };
+        let br = match r.bounded_recursion {
+            Some(b) => b.to_string(),
+            None => "null".to_string(),
+        };
+        out.push_str(&format!(
+            "{{\"name\":{},\"safety_standard\":{},\"is_pure\":{},\"no_heap\":{},\"no_float\":{},\"no_recursion\":{},\"interrupt\":{},\"deterministic_timing\":{},\"bounded_stack_bytes\":{},\"wcet_cycles\":{},\"bounded_recursion\":{}}}",
+            json_string_local(&r.name),
+            standard,
+            r.is_pure,
+            r.no_heap,
+            r.no_float,
+            r.no_recursion,
+            r.interrupt,
+            r.deterministic_timing,
+            bs,
+            wc,
+            br,
+        ));
+    }
+    out.push_str("]}\n");
+    out
+}
+
+pub fn format_safety_attrs_csv(report: &[FnSafetyAttrs]) -> String {
+    let mut out = String::from(
+        "name,safety_standard,is_pure,no_heap,no_float,no_recursion,interrupt,\
+         deterministic_timing,bounded_stack_bytes,wcet_cycles,bounded_recursion\n",
+    );
+    for r in report {
+        let standard = r.safety_standard.as_deref().unwrap_or("");
+        let bs = r.bounded_stack_bytes.map(|b| b.to_string()).unwrap_or_default();
+        let wc = r.wcet_cycles.map(|w| w.to_string()).unwrap_or_default();
+        let br = r.bounded_recursion.map(|b| b.to_string()).unwrap_or_default();
+        out.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{}\n",
+            csv_escape_local(&r.name),
+            csv_escape_local(standard),
+            r.is_pure,
+            r.no_heap,
+            r.no_float,
+            r.no_recursion,
+            r.interrupt,
+            r.deterministic_timing,
+            bs,
+            wc,
+            br,
+        ));
+    }
+    out
+}
