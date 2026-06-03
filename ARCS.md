@@ -59,7 +59,7 @@ asks for. Each pair lands as its own ~3–5-commit increment.
 | # | Pair | Effort | Depends on |
 |---|---|---|---|
 | 4.1 | `HashMap<OwnedStr, V>` — string key with FNV-1a + strcmp equality ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
-| 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot | ~3h | 1.5e |
+| 4.2 | `HashMap<i64, OwnedStr>` — string V with drop walk per slot ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e |
 | 4.3 | `HashMap<OwnedStr, OwnedStr>` — both axes | ~2h | 4.1 + 4.2 |
 | 4.4 | `HashMap<Tuple<i64, …, i64>, V>` — tuple K via `hash_combine` ✅ **SHIPPED 2026-06-03** | ~3h | 1.5e + Tuple E sugar |
 | 4.5 | `HashMap<f64, V>` — float K (caveat: NaN keys) ✅ **SHIPPED 2026-06-03** | ~2h | 1.5e |
@@ -424,8 +424,15 @@ For each new (K, V) pair:
      terminator. memcpy auto-bound by LLVM (no declare).
    - Parity example: `examples/hashmap_str.vani`.
 
-2. **4.2 — `HashMap<i64, Str>`. (~3h)**
+2. **4.2 — `HashMap<i64, OwnedStr>`. (~3h)** ✅ **SHIPPED 2026-06-03**
    - V = OwnedStr; map drops free each value Str.
+   - C bundle prefix: `intent_hashmap_int64_t_owned_str`.
+     `char**` values field; drop/clear walks free each.
+     Insert clones via strlen+malloc+memcpy; duplicate returns
+     prior V pointer (ownership transfer); remove transfers
+     out + tombstones slot; get clones the stored V.
+   - LLVM mirror: same shape, V is `i8*` per slot.
+   - Parity example: `examples/hashmap_strv.vani`.
 
 3. **4.3 — `HashMap<Str, Str>`. (~2h)**
    - Both axes OwnedStr.

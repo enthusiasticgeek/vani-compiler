@@ -37,10 +37,12 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 3. **Arc 4** (wider K-V) — six (K, V) pairs at ~3h each, ~16h
    total. Gates on Arc 1.4+1.5. Pairs in priority order:
    `HashMap<OwnedStr, V>` ✅ **shipped 2026-06-03 (ARC 4.1)**
-   → `HashMap<i64, OwnedStr>` → `HashMap<OwnedStr, OwnedStr>`
+   → `HashMap<i64, OwnedStr>` ✅ **shipped 2026-06-03 (ARC 4.2)**
+   → `HashMap<OwnedStr, OwnedStr>`
    → `HashMap<Tuple<i64,…,i64>, V>` ✅ **shipped 2026-06-03 (ARC 4.4)**
    → `HashMap<f64, V>` ✅ **shipped 2026-06-03 (ARC 4.5)**
    → `HashMap<Vec<i64>, V>`.
+   **Remaining: ARC 4.3 and 4.6.**
 - Through closure #604, the bounded one-shot primitive surface is
   exhausted (Tiers E–DD + W + Arc 0 — 108 closures since #497). All
   future work flows through one of the three plan docs/sections

@@ -10,7 +10,56 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 4.4 COMPLETE — `HashMap<(i64, …, i64), V>`
+**Last updated:** 2026-06-03 (**ARC 4.2 COMPLETE — `HashMap<i64, OwnedStr>`
+end-to-end on both backends.** i64 keys, OwnedStr values. Map
+clones each V internally on insert (same affine-system
+workaround as ARC 4.1 K=OwnedStr — strlen + malloc + memcpy);
+drop/clear walks free each stored V. `_insert` on duplicate
+returns the prior V pointer ownership back to the caller via
+Option<OwnedStr>; `_remove` transfers stored V pointer ownership
+to caller; `_get` returns a fresh clone so map + caller each
+own one.
+
+4.2 checker relaxation: `check_hashmap_builtin` accepts V=OwnedStr
+when K=i64 (the v1 scope). Wider K + OwnedStr V is ARC 4.3.
+
+4.2 (C bundle): new `emit_intent_hashmap_pair_c_body_i64k_strv`
+emits per-(i64, OwnedStr) bundle with prefix
+`intent_hashmap_int64_t_owned_str`. Values field is `char**`;
+each slot owns its V pointer. Drop / clear walk all occupied
+slots and `free` each. Insert clones via strlen-malloc-memcpy;
+duplicate path extracts old V pointer (returned to caller),
+stores clone of new V. Remove returns slot's V pointer
+(transferred out), tombstones the slot. Get clones the stored V.
+
+4.2 (LLVM bundle): `emit_intent_hashmap_pair_llvm_i64k_strv`
+mirrors C side. Bundle struct: `{i64*, i8**, i8*, i64, i64,
+i64}`. Drop loops free each occupied V; clear mirrors. Insert
+clones via `strlen + malloc + memcpy`; duplicate returns prior
+V pointer in Option payload. Remove transfers V pointer out
+and nulls the slot. Get clones the stored V.
+
+4.2 dispatch: prologue match restructured from `match &p.key`
+to `match (&p.key, &p.value)` on both backends to allow the
+(i64, OwnedStr) special-case alongside scalar-V/struct-K/etc.
+LLVM `hashmap_llvm_dispatch` extended: V=OwnedStr → v_tag
+"owned_str", v_llvm "i8*", v_mangle "OwnedStr"; produces prefix
+`intent_hashmap_int64_t_owned_str`.
+
+4.2 (end-to-end): `examples/hashmap_strv.vani` exercises
+insert (with overwrite) / contains_key / remove / len —
+exit clean, no double-free / leak, identical stdout on both
+backends. Added to parity test list.
+
+**2 new lib tests** covering:
+  - both backends compile HashMap<i64, OwnedStr> with the
+    `intent_hashmap_int64_t_owned_str` bundle prefix
+  - C bundle emits `free(m->values[i])` (per-slot V drop walk)
+    + `char* v_owned = (char*)malloc(n + 1)` (insert clone)
+
+**1785 lib + 57 parity green.**
+
+**Prior:** 2026-06-03 (**ARC 4.4 COMPLETE — `HashMap<(i64, …, i64), V>`
 end-to-end on both backends.** Tuple K with FNV-1a per-element
 hash_combine + pairwise field equality. Elements are Copy (i64)
 so no drop walk needed. Initially scoped to any-arity tuples

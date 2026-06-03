@@ -31882,6 +31882,53 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 4.2 — HashMap<i64, OwnedStr>: V drop walks on
+    // drop/clear/remove; _insert clones V internally; _insert
+    // duplicate + _remove transfer prior V ownership to caller.
+
+    #[test]
+    fn hashmap_i64_owned_str_compiles_to_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<i64, OwnedStr> → C");
+        let ll = compile_to_llvm(source).expect("HashMap<i64, OwnedStr> → LLVM");
+        assert!(
+            c.contains("intent_hashmap_int64_t_owned_str"),
+            "expected C V=OwnedStr bundle prefix",
+        );
+        assert!(
+            ll.contains("intent_hashmap_int64_t_owned_str"),
+            "expected LLVM V=OwnedStr bundle prefix",
+        );
+    }
+
+    #[test]
+    fn hashmap_i64_owned_str_c_has_v_drop_walk() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, OwnedStr> = hashmap_new();
+              let _ = hashmap_insert(mut ref m, 1, i64_to_str(100));
+              return hashmap_len(ref m);
+            }
+        "#;
+        let c = compile_to_c(source).expect("HashMap<i64, OwnedStr> → C");
+        // Drop walks free each occupied V pointer.
+        assert!(
+            c.contains("free(m->values[i])"),
+            "expected per-slot V free in drop/clear walks"
+        );
+        // Insert clones the caller's V (strlen + malloc + memcpy).
+        assert!(
+            c.contains("char* v_owned = (char*)malloc(n + 1)"),
+            "expected V clone allocation"
+        );
+    }
+
     // ARC 4.4 — HashMap<(i64, …), V>: tuple keys with FNV-1a
     // per-element hash_combine + pairwise field equality.
     // Elements are Copy (i64) so no drop walk.
