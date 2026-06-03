@@ -226,3 +226,83 @@ fn type_tag(ty: &Type) -> String {
         _ => "opaque".to_string(),
     }
 }
+
+// ---- Output formats for `intentc hashmap-usage` --------------
+
+/// Human-readable text format. Default output of the CLI.
+pub fn format_text(pairs: &[HashMapPair]) -> String {
+    if pairs.is_empty() {
+        return "no HashMap<K, V> instantiations found\n".to_string();
+    }
+    let mut out = String::new();
+    for p in pairs {
+        out.push_str(&format!(
+            "HashMap<{}, {}>  →  {}\n",
+            p.key, p.value, p.tag
+        ));
+    }
+    out.push_str(&format!(
+        "\n{} unique (K, V) pair{} total\n",
+        pairs.len(),
+        if pairs.len() == 1 { "" } else { "s" },
+    ));
+    out
+}
+
+/// Structured JSON. CI-friendly.
+pub fn format_json(pairs: &[HashMapPair]) -> String {
+    let mut out = String::from("{\"pairs\":[");
+    for (i, p) in pairs.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        out.push_str(&format!(
+            "{{\"key\":{},\"value\":{},\"tag\":{}}}",
+            json_string(&format!("{}", p.key)),
+            json_string(&format!("{}", p.value)),
+            json_string(&p.tag),
+        ));
+    }
+    out.push_str("]}\n");
+    out
+}
+
+/// CSV. Spreadsheet-friendly review.
+pub fn format_csv(pairs: &[HashMapPair]) -> String {
+    let mut out = String::from("key,value,tag\n");
+    for p in pairs {
+        out.push_str(&format!(
+            "{},{},{}\n",
+            csv_escape(&format!("{}", p.key)),
+            csv_escape(&format!("{}", p.value)),
+            csv_escape(&p.tag),
+        ));
+    }
+    out
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        let escaped = s.replace('"', "\"\"");
+        format!("\"{}\"", escaped)
+    } else {
+        s.to_string()
+    }
+}
+
+fn json_string(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}

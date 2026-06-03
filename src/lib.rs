@@ -30978,6 +30978,68 @@ fn main() -> i64 {
         );
     }
 
+    // ARC 1 follow-up — `intentc hashmap-usage` output formats.
+
+    #[test]
+    fn hashmap_usage_text_format_empty() {
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        let text = crate::hashmap_bundle::format_text(&pairs);
+        assert!(text.contains("no HashMap"));
+    }
+
+    #[test]
+    fn hashmap_usage_text_format_single_pair() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return hashmap_len(ref m);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        let text = crate::hashmap_bundle::format_text(&pairs);
+        assert!(text.contains("HashMap<i64, i64>"));
+        assert!(text.contains("intent_hashmap_int64_t_int64_t"));
+        assert!(text.contains("1 unique"));
+    }
+
+    #[test]
+    fn hashmap_usage_json_format_round_trips() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return hashmap_len(ref m);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        let json = crate::hashmap_bundle::format_json(&pairs);
+        assert!(json.starts_with("{\"pairs\":["));
+        assert!(json.contains("\"key\":\"i64\""));
+        assert!(json.contains("\"value\":\"i64\""));
+        assert!(json.contains("\"tag\":\"intent_hashmap_int64_t_int64_t\""));
+        assert!(json.ends_with("]}\n"));
+    }
+
+    #[test]
+    fn hashmap_usage_csv_format_has_header() {
+        let source = r#"
+            fn main() -> i64 {
+              let m: HashMap<i64, i64> = hashmap_new();
+              return hashmap_len(ref m);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let pairs = crate::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+        let csv = crate::hashmap_bundle::format_csv(&pairs);
+        assert!(csv.starts_with("key,value,tag\n"));
+        assert!(csv.contains("i64,i64,intent_hashmap_int64_t_int64_t"));
+    }
+
     // ARC 2.4 — depth / breadth confidence tests for the trie.
     // The full sparse-representation rewrite (ARC 2.1-2.3) is
     // deferred to a focused fresh session; these tests proactively

@@ -10,7 +10,23 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**ARC 2.3 shipped — sparse trie
+**Last updated:** 2026-06-03 (**`intentc hashmap-usage` subcommand
+shipped — surfaces every HashMap<K, V> pair the program uses
+as an audit artifact.** New CLI: `intentc hashmap-usage <path>
+[--format=text|json|csv]`. Walks the typed program via the
+ARC 1.3 `collect_hashmap_pairs` collector and emits each
+deduped (K, V) pair with the mangled bundle tag
+(`intent_hashmap_<K>_<V>`). Three output formats matching the
+established pattern (text default for console, JSON for CI,
+CSV for spreadsheet review). Useful for embedded teams
+reviewing HashMap shapes before sign-off, and as the input
+shape catalog that the eventual ARC 1.4/1.5 per-(K, V) bundle
+emitters will consume. **4 new lib tests** (empty program text
+format, single-pair text/JSON/CSV well-formed). Smoke-tested
+all three formats end-to-end with `intentc hashmap-usage`.
+**1749 lib + 54 parity green.**)
+
+**Prior:** 2026-06-03 (**ARC 2.3 shipped — sparse trie
 LLVM mirror. ARC 2 (Trie sparse) COMPLETE.** The LLVM trie
 implementation now mirrors the C-side sparse representation:
 11-field struct `{ i8**, i32**, i16*, i16*, i64*, i8*, i64×5 }`,

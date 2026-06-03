@@ -798,6 +798,13 @@ COMMANDS:
                                           that single-fn checks miss. Required
                                           by DO-178C / ASIL-D. Exit 1 on
                                           violation.
+    hashmap-usage <file.vani> [--format=<csv|json|text>]
+                                          Surface every HashMap<K, V> pair the
+                                          program uses, with the mangled bundle
+                                          tag (`intent_hashmap_<K>_<V>`). Audit
+                                          artifact for embedded teams reviewing
+                                          HashMap shapes; consumed by per-
+                                          (K, V) bundle emitters in ARC 1.4/1.5.
     fmt <path>... [--check|--in-place]
                                           Pretty-print canonical source.
                                           // comments are preserved. Paths
@@ -1229,6 +1236,59 @@ fn run() -> Result<ExitCode, String> {
             } else {
                 Ok(ExitCode::SUCCESS)
             }
+        }
+        "hashmap-usage" => {
+            // ARC 1.3 follow-up: surface every HashMap<K, V> pair
+            // appearing in the typed program as an audit artifact.
+            // Each row carries the K type, V type, and mangled tag
+            // used by the per-(K, V) bundle emitters in ARC 1.4/1.5.
+            // Useful for embedded teams reviewing HashMap shapes
+            // before sign-off, and for compilers shipping
+            // per-(K, V) bundle emission to inspect what shapes a
+            // program actually uses.
+            //
+            // Usage: intentc hashmap-usage <path> [--format=csv|json|text]
+            let mut format = "text";
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'hashmap-usage' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'hashmap-usage' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, _file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let pairs = vani::hashmap_bundle::collect_hashmap_pairs(&checked.ir);
+            match format {
+                "csv" => print!("{}", vani::hashmap_bundle::format_csv(&pairs)),
+                "json" => print!("{}", vani::hashmap_bundle::format_json(&pairs)),
+                _ => print!("{}", vani::hashmap_bundle::format_text(&pairs)),
+            }
+            Ok(ExitCode::SUCCESS)
         }
         "deviations" => {
             // T1.1 of the safety-standard alignment arc: extract
