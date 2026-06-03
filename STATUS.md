@@ -10,7 +10,35 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-03 (**`intentc safety-attrs` shipped —
+**Last updated:** 2026-06-03 (**`intentc audit-pack` shipped —
+meta CLI that bundles all 6 audit reports into a Markdown
+document.** Capstone of the audit-CLI family. New CLI:
+`intentc audit-pack <path> [--out=report.md] [--max-stack=<bytes>]
+[--max-complexity=<N>]`. Runs all six per-fact CLIs internally
+(`deviations`, `stack-depth`, `acyclicity`, `hashmap-usage`,
+`complexity`, `safety-attrs`) and bundles their outputs as
+Markdown sections in a single deliverable. With `--out`, writes
+to the file; otherwise prints to stdout. The two hard-gate
+flags (`--max-stack`, `--max-complexity`) plus the inherent
+acyclicity gate (exits 1 on any non-bounded cycle) compose into
+a CI-friendly all-in-one safety/audit run. One reviewer-facing
+output: a single Markdown document with one section per
+reviewable shape — pipe through standard markdown tooling for
+PDF / HTML / git artifact pinning. Smoke-tested end-to-end with
+a mixed-annotation program — produces a 61-line report with
+proper section ordering, hard-gate exit codes verified
+(`--max-complexity=2` exits 1, `--max-stack=50` exits 1,
+lenient gates exit 0). **No new lib tests** (the underlying
+report builders are already covered by their per-CLI test
+suites; this is just an orchestrator). **1759 lib + 54 parity
+green.**
+
+`intentc` now has a **complete 7-CLI audit family**: 6 per-fact
+CLIs + 1 capstone `audit-pack` that runs them all. Together
+they cover the embedded / safety-critical review surface end-
+to-end with a single command for the audit pack deliverable.)
+
+**Prior:** 2026-06-03 (**`intentc safety-attrs` shipped —
 per-function listing of every safety annotation.** New CLI:
 `intentc safety-attrs <path> [--format=text|json|csv]`. One row
 per function with columns for every safety primitive
