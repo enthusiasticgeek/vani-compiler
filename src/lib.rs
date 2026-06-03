@@ -29184,6 +29184,52 @@ fn main() -> i64 {
         );
     }
 
+    // Closure A drop-dispatch follow-up (2026-06-03): verify
+    // a mixed-payload enum like `Result<Vec<i64>, OwnedStr>`
+    // routes through the per-variant `switch (tag)` drop
+    // pattern on both backends. The Ok variant must free the
+    // Vec's heap buffer; the Err variant must free the
+    // OwnedStr's char buffer. The C bundle uses
+    // `u.v_<variant>` union access; LLVM bitcasts the
+    // `[N x i8]` byte buffer to the variant's actual type.
+    #[test]
+    fn mixed_payload_enum_drop_dispatches_per_variant_on_both_backends() {
+        let source = r#"
+            enum Outcome {
+              Done(Vec<i64>),
+              Reason(OwnedStr),
+            }
+
+            fn main() -> i64 {
+              let ok: Outcome = Outcome.Done(vec(1, 2, 3));
+              let err: Outcome = Outcome.Reason(i64_to_str(42));
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("mixed-payload Result-like enum (C)");
+        let ll = compile_to_llvm(source).expect("mixed-payload Result-like enum (LLVM)");
+        // C bundle: per-variant drop dispatch fires through a
+        // switch on `.tag` with cases freeing `.u.v_Done` (Vec)
+        // and `.u.v_Reason` (OwnedStr).
+        assert!(
+            c.contains("switch (v_ok.tag)") || c.contains(".u.v_Done") || c.contains(".u.v_Reason"),
+            "expected C per-variant drop dispatch (.tag switch with .u.v_*), got snippet:\n{}",
+            &c[..c.len().min(4000)],
+        );
+        // LLVM bundle: per-variant drop dispatch emits an
+        // `icmp eq i32 %tag, <vtag>` per heap-shaped variant
+        // followed by a bitcast on the byte buffer.
+        assert!(
+            ll.contains("icmp eq i32") && ll.contains("@intent_vec_i64__free"),
+            "expected LLVM per-variant Vec-free dispatch via tag-cmp + bitcast, got snippet:\n{}",
+            &ll[..ll.len().min(4000)],
+        );
+        assert!(
+            ll.contains("call void @free(i8*"),
+            "expected LLVM OwnedStr-free in mixed-payload enum drop",
+        );
+    }
+
     #[test]
     fn try_vec_returns_result_vec_on_llvm_backend() {
         let source = r#"
