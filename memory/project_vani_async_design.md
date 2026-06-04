@@ -58,12 +58,13 @@ slices on top of v1:
   don't break parity).
 
 **Arc 8 FULLY COMPLETE 2026-06-04 + v3.1 Phase 0 + Phase 1
-shipped**: every user-visible async + networking +
-concurrency feature ships AND the compiler-driven `async fn
-→ Task` transform now auto-generates state-machine
-struct/poll/constructor triples for linear async-fn bodies
-with `io_*_async` calls. Six acceptance examples cross-
-backend parity-green:
++ Phase 2 narrow shipped**: every user-visible async +
+networking + concurrency feature ships AND the compiler-
+driven `async fn → Task` transform now auto-generates
+state-machine struct/poll/constructor triples for linear
+async-fn bodies AND control flow (if/while/Assign/Print +
+mid-body return) when branches don't contain suspends.
+Seven acceptance examples cross-backend parity-green:
 
 - `async_io.vani` — timer-driven async fn + task fan-out
 - `tcp_echo.vani` — single-client TCP echo
@@ -77,6 +78,9 @@ backend parity-green:
   `async fn → Task` transform (user writes ONLY the async-
   fn body + 5-line drive loop; compiler synthesizes the
   rest)
+- `echo_with_timeout.vani` — v3.1 Phase 2 narrow control
+  flow (input validation + outer-local Assign + mid-body
+  return + suspend points)
 - `timer_async.vani` — v3.1 Phase 0 timerfd-based
   cooperative sleep
 

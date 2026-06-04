@@ -11,6 +11,15 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2 narrow ✅ COMPLETE 2026-06-04** (commit `a3cab5b`).
+> Control flow inside async-fn bodies — `if` / `while` /
+> `Assign` / `Print` + mid-body `return` — provided branches
+> don't contain `io_*_async`. examples/echo_with_timeout.vani
+> parity-green. 4 new lib tests. Phase 2.1 (suspend-in-
+> branch, ~10-12h), 2.2 (ANF lifting, ~5-6h), 2.3 (match
+> arms), 2.4 (try keyword), 2.5 (break/continue) all
+> deferred per ARC8_V3_PLAN Phase 2 caveats.
+>
 > **Phase 1 ✅ COMPLETE 2026-06-04** (commit `7d47ff6`).
 > The headline v3.1 compiler-driven `async fn → Task`
 > transform ships. Retrospective:
@@ -59,15 +68,16 @@ parallel-safe. Total backlog: **~113-148h focused across
 **Recommended order of execution (highest user value first):**
 1. ~~**Phase 0** — Foundation~~ ✅ DONE 2026-06-04.
 2. ~~**Phase 1** — v3.1 linear core~~ ✅ DONE 2026-06-04.
-   Headline compiler-driven sugar shipped + naturally
-   subsumed A0.2.
-3. **Phase 5** — macOS port. Smallest cross-platform lift;
+3. ~~**Phase 2 narrow** — control flow w/o suspend in
+   branches~~ ✅ DONE 2026-06-04. Sub-phases 2.1-2.5
+   queued.
+4. **Phase 5** — macOS port. Smallest cross-platform lift;
    unblocks macOS CI and broadens user base. **← NEXT
-   SESSION RECOMMENDED (parallel-safe alternative).**
-4. **Phase 2** — v3.1 control flow. Lifts the linear-only
-   restriction so real-world async fns work. **← OR
-   START HERE next session if you prefer continuing the
-   v3.1 compiler-sugar arc.**
+   SESSION RECOMMENDED.**
+5. **Phase 2.1** — suspend-in-branch state-splitting. The
+   harder half of Phase 2 — each if/while branch with a
+   suspend becomes its own state chain with a merge state.
+   ~10-12h. Picks up where Phase 2 narrow left off.
 5. **Phase 3** — v3.1 affine integration. Unlocks OwnedStr
    / Vec across awaits.
 6. **Phase 4** — v3.1 advanced (generics, nested, multi-task).

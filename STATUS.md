@@ -11,12 +11,13 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phase 0 + Phase 1 shipped — compiler-driven `async fn → Task`
-transform now generates state-machine struct + poll fn +
-constructor for linear async-fn bodies with `io_*_async`
-calls. examples/tcp_echo_async.vani parity-green on both
-backends. Phases 2-4 (control flow / affine / advanced)
-queued; macOS port (Phase 5) recommended next**).
+Phase 0 + Phase 1 + Phase 2 narrow shipped — compiler-driven
+`async fn → Task` transform now handles linear bodies AND
+control flow (if/while/Assign/Print/mid-body return) when
+branches don't contain suspends. examples/tcp_echo_async +
+echo_with_timeout parity-green. Phase 2.1 suspend-in-branch
+state-splitting + Phases 3-4 queued; macOS port (Phase 5)
+recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -94,6 +95,25 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     resolves this naturally by concretizing T at transform
     time.
 
+- **v3.1 Phase 2 narrow — control flow inside async fn**
+  (commit `a3cab5b`). Lifts Phase 1's linear-body
+  restriction:
+  - Stmt::If / Stmt::While / Stmt::Assign / Stmt::Print
+    + mid-body Return all allowed at the top level —
+    provided branches don't contain `io_*_async` suspends
+  - Reassign on outer-scope locals rewrites to FieldAssign
+    on `__t.<name>`
+  - Suspend-in-branch / suspend-in-cond / multi-await-in-
+    expr cases rejected with explicit Phase 2.1 / 2.2
+    pointers
+  - examples/echo_with_timeout.vani — input validation +
+    counter increment + two suspend points woven together,
+    byte-identical "echoed bytes: 6" on both backends
+  - 4 new lib tests; helpers `expr_contains_io_async` +
+    `stmt_contains_io_async` for granular shape checks;
+    `rewrite_vars_in_stmt` for recursive Var-to-field
+    rewriting across nested control flow
+
 - **v3.1 Phase 1 — compiler-driven `async fn → Task`
   transform** (commit `7d47ff6`). The headline v3.1
   feature lands:
@@ -122,10 +142,11 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1827 lib + 54 parity green** (parity includes
+**1831 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
-and `timer_async.vani` byte-identical-stdout checks).
+`echo_with_timeout.vani`, and `timer_async.vani`
+byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 
