@@ -24,13 +24,12 @@
 >
 > **Open queue:**
 > 1. **Arc 8 v3.1 sugar** — compiler-driven state-machine
->    codegen with 15 design caveats documented. Optional;
->    multi-day per caveat. See STATUS.md "v3.1 design
->    caveats".
-> 2. **Arc 8 platform port** (macOS kqueue ~8-12h /
->    Windows IOCP ~25-35h) — every Arc 8 v1.5/v1.6/v2/v3
->    runtime helper is currently Linux-only. See STATUS.md
->    "🪟 Platform support".
+>    codegen. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phases
+>    0–4 (~78-98h across 11-17 sessions). 15 design caveats
+>    captured in STATUS.md.
+> 2. **Arc 8 platform port** — macOS kqueue + Windows IOCP.
+>    See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phases 5–6
+>    (~35-50h across 5-8 sessions). Parallel-safe with v3.1.
 > 3. **Arc 10** Devanagari SOV grammar — blocked on
 >    consultant.
 > 4. **Arc 9 a/b/e/f** Kosh package manager — deferred

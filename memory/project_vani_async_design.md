@@ -107,9 +107,12 @@ case; many MORE multi-day items per design caveat below.
 
 ## v3.1 design caveats (open questions for the implementer)
 
-Each caveat is a real engineering decision the v3.1 transform
-must make. Captured in STATUS.md "v3.1 design caveats" table
-for canonical reference; summary here:
+**Phased execution plan: see [ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md)**
+(5 v3.1 phases + 2 platform-port phases, total ~113-148h
+across 16-25 sessions, each phase has explicit
+scope/acceptance/effort/dependencies). Below is the design-
+caveat summary captured in STATUS.md "v3.1 design caveats"
+table:
 
 1. **Body shape**: linear (Let + Print + Discard + Return)
    only at first; `if` / `while` / `for` / `match` / `try` /

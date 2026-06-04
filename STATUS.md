@@ -125,10 +125,14 @@ PATTERN (hand-rolled via `examples/tcp_echo_state_machine.vani`).
 v3.1 would add the COMPILER-DRIVEN transform that auto-rewrites
 `async fn` bodies containing `io_*_async` calls into the
 state-machine struct + poll fn + constructor triples that
-users today write by hand. This is multi-day compiler work
-(parser-level body scan + struct/fn AST synthesis + a thread-
-local registry to flush new decls into the program); it
-doesn't honestly fit a single session.
+users today write by hand.
+
+**Phased execution plan lives in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md).**
+Five v3.1 phases (foundation → linear core → control flow →
+affine integration → advanced) + two platform-port phases
+(macOS kqueue → Windows IOCP). Total backlog ~113-148h
+across 16-25 sessions. **Recommended first session: Phase 0
+(Foundation) — ~6-8h.**
 
 Pick up a future session with this prompt if you want sugar:
 
@@ -200,6 +204,11 @@ the v3.1 implementer must answer:
 ---
 
 ## 🪟 Platform support (Arc 8) — Linux only today
+
+**Phased port plan lives in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)
+Phases 5–6** (macOS kqueue ~10-15h, Windows IOCP ~25-35h).
+Below is the per-subsystem matrix for quick reference.
+
 
 The Arc 8 v1.5/v1.6/v2/v3 runtime helpers **only compile + run on
 Linux**. Every other tested target needs porting:
