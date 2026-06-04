@@ -11,6 +11,13 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.3-narrow ✅ COMPLETE 2026-06-04** (commit `2d92f30`).
+> Match expressions in async fn bodies when no arm
+> contains a suspend. Rewriter + walkers extended for
+> Match + 6 other expr shapes. Suspends in arms rejected
+> with Phase 2.3a pointer. examples/echo_match.vani
+> parity-green. 2 new lib tests.
+>
 > **🎉 v3.1 control-flow sugar — CAPABILITY-COMPLETE 2026-06-04.**
 > The compiler-driven `async fn → Task` transform handles
 > every common control-flow shape in vāṇī. Capstone:

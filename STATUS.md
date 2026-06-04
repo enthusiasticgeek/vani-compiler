@@ -11,14 +11,15 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.5 + 2.5b
-shipped — compiler-driven `async fn → Task` transform
-handles linear bodies + non-suspending control flow +
-suspend-in-branch state-splitting + fall-through merge
-state + nested ifs + ANF lifting + loops with suspend
-inside + break/continue inside loops. 10 v3.1 acceptance
-examples parity-green. Phases 2.3 (match), 2.4 (try),
-3-4 queued; macOS port (Phase 5) recommended next**).
+Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.5
++ 2.5b shipped — compiler-driven `async fn → Task`
+transform handles linear bodies + non-suspending control
+flow + suspend-in-branch state-splitting + fall-through
+merge state + nested ifs + ANF lifting + match in async fn
++ loops with suspend inside + break/continue inside loops.
+13 v3.1 acceptance examples parity-green. Phases 2.3a
+(suspend-in-match-arm), 2.4 (try), 3-4 queued; macOS port
+(Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -95,6 +96,21 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - **A0.2 deferred** — Phase 1's compiler-driven sugar
     resolves this naturally by concretizing T at transform
     time.
+
+- **v3.1 Phase 2.3-narrow — match in async fns** (commit
+  `2d92f30`). Allows `match` expressions inside async fn
+  bodies when no arm contains a suspend:
+  - `rewrite_vars_to_fields` extended with Match +
+    MethodCall + Tuple/TupleAccess + FieldAccess +
+    StructLit + ArrayLit cases (recursive walk into all
+    these expr shapes)
+  - `expr_contains_io_async` + `body_uses_io_async` both
+    walk Match scrutinee + arm bodies
+  - Suspends inside match arms rejected with Phase 2.3a
+    pointer (per-arm state graphs needed)
+  - `examples/echo_match.vani` — `match mode {…}` followed
+    by `io_recv_async`; total = 305 byte-identical
+  - 2 new lib tests
 
 - **v3.1 Phase 2.5b — break/continue inside loops** (commit
   `4702cb6`). Adds `break` and `continue` keywords inside
@@ -255,7 +271,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1845 lib + 54 parity green** (parity includes 12 v3.1
+**1847 lib + 54 parity green** (parity includes 13 v3.1
 acceptance examples + the v3 hand-rolled pattern, all
 byte-identical cross-backend: `tcp_echo.vani`,
 `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
@@ -263,8 +279,8 @@ byte-identical cross-backend: `tcp_echo.vani`,
 `tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
 `echo_nested_if.vani`, `echo_anf_lift.vani`,
 `echo_loop.vani`, `echo_loop_break.vani`,
-`echo_with_timeout.vani`, `async_showcase.vani`, and
-`timer_async.vani`).
+`echo_match.vani`, `echo_with_timeout.vani`,
+`async_showcase.vani`, and `timer_async.vani`).
 
 ## 🎉 v3.1 sugar arc — capability-complete for control flow
 

@@ -7,7 +7,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 - [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) — phased execution plan
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
   platform port (2 phases). **Phase 0 + 1 + 2 narrow +
-  2.1a + 2.1b + 2.1c + 2.2 + 2.5 + 2.5b ✅ COMPLETE 2026-06-04** —
+  2.1a + 2.1b + 2.1c + 2.2 + 2.3-narrow + 2.5 + 2.5b ✅ COMPLETE 2026-06-04** —
   compiler-driven `async fn → Task` transform handles
   linear bodies + non-suspending control flow + suspend-
   in-branch state-splitting + fall-through merge state +
