@@ -42,10 +42,19 @@ were also already on `main` (closures #281/#282 for generic
 type decls; closures #257/#258 for `pub use` re-exports +
 `pub(kosh)` visibility tier):
 
-- **Arc 5c COMPLETE** (commit `7cccc1b`, 2026-06-03) —
-  closure-as-value across fn boundaries works end-to-end on
-  both backends. Captured anonymous fns can now be passed to
-  higher-order functions typed `Closure(args) -> R`.
+- **Arc 5c COMPLETE** (commit `7cccc1b`, 2026-06-03) — closure-
+  as-value across fn boundaries works end-to-end on both
+  backends. **Arc 7 SysV remainder COMPLETE** (commit
+  `69b5ec0`) — float-field + mixed int/float structs ≤ 16 bytes
+  now FFI-safe (LLVM's calling-convention lowering handles
+  per-eightbyte SysV classification). **Arc 8 step 8a SHIPPED**
+  (commit `2e649ff`) — `Poll<T>` + `Future<T>` join the prelude
+  alongside Option / Result / AllocError.
+
+  1795 lib + 54 parity green.
+
+  Captured anonymous fns can now be passed to higher-order
+  functions typed `Closure(args) -> R`.
   Lift pass synthesizes an env-struct + trampoline + magic
   `__intent_make_closure_<N>` constructor per closure-with-
   captures. C backend emits per-(args, ret) closure struct
