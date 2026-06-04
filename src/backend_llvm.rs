@@ -174,6 +174,25 @@ pub(crate) fn host_uses_win32_threading() -> bool {
     cfg!(target_os = "windows")
 }
 
+/// Arc 8 v3.1 Phase 0 A0.1 — compile-time gate for the
+/// Arc 8 I/O runtime helpers (sleep_ms, full TCP family,
+/// epoll + nb variants, sleep_ms_async). Every helper below
+/// the Arc 8 line is Linux-specific: epoll(7), nanosleep,
+/// timerfd, fcntl(O_NONBLOCK), `__errno_location()`,
+/// `<sys/socket.h>`. Returns true on Linux hosts where
+/// these primitives are available.
+///
+/// **macOS** needs kqueue + `__error()` + `EVFILT_TIMER`
+/// (see [ARC8_V3_PLAN.md](../../ARC8_V3_PLAN.md) Phase 5).
+/// **Windows** needs WSAStartup + winsock2 + `ioctlsocket`
+/// + IOCP redesign (see Phase 6). Until those ports land,
+/// every Arc 8 helper-emit fast-fails on non-Linux hosts
+/// instead of producing a binary that breaks at link or
+/// runtime.
+pub(crate) fn host_is_linux() -> bool {
+    cfg!(target_os = "linux")
+}
+
 thread_local! {
     /// Per-program registry of enum payload types. Populated
     /// at the start of `emit_llvm` from `program.enums`.
@@ -1244,8 +1263,30 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // used. v3.1 Phase 0 sleep_ms_async / sleep_ms_finish
     // also route through the epoll-helper gate so they
     // inherit this fall-through.
+    //
+    // Arc 8 v3.1 Phase 0 A0.1 — compile-time gate.
+    // If the user's program references any Arc 8 I/O
+    // builtin and the host isn't Linux, panic with a
+    // clear pointer to ARC8_V3_PLAN.md Phases 5/6.
+    // Building this way fails LOUD (during codegen) rather
+    // than silently at link time with a `<sys/epoll.h> not
+    // found` error or undefined `@nanosleep` reference.
     let uses_epoll = program_uses_epoll(program);
-    if program_uses_tcp(program) || uses_epoll {
+    let uses_sleep_ms = program_uses_sleep_ms(program);
+    let uses_tcp = program_uses_tcp(program);
+    if (uses_epoll || uses_sleep_ms || uses_tcp) && !host_is_linux() {
+        panic!(
+            "Arc 8 I/O runtime (sleep_ms, TCP family, epoll + nb \
+             variants, sleep_ms_async) is Linux-only in v3.1. The \
+             current host target is not Linux; see ARC8_V3_PLAN.md \
+             Phase 5 (macOS kqueue port, ~10-15h) and Phase 6 \
+             (Windows IOCP port, ~25-35h) for the porting plan. \
+             Until those ports land, build vāṇī programs that use \
+             Arc 8 I/O on a Linux host."
+        );
+    }
+
+    if uses_tcp || uses_epoll {
         emit_intent_tcp_helpers_llvm(&mut out);
     }
 

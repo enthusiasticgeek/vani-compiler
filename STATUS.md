@@ -10,10 +10,12 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE — v1
-surface + v1.5 timers + v1.6 TCP + v2 epoll cooperative
-runtime + v3 state-machine pattern + io async aliases all
-shipped this session**).
+**Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
+Phase 0 Foundation shipped — sleep_ms_async (timerfd) +
+host_is_linux gate + timer_async example; A0.2
+intent_event_loop_run deferred to Phase 1 where compiler-
+driven dispatch resolves the v1 generic-inference limit
+naturally**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -60,16 +62,49 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   struct + an `echo_task_poll` fn returning -2 (Pending) / -1
   (Error) / Ready-value, driven by a small loop that
   epoll-waits on Pending. Both backends produce byte-
-  identical "echoed bytes: 2" (for "v2" payload). Demonstrates
-  the v3 user-facing technique TODAY. The parser-level
-  compiler-driven `async fn` → `Task<T>` transform that
-  would auto-generate these struct/poll/constructor triples
-  remains queued as v3.1 — multi-day compiler work that
-  doesn't honestly fit a single session.
+  identical "echoed bytes: 2" (for "v2" payload).
+- **v3.1 Phase 0 Foundation** — first slice of the
+  compiler-driven sugar arc per [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md):
+  - **A0.3 + A0.4** (commit `eac1bf6`) — `sleep_ms_async(ms) -> i64`
+    + `sleep_ms_finish(fd) -> i64` builtins backed by
+    `timerfd_create` + `timerfd_settime`. Composes with the
+    existing epoll runtime so the calling thread yields
+    while a timer is pending. LLVM IR builds
+    `struct itimerspec` by hand (32-byte stack alloca + sec
+    at +16, nsec at +24). 5 lib tests pin the surface.
+  - **examples/timer_async.vani** (commit `eac1bf6`) —
+    cooperative 40ms timer via `sleep_ms_async` + epoll +
+    `sleep_ms_finish`. Both backends byte-identical.
+  - **Build-order fix** (commit `eac1bf6`) — when epoll
+    helpers emit but TCP helpers don't, the epoll
+    definitions referenced `@accept` / `@recv` /
+    `@intent_tcp_buf` undeclared. Force TCP helpers to
+    emit whenever epoll helpers do.
+  - **A0.1 compile-time gate** (commit pending) —
+    `host_is_linux()` helper alongside
+    `host_uses_win32_threading()`. Codegen panics with a
+    clear "see ARC8_V3_PLAN.md Phases 5/6 for the macOS /
+    Windows ports" message when any Arc 8 I/O builtin
+    (sleep_ms, full TCP family, epoll + nb variants,
+    sleep_ms_async, sleep_ms_finish) is referenced on a
+    non-Linux host. Fails LOUD during codegen instead of
+    silently at link time.
+  - **A0.2 deferred** — `intent_event_loop_run<T>(task)`
+    as specified hits the v1 generic-call inference limit
+    ("supports literal arguments or annotated variable
+    bindings at the first position"). Phase 1's compiler-
+    driven sugar resolves this by concretizing T at
+    transform time. Documented in
+    [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 0 retrospective.
 
-**1817 lib + 54 parity green** (parity includes
+  The parser-level compiler-driven `async fn` → `Task<T>`
+  transform (Phase 1 onwards) remains queued — see
+  [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md).
+
+**1823 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
-`tcp_echo_state_machine.vani` byte-identical-stdout checks).
+`tcp_echo_state_machine.vani`, and `timer_async.vani`
+byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 

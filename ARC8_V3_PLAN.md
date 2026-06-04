@@ -5,6 +5,24 @@
 > remaining workstreams as a phased plan with explicit
 > acceptance criteria + effort estimates, so future sessions
 > can pick up any phase without re-deriving scope.
+>
+> **Phase 0 ✅ COMPLETE 2026-06-04** (commits `eac1bf6`, plus
+> A0.1 gate). Retrospective:
+> - A0.1 shipped — `host_is_linux()` codegen gate; panics
+>   clean on non-Linux with pointer to Phases 5/6.
+> - A0.3 + A0.4 shipped — `sleep_ms_async` / `sleep_ms_finish`
+>   builtins via `timerfd_create` + `timerfd_settime`; 5
+>   new lib tests pin surface.
+> - A0.2 **deferred to Phase 1** — `intent_event_loop_run<T>`
+>   as a generic-bounded vāṇī fn hits v1 generic-call
+>   inference limits ("supports literal arguments or
+>   annotated variable bindings at the first position").
+>   Phase 1's compiler-driven sugar naturally resolves this
+>   by emitting per-type concrete `__poll_<TaskType>`
+>   dispatch instead of a generic helper. No code shipped
+>   for A0.2 — clean defer.
+> - `examples/timer_async.vani` parity-green on both
+>   backends. Test ledger: 1823 lib + 54 parity.
 
 ---
 
@@ -23,11 +41,12 @@ parallel-safe. Total backlog: **~113-148h focused across
 16-25 sessions**.
 
 **Recommended order of execution (highest user value first):**
-1. **Phase 0** — Foundation (gates + driver builtin + timerfd
-   `sleep_ms_async`). Unblocks both v3.1 and graceful failure
-   on non-Linux.
-2. **Phase 1** — v3.1 linear core. Ships the headline
-   compiler-driven sugar for the common case.
+1. ~~**Phase 0** — Foundation~~ ✅ DONE 2026-06-04 (A0.2
+   deferred to Phase 1).
+2. **Phase 1** — v3.1 linear core. **← START HERE NEXT.**
+   Ships the headline compiler-driven sugar for the common
+   case + naturally subsumes A0.2 by generating per-type
+   poll dispatch.
 3. **Phase 5** — macOS port. Smallest cross-platform lift;
    unblocks macOS CI and broadens user base.
 4. **Phase 2** — v3.1 control flow. Lifts the linear-only

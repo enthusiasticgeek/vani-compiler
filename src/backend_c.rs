@@ -1021,6 +1021,26 @@ pub fn emit_c(program: &TypedProgram) -> String {
         || body.contains("intent_tcp_recv_nb")
         || body.contains("intent_sleep_ms_async")
         || body.contains("intent_sleep_ms_finish");
+    let uses_arc8_io = need_epoll_helpers
+        || body.contains("intent_tcp_")
+        || body.contains("intent_sleep_ms(");
+    // Arc 8 v3.1 Phase 0 A0.1 — compile-time gate. The Arc 8
+    // I/O runtime (sleep_ms / TCP / epoll / nb variants /
+    // timerfd) is Linux-only. Fail loud during codegen when
+    // any Arc 8 I/O builtin is referenced on a non-Linux
+    // host instead of breaking silently at C-compile time
+    // with `<sys/socket.h>: No such file or directory`.
+    if uses_arc8_io && !crate::backend_llvm::host_is_linux() {
+        panic!(
+            "Arc 8 I/O runtime (sleep_ms, TCP family, epoll + nb \
+             variants, sleep_ms_async) is Linux-only in v3.1. The \
+             current host target is not Linux; see ARC8_V3_PLAN.md \
+             Phase 5 (macOS kqueue port, ~10-15h) and Phase 6 \
+             (Windows IOCP port, ~25-35h) for the porting plan. \
+             Until those ports land, build vāṇī programs that use \
+             Arc 8 I/O on a Linux host."
+        );
+    }
     if need_epoll_helpers && !body.contains("intent_tcp_") {
         // Synthesize a `intent_tcp_` reference to flip the
         // gate in emit_intent_tcp_helpers_c. Cheap hack vs

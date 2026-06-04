@@ -7,10 +7,11 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 - [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) — phased execution plan
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
   platform port (2 phases). Total ~113-148h across 16-25
-  sessions. **Recommended first session: Phase 0 Foundation
-  (~6-8h).** Each phase has explicit scope, acceptance
-  criteria, effort estimate, dependencies, and open
-  questions documented.
+  sessions. **Phase 0 ✅ COMPLETE 2026-06-04** (sleep_ms_async +
+  timerfd; host_is_linux gate; A0.2 deferred to Phase 1).
+  **Next session: Phase 1 (linear core, ~12-15h).** Each
+  phase has explicit scope, acceptance criteria, effort
+  estimate, dependencies, and open questions documented.
 - [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
   session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
   Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped

@@ -20969,6 +20969,18 @@ fn main() -> i64 {
     /// suspend-point semantics.
     /// Arc 8 v3.1 Phase 0 — timerfd-based cooperative sleep.
     /// Surface tests on both backends.
+    /// Arc 8 v3.1 Phase 0 A0.1 — verify that the host_is_linux()
+    /// gate exists. Direct invocation test on Linux returns
+    /// true; the panic path is exercised manually on macOS /
+    /// Windows hosts (or by future CI gating).
+    #[test]
+    fn host_is_linux_helper_present() {
+        assert!(
+            crate::backend_llvm::host_is_linux(),
+            "test must run on a Linux host; got non-Linux"
+        );
+    }
+
     #[test]
     fn sleep_ms_async_typechecks_on_both_backends() {
         let source = r#"
