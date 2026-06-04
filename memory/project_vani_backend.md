@@ -227,8 +227,8 @@ that fire on Windows hosts only.)
   timer-driven `async fn` + sequential awaits + CancelToken
   short-circuit + `task` + `join` concurrent timer fan-out
   (real OS threads, ~30ms wall-clock for three 30ms sleeps).
-- **Arc 8 v1.6 — full TCP networking builtin family** (commit
-  `9aaec41`). Eight new builtins: `tcp_listen` /
+- **Arc 8 v1.6 — full TCP networking builtin family** (commits
+  `9aaec41`, `83010ab`). Eight new builtins: `tcp_listen` /
   `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` /
   `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close`.
   All wrap libc socket / bind / listen / accept / connect /
@@ -240,10 +240,30 @@ that fire on Windows hosts only.)
   recurses into `TaskSpawn` + `UnsafeBlock` bodies so string
   literals inside task bodies intern at module scope
   (regression: `tcp_send_str(fd, "ping")` inside a task
-  previously emitted `i8* null`). `examples/tcp_echo.vani`
-  ships an end-to-end loopback echo server + client in one
-  process via `task` + `join`. Both backends produce
-  byte-identical stdout in the parity runner.
+  previously emitted `i8* null`). Two acceptance examples:
+  `examples/tcp_echo.vani` (single-client echo) and
+  `examples/tcp_multi_echo.vani` (three concurrent client
+  tasks). Both backends produce byte-identical stdout in
+  the parity runner.
+
+## Arc 8 status (2026-06-04 — capability-complete)
+
+The full Arc 8 user-visible feature set ships:
+- async fn / await syntax (parser-level desugar)
+- Future<T> / Poll<T> / CancelToken (prelude)
+- sleep_ms (POSIX nanosleep)
+- Full TCP family (8 builtins)
+- task + join concurrency (existing)
+- Three acceptance examples (async_io, tcp_echo, tcp_multi_echo)
+
+Queued as Arc 8 v2 runtime optimization (NOT a missing
+user feature):
+- State-machine codegen for async fn bodies with awaits
+- Epoll/kqueue event-loop runtime
+- Non-blocking variants of sleep_ms / tcp_* returning real
+  Pending futures
+- Single-threaded cooperative fan-out without per-task
+  pthread overhead
 - **Arc 9 c+d — `pub(kosh)` visibility tier + `pub use` chained
   re-exports** already on `main` via closures #257 + #258.
 

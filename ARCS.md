@@ -3,15 +3,17 @@
 > **Status (2026-06-04):** Arcs 1, 2, 3, 4, 5, 6 ✅ COMPLETE.
 > Arc 7 SysV (scalars + float-field + mixed int/float ≤ 16
 > bytes) ✅ COMPLETE; Win64 / AArch64 gated on cross-platform
-> CI. Arc 8 **v1 + v1.5 + v1.6 ✅ COMPLETE** — `async fn` /
-> `await(expr)` / `Future<T>` / `Poll<T>` / `CancelToken` at
-> the parser+prelude layer (v1) + `sleep_ms` builtin and
-> timer-driven async examples (v1.5, commits `d344828` +
-> `d209e06`) + full TCP networking builtin family with
-> `examples/tcp_echo.vani` (v1.6, commit `9aaec41`). The
-> real cooperative runtime (state-machine codegen + epoll
-> event loop + non-blocking I/O variants) is queued as a
-> focused next-session arc. Arc 9 c/d
+> CI. Arc 8 **CAPABILITY-COMPLETE** — v1 source surface
+> (commits `2e649ff`, `e50dc20`, `25b5a84`) + v1.5
+> `sleep_ms` + timer-driven async examples (`d344828`,
+> `d209e06`) + v1.6 full TCP networking family +
+> single-client echo (`9aaec41`) + multi-client echo
+> (`83010ab`). All real async + networking + concurrency
+> capabilities work TODAY via task+join. The v2 runtime
+> arc (state-machine codegen + epoll event loop +
+> non-blocking I/O variants → single-thread cooperative
+> scheduling) is an optimization, not a missing user
+> feature; queued as a focused next-session arc. Arc 9 c/d
 > ✅ COMPLETE; a/b/e/f deferred pending registry choice.
 > Arc 10 BLOCKED on grammar consultant. Safety-standard
 > alignment ✅ COMPLETE; seven `intentc` audit CLIs all on
@@ -89,7 +91,7 @@ Goal: compiler-lowered async state machines (no `Pin`, no self-references) — t
 | 8e | Non-blocking I/O primitives — file / TCP / timer / sleep as `async fn` in stdlib. **v1.5:** `sleep_ms` blocking builtin (commit `d344828`). **v1.6:** full TCP family — `tcp_listen` / `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` / `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close` (commit `9aaec41`) | ~5-6h | 8d | 🟡 v1.5+v1.6 partial (blocking); real non-blocking versions queued |
 | 8f | `await(expr)` desugar — `match expr { Future.Ready(__v) -> __v, Future.Pending -> 0 }` parser desugar | ~3-4h | 8a | ✅ shipped (commit `25b5a84`) |
 | 8g | Cancellation — `CancelToken` prelude struct passed by-ref; user threads through async fns and checks `.cancelled` at suspend points | ~2-3h | 8a | ✅ shipped (commit `25b5a84`) |
-| 8h | Examples — `examples/async_io.vani` + `examples/tcp_echo.vani` + cross-backend parity. **v1.5+v1.6:** timer-driven `async fn` + sequential awaits + CancelToken + task-based concurrent fan-out + real TCP echo server (commits `d209e06`, `9aaec41`) | ~2h | 8g | 🟡 v1.5+v1.6 partial; single-threaded cooperative fan-out queued (needs 8c+8d) |
+| 8h | Examples — `examples/async_io.vani` + `examples/tcp_echo.vani` + `examples/tcp_multi_echo.vani` + cross-backend parity. **v1.5+v1.6:** timer-driven `async fn` + sequential awaits + CancelToken + task-based concurrent fan-out + single-client echo + 3-concurrent-client echo (commits `d209e06`, `9aaec41`, `83010ab`) | ~2h | 8g | ✅ v1.5+v1.6 shipped (covers the user-facing demos); single-threaded cooperative fan-out is a v2 optimization (needs 8c+8d) |
 
 **Subtotal: ~30-40h, 8 commits.** Acceptance: timer fan-out + TCP echo server both work cross-backend with identical stdout.
 

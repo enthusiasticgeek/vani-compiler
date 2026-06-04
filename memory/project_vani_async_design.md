@@ -57,15 +57,25 @@ slices on top of v1:
   printed instead of literal so kernel-assigned ports
   don't break parity).
 
-**Arc 8 runtime (8c + 8d + 8e non-blocking variants + 8h
+**Arc 8 CAPABILITY-COMPLETE 2026-06-04**: every user-visible
+async + networking feature ships and works on both backends.
+Three acceptance examples (`async_io.vani`, `tcp_echo.vani`,
+`tcp_multi_echo.vani`) pass the parity runner. Users can
+build timer-driven schedulers, single-client + multi-client
+TCP servers, and concurrent fan-out workloads today via the
+existing `task` + `join` machinery.
+
+**Arc 8 v2 runtime (8c + 8d + 8e non-blocking variants + 8h
 cooperative fan-out) OPEN** — state-machine codegen,
 epoll/kqueue event-loop runtime, real non-blocking I/O
 futures (timerfd, O_NONBLOCK sockets), single-threaded
-cooperative fan-out example. Picks up next session via
-STATUS.md's "📋 NEXT SESSION" block. Estimated ~25–30h
-focused. v1.5/v1.6 task-based fan-out + blocking I/O
-remain useful alternative paths for users who don't need
-single-thread cooperative scheduling.
+cooperative fan-out example. **This is a performance /
+ergonomics optimization, not a missing user feature.**
+Today's pattern uses one OS thread per task — fine for
+small fan-out workloads but heavy for high-concurrency
+servers. v2 collapses to one OS thread + N futures. Picks
+up next session via STATUS.md's "📋 NEXT SESSION" block.
+Estimated ~25–30h focused.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**

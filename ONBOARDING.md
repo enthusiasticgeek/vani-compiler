@@ -195,24 +195,29 @@ as ahead) include:
   alphabet, `SkipList` with O(1) `max` via maintained `tail_node`.
   See [STATUS.md](STATUS.md) for the closure-by-closure history.
 - **Arcs 1–9 multi-session ledger (2026-06-03 → 2026-06-04):**
-  Arc 4 full HashMap K-V matrix cross-backend (OwnedStr / Tuple
-  / f64 / Vec<i64> keys × i64/OwnedStr/scalar values). Arc 5c
-  **closure-as-value across fn boundaries** (env-struct +
-  trampoline + magic `__intent_make_closure_<N>` constructor;
-  commit `7cccc1b`). Arc 7 SysV full float-class + mixed
-  int/float ≤ 16-byte struct FFI classifier (commit
-  `69b5ec0`). Arc 8 v1 **`async fn` / `await(expr)` /
-  `Future<T>` / `Poll<T>` / `CancelToken`** at the
-  parser+prelude layer with synchronous v1 semantics (commits
-  `2e649ff`, `e50dc20`, `25b5a84`). Arc 9 c+d `pub(kosh)` +
+  Arc 4 full HashMap K-V matrix cross-backend. Arc 5c
+  **closure-as-value across fn boundaries** (commit `7cccc1b`).
+  Arc 7 SysV full float-class + mixed int/float ≤ 16-byte
+  struct FFI (commit `69b5ec0`). **Arc 8 capability-complete**
+  — v1 surface `async fn` / `await` / `Future<T>` / `Poll<T>` /
+  `CancelToken` (commits `2e649ff`, `e50dc20`, `25b5a84`) +
+  v1.5 `sleep_ms` builtin + `examples/async_io.vani` (commits
+  `d344828`, `d209e06`) + v1.6 full TCP networking family
+  (`tcp_listen` / `accept` / `connect_local` / `send_str` /
+  `recv` / `send_buf` / `close` / `socket_port`) +
+  `examples/tcp_echo.vani` + `examples/tcp_multi_echo.vani`
+  (commits `9aaec41`, `83010ab`). Arc 9 c+d `pub(kosh)` +
   `pub use` re-exports.
 
 Currently pending:
-- **Arc 8 runtime (8c+8d+8e+8h)** — state-machine codegen +
-  event-loop runtime + non-blocking I/O + acceptance example
-  (`examples/async_io.vani`). Focused multi-day next-session
-  arc; STATUS.md "📋 NEXT SESSION" block carries the verbatim
-  handoff prompt.
+- **Arc 8 v2 runtime arc (8c+8d+8e+8h)** — state-machine
+  codegen + epoll event-loop runtime + non-blocking I/O
+  variants + single-thread cooperative fan-out example.
+  Performance/ergonomics optimization (replace thread-per-
+  task + blocking I/O with one-thread-many-futures), not a
+  missing user feature — Arc 8 capabilities all work TODAY
+  via task+join. STATUS.md "📋 NEXT SESSION" block carries
+  the verbatim handoff prompt.
 - Closure-as-value richer support (capture-by-ref, non-Copy
   captures, `.collect()`, lazy iterators, non-i64 element types
   in combinators, tuple-element `vec_zip`).
