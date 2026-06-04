@@ -214,9 +214,21 @@ Currently pending:
   compiler transform that auto-generates state-machine
   struct + poll fn + constructor from `async fn` bodies
   with `io_*_async` calls. The hand-rolled pattern already
-  ships via `tcp_echo_state_machine.vani`; v3.1 just
-  automates the boilerplate. See STATUS.md "📋 Arc 8 v3.1"
-  block.
+  ships via `tcp_echo_state_machine.vani`; v3.1 automates
+  the boilerplate. **15 design caveats** documented in
+  STATUS.md (body shape, local liveness, affine-types-
+  across-await, multi-await ANF lifting, ref params,
+  CancelToken, error propagation, nested async calls,
+  generics, multi-task scheduling, `sleep_ms_async`,
+  diagnostics).
+- **Arc 8 platform port** — all Arc 8 v1.5/v1.6/v2/v3
+  runtime helpers are **Linux-only** today (epoll +
+  nanosleep + glibc errno thunk). macOS port = kqueue
+  shim (~8-12h); Windows port = IOCP rewrite (~25-35h).
+  Threading is already cross-platform. Until ports land,
+  Windows / macOS builds need a compile-time gate that
+  fails loud (currently they break silently at link
+  time). See STATUS.md "🪟 Platform support".
 - Closure-as-value richer support (capture-by-ref, non-Copy
   captures, `.collect()`, lazy iterators, non-i64 element types
   in combinators, tuple-element `vec_zip`).

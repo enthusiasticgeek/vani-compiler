@@ -102,7 +102,77 @@ If/when v3.1 sugar lands, it would add:
   but with the struct/poll/constructor triple hidden behind
   `async fn` + `io_*_async` calls
 
-Estimated v3.1 effort: ~15–20h focused.
+Estimated v3.1 effort: ~15–20h focused for the linear-body
+case; many MORE multi-day items per design caveat below.
+
+## v3.1 design caveats (open questions for the implementer)
+
+Each caveat is a real engineering decision the v3.1 transform
+must make. Captured in STATUS.md "v3.1 design caveats" table
+for canonical reference; summary here:
+
+1. **Body shape**: linear (Let + Print + Discard + Return)
+   only at first; `if` / `while` / `for` / `match` / `try` /
+   `break` / `continue` each need explicit state-machine
+   handling and add multi-day implementation cost per
+   construct.
+2. **Local liveness analysis**: storing every local in the
+   state struct is wasteful; cross-await liveness analysis
+   is the right answer but adds complexity.
+3. **Affine types across await**: `OwnedStr` / `Vec<T>` /
+   user-struct locals that live across a suspend point must
+   be moved into state with proper Drop-on-Pending-return.
+   Initial v3.1 rejects non-i64 locals at suspend points.
+4. **Multiple awaits in one expression**: needs ANF lifting
+   pass before state-machine transform. Initial v3.1 rejects.
+5. **`ref` / `mut ref` params**: can't store across heap-
+   allocated state without lifetime tracking. Initial v3.1
+   rejects.
+6. **CancelToken auto-plumbing**: today the user reads
+   `.cancelled` explicitly. v3.1 ideally auto-injects checks
+   at every suspend point.
+7. **Error propagation**: `io_*_async(-1)` hard error must
+   flow back; integrate with `try` keyword / `Result<T, E>`.
+8. **Nested async-fn calls**: `await(foo())` where `foo` is
+   itself v3.1-transformed (state-machine composition with
+   child state inside parent state).
+9. **Generics**: monomorphize per (async-fn, type-args). Lean
+   on closure #281 generic-decl infrastructure.
+10. **Side effects between awaits** preserved (Print, Vec
+    mutation, etc.); verify no affine-drop surprises.
+11. **`intent_event_loop_run<T>(task) -> T`** as a real builtin
+    (today the v3 pattern has the user write the driver loop
+    by hand).
+12. **Multi-task scheduling** — running multiple Tasks on one
+    reactor needs `Vec<Task<T>>` (heterogeneous T = existential
+    type or boxed-trait shape).
+13. **`sleep_ms_async`**: timerfd-based, registers with epoll,
+    yields without blocking. Today's `sleep_ms` blocks the
+    calling OS thread.
+14. **Diagnostic quality** when rejecting unsupported async-fn
+    shapes — clear spans + suggested fix-ups.
+15. **Test surface** for compiler-generated state machines —
+    snapshot the typed IR + parity-test the runtime behavior.
+
+## Platform support (Arc 8 runtime)
+
+**Linux only today** — every Arc 8 v1.5/v1.6/v2/v3 helper
+assumes glibc/musl + epoll + POSIX socket headers.
+
+| Subsystem | Linux | macOS | Windows |
+|---|---|---|---|
+| `sleep_ms` | ✅ | ✅ (nanosleep works) | ❌ needs `Sleep(ms)` |
+| Blocking TCP | ✅ | 🟡 untested | ❌ needs WSAStartup + winsock2 |
+| `tcp_set_nonblocking` | ✅ | 🟡 untested | ❌ needs `ioctlsocket(FIONBIO)` |
+| `__errno_location()` | ✅ glibc/musl | ❌ macOS uses `__error()` | ❌ Win32 uses `_errno()` |
+| `epoll_*` | ✅ | ❌ needs **kqueue** shim | ❌ needs **IOCP** port (different programming model) |
+| `task` + `join` | ✅ pthread | 🟡 likely (POSIX) | ✅ already wired via CreateThread |
+
+Threading IS portable; I/O isn't. macOS port is ~8–12h
+(kqueue shim matching epoll_* signatures); Windows port is
+~25–35h (full IOCP redesign). Compile-time gate to fail loud
+on non-Linux targets is a small follow-up (~1h) until ports
+land.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**

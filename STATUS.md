@@ -173,6 +173,77 @@ Pick up a future session with this prompt if you want sugar:
 > Estimated effort: ~15-20h focused (state machines are the
 > bulk; the reactor + nb primitives already ship).
 
+### v3.1 design caveats — open questions to resolve
+
+The transform sketched above works cleanly only for the
+simplest case. Each item below is a real engineering question
+the v3.1 implementer must answer:
+
+| # | Caveat | Initial v3.1 stance | Future polish |
+|---|---|---|---|
+| 1 | **Body shape** — linear (Let + Print + Discard + Return) only | Accept only linear; reject `if` / `while` / `for` / `match` / `try` / `break` / `continue` inside async fn body with `io_*_async` calls | Each control-flow form needs explicit state-machine handling. `if/else` doubles states per branch; `while` needs a back-edge state. Multi-day per construct. |
+| 2 | **Local liveness analysis** — only locals KEPT ACROSS an await should land in the state struct | Conservatively put EVERY i64 local in the state struct | Compute per-await liveness; transient locals become poll-fn locals (not stored). Saves heap. |
+| 3 | **Affine types across await** — `OwnedStr` / `Vec<T>` locals must be moved into state, not borrowed | Reject non-i64 locals at suspend-point boundaries with a clear diagnostic | Track owning locals → store in state with proper Drop on Pending-return; restore on resume. Hard problem under the affine checker. |
+| 4 | **Multiple awaits in one expression** — `let x = await(f()) + await(g());` | Reject; require ANF lifting (one await per Let) | Expression-level transform that lifts awaits into sequenced Lets before state-machine pass |
+| 5 | **`ref` / `mut ref` parameters** — can't store across heap-allocated state without lifetime tracking | Reject async fns that take `ref T` params with a clear diagnostic | Either lifetime tracking in the affine checker, or copy-the-pointee-into-state pattern |
+| 6 | **CancelToken plumbing** — currently user checks `.cancelled` by hand | v3.1 user still passes `ref CancelToken` and reads `.cancelled` between awaits explicitly | Auto-inject `if token.cancelled { return ...; }` at every suspend point. Needs semantic decision: what does the cancelled value look like? |
+| 7 | **Error propagation** — `io_recv_async` returns -1 on hard error; the user's async fn must decide what to do | v3.1 propagates the -1 through the state struct's error field; caller checks | Integrate with `try` keyword / `Result<T, E>` so async fns naturally propagate errors |
+| 8 | **Nested async-fn calls** — `await(foo())` where `foo` is itself v3.1-transformed (returns Task<T>) | Reject: await only applies to `io_*_async` builtin calls, not user async fns | State-machine composition: parent suspends until child Task<T> is Ready. Real-world need but complex (child state lives inside parent state struct). |
+| 9 | **Generic params** — `async fn foo<T>(x: T) -> T` | Reject generics; require concrete i64 | Monomorphize the state struct + poll fn per (async-fn, type-args) tuple. Already have closure #281 generic-decl machinery to lean on. |
+| 10 | **Side effects between awaits** — Print statements, Vec mutations, etc. | Allowed (just emit as normal vāṇī code in the matching state arm) | Verify no surprises with affine drops at suspend points |
+| 11 | **Top-level driver** — `intent_event_loop_run<T>(task: Task<T>) -> T` | Ships as a vāṇī source-level helper (loops calling poll + epoll_wait) | Builtin that takes the Task type and the underlying fd dispatch table |
+| 12 | **Multi-task scheduling** — N concurrent Tasks on one reactor | v3.1 ships single-task driver; multi-task uses task + join (cooperative scheduling INSIDE a task is single-task) | Real cooperative scheduler that round-robins through a Vec<Task> — needs Vec<Task<T>> for heterogeneous T (existential or boxed-trait shape) |
+| 13 | **timerfd-based `sleep_ms_async`** — currently `sleep_ms` blocks the calling OS thread | Ship a `sleep_ms_async(ms) -> i64` that uses `timerfd_create` + `epoll_add_read` so the event loop can wait on it without blocking | Same mechanism extended to file I/O (`file_open_async`, etc.) |
+| 14 | **Diagnostic quality** — when v3.1 rejects an unsupported async-fn shape, the error should clearly point at the problem | Reuse the existing diagnostic machinery; carry the span of the offending construct | Suggest fix-ups (e.g., "lift this expression into a Let") |
+| 15 | **Test surface** — how do we test compiler-generated state machines? | Generate to typed IR; assert structure in lib tests; run via parity for behavior | Snapshot tests on the generated state-struct + poll-fn AST |
+
+---
+
+## 🪟 Platform support (Arc 8) — Linux only today
+
+The Arc 8 v1.5/v1.6/v2/v3 runtime helpers **only compile + run on
+Linux**. Every other tested target needs porting:
+
+| Subsystem | Linux | macOS | Windows | Notes |
+|---|---|---|---|---|
+| `sleep_ms` (nanosleep) | ✅ ships | ✅ POSIX (nanosleep works) | ❌ would need `Sleep(ms)` from Win32 API | nanosleep is POSIX, not Win32 |
+| Blocking TCP (socket/bind/listen/accept/connect/recv/send/close) | ✅ ships | 🟡 likely works (BSD sockets) — UNTESTED | ❌ requires WSAStartup + winsock2.h + SOCKET type (≠ int) + WSAGetLastError | Win32 sockets are a separate API surface |
+| `tcp_set_nonblocking` (fcntl O_NONBLOCK) | ✅ ships | 🟡 likely works — UNTESTED | ❌ requires `ioctlsocket(FIONBIO)` | fcntl is POSIX-only |
+| `__errno_location()` (used by `tcp_accept_nb`, `tcp_recv_nb`) | ✅ glibc/musl | ❌ macOS uses `__error()` | ❌ Win32 uses `_errno()` / `GetLastError()` | Three different thunks for three platforms |
+| **epoll** (epoll_create1 / epoll_ctl / epoll_wait) | ✅ ships | ❌ macOS uses **kqueue** + kevent | ❌ Windows uses **IOCP** (I/O Completion Ports — fundamentally different programming model) | The biggest porting cost is here |
+| `io_*_async` aliases | ✅ ships (route to nb variants) | 🟡 follows nb variant support | ❌ follows nb variant support | Aliases inherit underlying portability |
+| `task` + `join` concurrency | ✅ pthread_create / pthread_join | 🟡 likely works (POSIX threads) — UNTESTED | ✅ already wired via `CreateThread` + `WaitForSingleObject` (see `host_uses_win32_threading()`) | Threading IS portable; I/O isn't |
+
+**Engineering plan to lift Linux-only restriction:**
+
+1. **macOS (lower lift)** — port the LLVM IR + C runtime helpers
+   to use `__error()` for errno, then write a `kqueue` shim that
+   matches the `intent_epoll_*` signatures byte-for-byte. The
+   user-facing `epoll_*` names stay; the implementation forks.
+   Estimated effort: ~8–12h.
+
+2. **Windows (high lift)** — full IOCP port. The programming
+   model is "register I/O operations, then poll for completions"
+   rather than "register fds, then poll for readiness". This
+   doesn't map cleanly onto the existing `epoll_add_read` +
+   `epoll_wait_one` shape. Likely needs a separate
+   `iocp_*` builtin family AND a Win32 socket runtime
+   (`WSAStartup` etc.). Estimated effort: ~25–35h.
+
+3. **Compile-time gate** — until macOS / Windows ports land,
+   wrap the Arc 8 I/O helper emit in
+   `if !host_uses_win32_threading() && !host_is_darwin()` so
+   builds on those targets fail loud with a clear message
+   ("Arc 8 epoll runtime is Linux-only; see STATUS.md
+   Platform support"). Currently Windows builds would fail
+   silently at C-compile time (missing `<sys/socket.h>`) or
+   LLVM link time (undefined `@epoll_create1`).
+
+**Today's parity runner is Linux-only** (`cargo test` runs on
+the developer's machine — typically Linux). Cross-platform CI
+would catch the breakage but isn't wired up; same gate as
+Arc 7 Win64/AArch64 FFI work.
+
 ---
 
 Session 2026-06-03 shipped: all 6 ARC 4 sub-arcs cross-backend

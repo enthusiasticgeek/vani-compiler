@@ -23,14 +23,19 @@
 > `main`. See [STATUS.md](STATUS.md) for per-commit ledger.
 >
 > **Open queue:**
-> 1. **Arc 8 runtime** (8c+8d+8e+8h) — focused multi-day
->    session. Picks up from STATUS.md's "📋 NEXT SESSION"
->    block.
-> 2. **Arc 10** Devanagari SOV grammar — blocked on
+> 1. **Arc 8 v3.1 sugar** — compiler-driven state-machine
+>    codegen with 15 design caveats documented. Optional;
+>    multi-day per caveat. See STATUS.md "v3.1 design
+>    caveats".
+> 2. **Arc 8 platform port** (macOS kqueue ~8-12h /
+>    Windows IOCP ~25-35h) — every Arc 8 v1.5/v1.6/v2/v3
+>    runtime helper is currently Linux-only. See STATUS.md
+>    "🪟 Platform support".
+> 3. **Arc 10** Devanagari SOV grammar — blocked on
 >    consultant.
-> 3. **Arc 9 a/b/e/f** Kosh package manager — deferred
+> 4. **Arc 9 a/b/e/f** Kosh package manager — deferred
 >    pending registry choice.
-> 4. **Arc 7 Win64/AArch64** — gated on CI.
+> 5. **Arc 7 Win64/AArch64** — gated on CI.
 
 ## Arcs 5–10 — granular sub-step plan
 
@@ -89,7 +94,7 @@ Goal: compiler-lowered async state machines (no `Pin`, no self-references) — t
 |---|---|---|---|
 | 8a | `Future<T>` generic enum in prelude (via Arc 6) — `Ready(T)` / `Pending` variants | ~1-2h | Arc 6 | ✅ shipped (commit `2e649ff`) |
 | 8b | `async fn` parser + parser-level desugar (body returns wrap to `Future.Ready`, `-> R` reshapes to `-> Future<R>`) | ~5-6h | 8a | ✅ shipped (commit `e50dc20`) |
-| 8c | State-machine codegen. **v3 pattern shipped** (commit `f7743a1`) — `io_*_async` builtin aliases + `tcp_echo_state_machine.vani` example demonstrate the hand-rolled state-machine pattern users write today. **v3.1 compiler-driven sugar** that auto-generates the struct/poll/constructor triples from an `async fn` body is queued as multi-day compiler work | ~6-8h | 8b | 🟡 v3 pattern shipped; v3.1 compiler transform optional |
+| 8c | State-machine codegen. **v3 pattern shipped** (commit `f7743a1`) — `io_*_async` builtin aliases + `tcp_echo_state_machine.vani` example demonstrate the hand-rolled pattern. **v3.1 compiler-driven sugar** queued — 15 design caveats captured in STATUS.md including: linear-body-only initially, local liveness analysis, affine-types-across-await problem, ANF lifting for multi-await expressions, `ref` param handling, CancelToken plumbing, nested async-fn calls (state composition), generics, `intent_event_loop_run` builtin, multi-task scheduling, timerfd-based `sleep_ms_async`. | ~6-8h initial / multi-day per caveat | 8b | 🟡 v3 pattern shipped; v3.1 compiler transform optional with documented caveats |
 | 8d | Event-loop runtime — `intent_event_loop_run<T>(task) -> T` driver over the existing v2 epoll reactor | ~4-5h | 8c | 📋 v3 (the reactor primitives already ship via 8e v2) |
 | 8e | Non-blocking I/O primitives. **v1.5:** `sleep_ms` (commit `d344828`). **v1.6:** full TCP family (commit `9aaec41`). **v2:** epoll + nb variants (commit `92864de`). **v3:** async-flavored aliases `io_recv_async` / `io_send_async` / `io_accept_async` (commit `f7743a1`) | ~5-6h | 8d | ✅ shipped (timerfd-based `sleep_ms_async` is the only remaining v3.1 piece) |
 | 8f | `await(expr)` desugar — `match expr { Future.Ready(__v) -> __v, Future.Pending -> 0 }` parser desugar | ~3-4h | 8a | ✅ shipped (commit `25b5a84`) |
