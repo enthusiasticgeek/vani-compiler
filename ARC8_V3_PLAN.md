@@ -11,14 +11,21 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.1a ✅ COMPLETE 2026-06-04** (commit `7566ab8`).
+> Suspend-in-branch state-splitting. `if` with `io_*_async`
+> in either or both branches (both must end with Return).
+> Required restructuring: explicit state numbering via
+> `collect_into` + new `Seg::Decision` + `Seg::Suspend.bump_to`.
+> examples/tcp_echo_async_branched.vani parity-green. 4 new
+> lib tests. Phase 2.1b (fall-through merge state, ~3-5h),
+> 2.1c (nested ifs inside suspending branches, ~5-8h),
+> 2.2-2.5 deferred.
+>
 > **Phase 2 narrow ✅ COMPLETE 2026-06-04** (commit `a3cab5b`).
 > Control flow inside async-fn bodies — `if` / `while` /
 > `Assign` / `Print` + mid-body `return` — provided branches
 > don't contain `io_*_async`. examples/echo_with_timeout.vani
-> parity-green. 4 new lib tests. Phase 2.1 (suspend-in-
-> branch, ~10-12h), 2.2 (ANF lifting, ~5-6h), 2.3 (match
-> arms), 2.4 (try keyword), 2.5 (break/continue) all
-> deferred per ARC8_V3_PLAN Phase 2 caveats.
+> parity-green. 4 new lib tests.
 >
 > **Phase 1 ✅ COMPLETE 2026-06-04** (commit `7d47ff6`).
 > The headline v3.1 compiler-driven `async fn → Task`

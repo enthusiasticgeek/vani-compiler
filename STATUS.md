@@ -11,13 +11,12 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phase 0 + Phase 1 + Phase 2 narrow shipped — compiler-driven
-`async fn → Task` transform now handles linear bodies AND
-control flow (if/while/Assign/Print/mid-body return) when
-branches don't contain suspends. examples/tcp_echo_async +
-echo_with_timeout parity-green. Phase 2.1 suspend-in-branch
-state-splitting + Phases 3-4 queued; macOS port (Phase 5)
-recommended next**).
+Phases 0 + 1 + 2 narrow + 2.1a shipped — compiler-driven
+`async fn → Task` transform now handles linear bodies +
+non-suspending control flow + suspend-in-branch state-
+splitting (both branches return-terminated). 5 v3.1
+acceptance examples parity-green. Phases 2.1b/c, 2.2-2.5,
+3-4 queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -95,6 +94,29 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     resolves this naturally by concretizing T at transform
     time.
 
+- **v3.1 Phase 2.1a — suspend-in-branch state-splitting**
+  (commit `7566ab8`). Lifts Phase 2 narrow's "no suspend
+  in branches" restriction:
+  - `if cond { ... } else { ... }` may now contain
+    `io_*_async` calls in either or both branches
+    (provided both branches end with explicit Return)
+  - New `Seg::Decision { cond, then_state, else_state }`
+    variant — the current state ends with a conditional
+    state_tag bump to the right branch's starting state
+  - New `Seg::Suspend.bump_to` carries the explicit next-
+    state index (Phase 2.1 fix: branching makes the next
+    state non-sequential)
+  - Recursive `collect_into` replaces the flat collect-
+    then-group pass; uses explicit state allocation via
+    `state_bodies.len()`
+  - Branch-local Lets contribute fields to the task struct
+    so locals persist across suspends within a branch
+  - Phase 2.1b (fall-through merge), 2.1c (nested ifs),
+    2.5 (break/continue) rejected with explicit pointers
+  - `examples/tcp_echo_async_branched.vani` — both branches
+    exercised cross-backend, byte-identical
+  - 4 new lib tests
+
 - **v3.1 Phase 2 narrow — control flow inside async fn**
   (commit `a3cab5b`). Lifts Phase 1's linear-body
   restriction:
@@ -142,11 +164,11 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1831 lib + 54 parity green** (parity includes
+**1835 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
-`echo_with_timeout.vani`, and `timer_async.vani`
-byte-identical-stdout checks).
+`tcp_echo_async_branched.vani`, `echo_with_timeout.vani`,
+and `timer_async.vani` byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 

@@ -6,15 +6,16 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 **Top-of-queue planning docs (2026-06-04):**
 - [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) — phased execution plan
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
-  platform port (2 phases). **Phase 0 + Phase 1 + Phase 2
-  narrow ✅ COMPLETE 2026-06-04** — compiler-driven
-  `async fn → Task` transform handles linear bodies AND
-  control flow without suspends-in-branches. Shipped via
-  commits `eac1bf6`, `51748d6`, `7d47ff6`, `a3cab5b`.
-  Phase 2.1 (suspend-in-branch state-splitting) + Phases
-  3-4 queued. **Next session recommended: Phase 5 (macOS
-  kqueue port, ~10-15h)**. Alternative: Phase 2.1 suspend-
-  in-branch codegen (~10-12h).
+  platform port (2 phases). **Phase 0 + 1 + 2 narrow + 2.1a
+  ✅ COMPLETE 2026-06-04** — compiler-driven `async fn →
+  Task` transform handles linear bodies + non-suspending
+  control flow + suspend-in-branch state-splitting (both
+  branches return-terminated). Shipped via commits
+  `eac1bf6`, `51748d6`, `7d47ff6`, `a3cab5b`, `7566ab8`.
+  Phases 2.1b/c, 2.2-2.5, 3-4 queued. **Next session
+  recommended: Phase 5 (macOS kqueue port, ~10-15h)**.
+  Alternative: Phase 2.1b fall-through merge state
+  (~3-5h) or Phase 2.2 ANF lifting (~5-6h).
 - [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
   session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
   Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped
