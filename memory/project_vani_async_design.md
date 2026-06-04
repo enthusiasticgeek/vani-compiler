@@ -28,12 +28,30 @@ parser + prelude level with synchronous semantics:
   desugar), `25b5a84` (await + CancelToken). Example:
   [examples/async_await.vani](../examples/async_await.vani).
 
-**Arc 8 runtime (8c + 8d + 8e + 8h) OPEN** — state-machine
-codegen, event-loop runtime, non-blocking I/O, acceptance
-example. Picks up next session via STATUS.md's "📋 NEXT
-SESSION" block (the verbatim handoff prompt). Estimated
-~25–30h focused. The v1 source-level surface upgrades to the
-real runtime without breaking user code.
+**Arc 8 v1.5 ✅ SHIPPED 2026-06-04** — incremental slice on
+top of v1:
+
+- `sleep_ms(ms: i64) -> i64` builtin (commit `d344828`)
+  wraps POSIX `nanosleep` (EINTR retry) and emits via both
+  tree-LLVM and tree-C. Used inside `async fn` bodies today
+  to give real timer-driven flow with synchronous v1
+  semantics. Walker recurses into TaskSpawn bodies so
+  `sleep_ms` in a `task` works.
+- `examples/async_io.vani` (commit `d209e06`) — timer-driven
+  `async fn` + sequential awaits + `CancelToken` short-
+  circuit + **concurrent timer fan-out via `task` + `join`**
+  (real OS threads, ~30ms wall-clock for three 30ms sleeps).
+  Both backends produce byte-identical stdout.
+
+**Arc 8 runtime (8c + 8d + 8e proper + 8h proper) OPEN** —
+state-machine codegen, epoll/kqueue event-loop runtime, real
+non-blocking I/O futures (timerfd, TCP), single-threaded
+cooperative fan-out + TCP echo example. Picks up next
+session via STATUS.md's "📋 NEXT SESSION" block. Estimated
+~25–30h focused. The v1 source-level surface upgrades to
+the real runtime without breaking user code; v1.5 task-
+based fan-out remains a useful alternative path for users
+who want concurrency without cooperative scheduling.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**

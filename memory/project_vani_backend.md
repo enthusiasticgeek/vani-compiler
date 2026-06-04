@@ -166,7 +166,9 @@ deferred). `Drop for T` is suppressed when T has heap fields
 
 ## Test totals (2026-06-04)
 
-**1800 lib + 56 parity tests green.** Cross-backend parity
+**1804 lib + 54 parity tests green** (4 new lib tests pin
+`sleep_ms` surface — C emit, LLVM emit, arity diagnostic,
+async-fn composition). Cross-backend parity
 runner covers all examples (now including closure-as-value,
 async fn, await, CancelToken — `examples/closure_as_value.vani`,
 `examples/async_fn.vani`, `examples/async_await.vani`). ASan /
@@ -210,6 +212,19 @@ that fire on Windows hosts only.)
   `Future.Ready`; users get the right types + syntax; runtime
   steps (state-machine codegen + event loop + non-blocking I/O)
   upgrade later without breaking source.
+- **Arc 8 v1.5 — `sleep_ms` builtin + `examples/async_io.vani`
+  + task-based concurrent fan-out** (commits `d344828`,
+  `d209e06`). `sleep_ms(ms: i64) -> i64` wraps POSIX
+  `nanosleep` with EINTR retry. Tree-C emits
+  `intent_sleep_ms` helper; tree-LLVM emits
+  `@intent_sleep_ms` + `@nanosleep` declare, both gated on
+  `program_uses_sleep_ms` (recurses into `TaskSpawn` +
+  `UnsafeBlock` bodies so the helper lands for task-internal
+  uses). Routes through tree backends per the SSA gate.
+  `examples/async_io.vani` demonstrates the v1.5 surface:
+  timer-driven `async fn` + sequential awaits + CancelToken
+  short-circuit + `task` + `join` concurrent timer fan-out
+  (real OS threads, ~30ms wall-clock for three 30ms sleeps).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + `pub use` chained
   re-exports** already on `main` via closures #257 + #258.
 

@@ -10,56 +10,79 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-04 (**Arc 5c COMPLETE + Arc 7 SysV +
-Arc 8 v1 COMPLETE — closures-as-value, float FFI, async/await
-surface all shipped**).
+**Last updated:** 2026-06-04 (**Arc 8 v1.5 — `sleep_ms`
+builtin + first real timer-driven async example +
+concurrent fan-out via tasks shipped this session**).
+
+Session 2026-06-04 (Arc 8 v1.5 slice) shipped:
+- **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
+  builtin on both backends. Wraps POSIX `nanosleep` with
+  EINTR retry. Routes through tree-LLVM/C (not SSA) per the
+  gate in [main.rs](src/main.rs). Emits `@intent_sleep_ms`
+  LLVM helper + declares `@nanosleep`; gated on actual use
+  via `program_uses_sleep_ms` walker. 4 lib tests pin
+  surface.
+- **Step 8h v1.5** (commit `d209e06`) — `examples/async_io.vani`
+  demonstrates timer-driven `async fn` composition + sequential
+  awaits + CancelToken short-circuit + concurrent timer
+  fan-out via `task` + `join` (~30ms wall-clock for three
+  30ms sleeps, real OS threads). Walker fix: `sleep_ms` inside
+  a `task` body now emits the helper correctly.
+
+**1804 lib + 54 parity green.**
 
 ---
 
-## 📋 NEXT SESSION — Arc 8 runtime (8c+8d+8e+8h)
+## 📋 NEXT SESSION — Arc 8 runtime (8c+8d+8e+8h proper)
 
-The remaining Arc 8 work — **state-machine codegen +
-event-loop runtime + non-blocking I/O + acceptance example** —
-is a focused multi-day arc that needs its own session. Pick up
-the next session with this prompt:
+The **real** state-machine + epoll runtime is still queued.
+v1.5 (above) uses `sleep_ms` to block the calling OS thread
+and relies on `task`/`join` for concurrency — useful TODAY
+but not single-threaded cooperative async. Pick up the next
+session with this prompt:
 
-> Continue Arc 8 from where 2026-06-04 left off. Arc 8 v1
-> (8a + 8b + 8f + 8g) is shipped: `async fn` / `await(expr)` /
-> `Future<T>` / `Poll<T>` / `CancelToken` all at the parser +
-> prelude level with synchronous v1 semantics. Now ship the
-> real runtime:
+> Continue Arc 8 from where 2026-06-04 left off. v1.5 (commit
+> `d344828` + `d209e06`) ships `sleep_ms` + `examples/async_io.vani`
+> with task-based concurrent fan-out. Arc 8 v1 surface
+> (`async fn` / `await` / `Future<T>` / `Poll<T>` /
+> `CancelToken`) is at the parser+prelude level with
+> synchronous semantics. Now ship the real cooperative
+> runtime:
 >
 > **Step 8c** — state-machine codegen. Walk each `async fn`
 > body, split at every `await` point, generate a per-state
 > frame struct holding locals alive across the suspension,
-> emit a `poll(state) -> Poll<T>` dispatch. New IR variants:
+> emit a `poll(state) -> Poll<T>` dispatch. Likely needs a
+> new prelude type `Task<T> = { env: u64, poll: fn(u64) -> Future<T> }`
+> distinct from the v1 `Future<T>` enum (so v1 source stays
+> source-compatible). New IR variants:
 > `TypedExprKind::Await { future_expr }` (the real one — the
 > v1 parser-level `await(expr) → match` desugar is just the
-> v1 placeholder). Frame layout: one struct per state with
-> the locals + tag for the next state.
+> v1 placeholder). Foundation: Arc 5c closure-as-value
+> (commit `7cccc1b`) gives the env-struct + trampoline
+> primitive the frames build on.
 >
 > **Step 8d** — event-loop runtime. Add `intent_event_loop_run(future)`
 > + a C runtime (`runtime/async_eventloop.c`) wrapping epoll /
 > kqueue / IOCP. Single-threaded cooperative scheduler v1.
 >
-> **Step 8e** — non-blocking I/O primitives as `async fn`s in
-> stdlib (or as builtin `extern "C" async fn`s linked against
-> the runtime): `timer_sleep_ms(ms) -> Future<i64>`,
-> `tcp_listen(port) -> Future<TcpListener>`, `tcp_accept`,
-> `tcp_read`, `tcp_write`, `file_open`, `file_read`,
-> `file_write`. Gated on 8d.
+> **Step 8e** — non-blocking I/O primitives: replace `sleep_ms`
+> (or add `sleep_ms_async`) returning a real `Future<i64>` that
+> registers a timerfd with the event loop and yields Pending
+> until it fires. Then `tcp_listen` / `tcp_accept` / `tcp_read` /
+> `tcp_write` / `file_open` / `file_read` / `file_write`. Gated
+> on 8d.
 >
-> **Step 8h** — `examples/async_io.vani`: timer fan-out + tiny
-> TCP echo server. Acceptance for the full async stack.
-> Identical stdout on both backends via the parity runner.
+> **Step 8h** — extend `examples/async_io.vani` with a single-
+> threaded cooperative fan-out (multiple async fns concurrent
+> on ONE thread, no task / join) + a tiny TCP echo server.
+> Acceptance for the full async stack. Identical stdout on
+> both backends via the parity runner.
 >
-> Estimated effort: ~25-30h focused. Likely 6-8 commits if
-> shipped contiguously.
->
-> Foundation: Arc 5c (closure-as-value, commit 7cccc1b) is
-> the closure-as-value primitive the state-machine codegen
-> needs for the frame structs; Arc 8 v1 (commits 2e649ff,
-> e50dc20, 25b5a84) is the user-visible surface. Both ship.
+> Estimated effort: ~25-30h focused (state machines are the
+> bulk; the event loop + I/O primitives compose more
+> cheaply once 8c is done). Likely 6-8 commits if shipped
+> contiguously.
 
 ---
 

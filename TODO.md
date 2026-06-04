@@ -62,7 +62,8 @@ dependency chain).
 | **Arc 7 (SysV)** | FFI ABI scalar + float + mixed structs ≤ 16 bytes | ✅ COMPLETE — closure #285 + float-class commit `69b5ec0` shipped 2026-06-03 |
 | **Arc 7 (Win64/AArch64)** | Cross-platform classifier | OPEN — gated on cross-platform CI availability |
 | **Arc 8 v1** | `Poll<T>`/`Future<T>`/`CancelToken` prelude + `async fn` + `await` parser desugar | ✅ COMPLETE — commits `2e649ff`, `e50dc20`, `25b5a84` shipped 2026-06-03/04 |
-| **Arc 8 runtime** | State-machine codegen (8c) + event-loop runtime (8d) + non-blocking I/O (8e) + `examples/async_io.vani` (8h) | **OPEN — focused multi-day arc, picked up in next session.** See STATUS.md's "📋 NEXT SESSION" block for the verbatim handoff prompt. |
+| **Arc 8 v1.5** | `sleep_ms` builtin + `examples/async_io.vani` with timer-driven async fn + task-based concurrent fan-out | ✅ COMPLETE — commits `d344828` + `d209e06` shipped 2026-06-04 |
+| **Arc 8 runtime** | State-machine codegen (8c) + event-loop runtime (8d) + non-blocking I/O (8e proper) + cooperative-fan-out example (8h proper) | **OPEN — focused multi-day arc, picked up in next session.** See STATUS.md's "📋 NEXT SESSION" block for the verbatim handoff prompt. v1.5 above gives users blocking timer-driven async TODAY; runtime arc upgrades to real single-threaded cooperative scheduling. |
 | **Arc 9 (c+d)** | `pub(kosh)` visibility + `pub use` re-exports | ✅ COMPLETE — closures #257+#258 |
 | **Arc 9 (a/b/e/f)** | `kosh.toml` manifest + resolver + registry + stdlib-as-kosh | **DEFERRED** — registry hosting choice still pending |
 | **Arc 10** | Devanagari SOV grammar (per-language parser mode + SOV constructs + alias-table completion) | **BLOCKED** — needs grammar consultant validation per design notes ("Don't ship without language-expert confirmation") |
