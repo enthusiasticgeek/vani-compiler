@@ -20736,6 +20736,76 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 step 8e — `sleep_ms(ms: i64) -> i64` builtin
+    /// compiles on both backends and emits the expected
+    /// runtime helper.
+    #[test]
+    fn sleep_ms_typechecks_and_emits_helper_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let rc: i64 = sleep_ms(0);
+              return rc;
+            }
+        "#;
+        let c = compile_to_c(source).expect("sleep_ms must type-check on C");
+        assert!(
+            c.contains("intent_sleep_ms") && c.contains("nanosleep"),
+            "C output must include the sleep_ms runtime helper; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn sleep_ms_emits_helper_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let _: i64 = sleep_ms(0);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("sleep_ms LLVM compile");
+        assert!(
+            ll.contains("declare i32 @nanosleep")
+                && ll.contains("define i64 @intent_sleep_ms"),
+            "LLVM output must declare nanosleep + define intent_sleep_ms; got snippet:\n{}",
+            &ll[..ll.len().min(800)]
+        );
+    }
+
+    #[test]
+    fn sleep_ms_rejects_wrong_arity() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = sleep_ms();
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("0-arg sleep_ms must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("1 argument")),
+            "expected arity diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sleep_ms_inside_async_fn_compiles() {
+        // Arc 8 step 8h — verify the v1.5 surface composes:
+        // async fn calling sleep_ms then returning.
+        let source = r#"
+            async fn delay_value(ms: i64, v: i64) -> i64 {
+              sleep_ms(ms);
+              return v;
+            }
+            fn main() -> i64 {
+              let r: i64 = await(delay_value(0, 42));
+              return r;
+            }
+        "#;
+        compile_to_c(source).expect("async + sleep_ms must compile on C");
+        compile_to_llvm(source).expect("async + sleep_ms must compile on LLVM");
+    }
+
     #[test]
     fn rng_deterministic_from_same_seed() {
         // Run the same source twice; under the deterministic

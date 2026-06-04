@@ -1228,6 +1228,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         emit_intent_rng_helpers_llvm(&mut out);
     }
 
+    // Arc 8 step 8e — `sleep_ms` runtime helper. Gated on the
+    // program actually calling `sleep_ms` so programs that
+    // never touch async timing don't pull in `nanosleep`.
+    if program_uses_sleep_ms(program) {
+        emit_intent_sleep_ms_helper_llvm(&mut out);
+    }
+
     // Data-structures roadmap: FNV-1a hash helpers. Gated on
     // the program actually using a hash builtin OR a Bloom
     // filter (closure #327 calls @intent_hash_i64 from its
@@ -8793,6 +8800,18 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i64 @intent_siphash_str(i64 {}, i64 {}, i8* {})\n",
                     dest, k0, k1, s
+                ));
+                return dest;
+            }
+            // Arc 8 step 8e — `sleep_ms(ms) -> i64`. Calls the
+            // outlined `@intent_sleep_ms` helper emitted at
+            // module scope when the program references it.
+            if name == "sleep_ms" {
+                let ms = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_sleep_ms(i64 {})\n",
+                    dest, ms
                 ));
                 return dest;
             }
@@ -21938,6 +21957,112 @@ fn emit_intent_rng_helpers_llvm(out: &mut String) {
          \x20 %ur = urem i64 %r, %span\n\
          \x20 %res = add i64 %lo, %ur\n\
          \x20 ret i64 %res\n\
+         }\n\n",
+    );
+}
+
+/// Arc 8 step 8e — walk the typed program for any Call to
+/// `sleep_ms`. Triggers emission of the `@intent_sleep_ms`
+/// LLVM helper + the `@nanosleep` declare.
+fn program_uses_sleep_ms(program: &TypedProgram) -> bool {
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        match &expr.kind {
+            E::Call { name, args, .. } => {
+                if name == "sleep_ms" {
+                    return true;
+                }
+                args.iter().any(expr_uses)
+            }
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            E::IfExpr { cond, then_value, else_value } => {
+                expr_uses(cond) || expr_uses(then_value) || expr_uses(else_value)
+            }
+            E::Match { scrutinee, arms } => {
+                expr_uses(scrutinee) || arms.iter().any(|a| expr_uses(&a.body))
+            }
+            E::Block { stmts, tail } => {
+                stmts.iter().any(stmt_uses) || expr_uses(tail)
+            }
+            _ => false,
+        }
+    }
+    fn stmt_uses(stmt: &crate::ir::TypedStmt) -> bool {
+        match stmt {
+            S::Let { expr, .. }
+            | S::Reassign { expr, .. }
+            | S::Return { expr }
+            | S::Assert { expr, .. }
+            | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|it| match it {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { body, .. } | S::ForIter { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        for s in &f.body {
+            if stmt_uses(s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Arc 8 step 8e — emit `@intent_sleep_ms(i64 ms) -> i64` and
+/// the libc `@nanosleep` declare. Uses a stack-allocated
+/// `[2 x i64]` as the timespec — valid on Linux/macOS x86_64
+/// + AArch64 where `time_t == long` and `tv_nsec == long`.
+/// 32-bit targets need a different layout; out of scope for
+/// v1 since vāṇī's tested triples are all 64-bit.
+fn emit_intent_sleep_ms_helper_llvm(out: &mut String) {
+    out.push_str(
+        "declare i32 @nanosleep(i8*, i8*)\n\
+         define i64 @intent_sleep_ms(i64 %ms) {\n\
+         entry:\n\
+         \x20 %neg = icmp sle i64 %ms, 0\n\
+         \x20 br i1 %neg, label %ret_zero, label %do_sleep\n\
+         ret_zero:\n\
+         \x20 ret i64 0\n\
+         do_sleep:\n\
+         \x20 %ts = alloca [2 x i64], align 8\n\
+         \x20 %sec_ptr = getelementptr [2 x i64], [2 x i64]* %ts, i32 0, i32 0\n\
+         \x20 %nsec_ptr = getelementptr [2 x i64], [2 x i64]* %ts, i32 0, i32 1\n\
+         \x20 %sec = sdiv i64 %ms, 1000\n\
+         \x20 %ms_mod = srem i64 %ms, 1000\n\
+         \x20 %nsec = mul i64 %ms_mod, 1000000\n\
+         \x20 store i64 %sec, i64* %sec_ptr\n\
+         \x20 store i64 %nsec, i64* %nsec_ptr\n\
+         \x20 %ts_i8 = bitcast [2 x i64]* %ts to i8*\n\
+         \x20 %rc = call i32 @nanosleep(i8* %ts_i8, i8* null)\n\
+         \x20 ret i64 0\n\
          }\n\n",
     );
 }

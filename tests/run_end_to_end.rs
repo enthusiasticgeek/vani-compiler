@@ -820,6 +820,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "anon_fn.vani",
         "async_fn.vani",
         "async_await.vani",
+        "async_io.vani",
         "array_proofs.vani",
         "array_return.vani",
         "arrays.vani",

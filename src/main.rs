@@ -467,6 +467,7 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "rand_f64" || name == "rand_in_range_f64"
                 || name == "rand_bool" || name == "rand_choice"
                 || name == "rand_normal"
+                || name == "sleep_ms"
                 || name == "vec_chunks" || name == "vec_windows"
                 || name == "vec_flatten" || name == "vec_group_by_value"
                 || name == "vec_running_mean" || name == "vec_intersperse"

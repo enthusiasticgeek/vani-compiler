@@ -1010,8 +1010,35 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs);
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
+    emit_intent_sleep_ms_helper_c(&mut out, &body);
     out.push_str(&body);
     out
+}
+
+/// Arc 8 step 8e — runtime helper for `sleep_ms(ms)`. Wraps
+/// POSIX `nanosleep` (preferred, no INT-overflow at long
+/// delays) with a `usleep` fallback for older toolchains.
+/// Returns 0 on success; -1 on EINTR (caller can retry).
+/// Negative `ms` is a no-op (returns 0).
+fn emit_intent_sleep_ms_helper_c(out: &mut String, body: &str) {
+    if !body.contains("intent_sleep_ms") {
+        return;
+    }
+    out.push_str(
+        "#include <time.h>\n\
+         #include <errno.h>\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms(int64_t ms) {\n\
+         \x20 if (ms <= 0) return 0;\n\
+         \x20 struct timespec req; struct timespec rem;\n\
+         \x20 req.tv_sec = (time_t)(ms / 1000);\n\
+         \x20 req.tv_nsec = (long)((ms % 1000) * 1000000L);\n\
+         \x20 while (nanosleep(&req, &rem) == -1) {\n\
+         \x20   if (errno != EINTR) return -1;\n\
+         \x20   req = rem;\n\
+         \x20 }\n\
+         \x20 return 0;\n\
+         }\n\n",
+    );
 }
 
 /// Data-structures roadmap Level 1 — runtime helpers for the
@@ -14648,6 +14675,13 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         "seed_rng" => {
             format!("intent_rng_seed(({}))", emit_expr(&args[0]))
+        }
+        // Arc 8 step 8e — `sleep_ms(ms) -> i64`. Wraps the
+        // emitted runtime helper `intent_sleep_ms` (defined in
+        // the C prologue when the program references it).
+        // Always returns 0; passes ms straight through.
+        "sleep_ms" => {
+            format!("intent_sleep_ms(({}))", emit_expr(&args[0]))
         }
         "rand_i64" => "intent_rng_next()".to_string(),
         "rand_in_range" => {

@@ -1,0 +1,57 @@
+// Arc 8 step 8h v1.5 — timer-driven async fn example.
+//
+// Demonstrates the v1 async surface (`async fn` / `await` /
+// `Future<T>` / `CancelToken`) composed with the v1.5
+// `sleep_ms` builtin to produce real timer-driven flows.
+//
+// **Limitations of v1.5:** `async fn` desugars synchronously
+// (every async fn runs to completion on call and emits
+// `Future.Ready`), so `sleep_ms` blocks the calling OS
+// thread. Concurrent fan-out + non-blocking I/O via epoll
+// are queued in Arc 8 step 8c (state-machine codegen) +
+// step 8d (event-loop runtime).
+//
+// build & run:
+//   intentc run examples/async_io.vani                # LLVM
+//   intentc run examples/async_io.vani --backend=c    # C
+
+intent "async timer + CancelToken demo — Arc 8 step 8h v1.5";
+
+async fn delay_value(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  return v;
+}
+
+async fn delay_with_cancel(ms: i64, v: i64, token: ref CancelToken) -> i64 {
+  if token.cancelled {
+    return 0 - 1;
+  }
+  sleep_ms(ms);
+  if token.cancelled {
+    return 0 - 1;
+  }
+  return v;
+}
+
+fn main() -> i64 {
+  // Plain timer-driven async fn.
+  let r1: i64 = await(delay_value(20, 42));
+  print "await delay_value(20, 42) (42):", r1;
+
+  // Sequential awaits — total elapsed is 30 + 20 = 50ms.
+  let a: i64 = await(delay_value(30, 7));
+  let b: i64 = await(delay_value(20, 11));
+  print "sequential sum (18):", a + b;
+
+  // CancelToken short-circuits before the sleep.
+  let tok: CancelToken = CancelToken { cancelled: true };
+  let r2: i64 = await(delay_with_cancel(50, 99, ref tok));
+  print "cancelled before sleep (-1):", r2;
+
+  // CancelToken not set — runs to completion.
+  let tok2: CancelToken = CancelToken { cancelled: false };
+  let r3: i64 = await(delay_with_cancel(15, 88, ref tok2));
+  print "uncancelled (88):", r3;
+
+  return 0;
+}
