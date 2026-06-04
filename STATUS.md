@@ -11,15 +11,15 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.5
-+ 2.5b shipped — compiler-driven `async fn → Task`
+Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
+2.3a + 2.5 + 2.5b shipped — compiler-driven `async fn → Task`
 transform handles linear bodies + non-suspending control
 flow + suspend-in-branch state-splitting + fall-through
 merge state + nested ifs + ANF lifting + match in async fn
-+ loops with suspend inside + break/continue inside loops.
-13 v3.1 acceptance examples parity-green. Phases 2.3a
-(suspend-in-match-arm), 2.4 (try), 3-4 queued; macOS port
-(Phase 5) recommended next**).
++ match arms WITH suspends (Int + Wildcard) + loops with
+suspend inside + break/continue inside loops. 14 v3.1
+acceptance examples parity-green. Phase 2.4 (try), 3-4
+queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -111,6 +111,31 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - `examples/echo_match.vani` — `match mode {…}` followed
     by `io_recv_async`; total = 305 byte-identical
   - 2 new lib tests
+
+- **v3.1 Phase 2.3a — match arms WITH suspends** (commit
+  pending). Generalizes Phase 2.1a (binary if-with-suspend)
+  to n-way match arms via a desugar in `anf_lift_body`:
+  - `try_desugar_let_match_with_suspends` lifts
+    `let X = match SCRUT { p0 then e0, …, _ then ed };` with
+    suspends in any arm into
+    `let X: i64 = 0; if SCRUT == p0 { X = e0; }
+    else if … else { X = ed; }`
+  - Runs BEFORE ANF + before validator; existing Phase
+    2.1a/b state-splitting machinery handles per-arm state
+    graphs without new infrastructure
+  - Supports Pattern::Int + Pattern::Wildcard (last arm);
+    Variant / Bool / Str patterns rejected with sub-phase
+    pointer
+  - Mixed suspending + non-suspending arms work
+    (suspending arms become poll-states; non-suspending
+    arms stay inline)
+  - `examples/echo_match_suspend.vani` — 4-arm match
+    (`recv 64`, `recv 8`, `42`, `0 - 1`); all three modes
+    byte-identical: mode=0 → 3 (recv "abc"), mode=2 → 42,
+    mode=99 → -1
+  - Existing rejection lib test flipped to acceptance +
+    new mixed-arms acceptance test added (2 lib tests
+    total covering 2.3a)
 
 - **v3.1 Phase 2.5b — break/continue inside loops** (commit
   `4702cb6`). Adds `break` and `continue` keywords inside

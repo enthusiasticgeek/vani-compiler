@@ -21198,12 +21198,16 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3.1 Phase 2.3a — match arms WITH suspends now
+    /// ACCEPTED. Desugar lifts `let X = match SCRUT { ... }`
+    /// with suspending arms into `let X: i64 = 0; if SCRUT == p0
+    /// { X = e0; } else if ...` before ANF + state-machine
+    /// codegen, so Phase 2.1a/b machinery handles per-arm state
+    /// graphs without new infrastructure.
     #[test]
-    fn v31_phase23a_match_with_suspend_in_arm_rejected() {
-        // Suspend inside a match arm — Phase 2.3a needs
-        // per-arm state graphs. Phase 2.3-narrow rejects.
+    fn v31_phase23a_match_with_suspend_in_arm_accepted() {
         let source = r#"
-            async fn bad_match(fd: i64, mode: i64) -> i64 {
+            async fn good_match(fd: i64, mode: i64) -> i64 {
               let n: i64 = match mode {
                 0 then io_recv_async(fd, 64),
                 _ then 0
@@ -21212,15 +21216,40 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 2.3-narrow must reject suspend-in-match-arm");
+        let c = compile_to_c(source).expect("Phase 2.3a: match-with-suspending-arm must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3a: match-with-suspending-arm must compile on LLVM");
         assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2.3a") || m.contains("per-arm state graphs") || m.contains("match")
-            }),
-            "expected Phase 2.3a / per-arm-state diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+            c.contains("Task__good_match") && c.contains("__poll_good_match"),
+            "C output must include synthesized Task struct + poll fn"
         );
+        assert!(
+            ll.contains("Task__good_match") && ll.contains("__poll_good_match"),
+            "LLVM output must include synthesized Task struct + poll fn"
+        );
+    }
+
+    /// Arc 8 v3.1 Phase 2.3a — n-way match with multiple
+    /// suspending arms + a non-suspending arm + wildcard default.
+    /// Exercises mixed-arm desugaring and confirms the if-chain
+    /// preserves arm ordering.
+    #[test]
+    fn v31_phase23a_match_mixed_arms_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match mode {
+                0 then io_recv_async(fd, 64),
+                1 then io_recv_async(fd, 8),
+                2 then 42,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3a mixed arms must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3a mixed arms must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside

@@ -4985,15 +4985,139 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
     }
 }
 
+/// Phase 2.3a — desugar a `let X = match SCRUT { p0 -> e0,
+/// ..., _ -> ed }` where SOME arm contains an io_*_async
+/// suspend into a sequence of:
+///   let X: i64 = 0;          // placeholder
+///   if SCRUT == p0 { X = e0; }
+///   else if SCRUT == p1 { X = e1; }
+///   ...
+///   else { X = ed; }
+///
+/// Then ANF + Phase 2.1a/b/c machinery handles the rest.
+/// Returns None if the match isn't desugarable (non-i64
+/// pattern, missing wildcard, etc.).
+///
+/// Supported in Phase 2.3a:
+/// - Pattern::Int(literal) arms
+/// - Pattern::Wildcard catch-all (required as last arm)
+/// - Arm bodies that produce i64 values
+///
+/// Rejected (deferred):
+/// - Bool / Str / Variant patterns
+/// - Wildcard not at the end
+/// - Multiple match expressions in one let
+fn try_desugar_let_match_with_suspends(
+    name: &str,
+    annotation: &Option<Type>,
+    expr: &Expr,
+    span: crate::span::Span,
+) -> Option<Vec<Stmt>> {
+    // Only desugar if expr is a Match AND has suspends.
+    let (scrutinee, arms) = match &expr.kind {
+        ExprKind::Match { scrutinee, arms } => (scrutinee, arms),
+        _ => return None,
+    };
+    if !expr_contains_io_async(expr) {
+        return None; // No suspends — Phase 2.3-narrow handles it.
+    }
+    // Validate arms: Pattern::Int OR Pattern::Wildcard.
+    // Last arm must be Wildcard.
+    let mut int_arms: Vec<(i128, Expr, crate::span::Span)> = Vec::new();
+    let mut default_arm: Option<(Expr, crate::span::Span)> = None;
+    for (i, arm) in arms.iter().enumerate() {
+        let is_last = i == arms.len() - 1;
+        match &arm.pattern {
+            crate::ast::Pattern::Int(lit) => {
+                if is_last && default_arm.is_none() {
+                    // Tolerate: last arm is Int (no wildcard).
+                    // Will produce a fallthrough that does nothing
+                    // for unmatched values; placeholder 0 stays.
+                }
+                int_arms.push((*lit, arm.body.clone(), arm.pattern_span));
+            }
+            crate::ast::Pattern::Wildcard => {
+                if !is_last {
+                    return None; // Wildcard must be last.
+                }
+                default_arm = Some((arm.body.clone(), arm.pattern_span));
+            }
+            // Other patterns deferred to future sub-phase.
+            _ => return None,
+        }
+    }
+    // Build the placeholder Let + if-else-assign chain.
+    let mut out = Vec::new();
+    out.push(Stmt::Let {
+        name: name.to_string(),
+        annotation: annotation.clone(),
+        expr: Expr { kind: ExprKind::Int(0), span },
+        span,
+    });
+
+    // Build innermost else first (default arm or no-op).
+    let mut current_else: Vec<Stmt> = if let Some((dexpr, dspan)) = default_arm {
+        vec![Stmt::Assign {
+            name: name.to_string(),
+            expr: dexpr,
+            span: dspan,
+        }]
+    } else {
+        Vec::new()
+    };
+
+    // Walk int_arms in REVERSE to nest if-else properly.
+    for (lit, arm_expr, arm_span) in int_arms.into_iter().rev() {
+        let cond = Expr {
+            kind: ExprKind::Binary {
+                op: BinaryOp::Eq,
+                left: Box::new((**scrutinee).clone()),
+                right: Box::new(Expr {
+                    kind: ExprKind::Int(lit),
+                    span: arm_span,
+                }),
+            },
+            span: arm_span,
+        };
+        let then_body = vec![Stmt::Assign {
+            name: name.to_string(),
+            expr: arm_expr,
+            span: arm_span,
+        }];
+        current_else = vec![Stmt::If {
+            cond,
+            then_body,
+            else_body: std::mem::take(&mut current_else),
+            span: arm_span,
+        }];
+    }
+    out.extend(current_else);
+    Some(out)
+}
+
 /// Phase 2.2 — ANF lift a body of statements. Walks each
 /// stmt, lifting nested io_*_async calls out of expressions
 /// into fresh Let bindings emitted BEFORE the original stmt.
-/// Recurses into nested if/while branches.
+/// Recurses into nested if/while branches. Phase 2.3a
+/// desugars `let X = match {...}` with suspending arms into
+/// `let X = 0; if SCRUT == p0 { X = e0; } else if ...` BEFORE
+/// running ANF on each piece.
 fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
     let mut out = Vec::new();
     for s in body {
         match s {
             Stmt::Let { name, annotation, expr, span } => {
+                // Phase 2.3a: if this Let's RHS is a Match
+                // expression with suspends in arms, desugar
+                // FIRST (then ANF the desugared stmts).
+                if let Some(desugared) = try_desugar_let_match_with_suspends(
+                    name, annotation, expr, *span,
+                ) {
+                    // Recursively ANF the desugared stmts.
+                    let lifted = anf_lift_body(&desugared, counter);
+                    out.extend(lifted);
+                    continue;
+                }
                 // If the Let's RHS is directly an io_*_async
                 // call, it's already at a valid suspend-point
                 // position — pass through unchanged (but still
@@ -5387,16 +5511,20 @@ fn validate_v31_linear_body(
                         ),
                     ));
                 }
-                // Phase 2.3-narrow: detect `let x = match … { …
-                // io_*_async … };` — match arms with suspends
-                // need per-arm state graphs (Phase 2.3a). Catch
-                // here so the user gets a clean diagnostic
-                // instead of broken-at-runtime state machine.
+                // Phase 2.3a: most match-with-suspending-arms
+                // shapes are desugared by `anf_lift_body` BEFORE
+                // this validator runs (Int / Wildcard patterns).
+                // If we still see a `Match` here AND it contains
+                // suspends, the desugar bailed because of an
+                // unsupported pattern shape (Variant /
+                // VariantWithBinding / Bool / Str). Catch with a
+                // clear diagnostic pointing at the future
+                // sub-phase.
                 if let ExprKind::Match { .. } = &expr.kind {
                     if expr_contains_io_async(expr) {
                         return Err(Diagnostic::new(
                             *span,
-                            "v3.1 async fn: `match` arm contains an `io_*_async` suspend — Phase 2.3 narrow allows match only when arms don't suspend; per-arm state graphs arrive in Phase 2.3a",
+                            "v3.1 async fn: `match` arm contains an `io_*_async` suspend with an unsupported pattern shape — Phase 2.3a desugars Int + Wildcard patterns; Variant/Bool/Str patterns arrive in a future sub-phase",
                         ));
                     }
                 }

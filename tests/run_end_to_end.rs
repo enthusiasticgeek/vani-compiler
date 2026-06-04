@@ -834,6 +834,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_loop_break.vani",
         "async_showcase.vani",
         "echo_match.vani",
+        "echo_match_suspend.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",

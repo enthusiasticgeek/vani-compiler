@@ -18,6 +18,22 @@
 > with Phase 2.3a pointer. examples/echo_match.vani
 > parity-green. 2 new lib tests.
 >
+> **Phase 2.3a ✅ COMPLETE 2026-06-04** (commit pending).
+> Match arms WITH suspends — n-way generalization of
+> Phase 2.1a's binary if-with-suspend. Approach: desugar
+> `let X = match SCRUT { p0 then e0, …, _ then ed };` (with
+> suspends in any arm) into `let X: i64 = 0; if SCRUT == p0
+> { X = e0; } else if … else { X = ed; }` inside
+> `anf_lift_body` BEFORE ANF + validation. Existing Phase
+> 2.1a/b state-splitting handles per-arm state graphs with
+> zero new infrastructure. Pattern::Int + Pattern::Wildcard
+> (last arm) supported; Variant/Bool/Str patterns rejected
+> with future-sub-phase pointer. Mixed suspending +
+> non-suspending arms work. examples/echo_match_suspend.vani
+> parity-green across 3 modes (recv, const, wildcard). 2
+> new lib tests; existing rejection test flipped to
+> acceptance.
+>
 > **🎉 v3.1 control-flow sugar — CAPABILITY-COMPLETE 2026-06-04.**
 > The compiler-driven `async fn → Task` transform handles
 > every common control-flow shape in vāṇī. Capstone:
@@ -25,7 +41,7 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.3 match arms (~8-10h)
+> - 2.3b match arms — Variant/Bool/Str patterns (~6-8h)
 > - 2.4 try keyword + Result propagation (~6-8h)
 > - 3 affine types across await — OwnedStr/Vec (~20-25h)
 > - 4 generics / nested async calls / multi-task (~25-30h)
@@ -367,8 +383,19 @@ needed by the acceptance example).
   call into its own `let __anf_v = io_*_async(...);` before
   the parent expression.
 
-- **Phase 2.3** (queued, ~8-10h) — `match` arms with per-arm
-  state graphs.
+- **Phase 2.3a ✅ DONE 2026-06-04** — `match` arms with per-arm
+  state graphs (Int + Wildcard). Desugars to if-else-assign
+  chain in `anf_lift_body` BEFORE ANF + validation, so Phase
+  2.1a/b state-splitting handles per-arm state graphs with
+  zero new infrastructure. examples/echo_match_suspend.vani
+  parity-green. 2 new lib tests + 1 rejection test flipped
+  to acceptance.
+
+- **Phase 2.3b** (queued, ~6-8h) — `match` arms with
+  Variant / VariantWithBinding / Bool / Str patterns. Same
+  desugar pattern but condition synthesis differs by
+  pattern shape (`scrut.tag == X`, `scrut == true`,
+  `strcmp(scrut, "lit") == 0`).
 
 - **Phase 2.4** (queued, ~6-8h) — `try expr` keyword + Result
   propagation through the state machine.
