@@ -11,13 +11,14 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a + 2.1b + 2.1c + 2.2 shipped —
+Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.5 shipped —
 compiler-driven `async fn → Task` transform handles linear
 bodies + non-suspending control flow + suspend-in-branch
 state-splitting + fall-through merge state + nested ifs +
-ANF lifting for nested `io_*_async` calls. 8 v3.1
-acceptance examples parity-green. Phases 2.3-2.5, 3-4
-queued; macOS port (Phase 5) recommended next**).
+ANF lifting + loops with suspend inside (back-Jump +
+while-true wrap). 9 v3.1 acceptance examples parity-green.
+Phases 2.3 (match), 2.4 (try), 2.5b (break/continue),
+3-4 queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -94,6 +95,25 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - **A0.2 deferred** — Phase 1's compiler-driven sugar
     resolves this naturally by concretizing T at transform
     time.
+
+- **v3.1 Phase 2.5 — loops with suspend** (commit `a77b799`).
+  Lifts the "while body cannot contain suspends"
+  restriction:
+  - Stmt::While with suspends in body now state-splits:
+    loop_header + body_start + post_loop states + BACKWARD
+    `Seg::Jump` at body tail
+  - Synthesis wraps poll body in `while true { ... return
+    -1; }` so backward Jumps use `continue;` to re-enter
+    the cascade
+  - Jump synthesis detects `target_state <= state_idx`
+    (backward jump) and emits `Stmt::Continue`
+  - Branch validator relaxed for Phase 2.5 needs: Assign +
+    Print allowed inside suspending branches (when their
+    exprs don't suspend — ANF lifts those)
+  - `examples/echo_loop.vani` — 3-iteration while loop
+    reading 4 + 0 + 0 bytes. "3-iter loop total: 4"
+    byte-identical on both backends
+  - 2 new lib tests
 
 - **v3.1 Phase 2.2 — ANF lifting** (commit `d3a0af3`).
   Lifts the restriction that `io_*_async` must appear ONLY
@@ -217,13 +237,13 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1841 lib + 54 parity green** (parity includes
+**1843 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
 `tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
 `echo_nested_if.vani`, `echo_anf_lift.vani`,
-`echo_with_timeout.vani`, and `timer_async.vani`
-byte-identical-stdout checks).
+`echo_loop.vani`, `echo_with_timeout.vani`, and
+`timer_async.vani` byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 

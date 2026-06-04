@@ -11,6 +11,15 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.5 ✅ COMPLETE 2026-06-04** (commit `a77b799`).
+> Loops with suspend inside body. Stmt::While state-splits
+> into loop_header + body + post_loop with a BACKWARD
+> Seg::Jump at body tail. Synthesis wraps poll body in
+> `while true { ... }` + emits `Stmt::Continue` after
+> backward jumps. examples/echo_loop.vani parity-green.
+> 2 new lib tests. Phase 2.5b (break/continue inside
+> suspending loops) deferred.
+>
 > **Phase 2.2 ✅ COMPLETE 2026-06-04** (commit `d3a0af3`).
 > ANF lifting for nested `io_*_async` calls in compound
 > expressions. Pre-pass `anf_lift_body` runs before
