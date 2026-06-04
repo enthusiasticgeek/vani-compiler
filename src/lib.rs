@@ -20962,6 +20962,41 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3 — async-flavored I/O alias surface. Behaves
+    /// identically to the v2 nb counterparts (alias rewritten
+    /// at the typed-IR boundary in `check_epoll_builtin`).
+    /// The names reserve the future v3.1 state-machine
+    /// suspend-point semantics.
+    #[test]
+    fn io_async_aliases_route_to_nb_variants() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = io_recv_async(0, 64);
+              let _ = io_send_async(0, 64);
+              let _ = io_accept_async(0);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("io aliases must type-check on C");
+        let ll = compile_to_llvm(source).expect("io aliases must type-check on LLVM");
+        // After alias rewrite, the typed IR contains tcp_recv_nb /
+        // tcp_send_buf / tcp_accept_nb, NOT the alias names.
+        assert!(
+            c.contains("intent_tcp_recv_nb")
+                && c.contains("intent_tcp_send_buf")
+                && c.contains("intent_tcp_accept_nb"),
+            "C output must lower io_*_async aliases to v2 nb helpers; got:\n{}",
+            c
+        );
+        assert!(
+            ll.contains("@intent_tcp_recv_nb")
+                && ll.contains("@intent_tcp_send_buf")
+                && ll.contains("@intent_tcp_accept_nb"),
+            "LLVM output must lower io_*_async aliases to v2 nb helpers; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
     #[test]
     fn tcp_recv_nb_alone_emits_tcp_buf() {
         // Regression: using only tcp_recv_nb without any regular

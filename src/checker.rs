@@ -19,7 +19,13 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // returning sentinel codes (-2 = would-block / EAGAIN).
     "epoll_new", "epoll_add_read", "epoll_wait_one",
     "epoll_close",
-    "tcp_set_nonblocking", "tcp_accept_nb", "tcp_recv_nb"];
+    "tcp_set_nonblocking", "tcp_accept_nb", "tcp_recv_nb",
+    // Arc 8 v3 — async-flavored aliases for the v2 nb variants.
+    // Same runtime behavior; the names reserve future state-
+    // machine codegen semantics (when the compiler-driven
+    // `async fn` -> `Task<T>` transform lands, calls to these
+    // builtins inside an async fn body become suspend points).
+    "io_recv_async", "io_send_async", "io_accept_async"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -15400,7 +15406,13 @@ fn check_call(
         // accept / recv return -2 instead of -1.
         "epoll_new" | "epoll_add_read" | "epoll_wait_one"
         | "epoll_close"
-        | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb" => {
+        | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb"
+        // Arc 8 v3 — async-flavored aliases route to the same
+        // checker; the alias is rewritten to its v2 nb variant
+        // at codegen so behavior is identical TODAY. The names
+        // reserve the future state-machine-suspend-point
+        // semantics for the v3.1 compiler-driven transform.
+        | "io_recv_async" | "io_send_async" | "io_accept_async" => {
             return check_epoll_builtin(
                 name, args, env, signatures, span, diagnostics,
             );
@@ -23000,8 +23012,10 @@ fn check_epoll_builtin(
 ) -> CheckedExpr {
     let want_args: usize = match name {
         "epoll_new" => 0,
-        "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb" => 1,
-        "epoll_add_read" | "epoll_wait_one" | "tcp_recv_nb" => 2,
+        "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb"
+        | "io_accept_async" => 1,
+        "epoll_add_read" | "epoll_wait_one" | "tcp_recv_nb"
+        | "io_recv_async" | "io_send_async" => 2,
         _ => unreachable!("unknown epoll builtin: {}", name),
     };
     if args.len() != want_args {
@@ -23027,9 +23041,21 @@ fn check_epoll_builtin(
         );
         typed_args.push(coerced.expr);
     }
+    // Arc 8 v3 — canonicalize async-flavored aliases to their
+    // v2 nb counterparts at the typed-IR boundary so the
+    // backends only need to know one name per primitive. When
+    // the compiler-driven state-machine transform lands later
+    // (v3.1), it will scan for the alias names BEFORE this
+    // rewrite so suspend-point semantics still trigger.
+    let canonical = match name {
+        "io_recv_async" => "tcp_recv_nb",
+        "io_send_async" => "tcp_send_buf",
+        "io_accept_async" => "tcp_accept_nb",
+        other => other,
+    };
     CheckedExpr::new(
         TypedExprKind::Call {
-            name: name.to_string(),
+            name: canonical.to_string(),
             name_span: span,
             args: typed_args,
         },

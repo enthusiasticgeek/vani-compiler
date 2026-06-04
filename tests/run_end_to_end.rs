@@ -824,6 +824,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "tcp_echo.vani",
         "tcp_multi_echo.vani",
         "tcp_echo_epoll.vani",
+        "tcp_echo_state_machine.vani",
         "array_proofs.vani",
         "array_return.vani",
         "arrays.vani",
