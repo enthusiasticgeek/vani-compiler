@@ -21169,6 +21169,60 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2.3-narrow — match expressions inside
+    /// async fn bodies (when no arm contains a suspend).
+    #[test]
+    fn v31_phase23_match_no_suspends_in_arms() {
+        let source = r#"
+            async fn match_demo(fd: i64, mode: i64) -> i64 {
+              let label: i64 = match mode {
+                0 then 100,
+                1 then 200,
+                _ then 0
+              };
+              let n: i64 = io_recv_async(fd, 64);
+              return n + label;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("match in async fn must compile on C");
+        let ll = compile_to_llvm(source).expect("match in async fn must compile on LLVM");
+        // Task struct has fields for mode (param), label (Let).
+        assert!(
+            c.contains("Task__match_demo") && c.contains("__poll_match_demo"),
+            "C output must include synthesized Task struct + poll fn"
+        );
+        assert!(
+            ll.contains("Task__match_demo") && ll.contains("__poll_match_demo"),
+            "LLVM output must include synthesized Task struct + poll fn"
+        );
+    }
+
+    #[test]
+    fn v31_phase23a_match_with_suspend_in_arm_rejected() {
+        // Suspend inside a match arm — Phase 2.3a needs
+        // per-arm state graphs. Phase 2.3-narrow rejects.
+        let source = r#"
+            async fn bad_match(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match mode {
+                0 then io_recv_async(fd, 64),
+                _ then 0
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 2.3-narrow must reject suspend-in-match-arm");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2.3a") || m.contains("per-arm state graphs") || m.contains("match")
+            }),
+            "expected Phase 2.3a / per-arm-state diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside
     /// suspending loops. The collector maintains a loop_stack;
     /// break/continue translate to state_tag jumps targeting

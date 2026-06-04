@@ -4758,6 +4758,13 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
             ExprKind::MethodCall { receiver, args, .. } => {
                 expr_uses(receiver) || args.iter().any(expr_uses)
             }
+            // Phase 2.3-narrow: walk Match scrutinee + arm
+            // bodies so the outer transform-trigger detects
+            // suspends nested in match (per-arm state graphs
+            // arrive in Phase 2.3a).
+            ExprKind::Match { scrutinee, arms } => {
+                expr_uses(scrutinee) || arms.iter().any(|a| expr_uses(&a.body))
+            }
             _ => false,
         }
     }
@@ -4829,6 +4836,14 @@ fn expr_contains_io_async(e: &Expr) -> bool {
         ExprKind::FieldAccess { object, .. } => expr_contains_io_async(object),
         ExprKind::MethodCall { receiver, args, .. } => {
             expr_contains_io_async(receiver) || args.iter().any(expr_contains_io_async)
+        }
+        // Phase 2.3-narrow: walk Match scrutinee + arm bodies
+        // so the v3.1 transform sees suspends nested inside
+        // match arms (currently rejected with a Phase 2.3a
+        // pointer; future phase adds per-arm state graphs).
+        ExprKind::Match { scrutinee, arms } => {
+            expr_contains_io_async(scrutinee)
+                || arms.iter().any(|a| expr_contains_io_async(&a.body))
         }
         _ => false,
     }
@@ -5361,7 +5376,7 @@ fn validate_v31_linear_body(
     let mut locals: Vec<(String, Type, crate::span::Span)> = Vec::new();
     for s in body.iter() {
         match s {
-            Stmt::Let { name, annotation, span, .. } => {
+            Stmt::Let { name, annotation, expr, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
                 if !matches!(ty, Type::I64) {
                     return Err(Diagnostic::new(
@@ -5371,6 +5386,19 @@ fn validate_v31_linear_body(
                             name, ty
                         ),
                     ));
+                }
+                // Phase 2.3-narrow: detect `let x = match … { …
+                // io_*_async … };` — match arms with suspends
+                // need per-arm state graphs (Phase 2.3a). Catch
+                // here so the user gets a clean diagnostic
+                // instead of broken-at-runtime state machine.
+                if let ExprKind::Match { .. } = &expr.kind {
+                    if expr_contains_io_async(expr) {
+                        return Err(Diagnostic::new(
+                            *span,
+                            "v3.1 async fn: `match` arm contains an `io_*_async` suspend — Phase 2.3 narrow allows match only when arms don't suspend; per-arm state graphs arrive in Phase 2.3a",
+                        ));
+                    }
                 }
                 // Skip `let _ = ...` (Discard) from locals — but
                 // still process its RHS later in the state machine.
@@ -5632,6 +5660,44 @@ fn rewrite_vars_to_fields(
         },
         ExprKind::RefMut { inner } => ExprKind::RefMut {
             inner: Box::new(rewrite_vars_to_fields(inner, rename_set, obj_name)),
+        },
+        // Phase 2.3 — Match expression: rewrite scrutinee +
+        // each arm's body. Patterns themselves don't contain
+        // exprs (just literals / variant names / bindings).
+        ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+            scrutinee: Box::new(rewrite_vars_to_fields(scrutinee, rename_set, obj_name)),
+            arms: arms.iter().map(|a| crate::ast::MatchArm {
+                pattern: a.pattern.clone(),
+                pattern_span: a.pattern_span,
+                body: rewrite_vars_to_fields(&a.body, rename_set, obj_name),
+            }).collect(),
+        },
+        ExprKind::MethodCall { receiver, method, method_span, args } => ExprKind::MethodCall {
+            receiver: Box::new(rewrite_vars_to_fields(receiver, rename_set, obj_name)),
+            method: method.clone(),
+            method_span: *method_span,
+            args: args.iter().map(|a| rewrite_vars_to_fields(a, rename_set, obj_name)).collect(),
+        },
+        ExprKind::Tuple(elements) => ExprKind::Tuple(
+            elements.iter().map(|e| rewrite_vars_to_fields(e, rename_set, obj_name)).collect(),
+        ),
+        ExprKind::TupleAccess { tuple, index } => ExprKind::TupleAccess {
+            tuple: Box::new(rewrite_vars_to_fields(tuple, rename_set, obj_name)),
+            index: *index,
+        },
+        ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
+            object: Box::new(rewrite_vars_to_fields(object, rename_set, obj_name)),
+            field: field.clone(),
+        },
+        ExprKind::StructLit { type_name, type_name_span, fields } => ExprKind::StructLit {
+            type_name: type_name.clone(),
+            type_name_span: *type_name_span,
+            fields: fields.iter().map(|(n, e)| {
+                (n.clone(), rewrite_vars_to_fields(e, rename_set, obj_name))
+            }).collect(),
+        },
+        ExprKind::ArrayLit { elements } => ExprKind::ArrayLit {
+            elements: elements.iter().map(|e| rewrite_vars_to_fields(e, rename_set, obj_name)).collect(),
         },
         other => other.clone(),
     };

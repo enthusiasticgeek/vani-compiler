@@ -1,0 +1,77 @@
+// Arc 8 v3.1 Phase 2.3-narrow — match expressions inside async fns.
+//
+// Phase 2.3-narrow allows `match` expressions inside async
+// fn bodies provided no match arm contains a suspend. The
+// rewriter recursively walks the Match's scrutinee + arm
+// bodies so Vars referring to outer-scope locals/params hit
+// `__t.field`. The match runs in a single state arm and
+// produces a value that's then stored into the task struct.
+//
+// Suspends INSIDE match arms (`match v { 0 -> io_recv_async(...) }`)
+// need per-arm state graphs and arrive in Phase 2.3a. The
+// validator rejects them with a clear phase pointer.
+//
+// build & run:
+//   intentc run examples/echo_match.vani                # LLVM
+//   intentc run examples/echo_match.vani --backend=c    # C
+
+intent "Phase 2.3-narrow — match in async fn (no suspends in arms)";
+
+async fn echo_with_mode(fd: i64, mode: i64) -> i64 {
+  // Match expression inside async body — Phase 2.3-narrow.
+  // Compiler synthesizes a task struct field for `label`
+  // (the let-bound result) and the rewriter rewrites
+  // `mode` to `__t.mode` inside the scrutinee.
+  let label: i64 = match mode {
+    0 then 100,
+    1 then 200,
+    2 then 300,
+    _ then 0
+  };
+
+  // Suspend point AFTER the match — Phase 1 sequential
+  // shape. State machine: match runs in state 0; recv
+  // happens in state 1; final return in state 2.
+  let n: i64 = io_recv_async(fd, 64);
+  return n + label;
+}
+
+fn drive(ep: i64, t: mut ref Task__echo_with_mode) -> i64 {
+  while true {
+    let r: i64 = __poll_echo_with_mode(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "match");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=2 → label=300; recv "match" = 5 bytes;
+  // total = 300 + 5 = 305.
+  let t: Task__echo_with_mode = echo_with_mode(cfd, 2);
+  let r: i64 = drive(ep, mut ref t);
+  print "match-then-recv result:", r;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
