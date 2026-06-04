@@ -20981,6 +20981,102 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3.1 Phase 1 — compiler-driven async-fn → Task
+    /// transform. Verify the simplest linear async fn produces
+    /// the expected `Task__<name>` struct + `__poll_<name>` fn.
+    #[test]
+    fn v31_phase1_simplest_async_fn_synthesizes_task_and_poll() {
+        let source = r#"
+            async fn echo_once(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("v3.1 async fn must compile on C");
+        let ll = compile_to_llvm(source).expect("v3.1 async fn must compile on LLVM");
+        assert!(
+            c.contains("Task__echo_once") && c.contains("__poll_echo_once"),
+            "C output must include synthesized Task struct + poll fn; got snippet:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        assert!(
+            ll.contains("Task__echo_once") && ll.contains("__poll_echo_once"),
+            "LLVM output must include synthesized Task struct + poll fn; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn v31_phase1_async_fn_with_two_suspend_points() {
+        let source = r#"
+            async fn double_io(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              let _ = io_send_async(fd, n);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("v3.1 two-await must compile on C");
+        let ll = compile_to_llvm(source).expect("v3.1 two-await must compile on LLVM");
+        // Phase 1 wires io_*_async → canonical nb variants at
+        // the typed-IR boundary. Two suspend points means both
+        // tcp_recv_nb AND tcp_send_buf appear in the synthesized
+        // poll fn.
+        assert!(
+            c.contains("intent_tcp_recv_nb") && c.contains("intent_tcp_send_buf"),
+            "C output must include both nb helpers from the synthesized poll fn; got:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        assert!(
+            ll.contains("@intent_tcp_recv_nb") && ll.contains("@intent_tcp_send_buf"),
+            "LLVM output must include both nb helpers from the synthesized poll fn; got:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn v31_phase1_async_fn_without_io_async_falls_to_v1_desugar() {
+        // No io_*_async calls inside the body — v3.1 transform
+        // should NOT fire; v1 sync desugar applies.
+        let source = r#"
+            async fn sync_async(x: i64) -> i64 {
+              return x * 2;
+            }
+            fn main() -> i64 {
+              let r: i64 = await(sync_async(7));
+              return r;
+            }
+        "#;
+        compile_to_c(source).expect("sync async fn must use v1 desugar on C");
+        compile_to_llvm(source).expect("sync async fn must use v1 desugar on LLVM");
+    }
+
+    #[test]
+    fn v31_phase1_non_linear_body_rejected_with_phase_2_diag() {
+        // Body has io_recv_async + an `if` → v3.1 Phase 1
+        // rejects with a clear Phase 2 pointer.
+        let source = r#"
+            async fn conditional(fd: i64) -> i64 {
+              if fd > 0 {
+                let n: i64 = io_recv_async(fd, 64);
+                return n;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("v3.1 must reject if-in-body");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2") || m.contains("control flow") || m.contains("no `if`")
+            }),
+            "expected Phase 2 / control-flow diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn sleep_ms_async_typechecks_on_both_backends() {
         let source = r#"

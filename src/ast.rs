@@ -208,6 +208,16 @@ thread_local! {
     /// to emit closure-struct construction.
     pub(crate) static CLOSURE_MAKE_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, String, Vec<Type>, Vec<Type>, Type)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Arc 8 v3.1 Phase 1 — registry of synthesized async-fn
+    /// state machines. Each entry is a `(StructDecl, Function)`
+    /// pair: the per-async-fn task struct + its companion
+    /// `__poll_<name>` function. parse_function pushes one
+    /// entry per v3.1-eligible async fn; parse_program flushes
+    /// the registry into Program.structs + Program.functions
+    /// at end-of-parse. Linear-body-only in this phase; control
+    /// flow / affine types come in Phases 2-3.
+    pub(crate) static V31_TASK_REGISTRY: std::cell::RefCell<Vec<(StructDecl, Function)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
 }
 
 pub fn set_user_drop_by_ref<I: IntoIterator<Item = String>>(names: I) {

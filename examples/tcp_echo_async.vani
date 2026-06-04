@@ -1,0 +1,101 @@
+// Arc 8 v3.1 Phase 1 — compiler-driven async fn → Task transform.
+//
+// THIS IS THE PHASE 1 ACCEPTANCE. The user writes `async fn`
+// + `io_*_async` calls + a return; the compiler synthesizes:
+//   - a per-fn `__TaskFor_<name>` struct (state_tag + saved
+//     params + locals)
+//   - a `__poll_<name>` fn that drives the state machine
+//   - replaces the original fn body with a constructor
+//     returning the Task struct
+//
+// Compare to `tcp_echo_state_machine.vani` (Arc 8 v3 pattern):
+// that example has the user write the struct + poll fn + driver
+// loop by hand. This one auto-generates the struct + poll fn.
+// User-facing source becomes the async fn body plus a small
+// drive loop that calls `__poll_<name>` (the driver builtin
+// arrives in a later phase).
+//
+// build & run:
+//   intentc run examples/tcp_echo_async.vani                # LLVM
+//   intentc run examples/tcp_echo_async.vani --backend=c    # C
+
+intent "Compiler-driven async fn → Task — Arc 8 v3.1 Phase 1";
+
+// Phase 1 linear-core form: linear body, all-i64 locals + params,
+// each `let` is either a normal i64 expr OR a suspend point
+// (`io_*_async` call), ending with `return EXPR`.
+//
+// The compiler walks this body and synthesizes:
+//   struct Task__echo_once { state_tag, fd, n }
+//   fn __poll_echo_once(__t: mut ref Task__echo_once) -> i64 {
+//     if __t.state_tag == 0 {
+//       let r0: i64 = tcp_recv_nb(__t.fd, 64);  // suspend
+//       if r0 == 0 - 2 { return 0 - 2; }
+//       if r0 < 0 { return 0 - 1; }
+//       __t.n = r0;
+//       __t.state_tag = 1;
+//     }
+//     if __t.state_tag == 1 {
+//       let r1: i64 = tcp_send_buf(__t.fd, __t.n);  // suspend
+//       if r1 == 0 - 2 { return 0 - 2; }
+//       if r1 < 0 { return 0 - 1; }
+//       __t.state_tag = 2;
+//     }
+//     if __t.state_tag == 2 {
+//       return __t.n;
+//     }
+//     return 0 - 1;
+//   }
+//   fn echo_once(fd: i64) -> Task__echo_once {
+//     return Task__echo_once { state_tag: 0, fd: fd, n: 0 };
+//   }
+async fn echo_once(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let _ = io_send_async(fd, n);
+  return n;
+}
+
+// Driver loop. v3.1.1+ ships intent_event_loop_run as a builtin;
+// for now the user writes this 5-line loop.
+fn drive(ep: i64, t: mut ref Task__echo_once) -> i64 {
+  while true {
+    let r: i64 = __poll_echo_once(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "v31");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // The compiler-synthesized constructor runs HERE — `echo_once(cfd)`
+  // returns a `Task__echo_once`, NOT an i64. The driver loop polls
+  // it via the auto-generated `__poll_echo_once`.
+  // (Binding named `t` not `task` — the latter is a vāṇī keyword
+  // for `task ta { ... }` thread spawns.)
+  let t: Task__echo_once = echo_once(cfd);
+  let bytes: i64 = drive(ep, mut ref t);
+  print "echoed bytes:", bytes;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

@@ -55,6 +55,12 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> Program {
+        // Arc 8 v3.1 Phase 1 — clear the v3.1 task registry so
+        // multi-program test runs (lib tests, parity sweeps)
+        // don't accumulate stale synthesized struct/poll-fn
+        // pairs from earlier compiles in the same process.
+        crate::ast::V31_TASK_REGISTRY.with(|r| r.borrow_mut().clear());
+
         let mut intents = Vec::new();
         let mut functions = Vec::new();
         let mut uses = Vec::new();
@@ -229,6 +235,19 @@ impl Parser {
                 self.sync_to_top_level();
             }
         }
+
+        // Arc 8 v3.1 Phase 1 — flush V31_TASK_REGISTRY entries
+        // synthesized by try_v31_transform during parse_function.
+        // Each entry contributes one struct + one poll fn into
+        // the program-level decls.
+        let mut functions = functions;
+        let mut structs = structs;
+        crate::ast::V31_TASK_REGISTRY.with(|reg| {
+            for (s, f) in reg.borrow_mut().drain(..) {
+                structs.push(s);
+                functions.push(f);
+            }
+        });
 
         Program {
             intents,
@@ -1285,13 +1304,41 @@ impl Parser {
         // (state-machine transform + event loop) is queued as
         // Arc 8 steps 8c–8h.
         let (final_return_type, final_body) = if is_async {
-            let wrapped_ret = Type::Apply {
-                name: "Future".to_string(),
-                args: vec![return_type],
-            };
-            let mut new_body = body;
-            wrap_returns_in_future_ready(&mut new_body);
-            (wrapped_ret, new_body)
+            // Arc 8 v3.1 Phase 1 — try the state-machine
+            // transform first. If body has io_*_async calls
+            // AND satisfies linear-core shape, the transform
+            // produces a constructor body + Task struct return
+            // type and queues the synthesized struct/poll fn
+            // in V31_TASK_REGISTRY for parse_program to flush.
+            // Otherwise fall through to v1 sync desugar below.
+            match try_v31_transform(
+                &name,
+                fn_token.span.merge(name_span),
+                &params,
+                &body,
+                &return_type,
+            ) {
+                Some(Ok((task_ret, ctor_body))) => (task_ret, ctor_body),
+                Some(Err(diag)) => {
+                    self.errors.push(diag);
+                    let wrapped_ret = Type::Apply {
+                        name: "Future".to_string(),
+                        args: vec![return_type],
+                    };
+                    let mut new_body = body;
+                    wrap_returns_in_future_ready(&mut new_body);
+                    (wrapped_ret, new_body)
+                }
+                None => {
+                    let wrapped_ret = Type::Apply {
+                        name: "Future".to_string(),
+                        args: vec![return_type],
+                    };
+                    let mut new_body = body;
+                    wrap_returns_in_future_ready(&mut new_body);
+                    (wrapped_ret, new_body)
+                }
+            }
         } else {
             (return_type, body)
         };
@@ -4642,4 +4689,767 @@ fn expr_as_int_literal(
         }
         _ => None,
     }
+}
+
+// =========================================================
+// Arc 8 v3.1 Phase 1 — compiler-driven state-machine codegen
+// =========================================================
+//
+// For an `async fn` whose body contains calls to the
+// `io_*_async` builtin family, this transform replaces the
+// body with a constructor that returns a per-fn task struct,
+// and synthesizes both the struct + a `__poll_<name>` function
+// that drives the state machine.
+//
+// Scope (linear-core, Phase 1):
+// - Body is LINEAR: only Let / Return / Discard / Print at the
+//   top level. No if / while / for / match / try / break /
+//   continue. Reject with a clear diagnostic if found.
+// - All params + locals are i64. Reject non-i64 with a clear
+//   diagnostic.
+// - Return type is i64. Each Let RHS is either:
+//   * a Call to `io_recv_async(fd, max)`,
+//     `io_send_async(fd, n)`, or `io_accept_async(fd)` —
+//     these are SUSPEND POINTS that bump the state tag and
+//     check for Pending (-2) / Error (-1)
+//   * any other i64-typed expression — emitted verbatim in
+//     the current state's prologue
+// - Return EXPR — rewritten so locals/params reference
+//   `t.field`; emitted in the final state.
+//
+// Out of scope (deferred to Phases 2-4):
+// - Control flow inside async body (Phase 2)
+// - Non-i64 locals / affine types across await (Phase 3)
+// - Multi-await in one expression / ref params / generics /
+//   nested async calls / CancelToken auto-plumbing (Phase 4)
+//
+// The synthesized struct + poll fn get queued in
+// `V31_TASK_REGISTRY`; `parse_program` flushes the queue into
+// `Program.structs` + `Program.functions` at end-of-parse.
+
+/// Detect whether an `async fn` body contains any
+/// `io_*_async` call. Walks Let / Return / Print / Discard /
+/// FieldAssign / Assign / IndexAssign statements and the
+/// embedded Expr trees. Returns true on the first hit.
+pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
+    fn expr_uses(e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::Call { name, args, .. } => {
+                if matches!(
+                    name.as_str(),
+                    "io_recv_async" | "io_send_async" | "io_accept_async"
+                ) {
+                    return true;
+                }
+                args.iter().any(expr_uses)
+            }
+            ExprKind::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            ExprKind::Unary { expr, .. }
+            | ExprKind::Cast { expr, .. } => expr_uses(expr),
+            ExprKind::Index { array, index } => expr_uses(array) || expr_uses(index),
+            ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+                elements.iter().any(expr_uses)
+            }
+            ExprKind::TupleAccess { tuple, .. } => expr_uses(tuple),
+            ExprKind::Len { array } => expr_uses(array),
+            ExprKind::Ref { inner } | ExprKind::RefMut { inner } => expr_uses(inner),
+            ExprKind::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            ExprKind::FieldAccess { object, .. } => expr_uses(object),
+            ExprKind::MethodCall { receiver, args, .. } => {
+                expr_uses(receiver) || args.iter().any(expr_uses)
+            }
+            _ => false,
+        }
+    }
+    fn stmt_uses(s: &Stmt) -> bool {
+        match s {
+            Stmt::Let { expr, .. }
+            | Stmt::LetTuple { expr, .. }
+            | Stmt::Return { expr, .. }
+            | Stmt::Assert { expr, .. }
+            | Stmt::Prove { expr, .. }
+            | Stmt::Assign { expr, .. } => expr_uses(expr),
+            Stmt::Print { items, .. } => items.iter().any(|it| match it {
+                crate::ast::PrintItem::Expr(e) => expr_uses(e),
+                crate::ast::PrintItem::Str(_) => false,
+            }),
+            Stmt::If { cond, then_body, else_body, .. } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            Stmt::While { cond, body, .. } => {
+                expr_uses(cond) || body.iter().any(stmt_uses)
+            }
+            Stmt::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            Stmt::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    body.iter().any(stmt_uses)
+}
+
+/// Phase 1 narrow-case eligibility check. Returns the locals
+/// (in declaration order) on success; an error diagnostic on
+/// rejection. Rejects:
+/// - Non-linear shapes (if / while / for / match / break /
+///   continue / try at top level).
+/// - Non-i64 params, locals, return type.
+/// - Multiple Returns; Return not at end.
+/// - Print / Assign / non-Let / non-Return at top level (kept
+///   strict for Phase 1; Phase 2 widens).
+fn validate_v31_linear_body(
+    params: &[Param],
+    body: &[Stmt],
+    return_type: &Type,
+) -> Result<Vec<(String, Type, crate::span::Span)>, Diagnostic> {
+    // Return type must be i64.
+    if !matches!(return_type, Type::I64) {
+        return Err(Diagnostic::new(
+            body.first().map(|s| match s {
+                Stmt::Let { span, .. }
+                | Stmt::Return { span, .. } => *span,
+                _ => crate::span::Span::new(0, 0),
+            }).unwrap_or(crate::span::Span::new(0, 0)),
+            format!(
+                "v3.1 async fn must return i64 (got {:?}); other return types arrive in Phase 3 (affine types across await)",
+                return_type
+            ),
+        ));
+    }
+    // All params must be i64 (no ref T, no other types).
+    for p in params {
+        if !matches!(p.ty, Type::I64) {
+            return Err(Diagnostic::new(
+                p.span,
+                format!(
+                    "v3.1 async fn parameter '{}' must be i64 (got {:?}); ref / non-i64 params arrive in Phase 3-4",
+                    p.name, p.ty
+                ),
+            ));
+        }
+    }
+    // Walk body. Collect Let locals. Reject control flow + non-Let / non-Return.
+    let mut locals: Vec<(String, Type, crate::span::Span)> = Vec::new();
+    let last_idx = body.len().saturating_sub(1);
+    for (i, s) in body.iter().enumerate() {
+        match s {
+            Stmt::Let { name, annotation, span, .. } => {
+                let ty = annotation.clone().unwrap_or(Type::I64);
+                if !matches!(ty, Type::I64) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn local '{}' must be i64 (got {:?}); non-i64 locals arrive in Phase 3 (affine types across await)",
+                            name, ty
+                        ),
+                    ));
+                }
+                // Skip `let _ = ...` (Discard) from locals — but
+                // still process its RHS later in the state machine.
+                if name != "_" {
+                    locals.push((name.clone(), ty, *span));
+                }
+            }
+            Stmt::Return { expr: _, span } => {
+                if i != last_idx {
+                    return Err(Diagnostic::new(
+                        *span,
+                        "v3.1 async fn: `return` must be the last statement; mid-body early-returns arrive in Phase 2",
+                    ));
+                }
+            }
+            Stmt::Print { span, .. } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    "v3.1 async fn: `print` between suspend points isn't yet supported; arrives in Phase 2 (side-effect ordering)",
+                ));
+            }
+            Stmt::Assign { span, .. } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    "v3.1 async fn: `=` reassignment of locals isn't yet supported; arrives in Phase 2",
+                ));
+            }
+            Stmt::If { span, .. } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    "v3.1 async fn body must be linear (no `if`); control flow arrives in Phase 2",
+                ));
+            }
+            Stmt::While { span, .. } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    "v3.1 async fn body must be linear (no `while`); loops arrive in Phase 2",
+                ));
+            }
+            Stmt::Break { span } | Stmt::Continue { span } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    "v3.1 async fn body must be linear (no break/continue); arrives in Phase 2",
+                ));
+            }
+            // Reject other forms with a generic message.
+            _ => {
+                return Err(Diagnostic::new(
+                    crate::span::Span::new(0, 0),
+                    "v3.1 async fn body contains an unsupported statement form for Phase 1 (linear core); see ARC8_V3_PLAN.md",
+                ));
+            }
+        }
+    }
+    // Last stmt must be Return.
+    match body.last() {
+        Some(Stmt::Return { .. }) => Ok(locals),
+        _ => Err(Diagnostic::new(
+            crate::span::Span::new(0, 0),
+            "v3.1 async fn body must end with `return EXPR;`",
+        )),
+    }
+}
+
+/// Build a simple i64 binary subtract expression `a - b` —
+/// vāṇī source convention for negative literals (no unary
+/// minus literal). Used by the synthesized poll fn to compare
+/// against the -2 (Pending) and -1 (Error) sentinels.
+fn synth_i64_sub(a: i128, b: i128, span: crate::span::Span) -> Expr {
+    Expr {
+        kind: ExprKind::Binary {
+            op: BinaryOp::Sub,
+            left: Box::new(Expr { kind: ExprKind::Int(a), span }),
+            right: Box::new(Expr { kind: ExprKind::Int(b), span }),
+        },
+        span,
+    }
+}
+
+/// Build a `t.field` field-access expression.
+fn synth_field_access(obj_name: &str, field: &str, span: crate::span::Span) -> Expr {
+    Expr {
+        kind: ExprKind::FieldAccess {
+            object: Box::new(Expr {
+                kind: ExprKind::Var(obj_name.to_string()),
+                span,
+            }),
+            field: field.to_string(),
+        },
+        span,
+    }
+}
+
+/// Rewrite every `Var(name)` in `expr` to `t.<name>` if `name`
+/// is in the rename set. Used inside the poll fn's state arms
+/// so that user-written locals + params resolve through the
+/// task struct.
+fn rewrite_vars_to_fields(
+    expr: &Expr,
+    rename_set: &std::collections::HashSet<String>,
+    obj_name: &str,
+) -> Expr {
+    let kind = match &expr.kind {
+        ExprKind::Var(name) if rename_set.contains(name) => {
+            return synth_field_access(obj_name, name, expr.span);
+        }
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op: *op,
+            left: Box::new(rewrite_vars_to_fields(left, rename_set, obj_name)),
+            right: Box::new(rewrite_vars_to_fields(right, rename_set, obj_name)),
+        },
+        ExprKind::Unary { op, expr: e } => ExprKind::Unary {
+            op: *op,
+            expr: Box::new(rewrite_vars_to_fields(e, rename_set, obj_name)),
+        },
+        ExprKind::Cast { expr: e, ty } => ExprKind::Cast {
+            expr: Box::new(rewrite_vars_to_fields(e, rename_set, obj_name)),
+            ty: ty.clone(),
+        },
+        ExprKind::Call { name, name_span, args } => ExprKind::Call {
+            name: name.clone(),
+            name_span: *name_span,
+            args: args.iter().map(|a| rewrite_vars_to_fields(a, rename_set, obj_name)).collect(),
+        },
+        ExprKind::Index { array, index } => ExprKind::Index {
+            array: Box::new(rewrite_vars_to_fields(array, rename_set, obj_name)),
+            index: Box::new(rewrite_vars_to_fields(index, rename_set, obj_name)),
+        },
+        ExprKind::Len { array } => ExprKind::Len {
+            array: Box::new(rewrite_vars_to_fields(array, rename_set, obj_name)),
+        },
+        ExprKind::Ref { inner } => ExprKind::Ref {
+            inner: Box::new(rewrite_vars_to_fields(inner, rename_set, obj_name)),
+        },
+        ExprKind::RefMut { inner } => ExprKind::RefMut {
+            inner: Box::new(rewrite_vars_to_fields(inner, rename_set, obj_name)),
+        },
+        other => other.clone(),
+    };
+    Expr { kind, span: expr.span }
+}
+
+/// Phase 1 transform entry point. If the async fn body is
+/// v3.1-eligible (contains io_*_async + linear shape + i64
+/// only), synthesize:
+/// - A `__TaskFor_<name>` struct with state_tag + params + locals
+/// - A `__poll_<name>` fn implementing the state machine
+/// - A constructor body that returns the struct
+///
+/// Pushes the new struct + poll fn into V31_TASK_REGISTRY for
+/// parse_program to flush. Returns the new (return_type,
+/// constructor_body) for the original async fn to adopt.
+///
+/// Returns None when the body has no io_*_async calls (caller
+/// falls through to v1 sync desugar).
+///
+/// Returns Some(Err(diag)) when the body has io_*_async calls
+/// but doesn't satisfy Phase 1's narrow shape — the diagnostic
+/// is bubbled up so the user sees a clear pointer to which
+/// later phase handles their case.
+pub(crate) fn try_v31_transform(
+    fn_name: &str,
+    fn_name_span: crate::span::Span,
+    params: &[Param],
+    body: &[Stmt],
+    return_type: &Type,
+) -> Option<Result<(Type, Vec<Stmt>), Diagnostic>> {
+    if !body_uses_io_async(body) {
+        return None; // Caller falls through to v1 desugar.
+    }
+    let locals = match validate_v31_linear_body(params, body, return_type) {
+        Ok(ls) => ls,
+        Err(d) => return Some(Err(d)),
+    };
+
+    // Synthesized type name MUST start uppercase per the
+    // parser's `parse_type` discipline ("only types can
+    // appear in type position; identifier must be
+    // PascalCase-leading"). Use the existing module-mangle
+    // convention with double-underscore separators.
+    let task_struct_name = format!("Task__{}", fn_name);
+    let poll_fn_name = format!("__poll_{}", fn_name);
+
+    // Build the rename set: all params + all (non-_) locals.
+    let mut rename: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for p in params {
+        rename.insert(p.name.clone());
+    }
+    for (name, _, _) in &locals {
+        rename.insert(name.clone());
+    }
+
+    // Task struct fields: state_tag (i64), then one i64 per
+    // param (in declaration order), then one i64 per local
+    // (in declaration order).
+    let mut struct_fields: Vec<StructField> = Vec::new();
+    struct_fields.push(StructField {
+        name: "state_tag".to_string(),
+        ty: Type::I64,
+        span: fn_name_span,
+    });
+    for p in params {
+        struct_fields.push(StructField {
+            name: p.name.clone(),
+            ty: Type::I64,
+            span: p.span,
+        });
+    }
+    for (name, ty, span) in &locals {
+        struct_fields.push(StructField {
+            name: name.clone(),
+            ty: ty.clone(),
+            span: *span,
+        });
+    }
+
+    let task_struct = StructDecl {
+        name: task_struct_name.clone(),
+        name_span: fn_name_span,
+        type_params: vec![],
+        fields: struct_fields,
+        span: fn_name_span,
+    };
+
+    // Walk the body again, splitting into states.
+    // State N spans:
+    //   - All non-suspend Let stmts + non-Return Print/Assign
+    //     stmts since the previous state
+    //   - Plus the suspend-point at the END of state N (if any)
+    // After each suspend point, bump state_tag and process the
+    // suspend's result.
+    //
+    // For Phase 1's narrow shape:
+    //   body = [ Let(L1, EXPR1), Let(L2, EXPR2), ..., Return(EXPR_R) ]
+    // where each Lt either contains a suspend (io_*_async) or not.
+    //
+    // We emit one state per Let-with-suspend + a final state for
+    // the Return.
+    //
+    // States layout:
+    //   state 0: any preceding non-suspend Lets + first suspend (or Return)
+    //   state N: result-handling for suspend N-1 + any non-suspend Lets +
+    //            next suspend (or Return)
+    //
+    // For simplicity, this Phase 1 implementation treats EACH
+    // Let as its own state segment. Non-suspend Lets are
+    // emitted directly inside the next state's prologue.
+
+    // Collect a flat list of (state_index, segment_kind):
+    //   - NonSuspendLet(name, expr): runs in the same state
+    //     where the previous suspend completed
+    //   - Suspend(name, builtin, args): runs as a suspend point
+    //   - Return(expr): final state
+    enum Seg {
+        NonSuspendLet { name: String, expr: Expr, span: crate::span::Span },
+        Suspend { local_name: String, builtin: String, args: Vec<Expr>, span: crate::span::Span },
+        Discard { expr: Expr, span: crate::span::Span },
+        Return { expr: Expr, span: crate::span::Span },
+    }
+    let mut segs: Vec<Seg> = Vec::new();
+    for s in body {
+        match s {
+            Stmt::Let { name, expr, span, .. } => {
+                let is_discard = name == "_";
+                // Detect suspend-Let.
+                if let ExprKind::Call { name: cname, args, .. } = &expr.kind {
+                    if matches!(
+                        cname.as_str(),
+                        "io_recv_async" | "io_send_async" | "io_accept_async"
+                    ) {
+                        if is_discard {
+                            // `let _ = io_*_async(...);` — treat as
+                            // suspend that discards the result. Use a
+                            // synthetic local name.
+                            let synth = format!("__v3_discard_{}", segs.len());
+                            segs.push(Seg::Suspend {
+                                local_name: synth,
+                                builtin: cname.clone(),
+                                args: args.clone(),
+                                span: *span,
+                            });
+                        } else {
+                            segs.push(Seg::Suspend {
+                                local_name: name.clone(),
+                                builtin: cname.clone(),
+                                args: args.clone(),
+                                span: *span,
+                            });
+                        }
+                        continue;
+                    }
+                }
+                // Non-suspend Let — could be a Discard or a regular Let.
+                if is_discard {
+                    segs.push(Seg::Discard { expr: expr.clone(), span: *span });
+                } else {
+                    segs.push(Seg::NonSuspendLet {
+                        name: name.clone(),
+                        expr: expr.clone(),
+                        span: *span,
+                    });
+                }
+            }
+            Stmt::Return { expr, span } => {
+                segs.push(Seg::Return { expr: expr.clone(), span: *span });
+            }
+            // validate_v31_linear_body already rejected other forms;
+            // unreachable in well-formed input.
+            _ => {}
+        }
+    }
+
+    // Assign state tags. Each Suspend bumps the state tag. We
+    // emit:
+    //   state 0:  all leading NonSuspendLet/Discard + first
+    //             Suspend's I/O call → if Pending return -2, save result, bump
+    //   state 1:  the same shape for the next suspend
+    //   ...
+    //   state N:  if N-1 was a suspend, this state holds the
+    //             non-suspend stmts after the last suspend +
+    //             the Return
+    //
+    // We'll build the poll fn body as a sequence of
+    // `if t.state_tag == K { ...; t.state_tag = K+1; }` blocks.
+
+    // Group segments by state. Each Suspend ends a state. The
+    // final Return is its own state (state = number of suspends).
+    let mut states: Vec<Vec<Seg>> = Vec::new();
+    let mut current: Vec<Seg> = Vec::new();
+    for s in segs {
+        let is_terminator = matches!(s, Seg::Suspend { .. } | Seg::Return { .. });
+        current.push(s);
+        if is_terminator {
+            states.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        // Trailing non-terminator stmts (shouldn't happen since validate
+        // requires Return at end), but be defensive.
+        states.push(current);
+    }
+
+    // Canonicalize alias names at the typed-IR boundary. v3.1
+    // poll fn calls the canonical nb variants directly.
+    let canonical = |n: &str| -> String {
+        match n {
+            "io_recv_async" => "tcp_recv_nb".to_string(),
+            "io_send_async" => "tcp_send_buf".to_string(),
+            "io_accept_async" => "tcp_accept_nb".to_string(),
+            other => other.to_string(),
+        }
+    };
+
+    // Build the poll fn's body.
+    let t_param_name = "__t".to_string();
+    let mut poll_body: Vec<Stmt> = Vec::new();
+    for (state_idx, state_segs) in states.iter().enumerate() {
+        let span = state_segs.first().map(|s| match s {
+            Seg::NonSuspendLet { span, .. }
+            | Seg::Suspend { span, .. }
+            | Seg::Discard { span, .. }
+            | Seg::Return { span, .. } => *span,
+        }).unwrap_or(fn_name_span);
+
+        // `if __t.state_tag == K { ... }`
+        let cond = Expr {
+            kind: ExprKind::Binary {
+                op: BinaryOp::Eq,
+                left: Box::new(synth_field_access(&t_param_name, "state_tag", span)),
+                right: Box::new(Expr { kind: ExprKind::Int(state_idx as i128), span }),
+            },
+            span,
+        };
+        let mut then_body: Vec<Stmt> = Vec::new();
+
+        for seg in state_segs {
+            match seg {
+                Seg::NonSuspendLet { name, expr, span } => {
+                    // Emit `let <synth>: i64 = <rewritten expr>;` then
+                    // assign to t.<name>.
+                    let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
+                    let synth_local = format!("__v3_tmp_{}", name);
+                    then_body.push(Stmt::Let {
+                        name: synth_local.clone(),
+                        annotation: Some(Type::I64),
+                        expr: rewritten_expr,
+                        span: *span,
+                    });
+                    then_body.push(Stmt::FieldAssign {
+                        object: Expr {
+                            kind: ExprKind::Var(t_param_name.clone()),
+                            span: *span,
+                        },
+                        field: name.clone(),
+                        field_span: *span,
+                        value: Expr {
+                            kind: ExprKind::Var(synth_local),
+                            span: *span,
+                        },
+                        span: *span,
+                    });
+                }
+                Seg::Discard { expr, span } => {
+                    // `let _ = EXPR;` — emit as a normal discard with the
+                    // expr rewritten so any Var refs hit the task struct.
+                    let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
+                    then_body.push(Stmt::Let {
+                        name: "_".to_string(),
+                        annotation: None,
+                        expr: rewritten_expr,
+                        span: *span,
+                    });
+                }
+                Seg::Suspend { local_name, builtin, args, span } => {
+                    // Suspend point. Emit:
+                    //   let r: i64 = canonical(arg0, arg1);
+                    //   if r == 0 - 2 { return 0 - 2; }
+                    //   if r < 0 { return 0 - 1; }
+                    //   t.<local_name> = r;
+                    //   t.state_tag = K+1;
+                    let canonical_name = canonical(builtin);
+                    let rewritten_args: Vec<Expr> = args
+                        .iter()
+                        .map(|a| rewrite_vars_to_fields(a, &rename, &t_param_name))
+                        .collect();
+                    let r_local = format!("__v3_r{}", state_idx);
+                    then_body.push(Stmt::Let {
+                        name: r_local.clone(),
+                        annotation: Some(Type::I64),
+                        expr: Expr {
+                            kind: ExprKind::Call {
+                                name: canonical_name,
+                                name_span: *span,
+                                args: rewritten_args,
+                            },
+                            span: *span,
+                        },
+                        span: *span,
+                    });
+                    // if r == 0 - 2 { return 0 - 2; }
+                    then_body.push(Stmt::If {
+                        cond: Expr {
+                            kind: ExprKind::Binary {
+                                op: BinaryOp::Eq,
+                                left: Box::new(Expr {
+                                    kind: ExprKind::Var(r_local.clone()),
+                                    span: *span,
+                                }),
+                                right: Box::new(synth_i64_sub(0, 2, *span)),
+                            },
+                            span: *span,
+                        },
+                        then_body: vec![Stmt::Return {
+                            expr: synth_i64_sub(0, 2, *span),
+                            span: *span,
+                        }],
+                        else_body: vec![],
+                        span: *span,
+                    });
+                    // if r < 0 { return 0 - 1; }
+                    then_body.push(Stmt::If {
+                        cond: Expr {
+                            kind: ExprKind::Binary {
+                                op: BinaryOp::Lt,
+                                left: Box::new(Expr {
+                                    kind: ExprKind::Var(r_local.clone()),
+                                    span: *span,
+                                }),
+                                right: Box::new(Expr { kind: ExprKind::Int(0), span: *span }),
+                            },
+                            span: *span,
+                        },
+                        then_body: vec![Stmt::Return {
+                            expr: synth_i64_sub(0, 1, *span),
+                            span: *span,
+                        }],
+                        else_body: vec![],
+                        span: *span,
+                    });
+                    // Save: t.<local_name> = r
+                    if !local_name.starts_with("__v3_discard_") {
+                        // Ensure the task struct knows about this field.
+                        // Already added during locals collection if the
+                        // user declared it; synthetic discard fields would
+                        // need adding too if we cared (we don't — discards
+                        // skip the save).
+                        then_body.push(Stmt::FieldAssign {
+                            object: Expr {
+                                kind: ExprKind::Var(t_param_name.clone()),
+                                span: *span,
+                            },
+                            field: local_name.clone(),
+                            field_span: *span,
+                            value: Expr {
+                                kind: ExprKind::Var(r_local),
+                                span: *span,
+                            },
+                            span: *span,
+                        });
+                    }
+                    // Bump: t.state_tag = K+1
+                    then_body.push(Stmt::FieldAssign {
+                        object: Expr {
+                            kind: ExprKind::Var(t_param_name.clone()),
+                            span: *span,
+                        },
+                        field: "state_tag".to_string(),
+                        field_span: *span,
+                        value: Expr {
+                            kind: ExprKind::Int((state_idx + 1) as i128),
+                            span: *span,
+                        },
+                        span: *span,
+                    });
+                }
+                Seg::Return { expr, span } => {
+                    let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
+                    then_body.push(Stmt::Return {
+                        expr: rewritten_expr,
+                        span: *span,
+                    });
+                }
+            }
+        }
+
+        poll_body.push(Stmt::If {
+            cond,
+            then_body,
+            else_body: vec![],
+            span,
+        });
+    }
+    // Defensive trailing `return 0 - 1;` (unreachable in
+    // well-formed state machines but keeps the fn body
+    // satisfying the i64 return type even on a fallthrough.
+    poll_body.push(Stmt::Return {
+        expr: synth_i64_sub(0, 1, fn_name_span),
+        span: fn_name_span,
+    });
+
+    // Build the poll Function.
+    let poll_fn = Function {
+        name: poll_fn_name,
+        type_params: vec![],
+        where_clauses: vec![],
+        params: vec![Param {
+            name: t_param_name.clone(),
+            ty: Type::RefMut(Box::new(Type::Struct(task_struct_name.clone()))),
+            name_span: fn_name_span,
+            span: fn_name_span,
+        }],
+        return_type: Type::I64,
+        requires: vec![],
+        ensures: vec![],
+        body: poll_body,
+        span: fn_name_span,
+        is_pure: false,
+        is_extern: false,
+        no_heap: false,
+        no_float: false,
+        no_recursion: false,
+        interrupt: false,
+        safety_standard: None,
+        bounded_stack: None,
+        wcet_cycles: None,
+        deterministic_timing: false,
+        recursion_bound: None,
+    };
+
+    // Build the constructor body: `return __TaskFor_<name> { state_tag: 0, <params>, <locals>: 0 };`
+    let mut ctor_fields: Vec<(String, Expr)> = Vec::new();
+    ctor_fields.push((
+        "state_tag".to_string(),
+        Expr { kind: ExprKind::Int(0), span: fn_name_span },
+    ));
+    for p in params {
+        ctor_fields.push((
+            p.name.clone(),
+            Expr {
+                kind: ExprKind::Var(p.name.clone()),
+                span: p.span,
+            },
+        ));
+    }
+    for (name, _, span) in &locals {
+        ctor_fields.push((
+            name.clone(),
+            Expr { kind: ExprKind::Int(0), span: *span },
+        ));
+    }
+    let ctor_body = vec![Stmt::Return {
+        expr: Expr {
+            kind: ExprKind::StructLit {
+                type_name: task_struct_name.clone(),
+                type_name_span: fn_name_span,
+                fields: ctor_fields,
+            },
+            span: fn_name_span,
+        },
+        span: fn_name_span,
+    }];
+
+    // Push the synthesized struct + poll fn into the registry.
+    crate::ast::V31_TASK_REGISTRY.with(|reg| {
+        reg.borrow_mut().push((task_struct, poll_fn));
+    });
+
+    Some(Ok((Type::Struct(task_struct_name), ctor_body)))
 }
