@@ -4867,6 +4867,107 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
     }
 }
 
+/// Phase 2.1a branch validator. Each branch of an if-with-
+/// suspend must:
+/// - Be linear (Let / Discard / Return only — no nested if /
+///   while / match / break / continue)
+/// - Each Let must be i64
+/// - End with `Stmt::Return` (no fall-through; Phase 2.1b
+///   adds merge states for that)
+///
+/// On failure, returns a diagnostic pointing at the offending
+/// stmt with a clear phase pointer.
+fn validate_v31_phase_21a_branch(
+    body: &[Stmt],
+    branch_label: &str,
+    deferred_phase: &str,
+) -> Result<(), Diagnostic> {
+    if body.is_empty() {
+        return Err(Diagnostic::new(
+            crate::span::Span::new(0, 0),
+            format!(
+                "v3.1 async fn: {} is empty; Phase 2.1a requires both branches to end with `return EXPR;` — empty/fall-through arrives in {}",
+                branch_label, deferred_phase
+            ),
+        ));
+    }
+    for s in body.iter() {
+        match s {
+            Stmt::Let { name, annotation, span, .. } => {
+                let ty = annotation.clone().unwrap_or(Type::I64);
+                if !matches!(ty, Type::I64) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn: {} local '{}' must be i64 (got {:?}); non-i64 across await arrives in Phase 3",
+                            branch_label, name, ty
+                        ),
+                    ));
+                }
+            }
+            Stmt::Return { .. } => {}
+            Stmt::Print { .. } | Stmt::Assign { .. } => {
+                // Phase 2.1a narrow: branches stay linear.
+                // Print + Assign inside a suspending branch
+                // arrive once Phase 2.1c lifts the linear
+                // restriction.
+                return Err(Diagnostic::new(
+                    crate::span::Span::new(0, 0),
+                    format!(
+                        "v3.1 async fn: {} contains Print/Assign; Phase 2.1a allows only Let + Return inside suspending branches — arrives in Phase 2.1c (relaxed branch body)",
+                        branch_label
+                    ),
+                ));
+            }
+            Stmt::If { span, .. } | Stmt::While { span, .. } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    format!(
+                        "v3.1 async fn: {} contains nested control flow; Phase 2.1a only supports linear branches — nested ifs/loops arrive in Phase 2.1c",
+                        branch_label
+                    ),
+                ));
+            }
+            Stmt::Break { span } | Stmt::Continue { span } => {
+                return Err(Diagnostic::new(
+                    *span,
+                    format!(
+                        "v3.1 async fn: {} contains break/continue — arrives in Phase 2.5 (loop with suspend-aware back-edge)",
+                        branch_label
+                    ),
+                ));
+            }
+            _ => {
+                return Err(Diagnostic::new(
+                    crate::span::Span::new(0, 0),
+                    format!(
+                        "v3.1 async fn: {} contains an unsupported statement form for Phase 2.1a — see ARC8_V3_PLAN.md",
+                        branch_label
+                    ),
+                ));
+            }
+        }
+    }
+    // Last stmt must be Return.
+    match body.last() {
+        Some(Stmt::Return { .. }) => Ok(()),
+        Some(other) => Err(Diagnostic::new(
+            match other {
+                Stmt::Let { span, .. } | Stmt::Print { span, .. } => *span,
+                _ => crate::span::Span::new(0, 0),
+            },
+            format!(
+                "v3.1 async fn: {} must end with `return EXPR;` in Phase 2.1a (fall-through arrives in {})",
+                branch_label, deferred_phase
+            ),
+        )),
+        None => Err(Diagnostic::new(
+            crate::span::Span::new(0, 0),
+            format!("v3.1 async fn: {} is empty", branch_label),
+        )),
+    }
+}
+
 /// Phase 1+2 narrow-case eligibility check. Returns the
 /// locals (in declaration order) on success; an error
 /// diagnostic on rejection.
@@ -4968,13 +5069,33 @@ fn validate_v31_linear_body(
                         "v3.1 async fn: `if` condition contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
                     ));
                 }
-                if then_body.iter().any(stmt_contains_io_async)
-                    || else_body.iter().any(stmt_contains_io_async)
-                {
-                    return Err(Diagnostic::new(
-                        *span,
-                        "v3.1 async fn: `if` branch contains an `io_*_async` suspend point. Phase 2 narrow allows control flow ONLY when branches don't suspend; suspend-in-branch needs full state-splitting codegen — arrives in Phase 2.1.",
-                    ));
+                let then_has_suspend = then_body.iter().any(stmt_contains_io_async);
+                let else_has_suspend = else_body.iter().any(stmt_contains_io_async);
+                if then_has_suspend || else_has_suspend {
+                    // Phase 2.1a: both branches must be linear
+                    // (no nested control flow) AND end with
+                    // Return. Otherwise reject with phase-pointer.
+                    validate_v31_phase_21a_branch(
+                        then_body, "if then-branch", "Phase 2.1b (fall-through merge state)",
+                    )?;
+                    validate_v31_phase_21a_branch(
+                        else_body, "if else-branch", "Phase 2.1b (fall-through merge state)",
+                    )?;
+                    // Collect branch Lets into the outer locals
+                    // list so the task struct has fields for
+                    // them. Lets that live across a suspend
+                    // (within or across branches) need
+                    // persistence.
+                    for branch in [then_body.as_slice(), else_body.as_slice()] {
+                        for bs in branch {
+                            if let Stmt::Let { name, annotation, span, .. } = bs {
+                                let ty = annotation.clone().unwrap_or(Type::I64);
+                                if name != "_" && matches!(ty, Type::I64) {
+                                    locals.push((name.clone(), ty, *span));
+                                }
+                            }
+                        }
+                    }
                 }
             }
             Stmt::While { cond, body: while_body, span, .. } => {
@@ -5294,101 +5415,172 @@ pub(crate) fn try_v31_transform(
     //     transitions).
     enum Seg {
         NonSuspendLet { name: String, expr: Expr, span: crate::span::Span },
-        Suspend { local_name: String, builtin: String, args: Vec<Expr>, span: crate::span::Span },
+        /// Phase 2.1 — Suspend carries explicit `bump_to`
+        /// because with branching the next state isn't always
+        /// `current_index + 1`. Phase 1 sequential bodies still
+        /// see `bump_to == current_index + 1` per the collector.
+        Suspend {
+            local_name: String,
+            builtin: String,
+            args: Vec<Expr>,
+            bump_to: usize,
+            span: crate::span::Span,
+        },
         Discard { expr: Expr, span: crate::span::Span },
         Return { expr: Expr, span: crate::span::Span },
         Verbatim(Stmt),
+        /// Phase 2.1a — `if cond { ... } else { ... }` where at
+        /// least one branch contains a suspend. The current
+        /// state ends with a conditional jump to either
+        /// then_state or else_state; the cascade enters the
+        /// matching branch and ignores the unreachable one
+        /// (each branch must end with Return per Phase 2.1a's
+        /// narrow scope).
+        Decision { cond: Expr, then_state: usize, else_state: usize, span: crate::span::Span },
     }
-    let mut segs: Vec<Seg> = Vec::new();
-    for s in body {
-        match s {
-            Stmt::Let { name, expr, span, .. } => {
-                let is_discard = name == "_";
-                // Detect suspend-Let.
-                if let ExprKind::Call { name: cname, args, .. } = &expr.kind {
-                    if matches!(
-                        cname.as_str(),
-                        "io_recv_async" | "io_send_async" | "io_accept_async"
-                    ) {
-                        if is_discard {
-                            // `let _ = io_*_async(...);` — treat as
-                            // suspend that discards the result. Use a
-                            // synthetic local name.
-                            let synth = format!("__v3_discard_{}", segs.len());
-                            segs.push(Seg::Suspend {
-                                local_name: synth,
+
+    // Build state_bodies directly via a recursive collector.
+    // state_bodies[K] = segs that run when state_tag == K.
+    // Phase 2.1a allows Stmt::If with suspends in branches —
+    // each branch becomes its own state chain rooted at an
+    // explicit state index. The cascade pattern relies on
+    // monotonic state advances, which holds because branch
+    // states are always allocated AFTER the decision state.
+    //
+    // Defensive `__v3_discard_NNNN` counter: synthetic names
+    // for `let _ = io_*_async(...)` so the validator + poll
+    // codegen treat them as suspends-that-throw-away-the-result.
+    // Counter is incremented across recursive calls so each
+    // branch's discards get unique names.
+    let mut state_bodies: Vec<Vec<Seg>> = vec![Vec::new()];
+    let mut discard_counter: usize = 0;
+
+    // Recursively walk a list of stmts, appending segs to the
+    // state pointed at by current_state. May allocate new
+    // states. Returns the index of the state pointed at on
+    // exit (useful when callers need to know where execution
+    // continues — for Phase 2.1a both branches must end with
+    // Return so the exit-state isn't consumed).
+    fn collect_into(
+        stmts: &[Stmt],
+        state_bodies: &mut Vec<Vec<Seg>>,
+        current_state: &mut usize,
+        discard_counter: &mut usize,
+    ) {
+        for s in stmts {
+            match s {
+                Stmt::Let { name, expr, span, .. } => {
+                    let is_discard = name == "_";
+                    if let ExprKind::Call { name: cname, args, .. } = &expr.kind {
+                        if matches!(
+                            cname.as_str(),
+                            "io_recv_async" | "io_send_async" | "io_accept_async"
+                        ) {
+                            let local_name = if is_discard {
+                                let n = format!("__v3_discard_{}", *discard_counter);
+                                *discard_counter += 1;
+                                n
+                            } else {
+                                name.clone()
+                            };
+                            // Allocate next state for resume; pass
+                            // its index to Suspend so synthesis can
+                            // emit the explicit state_tag bump
+                            // (Phase 2.1 fix: branches make the
+                            // next state's index non-sequential).
+                            let next_state = state_bodies.len();
+                            state_bodies[*current_state].push(Seg::Suspend {
+                                local_name,
                                 builtin: cname.clone(),
                                 args: args.clone(),
+                                bump_to: next_state,
                                 span: *span,
                             });
-                        } else {
-                            segs.push(Seg::Suspend {
-                                local_name: name.clone(),
-                                builtin: cname.clone(),
-                                args: args.clone(),
-                                span: *span,
-                            });
+                            state_bodies.push(Vec::new());
+                            *current_state = next_state;
+                            continue;
                         }
-                        continue;
+                    }
+                    if is_discard {
+                        state_bodies[*current_state].push(Seg::Discard {
+                            expr: expr.clone(),
+                            span: *span,
+                        });
+                    } else {
+                        state_bodies[*current_state].push(Seg::NonSuspendLet {
+                            name: name.clone(),
+                            expr: expr.clone(),
+                            span: *span,
+                        });
                     }
                 }
-                // Non-suspend Let — could be a Discard or a regular Let.
-                if is_discard {
-                    segs.push(Seg::Discard { expr: expr.clone(), span: *span });
-                } else {
-                    segs.push(Seg::NonSuspendLet {
-                        name: name.clone(),
+                Stmt::Return { expr, span } => {
+                    state_bodies[*current_state].push(Seg::Return {
                         expr: expr.clone(),
                         span: *span,
                     });
+                    // Return terminates the state — anything
+                    // after is dead in the current branch.
+                    // Allocate a fresh "dead" state for any
+                    // subsequent stmts (validator should have
+                    // rejected those, but defensive).
+                    state_bodies.push(Vec::new());
+                    *current_state = state_bodies.len() - 1;
                 }
+                Stmt::If { cond, then_body, else_body, span } => {
+                    let has_suspend = then_body.iter().any(stmt_contains_io_async)
+                        || else_body.iter().any(stmt_contains_io_async);
+                    if !has_suspend {
+                        // Phase 2 narrow path: emit verbatim.
+                        state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                    } else {
+                        // Phase 2.1a: state-splitting. Allocate
+                        // then_state + else_state, push Decision
+                        // into current state, recurse into each
+                        // branch.
+                        let then_state = state_bodies.len();
+                        state_bodies.push(Vec::new());
+                        let else_state = state_bodies.len();
+                        state_bodies.push(Vec::new());
+                        state_bodies[*current_state].push(Seg::Decision {
+                            cond: cond.clone(),
+                            then_state,
+                            else_state,
+                            span: *span,
+                        });
+                        // Recurse into then_body.
+                        let mut then_current = then_state;
+                        collect_into(then_body, state_bodies, &mut then_current, discard_counter);
+                        // Recurse into else_body.
+                        let mut else_current = else_state;
+                        collect_into(else_body, state_bodies, &mut else_current, discard_counter);
+                        // After the if, current_state is "dead"
+                        // — Phase 2.1a requires both branches to
+                        // Return so the outer flow doesn't fall
+                        // through. Validator enforces this.
+                        // Allocate a fresh state for any trailing
+                        // (defensive — should be unreachable).
+                        state_bodies.push(Vec::new());
+                        *current_state = state_bodies.len() - 1;
+                    }
+                }
+                Stmt::While { .. } | Stmt::Assign { .. } | Stmt::Print { .. } => {
+                    // Phase 2 narrow: emit verbatim
+                    // (validator guarantees no suspend inside).
+                    state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                }
+                _ => {}
             }
-            Stmt::Return { expr, span } => {
-                segs.push(Seg::Return { expr: expr.clone(), span: *span });
-            }
-            // Phase 2 narrow: if / while / Assign / Print at
-            // top level. validate_v31_linear_body already
-            // confirmed branches don't contain io_*_async, so
-            // these can land verbatim in the current state's
-            // arm without state-splitting.
-            Stmt::If { .. } | Stmt::While { .. } | Stmt::Assign { .. } | Stmt::Print { .. } => {
-                segs.push(Seg::Verbatim(s.clone()));
-            }
-            // validate_v31_linear_body already rejected other forms;
-            // unreachable in well-formed input.
-            _ => {}
         }
     }
 
-    // Assign state tags. Each Suspend bumps the state tag. We
-    // emit:
-    //   state 0:  all leading NonSuspendLet/Discard + first
-    //             Suspend's I/O call → if Pending return -2, save result, bump
-    //   state 1:  the same shape for the next suspend
-    //   ...
-    //   state N:  if N-1 was a suspend, this state holds the
-    //             non-suspend stmts after the last suspend +
-    //             the Return
-    //
-    // We'll build the poll fn body as a sequence of
-    // `if t.state_tag == K { ...; t.state_tag = K+1; }` blocks.
+    let mut start_state: usize = 0;
+    collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter);
 
-    // Group segments by state. Each Suspend ends a state. The
-    // final Return is its own state (state = number of suspends).
-    let mut states: Vec<Vec<Seg>> = Vec::new();
-    let mut current: Vec<Seg> = Vec::new();
-    for s in segs {
-        let is_terminator = matches!(s, Seg::Suspend { .. } | Seg::Return { .. });
-        current.push(s);
-        if is_terminator {
-            states.push(std::mem::take(&mut current));
-        }
-    }
-    if !current.is_empty() {
-        // Trailing non-terminator stmts (shouldn't happen since validate
-        // requires Return at end), but be defensive.
-        states.push(current);
-    }
+    // The `states` shape stays the same as before — outer code
+    // just iterates state_bodies. Drop any trailing empty
+    // states allocated defensively after Returns/branches.
+    let states: Vec<Vec<Seg>> = state_bodies;
 
     // Canonicalize alias names at the typed-IR boundary. v3.1
     // poll fn calls the canonical nb variants directly.
@@ -5409,7 +5601,8 @@ pub(crate) fn try_v31_transform(
             Seg::NonSuspendLet { span, .. }
             | Seg::Suspend { span, .. }
             | Seg::Discard { span, .. }
-            | Seg::Return { span, .. } => *span,
+            | Seg::Return { span, .. }
+            | Seg::Decision { span, .. } => *span,
             Seg::Verbatim(s) => match s {
                 Stmt::If { span, .. }
                 | Stmt::While { span, .. }
@@ -5468,7 +5661,7 @@ pub(crate) fn try_v31_transform(
                         span: *span,
                     });
                 }
-                Seg::Suspend { local_name, builtin, args, span } => {
+                Seg::Suspend { local_name, builtin, args, bump_to, span } => {
                     // Suspend point. Emit:
                     //   let r: i64 = canonical(arg0, arg1);
                     //   if r == 0 - 2 { return 0 - 2; }
@@ -5555,7 +5748,10 @@ pub(crate) fn try_v31_transform(
                             span: *span,
                         });
                     }
-                    // Bump: t.state_tag = K+1
+                    // Bump: t.state_tag = bump_to. Phase 2.1
+                    // uses explicit per-Suspend bump targets;
+                    // sequential Phase 1 cases get bump_to ==
+                    // state_idx + 1 from the collector.
                     then_body.push(Stmt::FieldAssign {
                         object: Expr {
                             kind: ExprKind::Var(t_param_name.clone()),
@@ -5564,7 +5760,7 @@ pub(crate) fn try_v31_transform(
                         field: "state_tag".to_string(),
                         field_span: *span,
                         value: Expr {
-                            kind: ExprKind::Int((state_idx + 1) as i128),
+                            kind: ExprKind::Int(*bump_to as i128),
                             span: *span,
                         },
                         span: *span,
@@ -5585,6 +5781,51 @@ pub(crate) fn try_v31_transform(
                     // struct fields. Then emit verbatim.
                     let rewritten = rewrite_vars_in_stmt(stmt, &rename, &t_param_name);
                     then_body.push(rewritten);
+                }
+                Seg::Decision { cond, then_state, else_state, span } => {
+                    // Phase 2.1a: if-with-suspend. Emit
+                    //   if cond_rewritten {
+                    //     __t.state_tag = then_state;
+                    //   } else {
+                    //     __t.state_tag = else_state;
+                    //   }
+                    // The cascade then enters either then_state
+                    // or else_state on the same poll() call —
+                    // no return -2 here because the decision
+                    // itself isn't a suspend point.
+                    let rewritten_cond = rewrite_vars_to_fields(cond, &rename, &t_param_name);
+                    let bump_then = Stmt::FieldAssign {
+                        object: Expr {
+                            kind: ExprKind::Var(t_param_name.clone()),
+                            span: *span,
+                        },
+                        field: "state_tag".to_string(),
+                        field_span: *span,
+                        value: Expr {
+                            kind: ExprKind::Int(*then_state as i128),
+                            span: *span,
+                        },
+                        span: *span,
+                    };
+                    let bump_else = Stmt::FieldAssign {
+                        object: Expr {
+                            kind: ExprKind::Var(t_param_name.clone()),
+                            span: *span,
+                        },
+                        field: "state_tag".to_string(),
+                        field_span: *span,
+                        value: Expr {
+                            kind: ExprKind::Int(*else_state as i128),
+                            span: *span,
+                        },
+                        span: *span,
+                    };
+                    then_body.push(Stmt::If {
+                        cond: rewritten_cond,
+                        then_body: vec![bump_then],
+                        else_body: vec![bump_else],
+                        span: *span,
+                    });
                 }
             }
         }

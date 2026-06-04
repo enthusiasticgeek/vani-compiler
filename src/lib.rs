@@ -21121,6 +21121,113 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3.1 Phase 2.1a — suspend-in-branch state-splitting.
+    /// Verifies the compiler-driven transform handles
+    /// `if cond { suspend; return } else { return }` shape.
+    #[test]
+    fn v31_phase21a_if_with_suspend_in_then_branch() {
+        let source = r#"
+            async fn cond_recv(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                let n: i64 = io_recv_async(fd, 64);
+                return n;
+              } else {
+                return 0 - 1;
+              }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.1a if-with-suspend must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.1a if-with-suspend must compile on LLVM");
+        // The decision state + branch states should produce
+        // multiple state_tag assignments (one per branch
+        // transition + one per suspend).
+        assert!(
+            c.contains("Task__cond_recv") && c.contains("__poll_cond_recv"),
+            "C must include synthesized Task struct + poll fn"
+        );
+        assert!(
+            ll.contains("Task__cond_recv") && ll.contains("__poll_cond_recv"),
+            "LLVM must include synthesized Task struct + poll fn"
+        );
+    }
+
+    #[test]
+    fn v31_phase21a_if_with_suspends_in_both_branches() {
+        // Both branches have suspends + return — full
+        // Phase 2.1a state-splitting.
+        let source = r#"
+            async fn both_branches(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                let a: i64 = io_recv_async(fd, 64);
+                return a;
+              } else {
+                let b: i64 = io_recv_async(fd, 32);
+                return b;
+              }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.1a both-branch-suspend must compile on C");
+        compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase21a_branch_without_return_rejected() {
+        // Phase 2.1a requires both branches to end with Return.
+        // Branch missing the Return is rejected with Phase 2.1b
+        // diagnostic.
+        let source = r#"
+            async fn bad(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                let n: i64 = io_recv_async(fd, 64);
+              } else {
+                return 0;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 2.1a must reject missing-return branch");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2.1b") || m.contains("must end with `return") || m.contains("fall-through")
+            }),
+            "expected Phase 2.1b / return-required diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn v31_phase21a_nested_if_in_suspending_branch_rejected() {
+        // Phase 2.1a requires branches to be linear (no nested
+        // ifs/whiles). Reject with Phase 2.1c diagnostic.
+        let source = r#"
+            async fn nested(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                if fd > 0 {
+                  let n: i64 = io_recv_async(fd, 64);
+                  return n;
+                }
+                return 1;
+              } else {
+                return 0;
+              }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 2.1a must reject nested if");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2.1c") || m.contains("nested control flow") || m.contains("linear branches")
+            }),
+            "expected Phase 2.1c / nested-control-flow diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn v31_phase2_while_no_suspend_in_body_allowed() {
         // Non-suspend while loop alongside a suspend Let
