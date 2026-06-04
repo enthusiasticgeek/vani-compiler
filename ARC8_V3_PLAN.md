@@ -6,23 +6,39 @@
 > acceptance criteria + effort estimates, so future sessions
 > can pick up any phase without re-deriving scope.
 >
-> **Phase 0 ✅ COMPLETE 2026-06-04** (commits `eac1bf6`, plus
-> A0.1 gate). Retrospective:
-> - A0.1 shipped — `host_is_linux()` codegen gate; panics
->   clean on non-Linux with pointer to Phases 5/6.
-> - A0.3 + A0.4 shipped — `sleep_ms_async` / `sleep_ms_finish`
->   builtins via `timerfd_create` + `timerfd_settime`; 5
->   new lib tests pin surface.
-> - A0.2 **deferred to Phase 1** — `intent_event_loop_run<T>`
->   as a generic-bounded vāṇī fn hits v1 generic-call
->   inference limits ("supports literal arguments or
->   annotated variable bindings at the first position").
->   Phase 1's compiler-driven sugar naturally resolves this
->   by emitting per-type concrete `__poll_<TaskType>`
->   dispatch instead of a generic helper. No code shipped
->   for A0.2 — clean defer.
-> - `examples/timer_async.vani` parity-green on both
->   backends. Test ledger: 1823 lib + 54 parity.
+> **Phase 0 ✅ COMPLETE 2026-06-04** (commits `eac1bf6`,
+> `51748d6`). A0.1 gate + A0.3+A0.4 sleep_ms_async + timer
+> example. A0.2 cleanly deferred to Phase 1 (resolved
+> naturally by per-type concrete dispatch).
+>
+> **Phase 1 ✅ COMPLETE 2026-06-04** (commit `7d47ff6`).
+> The headline v3.1 compiler-driven `async fn → Task`
+> transform ships. Retrospective:
+> - A1.1+A1.2 — detection + linear-shape validation. Walks
+>   Stmt/Expr trees for `io_*_async` calls; rejects
+>   non-linear bodies with explicit phase-pointer
+>   diagnostics ("control flow arrives in Phase 2",
+>   "non-i64 locals arrive in Phase 3").
+> - A1.3+A1.4 — synthesizes `Task__<fn>` struct (state_tag
+>   + saved params + locals) + `__poll_<fn>` fn (one
+>   `if t.state_tag == K` arm per suspend point, with
+>   Pending(-2) / Error(-1) handling).
+> - A1.5+A1.6 — original fn's body rewritten to a
+>   constructor returning the Task struct; synthesized
+>   struct + poll fn queued in `V31_TASK_REGISTRY`,
+>   flushed into `program.{structs, functions}` at end of
+>   `parse_program`.
+> - A1.7 — diagnostic-quality rejections with phase
+>   pointers.
+> - A1.8 — `examples/tcp_echo_async.vani` parity-green on
+>   both backends.
+> - Naming: `Task__<name>` (PascalCase leading per
+>   `parse_type` discipline) + `__poll_<name>`.
+> - A0.2's deferred `intent_event_loop_run` builtin
+>   resolves naturally in Phase 2 (driver as builtin) or
+>   user can hand-write the 5-line drive loop today.
+> - Test ledger: 1827 lib (+4 Phase 1 tests) + 54 parity
+>   green.
 
 ---
 
@@ -41,16 +57,17 @@ parallel-safe. Total backlog: **~113-148h focused across
 16-25 sessions**.
 
 **Recommended order of execution (highest user value first):**
-1. ~~**Phase 0** — Foundation~~ ✅ DONE 2026-06-04 (A0.2
-   deferred to Phase 1).
-2. **Phase 1** — v3.1 linear core. **← START HERE NEXT.**
-   Ships the headline compiler-driven sugar for the common
-   case + naturally subsumes A0.2 by generating per-type
-   poll dispatch.
+1. ~~**Phase 0** — Foundation~~ ✅ DONE 2026-06-04.
+2. ~~**Phase 1** — v3.1 linear core~~ ✅ DONE 2026-06-04.
+   Headline compiler-driven sugar shipped + naturally
+   subsumed A0.2.
 3. **Phase 5** — macOS port. Smallest cross-platform lift;
-   unblocks macOS CI and broadens user base.
+   unblocks macOS CI and broadens user base. **← NEXT
+   SESSION RECOMMENDED (parallel-safe alternative).**
 4. **Phase 2** — v3.1 control flow. Lifts the linear-only
-   restriction so real-world async fns work.
+   restriction so real-world async fns work. **← OR
+   START HERE next session if you prefer continuing the
+   v3.1 compiler-sugar arc.**
 5. **Phase 3** — v3.1 affine integration. Unlocks OwnedStr
    / Vec across awaits.
 6. **Phase 4** — v3.1 advanced (generics, nested, multi-task).

@@ -11,11 +11,12 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phase 0 Foundation shipped — sleep_ms_async (timerfd) +
-host_is_linux gate + timer_async example; A0.2
-intent_event_loop_run deferred to Phase 1 where compiler-
-driven dispatch resolves the v1 generic-inference limit
-naturally**).
+Phase 0 + Phase 1 shipped — compiler-driven `async fn → Task`
+transform now generates state-machine struct + poll fn +
+constructor for linear async-fn bodies with `io_*_async`
+calls. examples/tcp_echo_async.vani parity-green on both
+backends. Phases 2-4 (control flow / affine / advanced)
+queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -89,22 +90,42 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     sleep_ms_async, sleep_ms_finish) is referenced on a
     non-Linux host. Fails LOUD during codegen instead of
     silently at link time.
-  - **A0.2 deferred** — `intent_event_loop_run<T>(task)`
-    as specified hits the v1 generic-call inference limit
-    ("supports literal arguments or annotated variable
-    bindings at the first position"). Phase 1's compiler-
-    driven sugar resolves this by concretizing T at
-    transform time. Documented in
-    [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 0 retrospective.
+  - **A0.2 deferred** — Phase 1's compiler-driven sugar
+    resolves this naturally by concretizing T at transform
+    time.
 
-  The parser-level compiler-driven `async fn` → `Task<T>`
-  transform (Phase 1 onwards) remains queued — see
-  [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md).
+- **v3.1 Phase 1 — compiler-driven `async fn → Task`
+  transform** (commit `7d47ff6`). The headline v3.1
+  feature lands:
+  - Detection: `body_uses_io_async` walks Stmt/Expr trees
+    for `io_recv_async` / `io_send_async` / `io_accept_async`
+    calls.
+  - Validation: `validate_v31_linear_body` enforces Phase 1's
+    narrow shape (linear body, all-i64 locals/params, return
+    i64). Rejects with explicit phase-pointer diagnostics
+    ("control flow arrives in Phase 2", "non-i64 locals
+    arrive in Phase 3").
+  - Synthesis: per-fn `Task__<name>` struct (state_tag + saved
+    params + locals) + `__poll_<name>` fn (one `if t.state_tag
+    == K` arm per suspend point, with Pending(-2) / Error(-1)
+    propagation) + constructor body replacing the original
+    async fn body.
+  - Registry: `V31_TASK_REGISTRY` thread-local queue of
+    synthesized `(StructDecl, Function)` pairs, cleared at
+    start + flushed at end of `parse_program`.
+  - Naming: `Task__<name>` (PascalCase leading per
+    `parse_type` discipline) + `__poll_<name>`.
+  - `examples/tcp_echo_async.vani` — Phase 1 acceptance.
+    User writes ONLY the async-fn body + a 5-line drive
+    loop; compiler generates the rest. Byte-identical
+    "echoed bytes: 3" on both backends.
+  - 4 new lib tests (simplest case, two-await composition,
+    no-io fall-through to v1 desugar, non-linear rejection).
 
-**1823 lib + 54 parity green** (parity includes
+**1827 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
-`tcp_echo_state_machine.vani`, and `timer_async.vani`
-byte-identical-stdout checks).
+`tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
+and `timer_async.vani` byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 

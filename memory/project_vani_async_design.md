@@ -57,10 +57,13 @@ slices on top of v1:
   printed instead of literal so kernel-assigned ports
   don't break parity).
 
-**Arc 8 FULLY COMPLETE 2026-06-04**: every user-visible
-async + networking + concurrency feature ships and works on
-both backends. Five acceptance examples cross-backend
-parity-green:
+**Arc 8 FULLY COMPLETE 2026-06-04 + v3.1 Phase 0 + Phase 1
+shipped**: every user-visible async + networking +
+concurrency feature ships AND the compiler-driven `async fn
+→ Task` transform now auto-generates state-machine
+struct/poll/constructor triples for linear async-fn bodies
+with `io_*_async` calls. Six acceptance examples cross-
+backend parity-green:
 
 - `async_io.vani` — timer-driven async fn + task fan-out
 - `tcp_echo.vani` — single-client TCP echo
@@ -70,14 +73,23 @@ parity-green:
 - `tcp_echo_state_machine.vani` — v3 hand-rolled state-
   machine pattern (struct + poll fn + driver loop) using
   `io_*_async` builtin aliases
+- `tcp_echo_async.vani` — v3.1 Phase 1 compiler-driven
+  `async fn → Task` transform (user writes ONLY the async-
+  fn body + 5-line drive loop; compiler synthesizes the
+  rest)
+- `timer_async.vani` — v3.1 Phase 0 timerfd-based
+  cooperative sleep
 
-Three concurrency models supported, user's choice:
+Four concurrency models supported, user's choice:
 1. Thread-per-task via `task` + `join` (race-free by the
    affine checker)
 2. Single-thread cooperative via epoll + nb I/O variants
    (kernel multiplexing, no per-task threads)
 3. Hand-rolled state-machine pattern (struct + poll fn +
-   driver) using `io_*_async` aliases
+   driver) using `io_*_async` aliases (v3 pattern)
+4. **Compiler-driven `async fn → Task` (v3.1 Phase 1)** —
+   user writes async-fn body; compiler synthesizes the
+   Task struct + poll fn + constructor
 
 **Arc 8 v3.1 sugar (compiler-driven state-machine codegen)
 OPTIONAL** — parser-level transform that scans `async fn`
