@@ -12,7 +12,14 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // sockets via libc; thread-local 4KB recv/send buffer.
     "tcp_listen", "tcp_socket_port", "tcp_accept",
     "tcp_connect_local", "tcp_send_str", "tcp_recv",
-    "tcp_send_buf", "tcp_close"];
+    "tcp_send_buf", "tcp_close",
+    // Arc 8 v2 runtime — epoll-driven single-threaded
+    // cooperative scheduling. Linux-only in v2 (kqueue/IOCP
+    // queued). Plus non-blocking variants of the TCP primitives
+    // returning sentinel codes (-2 = would-block / EAGAIN).
+    "epoll_new", "epoll_add_read", "epoll_wait_one",
+    "epoll_close",
+    "tcp_set_nonblocking", "tcp_accept_nb", "tcp_recv_nb"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -15388,6 +15395,16 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
+        // Arc 8 v2 — epoll event loop + non-blocking I/O.
+        // Linux epoll(7) wrappers; would-block variants of
+        // accept / recv return -2 instead of -1.
+        "epoll_new" | "epoll_add_read" | "epoll_wait_one"
+        | "epoll_close"
+        | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb" => {
+            return check_epoll_builtin(
+                name, args, env, signatures, span, diagnostics,
+            );
+        }
         "hashmap_new"
         | "hashmap_insert"
         | "hashmap_get"
@@ -22931,6 +22948,84 @@ fn check_tcp_builtin(
             );
             typed_args.push(coerced.expr);
         }
+    }
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: name.to_string(),
+            name_span: span,
+            args: typed_args,
+        },
+        Type::I64,
+        None,
+        span,
+    )
+}
+
+/// Arc 8 v2 — epoll event-loop primitives + non-blocking
+/// I/O variants. Linux only in v2 (kqueue + IOCP queued).
+///
+///   epoll_new() -> i64
+///       Create an epoll instance via epoll_create1(0).
+///       Returns epfd or -1.
+///   epoll_add_read(epfd, fd) -> i64
+///       Register fd for read events (EPOLLIN).
+///       Returns 0 on success, -1 on error.
+///   epoll_wait_one(epfd, timeout_ms) -> i64
+///       Block until one fd is ready or timeout. Returns the
+///       fd that's ready, -2 if the timeout expired with no
+///       events, or -1 on error. `timeout_ms = -1` waits
+///       forever.
+///   epoll_close(epfd) -> i64
+///       Close the epoll instance.
+///   tcp_set_nonblocking(fd) -> i64
+///       Set O_NONBLOCK on an existing socket fd.
+///   tcp_accept_nb(server_fd) -> i64
+///       Non-blocking accept. Returns client fd, -2 if no
+///       client pending (EAGAIN), or -1 on real error.
+///   tcp_recv_nb(fd, max) -> i64
+///       Non-blocking recv into the thread-local TCP buffer.
+///       Returns bytes read, 0 on EOF, -2 on EAGAIN, -1 on
+///       error.
+///
+/// Composition: epoll_new + tcp_set_nonblocking on every fd +
+/// epoll_add_read + epoll_wait_one loop = single-threaded
+/// cooperative scheduling. See `examples/tcp_echo_epoll.vani`.
+fn check_epoll_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    let want_args: usize = match name {
+        "epoll_new" => 0,
+        "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb" => 1,
+        "epoll_add_read" | "epoll_wait_one" | "tcp_recv_nb" => 2,
+        _ => unreachable!("unknown epoll builtin: {}", name),
+    };
+    if args.len() != want_args {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "{}() expects {} argument{}, got {}",
+                name,
+                want_args,
+                if want_args == 1 { "" } else { "s" },
+                args.len()
+            ),
+        ));
+        return CheckedExpr::fallback(Type::I64, span);
+    }
+    let mut typed_args = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        let raw = check_expr(arg, env, signatures, diagnostics);
+        let coerced = coerce_checked(
+            raw, &Type::I64, arg.span,
+            &format!("{}() arg #{} (i64)", name, i + 1),
+            diagnostics,
+        );
+        typed_args.push(coerced.expr);
     }
     CheckedExpr::new(
         TypedExprKind::Call {

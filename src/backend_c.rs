@@ -1012,8 +1012,67 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
     emit_intent_tcp_helpers_c(&mut out, &body);
+    emit_intent_epoll_helpers_c(&mut out, &body);
     out.push_str(&body);
     out
+}
+
+/// Arc 8 v2 — epoll + non-blocking I/O runtime helpers
+/// (Linux-only in v2). Gated on the program actually
+/// referencing any `intent_epoll_*` or `intent_tcp_*_nb`
+/// helper.
+fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
+    if !body.contains("intent_epoll_") && !body.contains("intent_tcp_set_nonblocking")
+        && !body.contains("intent_tcp_accept_nb") && !body.contains("intent_tcp_recv_nb")
+    {
+        return;
+    }
+    out.push_str(
+        "#include <sys/epoll.h>\n\
+         #include <fcntl.h>\n\
+         static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
+         \x20 int fd = epoll_create1(0);\n\
+         \x20 return (fd < 0) ? -1 : (int64_t)fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_add_read(int64_t epfd, int64_t fd) {\n\
+         \x20 struct epoll_event ev;\n\
+         \x20 ev.events = EPOLLIN;\n\
+         \x20 ev.data.fd = (int)fd;\n\
+         \x20 return (epoll_ctl((int)epfd, EPOLL_CTL_ADD, (int)fd, &ev) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_wait_one(int64_t epfd, int64_t timeout_ms) {\n\
+         \x20 struct epoll_event ev;\n\
+         \x20 int rc;\n\
+         \x20 do { rc = epoll_wait((int)epfd, &ev, 1, (int)timeout_ms); }\n\
+         \x20 while (rc < 0 && errno == EINTR);\n\
+         \x20 if (rc < 0) return -1;\n\
+         \x20 if (rc == 0) return -2;\n\
+         \x20 return (int64_t)ev.data.fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_close(int64_t epfd) {\n\
+         \x20 return (close((int)epfd) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_set_nonblocking(int64_t fd) {\n\
+         \x20 int flags = fcntl((int)fd, F_GETFL, 0);\n\
+         \x20 if (flags < 0) return -1;\n\
+         \x20 return (fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_accept_nb(int64_t server_fd) {\n\
+         \x20 int cfd = accept((int)server_fd, NULL, NULL);\n\
+         \x20 if (cfd >= 0) return (int64_t)cfd;\n\
+         \x20 if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;\n\
+         \x20 return -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_recv_nb(int64_t fd, int64_t max) {\n\
+         \x20 if (max < 0) return -1;\n\
+         \x20 size_t want = (size_t)max;\n\
+         \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
+         \x20 ssize_t n = recv((int)fd, intent_tcp_buf, want, 0);\n\
+         \x20 if (n >= 0) return (int64_t)n;\n\
+         \x20 if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;\n\
+         \x20 return -1;\n\
+         }\n\n",
+    );
 }
 
 /// Arc 8 step 8e proper — TCP runtime helpers. All eight
@@ -14821,6 +14880,36 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "tcp_close" => {
             format!("intent_tcp_close(({}))", emit_expr(&args[0]))
         }
+        // Arc 8 v2 — epoll + non-blocking I/O. Each resolves to
+        // a runtime helper emitted by emit_intent_epoll_helpers_c.
+        "epoll_new" => "intent_epoll_new()".to_string(),
+        "epoll_add_read" => format!(
+            "intent_epoll_add_read(({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "epoll_wait_one" => format!(
+            "intent_epoll_wait_one(({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
+        "epoll_close" => format!(
+            "intent_epoll_close(({}))",
+            emit_expr(&args[0])
+        ),
+        "tcp_set_nonblocking" => format!(
+            "intent_tcp_set_nonblocking(({}))",
+            emit_expr(&args[0])
+        ),
+        "tcp_accept_nb" => format!(
+            "intent_tcp_accept_nb(({}))",
+            emit_expr(&args[0])
+        ),
+        "tcp_recv_nb" => format!(
+            "intent_tcp_recv_nb(({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         "rand_i64" => "intent_rng_next()".to_string(),
         "rand_in_range" => {
             format!(

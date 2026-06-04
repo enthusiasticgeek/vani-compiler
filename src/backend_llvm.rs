@@ -1242,6 +1242,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         emit_intent_tcp_helpers_llvm(&mut out);
     }
 
+    // Arc 8 v2 — epoll + non-blocking I/O helpers. Gated on
+    // the program actually calling any epoll_* or tcp_*_nb /
+    // tcp_set_nonblocking builtin.
+    if program_uses_epoll(program) {
+        emit_intent_epoll_helpers_llvm(&mut out);
+    }
+
     // Data-structures roadmap: FNV-1a hash helpers. Gated on
     // the program actually using a hash builtin OR a Bloom
     // filter (closure #327 calls @intent_hash_i64 from its
@@ -8856,6 +8863,40 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i64 @intent_{}(i64 {}, i64 {})\n",
                     dest, name, fd, n
+                ));
+                return dest;
+            }
+            // Arc 8 v2 — epoll + non-blocking I/O primitives.
+            if name == "epoll_new" {
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_epoll_new()\n",
+                    dest
+                ));
+                return dest;
+            }
+            if matches!(
+                name.as_str(),
+                "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb"
+            ) {
+                let a0 = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_{}(i64 {})\n",
+                    dest, name, a0
+                ));
+                return dest;
+            }
+            if matches!(
+                name.as_str(),
+                "epoll_add_read" | "epoll_wait_one" | "tcp_recv_nb"
+            ) {
+                let a0 = emit_expr(&args[0], ctx, out);
+                let a1 = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_{}(i64 {}, i64 {})\n",
+                    dest, name, a0, a1
                 ));
                 return dest;
             }
@@ -22098,6 +22139,10 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
             "tcp_listen" | "tcp_socket_port" | "tcp_accept"
             | "tcp_connect_local" | "tcp_send_str" | "tcp_recv"
             | "tcp_send_buf" | "tcp_close"
+            // Arc 8 v2 _nb variants share the same thread-local
+            // @intent_tcp_buf, so the TCP helpers must emit
+            // when any nonblocking recv form is used.
+            | "tcp_recv_nb" | "tcp_set_nonblocking" | "tcp_accept_nb"
         )
     }
     fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
@@ -22363,6 +22408,227 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String) {
          \x20 %err = icmp slt i32 %rc, 0\n\
          \x20 %res = select i1 %err, i64 -1, i64 0\n\
          \x20 ret i64 %res\n\
+         }\n\n",
+    );
+}
+
+/// Arc 8 v2 — walk the typed program for any epoll_* or
+/// tcp_*_nb / tcp_set_nonblocking call. Mirrors
+/// `program_uses_tcp`. Triggers emit of the epoll runtime
+/// helpers + libc declares.
+fn program_uses_epoll(program: &TypedProgram) -> bool {
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn is_epoll_builtin(name: &str) -> bool {
+        matches!(
+            name,
+            "epoll_new" | "epoll_add_read" | "epoll_wait_one" | "epoll_close"
+            | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb"
+        )
+    }
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        match &expr.kind {
+            E::Call { name, args, .. } => {
+                if is_epoll_builtin(name) {
+                    return true;
+                }
+                args.iter().any(expr_uses)
+            }
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            E::IfExpr { cond, then_value, else_value } => {
+                expr_uses(cond) || expr_uses(then_value) || expr_uses(else_value)
+            }
+            E::Match { scrutinee, arms } => {
+                expr_uses(scrutinee) || arms.iter().any(|a| expr_uses(&a.body))
+            }
+            E::Block { stmts, tail } => {
+                stmts.iter().any(stmt_uses) || expr_uses(tail)
+            }
+            _ => false,
+        }
+    }
+    fn stmt_uses(stmt: &crate::ir::TypedStmt) -> bool {
+        match stmt {
+            S::Let { expr, .. }
+            | S::Reassign { expr, .. }
+            | S::Return { expr }
+            | S::Assert { expr, .. }
+            | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|it| match it {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { body, .. } | S::ForIter { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        for s in &f.body {
+            if stmt_uses(s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Arc 8 v2 — emit LLVM IR for epoll + non-blocking I/O
+/// runtime helpers. epoll_event layout on Linux x86_64:
+/// `{i32 events, i32 _pad, [8 x i8] data}` (12 bytes
+/// __attribute__((packed))). The `data` field is a union
+/// where `data.fd` is the leading i32. We use a 16-byte
+/// alloca to be safe for alignment on AArch64 (12 bytes
+/// is the packed layout but 16 with default alignment).
+///
+/// errno is accessed via the libc `__errno_location()` thunk
+/// (glibc + musl convention).
+fn emit_intent_epoll_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "declare i32 @epoll_create1(i32)\n\
+         declare i32 @epoll_ctl(i32, i32, i32, i8*)\n\
+         declare i32 @epoll_wait(i32, i8*, i32, i32)\n\
+         declare i32 @fcntl(i32, i32, ...)\n\
+         declare i32* @__errno_location()\n\
+         define i64 @intent_epoll_new() {\n\
+         entry:\n\
+         \x20 %fd = call i32 @epoll_create1(i32 0)\n\
+         \x20 %neg = icmp slt i32 %fd, 0\n\
+         \x20 %ret = select i1 %neg, i64 -1, i64 0\n\
+         \x20 %fd_i64 = sext i32 %fd to i64\n\
+         \x20 %res = select i1 %neg, i64 -1, i64 %fd_i64\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_add_read(i64 %epfd, i64 %fd) {\n\
+         entry:\n\
+         \x20 ; epoll_event: 16-byte stack alloca, store events=EPOLLIN(1) at +0,\n\
+         \x20 ; store fd at +8 (the data.fd field). EPOLL_CTL_ADD = 1.\n\
+         \x20 %ev = alloca [16 x i8], align 8\n\
+         \x20 %ev_i8 = getelementptr [16 x i8], [16 x i8]* %ev, i32 0, i32 0\n\
+         \x20 %_z = call i8* @memset(i8* %ev_i8, i32 0, i64 16)\n\
+         \x20 %ev_evt_ptr = bitcast i8* %ev_i8 to i32*\n\
+         \x20 store i32 1, i32* %ev_evt_ptr\n\
+         \x20 %ev_fd_ptr_i8 = getelementptr i8, i8* %ev_i8, i64 8\n\
+         \x20 %ev_fd_ptr = bitcast i8* %ev_fd_ptr_i8 to i32*\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 store i32 %fd_i32, i32* %ev_fd_ptr\n\
+         \x20 %epfd_i32 = trunc i64 %epfd to i32\n\
+         \x20 %rc = call i32 @epoll_ctl(i32 %epfd_i32, i32 1, i32 %fd_i32, i8* %ev_i8)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_wait_one(i64 %epfd, i64 %timeout_ms) {\n\
+         entry:\n\
+         \x20 %ev = alloca [16 x i8], align 8\n\
+         \x20 %ev_i8 = getelementptr [16 x i8], [16 x i8]* %ev, i32 0, i32 0\n\
+         \x20 %epfd_i32 = trunc i64 %epfd to i32\n\
+         \x20 %tmo_i32 = trunc i64 %timeout_ms to i32\n\
+         \x20 %rc = call i32 @epoll_wait(i32 %epfd_i32, i8* %ev_i8, i32 1, i32 %tmo_i32)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 br i1 %err, label %ret_err, label %check_timeout\n\
+         check_timeout:\n\
+         \x20 %is_zero = icmp eq i32 %rc, 0\n\
+         \x20 br i1 %is_zero, label %ret_timeout, label %read_fd\n\
+         read_fd:\n\
+         \x20 %ev_fd_ptr_i8 = getelementptr i8, i8* %ev_i8, i64 8\n\
+         \x20 %ev_fd_ptr = bitcast i8* %ev_fd_ptr_i8 to i32*\n\
+         \x20 %fd_i32 = load i32, i32* %ev_fd_ptr\n\
+         \x20 %fd_i64 = sext i32 %fd_i32 to i64\n\
+         \x20 ret i64 %fd_i64\n\
+         ret_timeout:\n\
+         \x20 ret i64 -2\n\
+         ret_err:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_epoll_close(i64 %epfd) {\n\
+         entry:\n\
+         \x20 %epfd_i32 = trunc i64 %epfd to i32\n\
+         \x20 %rc = call i32 @close(i32 %epfd_i32)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_set_nonblocking(i64 %fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 ; F_GETFL = 3, F_SETFL = 4, O_NONBLOCK = 2048 (0x800)\n\
+         \x20 %flags = call i32 (i32, i32, ...) @fcntl(i32 %fd_i32, i32 3)\n\
+         \x20 %flags_err = icmp slt i32 %flags, 0\n\
+         \x20 br i1 %flags_err, label %ret_neg1, label %do_set\n\
+         do_set:\n\
+         \x20 %new_flags = or i32 %flags, 2048\n\
+         \x20 %rc = call i32 (i32, i32, ...) @fcntl(i32 %fd_i32, i32 4, i32 %new_flags)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_accept_nb(i64 %server_fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %server_fd to i32\n\
+         \x20 %cfd = call i32 @accept(i32 %fd_i32, i8* null, i32* null)\n\
+         \x20 %ok = icmp sge i32 %cfd, 0\n\
+         \x20 br i1 %ok, label %ret_ok, label %check_eagain\n\
+         ret_ok:\n\
+         \x20 %cfd_i64 = sext i32 %cfd to i64\n\
+         \x20 ret i64 %cfd_i64\n\
+         check_eagain:\n\
+         \x20 ; errno: EAGAIN = 11 on Linux x86_64; EWOULDBLOCK = EAGAIN.\n\
+         \x20 %errno_p = call i32* @__errno_location()\n\
+         \x20 %err_v = load i32, i32* %errno_p\n\
+         \x20 %is_eagain = icmp eq i32 %err_v, 11\n\
+         \x20 %res = select i1 %is_eagain, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_recv_nb(i64 %fd, i64 %max) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %max, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %clamp\n\
+         clamp:\n\
+         \x20 %too_big = icmp sgt i64 %max, 4096\n\
+         \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %n = call i64 @recv(i32 %fd_i32, i8* %buf_ptr, i64 %want, i32 0)\n\
+         \x20 %ok = icmp sge i64 %n, 0\n\
+         \x20 br i1 %ok, label %ret_n, label %check_eagain\n\
+         ret_n:\n\
+         \x20 ret i64 %n\n\
+         check_eagain:\n\
+         \x20 %errno_p = call i32* @__errno_location()\n\
+         \x20 %err_v = load i32, i32* %errno_p\n\
+         \x20 %is_eagain = icmp eq i32 %err_v, 11\n\
+         \x20 %res = select i1 %is_eagain, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
          }\n\n",
     );
 }

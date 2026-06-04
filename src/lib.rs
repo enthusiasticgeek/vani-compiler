@@ -20883,6 +20883,104 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v2 — epoll + non-blocking I/O surface. Real
+    /// epoll wrappers (Linux-only in v2); lib tests just
+    /// compile + introspect emit. End-to-end exercise via
+    /// `examples/tcp_echo_epoll.vani` in the parity runner.
+    #[test]
+    fn epoll_and_nb_typecheck_on_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let s: i64 = tcp_listen(0);
+              let _ = tcp_set_nonblocking(s);
+              let _ = epoll_add_read(ep, s);
+              let r: i64 = epoll_wait_one(ep, 10);
+              let c: i64 = tcp_accept_nb(s);
+              let n: i64 = tcp_recv_nb(s, 64);
+              let _ = epoll_close(ep);
+              let _ = tcp_close(s);
+              return r + c + n;
+            }
+        "#;
+        compile_to_c(source).expect("epoll builtins must type-check on C");
+        compile_to_llvm(source).expect("epoll builtins must type-check on LLVM");
+    }
+
+    #[test]
+    fn epoll_emits_helpers_in_c() {
+        let source = r#"
+            fn main() -> i64 { let _ = epoll_new(); return 0; }
+        "#;
+        let c = compile_to_c(source).expect("epoll program compiles");
+        assert!(
+            c.contains("intent_epoll_new") && c.contains("sys/epoll.h"),
+            "C output must include the epoll helper + epoll.h include; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn epoll_emits_helpers_in_llvm() {
+        let source = r#"
+            fn main() -> i64 { let _ = epoll_new(); return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("epoll LLVM compile");
+        assert!(
+            ll.contains("declare i32 @epoll_create1")
+                && ll.contains("define i64 @intent_epoll_new"),
+            "LLVM output must declare epoll_create1 + define intent_epoll_new; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn epoll_rejects_wrong_arity() {
+        let source = r#"
+            fn main() -> i64 { let _ = epoll_wait_one(0); return 0; }
+        "#;
+        let errors = compile(source).expect_err("1-arg epoll_wait_one must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("2 arguments")),
+            "expected arity diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn epoll_helpers_skipped_when_unused() {
+        let source = r#"fn main() -> i64 { return 0; }"#;
+        let c = compile_to_c(source).expect("trivial compiles");
+        let ll = compile_to_llvm(source).expect("trivial LLVM compiles");
+        assert!(
+            !c.contains("intent_epoll_new"),
+            "epoll helpers must not appear in C when unused"
+        );
+        assert!(
+            !ll.contains("@intent_epoll_new"),
+            "epoll helpers must not appear in LLVM when unused"
+        );
+    }
+
+    #[test]
+    fn tcp_recv_nb_alone_emits_tcp_buf() {
+        // Regression: using only tcp_recv_nb without any regular
+        // tcp_* must still emit @intent_tcp_buf (the shared
+        // thread-local 4KB buffer the helper reads into).
+        let source = r#"
+            fn main() -> i64 {
+              let _ = tcp_recv_nb(0, 64);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("LLVM compile");
+        assert!(
+            ll.contains("@intent_tcp_buf"),
+            "tcp_recv_nb-only programs must still emit @intent_tcp_buf; got:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
     #[test]
     fn tcp_str_literal_in_task_body_interned() {
         // Regression test for the str-collection-walker bug
