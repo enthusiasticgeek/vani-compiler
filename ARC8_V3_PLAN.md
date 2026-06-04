@@ -11,6 +11,20 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **🎉 v3.1 control-flow sugar — CAPABILITY-COMPLETE 2026-06-04.**
+> The compiler-driven `async fn → Task` transform handles
+> every common control-flow shape in vāṇī. Capstone:
+> `examples/async_showcase.vani` (commit `3c46e31`).
+>
+> Remaining v3.x sub-phases (each independent, none
+> blocking):
+> - 2.3 match arms (~8-10h)
+> - 2.4 try keyword + Result propagation (~6-8h)
+> - 3 affine types across await — OwnedStr/Vec (~20-25h)
+> - 4 generics / nested async calls / multi-task (~25-30h)
+> - 5 macOS kqueue port (~10-15h)
+> - 6 Windows IOCP port (~25-35h)
+>
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
 > threads a loop_stack of (loop_header, post_loop) pairs;

@@ -255,14 +255,41 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1845 lib + 54 parity green** (parity includes
-`tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
+**1845 lib + 54 parity green** (parity includes 12 v3.1
+acceptance examples + the v3 hand-rolled pattern, all
+byte-identical cross-backend: `tcp_echo.vani`,
+`tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
 `tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
 `echo_nested_if.vani`, `echo_anf_lift.vani`,
 `echo_loop.vani`, `echo_loop_break.vani`,
-`echo_with_timeout.vani`, and `timer_async.vani`
-byte-identical-stdout checks).
+`echo_with_timeout.vani`, `async_showcase.vani`, and
+`timer_async.vani`).
+
+## 🎉 v3.1 sugar arc — capability-complete for control flow
+
+The compiler-driven `async fn → Task` transform handles
+EVERY common control-flow shape in vāṇī:
+- Linear bodies + sequential suspends
+- if/else (with or without suspends in branches)
+- Mid-body Return
+- Outer-local Assign + Print between suspends
+- Fall-through merge state for non-return-terminated branches
+- Nested ifs inside suspending branches (arbitrary depth)
+- ANF lifting for io_*_async in compound expressions
+- while loops with suspends inside
+- break / continue inside suspending loops
+
+`examples/async_showcase.vani` is the user-facing capstone —
+all of these in one async fn body.
+
+What's NOT yet supported (deferred sub-phases):
+- `match` arms (Phase 2.3, ~8-10h)
+- `try` keyword + Result propagation (Phase 2.4, ~6-8h)
+- Affine types across await — OwnedStr / Vec (Phase 3, ~20-25h)
+- Generics / nested async-fn calls / multi-task scheduling
+  (Phase 4, ~25-30h)
+- macOS port (Phase 5, ~10-15h) / Windows port (Phase 6, ~25-35h)
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 
