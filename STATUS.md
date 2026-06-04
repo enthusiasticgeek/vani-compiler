@@ -46,12 +46,16 @@ type decls; closures #257/#258 for `pub use` re-exports +
   as-value across fn boundaries works end-to-end on both
   backends. **Arc 7 SysV remainder COMPLETE** (commit
   `69b5ec0`) — float-field + mixed int/float structs ≤ 16 bytes
-  now FFI-safe (LLVM's calling-convention lowering handles
-  per-eightbyte SysV classification). **Arc 8 step 8a SHIPPED**
-  (commit `2e649ff`) — `Poll<T>` + `Future<T>` join the prelude
-  alongside Option / Result / AllocError.
+  now FFI-safe. **Arc 8 step 8a SHIPPED** (commit `2e649ff`) —
+  `Poll<T>` + `Future<T>` join the prelude. **Arc 8 step 8b
+  SHIPPED** (commit `e50dc20`) — `async fn` contextual keyword
+  + parser-level desugar; body returns wrap to
+  `Future.Ready(expr)` and the declared `-> R` reshapes to
+  `-> Future<R>`. Synchronous semantics in v1 (runs to
+  completion on call); state-machine codegen + event-loop
+  runtime queued as Arc 8 steps 8c-h.
 
-  1795 lib + 54 parity green.
+  1798 lib + 55 parity green.
 
   Captured anonymous fns can now be passed to higher-order
   functions typed `Closure(args) -> R`.
