@@ -18,7 +18,7 @@
 > with Phase 2.3a pointer. examples/echo_match.vani
 > parity-green. 2 new lib tests.
 >
-> **Phase 2.3a ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 2.3a ✅ COMPLETE 2026-06-04** (commit `7a19b68`).
 > Match arms WITH suspends — n-way generalization of
 > Phase 2.1a's binary if-with-suspend. Approach: desugar
 > `let X = match SCRUT { p0 then e0, …, _ then ed };` (with

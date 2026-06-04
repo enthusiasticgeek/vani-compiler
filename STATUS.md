@@ -113,7 +113,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 2 new lib tests
 
 - **v3.1 Phase 2.3a — match arms WITH suspends** (commit
-  pending). Generalizes Phase 2.1a (binary if-with-suspend)
+  `7a19b68`). Generalizes Phase 2.1a (binary if-with-suspend)
   to n-way match arms via a desugar in `anf_lift_body`:
   - `try_desugar_let_match_with_suspends` lifts
     `let X = match SCRUT { p0 then e0, …, _ then ed };` with
