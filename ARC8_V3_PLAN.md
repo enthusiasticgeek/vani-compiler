@@ -11,6 +11,16 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.1c ✅ COMPLETE 2026-06-04** (commit `22fc622`).
+> Nested ifs inside suspending branches. Validator
+> relaxed; `collect_branch_locals_recursive` collects Lets
+> at arbitrary depth; `body_all_paths_return` suppresses
+> dead Jumps after fully-returning Verbatim stmts.
+> examples/echo_nested_if.vani parity-green. 2 new lib
+> tests + 1 prior rejection test updated to acceptance.
+> Recursive `collect_into` already supported this — just
+> needed validator + locals helpers.
+>
 > **Phase 2.1b ✅ COMPLETE 2026-06-04** (commit `b1b8113`).
 > Fall-through merge state. New `Seg::Jump` emitted at tail
 > of non-return-terminated branches; merge state allocated

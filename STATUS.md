@@ -11,12 +11,13 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a + 2.1b shipped — compiler-
-driven `async fn → Task` transform now handles linear
+Phases 0 + 1 + 2 narrow + 2.1a + 2.1b + 2.1c shipped —
+compiler-driven `async fn → Task` transform handles linear
 bodies + non-suspending control flow + suspend-in-branch
-state-splitting + fall-through merge state. 6 v3.1
-acceptance examples parity-green. Phases 2.1c, 2.2-2.5,
-3-4 queued; macOS port (Phase 5) recommended next**).
+state-splitting + fall-through merge state + nested ifs
+inside suspending branches (arbitrary depth). 7 v3.1
+acceptance examples parity-green. Phases 2.2-2.5, 3-4
+queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -93,6 +94,26 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - **A0.2 deferred** — Phase 1's compiler-driven sugar
     resolves this naturally by concretizing T at transform
     time.
+
+- **v3.1 Phase 2.1c — nested ifs inside suspending branches**
+  (commit `22fc622`). Lifts Phase 2.1a/b's "branches must
+  be linear" restriction:
+  - Recursive `collect_into` ALREADY supported arbitrary
+    nesting via its recursive Stmt::If handling — Phase
+    2.1c was a validator relaxation + recursive branch-
+    local collection
+  - New `collect_branch_locals_recursive` — walks nested
+    branches' Lets so the task struct has fields for all
+    locals that might persist across suspends
+  - New `body_all_paths_return` — detects when a Verbatim
+    stmt unconditionally exits, so the collector suppresses
+    the dead `Jump` that would trip the reachability checker
+  - `examples/echo_nested_if.vani` — outer suspending
+    branch contains a nested if with both branches
+    returning; state machine fans out to two nested-return
+    states. Byte-identical on both backends.
+  - 2 new lib tests + 1 prior rejection test updated to
+    acceptance
 
 - **v3.1 Phase 2.1b — fall-through merge state** (commit
   `b1b8113`). Lifts Phase 2.1a's "both branches must
@@ -180,12 +201,12 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1836 lib + 54 parity green** (parity includes
+**1838 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
 `tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
-`echo_with_timeout.vani`, and `timer_async.vani`
-byte-identical-stdout checks).
+`echo_nested_if.vani`, `echo_with_timeout.vani`, and
+`timer_async.vani` byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 
