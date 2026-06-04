@@ -21097,11 +21097,15 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn v31_phase2_suspend_in_branch_rejected_with_phase_21_diag() {
-        // If branch contains io_*_async — Phase 2 narrow rejects
-        // with a clear "Phase 2.1" pointer.
+    fn v31_phase21a_suspend_in_branch_now_accepted_after_phase_21a_b() {
+        // The source was originally rejected with a
+        // "Phase 2.1" pointer (Phase 2 narrow era). After
+        // Phase 2.1a + Phase 2.1b shipped, this body
+        // compiles cleanly — both branches' state machines
+        // get state-split and a merge state is allocated for
+        // the trailing `return 0`.
         let source = r#"
-            async fn bad(fd: i64) -> i64 {
+            async fn was_bad_now_works(fd: i64) -> i64 {
               if fd > 0 {
                 let n: i64 = io_recv_async(fd, 64);
                 return n;
@@ -21110,15 +21114,8 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("v3.1 must reject suspend-in-branch");
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2.1") || m.contains("suspend-in-branch") || m.contains("state-splitting")
-            }),
-            "expected Phase 2.1 / suspend-in-branch diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        compile_to_c(source).expect("Phase 2.1a/b accepts suspend-in-branch on C");
+        compile_to_llvm(source).expect("Phase 2.1a/b accepts suspend-in-branch on LLVM");
     }
 
     /// Arc 8 v3.1 Phase 2.1a — suspend-in-branch state-splitting.
@@ -21173,30 +21170,42 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn v31_phase21a_branch_without_return_rejected() {
-        // Phase 2.1a requires both branches to end with Return.
-        // Branch missing the Return is rejected with Phase 2.1b
-        // diagnostic.
+    fn v31_phase21b_branch_fall_through_to_merge_state() {
+        // Phase 2.1b: branches don't have to end with Return.
+        // Fall-through routes via the merge state. Previously
+        // (Phase 2.1a) this was rejected; now it compiles.
         let source = r#"
-            async fn bad(fd: i64, mode: i64) -> i64 {
+            async fn cond_recv(fd: i64, mode: i64) -> i64 {
               if mode > 0 {
-                let n: i64 = io_recv_async(fd, 64);
+                let _ = io_recv_async(fd, 64);
               } else {
-                return 0;
+                return 0 - 5;
+              }
+              return 100;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.1b fall-through must compile on C");
+        compile_to_llvm(source).expect("Phase 2.1b fall-through must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase21b_both_branches_fall_through() {
+        // Both branches with suspends + no Return — both Jump
+        // to the merge state, which holds the final Return.
+        let source = r#"
+            async fn split(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                let _ = io_recv_async(fd, 64);
+              } else {
+                let _ = io_recv_async(fd, 32);
               }
               return 0;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 2.1a must reject missing-return branch");
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2.1b") || m.contains("must end with `return") || m.contains("fall-through")
-            }),
-            "expected Phase 2.1b / return-required diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        compile_to_c(source).expect("Phase 2.1b both-branch fall-through must compile on C");
+        compile_to_llvm(source).expect("Phase 2.1b both-branch fall-through must compile on LLVM");
     }
 
     #[test]
@@ -21248,9 +21257,13 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn v31_phase1_non_linear_body_rejected_with_phase_2_diag() {
-        // Body has io_recv_async + an `if` → v3.1 Phase 1
-        // rejects with a clear Phase 2 pointer.
+    #[allow(non_snake_case)]
+    fn v31_phase1_non_linear_body_OBSOLETE_now_accepted_by_phase_21a() {
+        // Phase 1 originally rejected if-with-suspend with a
+        // "Phase 2" diagnostic. Phase 2.1a/b lifted that
+        // restriction — this body now compiles. Test kept to
+        // pin the behavior shift; if Phase 2.1a/b ever rolls
+        // back, this catches it.
         let source = r#"
             async fn conditional(fd: i64) -> i64 {
               if fd > 0 {
@@ -21261,16 +21274,14 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("v3.1 must reject if-in-body");
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2") || m.contains("control flow") || m.contains("no `if`")
-            }),
-            "expected Phase 2 / control-flow diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        compile_to_c(source).expect("Phase 2.1a/b now accepts if-with-suspend on C");
+        compile_to_llvm(source).expect("Phase 2.1a/b now accepts if-with-suspend on LLVM");
     }
+
+    // Tombstone for the removed Phase 1 if-with-suspend rejection
+    // test — Phase 2.1a/b lifted the rejection. The
+    // `v31_phase1_non_linear_body_OBSOLETE_now_accepted_by_phase_21a`
+    // test above pins the new behavior (acceptance).
 
     #[test]
     fn sleep_ms_async_typechecks_on_both_backends() {

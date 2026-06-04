@@ -4867,30 +4867,25 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
     }
 }
 
-/// Phase 2.1a branch validator. Each branch of an if-with-
-/// suspend must:
+/// Phase 2.1a + 2.1b branch validator. Each branch of an
+/// if-with-suspend must:
 /// - Be linear (Let / Discard / Return only — no nested if /
 ///   while / match / break / continue)
 /// - Each Let must be i64
-/// - End with `Stmt::Return` (no fall-through; Phase 2.1b
-///   adds merge states for that)
+/// - Phase 2.1a required Return at end; **Phase 2.1b lifts
+///   this** — branches can fall through to a merge state
+///   that the segment collector allocates after both branch
+///   recursions.
 ///
 /// On failure, returns a diagnostic pointing at the offending
 /// stmt with a clear phase pointer.
 fn validate_v31_phase_21a_branch(
     body: &[Stmt],
     branch_label: &str,
-    deferred_phase: &str,
+    _deferred_phase: &str,
 ) -> Result<(), Diagnostic> {
-    if body.is_empty() {
-        return Err(Diagnostic::new(
-            crate::span::Span::new(0, 0),
-            format!(
-                "v3.1 async fn: {} is empty; Phase 2.1a requires both branches to end with `return EXPR;` — empty/fall-through arrives in {}",
-                branch_label, deferred_phase
-            ),
-        ));
-    }
+    // Phase 2.1b: empty branches are allowed (treated as
+    // straight fall-through to the merge state).
     for s in body.iter() {
         match s {
             Stmt::Let { name, annotation, span, .. } => {
@@ -4907,14 +4902,14 @@ fn validate_v31_phase_21a_branch(
             }
             Stmt::Return { .. } => {}
             Stmt::Print { .. } | Stmt::Assign { .. } => {
-                // Phase 2.1a narrow: branches stay linear.
+                // Phase 2.1a/b narrow: branches stay linear.
                 // Print + Assign inside a suspending branch
                 // arrive once Phase 2.1c lifts the linear
                 // restriction.
                 return Err(Diagnostic::new(
                     crate::span::Span::new(0, 0),
                     format!(
-                        "v3.1 async fn: {} contains Print/Assign; Phase 2.1a allows only Let + Return inside suspending branches — arrives in Phase 2.1c (relaxed branch body)",
+                        "v3.1 async fn: {} contains Print/Assign; Phase 2.1a/b allows only Let + Return inside suspending branches — arrives in Phase 2.1c (relaxed branch body)",
                         branch_label
                     ),
                 ));
@@ -4923,7 +4918,7 @@ fn validate_v31_phase_21a_branch(
                 return Err(Diagnostic::new(
                     *span,
                     format!(
-                        "v3.1 async fn: {} contains nested control flow; Phase 2.1a only supports linear branches — nested ifs/loops arrive in Phase 2.1c",
+                        "v3.1 async fn: {} contains nested control flow; Phase 2.1a/b only supports linear branches — nested ifs/loops arrive in Phase 2.1c",
                         branch_label
                     ),
                 ));
@@ -4941,31 +4936,14 @@ fn validate_v31_phase_21a_branch(
                 return Err(Diagnostic::new(
                     crate::span::Span::new(0, 0),
                     format!(
-                        "v3.1 async fn: {} contains an unsupported statement form for Phase 2.1a — see ARC8_V3_PLAN.md",
+                        "v3.1 async fn: {} contains an unsupported statement form for Phase 2.1a/b — see ARC8_V3_PLAN.md",
                         branch_label
                     ),
                 ));
             }
         }
     }
-    // Last stmt must be Return.
-    match body.last() {
-        Some(Stmt::Return { .. }) => Ok(()),
-        Some(other) => Err(Diagnostic::new(
-            match other {
-                Stmt::Let { span, .. } | Stmt::Print { span, .. } => *span,
-                _ => crate::span::Span::new(0, 0),
-            },
-            format!(
-                "v3.1 async fn: {} must end with `return EXPR;` in Phase 2.1a (fall-through arrives in {})",
-                branch_label, deferred_phase
-            ),
-        )),
-        None => Err(Diagnostic::new(
-            crate::span::Span::new(0, 0),
-            format!("v3.1 async fn: {} is empty", branch_label),
-        )),
-    }
+    Ok(())
 }
 
 /// Phase 1+2 narrow-case eligibility check. Returns the
@@ -5437,6 +5415,11 @@ pub(crate) fn try_v31_transform(
         /// (each branch must end with Return per Phase 2.1a's
         /// narrow scope).
         Decision { cond: Expr, then_state: usize, else_state: usize, span: crate::span::Span },
+        /// Phase 2.1b — unconditional state_tag bump. Emitted
+        /// at the END of a non-return-terminated branch to
+        /// transfer control to the merge state. Cascade then
+        /// enters the merge state on a subsequent poll() call.
+        Jump { target_state: usize, span: crate::span::Span },
     }
 
     // Build state_bodies directly via a recursive collector.
@@ -5461,13 +5444,23 @@ pub(crate) fn try_v31_transform(
     // exit (useful when callers need to know where execution
     // continues — for Phase 2.1a both branches must end with
     // Return so the exit-state isn't consumed).
+    /// Returns `true` if the body terminated with a top-level
+    /// `Return` (no fall-through). Phase 2.1b uses this to
+    /// decide whether to emit a `Jump` to the merge state at
+    /// a branch's tail.
     fn collect_into(
         stmts: &[Stmt],
         state_bodies: &mut Vec<Vec<Seg>>,
         current_state: &mut usize,
         discard_counter: &mut usize,
-    ) {
+    ) -> bool {
+        let mut terminated = false;
         for s in stmts {
+            if terminated {
+                // Unreachable code after a Return — validator
+                // should reject this, but bail defensively.
+                break;
+            }
             match s {
                 Stmt::Let { name, expr, span, .. } => {
                     let is_discard = name == "_";
@@ -5519,13 +5512,7 @@ pub(crate) fn try_v31_transform(
                         expr: expr.clone(),
                         span: *span,
                     });
-                    // Return terminates the state — anything
-                    // after is dead in the current branch.
-                    // Allocate a fresh "dead" state for any
-                    // subsequent stmts (validator should have
-                    // rejected those, but defensive).
-                    state_bodies.push(Vec::new());
-                    *current_state = state_bodies.len() - 1;
+                    terminated = true;
                 }
                 Stmt::If { cond, then_body, else_body, span } => {
                     let has_suspend = then_body.iter().any(stmt_contains_io_async)
@@ -5534,10 +5521,16 @@ pub(crate) fn try_v31_transform(
                         // Phase 2 narrow path: emit verbatim.
                         state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
                     } else {
-                        // Phase 2.1a: state-splitting. Allocate
-                        // then_state + else_state, push Decision
-                        // into current state, recurse into each
-                        // branch.
+                        // Phase 2.1a/b: state-splitting. Allocate
+                        // then_state + else_state up front (they
+                        // need stable indices for the Decision
+                        // seg), push Decision into current state,
+                        // recurse into each branch, then allocate
+                        // the merge state AFTER both recursions so
+                        // its index is highest (Phase 2.1b cascade
+                        // invariant). For each branch that fell
+                        // through (didn't terminate with Return),
+                        // emit a Jump at its tail to the merge.
                         let then_state = state_bodies.len();
                         state_bodies.push(Vec::new());
                         let else_state = state_bodies.len();
@@ -5548,20 +5541,46 @@ pub(crate) fn try_v31_transform(
                             else_state,
                             span: *span,
                         });
-                        // Recurse into then_body.
                         let mut then_current = then_state;
-                        collect_into(then_body, state_bodies, &mut then_current, discard_counter);
-                        // Recurse into else_body.
+                        let then_terminated = collect_into(
+                            then_body, state_bodies, &mut then_current, discard_counter,
+                        );
                         let mut else_current = else_state;
-                        collect_into(else_body, state_bodies, &mut else_current, discard_counter);
-                        // After the if, current_state is "dead"
-                        // — Phase 2.1a requires both branches to
-                        // Return so the outer flow doesn't fall
-                        // through. Validator enforces this.
-                        // Allocate a fresh state for any trailing
-                        // (defensive — should be unreachable).
-                        state_bodies.push(Vec::new());
-                        *current_state = state_bodies.len() - 1;
+                        let else_terminated = collect_into(
+                            else_body, state_bodies, &mut else_current, discard_counter,
+                        );
+                        // Phase 2.1b: if either branch fell
+                        // through, allocate a merge state and
+                        // emit Jumps. If BOTH branches terminated
+                        // with Return (the Phase 2.1a case),
+                        // skip the merge — the outer flow can
+                        // never reach it. Otherwise the outer
+                        // continues at the merge state.
+                        if !then_terminated || !else_terminated {
+                            let merge_state = state_bodies.len();
+                            state_bodies.push(Vec::new());
+                            if !then_terminated {
+                                state_bodies[then_current].push(Seg::Jump {
+                                    target_state: merge_state,
+                                    span: *span,
+                                });
+                            }
+                            if !else_terminated {
+                                state_bodies[else_current].push(Seg::Jump {
+                                    target_state: merge_state,
+                                    span: *span,
+                                });
+                            }
+                            *current_state = merge_state;
+                        } else {
+                            // Both branches Return — outer flow
+                            // is dead. Allocate a defensive empty
+                            // state. Validator should reject any
+                            // stmts after this if.
+                            state_bodies.push(Vec::new());
+                            *current_state = state_bodies.len() - 1;
+                            terminated = true;
+                        }
                     }
                 }
                 Stmt::While { .. } | Stmt::Assign { .. } | Stmt::Print { .. } => {
@@ -5572,10 +5591,11 @@ pub(crate) fn try_v31_transform(
                 _ => {}
             }
         }
+        terminated
     }
 
     let mut start_state: usize = 0;
-    collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter);
+    let _ = collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter);
 
     // The `states` shape stays the same as before — outer code
     // just iterates state_bodies. Drop any trailing empty
@@ -5602,7 +5622,8 @@ pub(crate) fn try_v31_transform(
             | Seg::Suspend { span, .. }
             | Seg::Discard { span, .. }
             | Seg::Return { span, .. }
-            | Seg::Decision { span, .. } => *span,
+            | Seg::Decision { span, .. }
+            | Seg::Jump { span, .. } => *span,
             Seg::Verbatim(s) => match s {
                 Stmt::If { span, .. }
                 | Stmt::While { span, .. }
@@ -5781,6 +5802,25 @@ pub(crate) fn try_v31_transform(
                     // struct fields. Then emit verbatim.
                     let rewritten = rewrite_vars_in_stmt(stmt, &rename, &t_param_name);
                     then_body.push(rewritten);
+                }
+                Seg::Jump { target_state, span } => {
+                    // Phase 2.1b: unconditional state_tag bump.
+                    // Emitted at the tail of a non-return-
+                    // terminated branch to transfer control to
+                    // the merge state.
+                    then_body.push(Stmt::FieldAssign {
+                        object: Expr {
+                            kind: ExprKind::Var(t_param_name.clone()),
+                            span: *span,
+                        },
+                        field: "state_tag".to_string(),
+                        field_span: *span,
+                        value: Expr {
+                            kind: ExprKind::Int(*target_state as i128),
+                            span: *span,
+                        },
+                        span: *span,
+                    });
                 }
                 Seg::Decision { cond, then_state, else_state, span } => {
                     // Phase 2.1a: if-with-suspend. Emit
