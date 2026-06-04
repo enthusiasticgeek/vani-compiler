@@ -21169,6 +21169,52 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside
+    /// suspending loops. The collector maintains a loop_stack;
+    /// break/continue translate to state_tag jumps targeting
+    /// the innermost loop's post_loop / loop_header.
+    #[test]
+    fn v31_phase25b_break_inside_suspending_loop() {
+        let source = r#"
+            async fn until_zero(fd: i64) -> i64 {
+              let total: i64 = 0;
+              while total < 1000 {
+                let n: i64 = io_recv_async(fd, 64);
+                if n == 0 {
+                  break;
+                }
+                total = total + n;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.5b break must compile on C");
+        compile_to_llvm(source).expect("Phase 2.5b break must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase25b_continue_inside_suspending_loop() {
+        let source = r#"
+            async fn skip_zeros(fd: i64) -> i64 {
+              let total: i64 = 0;
+              let i: i64 = 0;
+              while i < 3 {
+                let n: i64 = io_recv_async(fd, 64);
+                i = i + 1;
+                if n == 0 {
+                  continue;
+                }
+                total = total + n;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.5b continue must compile on C");
+        compile_to_llvm(source).expect("Phase 2.5b continue must compile on LLVM");
+    }
+
     /// Arc 8 v3.1 Phase 2.5 — loops with suspend inside.
     /// The collector allocates loop_header + body_start +
     /// post_loop states + emits a BACKWARD Jump at the body

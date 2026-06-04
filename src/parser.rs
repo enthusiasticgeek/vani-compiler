@@ -5066,6 +5066,76 @@ fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
     out
 }
 
+/// Phase 2.5b — rewrite `break` / `continue` inside a
+/// Verbatim Stmt::If's branches to state_tag jumps so they
+/// target the ENCLOSING suspending loop (not the synthesized
+/// `while true` wrapping the poll fn body). Recurses into
+/// nested if branches but NOT into nested user `while` bodies
+/// (those have their own loop semantics and break/continue
+/// inside should target THAT while).
+fn rewrite_break_continue_in_stmts(
+    stmts: &[Stmt],
+    loop_header: usize,
+    post_loop: usize,
+    t_param: &str,
+) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    for s in stmts {
+        match s {
+            Stmt::Break { span } => {
+                out.push(Stmt::FieldAssign {
+                    object: Expr {
+                        kind: ExprKind::Var(t_param.to_string()),
+                        span: *span,
+                    },
+                    field: "state_tag".to_string(),
+                    field_span: *span,
+                    value: Expr {
+                        kind: ExprKind::Int(post_loop as i128),
+                        span: *span,
+                    },
+                    span: *span,
+                });
+                out.push(Stmt::Continue { span: *span });
+            }
+            Stmt::Continue { span } => {
+                out.push(Stmt::FieldAssign {
+                    object: Expr {
+                        kind: ExprKind::Var(t_param.to_string()),
+                        span: *span,
+                    },
+                    field: "state_tag".to_string(),
+                    field_span: *span,
+                    value: Expr {
+                        kind: ExprKind::Int(loop_header as i128),
+                        span: *span,
+                    },
+                    span: *span,
+                });
+                out.push(Stmt::Continue { span: *span });
+            }
+            Stmt::If { cond, then_body, else_body, span } => {
+                out.push(Stmt::If {
+                    cond: cond.clone(),
+                    then_body: rewrite_break_continue_in_stmts(
+                        then_body, loop_header, post_loop, t_param,
+                    ),
+                    else_body: rewrite_break_continue_in_stmts(
+                        else_body, loop_header, post_loop, t_param,
+                    ),
+                    span: *span,
+                });
+            }
+            // Don't recurse into Stmt::While — break/continue
+            // inside a USER's nested non-suspending while
+            // target THAT while, not the enclosing suspending
+            // one. Pass through verbatim.
+            other => out.push(other.clone()),
+        }
+    }
+    out
+}
+
 /// Phase 2.1c helper — does this body unconditionally exit
 /// via Return on every control-flow path? Used to suppress
 /// the defensive Jump emitted after a Verbatim stmt that
@@ -5219,14 +5289,11 @@ fn validate_v31_phase_21a_branch(
                     body, "nested while body", "Phase 2.5b (break/continue inside suspending loops)",
                 )?;
             }
-            Stmt::Break { span } | Stmt::Continue { span } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    format!(
-                        "v3.1 async fn: {} contains break/continue — arrives in Phase 2.5 (loop with suspend-aware back-edge)",
-                        branch_label
-                    ),
-                ));
+            Stmt::Break { .. } | Stmt::Continue { .. } => {
+                // Phase 2.5b: break/continue allowed inside
+                // suspending branches/loops. Base language
+                // validates loop context.
+                let _ = branch_label;
             }
             _ => {
                 return Err(Diagnostic::new(
@@ -5390,11 +5457,14 @@ fn validate_v31_linear_body(
                     collect_branch_locals_recursive(while_body, &mut locals);
                 }
             }
-            Stmt::Break { span } | Stmt::Continue { span } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    "v3.1 async fn: `break` / `continue` arrive in Phase 2.1 (loop with suspend-aware back-edge codegen).",
-                ));
+            Stmt::Break { .. } | Stmt::Continue { .. } => {
+                // Phase 2.5b: break/continue allowed at top
+                // level of async fn body. The base language
+                // already validates that they appear only
+                // inside loops; if we see one here it's
+                // inside a while body or nested if-inside-while
+                // (validator descends into nested constructs
+                // recursively via validate_v31_phase_21a_branch).
             }
             // Reject other forms with a generic message.
             _ => {
@@ -5760,11 +5830,18 @@ pub(crate) fn try_v31_transform(
     /// `Return` (no fall-through). Phase 2.1b uses this to
     /// decide whether to emit a `Jump` to the merge state at
     /// a branch's tail.
+    ///
+    /// Phase 2.5b: `loop_stack` carries `(loop_header,
+    /// post_loop)` pairs for each enclosing suspending while
+    /// loop. `break` jumps to the innermost `post_loop`;
+    /// `continue` jumps to the innermost `loop_header`. Both
+    /// terminate the current state's segment chain.
     fn collect_into(
         stmts: &[Stmt],
         state_bodies: &mut Vec<Vec<Seg>>,
         current_state: &mut usize,
         discard_counter: &mut usize,
+        loop_stack: &mut Vec<(usize, usize)>,
     ) -> bool {
         let mut terminated = false;
         for s in stmts {
@@ -5831,7 +5908,23 @@ pub(crate) fn try_v31_transform(
                         || else_body.iter().any(stmt_contains_io_async);
                     if !has_suspend {
                         // Phase 2 narrow path: emit verbatim.
-                        state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                        // Phase 2.5b: if we're inside a
+                        // suspending loop, rewrite any nested
+                        // break/continue inside this if's
+                        // branches to state_tag jumps targeting
+                        // the innermost suspending loop.
+                        let verbatim_stmt = if let Some(&(lh, pl)) = loop_stack.last() {
+                            let rewritten = rewrite_break_continue_in_stmts(
+                                std::slice::from_ref(s), lh, pl, "__t",
+                            );
+                            // rewrite_break_continue_in_stmts on a
+                            // single-element slice returns a Vec
+                            // with one element (the rewritten if).
+                            rewritten.into_iter().next().unwrap_or_else(|| s.clone())
+                        } else {
+                            s.clone()
+                        };
+                        state_bodies[*current_state].push(Seg::Verbatim(verbatim_stmt));
                         // Phase 2.1c: if both branches return,
                         // mark terminated so the caller doesn't
                         // emit a dead Jump after the verbatim.
@@ -5861,11 +5954,11 @@ pub(crate) fn try_v31_transform(
                         });
                         let mut then_current = then_state;
                         let then_terminated = collect_into(
-                            then_body, state_bodies, &mut then_current, discard_counter,
+                            then_body, state_bodies, &mut then_current, discard_counter, loop_stack,
                         );
                         let mut else_current = else_state;
                         let else_terminated = collect_into(
-                            else_body, state_bodies, &mut else_current, discard_counter,
+                            else_body, state_bodies, &mut else_current, discard_counter, loop_stack,
                         );
                         // Phase 2.1b: if either branch fell
                         // through, allocate a merge state and
@@ -5933,10 +6026,15 @@ pub(crate) fn try_v31_transform(
                             span: *span,
                         });
                         // Recurse into body starting at body_start.
+                        // Phase 2.5b: push (loop_header, post_loop)
+                        // onto loop_stack so break/continue inside
+                        // this loop's body know where to jump.
+                        loop_stack.push((loop_header, post_loop));
                         let mut body_current = body_start;
                         let body_terminated = collect_into(
-                            while_body, state_bodies, &mut body_current, discard_counter,
+                            while_body, state_bodies, &mut body_current, discard_counter, loop_stack,
                         );
+                        loop_stack.pop();
                         // At body's tail (if not return-
                         // terminated), emit BACKWARD Jump to
                         // loop_header. Synthesis recognizes
@@ -5959,6 +6057,32 @@ pub(crate) fn try_v31_transform(
                         terminated = true;
                     }
                 }
+                Stmt::Break { span } => {
+                    // Phase 2.5b: break jumps to the innermost
+                    // loop's post_loop state.
+                    if let Some(&(_, post_loop)) = loop_stack.last() {
+                        state_bodies[*current_state].push(Seg::Jump {
+                            target_state: post_loop,
+                            span: *span,
+                        });
+                        // After break, the rest of the current
+                        // branch's stmts are unreachable.
+                        terminated = true;
+                    }
+                    // If no enclosing loop, the base language
+                    // rejects already; defensively skip.
+                }
+                Stmt::Continue { span } => {
+                    // Phase 2.5b: continue jumps to the innermost
+                    // loop's loop_header state.
+                    if let Some(&(loop_header, _)) = loop_stack.last() {
+                        state_bodies[*current_state].push(Seg::Jump {
+                            target_state: loop_header,
+                            span: *span,
+                        });
+                        terminated = true;
+                    }
+                }
                 _ => {}
             }
         }
@@ -5966,7 +6090,8 @@ pub(crate) fn try_v31_transform(
     }
 
     let mut start_state: usize = 0;
-    let _ = collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter);
+    let mut loop_stack: Vec<(usize, usize)> = Vec::new();
+    let _ = collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter, &mut loop_stack);
 
     // The `states` shape stays the same as before — outer code
     // just iterates state_bodies. Drop any trailing empty
