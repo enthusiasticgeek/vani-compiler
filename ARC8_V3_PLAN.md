@@ -271,11 +271,159 @@ needed by the acceptance example).
 
 ### Phase 2 — v3.1 control flow
 
-**Goal.** Lift the linear-body restriction. Handle
-`if` / `while` / `for` / `match` / `break` / `continue` /
-`try` inside async fn bodies.
+**Phase 2 was split into sub-phases during implementation:**
 
-**Scope (in):**
+- **Phase 2 narrow ✅ DONE 2026-06-04** (commit `a3cab5b`):
+  `if` / `while` / `Assign` / `Print` + mid-body `return`
+  ALLOWED at top level **provided** branches contain no
+  `io_*_async` suspend points. Emitted verbatim in current
+  state with var-rewriting. 4 lib tests +
+  `examples/echo_with_timeout.vani` parity-green.
+
+- **Phase 2.1** (queued, ~10-12h focused) —
+  **suspend-in-branch state-splitting**. The hardest sub-
+  phase. Detailed design below ("Phase 2.1 implementation
+  guide"). Without 2.1, an `if` / `while` branch that
+  itself contains `io_*_async` is rejected with the
+  "needs full state-splitting codegen" diagnostic.
+
+- **Phase 2.2** (queued, ~5-6h) — ANF lifting for
+  `await(io_*_async(...))` calls inside larger
+  expressions. Compiler walks the body and pulls each such
+  call into its own `let __anf_v = io_*_async(...);` before
+  the parent expression.
+
+- **Phase 2.3** (queued, ~8-10h) — `match` arms with per-arm
+  state graphs.
+
+- **Phase 2.4** (queued, ~6-8h) — `try expr` keyword + Result
+  propagation through the state machine.
+
+- **Phase 2.5** (queued, ~6-8h) — `break` / `continue` inside
+  loops with suspend-aware back-edge codegen.
+
+### Phase 2.1 implementation guide (suspend-in-branch)
+
+The bulk of Phase 2.1 is converting the current implicit
+linear state allocation to explicit state numbering.
+
+**Required restructuring** (in `src/parser.rs`):
+
+1. **Replace the linear `Vec<Vec<Seg>>` `states` accumulator**
+   with an explicit `StateMachine` struct:
+
+   ```rust
+   struct StateMachine {
+       next_state: usize,            // monotonically increasing
+       state_bodies: Vec<Vec<Seg>>,  // state_bodies[K] = segs for state K
+   }
+   impl StateMachine {
+       fn alloc_state(&mut self) -> usize {
+           let s = self.next_state;
+           self.next_state += 1;
+           self.state_bodies.push(Vec::new());
+           s
+       }
+   }
+   ```
+
+2. **Add explicit branch + jump segments:**
+
+   ```rust
+   enum Seg {
+       // ... existing variants ...
+       Decision {
+           cond: Expr,
+           then_state: usize,
+           else_state: usize,
+           span: Span,
+       },
+       // Optional: explicit Jump for branches that don't
+       // return but need to merge back. Phase 2.1a can
+       // require return-termination instead.
+   }
+   ```
+
+3. **Replace the existing `for s in segs` loop with a
+   recursive `collect_segs(stmts, sm, current_state)`** that:
+   - Takes a mutable `&mut StateMachine` and `&mut usize` for
+     the current state being built
+   - On Stmt::Let with suspend: bumps state and emits Suspend
+   - On Stmt::Return: emits Return (no state change — the poll
+     fn exits via return; the cascading caller's current_state
+     becomes "dead")
+   - On Stmt::If with suspend-in-branch: allocates `then_state`
+     and `else_state`, pushes a `Seg::Decision` into the
+     current state, then recurses into each branch with that
+     branch's starting state as `current_state`
+   - On Stmt::If without suspend (Phase 2 narrow): emits
+     `Seg::Verbatim`
+
+4. **State-numbering invariant (critical):** each state's body
+   must set `state_tag` to a value GREATER than the current
+   state index. The cascade pattern relies on monotonic state
+   transitions. Decision states satisfy this because both
+   branch states are allocated AFTER the decision state.
+
+5. **Phase 2.1a narrow scope** (recommended first slice):
+   - Require BOTH branches of every if-with-suspend to end
+     with `Stmt::Return` — no fall-through, no merge state
+     needed
+   - Reject nested ifs inside branches (the recursion is
+     supported in principle but increases test surface)
+   - Reject Phase 2 narrow constructs INSIDE branches (no
+     nested if/while/Assign in branches)
+
+6. **Phase 2.1b** (follow-up): allow non-return-terminated
+   branches. Requires a "merge state" that both branches
+   `state_tag =` before falling through. Each branch's
+   FINAL state body bumps to the merge state.
+
+7. **Phase 2.1c** (follow-up): nested if-with-suspend inside a
+   branch. Recursive `collect_segs` already handles this in
+   principle; just need tests.
+
+**Acceptance example** for Phase 2.1a:
+
+```vani
+async fn cond_recv(fd: i64, mode: i64) -> i64 {
+  if mode > 0 {
+    let n: i64 = io_recv_async(fd, 64);
+    return n;
+  } else {
+    return mode;
+  }
+}
+```
+
+Expected synthesized states:
+- State 0: `if t.mode > 0 { t.state_tag = 1; } else { t.state_tag = 3; }`
+- State 1: `let r = tcp_recv_nb(t.fd, 64); ... save r → t.n; t.state_tag = 2;`
+- State 2: `return t.n;`
+- State 3: `return t.mode;`
+
+The cascade naturally enters either state 1 (after state 0 sets state_tag=1) or skips to state 3 (state_tag=3 doesn't match state 1 or 2's check).
+
+**Lib test surface for Phase 2.1a:** ~5-8 tests covering:
+- Simplest case (one suspend in then-branch, return in else)
+- Suspend in both branches
+- Two suspends in then-branch
+- Nested control-flow rejection (until Phase 2.1c)
+- Fall-through rejection (until Phase 2.1b)
+
+**Effort estimate (refined):** ~10-12h focused for Phase 2.1a;
+each follow-up sub-phase ~3-5h additional.
+
+---
+
+### Phase 2 (original — kept for reference)
+
+The pre-implementation Phase 2 sketch below describes the
+end-state covering all sub-phases. Phase 2 narrow shipped
+the no-suspend-in-branches case; 2.1 / 2.2 / 2.3 / 2.4 / 2.5
+remain queued.
+
+**Scope (in — full Phase 2):**
 - **A2.1 — `if/else` inside async body.** Each branch may
   contain a suspend point. The state machine doubles per
   branch: states `(N, then)` and `(N, else)` track which
