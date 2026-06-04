@@ -38,7 +38,7 @@ use diagnostic::Diagnostic;
 /// Result construction against this known monomorphic
 /// name. The fn is never called; the monomorphizer keeps
 /// its signature in scope.
-const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\nenum Poll<T> { Ready(T), Pending }\nenum Future<T> { Ready(T), Pending }\n";
+const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\nenum Poll<T> { Ready(T), Pending }\nenum Future<T> { Ready(T), Pending }\nstruct CancelToken { cancelled: bool }\n";
 
 fn inject_prelude(program: &mut ast::Program) {
     let prelude_tokens = match lexer::lex(PRELUDE) {
@@ -52,6 +52,12 @@ fn inject_prelude(program: &mut ast::Program) {
         program.enums.iter().map(|e| e.name.clone()).collect();
     prelude_prog.enums.retain(|e| !user_enum_names.contains(&e.name));
     program.enums.extend(prelude_prog.enums);
+    // Arc 8 step 8g: same shape for prelude structs (today
+    // only `CancelToken`). User redeclarations override.
+    let user_struct_names: std::collections::HashSet<String> =
+        program.structs.iter().map(|s| s.name.clone()).collect();
+    prelude_prog.structs.retain(|s| !user_struct_names.contains(&s.name));
+    program.structs.extend(prelude_prog.structs);
 }
 
 pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
@@ -29471,6 +29477,45 @@ fn main() -> i64 {
         "#;
         compile_to_c(source).expect("async fn with early-return compiles to C");
         compile_to_llvm(source).expect("async fn with early-return compiles to LLVM");
+    }
+
+    // Arc 8 step 8f (2026-06-04): `await(expr)` parser-level
+    // desugar. Rewrites to a match extracting Future.Ready's
+    // payload; the Pending arm body is a literal `0` (typed as
+    // i64 by default — v1 works directly for `Future<i64>`).
+    // For other scalar T, users add an explicit `as T` cast at
+    // the await site. Non-scalar T should match manually.
+    #[test]
+    fn await_desugars_to_match_on_future_ready() {
+        let source = r#"
+            async fn fetch(n: i64) -> i64 {
+              return n * 7;
+            }
+
+            fn main() -> i64 {
+              return await(fetch(6));
+            }
+        "#;
+        compile_to_c(source).expect("await desugar compiles on C");
+        compile_to_llvm(source).expect("await desugar compiles on LLVM");
+    }
+
+    // Arc 8 step 8g (2026-06-04): `CancelToken` struct joins
+    // the prelude as the cancellation-flag primitive. The full
+    // cancellation semantics (checked at every suspend point)
+    // become meaningful once Arc 8 8c (state-machine codegen)
+    // ships; in v1 it's a plain struct users can pass around
+    // and check manually.
+    #[test]
+    fn prelude_provides_cancel_token_struct() {
+        let source = r#"
+            fn main() -> i64 {
+              let t: CancelToken = CancelToken { cancelled: false };
+              return if t.cancelled { 1 } else { 0 };
+            }
+        "#;
+        compile_to_c(source).expect("CancelToken prelude available on C");
+        compile_to_llvm(source).expect("CancelToken prelude available on LLVM");
     }
 
     #[test]

@@ -1,0 +1,50 @@
+// Arc 8 v1 — `async fn` + `await` + `CancelToken` shipped at
+// the parser+prelude level. v1 semantics:
+//
+// - `async fn foo() -> R { ...; return v; ... }` desugars to
+//   `fn foo() -> Future<R> { ...; return Future.Ready(v); ... }`.
+//   The fn runs to completion synchronously on call.
+// - `await(expr)` desugars to a `match` that extracts
+//   Future.Ready's payload. v1 works directly for
+//   `Future<i64>` (Pending arm body is literal 0 — unreachable
+//   in v1 since async fns always emit Ready).
+// - `CancelToken` is a prelude struct `{ cancelled: bool }`;
+//   the user threads it through async fns and checks
+//   `.cancelled` at relevant points. Real suspend-point
+//   cancellation lands when the state-machine codegen (Arc 8
+//   step 8c) ships.
+//
+// build & run:
+//   intentc run examples/async_await.vani                   # LLVM
+//   intentc run examples/async_await.vani --backend=c       # C
+
+intent "async fn + await + CancelToken — v1 (Arc 8 steps 8a/8b/8f/8g)";
+
+async fn fetch(n: i64) -> i64 {
+  return n * 7;
+}
+
+async fn cancellable(n: i64, token: ref CancelToken) -> i64 {
+  if token.cancelled {
+    return 0 - 1;
+  }
+  return n + 100;
+}
+
+fn main() -> i64 {
+  // Plain async fn + await round-trip.
+  let r1: i64 = await(fetch(6));
+  print "await fetch(6) (42):", r1;
+
+  // CancelToken: not cancelled → produces value.
+  let tok: CancelToken = CancelToken { cancelled: false };
+  let r2: i64 = await(cancellable(7, ref tok));
+  print "await cancellable(7, !tok) (107):", r2;
+
+  // CancelToken: cancelled → produces sentinel.
+  let tok2: CancelToken = CancelToken { cancelled: true };
+  let r3: i64 = await(cancellable(7, ref tok2));
+  print "await cancellable(7, tok) (-1):", r3;
+
+  return 0;
+}

@@ -3,6 +3,7 @@ use crate::ast::{
     InterfaceDecl, InterfaceMethod, MatchArm, MethodsBlock, Param, Pattern, Program, Reduction,
     ReductionOp, Stmt, StructDecl, StructField, Type, TypeAlias, UnaryOp, Use, WhereClause,
 };
+use crate::span::Span;
 
 /// Parser-internal sum of the three `use`-statement shapes
 /// (closures #245, #247). The top-level parse loop dispatches
@@ -3495,10 +3496,23 @@ impl Parser {
                 }
                 let close = self.expect_keyword("')'", |kind| matches!(kind, TokenKind::RParen))?;
                 let span = name_span.merge(close.span);
-                expr = Expr {
-                    kind: ExprKind::Call { name, name_span, args },
-                    span,
-                };
+                // Arc 8 step 8f — `await(expr)` parser-level
+                // desugar. Rewrites to a match that extracts
+                // the Ready payload; the Pending arm panics
+                // (via assert false) and falls through to a
+                // literal 0 of the inferred T. v1: works for
+                // Future<i64> directly. For other scalar T, the
+                // user writes `await(expr) as T`. For non-scalar
+                // T, manually destructure with match.
+                if name == "await" && args.len() == 1 {
+                    let inner = args.into_iter().next().unwrap();
+                    expr = synthesize_await_desugar(inner, span);
+                } else {
+                    expr = Expr {
+                        kind: ExprKind::Call { name, name_span, args },
+                        span,
+                    };
+                }
             } else if self
                 .match_token(|kind| matches!(kind, TokenKind::As))
                 .is_some()
@@ -4476,6 +4490,50 @@ fn ident_text(token: Token) -> String {
     match token.kind {
         TokenKind::Ident(name) => name,
         _ => unreachable!("expected identifier"),
+    }
+}
+
+/// Arc 8 step 8f — synthesize the AST for `await(expr)`:
+///   `match expr { Future.Ready(__v) then __v, Future.Pending then 0 }`
+/// The Pending arm body is a literal `0` (i64). For v1 this
+/// works directly for `Future<i64>`; the user explicitly casts
+/// (`await(future_f64) as f64` would type-check via the
+/// surrounding context's coercion). Non-scalar T should match
+/// manually until the state-machine codegen (Arc 8 step 8c)
+/// lands.
+fn synthesize_await_desugar(inner: Expr, span: Span) -> Expr {
+    let v_var = Expr {
+        kind: ExprKind::Var("__await_v".to_string()),
+        span,
+    };
+    let arms = vec![
+        MatchArm {
+            pattern: Pattern::VariantWithBinding {
+                enum_name: "Future".to_string(),
+                variant: "Ready".to_string(),
+                binding: "__await_v".to_string(),
+            },
+            pattern_span: span,
+            body: v_var,
+        },
+        MatchArm {
+            pattern: Pattern::Variant {
+                enum_name: "Future".to_string(),
+                variant: "Pending".to_string(),
+            },
+            pattern_span: span,
+            body: Expr {
+                kind: ExprKind::Int(0),
+                span,
+            },
+        },
+    ];
+    Expr {
+        kind: ExprKind::Match {
+            scrutinee: Box::new(inner),
+            arms,
+        },
+        span,
     }
 }
 
