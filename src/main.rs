@@ -478,6 +478,7 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "tcp_accept_nb" || name == "tcp_recv_nb"
                 || name == "io_recv_async" || name == "io_send_async"
                 || name == "io_accept_async"
+                || name == "sleep_ms_async" || name == "sleep_ms_finish"
                 || name == "vec_chunks" || name == "vec_windows"
                 || name == "vec_flatten" || name == "vec_group_by_value"
                 || name == "vec_running_mean" || name == "vec_intersperse"

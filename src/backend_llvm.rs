@@ -1237,15 +1237,22 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
 
     // Arc 8 step 8e proper — TCP runtime helpers. Gated on
     // the program actually calling any tcp_* builtin so the
-    // libc socket declares only land when needed.
-    if program_uses_tcp(program) {
+    // libc socket declares only land when needed. Also
+    // emitted when the epoll helpers need their declares
+    // (@accept / @recv / @intent_tcp_buf) so the epoll +
+    // nb variants link cleanly even if no blocking TCP is
+    // used. v3.1 Phase 0 sleep_ms_async / sleep_ms_finish
+    // also route through the epoll-helper gate so they
+    // inherit this fall-through.
+    let uses_epoll = program_uses_epoll(program);
+    if program_uses_tcp(program) || uses_epoll {
         emit_intent_tcp_helpers_llvm(&mut out);
     }
 
     // Arc 8 v2 — epoll + non-blocking I/O helpers. Gated on
     // the program actually calling any epoll_* or tcp_*_nb /
     // tcp_set_nonblocking builtin.
-    if program_uses_epoll(program) {
+    if uses_epoll {
         emit_intent_epoll_helpers_llvm(&mut out);
     }
 
@@ -8878,6 +8885,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             if matches!(
                 name.as_str(),
                 "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb"
+                // Arc 8 v3.1 Phase 0 — timerfd builtins share
+                // the same single-i64-arg shape as the existing
+                // 1-arg epoll family. The runtime helpers emit
+                // alongside the rest of the epoll block.
+                | "sleep_ms_async" | "sleep_ms_finish"
             ) {
                 let a0 = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
@@ -22424,6 +22436,10 @@ fn program_uses_epoll(program: &TypedProgram) -> bool {
             name,
             "epoll_new" | "epoll_add_read" | "epoll_wait_one" | "epoll_close"
             | "tcp_set_nonblocking" | "tcp_accept_nb" | "tcp_recv_nb"
+            // Arc 8 v3.1 Phase 0 — timerfd-based async sleep
+            // shares the epoll helper-emit gate so the
+            // <sys/timerfd.h> + read declares land alongside.
+            | "sleep_ms_async" | "sleep_ms_finish"
         )
     }
     fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
@@ -22514,6 +22530,9 @@ fn emit_intent_epoll_helpers_llvm(out: &mut String) {
          declare i32 @epoll_ctl(i32, i32, i32, i8*)\n\
          declare i32 @epoll_wait(i32, i8*, i32, i32)\n\
          declare i32 @fcntl(i32, i32, ...)\n\
+         declare i32 @timerfd_create(i32, i32)\n\
+         declare i32 @timerfd_settime(i32, i32, i8*, i8*)\n\
+         declare i64 @read(i32, i8*, i64)\n\
          declare i32* @__errno_location()\n\
          define i64 @intent_epoll_new() {\n\
          entry:\n\
@@ -22627,6 +22646,57 @@ fn emit_intent_epoll_helpers_llvm(out: &mut String) {
          \x20 %is_eagain = icmp eq i32 %err_v, 11\n\
          \x20 %res = select i1 %is_eagain, i64 -2, i64 -1\n\
          \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_sleep_ms_async(i64 %ms) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %ms, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %do_create\n\
+         do_create:\n\
+         \x20 ; timerfd_create(CLOCK_MONOTONIC=1, TFD_NONBLOCK=2048).\n\
+         \x20 %fd = call i32 @timerfd_create(i32 1, i32 2048)\n\
+         \x20 %fd_err = icmp slt i32 %fd, 0\n\
+         \x20 br i1 %fd_err, label %ret_neg1, label %do_set\n\
+         do_set:\n\
+         \x20 ; struct itimerspec = 4 longs (32 bytes on 64-bit).\n\
+         \x20 %its = alloca [32 x i8], align 8\n\
+         \x20 %its_i8 = getelementptr [32 x i8], [32 x i8]* %its, i32 0, i32 0\n\
+         \x20 %_z = call i8* @memset(i8* %its_i8, i32 0, i64 32)\n\
+         \x20 ; it_value.tv_sec at +16, tv_nsec at +24.\n\
+         \x20 %sec = sdiv i64 %ms, 1000\n\
+         \x20 %ms_mod = srem i64 %ms, 1000\n\
+         \x20 %nsec = mul i64 %ms_mod, 1000000\n\
+         \x20 %sec_ptr_i8 = getelementptr i8, i8* %its_i8, i64 16\n\
+         \x20 %sec_ptr = bitcast i8* %sec_ptr_i8 to i64*\n\
+         \x20 store i64 %sec, i64* %sec_ptr\n\
+         \x20 %nsec_ptr_i8 = getelementptr i8, i8* %its_i8, i64 24\n\
+         \x20 %nsec_ptr = bitcast i8* %nsec_ptr_i8 to i64*\n\
+         \x20 store i64 %nsec, i64* %nsec_ptr\n\
+         \x20 %rc = call i32 @timerfd_settime(i32 %fd, i32 0, i8* %its_i8, i8* null)\n\
+         \x20 %rc_err = icmp slt i32 %rc, 0\n\
+         \x20 br i1 %rc_err, label %close_neg1, label %ret_fd\n\
+         ret_fd:\n\
+         \x20 %fd_i64 = sext i32 %fd to i64\n\
+         \x20 ret i64 %fd_i64\n\
+         close_neg1:\n\
+         \x20 %_cc = call i32 @close(i32 %fd)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_sleep_ms_finish(i64 %fd) {\n\
+         entry:\n\
+         \x20 %exp = alloca i64, align 8\n\
+         \x20 %exp_i8 = bitcast i64* %exp to i8*\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %n = call i64 @read(i32 %fd_i32, i8* %exp_i8, i64 8)\n\
+         \x20 %_close = call i32 @close(i32 %fd_i32)\n\
+         \x20 %err = icmp slt i64 %n, 0\n\
+         \x20 br i1 %err, label %ret_neg1, label %ret_exp\n\
+         ret_exp:\n\
+         \x20 %v = load i64, i64* %exp\n\
+         \x20 ret i64 %v\n\
          ret_neg1:\n\
          \x20 ret i64 -1\n\
          }\n\n",

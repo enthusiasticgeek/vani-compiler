@@ -25,7 +25,13 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // machine codegen semantics (when the compiler-driven
     // `async fn` -> `Task<T>` transform lands, calls to these
     // builtins inside an async fn body become suspend points).
-    "io_recv_async", "io_send_async", "io_accept_async"];
+    "io_recv_async", "io_send_async", "io_accept_async",
+    // Arc 8 v3.1 Phase 0 — timerfd-based non-blocking sleep.
+    // Composes with epoll for true single-thread cooperative
+    // timers: caller calls sleep_ms_async, registers the
+    // returned fd with epoll, waits via epoll_wait_one,
+    // then calls sleep_ms_finish to clear + close the timer.
+    "sleep_ms_async", "sleep_ms_finish"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -15412,7 +15418,11 @@ fn check_call(
         // at codegen so behavior is identical TODAY. The names
         // reserve the future state-machine-suspend-point
         // semantics for the v3.1 compiler-driven transform.
-        | "io_recv_async" | "io_send_async" | "io_accept_async" => {
+        | "io_recv_async" | "io_send_async" | "io_accept_async"
+        // Arc 8 v3.1 Phase 0 — timerfd-based non-blocking
+        // sleep. Returns the timerfd / clears the timer; the
+        // user pairs them with epoll for cooperative timing.
+        | "sleep_ms_async" | "sleep_ms_finish" => {
             return check_epoll_builtin(
                 name, args, env, signatures, span, diagnostics,
             );
@@ -23013,7 +23023,8 @@ fn check_epoll_builtin(
     let want_args: usize = match name {
         "epoll_new" => 0,
         "epoll_close" | "tcp_set_nonblocking" | "tcp_accept_nb"
-        | "io_accept_async" => 1,
+        | "io_accept_async"
+        | "sleep_ms_async" | "sleep_ms_finish" => 1,
         "epoll_add_read" | "epoll_wait_one" | "tcp_recv_nb"
         | "io_recv_async" | "io_send_async" => 2,
         _ => unreachable!("unknown epoll builtin: {}", name),

@@ -1011,7 +1011,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
-    emit_intent_tcp_helpers_c(&mut out, &body);
+    // Force TCP helpers to emit when epoll helpers do so the
+    // `accept()` / `recv()` declares + the thread-local buffer
+    // are available to the nb variants AND `read()` lands for
+    // sleep_ms_finish. Same fall-through as the LLVM side.
+    let need_epoll_helpers = body.contains("intent_epoll_")
+        || body.contains("intent_tcp_set_nonblocking")
+        || body.contains("intent_tcp_accept_nb")
+        || body.contains("intent_tcp_recv_nb")
+        || body.contains("intent_sleep_ms_async")
+        || body.contains("intent_sleep_ms_finish");
+    if need_epoll_helpers && !body.contains("intent_tcp_") {
+        // Synthesize a `intent_tcp_` reference to flip the
+        // gate in emit_intent_tcp_helpers_c. Cheap hack vs
+        // restructuring the gate predicates.
+        let body_with_force = format!("/*intent_tcp_force*/\n{}", body);
+        emit_intent_tcp_helpers_c(&mut out, &body_with_force);
+    } else {
+        emit_intent_tcp_helpers_c(&mut out, &body);
+    }
     emit_intent_epoll_helpers_c(&mut out, &body);
     out.push_str(&body);
     out
@@ -1024,12 +1042,15 @@ pub fn emit_c(program: &TypedProgram) -> String {
 fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
     if !body.contains("intent_epoll_") && !body.contains("intent_tcp_set_nonblocking")
         && !body.contains("intent_tcp_accept_nb") && !body.contains("intent_tcp_recv_nb")
+        && !body.contains("intent_sleep_ms_async") && !body.contains("intent_sleep_ms_finish")
     {
         return;
     }
     out.push_str(
         "#include <sys/epoll.h>\n\
+         #include <sys/timerfd.h>\n\
          #include <fcntl.h>\n\
+         #include <unistd.h>\n\
          static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
          \x20 int fd = epoll_create1(0);\n\
          \x20 return (fd < 0) ? -1 : (int64_t)fd;\n\
@@ -1071,6 +1092,25 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
          \x20 if (n >= 0) return (int64_t)n;\n\
          \x20 if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;\n\
          \x20 return -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_async(int64_t ms) {\n\
+         \x20 if (ms < 0) return -1;\n\
+         \x20 int fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);\n\
+         \x20 if (fd < 0) return -1;\n\
+         \x20 struct itimerspec val;\n\
+         \x20 val.it_interval.tv_sec = 0;\n\
+         \x20 val.it_interval.tv_nsec = 0;\n\
+         \x20 val.it_value.tv_sec = (time_t)(ms / 1000);\n\
+         \x20 val.it_value.tv_nsec = (long)((ms % 1000) * 1000000L);\n\
+         \x20 if (timerfd_settime(fd, 0, &val, NULL) < 0) { close(fd); return -1; }\n\
+         \x20 return (int64_t)fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_finish(int64_t fd) {\n\
+         \x20 uint64_t exp = 0;\n\
+         \x20 ssize_t n = read((int)fd, &exp, sizeof(exp));\n\
+         \x20 close((int)fd);\n\
+         \x20 if (n < 0) return -1;\n\
+         \x20 return (int64_t)exp;\n\
          }\n\n",
     );
 }
@@ -14909,6 +14949,15 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_tcp_recv_nb(({}), ({}))",
             emit_expr(&args[0]),
             emit_expr(&args[1])
+        ),
+        // Arc 8 v3.1 Phase 0 — timerfd-based non-blocking sleep.
+        "sleep_ms_async" => format!(
+            "intent_sleep_ms_async(({}))",
+            emit_expr(&args[0])
+        ),
+        "sleep_ms_finish" => format!(
+            "intent_sleep_ms_finish(({}))",
+            emit_expr(&args[0])
         ),
         "rand_i64" => "intent_rng_next()".to_string(),
         "rand_in_range" => {

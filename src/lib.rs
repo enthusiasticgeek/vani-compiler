@@ -20967,6 +20967,89 @@ fn main() -> i64 {
     /// at the typed-IR boundary in `check_epoll_builtin`).
     /// The names reserve the future v3.1 state-machine
     /// suspend-point semantics.
+    /// Arc 8 v3.1 Phase 0 — timerfd-based cooperative sleep.
+    /// Surface tests on both backends.
+    #[test]
+    fn sleep_ms_async_typechecks_on_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let ep: i64 = epoll_new();
+              let tfd: i64 = sleep_ms_async(50);
+              let _ = epoll_add_read(ep, tfd);
+              let _ = epoll_wait_one(ep, 100);
+              let exp: i64 = sleep_ms_finish(tfd);
+              let _ = epoll_close(ep);
+              return exp;
+            }
+        "#;
+        compile_to_c(source).expect("sleep_ms_async must type-check on C");
+        compile_to_llvm(source).expect("sleep_ms_async must type-check on LLVM");
+    }
+
+    #[test]
+    fn sleep_ms_async_emits_timerfd_helpers_in_c() {
+        let source = r#"
+            fn main() -> i64 { let _ = sleep_ms_async(0); return 0; }
+        "#;
+        let c = compile_to_c(source).expect("sleep_ms_async program compiles");
+        assert!(
+            c.contains("intent_sleep_ms_async")
+                && c.contains("timerfd_create")
+                && c.contains("sys/timerfd.h"),
+            "C output must include the sleep_ms_async helper + timerfd.h include; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn sleep_ms_async_emits_timerfd_declares_in_llvm() {
+        let source = r#"
+            fn main() -> i64 { let _ = sleep_ms_async(0); return 0; }
+        "#;
+        let ll = compile_to_llvm(source).expect("sleep_ms_async LLVM compile");
+        assert!(
+            ll.contains("declare i32 @timerfd_create")
+                && ll.contains("declare i32 @timerfd_settime")
+                && ll.contains("define i64 @intent_sleep_ms_async"),
+            "LLVM output must declare timerfd_* + define intent_sleep_ms_async; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn sleep_ms_async_rejects_wrong_arity() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = sleep_ms_async();
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("0-arg sleep_ms_async must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("1 argument")),
+            "expected arity diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sleep_ms_finish_emits_read_declare_in_llvm() {
+        // sleep_ms_finish uses @read; verify the declare lands.
+        let source = r#"
+            fn main() -> i64 {
+              let _ = sleep_ms_finish(0);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("sleep_ms_finish LLVM compile");
+        assert!(
+            ll.contains("declare i64 @read(")
+                && ll.contains("define i64 @intent_sleep_ms_finish"),
+            "LLVM output must declare @read + define intent_sleep_ms_finish; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
     #[test]
     fn io_async_aliases_route_to_nb_variants() {
         let source = r#"
