@@ -43,19 +43,52 @@ type decls; closures #257/#258 for `pub use` re-exports +
 `pub(kosh)` visibility tier):
 
 - **Arc 5c COMPLETE** (commit `7cccc1b`, 2026-06-03) — closure-
-  as-value across fn boundaries works end-to-end on both
-  backends. **Arc 7 SysV remainder COMPLETE** (commit
-  `69b5ec0`) — float-field + mixed int/float structs ≤ 16 bytes
-  now FFI-safe. **Arc 8 step 8a SHIPPED** (commit `2e649ff`) —
-  `Poll<T>` + `Future<T>` join the prelude. **Arc 8 step 8b
-  SHIPPED** (commit `e50dc20`) — `async fn` contextual keyword
-  + parser-level desugar; body returns wrap to
-  `Future.Ready(expr)` and the declared `-> R` reshapes to
-  `-> Future<R>`. Synchronous semantics in v1 (runs to
-  completion on call); state-machine codegen + event-loop
-  runtime queued as Arc 8 steps 8c-h.
+  as-value across fn boundaries. **Arc 7 SysV remainder
+  COMPLETE** (commit `69b5ec0`) — float-field + mixed int/float
+  structs ≤ 16 bytes FFI-safe.
+- **Arc 8 v1 COMPLETE** (2026-06-03/04, four commits):
+  - 8a (`2e649ff`) — `Poll<T>` + `Future<T>` in prelude
+  - 8b (`e50dc20`) — `async fn` contextual keyword + parser
+    desugar (body returns wrap to `Future.Ready(expr)`,
+    `-> R` reshapes to `-> Future<R>`)
+  - 8f + 8g (`25b5a84`) — `await(expr)` parser desugar
+    extracting Future.Ready payload; `CancelToken` prelude
+    struct
 
-  1798 lib + 55 parity green.
+  **1800 lib + 56 parity green.**
+
+  Working syntax on both backends:
+  ```vani
+  async fn fetch(n: i64) -> i64 { return n * 7; }
+  fn main() -> i64 {
+    let r: i64 = await(fetch(6));    // 42
+    let t: CancelToken = CancelToken { cancelled: false };
+    return r;
+  }
+  ```
+
+  v1 semantics: `async fn` runs synchronously on call,
+  always emitting `Future.Ready`. `await` extracts the
+  payload immediately. Users get the correct **types +
+  syntax** matching Rust's; the future async runtime
+  (state-machine codegen + event loop + non-blocking I/O)
+  upgrades the runtime without breaking source code.
+
+  **Arc 8 remainder (8c state-machine + 8d event loop + 8e
+  I/O primitives + 8h example) is queued as its own focused
+  multi-day arc — concentrated single-session work that
+  needs to land contiguously without mid-flight context
+  exhaustion.**
+- **Arc 10 (Devanagari SOV grammar)** explicitly blocked on
+  grammar-consultant validation per the TODO.md design notes
+  ("Sanskrit options include `संविदा` (saṁvidā), `कार्यान्वयन`
+  (kāryānvayan); Hindi / Marathi need separate evaluation.
+  Don't ship without language-expert confirmation."). Cannot
+  responsibly ship without consultant input — every sub-step
+  affects every Devanagari vāṇī file's surface syntax.
+- **Arc 9 (Kosh package manager)** deferred per user: registry
+  hosting model still pending decision before implementation
+  begins.
 
   Captured anonymous fns can now be passed to higher-order
   functions typed `Closure(args) -> R`.
