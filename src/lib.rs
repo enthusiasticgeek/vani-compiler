@@ -21169,6 +21169,63 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2.1c — nested ifs inside a suspending
+    /// branch. The recursive collect_into already handled this
+    /// in principle; Phase 2.1c lifts the validator's
+    /// rejection + adds recursive branch-local collection.
+    #[test]
+    fn v31_phase21c_nested_if_inside_suspending_branch() {
+        let source = r#"
+            async fn nested(fd: i64, mode: i64, retries: i64) -> i64 {
+              if mode > 0 {
+                let n: i64 = io_recv_async(fd, 64);
+                if retries > 0 {
+                  return n + retries;
+                } else {
+                  return n;
+                }
+              }
+              return 0 - 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.1c nested if must compile on C");
+        compile_to_llvm(source).expect("Phase 2.1c nested if must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase21c_nested_if_locals_in_task_struct() {
+        // Locals from nested branches must land in the task
+        // struct so they persist across suspends.
+        let source = r#"
+            async fn nested_local(fd: i64, mode: i64) -> i64 {
+              if mode > 0 {
+                let outer: i64 = io_recv_async(fd, 64);
+                if outer > 0 {
+                  let inner: i64 = io_recv_async(fd, 32);
+                  return outer + inner;
+                }
+                return outer;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("nested locals must compile on C");
+        let ll = compile_to_llvm(source).expect("nested locals must compile on LLVM");
+        // Both `outer` and `inner` should be fields of the
+        // task struct.
+        assert!(
+            c.contains("Task__nested_local") && c.contains("inner") && c.contains("outer"),
+            "C must include both nested locals as task struct fields; got:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        assert!(
+            ll.contains("Task__nested_local"),
+            "LLVM must include the Task struct"
+        );
+    }
+
     #[test]
     fn v31_phase21b_branch_fall_through_to_merge_state() {
         // Phase 2.1b: branches don't have to end with Return.
@@ -21209,9 +21266,12 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn v31_phase21a_nested_if_in_suspending_branch_rejected() {
-        // Phase 2.1a requires branches to be linear (no nested
-        // ifs/whiles). Reject with Phase 2.1c diagnostic.
+    fn v31_phase21c_nested_if_now_accepted() {
+        // The source was originally rejected by Phase 2.1a's
+        // "no nested control flow" rule. Phase 2.1c lifted
+        // that — nested ifs inside a suspending branch now
+        // compile (the recursive collect_into in the segment
+        // collector handles arbitrary depth).
         let source = r#"
             async fn nested(fd: i64, mode: i64) -> i64 {
               if mode > 0 {
@@ -21226,15 +21286,8 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 2.1a must reject nested if");
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2.1c") || m.contains("nested control flow") || m.contains("linear branches")
-            }),
-            "expected Phase 2.1c / nested-control-flow diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        compile_to_c(source).expect("Phase 2.1c accepts nested if on C");
+        compile_to_llvm(source).expect("Phase 2.1c accepts nested if on LLVM");
     }
 
     #[test]

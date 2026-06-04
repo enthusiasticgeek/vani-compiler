@@ -4867,6 +4867,49 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
     }
 }
 
+/// Phase 2.1c helper — does this body unconditionally exit
+/// via Return on every control-flow path? Used to suppress
+/// the defensive Jump emitted after a Verbatim stmt that
+/// itself always returns (e.g., a non-suspending `if` whose
+/// both branches return). Otherwise the Jump becomes dead
+/// code and the language's reachability checker rejects it.
+fn body_all_paths_return(body: &[Stmt]) -> bool {
+    match body.last() {
+        Some(Stmt::Return { .. }) => true,
+        Some(Stmt::If { then_body, else_body, .. }) => {
+            !else_body.is_empty()
+                && body_all_paths_return(then_body)
+                && body_all_paths_return(else_body)
+        }
+        _ => false,
+    }
+}
+
+/// Phase 2.1c — recursively collect i64 Let bindings from a
+/// branch body INCLUDING nested if branches. Each binding
+/// found at any depth needs a field in the task struct so
+/// the state machine can persist it across suspends.
+fn collect_branch_locals_recursive(
+    body: &[Stmt],
+    out: &mut Vec<(String, Type, crate::span::Span)>,
+) {
+    for s in body {
+        match s {
+            Stmt::Let { name, annotation, span, .. } => {
+                let ty = annotation.clone().unwrap_or(Type::I64);
+                if name != "_" && matches!(ty, Type::I64) {
+                    out.push((name.clone(), ty, *span));
+                }
+            }
+            Stmt::If { then_body, else_body, .. } => {
+                collect_branch_locals_recursive(then_body, out);
+                collect_branch_locals_recursive(else_body, out);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Phase 2.1a + 2.1b branch validator. Each branch of an
 /// if-with-suspend must:
 /// - Be linear (Let / Discard / Return only — no nested if /
@@ -4914,11 +4957,35 @@ fn validate_v31_phase_21a_branch(
                     ),
                 ));
             }
-            Stmt::If { span, .. } | Stmt::While { span, .. } => {
+            Stmt::If { cond, then_body, else_body, span } => {
+                // Phase 2.1c: nested ifs inside a suspending
+                // branch. The recursive `collect_into` in the
+                // segment collector already handles state-
+                // splitting at arbitrary depth — we just need
+                // to recursively validate the nested branches
+                // here so non-i64 / break-continue / unsupported
+                // shapes inside them still get diagnosed.
+                if expr_contains_io_async(cond) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn: nested `if` in {} has a suspend in its condition — needs ANF lifting (Phase 2.2)",
+                            branch_label
+                        ),
+                    ));
+                }
+                validate_v31_phase_21a_branch(
+                    then_body, "nested if then-branch", "Phase 2.1c (deeper nesting)",
+                )?;
+                validate_v31_phase_21a_branch(
+                    else_body, "nested if else-branch", "Phase 2.1c (deeper nesting)",
+                )?;
+            }
+            Stmt::While { span, .. } => {
                 return Err(Diagnostic::new(
                     *span,
                     format!(
-                        "v3.1 async fn: {} contains nested control flow; Phase 2.1a/b only supports linear branches — nested ifs/loops arrive in Phase 2.1c",
+                        "v3.1 async fn: {} contains a `while` loop with suspend handling — arrives in Phase 2.5 (loop with suspend-aware back-edge codegen)",
                         branch_label
                     ),
                 ));
@@ -5061,19 +5128,13 @@ fn validate_v31_linear_body(
                     )?;
                     // Collect branch Lets into the outer locals
                     // list so the task struct has fields for
-                    // them. Lets that live across a suspend
-                    // (within or across branches) need
-                    // persistence.
-                    for branch in [then_body.as_slice(), else_body.as_slice()] {
-                        for bs in branch {
-                            if let Stmt::Let { name, annotation, span, .. } = bs {
-                                let ty = annotation.clone().unwrap_or(Type::I64);
-                                if name != "_" && matches!(ty, Type::I64) {
-                                    locals.push((name.clone(), ty, *span));
-                                }
-                            }
-                        }
-                    }
+                    // them. Phase 2.1c uses a recursive helper
+                    // to also pick up Lets inside nested if
+                    // branches — they need persistence too
+                    // since the state machine spans nested
+                    // suspends.
+                    collect_branch_locals_recursive(then_body, &mut locals);
+                    collect_branch_locals_recursive(else_body, &mut locals);
                 }
             }
             Stmt::While { cond, body: while_body, span, .. } => {
@@ -5520,6 +5581,12 @@ pub(crate) fn try_v31_transform(
                     if !has_suspend {
                         // Phase 2 narrow path: emit verbatim.
                         state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                        // Phase 2.1c: if both branches return,
+                        // mark terminated so the caller doesn't
+                        // emit a dead Jump after the verbatim.
+                        if body_all_paths_return(std::slice::from_ref(s)) {
+                            terminated = true;
+                        }
                     } else {
                         // Phase 2.1a/b: state-splitting. Allocate
                         // then_state + else_state up front (they
@@ -5587,6 +5654,14 @@ pub(crate) fn try_v31_transform(
                     // Phase 2 narrow: emit verbatim
                     // (validator guarantees no suspend inside).
                     state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                    // Phase 2.1c: detect whether the verbatim
+                    // unconditionally returns (e.g., a non-
+                    // suspending `if` where both branches end
+                    // in `return`). If so, mark terminated so
+                    // the caller doesn't emit a dead Jump.
+                    if body_all_paths_return(std::slice::from_ref(s)) {
+                        terminated = true;
+                    }
                 }
                 _ => {}
             }
