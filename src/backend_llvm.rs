@@ -938,6 +938,160 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     if !program.structs.is_empty() {
         out.push('\n');
     }
+    // Arc 5c: closure-struct typedefs + trampolines.
+    // One %intent_closure_<sig> per unique (args, ret) shape;
+    // one trampoline + magic-make-closure constructor per
+    // registered closure binding. Scans CLOSURE_MAKE_REGISTRY
+    // populated by the lift pass.
+    {
+        use std::collections::HashMap as HM;
+        let entries: Vec<(String, (String, String, Vec<Type>, Vec<Type>, Type))> =
+            crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| {
+                r.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            });
+        let mut emitted_structs: HM<String, ()> = HM::new();
+        for (_, (_, _, _, args, ret)) in &entries {
+            let tags: Vec<String> = args.iter().map(llvm_closure_tag).collect();
+            let sname = format!("%intent_closure_{}_{}", tags.join("_"), llvm_closure_tag(ret));
+            if emitted_structs.insert(sname.clone(), ()).is_some() {
+                continue;
+            }
+            // Build trampoline fn-pointer type: ret (i64, args...)*
+            let ret_llvm = llvm_type_string(ret);
+            let mut params_llvm: Vec<String> = vec!["i64".to_string()];
+            for a in args {
+                params_llvm.push(llvm_type_string(a));
+            }
+            let fn_ptr_ty = format!("{} ({})*", ret_llvm, params_llvm.join(", "));
+            out.push_str(&format!(
+                "{sname} = type {{ i64, {fnp} }}\n",
+                sname = sname, fnp = fn_ptr_ty,
+            ));
+        }
+        if !emitted_structs.is_empty() {
+            out.push('\n');
+        }
+        // Emit trampoline + magic-call constructor per registered
+        // closure. LLVM resolves forward references at link time
+        // within a module, so no `declare` is needed for the
+        // hoisted fn (its `define` shows up later in this file).
+        for (magic_name, (hoist_name, env_struct_name, capture_types, args, ret)) in &entries {
+            let tags: Vec<String> = args.iter().map(llvm_closure_tag).collect();
+            let sname = format!("%intent_closure_{}_{}", tags.join("_"), llvm_closure_tag(ret));
+            let ret_llvm = llvm_type_string(ret);
+            // Find the env struct decl (already emitted as
+            // %Struct_<env_struct_name>) and get its field
+            // names so the trampoline can GEP into the right
+            // offsets.
+            let env_struct_decl = program.structs.iter().find(|d| d.name == *env_struct_name);
+            let capture_field_names: Vec<String> = if let Some(d) = env_struct_decl {
+                d.fields.iter().map(|(n, _)| n.clone()).collect()
+            } else {
+                (0..capture_types.len()).map(|i| format!("c{}", i)).collect()
+            };
+            // Trampoline: takes (i64 env_addr, args...). Reads
+            // captures from env-struct, calls __anon_fn_<N>.
+            let trampoline_name = format!("__anon_trampoline_{}", hoist_name.trim_start_matches("__anon_fn_"));
+            let env_struct_llvm = format!("%Struct_{}", env_struct_name);
+            let mut tramp_param_list: Vec<String> = vec!["i64 %env_addr".to_string()];
+            for (i, ty_llvm) in args.iter().map(llvm_type_string).enumerate() {
+                tramp_param_list.push(format!("{} %y{}", ty_llvm, i));
+            }
+            out.push_str(&format!(
+                "define internal {ret} @{tn}({tp}) {{\n\
+                 \x20 %env_ptr = inttoptr i64 %env_addr to {esll}*\n",
+                ret = ret_llvm,
+                tn = trampoline_name,
+                tp = tramp_param_list.join(", "),
+                esll = env_struct_llvm,
+            ));
+            // Load each capture via GEP into env-struct.
+            let mut call_args_llvm: Vec<String> = Vec::new();
+            for (i, (cname, cty)) in capture_field_names.iter().zip(capture_types.iter()).enumerate() {
+                let _ = cname;
+                let cty_llvm = llvm_type_string(cty);
+                out.push_str(&format!(
+                    "  %cap_{i}_ptr = getelementptr {est}, {est}* %env_ptr, i32 0, i32 {i}\n",
+                    i = i, est = env_struct_llvm,
+                ));
+                out.push_str(&format!(
+                    "  %cap_{i} = load {cty}, {cty}* %cap_{i}_ptr\n",
+                    i = i, cty = cty_llvm,
+                ));
+                call_args_llvm.push(format!("{} %cap_{}", cty_llvm, i));
+            }
+            // Append the trampoline's own args.
+            for (i, ty_llvm) in args.iter().map(llvm_type_string).enumerate() {
+                call_args_llvm.push(format!("{} %y{}", ty_llvm, i));
+            }
+            out.push_str(&format!(
+                "  %res = call {ret} @fn_{hn}({callargs})\n\
+                 \x20 ret {ret} %res\n}}\n",
+                ret = ret_llvm,
+                hn = hoist_name,
+                callargs = call_args_llvm.join(", "),
+            ));
+            // Magic-call constructor `fn_{magic_name}`:
+            // allocates env on heap (malloc to give it
+            // sufficient lifetime), populates fields, returns
+            // the closure struct value.
+            let ctor_name = format!("fn_{}", magic_name);
+            let mut ctor_param_list: Vec<String> = Vec::new();
+            for (i, (cname, cty)) in capture_field_names.iter().zip(capture_types.iter()).enumerate() {
+                let _ = cname;
+                ctor_param_list.push(format!("{} %p_{}", llvm_type_string(cty), i));
+            }
+            // Use a global env slot per-closure (single-shot
+            // semantics matches the C backend's `static
+            // __thread` slot). For multi-instance correctness
+            // a heap-alloc would be needed; v1 trades that
+            // for simplicity.
+            let env_global = format!("@__env_slot_{}", magic_name);
+            out.push_str(&format!(
+                "{eg} = internal global {est} zeroinitializer\n",
+                eg = env_global, est = env_struct_llvm,
+            ));
+            out.push_str(&format!(
+                "define {sname} @{cname}({params}) {{\n",
+                sname = sname, cname = ctor_name,
+                params = ctor_param_list.join(", "),
+            ));
+            // Store each capture into the global env slot.
+            for (i, cty) in capture_types.iter().enumerate() {
+                let cty_llvm = llvm_type_string(cty);
+                out.push_str(&format!(
+                    "  %fp{i} = getelementptr {est}, {est}* {eg}, i32 0, i32 {i}\n",
+                    i = i, est = env_struct_llvm, eg = env_global,
+                ));
+                out.push_str(&format!(
+                    "  store {cty} %p_{i}, {cty}* %fp{i}\n",
+                    i = i, cty = cty_llvm,
+                ));
+            }
+            // Build closure value: { i64 env_addr, fn-ptr call }.
+            out.push_str(&format!(
+                "  %addr = ptrtoint {est}* {eg} to i64\n",
+                est = env_struct_llvm, eg = env_global,
+            ));
+            // Build trampoline fn-ptr type
+            let mut tp_llvm: Vec<String> = vec!["i64".to_string()];
+            for a in args {
+                tp_llvm.push(llvm_type_string(a));
+            }
+            let fnp_ty = format!("{} ({})*", ret_llvm, tp_llvm.join(", "));
+            out.push_str(&format!(
+                "  %c0 = insertvalue {sname} undef, i64 %addr, 0\n\
+                 \x20 %c1 = insertvalue {sname} %c0, {fnp} @{tn}, 1\n\
+                 \x20 ret {sname} %c1\n}}\n",
+                sname = sname,
+                fnp = fnp_ty,
+                tn = trampoline_name,
+            ));
+        }
+        if !entries.is_empty() {
+            out.push('\n');
+        }
+    }
     // T1.3 phase 2b LLVM: emit `%Enum_<Name> = type { i32, T }`
     // for each payloaded enum. Plain enums stay as bare `i32`.
     //
@@ -13149,6 +13303,47 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             format!("@{}", crate::backend_c::function_name(name))
         }
         TypedExprKind::CallIndirect { callee, args } => {
+            // Arc 5c: Closure-typed callee → indirect call
+            // through `.call` field with `.env` prepended:
+            // `c.call(c.env, args...)`. Treats the closure as
+            // a struct, extracts the two fields, calls indirect.
+            if let Type::Closure(params, ret) = &callee.ty {
+                let callee_v = emit_expr(callee, ctx, out);
+                let closure_ty = llvm_type_string(&callee.ty);
+                let env_v = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = extractvalue {} {}, 0\n",
+                    env_v, closure_ty, callee_v
+                ));
+                let call_v = ctx.fresh_tmp();
+                // Build trampoline fn-ptr type.
+                let ret_llvm = llvm_type_string(ret);
+                let mut all_param_tys: Vec<String> = vec!["i64".to_string()];
+                for p in params {
+                    all_param_tys.push(llvm_type_string(p));
+                }
+                let fnp_ty = format!("{} ({})*", ret_llvm, all_param_tys.join(", "));
+                out.push_str(&format!(
+                    "  {} = extractvalue {} {}, 1\n",
+                    call_v, closure_ty, callee_v
+                ));
+                let arg_vs: Vec<String> = args.iter().map(|a| emit_expr(a, ctx, out)).collect();
+                let arg_list: Vec<String> = arg_vs
+                    .iter()
+                    .zip(params.iter())
+                    .map(|(v, p)| format!("{} {}", llvm_type_string(p), v))
+                    .collect();
+                let mut all_args = vec![format!("i64 {}", env_v)];
+                all_args.extend(arg_list);
+                let signature = format!("{} ({})", ret_llvm, all_param_tys.join(", "));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call {} {}({})\n",
+                    dest, signature, call_v, all_args.join(", ")
+                ));
+                let _ = fnp_ty;
+                return dest;
+            }
             // Load the callee's fn-ptr value (might be a Var
             // referencing an alloca, or a FnRef yielding the
             // global symbol directly). Then emit
@@ -38756,6 +38951,9 @@ fn is_scalar(ty: &Type) -> bool {
         // load returns a function-pointer SSA value the
         // CallIndirect emit consumes).
         || matches!(ty, Type::FnPtr(_, _))
+        // Arc 5c: Closure is a named struct ({i64, fn-ptr}).
+        // Goes through the scalar Let path uniformly.
+        || matches!(ty, Type::Closure(_, _))
         // Tuples lower to anonymous LLVM structs. The Let
         // path's `alloca <{T1, T2, …}>` and `store` work
         // uniformly via the scalar path. T1.1.
@@ -39047,6 +39245,26 @@ pub(crate) fn atomic_align(element: &Type) -> u32 {
 /// and `T*` for references. `llvm_type` returns `&'static str` for
 /// the scalar case so it's cheap to use everywhere; aggregates and
 /// references need a heap-allocated string.
+/// Arc 5c — per-leaf tag for closure-struct names. Matches the
+/// C backend's `c_leaf_simple_tag` so the two backends produce
+/// the same `intent_closure_<sig>` identifiers.
+fn llvm_closure_tag(ty: &Type) -> String {
+    match ty {
+        Type::I8 => "i8".to_string(),
+        Type::I16 => "i16".to_string(),
+        Type::I32 => "i32".to_string(),
+        Type::I64 => "i64".to_string(),
+        Type::U8 => "u8".to_string(),
+        Type::U16 => "u16".to_string(),
+        Type::U32 => "u32".to_string(),
+        Type::U64 => "u64".to_string(),
+        Type::F32 => "f32".to_string(),
+        Type::F64 => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        _ => "i64".to_string(),
+    }
+}
+
 fn llvm_type_string(ty: &Type) -> String {
     match ty {
         Type::Array { element, length } => {
@@ -39093,6 +39311,14 @@ fn llvm_type_string(ty: &Type) -> String {
                 llvm_type_string(ret),
                 params_s.join(", ")
             )
+        }
+        // Arc 5c: `Closure(args) -> ret` lowers to a named
+        // LLVM struct type `%intent_closure_<sig>` declared in
+        // the preamble. Two fields: `i64 env` (opaque address)
+        // + the trampoline fn-pointer.
+        Type::Closure(params, ret) => {
+            let tags: Vec<String> = params.iter().map(llvm_closure_tag).collect();
+            format!("%intent_closure_{}_{}", tags.join("_"), llvm_closure_tag(ret))
         }
         // Tuples use LLVM's anonymous-struct type literal —
         // `{T1, T2, …}`. Functions returning tuples return

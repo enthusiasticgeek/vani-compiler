@@ -15352,6 +15352,41 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("capture + top-level fn ref in LLVM");
     }
 
+    // Arc 5c — closure-as-value across fn boundaries.
+    // Captured anon-fns can now be passed to higher-order fns
+    // typed `Closure(args) -> R`. The lift pass synthesizes an
+    // env-struct + trampoline + magic `__intent_make_closure_<N>`
+    // constructor; the checker types the magic call as
+    // `Type::Closure(args, ret)`; both backends emit a fat-
+    // pointer struct typedef + indirect dispatch via the
+    // embedded fn-pointer (`c.call(c.env, args)`).
+    #[test]
+    fn closure_as_value_passes_to_higher_order_fn() {
+        let source = r#"
+            fn apply(f: Closure(i64) -> i64, x: i64) -> i64 {
+              return f(x);
+            }
+
+            fn main() -> i64 {
+              let n: i64 = 10;
+              let add_n = fn(y: i64) -> i64 { return n + y; };
+              return apply(add_n, 5);
+            }
+        "#;
+        let c = compile_to_c(source).expect("closure-as-value compiles to C");
+        let ll = compile_to_llvm(source).expect("closure-as-value compiles to LLVM");
+        // C: closure struct typedef + indirect dispatch.
+        assert!(
+            c.contains("intent_closure_i64_i64") && c.contains(".call("),
+            "expected closure struct typedef + indirect dispatch in C",
+        );
+        // LLVM: closure struct named type + extractvalue dispatch.
+        assert!(
+            ll.contains("%intent_closure_i64_i64 = type") && ll.contains("extractvalue"),
+            "expected closure struct + extractvalue dispatch in LLVM",
+        );
+    }
+
     #[test]
     fn closure_no_capture_still_works() {
         // The capture path must not break the no-capture

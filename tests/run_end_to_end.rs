@@ -835,6 +835,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "btreemap.vani",
         "btreeset.vani",
         "closures.vani",
+        "closure_as_value.vani",
         "composite_types.vani",
         "concurrency.vani",
         "condvar.vani",

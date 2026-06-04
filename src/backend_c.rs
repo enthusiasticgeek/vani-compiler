@@ -361,6 +361,156 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !program.structs.is_empty() {
         body.push('\n');
     }
+    // Arc 5c: emit per-(args, ret) Closure fat-pointer struct
+    // typedefs + per-closure trampolines. Scans
+    // `CLOSURE_MAKE_REGISTRY` populated by the lift pass. Each
+    // unique (args, ret) signature gets one typedef
+    // `intent_closure_<args>_<ret>` shaped as
+    // `{ uint64_t env; R (*call)(uint64_t env, args); }`.
+    // Each registered closure also gets a trampoline that
+    // casts the env-uint64 back to the env-struct, reads the
+    // captures, and calls `__anon_fn_<N>(captures..., args)`.
+    {
+        use std::collections::HashMap as HM;
+        let entries: Vec<(String, (String, String, Vec<Type>, Vec<Type>, Type))> =
+            crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| {
+                r.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+            });
+        // Emit closure-struct typedef per unique (args, ret) shape.
+        let mut emitted_closure_structs: HM<String, ()> = HM::new();
+        for (_, (_, _, _, args, ret)) in &entries {
+            let sname = closure_c_struct_name(args, ret);
+            if emitted_closure_structs.insert(sname.clone(), ()).is_some() {
+                continue;
+            }
+            // Build call-field type: R (*call)(uint64_t env, T1, T2, ...)
+            let ret_c = c_leaf_type(ret);
+            let mut arg_decls: Vec<String> = vec!["uint64_t".to_string()];
+            for a in args {
+                arg_decls.push(c_leaf_type(a).to_string());
+            }
+            body.push_str(&format!(
+                "typedef struct {{ uint64_t env; {ret_c} (*call)({args}); }} {sname};\n",
+                ret_c = ret_c,
+                args = arg_decls.join(", "),
+                sname = sname,
+            ));
+        }
+        if !emitted_closure_structs.is_empty() {
+            body.push('\n');
+        }
+        // Forward-declare each hoisted closure fn so the
+        // trampolines below can call them without implicit
+        // declaration warnings.
+        for (_, (hoist_name, _, capture_types, args, ret)) in &entries {
+            let ret_c = c_leaf_type(ret);
+            let mut decl_params: Vec<String> = Vec::new();
+            for cty in capture_types {
+                decl_params.push(c_leaf_type(cty).to_string());
+            }
+            for cty in args {
+                decl_params.push(c_leaf_type(cty).to_string());
+            }
+            body.push_str(&format!(
+                "static {ret_c} fn_{hn}({params});\n",
+                ret_c = ret_c,
+                hn = hoist_name,
+                params = decl_params.join(", "),
+            ));
+        }
+        if !entries.is_empty() {
+            body.push('\n');
+        }
+        // Emit trampoline + magic-call constructor per registered closure.
+        // The constructor `fn___intent_make_closure_N(captures...)`
+        // stack-allocates the env-struct and returns the Closure
+        // by value. Naturally, returning a struct that contains
+        // a pointer into a local stack-frame would dangle — so
+        // we mark these as `static inline` and require the C
+        // compiler to inline them at the call site. v1
+        // restriction: the closure-binding's lifetime is the
+        // enclosing fn's stack frame; passing it OUT of the fn
+        // (return value / global / heap struct field) is undefined.
+        for (magic_name, (hoist_name, env_struct_name, capture_types, args, ret)) in &entries {
+            let sname = closure_c_struct_name(args, ret);
+            let trampoline_name = format!("{}__trampoline", hoist_name);
+            // Capture-arg-list for the trampoline body call:
+            // env->cap_N for each capture, then the trampoline's
+            // own args.
+            let mut call_args: Vec<String> = Vec::new();
+            // We don't have the capture *names* in scope here
+            // (only types); but the env-struct's fields use the
+            // ORIGINAL capture names. We can pull them from
+            // program.structs which contains the env struct.
+            let env_struct_decl = program.structs.iter()
+                .find(|d| d.name == *env_struct_name)
+                .cloned();
+            let capture_names: Vec<String> = if let Some(d) = &env_struct_decl {
+                d.fields.iter().map(|(n, _)| n.clone()).collect()
+            } else {
+                (0..capture_types.len()).map(|i| format!("c{}", i)).collect()
+            };
+            for cname in &capture_names {
+                call_args.push(format!("env->{}", cname));
+            }
+            // Trampoline param names: y0, y1, ...
+            let mut tramp_params: Vec<String> = vec!["uint64_t env_addr".to_string()];
+            let mut tramp_call_extra: Vec<String> = Vec::new();
+            for (i, a) in args.iter().enumerate() {
+                tramp_params.push(format!("{} y{}", c_leaf_type(a), i));
+                tramp_call_extra.push(format!("y{}", i));
+            }
+            call_args.extend(tramp_call_extra);
+            let env_c = struct_c_name(env_struct_name);
+            let ret_c = c_leaf_type(ret);
+            body.push_str(&format!(
+                "static {ret_c} {tn}({tp}) {{\n\
+                 \x20 {env_c}* env = ({env_c}*)(uintptr_t)env_addr;\n\
+                 \x20 return fn_{hn}({args});\n\
+                 }}\n",
+                ret_c = ret_c,
+                tn = trampoline_name,
+                tp = tramp_params.join(", "),
+                env_c = env_c,
+                hn = hoist_name,
+                args = call_args.join(", "),
+            ));
+            // Magic-call constructor (used for the Let RHS).
+            // Stack-allocates the env-struct, returns the closure
+            // pair by value. Marked `static inline` so the C
+            // compiler can fold it into the caller's frame
+            // (closure env stays alive for the enclosing scope).
+            let ctor_name = format!("fn_{}", magic_name);
+            let mut ctor_params: Vec<String> = Vec::new();
+            let mut ctor_field_inits: Vec<String> = Vec::new();
+            for (i, (cname, cty)) in capture_names.iter().zip(capture_types.iter()).enumerate() {
+                let _ = i;
+                ctor_params.push(format!("{} p_{}", c_leaf_type(cty), cname));
+                ctor_field_inits.push(format!(".{} = p_{}", cname, cname));
+            }
+            let params_str = if ctor_params.is_empty() {
+                "void".to_string()
+            } else {
+                ctor_params.join(", ")
+            };
+            body.push_str(&format!(
+                "static inline {sname} {ctor}({params}) {{\n\
+                 \x20 static __thread {env_c} __env_slot;\n\
+                 \x20 __env_slot = ({env_c}){{ {inits} }};\n\
+                 \x20 {sname} __c;\n\
+                 \x20 __c.env = (uint64_t)(uintptr_t)&__env_slot;\n\
+                 \x20 __c.call = &{tn};\n\
+                 \x20 return __c;\n\
+                 }}\n\n",
+                sname = sname,
+                ctor = ctor_name,
+                params = params_str,
+                env_c = env_c,
+                inits = ctor_field_inits.join(", "),
+                tn = trampoline_name,
+            ));
+        }
+    }
     // Emit a per-name C struct typedef for each payloaded
     // enum. Layout: `typedef struct { int32_t tag; T payload;
     // } Enum_<Name>;` where T is the shared payload type for
@@ -11804,12 +11954,20 @@ fn emit_expr(expr: &TypedExpr) -> String {
             function_name(name)
         }
         TypedExprKind::CallIndirect { callee, args } => {
-            // `callee(args)` — C-style indirect call. Function
-            // pointers are dereferenced implicitly when
-            // invoked, so the simple form is enough.
+            // Arc 5c: when the callee is Closure-typed, lower
+            // as `c.call(c.env, args...)` — dispatch through
+            // the embedded fn-pointer with the env prepended.
+            // FnPtr-typed callees use the simple indirect form
+            // (function pointers auto-deref at call).
             let callee_c = emit_expr(callee);
             let arg_parts: Vec<String> = args.iter().map(emit_expr).collect();
-            format!("{}({})", callee_c, arg_parts.join(", "))
+            if matches!(callee.ty, Type::Closure(_, _)) {
+                let mut all_args: Vec<String> = vec![format!("{}.env", callee_c)];
+                all_args.extend(arg_parts);
+                format!("{}.call({})", callee_c, all_args.join(", "))
+            } else {
+                format!("{}({})", callee_c, arg_parts.join(", "))
+            }
         }
         TypedExprKind::Tuple { elements } => {
             // `(intent_tuple_<shape>){ ._0 = …, ._1 = …, … }`
@@ -16269,6 +16427,10 @@ fn c_type_name(ty: &Type) -> String {
         Type::Tuple(elements) => tuple_c_struct(elements),
         Type::Object(iface) => format!("intent_dyn_{}", iface),
         Type::Struct(name) => struct_c_name(name),
+        // Arc 5c: `Closure(args) -> ret` lowers to a per-shape
+        // fat-pointer struct typedef `intent_closure_<args>_<ret>`.
+        // Emitted in the preamble once per unique signature.
+        Type::Closure(args, ret) => closure_c_struct_name(args, ret),
         // T1.3 phase 2b: payloaded enums lower to the
         // tagged-union struct (`Enum_<Name>`); plain enums
         // stay as bare `int32_t` tags (via the c_leaf_type
@@ -16291,6 +16453,32 @@ fn c_type_name(ty: &Type) -> String {
 /// distinct from any builtin. T1.2.
 pub(crate) fn struct_c_name(name: &str) -> String {
     format!("Struct_{}", name)
+}
+
+/// Arc 5c: per-(args, ret) C struct typedef for a Closure
+/// fat-pointer. The type erases the env's concrete shape;
+/// runtime carries `(uint64_t env_addr, R (*call)(uint64_t, args))`.
+pub(crate) fn closure_c_struct_name(args: &[Type], ret: &Type) -> String {
+    let arg_tags: Vec<String> = args.iter().map(c_leaf_simple_tag).collect();
+    let ret_tag = c_leaf_simple_tag(ret);
+    format!("intent_closure_{}_{}", arg_tags.join("_"), ret_tag)
+}
+
+fn c_leaf_simple_tag(ty: &Type) -> String {
+    match ty {
+        Type::I8 => "i8".to_string(),
+        Type::I16 => "i16".to_string(),
+        Type::I32 => "i32".to_string(),
+        Type::I64 => "i64".to_string(),
+        Type::U8 => "u8".to_string(),
+        Type::U16 => "u16".to_string(),
+        Type::U32 => "u32".to_string(),
+        Type::U64 => "u64".to_string(),
+        Type::F32 => "f32".to_string(),
+        Type::F64 => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        _ => "i64".to_string(),
+    }
 }
 
 /// Walk a Vec-element type and emit a `typedef` for every
@@ -16354,6 +16542,9 @@ fn format_declarator(ty: &Type, name: &str) -> String {
         Type::Tuple(elements) => format!("{} {}", tuple_c_struct(elements), name),
         Type::Object(iface) => format!("intent_dyn_{} {}", iface, name),
         Type::Struct(sname) => format!("{} {}", struct_c_name(sname), name),
+        // Arc 5c: Closure params/locals declared as the
+        // per-(args, ret) fat-pointer struct typedef.
+        Type::Closure(args, ret) => format!("{} {}", closure_c_struct_name(args, ret), name),
         // T1.3 phase 2b: payloaded enums lower to the
         // tagged-union struct (Enum_<Name>); plain enums
         // stay as bare int32_t tags (falls through to

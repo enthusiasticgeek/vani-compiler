@@ -1389,6 +1389,11 @@ fn validate_main(
 fn lambda_lift_program(program: &mut Program) {
     let mut counter: usize = 0;
     let mut hoisted: Vec<crate::ast::Function> = Vec::new();
+    // Arc 5c: clear the CLOSURE_MAKE_REGISTRY at the start of
+    // each compilation so per-program entries don't leak when
+    // multiple compiles run in the same process (e.g.
+    // `intentc test <dir>`).
+    crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| r.borrow_mut().clear());
     // Arc 5c: parallel sink for env-struct decls synthesized
     // by the lift pass. Each captured anon-fn becomes (a) its
     // hoisted fn (the existing direct-call path) + (b) an
@@ -1553,7 +1558,8 @@ fn lift_closures_in_block(
                 }
                 let ref_captures_clone: Vec<String> = ref_captures.clone();
                 if !captures.is_empty() {
-                    let hoist_name = format!("__anon_fn_{}", counter);
+                    let closure_id = *counter;
+                    let hoist_name = format!("__anon_fn_{}", closure_id);
                     *counter += 1;
                     let mut hoist_params: Vec<crate::ast::Param> =
                         Vec::with_capacity(captures.len() + params.len());
@@ -1614,16 +1620,88 @@ fn lift_closures_in_block(
             deterministic_timing: false,
                         recursion_bound: None,
                     });
+                    // Arc 5c: synthesize env-struct + register
+                    // closure-make magic-call entry so Var(bind_name)
+                    // in value position (passed to higher-order fn,
+                    // etc.) can resolve to a Closure value. Skip
+                    // ref-captures for v1 (only by-value Copy
+                    // captures supported in the Closure-value path).
+                    let mut closure_replacement: Option<crate::ast::Stmt> = None;
+                    if ref_captures_clone.is_empty() {
+                        let env_struct_name = format!("__anon_env_{}", closure_id);
+                        let env_fields: Vec<crate::ast::StructField> = capture_names_only.iter()
+                            .map(|cap| crate::ast::StructField {
+                                name: cap.clone(),
+                                ty: env.get(cap).cloned().unwrap(),
+                                span: *fn_span,
+                            })
+                            .collect();
+                        hoisted_structs.push(crate::ast::StructDecl {
+                            name: env_struct_name.clone(),
+                            name_span: *fn_span,
+                            type_params: Vec::new(),
+                            fields: env_fields,
+                            span: *fn_span,
+                        });
+                        let magic_name = format!("__intent_make_closure_{}", closure_id);
+                        let capture_types: Vec<crate::ast::Type> = capture_names_only.iter()
+                            .map(|c| env.get(c).cloned().unwrap())
+                            .collect();
+                        let closure_arg_types: Vec<crate::ast::Type> = params.iter()
+                            .map(|p| p.ty.clone())
+                            .collect();
+                        let closure_ret = return_type.clone();
+                        crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| {
+                            r.borrow_mut().insert(
+                                magic_name.clone(),
+                                (hoist_name.clone(), env_struct_name, capture_types,
+                                 closure_arg_types.clone(), closure_ret.clone()),
+                            );
+                        });
+                        // Build replacement Let: bind_name has type
+                        // `Closure(args) -> ret`, RHS is the magic
+                        // make-closure call passing the captures.
+                        let capture_args: Vec<crate::ast::Expr> = capture_names_only.iter()
+                            .map(|cap| crate::ast::Expr {
+                                kind: crate::ast::ExprKind::Var(cap.clone()),
+                                span: *fn_span,
+                            })
+                            .collect();
+                        let magic_call = crate::ast::Expr {
+                            kind: crate::ast::ExprKind::Call {
+                                name: magic_name,
+                                name_span: *fn_span,
+                                args: capture_args,
+                            },
+                            span: *fn_span,
+                        };
+                        let closure_ty = crate::ast::Type::Closure(
+                            closure_arg_types,
+                            Box::new(closure_ret),
+                        );
+                        closure_replacement = Some(crate::ast::Stmt::Let {
+                            name: bind_name.clone(),
+                            annotation: Some(closure_ty),
+                            expr: magic_call,
+                            span: *fn_span,
+                        });
+                    }
                     closure_handles.insert(
                         bind_name.clone(),
                         (hoist_name, capture_names_only, ref_captures_clone),
                     );
                     handled = true;
+                    // If we built a replacement Let, push it.
+                    if let Some(repl) = closure_replacement {
+                        new_body.push(repl);
+                    }
                 }
             }
         }
         if handled {
-            // Closure binding is purely compile-time — drop the Let.
+            // Closure binding is compile-time only at the direct-
+            // call layer; the value-use replacement (if any) was
+            // pushed above. Skip the original AnonFn Let either way.
             continue;
         }
         // Track non-closure annotated lets so nested closures can
@@ -15339,6 +15417,36 @@ fn check_call(
         _ => {}
     }
 
+    // Arc 5c: `__intent_make_closure_<N>(captures...)` — magic
+    // call synthesized by the lift pass when a captured anon-fn
+    // appears in a value-binding position. Looks up the registry
+    // entry and produces a TypedExpr of type `Closure(args, ret)`.
+    if name.starts_with("__intent_make_closure_") {
+        let entry = crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| {
+            r.borrow().get(name).cloned()
+        });
+        if let Some((_trampoline, _env_struct, capture_types, closure_args, closure_ret)) = entry {
+            // Type-check each capture arg against the recorded
+            // capture type, mostly to keep the type-flow honest.
+            let mut typed_args: Vec<TypedExpr> = Vec::with_capacity(args.len());
+            for (i, arg) in args.iter().enumerate() {
+                let _expected = capture_types.get(i);
+                let checked = check_expr(arg, env, signatures, diagnostics);
+                typed_args.push(checked.expr);
+            }
+            let closure_ty = Type::Closure(closure_args, Box::new(closure_ret));
+            return CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: name.to_string(),
+                    name_span,
+                    args: typed_args,
+                },
+                closure_ty,
+                None,
+                span,
+            );
+        }
+    }
     let Some(signature) = signatures.get(name).cloned() else {
         // Maybe `name` is bound to a fn-pointer locally; if so
         // lower as an indirect call. The binding's type must
@@ -15362,6 +15470,46 @@ fn check_call(
                     signatures,
                     span,
                     diagnostics,
+                );
+            }
+            // Arc 5c: call on a Closure-typed binding lowers
+            // to indirect dispatch through the closure's
+            // embedded fn-pointer. Mirrors the FnPtr path
+            // above; the backend lowers `f(args)` as
+            // `f.call(f.env, args)` when f has Closure type.
+            if let Type::Closure(param_types, ret) = info.ty.clone() {
+                let callee_decl_span = info.decl_span;
+                let mut typed_args = Vec::with_capacity(args.len());
+                for (idx, arg) in args.iter().enumerate() {
+                    let checked = check_expr(arg, env, signatures, diagnostics);
+                    let target = param_types
+                        .get(idx)
+                        .cloned()
+                        .unwrap_or_else(|| checked.ty().clone());
+                    let coerced = coerce_checked(
+                        checked, &target, arg.span,
+                        &format!("closure call argument {}", idx),
+                        diagnostics,
+                    );
+                    typed_args.push(coerced.expr);
+                }
+                // Callee TypedExpr with Closure type — backends
+                // pattern-match on this to emit `c.call(c.env, args)`.
+                let callee = TypedExpr {
+                    kind: TypedExprKind::Var(name.to_string()),
+                    ty: Type::Closure(param_types.clone(), ret.clone()),
+                    constant: None,
+                    span: name_span,
+                    binding_decl_span: Some(callee_decl_span),
+                };
+                return CheckedExpr::new(
+                    TypedExprKind::CallIndirect {
+                        callee: Box::new(callee),
+                        args: typed_args,
+                    },
+                    *ret,
+                    None,
+                    span,
                 );
             }
         }
