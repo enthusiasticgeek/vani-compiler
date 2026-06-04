@@ -1,0 +1,70 @@
+// Arc 8 step 8e proper — TCP echo server example.
+//
+// Demonstrates the v1.6 TCP builtin family — real libc-backed
+// sockets via vāṇī's tcp_listen / tcp_accept / tcp_connect_local /
+// tcp_send_str / tcp_recv / tcp_send_buf / tcp_close. Single-
+// process loopback echo: spawn a client task, accept it on
+// the main thread, echo a single message back.
+//
+// The recv-into-buffer + send-buffer pattern uses a thread-
+// local 4KB scratch space — each `task` body has its own
+// buffer, so concurrent echo handlers don't race.
+//
+// **v1.6 limitations:** recv blocks (no O_NONBLOCK + epoll
+// yet). Concurrency comes from `task` + `join` (real OS
+// threads). The Arc 8 runtime arc (8c state-machine
+// codegen + 8d epoll event loop) upgrades to single-
+// threaded cooperative scheduling without breaking source.
+//
+// build & run:
+//   intentc run examples/tcp_echo.vani                # LLVM
+//   intentc run examples/tcp_echo.vani --backend=c    # C
+
+intent "TCP echo server (loopback, single message) — Arc 8 step 8e v1.6";
+
+fn main() -> i64 {
+  // Bind to port 0 — kernel picks a free port.
+  let server: i64 = tcp_listen(0);
+  if server < 0 {
+    print "tcp_listen failed";
+    return 1;
+  }
+  let port: i64 = tcp_socket_port(server);
+  // Don't print the port literal — kernel-assigned ports
+  // vary across runs, which would break the cross-backend
+  // parity runner's byte-equality check. Print only that
+  // a port was assigned (positive value).
+  print "server bound (port > 0):", port > 0;
+
+  // Client task: connect, send a probe, then close.
+  // Runs on a real OS thread so the server can accept it.
+  task client_task {
+    // Give the server a beat to reach accept() before we
+    // connect. Not strictly required since listen()'s
+    // backlog absorbs the SYN, but keeps stdout deterministic
+    // across LLVM (lli) and C (gcc) backends for the parity
+    // runner.
+    let _ = sleep_ms(10);
+    let cfd: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(cfd, "ping");
+    let _ = sleep_ms(40);
+    let _ = tcp_close(cfd);
+  }
+
+  // Server side: accept the client, recv, echo, close.
+  let client_fd: i64 = tcp_accept(server);
+  if client_fd < 0 {
+    print "tcp_accept failed";
+    return 2;
+  }
+  let n: i64 = tcp_recv(client_fd, 64);
+  print "server received bytes:", n;
+  let sent: i64 = tcp_send_buf(client_fd, n);
+  print "server echoed bytes:", sent;
+  let _ = tcp_close(client_fd);
+
+  join client_task;
+  let _ = tcp_close(server);
+  print "echo done";
+  return 0;
+}

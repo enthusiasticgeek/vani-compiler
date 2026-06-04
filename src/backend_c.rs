@@ -1011,8 +1011,106 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
+    emit_intent_tcp_helpers_c(&mut out, &body);
     out.push_str(&body);
     out
+}
+
+/// Arc 8 step 8e proper — TCP runtime helpers. All eight
+/// builtins (tcp_listen / tcp_socket_port / tcp_accept /
+/// tcp_connect_local / tcp_send_str / tcp_recv /
+/// tcp_send_buf / tcp_close) emit only when the program
+/// references any tcp_* helper. Thread-local 4KB recv
+/// buffer means concurrent `task` bodies have independent
+/// scratch space.
+fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
+    if !body.contains("intent_tcp_") {
+        return;
+    }
+    out.push_str(
+        "#include <sys/socket.h>\n\
+         #include <netinet/in.h>\n\
+         #include <arpa/inet.h>\n\
+         #include <unistd.h>\n\
+         #include <string.h>\n\
+         #include <errno.h>\n\
+         static _Thread_local unsigned char intent_tcp_buf[4096];\n\
+         static INTENT_UNUSED int64_t intent_tcp_listen(int64_t port) {\n\
+         \x20 int fd = socket(AF_INET, SOCK_STREAM, 0);\n\
+         \x20 if (fd < 0) return -1;\n\
+         \x20 int opt = 1;\n\
+         \x20 (void)setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 memset(&sa, 0, sizeof(sa));\n\
+         \x20 sa.sin_family = AF_INET;\n\
+         \x20 sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n\
+         \x20 sa.sin_port = htons((uint16_t)port);\n\
+         \x20 if (bind(fd, (struct sockaddr*)&sa, sizeof(sa)) < 0) { close(fd); return -1; }\n\
+         \x20 if (listen(fd, 16) < 0) { close(fd); return -1; }\n\
+         \x20 return (int64_t)fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_socket_port(int64_t fd) {\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 socklen_t slen = sizeof(sa);\n\
+         \x20 if (getsockname((int)fd, (struct sockaddr*)&sa, &slen) < 0) return -1;\n\
+         \x20 return (int64_t)ntohs(sa.sin_port);\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_accept(int64_t server_fd) {\n\
+         \x20 int cfd;\n\
+         \x20 do { cfd = accept((int)server_fd, NULL, NULL); }\n\
+         \x20 while (cfd < 0 && errno == EINTR);\n\
+         \x20 return (int64_t)cfd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_connect_local(int64_t port) {\n\
+         \x20 int fd = socket(AF_INET, SOCK_STREAM, 0);\n\
+         \x20 if (fd < 0) return -1;\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 memset(&sa, 0, sizeof(sa));\n\
+         \x20 sa.sin_family = AF_INET;\n\
+         \x20 sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n\
+         \x20 sa.sin_port = htons((uint16_t)port);\n\
+         \x20 int rc;\n\
+         \x20 do { rc = connect(fd, (struct sockaddr*)&sa, sizeof(sa)); }\n\
+         \x20 while (rc < 0 && errno == EINTR);\n\
+         \x20 if (rc < 0) { close(fd); return -1; }\n\
+         \x20 return (int64_t)fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_send_str(int64_t fd, const char* s) {\n\
+         \x20 if (!s) return -1;\n\
+         \x20 size_t len = strlen(s);\n\
+         \x20 size_t off = 0;\n\
+         \x20 while (off < len) {\n\
+         \x20   ssize_t n = send((int)fd, s + off, len - off, 0);\n\
+         \x20   if (n < 0) { if (errno == EINTR) continue; return -1; }\n\
+         \x20   if (n == 0) return -1;\n\
+         \x20   off += (size_t)n;\n\
+         \x20 }\n\
+         \x20 return (int64_t)len;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_recv(int64_t fd, int64_t max) {\n\
+         \x20 if (max < 0) return -1;\n\
+         \x20 size_t want = (size_t)max;\n\
+         \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
+         \x20 ssize_t n;\n\
+         \x20 do { n = recv((int)fd, intent_tcp_buf, want, 0); }\n\
+         \x20 while (n < 0 && errno == EINTR);\n\
+         \x20 return (int64_t)n;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_send_buf(int64_t fd, int64_t n) {\n\
+         \x20 if (n < 0 || (size_t)n > sizeof(intent_tcp_buf)) return -1;\n\
+         \x20 size_t off = 0;\n\
+         \x20 while (off < (size_t)n) {\n\
+         \x20   ssize_t m = send((int)fd, intent_tcp_buf + off, (size_t)n - off, 0);\n\
+         \x20   if (m < 0) { if (errno == EINTR) continue; return -1; }\n\
+         \x20   if (m == 0) return -1;\n\
+         \x20   off += (size_t)m;\n\
+         \x20 }\n\
+         \x20 return (int64_t)n;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
+         \x20 return (close((int)fd) == 0) ? 0 : -1;\n\
+         }\n\n",
+    );
 }
 
 /// Arc 8 step 8e — runtime helper for `sleep_ms(ms)`. Wraps
@@ -14682,6 +14780,46 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // Always returns 0; passes ms straight through.
         "sleep_ms" => {
             format!("intent_sleep_ms(({}))", emit_expr(&args[0]))
+        }
+        // Arc 8 step 8e proper — TCP networking primitives.
+        // All resolve to runtime helpers emitted by
+        // emit_intent_tcp_helpers_c when any tcp_* builtin
+        // is referenced.
+        "tcp_listen" => {
+            format!("intent_tcp_listen(({}))", emit_expr(&args[0]))
+        }
+        "tcp_socket_port" => {
+            format!("intent_tcp_socket_port(({}))", emit_expr(&args[0]))
+        }
+        "tcp_accept" => {
+            format!("intent_tcp_accept(({}))", emit_expr(&args[0]))
+        }
+        "tcp_connect_local" => {
+            format!("intent_tcp_connect_local(({}))", emit_expr(&args[0]))
+        }
+        "tcp_send_str" => {
+            format!(
+                "intent_tcp_send_str(({}), ({}))",
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        "tcp_recv" => {
+            format!(
+                "intent_tcp_recv(({}), ({}))",
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        "tcp_send_buf" => {
+            format!(
+                "intent_tcp_send_buf(({}), ({}))",
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        "tcp_close" => {
+            format!("intent_tcp_close(({}))", emit_expr(&args[0]))
         }
         "rand_i64" => "intent_rng_next()".to_string(),
         "rand_in_range" => {

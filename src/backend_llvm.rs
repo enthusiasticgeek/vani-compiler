@@ -1235,6 +1235,13 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         emit_intent_sleep_ms_helper_llvm(&mut out);
     }
 
+    // Arc 8 step 8e proper — TCP runtime helpers. Gated on
+    // the program actually calling any tcp_* builtin so the
+    // libc socket declares only land when needed.
+    if program_uses_tcp(program) {
+        emit_intent_tcp_helpers_llvm(&mut out);
+    }
+
     // Data-structures roadmap: FNV-1a hash helpers. Gated on
     // the program actually using a hash builtin OR a Bloom
     // filter (closure #327 calls @intent_hash_i64 from its
@@ -8812,6 +8819,43 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i64 @intent_sleep_ms(i64 {})\n",
                     dest, ms
+                ));
+                return dest;
+            }
+            // Arc 8 step 8e proper — TCP networking primitives.
+            // Each resolves to an outlined `@intent_tcp_*`
+            // helper emitted at module scope by
+            // emit_intent_tcp_helpers_llvm.
+            if matches!(
+                name.as_str(),
+                "tcp_listen" | "tcp_socket_port" | "tcp_accept"
+                | "tcp_connect_local" | "tcp_close"
+            ) {
+                let a0 = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_{}(i64 {})\n",
+                    dest, name, a0
+                ));
+                return dest;
+            }
+            if name == "tcp_send_str" {
+                let fd = emit_expr(&args[0], ctx, out);
+                let s = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_tcp_send_str(i64 {}, i8* {})\n",
+                    dest, fd, s
+                ));
+                return dest;
+            }
+            if matches!(name.as_str(), "tcp_recv" | "tcp_send_buf") {
+                let fd = emit_expr(&args[0], ctx, out);
+                let n = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_{}(i64 {}, i64 {})\n",
+                    dest, name, fd, n
                 ));
                 return dest;
             }
@@ -22041,6 +22085,286 @@ fn program_uses_sleep_ms(program: &TypedProgram) -> bool {
         }
     }
     false
+}
+
+/// Arc 8 step 8e proper — walk the typed program for any
+/// `tcp_*` call. Mirrors `program_uses_sleep_ms`.
+fn program_uses_tcp(program: &TypedProgram) -> bool {
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn is_tcp(name: &str) -> bool {
+        matches!(
+            name,
+            "tcp_listen" | "tcp_socket_port" | "tcp_accept"
+            | "tcp_connect_local" | "tcp_send_str" | "tcp_recv"
+            | "tcp_send_buf" | "tcp_close"
+        )
+    }
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        match &expr.kind {
+            E::Call { name, args, .. } => {
+                if is_tcp(name) {
+                    return true;
+                }
+                args.iter().any(expr_uses)
+            }
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            E::IfExpr { cond, then_value, else_value } => {
+                expr_uses(cond) || expr_uses(then_value) || expr_uses(else_value)
+            }
+            E::Match { scrutinee, arms } => {
+                expr_uses(scrutinee) || arms.iter().any(|a| expr_uses(&a.body))
+            }
+            E::Block { stmts, tail } => {
+                stmts.iter().any(stmt_uses) || expr_uses(tail)
+            }
+            _ => false,
+        }
+    }
+    fn stmt_uses(stmt: &crate::ir::TypedStmt) -> bool {
+        match stmt {
+            S::Let { expr, .. }
+            | S::Reassign { expr, .. }
+            | S::Return { expr }
+            | S::Assert { expr, .. }
+            | S::Prove { expr } => expr_uses(expr),
+            S::Discard { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|it| match it {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { body, .. } | S::ForIter { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        for s in &f.body {
+            if stmt_uses(s) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Arc 8 step 8e proper — emit LLVM IR for TCP runtime
+/// helpers. Each helper is a thin wrapper around libc
+/// socket / bind / listen / accept / connect / send / recv /
+/// close. Uses a thread_local 4KB recv buffer so concurrent
+/// `task` bodies have independent scratch space.
+///
+/// sockaddr_in is laid out as `{i16 sin_family, i16 sin_port,
+/// i32 sin_addr, [8 x i8] pad}` = 16 bytes on Linux/macOS
+/// x86_64 + AArch64. Loopback is `0x7F000001` in host order;
+/// `htonl` swaps to network order so we pass `0x0100007F`
+/// (little-endian host stores big-endian network → bytes
+/// `7F 00 00 01` on the wire).
+fn emit_intent_tcp_helpers_llvm(out: &mut String) {
+    out.push_str(
+        "declare i32 @socket(i32, i32, i32)\n\
+         declare i32 @bind(i32, i8*, i32)\n\
+         declare i32 @listen(i32, i32)\n\
+         declare i32 @accept(i32, i8*, i32*)\n\
+         declare i32 @connect(i32, i8*, i32)\n\
+         declare i32 @setsockopt(i32, i32, i32, i8*, i32)\n\
+         declare i32 @getsockname(i32, i8*, i32*)\n\
+         declare i64 @send(i32, i8*, i64, i32)\n\
+         declare i64 @recv(i32, i8*, i64, i32)\n\
+         declare i32 @close(i32)\n\
+         declare i32 @htons(i32)\n\
+         declare i32 @ntohs(i32)\n\
+         declare i32 @htonl(i32)\n\
+         @intent_tcp_buf = thread_local global [4096 x i8] zeroinitializer, align 1\n\
+         define i64 @intent_tcp_listen(i64 %port) {\n\
+         entry:\n\
+         \x20 ; socket(AF_INET=2, SOCK_STREAM=1, 0)\n\
+         \x20 %sock_i32 = call i32 @socket(i32 2, i32 1, i32 0)\n\
+         \x20 %sock_err = icmp slt i32 %sock_i32, 0\n\
+         \x20 br i1 %sock_err, label %ret_neg1, label %do_setsockopt\n\
+         do_setsockopt:\n\
+         \x20 %opt = alloca i32, align 4\n\
+         \x20 store i32 1, i32* %opt\n\
+         \x20 %opt_i8 = bitcast i32* %opt to i8*\n\
+         \x20 ; SOL_SOCKET=1, SO_REUSEADDR=2\n\
+         \x20 %sso = call i32 @setsockopt(i32 %sock_i32, i32 1, i32 2, i8* %opt_i8, i32 4)\n\
+         \x20 ; Build sockaddr_in on the stack — 16 bytes.\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %memset_rc = call i8* @memset(i8* %sa_i8, i32 0, i64 16)\n\
+         \x20 ; sin_family = AF_INET = 2 (offset 0, i16)\n\
+         \x20 %fam_ptr = bitcast i8* %sa_i8 to i16*\n\
+         \x20 store i16 2, i16* %fam_ptr\n\
+         \x20 ; sin_port = htons(port) (offset 2, i16)\n\
+         \x20 %port_i32 = trunc i64 %port to i32\n\
+         \x20 %port_be32 = call i32 @htons(i32 %port_i32)\n\
+         \x20 %port_be16 = trunc i32 %port_be32 to i16\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 store i16 %port_be16, i16* %port_ptr\n\
+         \x20 ; sin_addr = htonl(INADDR_LOOPBACK = 0x7F000001) (offset 4, i32)\n\
+         \x20 %lo_be = call i32 @htonl(i32 2130706433)\n\
+         \x20 %addr_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 4\n\
+         \x20 %addr_ptr = bitcast i8* %addr_ptr_i8 to i32*\n\
+         \x20 store i32 %lo_be, i32* %addr_ptr\n\
+         \x20 %brc = call i32 @bind(i32 %sock_i32, i8* %sa_i8, i32 16)\n\
+         \x20 %brc_err = icmp slt i32 %brc, 0\n\
+         \x20 br i1 %brc_err, label %close_and_neg1, label %do_listen\n\
+         do_listen:\n\
+         \x20 %lrc = call i32 @listen(i32 %sock_i32, i32 16)\n\
+         \x20 %lrc_err = icmp slt i32 %lrc, 0\n\
+         \x20 br i1 %lrc_err, label %close_and_neg1, label %ret_fd\n\
+         ret_fd:\n\
+         \x20 %sock_i64 = sext i32 %sock_i32 to i64\n\
+         \x20 ret i64 %sock_i64\n\
+         close_and_neg1:\n\
+         \x20 %_cc = call i32 @close(i32 %sock_i32)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_socket_port(i64 %fd) {\n\
+         entry:\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %slen = alloca i32, align 4\n\
+         \x20 store i32 16, i32* %slen\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %slen_i8 = bitcast i32* %slen to i32*\n\
+         \x20 %grc = call i32 @getsockname(i32 %fd_i32, i8* %sa_i8, i32* %slen_i8)\n\
+         \x20 %grc_err = icmp slt i32 %grc, 0\n\
+         \x20 br i1 %grc_err, label %ret_neg1, label %read_port\n\
+         read_port:\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 %port_be = load i16, i16* %port_ptr\n\
+         \x20 %port_be32 = zext i16 %port_be to i32\n\
+         \x20 %port_host32 = call i32 @ntohs(i32 %port_be32)\n\
+         \x20 %port_host64 = zext i32 %port_host32 to i64\n\
+         \x20 ret i64 %port_host64\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_accept(i64 %fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %cfd_i32 = call i32 @accept(i32 %fd_i32, i8* null, i32* null)\n\
+         \x20 %cfd_i64 = sext i32 %cfd_i32 to i64\n\
+         \x20 ret i64 %cfd_i64\n\
+         }\n\
+         define i64 @intent_tcp_connect_local(i64 %port) {\n\
+         entry:\n\
+         \x20 %sock_i32 = call i32 @socket(i32 2, i32 1, i32 0)\n\
+         \x20 %sock_err = icmp slt i32 %sock_i32, 0\n\
+         \x20 br i1 %sock_err, label %ret_neg1, label %do_connect\n\
+         do_connect:\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %_ms = call i8* @memset(i8* %sa_i8, i32 0, i64 16)\n\
+         \x20 %fam_ptr = bitcast i8* %sa_i8 to i16*\n\
+         \x20 store i16 2, i16* %fam_ptr\n\
+         \x20 %port_i32 = trunc i64 %port to i32\n\
+         \x20 %port_be32 = call i32 @htons(i32 %port_i32)\n\
+         \x20 %port_be16 = trunc i32 %port_be32 to i16\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 store i16 %port_be16, i16* %port_ptr\n\
+         \x20 %lo_be = call i32 @htonl(i32 2130706433)\n\
+         \x20 %addr_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 4\n\
+         \x20 %addr_ptr = bitcast i8* %addr_ptr_i8 to i32*\n\
+         \x20 store i32 %lo_be, i32* %addr_ptr\n\
+         \x20 %crc = call i32 @connect(i32 %sock_i32, i8* %sa_i8, i32 16)\n\
+         \x20 %crc_err = icmp slt i32 %crc, 0\n\
+         \x20 br i1 %crc_err, label %close_and_neg1, label %ret_fd\n\
+         ret_fd:\n\
+         \x20 %sock_i64 = sext i32 %sock_i32 to i64\n\
+         \x20 ret i64 %sock_i64\n\
+         close_and_neg1:\n\
+         \x20 %_cc = call i32 @close(i32 %sock_i32)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_send_str(i64 %fd, i8* %s) {\n\
+         entry:\n\
+         \x20 %is_null = icmp eq i8* %s, null\n\
+         \x20 br i1 %is_null, label %ret_neg1, label %do_send\n\
+         do_send:\n\
+         \x20 %len = call i64 @strlen(i8* %s)\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %n = call i64 @send(i32 %fd_i32, i8* %s, i64 %len, i32 0)\n\
+         \x20 %err = icmp slt i64 %n, 0\n\
+         \x20 br i1 %err, label %ret_neg1, label %ret_n\n\
+         ret_n:\n\
+         \x20 ret i64 %n\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_recv(i64 %fd, i64 %max) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %max, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %clamp\n\
+         clamp:\n\
+         \x20 %too_big = icmp sgt i64 %max, 4096\n\
+         \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %n = call i64 @recv(i32 %fd_i32, i8* %buf_ptr, i64 %want, i32 0)\n\
+         \x20 ret i64 %n\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_send_buf(i64 %fd, i64 %n) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %n, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %check_max\n\
+         check_max:\n\
+         \x20 %too_big = icmp sgt i64 %n, 4096\n\
+         \x20 br i1 %too_big, label %ret_neg1, label %do_send\n\
+         do_send:\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %m = call i64 @send(i32 %fd_i32, i8* %buf_ptr, i64 %n, i32 0)\n\
+         \x20 %err = icmp slt i64 %m, 0\n\
+         \x20 br i1 %err, label %ret_neg1, label %ret_m\n\
+         ret_m:\n\
+         \x20 ret i64 %m\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_close(i64 %fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %rc = call i32 @close(i32 %fd_i32)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\n",
+    );
 }
 
 /// Arc 8 step 8e — emit `@intent_sleep_ms(i64 ms) -> i64` and
@@ -37524,6 +37848,14 @@ fn collect_print_strings(
         TypedStmt::FieldAssign { object, value, .. } => {
             collect_strings_in_expr(object, msgs, idx, &intern);
             collect_strings_in_expr(value, msgs, idx, &intern);
+        }
+        // Task bodies + unsafe blocks get outlined later; any
+        // string literals they reference must still be interned
+        // at module scope so the outlined fn can GEP into them.
+        // Arc 8 step 8e proper — fixes tcp_send_str("...") in
+        // task bodies emitting `i8* null`.
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { collect_print_strings(s, msgs, idx); }
         }
         _ => {}
     }

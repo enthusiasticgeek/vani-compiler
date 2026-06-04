@@ -20788,6 +20788,124 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 step 8e proper — TCP builtins type-check and
+    /// emit on both backends. Real socket calls; lib tests
+    /// just compile + introspect emit output (the parity
+    /// runner exercises end-to-end via examples/tcp_echo.vani).
+    #[test]
+    fn tcp_builtins_typecheck_on_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let server: i64 = tcp_listen(0);
+              let port: i64 = tcp_socket_port(server);
+              let client: i64 = tcp_connect_local(port);
+              let _ = tcp_send_str(client, "hi");
+              let cfd: i64 = tcp_accept(server);
+              let n: i64 = tcp_recv(cfd, 64);
+              let _ = tcp_send_buf(cfd, n);
+              let _ = tcp_close(cfd);
+              let _ = tcp_close(client);
+              let _ = tcp_close(server);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("TCP builtins must type-check on C");
+        compile_to_llvm(source).expect("TCP builtins must type-check on LLVM");
+    }
+
+    #[test]
+    fn tcp_emits_helpers_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = tcp_listen(0);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("tcp program compiles");
+        assert!(
+            c.contains("intent_tcp_listen") && c.contains("sys/socket.h"),
+            "C output must include the tcp_listen helper + socket include; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn tcp_emits_helpers_in_llvm() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = tcp_listen(0);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("tcp LLVM compile");
+        assert!(
+            ll.contains("declare i32 @socket")
+                && ll.contains("define i64 @intent_tcp_listen")
+                && ll.contains("@intent_tcp_buf"),
+            "LLVM output must declare socket + define intent_tcp_listen + emit the thread_local buf; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn tcp_rejects_wrong_arity() {
+        let source = r#"
+            fn main() -> i64 {
+              let _ = tcp_send_str(0);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("1-arg tcp_send_str must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("2 arguments")),
+            "expected arity diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn tcp_helpers_skipped_when_unused() {
+        // Programs that never call any tcp_* builtin must
+        // NOT pull in the socket declares — keeps unrelated
+        // programs lean.
+        let source = r#"
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("trivial program compiles");
+        let ll = compile_to_llvm(source).expect("trivial LLVM compiles");
+        assert!(
+            !c.contains("intent_tcp_listen"),
+            "tcp helpers must not appear in C when unused"
+        );
+        assert!(
+            !ll.contains("@intent_tcp_buf"),
+            "tcp buf must not appear in LLVM when unused"
+        );
+    }
+
+    #[test]
+    fn tcp_str_literal_in_task_body_interned() {
+        // Regression test for the str-collection-walker bug
+        // that caused `tcp_send_str(fd, "ping")` inside a task
+        // to emit `i8* null`. After fix, the literal "wxyz"
+        // must appear in the LLVM module's interned globals.
+        let source = r#"
+            fn main() -> i64 {
+              task ta {
+                let _ = tcp_send_str(0, "wxyz");
+              }
+              join ta;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("LLVM compile");
+        assert!(
+            ll.contains("c\"wxyz\\00\""),
+            "task-body string literal must be interned at module scope; got:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
     #[test]
     fn sleep_ms_inside_async_fn_compiles() {
         // Arc 8 step 8h — verify the v1.5 surface composes:
