@@ -38,7 +38,7 @@ use diagnostic::Diagnostic;
 /// Result construction against this known monomorphic
 /// name. The fn is never called; the monomorphizer keeps
 /// its signature in scope.
-const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\n";
+const PRELUDE: &str = "enum Option<T> { Some(T), None }\nenum Result<T, E> { Ok(T), Err(E) }\nenum AllocError { OutOfMemory }\nenum Poll<T> { Ready(T), Pending }\nenum Future<T> { Ready(T), Pending }\n";
 
 fn inject_prelude(program: &mut ast::Program) {
     let prelude_tokens = match lexer::lex(PRELUDE) {
@@ -29419,6 +29419,32 @@ fn main() -> i64 {
         "#;
         compile_to_c(source).expect("prelude Result<T, E> available");
         compile_to_llvm(source).expect("prelude Result<T, E> available on LLVM");
+    }
+
+    // Arc 8 step 8a (2026-06-03): `Poll<T>` and `Future<T>`
+    // join the prelude alongside Option/Result/AllocError —
+    // foundation for the async/asyncio arc. Both are
+    // user-visible enum types; runtime async event-loop +
+    // state-machine codegen still queued as Arc 8 follow-ups.
+    #[test]
+    fn prelude_provides_future_and_poll() {
+        let source = r#"
+            fn main() -> i64 {
+              let p: Poll<i64> = Poll.Ready(42);
+              let v: i64 = match p {
+                Poll.Ready(x) then x,
+                Poll.Pending then 0,
+              };
+              let f: Future<i64> = Future.Pending;
+              let w: i64 = match f {
+                Future.Ready(x) then x,
+                Future.Pending then 99,
+              };
+              return v + w;
+            }
+        "#;
+        compile_to_c(source).expect("prelude Poll/Future available on C");
+        compile_to_llvm(source).expect("prelude Poll/Future available on LLVM");
     }
 
     #[test]
