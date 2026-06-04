@@ -22023,6 +22023,13 @@ fn program_uses_sleep_ms(program: &TypedProgram) -> bool {
             }
             S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
             S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            // Task bodies + unsafe blocks get outlined later in
+            // codegen — the call to sleep_ms might live inside
+            // them, so recurse to make sure the helper is
+            // emitted.
+            S::TaskSpawn { body, .. } | S::UnsafeBlock { body, .. } => {
+                body.iter().any(stmt_uses)
+            }
             _ => false,
         }
     }
