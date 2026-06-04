@@ -21169,6 +21169,70 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2.2 — ANF lifting for nested
+    /// io_*_async calls. A pre-pass walks expressions and
+    /// lifts each nested `io_*_async(args)` into a fresh
+    /// `let __anf_N = io_*_async(args);` BEFORE the original
+    /// statement.
+    #[test]
+    fn v31_phase22_anf_lift_io_recv_in_binary() {
+        let source = r#"
+            async fn anf(fd: i64) -> i64 {
+              let x: i64 = io_recv_async(fd, 64) + 10;
+              return x;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.2 ANF must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.2 ANF must compile on LLVM");
+        // The lifted __anf_0 local should land as a task struct
+        // field.
+        assert!(
+            c.contains("Task__anf") && c.contains("__anf_0"),
+            "C output must include synthesized __anf_0 field; got:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        // LLVM uses positional struct fields (no field names).
+        // Verify the Task struct has 4 i64 fields (state_tag,
+        // fd, __anf_0, x).
+        assert!(
+            ll.contains("%Struct_Task__anf = type { i64, i64, i64, i64 }"),
+            "LLVM output must include the 4-field Task struct (state_tag + fd + __anf_0 + x); got:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn v31_phase22_anf_lift_io_recv_in_return() {
+        // `return io_recv_async(...) + 1;` — Phase 2.2 lifts
+        // the call out of the return expression.
+        let source = r#"
+            async fn ret_anf(fd: i64) -> i64 {
+              return io_recv_async(fd, 64) + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("ANF in return must compile on C");
+        compile_to_llvm(source).expect("ANF in return must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase22_anf_lift_in_if_cond() {
+        // `if io_recv_async(...) > 0 { ... }` — Phase 2.2
+        // lifts the call to a Let BEFORE the if.
+        let source = r#"
+            async fn cond_anf(fd: i64) -> i64 {
+              if io_recv_async(fd, 64) > 0 {
+                return 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("ANF in if-cond must compile on C");
+        compile_to_llvm(source).expect("ANF in if-cond must compile on LLVM");
+    }
+
     /// Arc 8 v3.1 Phase 2.1c — nested ifs inside a suspending
     /// branch. The recursive collect_into already handled this
     /// in principle; Phase 2.1c lifts the validator's

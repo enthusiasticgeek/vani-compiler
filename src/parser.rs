@@ -4867,6 +4867,205 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
     }
 }
 
+/// Phase 2.2 — ANF lift: walk an expression, lifting EVERY
+/// `io_*_async(args)` call (even at the top level) into a
+/// fresh `__anf_N` Let. Returns (lifted_lets, rewritten_expr).
+/// The lifted_lets must be emitted BEFORE the containing
+/// statement.
+///
+/// **Callers MUST decide whether the top-level expr is
+/// already at a valid suspend-point position** (direct RHS
+/// of a `Let`) and skip calling this fn in that case.
+/// `anf_lift_body` handles that distinction.
+fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
+    // Walk subexpressions, lifting nested io_*_async calls.
+    match &expr.kind {
+        ExprKind::Call { name, name_span, args } => {
+            let mut all_lifts = Vec::new();
+            let mut new_args = Vec::new();
+            for arg in args {
+                let (lifts, new_arg) = anf_lift_expr(arg, counter);
+                all_lifts.extend(lifts);
+                new_args.push(new_arg);
+            }
+            let new_call = Expr {
+                kind: ExprKind::Call {
+                    name: name.clone(),
+                    name_span: *name_span,
+                    args: new_args,
+                },
+                span: expr.span,
+            };
+            // If THIS call is io_*_async, lift it now (nested
+            // case — caller's expr isn't a direct io_*_async
+            // call but this sub-expr is).
+            if matches!(
+                name.as_str(),
+                "io_recv_async" | "io_send_async" | "io_accept_async"
+            ) {
+                let synth_name = format!("__anf_{}", *counter);
+                *counter += 1;
+                let lifted_let = Stmt::Let {
+                    name: synth_name.clone(),
+                    annotation: Some(Type::I64),
+                    expr: new_call,
+                    span: expr.span,
+                };
+                all_lifts.push(lifted_let);
+                return (
+                    all_lifts,
+                    Expr {
+                        kind: ExprKind::Var(synth_name),
+                        span: expr.span,
+                    },
+                );
+            }
+            (all_lifts, new_call)
+        }
+        ExprKind::Binary { op, left, right } => {
+            let (mut left_lifts, left_new) = anf_lift_expr(left, counter);
+            let (right_lifts, right_new) = anf_lift_expr(right, counter);
+            left_lifts.extend(right_lifts);
+            (
+                left_lifts,
+                Expr {
+                    kind: ExprKind::Binary {
+                        op: *op,
+                        left: Box::new(left_new),
+                        right: Box::new(right_new),
+                    },
+                    span: expr.span,
+                },
+            )
+        }
+        ExprKind::Unary { op, expr: e } => {
+            let (lifts, new_e) = anf_lift_expr(e, counter);
+            (
+                lifts,
+                Expr {
+                    kind: ExprKind::Unary {
+                        op: *op,
+                        expr: Box::new(new_e),
+                    },
+                    span: expr.span,
+                },
+            )
+        }
+        ExprKind::Cast { expr: e, ty } => {
+            let (lifts, new_e) = anf_lift_expr(e, counter);
+            (
+                lifts,
+                Expr {
+                    kind: ExprKind::Cast {
+                        expr: Box::new(new_e),
+                        ty: ty.clone(),
+                    },
+                    span: expr.span,
+                },
+            )
+        }
+        // Other expr shapes don't typically contain io_*_async
+        // in v3.1 narrow scope; return unchanged.
+        _ => (vec![], expr.clone()),
+    }
+}
+
+/// Phase 2.2 — ANF lift a body of statements. Walks each
+/// stmt, lifting nested io_*_async calls out of expressions
+/// into fresh Let bindings emitted BEFORE the original stmt.
+/// Recurses into nested if/while branches.
+fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
+    let mut out = Vec::new();
+    for s in body {
+        match s {
+            Stmt::Let { name, annotation, expr, span } => {
+                // If the Let's RHS is directly an io_*_async
+                // call, it's already at a valid suspend-point
+                // position — pass through unchanged (but still
+                // ANF-lift its ARGS in case they contain
+                // nested io_*_async calls).
+                let is_direct_suspend = match &expr.kind {
+                    ExprKind::Call { name: cname, .. } => matches!(
+                        cname.as_str(),
+                        "io_recv_async" | "io_send_async" | "io_accept_async"
+                    ),
+                    _ => false,
+                };
+                if is_direct_suspend {
+                    if let ExprKind::Call { name: cname, name_span, args } = &expr.kind {
+                        let mut all_lifts = Vec::new();
+                        let mut new_args = Vec::new();
+                        for arg in args {
+                            let (lifts, new_arg) = anf_lift_expr(arg, counter);
+                            all_lifts.extend(lifts);
+                            new_args.push(new_arg);
+                        }
+                        out.extend(all_lifts);
+                        out.push(Stmt::Let {
+                            name: name.clone(),
+                            annotation: annotation.clone(),
+                            expr: Expr {
+                                kind: ExprKind::Call {
+                                    name: cname.clone(),
+                                    name_span: *name_span,
+                                    args: new_args,
+                                },
+                                span: expr.span,
+                            },
+                            span: *span,
+                        });
+                        continue;
+                    }
+                }
+                let (lifts, new_expr) = anf_lift_expr(expr, counter);
+                out.extend(lifts);
+                out.push(Stmt::Let {
+                    name: name.clone(),
+                    annotation: annotation.clone(),
+                    expr: new_expr,
+                    span: *span,
+                });
+            }
+            Stmt::Return { expr, span } => {
+                let (lifts, new_expr) = anf_lift_expr(expr, counter);
+                out.extend(lifts);
+                out.push(Stmt::Return {
+                    expr: new_expr,
+                    span: *span,
+                });
+            }
+            Stmt::Assign { name, expr, span } => {
+                let (lifts, new_expr) = anf_lift_expr(expr, counter);
+                out.extend(lifts);
+                out.push(Stmt::Assign {
+                    name: name.clone(),
+                    expr: new_expr,
+                    span: *span,
+                });
+            }
+            Stmt::If { cond, then_body, else_body, span } => {
+                let (cond_lifts, new_cond) = anf_lift_expr(cond, counter);
+                out.extend(cond_lifts);
+                let new_then = anf_lift_body(then_body, counter);
+                let new_else = anf_lift_body(else_body, counter);
+                out.push(Stmt::If {
+                    cond: new_cond,
+                    then_body: new_then,
+                    else_body: new_else,
+                    span: *span,
+                });
+            }
+            // Print / While / other forms — pass through; for
+            // Phase 2.2 narrow we assume io_*_async only
+            // appears in Let RHS / Return / Assign / if-cond
+            // contexts. Nested forms in Print items / While
+            // conds would need further casework.
+            other => out.push(other.clone()),
+        }
+    }
+    out
+}
+
 /// Phase 2.1c helper — does this body unconditionally exit
 /// via Return on every control-flow path? Used to suppress
 /// the defensive Jump emitted after a Verbatim stmt that
@@ -5357,6 +5556,18 @@ pub(crate) fn try_v31_transform(
     if !body_uses_io_async(body) {
         return None; // Caller falls through to v1 desugar.
     }
+    // Phase 2.2 — ANF lift nested io_*_async calls out of
+    // compound expressions into fresh Let bindings BEFORE
+    // running the validator + collector. The lifted body has
+    // io_*_async calls only at top-level Let RHS positions
+    // (where the segment collector recognizes them as
+    // suspend points). The validator + downstream synthesis
+    // see the lifted body — they don't need to know ANF
+    // happened.
+    let mut anf_counter: usize = 0;
+    let lifted_body = anf_lift_body(body, &mut anf_counter);
+    let body = lifted_body.as_slice();
+
     let locals = match validate_v31_linear_body(params, body, return_type) {
         Ok(ls) => ls,
         Err(d) => return Some(Err(d)),
