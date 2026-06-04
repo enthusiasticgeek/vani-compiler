@@ -11,6 +11,14 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.2 ✅ COMPLETE 2026-06-04** (commit `d3a0af3`).
+> ANF lifting for nested `io_*_async` calls in compound
+> expressions. Pre-pass `anf_lift_body` runs before
+> validation; lifts nested calls into fresh `__anf_N`
+> Lets. examples/echo_anf_lift.vani parity-green. 3 new
+> lib tests. Phase 2.3 (match arms), 2.4 (try keyword),
+> 2.5 (break/continue) queued.
+>
 > **Phase 2.1c ✅ COMPLETE 2026-06-04** (commit `22fc622`).
 > Nested ifs inside suspending branches. Validator
 > relaxed; `collect_branch_locals_recursive` collects Lets

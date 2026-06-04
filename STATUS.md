@@ -11,12 +11,12 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a + 2.1b + 2.1c shipped —
+Phases 0 + 1 + 2 narrow + 2.1a + 2.1b + 2.1c + 2.2 shipped —
 compiler-driven `async fn → Task` transform handles linear
 bodies + non-suspending control flow + suspend-in-branch
-state-splitting + fall-through merge state + nested ifs
-inside suspending branches (arbitrary depth). 7 v3.1
-acceptance examples parity-green. Phases 2.2-2.5, 3-4
+state-splitting + fall-through merge state + nested ifs +
+ANF lifting for nested `io_*_async` calls. 8 v3.1
+acceptance examples parity-green. Phases 2.3-2.5, 3-4
 queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -94,6 +94,22 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - **A0.2 deferred** — Phase 1's compiler-driven sugar
     resolves this naturally by concretizing T at transform
     time.
+
+- **v3.1 Phase 2.2 — ANF lifting** (commit `d3a0af3`).
+  Lifts the restriction that `io_*_async` must appear ONLY
+  as a direct Let RHS:
+  - Pre-pass walks every expression in the async fn body,
+    lifting nested `io_*_async(args)` into fresh
+    `let __anf_N = io_*_async(args);` Lets emitted BEFORE
+    the original stmt
+  - `anf_lift_expr` recursive Expr walker; `anf_lift_body`
+    statement-level driver
+  - Direct-Let-RHS pass-through optimization (don't lift
+    when already at valid suspend-point position)
+  - `examples/echo_anf_lift.vani` — `let r = io_recv_async(fd,
+    64) + bias;` lifts cleanly; "anf-lifted result (bytes
+    + 100): 104" byte-identical on both backends
+  - 3 new lib tests
 
 - **v3.1 Phase 2.1c — nested ifs inside suspending branches**
   (commit `22fc622`). Lifts Phase 2.1a/b's "branches must
@@ -201,12 +217,13 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1838 lib + 54 parity green** (parity includes
+**1841 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
 `tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
-`echo_nested_if.vani`, `echo_with_timeout.vani`, and
-`timer_async.vani` byte-identical-stdout checks).
+`echo_nested_if.vani`, `echo_anf_lift.vani`,
+`echo_with_timeout.vani`, and `timer_async.vani`
+byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 
