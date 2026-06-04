@@ -28853,14 +28853,16 @@ fn main() -> i64 {
     // unsupported parameter / return shapes. v1 FFI ABI is
     // scoped to scalars, `Str`, and references; aggregates by
     // value would silently corrupt under System V x86-64.
+    // Arc 7 remainder (2026-06-03): float-field structs and
+    // mixed integer/float structs ≤ 16 bytes are now accepted
+    // by-value at the FFI boundary. C backend forwards the
+    // struct to cc as-is; LLVM backend emits the raw
+    // `%Struct_Mixed` arg type and lets LLVM's SysV calling-
+    // convention classifier route each eightbyte to the right
+    // register class (INTEGER → GPR, SSE → XMM). Verifies the
+    // happy-path acceptance.
     #[test]
-    fn extern_struct_by_value_param_rejected_with_ref_hint() {
-        // Closure #285: all-integer structs ≤ 16 bytes are
-        // now allowed by-value (cc handles ABI on the C
-        // backend). To test the rejection path, use a struct
-        // with a float field — float fields aren't yet in
-        // the FFI-safe set (they'd route through SSE
-        // registers under System V).
+    fn extern_struct_with_float_field_accepted() {
         let source = r#"
             struct Mixed { x: i32, y: f64 }
 
@@ -28868,14 +28870,30 @@ fn main() -> i64 {
 
             fn main() -> i64 { return 0; }
         "#;
-        let errs = compile(source).expect_err("float-field struct by value must be rejected");
+        compile_to_c(source).expect("mixed int/float struct is FFI-safe (cc handles ABI)");
+        compile_to_llvm(source).expect("mixed int/float struct is FFI-safe (LLVM lowers ABI)");
+    }
+
+    // Arc 7 remainder: aggregate-in-aggregate (nested struct
+    // fields) still rejects — the v1 acceptance only covers
+    // scalar-fielded structs ≤ 16 bytes; nested aggregates
+    // would need recursive per-eightbyte classification.
+    #[test]
+    fn extern_struct_with_aggregate_field_rejected() {
+        let source = r#"
+            struct Inner { a: i32, b: i32 }
+            struct Outer { inner: Inner, c: i32 }
+
+            extern "C" fn takes_outer(o: Outer) -> i32;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err(
+            "nested-struct field must still reject for v1",
+        );
         assert!(
-            errs.iter().any(|d| {
-                let m = &d.message;
-                m.contains("unsupported FFI type Mixed")
-                    && m.contains("ref Mixed")
-            }),
-            "expected `ref Mixed` migration hint, got: {:?}",
+            errs.iter().any(|d| d.message.contains("ref Outer")),
+            "expected `ref Outer` migration hint, got: {:?}",
             errs
         );
     }
@@ -29659,11 +29677,11 @@ fn main() -> i64 {
         );
     }
 
+    // Arc 7 remainder: mixed int/float struct returns now
+    // accept under the broadened FFI rules. The rejection path
+    // is still tested for nested-aggregate / oversized shapes.
     #[test]
-    fn extern_struct_return_rejected_with_ref_hint() {
-        // Closure #285: all-integer structs ≤ 16 bytes are
-        // now allowed; use a non-FFI-safe shape (float field)
-        // to keep testing the rejection path.
+    fn extern_struct_return_with_float_field_accepted() {
         let source = r#"
             struct Mixed { x: i32, y: f64 }
 
@@ -29671,14 +29689,28 @@ fn main() -> i64 {
 
             fn main() -> i64 { return 0; }
         "#;
-        let errs = compile(source).expect_err("non-FFI-safe struct return must be rejected");
+        compile_to_c(source).expect("mixed int/float struct return is FFI-safe (cc handles ABI)");
+        compile_to_llvm(source).expect("mixed int/float struct return is FFI-safe (LLVM handles ABI)");
+    }
+
+    #[test]
+    fn extern_oversized_struct_return_rejected_with_ref_hint() {
+        // Struct > 16 bytes — still rejected by both backends.
+        let source = r#"
+            struct Big { a: i64, b: i64, c: i64 }
+
+            extern "C" fn make_big() -> Big;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("oversized struct return must reject");
         assert!(
             errs.iter().any(|d| {
                 let m = &d.message;
-                m.contains("return type Mixed is unsupported")
-                    && m.contains("ref Mixed")
+                m.contains("return type Big is unsupported")
+                    && m.contains("ref Big")
             }),
-            "expected `ref Mixed` return migration hint, got: {:?}",
+            "expected `ref Big` return migration hint, got: {:?}",
             errs
         );
     }

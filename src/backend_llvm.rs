@@ -1515,35 +1515,16 @@ fn emit_function(
     // `{i64, i64}` for size-9..16, with bitcast at call
     // sites.
     if function.is_extern {
-        // Closure #288: lower small all-integer structs to
-        // their System V x86-64 packed-register ABI form
-        // (i64 / {i64, i64}) at the declare site. The
-        // checker has already verified each struct is
-        // FFI-safe; if `llvm_ffi_struct_lowered_ty` still
-        // returns None for a struct that reached here, the
-        // checker's FFI-safe predicate and the LLVM lowering
-        // predicate disagree — panic to surface the bug
-        // loudly rather than emit bad IR.
-        for param in &function.params {
-            if matches!(&param.ty, Type::Struct(_)) && llvm_ffi_struct_lowered_ty(&param.ty).is_none() {
-                panic!(
-                    "FFI-safe predicate / LLVM ABI predicate mismatch on \
-                     param '{}' of extern fn '{}'. The checker accepted a \
-                     struct shape the LLVM ABI lowering doesn't recognize. \
-                     Use `--backend=c` as a workaround; file a bug.",
-                    param.name, function.name
-                );
-            }
-        }
-        if matches!(&function.return_type, Type::Struct(_))
-            && llvm_ffi_struct_lowered_ty(&function.return_type).is_none()
-        {
-            panic!(
-                "FFI-safe predicate / LLVM ABI predicate mismatch on return \
-                 type of extern fn '{}'. Use `--backend=c`; file a bug.",
-                function.name
-            );
-        }
+        // Closure #288 + Arc 7 remainder: lower small all-integer
+        // structs to their System V x86-64 packed-register ABI
+        // form (i64 / {i64, i64}) at the declare site. Float-
+        // field and mixed-int-float structs ≤ 16 bytes pass
+        // through with their raw `%Struct_<Name>` type — LLVM's
+        // SysV calling-convention lowering then classifies each
+        // eightbyte (INTEGER → GPR, SSE → XMM) matching what cc
+        // does on the foreign side. The all-integer pack-to-i64
+        // shortcut still applies because it preserves ABI
+        // exactly for the INTEGER-class eightbyte case.
         // Closure #288: lower struct params/returns to the
         // System V x86-64 ABI form (`i64` / `{i64, i64}`).
         let lowered_ret = llvm_ffi_struct_lowered_ty(&function.return_type)

@@ -6877,6 +6877,22 @@ fn is_ffi_integer_class(ty: &Type) -> bool {
     )
 }
 
+// Arc 7 remainder: floats get classified into SSE registers on
+// SysV x86-64 (XMM0–XMM7 for parameters). Mixed integer/float
+// aggregates pack into separate "eightbytes" — one INTEGER
+// chunk + one SSE chunk for a `{i64, f64}` struct, for
+// instance. The C compiler (cc / gcc / clang) handles the
+// per-eightbyte classification automatically when emitting
+// the call site; we just need to STOP rejecting these shapes
+// at the checker level.
+fn is_ffi_sse_class(ty: &Type) -> bool {
+    matches!(ty, Type::F32 | Type::F64)
+}
+
+fn is_ffi_safe_scalar(ty: &Type) -> bool {
+    is_ffi_integer_class(ty) || is_ffi_sse_class(ty)
+}
+
 fn ffi_byte_size(ty: &Type) -> u64 {
     match ty {
         Type::I8 | Type::U8 | Type::Bool => 1,
@@ -6889,11 +6905,15 @@ fn ffi_byte_size(ty: &Type) -> u64 {
     }
 }
 
-// Closure #285: classifies a struct as FFI-safe-by-value
-// under the v1 System V x86-64 rules. A struct passes
-// directly when (a) every field is an integer-class scalar,
-// and (b) total size ≤ 16 bytes. Float fields and nested
-// aggregates push it to the rejection path.
+// Closure #285 + Arc 7 remainder: classifies a struct as
+// FFI-safe-by-value under SysV x86-64 rules. A struct passes
+// directly when (a) every field is a scalar (integer-class
+// OR floating-point), and (b) total size ≤ 16 bytes. Aggregate-
+// in-aggregate (struct fields holding nested structs / tuples
+// / arrays) still falls through to rejection — that would
+// need recursive per-eightbyte classification which v1 leaves
+// to the C compiler's discretion (we just don't promise
+// correctness for those shapes yet).
 fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
     let Some(info) = structs.get(name) else {
         return false;
@@ -6905,7 +6925,7 @@ fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> boo
     if total > 16 {
         return false;
     }
-    info.fields.iter().all(|(_, t)| is_ffi_integer_class(t))
+    info.fields.iter().all(|(_, t)| is_ffi_safe_scalar(t))
 }
 
 fn extern_param_rejection_hint(
@@ -6929,8 +6949,10 @@ fn extern_param_rejection_hint(
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
         Type::Struct(name) => Some(format!(
             "pass struct '{}' by reference instead — write `ref {}` \
-             (v1 FFI passes by value only for all-integer-field structs \
-             ≤ 16 bytes; this struct has floats or exceeds the size)",
+             (v1 FFI passes by value only for structs whose fields are \
+             all scalars — integer / float / bool / Str / ref — and \
+             total ≤ 16 bytes; this struct has aggregates, generics, \
+             or exceeds the size)",
             name, name
         )),
         Type::Tuple(_) => Some(
