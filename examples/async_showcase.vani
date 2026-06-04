@@ -1,0 +1,129 @@
+// Arc 8 v3.1 capstone — every v3.1 feature in one async fn.
+//
+// This example exercises the full v3.1 compiler-driven
+// `async fn → Task` transform surface that shipped 2026-06-04:
+//
+// Phase 1   — linear bodies with sequential suspends
+// Phase 2-n — Print + Assign + mid-body return + if (no
+//             suspend) at top of async fn body
+// Phase 2.1a — if/else where branches contain suspends
+//              (both branches return)
+// Phase 2.1b — fall-through merge state (branches don't
+//              all return; outer code runs after)
+// Phase 2.1c — nested ifs inside suspending branches at
+//              arbitrary depth
+// Phase 2.2  — ANF lifting: io_*_async calls nested in
+//              compound expressions auto-lift to fresh
+//              `__anf_N` lets
+// Phase 2.5  — while loops with suspends in body (back-Jump
+//              + while-true wrap of poll fn)
+// Phase 2.5b — break/continue inside suspending loops
+//              (loop_stack tracks innermost loop's
+//              header/post-loop states)
+//
+// build & run:
+//   intentc run examples/async_showcase.vani                # LLVM
+//   intentc run examples/async_showcase.vani --backend=c    # C
+
+intent "v3.1 capstone — all compiler-driven sugar features in one async fn";
+
+// The async fn body exercises:
+// - Outer Let bindings (counter, attempts)
+// - Top-level if with mid-body return (Phase 2-narrow)
+// - Outer Assign (Phase 2-narrow)
+// - Print statement between suspends (Phase 2-narrow)
+// - while loop with suspends inside (Phase 2.5)
+// - ANF-lifted io_recv_async inside Binary (Phase 2.2)
+// - if/else inside loop where then-branch returns + else
+//   falls through (Phase 2.1a + 2.1b)
+// - break to exit loop on EOF (Phase 2.5b)
+// - continue to skip iteration on small reads (Phase 2.5b)
+async fn showcase(fd: i64, max_iters: i64) -> i64 {
+  let counter: i64 = 0;
+  let attempts: i64 = 0;
+
+  // Top-level if with early return (Phase 2-narrow).
+  if max_iters <= 0 {
+    return 0 - 1;
+  }
+
+  // Loop with suspend (Phase 2.5) + break/continue (Phase 2.5b).
+  while attempts < max_iters {
+    // ANF lifting: io_recv_async(fd, 64) is nested in a
+    // Binary expression — Phase 2.2 lifts it to a fresh
+    // __anf_N let BEFORE this line.
+    let n: i64 = io_recv_async(fd, 64) + 0;
+
+    if n == 0 {
+      // EOF — break out of loop (Phase 2.5b).
+      break;
+    }
+    if n < 0 {
+      // Hard error — early return mid-loop (Phase 2.1a + 2.1b
+      // routing: this if has return-only then-branch + no
+      // else, so it falls through to subsequent loop body
+      // when the cond is false).
+      return 0 - 2;
+    }
+
+    // Outer-local Assigns (Phase 2-narrow + Phase 2.5
+    // counter advance pattern).
+    counter = counter + n;
+    attempts = attempts + 1;
+
+    // Skip if we received a small read (continue — Phase 2.5b).
+    if n < 2 {
+      continue;
+    }
+
+    // Echo back the received data. Suspend point #2 inside
+    // the same loop body. Compiler ANF-lifts even though
+    // the result is discarded.
+    let _ = io_send_async(fd, n);
+  }
+
+  // Post-loop state code (Phase 2.1b merge state reached
+  // via the loop's natural exit AND via `break`).
+  return counter;
+}
+
+fn drive(ep: i64, t: mut ref Task__showcase) -> i64 {
+  while true {
+    let r: i64 = __poll_showcase(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "showcase");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // max_iters=3. Iter 1: recv 8 bytes ("showcase"), counter=8,
+  // attempts=1, send back, loop continues. Iter 2: recv 0
+  // (EOF, client closed), break. Loop exits. Return counter=8.
+  let t: Task__showcase = showcase(cfd, 3);
+  let r: i64 = drive(ep, mut ref t);
+  print "showcase result:", r;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
