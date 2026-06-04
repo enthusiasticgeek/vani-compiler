@@ -11,11 +11,11 @@
 > [TODO.md](TODO.md) for the canonical work list.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a shipped — compiler-driven
-`async fn → Task` transform now handles linear bodies +
-non-suspending control flow + suspend-in-branch state-
-splitting (both branches return-terminated). 5 v3.1
-acceptance examples parity-green. Phases 2.1b/c, 2.2-2.5,
+Phases 0 + 1 + 2 narrow + 2.1a + 2.1b shipped — compiler-
+driven `async fn → Task` transform now handles linear
+bodies + non-suspending control flow + suspend-in-branch
+state-splitting + fall-through merge state. 6 v3.1
+acceptance examples parity-green. Phases 2.1c, 2.2-2.5,
 3-4 queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -94,6 +94,22 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     resolves this naturally by concretizing T at transform
     time.
 
+- **v3.1 Phase 2.1b — fall-through merge state** (commit
+  `b1b8113`). Lifts Phase 2.1a's "both branches must
+  return" restriction:
+  - Branches can fall through to a merge state holding
+    post-if code (e.g. trailing `return EXPR`)
+  - New `Seg::Jump { target_state, span }` emitted at the
+    tail of a non-return-terminated branch
+  - `collect_into` returns bool (terminated-with-return);
+    merge state allocated AFTER both branch recursions
+    so its index is monotonically highest in the cascade
+  - `examples/echo_fall_through.vani` parity-green —
+    then-branch falls through to `return 100`,
+    else-branch returns -5
+  - 2 new lib tests + 2 prior "rejection" tests updated to
+    "acceptance" tests since Phase 2.1a/b lifted those
+
 - **v3.1 Phase 2.1a — suspend-in-branch state-splitting**
   (commit `7566ab8`). Lifts Phase 2 narrow's "no suspend
   in branches" restriction:
@@ -164,11 +180,12 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (simplest case, two-await composition,
     no-io fall-through to v1 desugar, non-linear rejection).
 
-**1835 lib + 54 parity green** (parity includes
+**1836 lib + 54 parity green** (parity includes
 `tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
 `tcp_echo_state_machine.vani`, `tcp_echo_async.vani`,
-`tcp_echo_async_branched.vani`, `echo_with_timeout.vani`,
-and `timer_async.vani` byte-identical-stdout checks).
+`tcp_echo_async_branched.vani`, `echo_fall_through.vani`,
+`echo_with_timeout.vani`, and `timer_async.vani`
+byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 

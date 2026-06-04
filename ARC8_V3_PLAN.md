@@ -11,6 +11,16 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.1b ✅ COMPLETE 2026-06-04** (commit `b1b8113`).
+> Fall-through merge state. New `Seg::Jump` emitted at tail
+> of non-return-terminated branches; merge state allocated
+> AFTER branch recursion to maintain cascade monotonicity.
+> `collect_into` returns bool tracking termination.
+> examples/echo_fall_through.vani parity-green. 2 new lib
+> tests + 2 prior rejection tests updated to acceptance.
+> Phase 2.1c (nested ifs in suspending branches, ~5-8h),
+> 2.2-2.5 deferred.
+>
 > **Phase 2.1a ✅ COMPLETE 2026-06-04** (commit `7566ab8`).
 > Suspend-in-branch state-splitting. `if` with `io_*_async`
 > in either or both branches (both must end with Return).
