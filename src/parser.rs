@@ -5143,18 +5143,38 @@ fn validate_v31_phase_21a_branch(
                 }
             }
             Stmt::Return { .. } => {}
-            Stmt::Print { .. } | Stmt::Assign { .. } => {
-                // Phase 2.1a/b narrow: branches stay linear.
-                // Print + Assign inside a suspending branch
-                // arrive once Phase 2.1c lifts the linear
-                // restriction.
-                return Err(Diagnostic::new(
-                    crate::span::Span::new(0, 0),
-                    format!(
-                        "v3.1 async fn: {} contains Print/Assign; Phase 2.1a/b allows only Let + Return inside suspending branches — arrives in Phase 2.1c (relaxed branch body)",
-                        branch_label
-                    ),
-                ));
+            Stmt::Print { items, .. } => {
+                // Phase 2.1c+: Print is allowed inside
+                // suspending branches if no print item
+                // contains a suspend (ANF doesn't yet lift
+                // inside print items).
+                for it in items {
+                    if let crate::ast::PrintItem::Expr(e) = it {
+                        if expr_contains_io_async(e) {
+                            return Err(Diagnostic::new(
+                                crate::span::Span::new(0, 0),
+                                format!(
+                                    "v3.1 async fn: {} has a `print` item with a suspend — Phase 2.2 ANF doesn't lift into print items yet",
+                                    branch_label
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+            Stmt::Assign { expr, span, .. } => {
+                // Phase 2.1c+: Assign is allowed inside
+                // suspending branches when RHS doesn't
+                // suspend (Phase 2.2 ANF lifts such cases).
+                if expr_contains_io_async(expr) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn: {} has an assign whose RHS contains a suspend (Phase 2.2 ANF should have lifted it)",
+                            branch_label
+                        ),
+                    ));
+                }
             }
             Stmt::If { cond, then_body, else_body, span } => {
                 // Phase 2.1c: nested ifs inside a suspending
@@ -5180,14 +5200,24 @@ fn validate_v31_phase_21a_branch(
                     else_body, "nested if else-branch", "Phase 2.1c (deeper nesting)",
                 )?;
             }
-            Stmt::While { span, .. } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    format!(
-                        "v3.1 async fn: {} contains a `while` loop with suspend handling — arrives in Phase 2.5 (loop with suspend-aware back-edge codegen)",
-                        branch_label
-                    ),
-                ));
+            Stmt::While { cond, body, span, .. } => {
+                // Phase 2.5: allow nested while-with-suspend.
+                // ANF lifting + collector's state allocation
+                // handle it (back-edge Jump emitted at body
+                // end; back-Jump triggers `continue` in the
+                // while-true wrapping the poll fn body).
+                if expr_contains_io_async(cond) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn: nested `while` in {} has a suspend in its condition (Phase 2.2 ANF should have lifted it; report as a v3.1 bug)",
+                            branch_label
+                        ),
+                    ));
+                }
+                validate_v31_phase_21a_branch(
+                    body, "nested while body", "Phase 2.5b (break/continue inside suspending loops)",
+                )?;
             }
             Stmt::Break { span } | Stmt::Continue { span } => {
                 return Err(Diagnostic::new(
@@ -5338,16 +5368,26 @@ fn validate_v31_linear_body(
             }
             Stmt::While { cond, body: while_body, span, .. } => {
                 if expr_contains_io_async(cond) {
+                    // Phase 2.2 ANF already handles this before
+                    // reaching here, so this path is unlikely.
                     return Err(Diagnostic::new(
                         *span,
-                        "v3.1 async fn: `while` condition contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                        "v3.1 async fn: `while` condition contains an `io_*_async` call (Phase 2.2 ANF should have lifted it; report as a v3.1 bug)",
                     ));
                 }
                 if while_body.iter().any(stmt_contains_io_async) {
-                    return Err(Diagnostic::new(
-                        *span,
-                        "v3.1 async fn: `while` body contains an `io_*_async` suspend point. Phase 2 narrow allows loops ONLY when their bodies don't suspend; suspend-in-loop needs back-edge state codegen — arrives in Phase 2.1.",
-                    ));
+                    // Phase 2.5: validate body recursively
+                    // (allows linear stmts + Lets + Return +
+                    // nested ifs per Phase 2.1c rules). The
+                    // collector handles state-splitting with
+                    // a back-Jump for the loop edge.
+                    validate_v31_phase_21a_branch(
+                        while_body, "while body", "Phase 2.5b (break/continue inside suspending loops)",
+                    )?;
+                    // Also collect any Lets inside the loop
+                    // body into the outer locals so the task
+                    // struct has fields for them.
+                    collect_branch_locals_recursive(while_body, &mut locals);
                 }
             }
             Stmt::Break { span } | Stmt::Continue { span } => {
@@ -5861,15 +5901,60 @@ pub(crate) fn try_v31_transform(
                         }
                     }
                 }
-                Stmt::While { .. } | Stmt::Assign { .. } | Stmt::Print { .. } => {
+                Stmt::While { cond, body: while_body, span, .. } => {
+                    let has_suspend = while_body.iter().any(stmt_contains_io_async);
+                    if !has_suspend {
+                        // Phase 2 narrow path: emit verbatim.
+                        state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
+                    } else {
+                        // Phase 2.5: state-splitting for
+                        // while-with-suspend.
+                        //   K       : current state — push Jump(loop_header)
+                        //   K+1     : loop_header — push Decision(cond, body_start, post_loop)
+                        //   K+2     : post_loop (allocated up front so Decision can target it)
+                        //   K+3..M  : body states (allocated during recursion)
+                        //   K+M's tail: backward Jump(loop_header)
+                        let loop_header = state_bodies.len();
+                        state_bodies.push(Vec::new());
+                        let post_loop = state_bodies.len();
+                        state_bodies.push(Vec::new());
+                        let body_start = state_bodies.len();
+                        state_bodies.push(Vec::new());
+                        // Jump from current state to loop_header.
+                        state_bodies[*current_state].push(Seg::Jump {
+                            target_state: loop_header,
+                            span: *span,
+                        });
+                        // At loop_header: Decision over cond.
+                        state_bodies[loop_header].push(Seg::Decision {
+                            cond: cond.clone(),
+                            then_state: body_start,
+                            else_state: post_loop,
+                            span: *span,
+                        });
+                        // Recurse into body starting at body_start.
+                        let mut body_current = body_start;
+                        let body_terminated = collect_into(
+                            while_body, state_bodies, &mut body_current, discard_counter,
+                        );
+                        // At body's tail (if not return-
+                        // terminated), emit BACKWARD Jump to
+                        // loop_header. Synthesis recognizes
+                        // this and emits `continue;`.
+                        if !body_terminated {
+                            state_bodies[body_current].push(Seg::Jump {
+                                target_state: loop_header,
+                                span: *span,
+                            });
+                        }
+                        // Outer continues at post_loop.
+                        *current_state = post_loop;
+                    }
+                }
+                Stmt::Assign { .. } | Stmt::Print { .. } => {
                     // Phase 2 narrow: emit verbatim
                     // (validator guarantees no suspend inside).
                     state_bodies[*current_state].push(Seg::Verbatim(s.clone()));
-                    // Phase 2.1c: detect whether the verbatim
-                    // unconditionally returns (e.g., a non-
-                    // suspending `if` where both branches end
-                    // in `return`). If so, mark terminated so
-                    // the caller doesn't emit a dead Jump.
                     if body_all_paths_return(std::slice::from_ref(s)) {
                         terminated = true;
                     }
@@ -6091,9 +6176,12 @@ pub(crate) fn try_v31_transform(
                 }
                 Seg::Jump { target_state, span } => {
                     // Phase 2.1b: unconditional state_tag bump.
-                    // Emitted at the tail of a non-return-
-                    // terminated branch to transfer control to
-                    // the merge state.
+                    // Phase 2.5: if the Jump is backward
+                    // (target_state < current state index),
+                    // emit `continue;` to re-enter the
+                    // while-true wrapping the poll-fn body so
+                    // the cascade re-checks states from the
+                    // top. Forward jumps fall through normally.
                     then_body.push(Stmt::FieldAssign {
                         object: Expr {
                             kind: ExprKind::Var(t_param_name.clone()),
@@ -6107,6 +6195,9 @@ pub(crate) fn try_v31_transform(
                         },
                         span: *span,
                     });
+                    if *target_state <= state_idx {
+                        then_body.push(Stmt::Continue { span: *span });
+                    }
                 }
                 Seg::Decision { cond, then_state, else_state, span } => {
                     // Phase 2.1a: if-with-suspend. Emit
@@ -6163,13 +6254,36 @@ pub(crate) fn try_v31_transform(
             span,
         });
     }
-    // Defensive trailing `return 0 - 1;` (unreachable in
-    // well-formed state machines but keeps the fn body
-    // satisfying the i64 return type even on a fallthrough.
+    // Defensive trailing `return 0 - 1;` inside the cascade
+    // (reached only when no state-tag matches — i.e., the
+    // state machine fell through somehow).
     poll_body.push(Stmt::Return {
         expr: synth_i64_sub(0, 1, fn_name_span),
         span: fn_name_span,
     });
+
+    // Phase 2.5 — wrap the cascade in `while true { ... }`
+    // so backward Jumps (loop back-edges) can use `continue`
+    // to re-enter the cascade. Non-loop fns hit the trailing
+    // return -1 on the first iteration and exit normally.
+    let wrapped_poll_body = vec![
+        Stmt::While {
+            cond: Expr {
+                kind: ExprKind::Bool(true),
+                span: fn_name_span,
+            },
+            invariants: vec![],
+            body: poll_body,
+            span: fn_name_span,
+        },
+        // Defensive trailing return after the while (unreachable
+        // — while-true exits only via `return` inside).
+        Stmt::Return {
+            expr: synth_i64_sub(0, 1, fn_name_span),
+            span: fn_name_span,
+        },
+    ];
+    let poll_body = wrapped_poll_body;
 
     // Build the poll Function.
     let poll_fn = Function {

@@ -1,0 +1,75 @@
+// Arc 8 v3.1 Phase 2.5 — loops with suspend inside.
+//
+// Phase 2 narrow accepted `while` loops only when the body
+// contained NO `io_*_async` calls. Phase 2.5 lifts that: a
+// while body can suspend; the segment collector allocates a
+// loop_header state + body states + post_loop state, and
+// emits a BACKWARD `Jump` at the body's tail.
+//
+// The synthesized poll fn is wrapped in `while true { ... }`
+// so backward Jumps can use `continue;` to re-enter the
+// cascade. Non-loop fns hit the trailing `return -1` on the
+// first iteration and exit normally.
+//
+// build & run:
+//   intentc run examples/echo_loop.vani                # LLVM
+//   intentc run examples/echo_loop.vani --backend=c    # C
+
+intent "Phase 2.5 — loops with suspend";
+
+async fn read_n(fd: i64, count: i64) -> i64 {
+  let i: i64 = 0;
+  let total: i64 = 0;
+  while i < count {
+    let n: i64 = io_recv_async(fd, 64);
+    if n < 0 {
+      return 0 - 1;
+    }
+    total = total + n;
+    i = i + 1;
+  }
+  return total;
+}
+
+fn drive(ep: i64, t: mut ref Task__read_n) -> i64 {
+  while true {
+    let r: i64 = __poll_read_n(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "loop");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // 3-iteration loop. First iter receives 4 bytes ("loop").
+  // Next iters get 0 bytes (EOF after client closed). Loop
+  // body's back-Jump cycles the state machine through
+  // loop_header → body_start → body_end → loop_header → ...
+  // until i == count.
+  let t: Task__read_n = read_n(cfd, 3);
+  let r: i64 = drive(ep, mut ref t);
+  print "3-iter loop total:", r;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

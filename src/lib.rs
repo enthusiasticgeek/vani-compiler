@@ -21169,6 +21169,59 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("Phase 2.1a both-branch-suspend must compile on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2.5 — loops with suspend inside.
+    /// The collector allocates loop_header + body_start +
+    /// post_loop states + emits a BACKWARD Jump at the body
+    /// tail; synthesis wraps the poll body in `while true`
+    /// + emits `continue;` after backward Jumps.
+    #[test]
+    fn v31_phase25_while_with_suspend_in_body() {
+        let source = r#"
+            async fn read_n(fd: i64, count: i64) -> i64 {
+              let i: i64 = 0;
+              while i < count {
+                let _ = io_recv_async(fd, 64);
+                i = i + 1;
+              }
+              return i;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.5 while-with-suspend must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.5 while-with-suspend must compile on LLVM");
+        assert!(
+            c.contains("Task__read_n") && c.contains("__poll_read_n"),
+            "C output must include synthesized Task struct + poll fn"
+        );
+        assert!(
+            ll.contains("Task__read_n") && ll.contains("__poll_read_n"),
+            "LLVM output must include synthesized Task struct + poll fn"
+        );
+    }
+
+    #[test]
+    fn v31_phase25_loop_with_mid_body_return() {
+        // Mid-body return inside a loop short-circuits via the
+        // existing Return-terminator logic; back-Jump only
+        // happens at the actual body end.
+        let source = r#"
+            async fn cond_loop(fd: i64) -> i64 {
+              let total: i64 = 0;
+              while total < 100 {
+                let n: i64 = io_recv_async(fd, 64);
+                if n < 0 {
+                  return 0 - 1;
+                }
+                total = total + n;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2.5 loop with mid-body return must compile on C");
+        compile_to_llvm(source).expect("Phase 2.5 loop with mid-body return must compile on LLVM");
+    }
+
     /// Arc 8 v3.1 Phase 2.2 — ANF lifting for nested
     /// io_*_async calls. A pre-pass walks expressions and
     /// lifts each nested `io_*_async(args)` into a fresh

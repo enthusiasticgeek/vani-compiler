@@ -830,6 +830,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_fall_through.vani",
         "echo_nested_if.vani",
         "echo_anf_lift.vani",
+        "echo_loop.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",
