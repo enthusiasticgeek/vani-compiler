@@ -29421,6 +29421,81 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("prelude Result<T, E> available on LLVM");
     }
 
+    // Arc 8 step 8b (2026-06-04): `async fn` keyword + parser-
+    // level desugar. `async fn foo() -> R { … return x; … }`
+    // rewrites at parse time to `fn foo() -> Future<R> { …
+    // return Future.Ready(x); … }`. The synchronous semantics
+    // (an `async fn` runs to completion on call, always returning
+    // `Future.Ready`) is a v1 shape; the suspend/resume runtime
+    // (state-machine transform + event loop, Arc 8 steps 8c-h)
+    // is queued. Users get the correct TYPE signatures and can
+    // write code that destructures `Future<T>` today.
+    #[test]
+    fn async_fn_returns_future_on_both_backends() {
+        let source = r#"
+            async fn double(n: i64) -> i64 {
+              return n + n;
+            }
+
+            fn main() -> i64 {
+              let f: Future<i64> = double(21);
+              let r: i64 = match f {
+                Future.Ready(v) then v,
+                Future.Pending then 0 - 1,
+              };
+              return r;
+            }
+        "#;
+        compile_to_c(source).expect("async fn compiles to C");
+        compile_to_llvm(source).expect("async fn compiles to LLVM");
+    }
+
+    #[test]
+    fn async_fn_with_early_return_wraps_all_branches() {
+        let source = r#"
+            async fn early(n: i64) -> i64 {
+              if n < 0 {
+                return 0 - 1;
+              }
+              return n + 100;
+            }
+
+            fn main() -> i64 {
+              let f: Future<i64> = early(42);
+              let r: i64 = match f {
+                Future.Ready(v) then v,
+                Future.Pending then 0,
+              };
+              return r;
+            }
+        "#;
+        compile_to_c(source).expect("async fn with early-return compiles to C");
+        compile_to_llvm(source).expect("async fn with early-return compiles to LLVM");
+    }
+
+    #[test]
+    fn async_fn_unit_return_wraps_synthesized_zero() {
+        // No explicit `-> R`, no explicit return — the
+        // synthesized trailing `return 0` gets wrapped into
+        // `Future.Ready(0)` so the fn yields `Future<i64>`.
+        let source = r#"
+            async fn side_effect(n: i64) {
+              print "running async with:", n;
+            }
+
+            fn main() -> i64 {
+              let f: Future<i64> = side_effect(7);
+              let _v: i64 = match f {
+                Future.Ready(v) then v,
+                Future.Pending then 0,
+              };
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("async unit-return compiles to C");
+        compile_to_llvm(source).expect("async unit-return compiles to LLVM");
+    }
+
     // Arc 8 step 8a (2026-06-03): `Poll<T>` and `Future<T>`
     // join the prelude alongside Option/Result/AllocError —
     // foundation for the async/asyncio arc. Both are

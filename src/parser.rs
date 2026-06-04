@@ -197,7 +197,9 @@ impl Parser {
                         self.sync_to_top_level();
                     }
                 }
-            } else if self.check(|kind| matches!(kind, TokenKind::Fn | TokenKind::Pure)) {
+            } else if self.check(|kind| matches!(kind, TokenKind::Fn | TokenKind::Pure))
+                || self.check_async_prefix()
+            {
                 match self.parse_function() {
                     Ok(f) => functions.push(f),
                     Err(e) => {
@@ -449,7 +451,9 @@ impl Parser {
                     }
                     Err(e) => { self.errors.push(e); self.sync_past_brace(); }
                 }
-            } else if self.check(|k| matches!(k, TokenKind::Fn | TokenKind::Pure)) {
+            } else if self.check(|k| matches!(k, TokenKind::Fn | TokenKind::Pure))
+                || self.check_async_prefix()
+            {
                 match self.parse_function() {
                     Ok(f) => {
                         functions.push(f);
@@ -1058,6 +1062,17 @@ impl Parser {
     }
 
     fn parse_function(&mut self) -> Result<Function, Diagnostic> {
+        // Arc 8 step 8b — optional `async` modifier before `fn`.
+        // `async` is a contextual keyword (still a regular ident
+        // in expression position); recognized here only when
+        // followed by `fn` or `pure fn`. Sets `is_async` so the
+        // body / return-type rewrite below wraps the result in
+        // `Future.Ready(...)` and reshapes `-> R` to
+        // `-> Future<R>`.
+        let is_async = self.check_async_prefix();
+        if is_async {
+            self.bump(); // consume `async`
+        }
         // Optional `pure` modifier before `fn`.
         let is_pure = self
             .match_token(|kind| matches!(kind, TokenKind::Pure))
@@ -1257,15 +1272,37 @@ impl Parser {
         }
 
         self.current_type_params = saved_tp;
+        // Arc 8 step 8b: async-fn body / return-type desugar.
+        // - Wrap return type `R` as `Future<R>` via `Type::Apply`.
+        // - Walk the body, replace each `Return { expr }` with
+        //   `Return { expr: Future.Ready(expr) }` so the
+        //   fn-body's value-flow types as `Future<R>`.
+        // v1 ships synchronous semantics: an `async fn` runs to
+        // completion immediately on call, returning
+        // `Future.Ready(value)`. The user-facing TYPE signature
+        // matches Rust's; the actual suspend/resume runtime
+        // (state-machine transform + event loop) is queued as
+        // Arc 8 steps 8c–8h.
+        let (final_return_type, final_body) = if is_async {
+            let wrapped_ret = Type::Apply {
+                name: "Future".to_string(),
+                args: vec![return_type],
+            };
+            let mut new_body = body;
+            wrap_returns_in_future_ready(&mut new_body);
+            (wrapped_ret, new_body)
+        } else {
+            (return_type, body)
+        };
         Ok(Function {
             name,
             type_params,
             where_clauses,
             params,
-            return_type,
+            return_type: final_return_type,
             requires,
             ensures,
-            body,
+            body: final_body,
             span: fn_token.span.merge(close.span).merge(name_span),
             is_pure,
             is_extern: false,
@@ -4389,6 +4426,31 @@ impl Parser {
         }
     }
 
+    /// Arc 8 step 8b — peek for the `async` contextual keyword.
+    /// True iff current token is `Ident("async")` AND the next
+    /// is `fn` (with optional `pure` between) so that bare
+    /// identifiers named `async` in expression position keep
+    /// working.
+    fn check_async_prefix(&self) -> bool {
+        let TokenKind::Ident(name) = &self.current().kind else {
+            return false;
+        };
+        if name != "async" {
+            return false;
+        }
+        // Peek past the `async` token. Allow `async fn` and
+        // `async pure fn`.
+        let next = self.tokens.get(self.pos + 1).map(|t| &t.kind);
+        match next {
+            Some(TokenKind::Fn) => true,
+            Some(TokenKind::Pure) => matches!(
+                self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                Some(TokenKind::Fn)
+            ),
+            _ => false,
+        }
+    }
+
     fn check(&self, predicate: impl FnOnce(&TokenKind) -> bool) -> bool {
         predicate(&self.current().kind)
     }
@@ -4414,6 +4476,56 @@ fn ident_text(token: Token) -> String {
     match token.kind {
         TokenKind::Ident(name) => name,
         _ => unreachable!("expected identifier"),
+    }
+}
+
+/// Arc 8 step 8b — recursively rewrite every `Return { expr }`
+/// statement inside an async fn body so `expr` is wrapped in
+/// `Future.Ready(expr)`. Recurses into nested blocks (if /
+/// while / for / ForIter / TaskSpawn) so deep returns lift
+/// correctly. The body's final implicit `return 0` (added by
+/// `parse_function` when the user wrote no explicit return)
+/// gets the same treatment — its synthesized expr becomes
+/// `Future.Ready(0)`.
+fn wrap_returns_in_future_ready(body: &mut Vec<Stmt>) {
+    for stmt in body.iter_mut() {
+        wrap_returns_in_future_ready_stmt(stmt);
+    }
+}
+
+fn wrap_returns_in_future_ready_stmt(stmt: &mut Stmt) {
+    match stmt {
+        Stmt::Return { expr, span } => {
+            let inner = std::mem::replace(
+                expr,
+                Expr {
+                    kind: ExprKind::Int(0),
+                    span: *span,
+                },
+            );
+            let span = inner.span;
+            *expr = Expr {
+                kind: ExprKind::MethodCall {
+                    receiver: Box::new(Expr {
+                        kind: ExprKind::Var("Future".to_string()),
+                        span,
+                    }),
+                    method: "Ready".to_string(),
+                    method_span: span,
+                    args: vec![inner],
+                },
+                span,
+            };
+        }
+        Stmt::If { then_body, else_body, .. } => {
+            wrap_returns_in_future_ready(then_body);
+            wrap_returns_in_future_ready(else_body);
+        }
+        Stmt::While { body, .. } => wrap_returns_in_future_ready(body),
+        Stmt::For { body, .. } => wrap_returns_in_future_ready(body),
+        Stmt::ForIter { body, .. } => wrap_returns_in_future_ready(body),
+        Stmt::TaskSpawn { body, .. } => wrap_returns_in_future_ready(body),
+        _ => {}
     }
 }
 

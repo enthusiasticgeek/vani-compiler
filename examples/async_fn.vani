@@ -1,0 +1,47 @@
+// Arc 8 step 8b — `async fn` keyword with parser-level desugar.
+//
+// `async fn foo() -> R { ... return x; ... }` rewrites at parse
+// time to `fn foo() -> Future<R> { ... return Future.Ready(x); ... }`.
+// The synthesized trailing `return 0` (for unit-return shorthand)
+// gets the same wrap.
+//
+// v1 semantics: an `async fn` runs to completion on call,
+// always returning `Future.Ready(value)`. The user-facing TYPE
+// signature matches Rust's; the actual suspend/resume runtime
+// (state-machine transform + event loop) is queued as Arc 8
+// steps 8c-h.
+//
+// build & run:
+//   intentc run examples/async_fn.vani                   # LLVM
+//   intentc run examples/async_fn.vani --backend=c       # C
+
+intent "async fn — parser-level desugar wraps body returns into Future.Ready (Arc 8 step 8b)";
+
+async fn double(n: i64) -> i64 {
+  return n + n;
+}
+
+async fn classify(n: i64) -> i64 {
+  if n < 0 {
+    return 0 - 1;
+  }
+  if n == 0 {
+    return 0;
+  }
+  return 1;
+}
+
+fn unwrap(f: Future<i64>) -> i64 {
+  return match f {
+    Future.Ready(v) then v,
+    Future.Pending then 0 - 1,
+  };
+}
+
+fn main() -> i64 {
+  print "double(21) (42):", unwrap(double(21));
+  print "classify(-5) (-1):", unwrap(classify(0 - 5));
+  print "classify(0) (0):", unwrap(classify(0));
+  print "classify(7) (1):", unwrap(classify(7));
+  return 0;
+}
