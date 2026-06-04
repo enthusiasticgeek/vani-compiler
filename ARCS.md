@@ -1,16 +1,27 @@
 # Multi-Session Arc Plan (Arcs 1–10)
 
-> **Status (2026-06-03):** Arcs 1, 2, 3, 4 ✅ COMPLETE.
-> Safety-standard alignment arc ✅ COMPLETE. The seven `intentc`
-> audit CLIs (deviations, stack-depth, acyclicity,
-> hashmap-usage, complexity, safety-attrs, audit-pack) all
-> shipped. See [STATUS.md](STATUS.md) for the per-commit ledger.
+> **Status (2026-06-04):** Arcs 1, 2, 3, 4, 5, 6 ✅ COMPLETE.
+> Arc 7 SysV (scalars + float-field + mixed int/float ≤ 16
+> bytes) ✅ COMPLETE; Win64 / AArch64 gated on cross-platform
+> CI. Arc 8 **v1 ✅ COMPLETE** — `async fn` / `await(expr)` /
+> `Future<T>` / `Poll<T>` / `CancelToken` ship at the parser
+> + prelude layer with synchronous semantics; the real
+> runtime (state-machine codegen + event loop + non-blocking
+> I/O) is queued as a focused next-session arc. Arc 9 c/d
+> ✅ COMPLETE; a/b/e/f deferred pending registry choice.
+> Arc 10 BLOCKED on grammar consultant. Safety-standard
+> alignment ✅ COMPLETE; seven `intentc` audit CLIs all on
+> `main`. See [STATUS.md](STATUS.md) for per-commit ledger.
 >
-> **Open queue: Arcs 5–10** (closures phase 4+, generic type
-> decls, FFI ABI, async, Kosh, Devanagari) plus a handful of
-> now-actionable small/medium items. See the
-> "Now-actionable" + "Multi-session arcs" tables in
-> [TODO.md](TODO.md) for the dependency-ordered ledger.
+> **Open queue:**
+> 1. **Arc 8 runtime** (8c+8d+8e+8h) — focused multi-day
+>    session. Picks up from STATUS.md's "📋 NEXT SESSION"
+>    block.
+> 2. **Arc 10** Devanagari SOV grammar — blocked on
+>    consultant.
+> 3. **Arc 9 a/b/e/f** Kosh package manager — deferred
+>    pending registry choice.
+> 4. **Arc 7 Win64/AArch64** — gated on CI.
 
 ## Arcs 5–10 — granular sub-step plan
 

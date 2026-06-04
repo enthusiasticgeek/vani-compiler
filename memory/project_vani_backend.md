@@ -1,6 +1,6 @@
 ---
 name: project-vani-backend
-description: "vāṇī compiler state — pipeline, backends, verifier; refreshed 2026-05-27 to reflect closures #1-#291 landed"
+description: "vāṇī compiler state — pipeline, backends, verifier; refreshed 2026-06-04 to reflect Arcs 1-9 + closure-as-value + async/await v1 + full SysV FFI"
 metadata:
   node_type: memory
   type: project
@@ -164,31 +164,68 @@ deferred). `Drop for T` is suppressed when T has heap fields
   `add_libgomp_load_flags` (in main.rs) and a test-local
   mirror in backend_llvm.rs. Honor `INTENT_LIBGOMP`.
 
-## Test totals (2026-05-27 post-#291)
+## Test totals (2026-06-04)
 
-**1025 lib + 54 e2e + 11 vtables-phase3 + 2 user-drop-by-ref +
-1 ssa-examples tests passing.**
-Cross-backend parity runner covers all 63 examples. ASan /
+**1800 lib + 56 parity tests green.** Cross-backend parity
+runner covers all examples (now including closure-as-value,
+async fn, await, CancelToken — `examples/closure_as_value.vani`,
+`examples/async_fn.vani`, `examples/async_await.vani`). ASan /
 UBSan clean across all examples. LLVM `opt -verify` /
 `opt -O3` clean. (Win32 LLVM dispatch adds 4 host-gated tests
-that fire on Windows hosts only — futex/WaitOnAddress,
-CreateThread for tasks, plus CreateThread fan-out parallel-for
-in tree-LLVM and SSA-LLVM.)
+that fire on Windows hosts only.)
 
-## Pending epics (post-#291)
+## Arcs landed since #291 (2026-06-03 → 2026-06-04)
+
+- **Arc 4 — full HashMap K-V matrix:** OwnedStr K, OwnedStr V,
+  (OwnedStr, OwnedStr), Tuple K, f64 K, Vec<i64> K all
+  cross-backend. Examples: `hashmap_{str,strv,strstr,tup,f64,veck}.vani`.
+- **Arc 5c — closure-as-value across fn boundaries** (commit
+  `7cccc1b`). New `Type::Closure(Args, Ret)`. Lift-pass
+  synthesizes env-struct + trampoline + magic call
+  `__intent_make_closure_<N>`. C emits per-(args, ret) closure
+  struct typedef `{uint64_t env; R (*call)(uint64_t, args);}`;
+  LLVM emits `%intent_closure_<sig>` named struct + trampoline
+  using `inttoptr`/getelementptr for env access. Call on
+  Closure-typed value dispatches via `c.call(c.env, args)`.
+  v1 restrictions: per-closure env in static __thread / module-
+  global slot (no heap); Closure cannot outlive lift site; Copy
+  captures only; no FnPtr→Closure auto-coerce. Example:
+  `examples/closure_as_value.vani`.
+- **Arc 7 SysV — float-class + mixed int/float ≤ 16 bytes FFI**
+  (commit `69b5ec0`). Extended `is_ffi_safe_struct` via
+  `is_ffi_safe_scalar` (integer + SSE eightbyte classes).
+  Removed over-restrictive LLVM panic; cc-calling-convention
+  lowering trusted. Closure #285 covered the integer-only
+  ≤ 16-byte subset; Win64 + AArch64 gated on CI.
+- **Arc 8 v1 — async fn / await / Future / Poll / CancelToken
+  at parser+prelude layer** (commits `2e649ff`, `e50dc20`,
+  `25b5a84`). `async fn foo() -> R { … return v; }` desugars to
+  `fn foo() -> Future<R> { … return Future.Ready(v); }`;
+  `await(expr)` desugars to a `match` that extracts
+  `Future.Ready`'s payload. Prelude grew `enum Poll<T>`,
+  `enum Future<T>`, `struct CancelToken { cancelled: bool }`.
+  `inject_prelude` now forwards prelude structs to
+  `program.structs` (had only forwarded enums before). v1
+  semantics: async fn runs synchronously, always emits
+  `Future.Ready`; users get the right types + syntax; runtime
+  steps (state-machine codegen + event loop + non-blocking I/O)
+  upgrade later without breaking source.
+- **Arc 9 c+d — `pub(kosh)` visibility tier + `pub use` chained
+  re-exports** already on `main` via closures #257 + #258.
+
+## Pending epics (post-Arc-9 — 2026-06-04)
 
 | # | Item | Effort | Status |
 |---|---|---|---|
-| A | Vtables — all 5 phases | done | Closures #220-#228 shipped |
+| Arc 8 runtime | State-machine codegen (8c) + event-loop runtime (8d) + non-blocking I/O (8e) + `examples/async_io.vani` (8h) | ~25-30h focused / 6-8 commits | **OPEN — next session.** See STATUS.md "📋 NEXT SESSION" block for the verbatim handoff prompt. v1 source surface already shipped (8a/8b/8f/8g). |
+| Arc 7 Win64/AArch64 | Cross-platform FFI classifier | ~6-8h | OPEN — gated on cross-platform CI availability |
+| Arc 9 a/b/e/f | `kosh.toml` manifest + resolver + registry + stdlib-as-kosh | ~25-30h | **DEFERRED** — registry hosting choice still pending per user |
+| Arc 10 | Devanagari SOV grammar (per-language parser mode + SOV constructs + alias-table completion) | ~15-20h | **BLOCKED** — needs grammar consultant per design notes |
 | B | Partial-move expansion (multi-level `moved`, multi-field reverse-decl drop, Mutex<non-i64>) | medium per item | Queued |
-| C | Mixed-payload-enum drop-dispatch follow-up | small | `switch (tag)` pattern threaded through both backends' Drop arms still needed; construction + match-extract done via #283 |
+| C | Mixed-payload-enum drop-dispatch follow-up (`switch (tag)` Drop arms) | small | Queued; construction + match-extract done via #283 |
 | D | Block-expr stmt vocabulary extension (admit Reassign / control flow) | medium | Queued |
 | E | Condition variables (`Condvar`) — pairs with `Mutex<T>` + `Guard<T>` | medium | ✅ AFFINE; codegen reuses Linux futex / Win32 WaitOnAddress / pthread-cond runtime; queued 2026-05-27 |
-| F | Data structures + algorithms roadmap — Levels 1-4 (sort / find / HashMap / BTree / Deque / BinaryHeap / closures / iterators / arena-based trees + graphs) | high (multi-session) | See [[project-vani-data-structures-roadmap]] |
-| G | Async / asyncio — compiler-lowered state machines on arena (NOT Pin / self-references) | high (multi-session) | See [[project-vani-async-design]]; depends on Level 3 closures |
-| H | Kosh package manager + Vāṇī-Kosh registry | high (multi-session) | Depends on namespaces (#10, done) + vani.toml v2 (#287, done) |
-| #5 last | Non-let stmts between `try` and `return` | low | Lands with epic D |
-| Devanagari | Script-aware diagnostics + grammar review | medium | Parked per user request |
+| F | Data structures + algorithms roadmap — Levels 1-4 follow-ons (BTree / Deque / BinaryHeap / iterators / arena-based trees + graphs) | high (multi-session) | See [[project-vani-data-structures-roadmap]] |
 
 ## Related memory
 

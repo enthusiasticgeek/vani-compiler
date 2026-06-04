@@ -251,6 +251,16 @@ history and [TODO.md](TODO.md) for what's queued. The full Roadmap
 (small + multi-session items) is in the README's *Roadmap* section
 below.
 
+**Since the Levels-1-to-4 sweep — Arcs 1–9 multi-session ledger
+(2026-06-03 → 2026-06-04):**
+- **Arc 4 — full HashMap K-V matrix** cross-backend: `HashMap<OwnedStr, V>` (4.1), `HashMap<i64, OwnedStr>` (4.2), `HashMap<OwnedStr, OwnedStr>` (4.3), `HashMap<Tuple, V>` (4.4), `HashMap<f64, V>` (4.5), `HashMap<Vec<i64>, V>` (4.6). Per-bundle FNV-1a + memcpy / strcmp / element-walk equality; per-slot drop walks; clone-on-insert to side-step the affine double-free shape.
+- **Arc 5c — closure-as-value across fn boundaries** (commit `7cccc1b`). New `Type::Closure(Args, Ret)`; lift-pass synthesizes env-struct + trampoline + magic `__intent_make_closure_<N>` constructor. Captured anonymous fns now pass as fn args / return values / struct fields. Example: [examples/closure_as_value.vani](examples/closure_as_value.vani).
+- **Arc 7 SysV — full float-class + mixed int/float ≤ 16-byte struct FFI** (commit `69b5ec0`). Closure #285 covered the integer-only subset; this completes the SysV classifier. Win64 / AArch64 gated on cross-platform CI.
+- **Arc 8 v1 — `async fn` / `await(expr)` / `Future<T>` / `Poll<T>` / `CancelToken` at the parser+prelude layer** (commits `2e649ff`, `e50dc20`, `25b5a84`). Synchronous v1 semantics: `async fn` runs to completion on call and emits `Future.Ready`; `await(expr)` extracts the payload immediately. Users get the right Rust-shaped types + syntax today; the **runtime arc (state-machine codegen + event loop + non-blocking I/O)** is queued as the focused next-session Arc 8 runtime arc — see [STATUS.md](STATUS.md) *📋 NEXT SESSION*. Examples: [examples/async_fn.vani](examples/async_fn.vani), [examples/async_await.vani](examples/async_await.vani).
+- **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
+
+**Test ledger at 2026-06-04: 1800 lib + 56 parity green.**
+
 ## Memory safety & concurrency model
 
 vāṇī treats **memory and concurrency bugs as compile-time errors
@@ -487,17 +497,24 @@ fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
 
 - **No garbage collector.** Affine ownership + deterministic Drop
   cover what GC would cover, without the unpredictable pause.
-- **`async` / `await` / event loop — queued.** Compiler-lowered
-  state machines on an arena are the canonical path (NOT Rust's
-  `Pin` / self-referential approach, which stays non-compliant
-  under affine; see [TODO.md](TODO.md) *Async / asyncio*). Today's
-  concurrency in vāṇī is
-  threads (`task` + `join`) plus shared-state primitives (`Atomic`,
-  `Mutex`, `Channel`). The user gets thread-safe code by construction
-  — the checker rejects the source patterns that would race —
-  without the function-coloring tax of `async`. Async I/O can be
-  added later if a clear win shows up; for now, blocking I/O through
-  a thread pool is the model.
+- **`async` / `await` — source surface ✅ shipped 2026-06-04
+  (Arc 8 v1).** `async fn`, `await(expr)`, `Future<T>`,
+  `Poll<T>`, and `CancelToken` all parse and run today with
+  synchronous semantics — `async fn` runs to completion on
+  call and emits `Future.Ready`; `await(expr)` extracts the
+  payload immediately. Users get the right Rust-shaped types
+  + syntax; the real runtime (compiler-lowered state machines
+  on an arena, NOT Rust's `Pin` / self-referential approach
+  which stays non-compliant under affine; event loop wrapping
+  epoll / kqueue / IOCP; non-blocking I/O primitives) is
+  queued as the focused next-session Arc 8 runtime arc — see
+  [STATUS.md](STATUS.md) *📋 NEXT SESSION* and
+  [TODO.md](TODO.md) *Async / asyncio*. Today's concurrency
+  in vāṇī also includes threads (`task` + `join`) plus
+  shared-state primitives (`Atomic`, `Mutex`, `Channel`). The
+  user gets thread-safe code by construction — the checker
+  rejects source patterns that would race — without the
+  function-coloring tax of `async` for non-I/O-bound code.
 - **No reference counting** (no `Rc` / `Arc` equivalent). Single-owner
   affine ownership means cycles can't form; there's nothing for an
   Rc to count.
@@ -3222,12 +3239,19 @@ The honest list, grouped by which work item closes them:
 **Memory & runtime model**
 
 - No GC, no Rc / Arc — affine + scope-exit Drop only.
-- Async / await / coroutines: **queued** (see *Async / asyncio*
-  in [TODO.md](TODO.md)). The canonical path is compiler-lowered
-  state machines on an arena — explicitly NOT Rust-style `Pin<&mut
-  Self>` self-references (those stay 🛑 NON-COMPLIANT under
-  affine). Today's concurrency is real threads (`task` + `join`)
-  plus shared-state via `Atomic` / `Mutex` / `Channel`.
+- Async / await / coroutines: **v1 source surface ✅ shipped
+  2026-06-04 (Arc 8 v1)** — `async fn`, `await(expr)`,
+  `Future<T>`, `Poll<T>`, `CancelToken` all parse and run with
+  synchronous semantics. **Real runtime queued** as the
+  focused next-session Arc 8 runtime arc (state-machine
+  codegen + event-loop runtime + non-blocking I/O); see
+  [STATUS.md](STATUS.md) *📋 NEXT SESSION* and
+  [TODO.md](TODO.md) *Async / asyncio*. The canonical path is
+  compiler-lowered state machines on an arena — explicitly
+  NOT Rust-style `Pin<&mut Self>` self-references (those stay
+  🛑 NON-COMPLIANT under affine). Today's concurrency also
+  includes real threads (`task` + `join`) plus shared-state
+  via `Atomic` / `Mutex` / `Channel`.
 - No exceptions (covered above).
 
 **Tooling**

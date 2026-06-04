@@ -3,15 +3,21 @@
 Snapshot from 2026-05-18 after min/max reductions + parallelism docs
 refresh landed. Order is rough priority (size + payoff), not strict.
 
-**Top-of-queue planning docs (2026-06-03):**
-- [ARCS.md](ARCS.md) — granular sub-step plan for the multi-session
-  arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE. Open
-  queue is **Arcs 5–10** (closures phase 4+, generic type decls,
-  FFI ABI, async, Kosh, Devanagari). See the unified "Open work
-  — sequenced ledger" below for the dependency + effort
-  ordering. The seven `intentc` audit CLIs (deviations,
-  stack-depth, acyclicity, hashmap-usage, complexity,
-  safety-attrs, audit-pack) all shipped 2026-06-03.
+**Top-of-queue planning docs (2026-06-04):**
+- [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
+  session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
+  Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped
+  2026-06-03). Arc 6 ✅ COMPLETE (closures #281/#282).
+  Arc 7 SysV ✅ COMPLETE (closure #285 + float-class FFI
+  shipped 2026-06-03). Arc 8 **v1 ✅ COMPLETE** (8a/8b/8f/8g
+  shipped 2026-06-03/04 — async fn / await / Future<T> /
+  Poll<T> / CancelToken at parser+prelude layer; runtime
+  steps 8c/8d/8e/8h queued as a focused multi-day arc).
+  Arc 9 c/d ✅ COMPLETE (closures #257/#258); a/b/e/f
+  deferred pending registry choice. **Open queue: Arc 8
+  runtime (8c-8h) and Arc 10 (Devanagari SOV — blocked on
+  grammar consultant).** The seven `intentc` audit CLIs all
+  shipped on `main`.
 - [unsafe.md](unsafe.md) — 5-layer plan for `unsafe { ... }` safety
   in the embedded path. **✅ COMPLETE 2026-06-02.** Layers 1.1, 1.2,
   1.3, 2.1, 2.2, 3.1, 3.2, 4.1, 4.2, 5 (foundation + lifetime-tagged
@@ -49,16 +55,35 @@ dependency chain).
 
 ### Multi-session arcs (sequenced by dependency)
 
-| Arc | Item | Effort | Deps | Unlocks |
-|---|---|---|---|---|
-| **Arc 5** | **Closures Phase 4+** — (5a) non-Copy captures with move; (5b) capture-by-ref second-class; (5c) closure-as-value across fn boundaries (env-struct + fn-ptr pair); (5d) reassign + name reuse | L (~15-20h) | — | Arc 8 (Async) |
-| **Arc 6** | **Generic type decls** — `EnumDecl`/`StructDecl` gain `type_params`; mono pass walks them; ships `Result<T, E>`, `Future<T>`, `Option<T>` as first-class user-visible generics (not auto-mono) | L (~15-20h) | — | generic `try_vec`, Arc 8 |
-| **Arc 7** | **FFI ABI lowering #13** — per-platform classifier (SysV x86-64, Win64, AArch64) + per-backend struct decomposition by value | L (~10-15h) | — | C-FFI ergonomics |
-| **Arc 8** | **Async / asyncio** — state-machine codegen, event-loop runtime, non-blocking I/O primitives, `await` sugar (9 sub-steps as designed in the *Async / asyncio* section below) | L (~30-40h) | Arc 5 (closure-as-value) + Arc 6 (`Future<T>`) | async stdlib |
-| **Arc 9** | **Kosh package manager** — Phase c-d first (`pub(kosh)`, re-exports); then Phase a/b/e/f (`kosh.toml`, resolver+lockfile, registry, stdlib-as-kosh); absorbs #14 multi-file pipeline | L (~40h+) | parser tweak for `use` inside `module { }` | multi-package projects |
-| **Arc 10** | **Devanagari polish** — (10a) SOV grammar fit (per-language parser mode); (10b) Sanskrit/Hindi/Marathi alias-table completion for `Interface`/`Implement`/`Arrow` | L (multi-session) | grammar consultant (soft) | Devanagari ergonomics |
+| Arc | Item | Status |
+|---|---|---|
+| **Arc 5** | Closures Phase 4+ (5a/5b/5c/5d) | ✅ COMPLETE — 5a/5b/5d were on `main` already; 5c (closure-as-value, commit `7cccc1b`) shipped 2026-06-03 |
+| **Arc 6** | Generic struct/enum decls | ✅ COMPLETE — closures #281+#282 |
+| **Arc 7 (SysV)** | FFI ABI scalar + float + mixed structs ≤ 16 bytes | ✅ COMPLETE — closure #285 + float-class commit `69b5ec0` shipped 2026-06-03 |
+| **Arc 7 (Win64/AArch64)** | Cross-platform classifier | OPEN — gated on cross-platform CI availability |
+| **Arc 8 v1** | `Poll<T>`/`Future<T>`/`CancelToken` prelude + `async fn` + `await` parser desugar | ✅ COMPLETE — commits `2e649ff`, `e50dc20`, `25b5a84` shipped 2026-06-03/04 |
+| **Arc 8 runtime** | State-machine codegen (8c) + event-loop runtime (8d) + non-blocking I/O (8e) + `examples/async_io.vani` (8h) | **OPEN — focused multi-day arc, picked up in next session.** See STATUS.md's "📋 NEXT SESSION" block for the verbatim handoff prompt. |
+| **Arc 9 (c+d)** | `pub(kosh)` visibility + `pub use` re-exports | ✅ COMPLETE — closures #257+#258 |
+| **Arc 9 (a/b/e/f)** | `kosh.toml` manifest + resolver + registry + stdlib-as-kosh | **DEFERRED** — registry hosting choice still pending |
+| **Arc 10** | Devanagari SOV grammar (per-language parser mode + SOV constructs + alias-table completion) | **BLOCKED** — needs grammar consultant validation per design notes ("Don't ship without language-expert confirmation") |
 
-### Dependency chain (textual)
+### Dependency chain (textual, after 2026-06-04 audit)
+
+```
+       [shipped — Arcs 1, 2, 3, 4, 5c, 6, 7 SysV, 8 v1, 9 c/d]
+                          ↓
+              Arc 8 runtime (8c+8d+8e+8h)   ← NEXT SESSION
+                   ↓
+              async stdlib + examples
+
+  Arc 9 a/b/e/f  ← waiting on registry hosting decision
+  Arc 10         ← waiting on grammar consultant
+  Arc 7 Win64/   ← waiting on cross-platform CI
+  AArch64
+```
+
+*Historical (pre-audit) dependency chain for the items
+already shipped:*
 
 ```
                  [shipped — Arcs 1, 2, 3, 4]

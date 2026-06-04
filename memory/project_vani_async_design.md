@@ -10,6 +10,31 @@ User asked on 2026-05-27 to add async / asyncio to the TODO. The
 canonical design lives in `/home/ptambe/vani/TODO.md` under *Async
 / asyncio — concurrency arc*. Summary here:
 
+## Current status (2026-06-04)
+
+**Arc 8 v1 ✅ SHIPPED** — the user-visible surface lands at the
+parser + prelude level with synchronous semantics:
+
+- `async fn foo() -> R { … return v; … }` desugars to
+  `fn foo() -> Future<R> { … return Future.Ready(v); … }`.
+  Body runs to completion synchronously on call.
+- `await(expr)` desugars to a `match` that extracts
+  `Future.Ready`'s payload.
+- `Future<T>` and `Poll<T>` are prelude generic enums.
+- `CancelToken` is a prelude struct `{ cancelled: bool }`;
+  user threads it through async fns as `ref CancelToken` and
+  reads `.cancelled` at relevant points.
+- Foundation commits: `2e649ff` (prelude), `e50dc20` (async fn
+  desugar), `25b5a84` (await + CancelToken). Example:
+  [examples/async_await.vani](../examples/async_await.vani).
+
+**Arc 8 runtime (8c + 8d + 8e + 8h) OPEN** — state-machine
+codegen, event-loop runtime, non-blocking I/O, acceptance
+example. Picks up next session via STATUS.md's "📋 NEXT
+SESSION" block (the verbatim handoff prompt). Estimated
+~25–30h focused. The v1 source-level surface upgrades to the
+real runtime without breaking user code.
+
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**
 

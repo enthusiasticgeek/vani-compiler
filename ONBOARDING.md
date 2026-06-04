@@ -169,7 +169,7 @@ docs/namespaces_design.md  Design rationale for the namespaces feature
 ## What's still ahead
 
 See README's *Roadmap* section for the longer arc and
-[TODO.md](TODO.md) for the canonical queue. As of 2026-05-29 the
+[TODO.md](TODO.md) for the canonical queue. As of 2026-06-04 the
 heavy lifts that **have** landed (some originally listed here
 as ahead) include:
 
@@ -194,8 +194,25 @@ as ahead) include:
   Kruskal/Prim, `Trie` with delete + arena compaction + full u8
   alphabet, `SkipList` with O(1) `max` via maintained `tail_node`.
   See [STATUS.md](STATUS.md) for the closure-by-closure history.
+- **Arcs 1–9 multi-session ledger (2026-06-03 → 2026-06-04):**
+  Arc 4 full HashMap K-V matrix cross-backend (OwnedStr / Tuple
+  / f64 / Vec<i64> keys × i64/OwnedStr/scalar values). Arc 5c
+  **closure-as-value across fn boundaries** (env-struct +
+  trampoline + magic `__intent_make_closure_<N>` constructor;
+  commit `7cccc1b`). Arc 7 SysV full float-class + mixed
+  int/float ≤ 16-byte struct FFI classifier (commit
+  `69b5ec0`). Arc 8 v1 **`async fn` / `await(expr)` /
+  `Future<T>` / `Poll<T>` / `CancelToken`** at the
+  parser+prelude layer with synchronous v1 semantics (commits
+  `2e649ff`, `e50dc20`, `25b5a84`). Arc 9 c+d `pub(kosh)` +
+  `pub use` re-exports.
 
 Currently pending:
+- **Arc 8 runtime (8c+8d+8e+8h)** — state-machine codegen +
+  event-loop runtime + non-blocking I/O + acceptance example
+  (`examples/async_io.vani`). Focused multi-day next-session
+  arc; STATUS.md "📋 NEXT SESSION" block carries the verbatim
+  handoff prompt.
 - Closure-as-value richer support (capture-by-ref, non-Copy
   captures, `.collect()`, lazy iterators, non-i64 element types
   in combinators, tuple-element `vec_zip`).
@@ -205,10 +222,13 @@ Currently pending:
 - Hash / Ord trait for user struct keys; SipHash; `hash_f64`.
 - SSA-LLVM multi-block atomicrmw emit (Phi-traceback; tree-LLVM
   is the correctness fallback today).
-- The **kosh** (कोश) package-manager arc: manifest (`kosh.toml`),
-  resolver + lockfile, registry + CLI, and stdlib-as-kosh.
-  Currently single-kosh; `pub(kosh)` already records intent.
-- Devanagari SOV word order and 3-way Sanskrit/Hindi/Marathi
-  alias parity (both blocked on grammar review).
-- `async` (deferred until concrete need; coroutines or
-  poll-and-runtime are both possible, decision deferred).
+- **Arc 9 a/b/e/f** — the **kosh** (कोश) package-manager arc:
+  manifest (`kosh.toml`), resolver + lockfile, registry + CLI,
+  and stdlib-as-kosh. Currently single-kosh; `pub(kosh)` +
+  `pub use` already on `main` (closures #257 + #258).
+  **Deferred** pending registry-hosting choice.
+- **Arc 7 Win64/AArch64** — cross-platform FFI classifier;
+  gated on CI availability.
+- **Arc 10** — Devanagari SOV word order and 3-way
+  Sanskrit/Hindi/Marathi alias parity. **Blocked** on grammar
+  consultant validation per design notes.
