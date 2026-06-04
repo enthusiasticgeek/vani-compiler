@@ -28,8 +28,8 @@ parser + prelude level with synchronous semantics:
   desugar), `25b5a84` (await + CancelToken). Example:
   [examples/async_await.vani](../examples/async_await.vani).
 
-**Arc 8 v1.5 ✅ SHIPPED 2026-06-04** — incremental slice on
-top of v1:
+**Arc 8 v1.5 + v1.6 ✅ SHIPPED 2026-06-04** — incremental
+slices on top of v1:
 
 - `sleep_ms(ms: i64) -> i64` builtin (commit `d344828`)
   wraps POSIX `nanosleep` (EINTR retry) and emits via both
@@ -41,17 +41,31 @@ top of v1:
   `async fn` + sequential awaits + `CancelToken` short-
   circuit + **concurrent timer fan-out via `task` + `join`**
   (real OS threads, ~30ms wall-clock for three 30ms sleeps).
-  Both backends produce byte-identical stdout.
+- **Full TCP networking builtin family** (commit `9aaec41`):
+  `tcp_listen` / `tcp_socket_port` / `tcp_accept` /
+  `tcp_connect_local` / `tcp_send_str` / `tcp_recv` /
+  `tcp_send_buf` / `tcp_close`. All wrap libc socket /
+  bind / listen / accept / connect / send / recv / close.
+  Thread-local 4KB recv buffer per OS thread. LLVM IR
+  builds `sockaddr_in` by hand (16-byte stack alloca +
+  htons port + htonl loopback addr). C side `#include
+  <sys/socket.h>` + friends. Walker fix: string literals
+  inside `task` bodies now intern at module scope.
+  `examples/tcp_echo.vani` ships end-to-end loopback echo
+  server + client in one process via `task` + `join`.
+  Both backends produce byte-identical stdout (port `> 0`
+  printed instead of literal so kernel-assigned ports
+  don't break parity).
 
-**Arc 8 runtime (8c + 8d + 8e proper + 8h proper) OPEN** —
-state-machine codegen, epoll/kqueue event-loop runtime, real
-non-blocking I/O futures (timerfd, TCP), single-threaded
-cooperative fan-out + TCP echo example. Picks up next
-session via STATUS.md's "📋 NEXT SESSION" block. Estimated
-~25–30h focused. The v1 source-level surface upgrades to
-the real runtime without breaking user code; v1.5 task-
-based fan-out remains a useful alternative path for users
-who want concurrency without cooperative scheduling.
+**Arc 8 runtime (8c + 8d + 8e non-blocking variants + 8h
+cooperative fan-out) OPEN** — state-machine codegen,
+epoll/kqueue event-loop runtime, real non-blocking I/O
+futures (timerfd, O_NONBLOCK sockets), single-threaded
+cooperative fan-out example. Picks up next session via
+STATUS.md's "📋 NEXT SESSION" block. Estimated ~25–30h
+focused. v1.5/v1.6 task-based fan-out + blocking I/O
+remain useful alternative paths for users who don't need
+single-thread cooperative scheduling.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**

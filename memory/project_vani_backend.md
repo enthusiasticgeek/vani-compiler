@@ -166,9 +166,11 @@ deferred). `Drop for T` is suppressed when T has heap fields
 
 ## Test totals (2026-06-04)
 
-**1804 lib + 54 parity tests green** (4 new lib tests pin
-`sleep_ms` surface — C emit, LLVM emit, arity diagnostic,
-async-fn composition). Cross-backend parity
+**1810 lib + 54 parity tests green** (4 new lib tests pin
+`sleep_ms` surface; 6 new lib tests pin TCP surface — C
+emit, LLVM emit, arity diagnostic, unused gate, str-in-
+task-body interning; parity sweep includes `tcp_echo.vani`
+via byte-identical-stdout check). Cross-backend parity
 runner covers all examples (now including closure-as-value,
 async fn, await, CancelToken — `examples/closure_as_value.vani`,
 `examples/async_fn.vani`, `examples/async_await.vani`). ASan /
@@ -225,6 +227,23 @@ that fire on Windows hosts only.)
   timer-driven `async fn` + sequential awaits + CancelToken
   short-circuit + `task` + `join` concurrent timer fan-out
   (real OS threads, ~30ms wall-clock for three 30ms sleeps).
+- **Arc 8 v1.6 — full TCP networking builtin family** (commit
+  `9aaec41`). Eight new builtins: `tcp_listen` /
+  `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` /
+  `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close`.
+  All wrap libc socket / bind / listen / accept / connect /
+  send / recv / close via per-backend runtime helpers.
+  Thread-local 4KB recv buffer (`@intent_tcp_buf`) means
+  concurrent `task` bodies have independent scratch. LLVM
+  IR builds `sockaddr_in` by hand (16-byte stack alloca +
+  htons + htonl). Walker fix in `collect_print_strings`:
+  recurses into `TaskSpawn` + `UnsafeBlock` bodies so string
+  literals inside task bodies intern at module scope
+  (regression: `tcp_send_str(fd, "ping")` inside a task
+  previously emitted `i8* null`). `examples/tcp_echo.vani`
+  ships an end-to-end loopback echo server + client in one
+  process via `task` + `join`. Both backends produce
+  byte-identical stdout in the parity runner.
 - **Arc 9 c+d — `pub(kosh)` visibility tier + `pub use` chained
   re-exports** already on `main` via closures #257 + #258.
 

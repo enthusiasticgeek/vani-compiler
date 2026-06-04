@@ -10,26 +10,34 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-04 (**Arc 8 v1.5 — `sleep_ms`
-builtin + first real timer-driven async example +
-concurrent fan-out via tasks shipped this session**).
+**Last updated:** 2026-06-04 (**Arc 8 v1.5 + v1.6 — sleep_ms,
+real TCP networking, concurrent fan-out, two new examples
+all shipped this session**).
 
-Session 2026-06-04 (Arc 8 v1.5 slice) shipped:
+Session 2026-06-04 shipped:
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
   builtin on both backends. Wraps POSIX `nanosleep` with
-  EINTR retry. Routes through tree-LLVM/C (not SSA) per the
-  gate in [main.rs](src/main.rs). Emits `@intent_sleep_ms`
-  LLVM helper + declares `@nanosleep`; gated on actual use
-  via `program_uses_sleep_ms` walker. 4 lib tests pin
-  surface.
+  EINTR retry. 4 lib tests pin surface.
 - **Step 8h v1.5** (commit `d209e06`) — `examples/async_io.vani`
-  demonstrates timer-driven `async fn` composition + sequential
-  awaits + CancelToken short-circuit + concurrent timer
-  fan-out via `task` + `join` (~30ms wall-clock for three
-  30ms sleeps, real OS threads). Walker fix: `sleep_ms` inside
-  a `task` body now emits the helper correctly.
+  with timer-driven `async fn` + sequential awaits + CancelToken
+  short-circuit + concurrent timer fan-out via `task` + `join`
+  (real OS threads). Walker fix: `sleep_ms` inside a `task`
+  body emits the helper correctly.
+- **Step 8e proper v1.6** (commit `9aaec41`) — full TCP
+  networking builtin family on both backends:
+  `tcp_listen` / `tcp_socket_port` / `tcp_accept` /
+  `tcp_connect_local` / `tcp_send_str` / `tcp_recv` /
+  `tcp_send_buf` / `tcp_close`. All wrap libc
+  socket / bind / listen / accept / connect / send / recv /
+  close. Thread-local 4KB recv buffer per OS thread.
+  `examples/tcp_echo.vani` ships an echo server + client in
+  one process via `task` + `join`. LLVM IR codegen builds
+  `sockaddr_in` by hand (16-byte stack alloca + htons +
+  htonl). Walker fix: string literals inside task bodies
+  now intern at module scope. 6 new lib tests.
 
-**1804 lib + 54 parity green.**
+**1810 lib + 54 parity green** (parity includes
+`tcp_echo.vani` byte-identical-stdout check).
 
 ---
 
