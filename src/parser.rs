@@ -4789,15 +4789,96 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
     body.iter().any(stmt_uses)
 }
 
-/// Phase 1 narrow-case eligibility check. Returns the locals
-/// (in declaration order) on success; an error diagnostic on
-/// rejection. Rejects:
-/// - Non-linear shapes (if / while / for / match / break /
-///   continue / try at top level).
-/// - Non-i64 params, locals, return type.
-/// - Multiple Returns; Return not at end.
-/// - Print / Assign / non-Let / non-Return at top level (kept
-///   strict for Phase 1; Phase 2 widens).
+/// Recursively check whether an expression contains any
+/// `io_*_async` call. Mirror of `body_uses_io_async` but
+/// scoped to a single Expr — used by Phase 2's validator to
+/// decide if a control-flow branch needs the full state-
+/// splitting transform (deferred to Phase 2.1) or can be
+/// emitted verbatim in the current state arm.
+fn expr_contains_io_async(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::Call { name, args, .. } => {
+            if matches!(
+                name.as_str(),
+                "io_recv_async" | "io_send_async" | "io_accept_async"
+            ) {
+                return true;
+            }
+            args.iter().any(expr_contains_io_async)
+        }
+        ExprKind::Binary { left, right, .. } => {
+            expr_contains_io_async(left) || expr_contains_io_async(right)
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => {
+            expr_contains_io_async(expr)
+        }
+        ExprKind::Index { array, index } => {
+            expr_contains_io_async(array) || expr_contains_io_async(index)
+        }
+        ExprKind::Len { array } => expr_contains_io_async(array),
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            expr_contains_io_async(inner)
+        }
+        ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+            elements.iter().any(expr_contains_io_async)
+        }
+        ExprKind::TupleAccess { tuple, .. } => expr_contains_io_async(tuple),
+        ExprKind::StructLit { fields, .. } => {
+            fields.iter().any(|(_, v)| expr_contains_io_async(v))
+        }
+        ExprKind::FieldAccess { object, .. } => expr_contains_io_async(object),
+        ExprKind::MethodCall { receiver, args, .. } => {
+            expr_contains_io_async(receiver) || args.iter().any(expr_contains_io_async)
+        }
+        _ => false,
+    }
+}
+
+/// Recursively check whether a Stmt (or any nested Stmt /
+/// Expr) contains an `io_*_async` call. Used by Phase 2's
+/// validator to gate `if` / `while` constructs.
+fn stmt_contains_io_async(s: &Stmt) -> bool {
+    match s {
+        Stmt::Let { expr, .. }
+        | Stmt::LetTuple { expr, .. }
+        | Stmt::Return { expr, .. }
+        | Stmt::Assert { expr, .. }
+        | Stmt::Prove { expr, .. }
+        | Stmt::Assign { expr, .. } => expr_contains_io_async(expr),
+        Stmt::Print { items, .. } => items.iter().any(|it| match it {
+            crate::ast::PrintItem::Expr(e) => expr_contains_io_async(e),
+            crate::ast::PrintItem::Str(_) => false,
+        }),
+        Stmt::If { cond, then_body, else_body, .. } => {
+            expr_contains_io_async(cond)
+                || then_body.iter().any(stmt_contains_io_async)
+                || else_body.iter().any(stmt_contains_io_async)
+        }
+        Stmt::While { cond, body, .. } => {
+            expr_contains_io_async(cond) || body.iter().any(stmt_contains_io_async)
+        }
+        Stmt::IndexAssign { index, value, .. } => {
+            expr_contains_io_async(index) || expr_contains_io_async(value)
+        }
+        Stmt::FieldAssign { object, value, .. } => {
+            expr_contains_io_async(object) || expr_contains_io_async(value)
+        }
+        _ => false,
+    }
+}
+
+/// Phase 1+2 narrow-case eligibility check. Returns the
+/// locals (in declaration order) on success; an error
+/// diagnostic on rejection.
+///
+/// **Phase 1 (linear core):** Let / Return at top level
+/// only, all-i64 params/locals, return i64.
+/// **Phase 2 narrow (added 2026-06-04):** also accepts
+/// Stmt::If / Stmt::While / Stmt::Assign / Stmt::Print /
+/// mid-body Return at the top level — **provided** the
+/// embedded if/while branches contain no `io_*_async` call.
+/// Bodies that do contain suspends inside control flow are
+/// rejected with a "suspend in branch — Phase 2.1" pointer.
 fn validate_v31_linear_body(
     params: &[Param],
     body: &[Stmt],
@@ -4829,10 +4910,14 @@ fn validate_v31_linear_body(
             ));
         }
     }
-    // Walk body. Collect Let locals. Reject control flow + non-Let / non-Return.
+    // Walk body. Collect Let locals. Phase 1 accepts Let +
+    // Return at top level; Phase 2 narrow ALSO accepts if /
+    // while / Assign / Print + mid-body Return — but only
+    // when the embedded constructs don't contain io_*_async
+    // (suspend-in-branch needs full state-splitting,
+    // deferred to Phase 2.1).
     let mut locals: Vec<(String, Type, crate::span::Span)> = Vec::new();
-    let last_idx = body.len().saturating_sub(1);
-    for (i, s) in body.iter().enumerate() {
+    for s in body.iter() {
         match s {
             Stmt::Let { name, annotation, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
@@ -4851,61 +4936,77 @@ fn validate_v31_linear_body(
                     locals.push((name.clone(), ty, *span));
                 }
             }
-            Stmt::Return { expr: _, span } => {
-                if i != last_idx {
+            Stmt::Return { .. } => {
+                // Phase 2 narrow: Return anywhere in the body
+                // is fine. The synthesizer emits it in the
+                // current state's arm and the driver loop sees
+                // a non-Pending value, exiting the poll loop.
+            }
+            Stmt::Print { .. } => {
+                // Phase 2 narrow: Print is allowed at top level
+                // — emits in the current state's arm as a normal
+                // side effect. (Print inside branches is also
+                // allowed if the branch has no suspends.)
+            }
+            Stmt::Assign { name: assign_name, expr, span, .. } => {
+                if expr_contains_io_async(expr) {
                     return Err(Diagnostic::new(
                         *span,
-                        "v3.1 async fn: `return` must be the last statement; mid-body early-returns arrive in Phase 2",
+                        format!(
+                            "v3.1 async fn: `{} = ...` RHS contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                            assign_name
+                        ),
+                    ));
+                }
+                // Allowed: rewriter handles outer-scope name
+                // assigns by emitting FieldAssign on t.<name>.
+            }
+            Stmt::If { cond, then_body, else_body, span } => {
+                if expr_contains_io_async(cond) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        "v3.1 async fn: `if` condition contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                    ));
+                }
+                if then_body.iter().any(stmt_contains_io_async)
+                    || else_body.iter().any(stmt_contains_io_async)
+                {
+                    return Err(Diagnostic::new(
+                        *span,
+                        "v3.1 async fn: `if` branch contains an `io_*_async` suspend point. Phase 2 narrow allows control flow ONLY when branches don't suspend; suspend-in-branch needs full state-splitting codegen — arrives in Phase 2.1.",
                     ));
                 }
             }
-            Stmt::Print { span, .. } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    "v3.1 async fn: `print` between suspend points isn't yet supported; arrives in Phase 2 (side-effect ordering)",
-                ));
-            }
-            Stmt::Assign { span, .. } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    "v3.1 async fn: `=` reassignment of locals isn't yet supported; arrives in Phase 2",
-                ));
-            }
-            Stmt::If { span, .. } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    "v3.1 async fn body must be linear (no `if`); control flow arrives in Phase 2",
-                ));
-            }
-            Stmt::While { span, .. } => {
-                return Err(Diagnostic::new(
-                    *span,
-                    "v3.1 async fn body must be linear (no `while`); loops arrive in Phase 2",
-                ));
+            Stmt::While { cond, body: while_body, span, .. } => {
+                if expr_contains_io_async(cond) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        "v3.1 async fn: `while` condition contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                    ));
+                }
+                if while_body.iter().any(stmt_contains_io_async) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        "v3.1 async fn: `while` body contains an `io_*_async` suspend point. Phase 2 narrow allows loops ONLY when their bodies don't suspend; suspend-in-loop needs back-edge state codegen — arrives in Phase 2.1.",
+                    ));
+                }
             }
             Stmt::Break { span } | Stmt::Continue { span } => {
                 return Err(Diagnostic::new(
                     *span,
-                    "v3.1 async fn body must be linear (no break/continue); arrives in Phase 2",
+                    "v3.1 async fn: `break` / `continue` arrive in Phase 2.1 (loop with suspend-aware back-edge codegen).",
                 ));
             }
             // Reject other forms with a generic message.
             _ => {
                 return Err(Diagnostic::new(
                     crate::span::Span::new(0, 0),
-                    "v3.1 async fn body contains an unsupported statement form for Phase 1 (linear core); see ARC8_V3_PLAN.md",
+                    "v3.1 async fn body contains an unsupported statement form for Phase 2 (control flow); see ARC8_V3_PLAN.md Phase 2.1+ for deferred shapes",
                 ));
             }
         }
     }
-    // Last stmt must be Return.
-    match body.last() {
-        Some(Stmt::Return { .. }) => Ok(locals),
-        _ => Err(Diagnostic::new(
-            crate::span::Span::new(0, 0),
-            "v3.1 async fn body must end with `return EXPR;`",
-        )),
-    }
+    Ok(locals)
 }
 
 /// Build a simple i64 binary subtract expression `a - b` —
@@ -4934,6 +5035,88 @@ fn synth_field_access(obj_name: &str, field: &str, span: crate::span::Span) -> E
             field: field.to_string(),
         },
         span,
+    }
+}
+
+/// Phase 2 — rewrite every Var inside a Stmt that matches
+/// the rename set to a FieldAccess on the task struct. For
+/// Stmt::Assign whose LHS name is in the rename set, emit
+/// a FieldAssign on `__t.<name>` instead. Recursively
+/// handles nested if/while bodies.
+fn rewrite_vars_in_stmt(
+    stmt: &Stmt,
+    rename_set: &std::collections::HashSet<String>,
+    obj_name: &str,
+) -> Stmt {
+    match stmt {
+        Stmt::Let { name, annotation, expr, span } => Stmt::Let {
+            name: name.clone(),
+            annotation: annotation.clone(),
+            expr: rewrite_vars_to_fields(expr, rename_set, obj_name),
+            span: *span,
+        },
+        Stmt::Return { expr, span } => Stmt::Return {
+            expr: rewrite_vars_to_fields(expr, rename_set, obj_name),
+            span: *span,
+        },
+        Stmt::Assign { name, expr, span } => {
+            // If the LHS is an outer-scope name, this becomes
+            // a FieldAssign on __t.<name>. Otherwise (inner
+            // local scope) keep as Assign on the local Var.
+            let new_expr = rewrite_vars_to_fields(expr, rename_set, obj_name);
+            if rename_set.contains(name) {
+                Stmt::FieldAssign {
+                    object: Expr {
+                        kind: ExprKind::Var(obj_name.to_string()),
+                        span: *span,
+                    },
+                    field: name.clone(),
+                    field_span: *span,
+                    value: new_expr,
+                    span: *span,
+                }
+            } else {
+                Stmt::Assign {
+                    name: name.clone(),
+                    expr: new_expr,
+                    span: *span,
+                }
+            }
+        }
+        Stmt::Print { items, span } => Stmt::Print {
+            items: items.iter().map(|it| match it {
+                crate::ast::PrintItem::Expr(e) => crate::ast::PrintItem::Expr(
+                    rewrite_vars_to_fields(e, rename_set, obj_name),
+                ),
+                crate::ast::PrintItem::Str(s) => crate::ast::PrintItem::Str(s.clone()),
+            }).collect(),
+            span: *span,
+        },
+        Stmt::If { cond, then_body, else_body, span } => Stmt::If {
+            cond: rewrite_vars_to_fields(cond, rename_set, obj_name),
+            then_body: then_body.iter()
+                .map(|s| rewrite_vars_in_stmt(s, rename_set, obj_name))
+                .collect(),
+            else_body: else_body.iter()
+                .map(|s| rewrite_vars_in_stmt(s, rename_set, obj_name))
+                .collect(),
+            span: *span,
+        },
+        Stmt::While { cond, invariants, body, span } => Stmt::While {
+            cond: rewrite_vars_to_fields(cond, rename_set, obj_name),
+            invariants: invariants.iter()
+                .map(|e| rewrite_vars_to_fields(e, rename_set, obj_name))
+                .collect(),
+            body: body.iter()
+                .map(|s| rewrite_vars_in_stmt(s, rename_set, obj_name))
+                .collect(),
+            span: *span,
+        },
+        // Other statement forms — Phase 2 narrow rejects these
+        // in the validator, so this branch is unreachable in
+        // well-formed input. Pass through verbatim as a
+        // defensive default.
+        other => other.clone(),
     }
 }
 
@@ -5094,14 +5277,27 @@ pub(crate) fn try_v31_transform(
 
     // Collect a flat list of (state_index, segment_kind):
     //   - NonSuspendLet(name, expr): runs in the same state
-    //     where the previous suspend completed
+    //     where the previous suspend completed; the local is
+    //     saved into the task struct field.
     //   - Suspend(name, builtin, args): runs as a suspend point
-    //   - Return(expr): final state
+    //     (STATE TERMINATOR — bumps state_tag).
+    //   - Discard(expr): non-suspend `let _ = ...;` — emitted
+    //     verbatim in current state.
+    //   - Return(expr): top-level return (STATE TERMINATOR —
+    //     exits the poll fn entirely).
+    //   - Verbatim(Stmt): Phase 2 narrow — an if / while /
+    //     Assign / Print at top level. The whole statement is
+    //     emitted verbatim in the current state's arm with
+    //     var-rewriting; does NOT terminate the state (a
+    //     nested return inside the if's then_body exits the
+    //     poll fn naturally without changing the outer state
+    //     transitions).
     enum Seg {
         NonSuspendLet { name: String, expr: Expr, span: crate::span::Span },
         Suspend { local_name: String, builtin: String, args: Vec<Expr>, span: crate::span::Span },
         Discard { expr: Expr, span: crate::span::Span },
         Return { expr: Expr, span: crate::span::Span },
+        Verbatim(Stmt),
     }
     let mut segs: Vec<Seg> = Vec::new();
     for s in body {
@@ -5149,6 +5345,14 @@ pub(crate) fn try_v31_transform(
             }
             Stmt::Return { expr, span } => {
                 segs.push(Seg::Return { expr: expr.clone(), span: *span });
+            }
+            // Phase 2 narrow: if / while / Assign / Print at
+            // top level. validate_v31_linear_body already
+            // confirmed branches don't contain io_*_async, so
+            // these can land verbatim in the current state's
+            // arm without state-splitting.
+            Stmt::If { .. } | Stmt::While { .. } | Stmt::Assign { .. } | Stmt::Print { .. } => {
+                segs.push(Seg::Verbatim(s.clone()));
             }
             // validate_v31_linear_body already rejected other forms;
             // unreachable in well-formed input.
@@ -5206,6 +5410,13 @@ pub(crate) fn try_v31_transform(
             | Seg::Suspend { span, .. }
             | Seg::Discard { span, .. }
             | Seg::Return { span, .. } => *span,
+            Seg::Verbatim(s) => match s {
+                Stmt::If { span, .. }
+                | Stmt::While { span, .. }
+                | Stmt::Assign { span, .. }
+                | Stmt::Print { span, .. } => *span,
+                _ => fn_name_span,
+            },
         }).unwrap_or(fn_name_span);
 
         // `if __t.state_tag == K { ... }`
@@ -5365,6 +5576,15 @@ pub(crate) fn try_v31_transform(
                         expr: rewritten_expr,
                         span: *span,
                     });
+                }
+                Seg::Verbatim(stmt) => {
+                    // Phase 2 narrow: if/while/Assign/Print at
+                    // top level. Recursively rewrite Vars
+                    // inside the stmt so any references to
+                    // outer-scope locals/params hit the task
+                    // struct fields. Then emit verbatim.
+                    let rewritten = rewrite_vars_in_stmt(stmt, &rename, &t_param_name);
+                    then_body.push(rewritten);
                 }
             }
         }

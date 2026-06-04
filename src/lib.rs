@@ -21052,6 +21052,94 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("sync async fn must use v1 desugar on LLVM");
     }
 
+    /// Arc 8 v3.1 Phase 2 narrow — if/while/Assign/Print +
+    /// mid-body return allowed inside async fn body when no
+    /// suspend appears in the branches.
+    #[test]
+    fn v31_phase2_async_fn_with_if_no_suspend_in_branches() {
+        let source = r#"
+            async fn check_then_recv(fd: i64) -> i64 {
+              if fd < 0 {
+                return 0 - 1;
+              }
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2 if-no-suspend must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2 if-no-suspend must compile on LLVM");
+        assert!(
+            c.contains("Task__check_then_recv") && c.contains("__poll_check_then_recv"),
+            "C output must include Task struct + poll fn for the Phase 2 async fn"
+        );
+        assert!(
+            ll.contains("Task__check_then_recv") && ll.contains("__poll_check_then_recv"),
+            "LLVM output must include Task struct + poll fn for the Phase 2 async fn"
+        );
+    }
+
+    #[test]
+    fn v31_phase2_async_fn_with_assign_on_outer_local() {
+        // Assign on an outer-scope local: rewriter emits
+        // FieldAssign on __t.<name>.
+        let source = r#"
+            async fn count_then_recv(fd: i64) -> i64 {
+              let attempts: i64 = 0;
+              attempts = attempts + 1;
+              let n: i64 = io_recv_async(fd, 64);
+              return n + attempts;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2 assign on outer local must compile on C");
+        compile_to_llvm(source).expect("Phase 2 assign on outer local must compile on LLVM");
+    }
+
+    #[test]
+    fn v31_phase2_suspend_in_branch_rejected_with_phase_21_diag() {
+        // If branch contains io_*_async — Phase 2 narrow rejects
+        // with a clear "Phase 2.1" pointer.
+        let source = r#"
+            async fn bad(fd: i64) -> i64 {
+              if fd > 0 {
+                let n: i64 = io_recv_async(fd, 64);
+                return n;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("v3.1 must reject suspend-in-branch");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2.1") || m.contains("suspend-in-branch") || m.contains("state-splitting")
+            }),
+            "expected Phase 2.1 / suspend-in-branch diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn v31_phase2_while_no_suspend_in_body_allowed() {
+        // Non-suspend while loop alongside a suspend Let
+        // outside. Phase 2 narrow accepts.
+        let source = r#"
+            async fn loop_then_recv(fd: i64, n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                i = i + 1;
+              }
+              let m: i64 = io_recv_async(fd, 64);
+              return m + i;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Phase 2 while-no-suspend must compile on C");
+        compile_to_llvm(source).expect("Phase 2 while-no-suspend must compile on LLVM");
+    }
+
     #[test]
     fn v31_phase1_non_linear_body_rejected_with_phase_2_diag() {
         // Body has io_recv_async + an `if` → v3.1 Phase 1
