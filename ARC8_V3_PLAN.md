@@ -11,6 +11,15 @@
 > example. A0.2 cleanly deferred to Phase 1 (resolved
 > naturally by per-type concrete dispatch).
 >
+> **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
+> `break` / `continue` inside suspending loops. collect_into
+> threads a loop_stack of (loop_header, post_loop) pairs;
+> break/continue at top level emit Seg::Jump to the
+> innermost loop. Verbatim Stmt::If's body rewrites
+> break/continue to state_tag jumps + synthesized Continue.
+> examples/echo_loop_break.vani parity-green. 2 new lib
+> tests.
+>
 > **Phase 2.5 ✅ COMPLETE 2026-06-04** (commit `a77b799`).
 > Loops with suspend inside body. Stmt::While state-splits
 > into loop_header + body + post_loop with a BACKWARD
