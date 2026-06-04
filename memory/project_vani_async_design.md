@@ -59,7 +59,7 @@ slices on top of v1:
 
 **Arc 8 FULLY COMPLETE 2026-06-04**: every user-visible
 async + networking + concurrency feature ships and works on
-both backends. Four acceptance examples cross-backend
+both backends. Five acceptance examples cross-backend
 parity-green:
 
 - `async_io.vani` — timer-driven async fn + task fan-out
@@ -67,35 +67,42 @@ parity-green:
 - `tcp_multi_echo.vani` — 3 concurrent clients via tasks
 - `tcp_echo_epoll.vani` — 3 concurrent clients on ONE
   OS thread via the epoll reactor
+- `tcp_echo_state_machine.vani` — v3 hand-rolled state-
+  machine pattern (struct + poll fn + driver loop) using
+  `io_*_async` builtin aliases
 
-Both concurrency models supported, user's choice:
+Three concurrency models supported, user's choice:
 1. Thread-per-task via `task` + `join` (race-free by the
    affine checker)
 2. Single-thread cooperative via epoll + nb I/O variants
    (kernel multiplexing, no per-task threads)
+3. Hand-rolled state-machine pattern (struct + poll fn +
+   driver) using `io_*_async` aliases
 
-**Arc 8 v3 sugar (state-machine codegen) OPTIONAL** —
-compiler auto-rewriting `async fn` bodies with `await`
-inside into poll-functions over the existing v2 epoll
-reactor. This is an ergonomics win (users write
-`await(tcp_recv_async(fd))` instead of an epoll_wait_one
-loop by hand), NOT a missing capability. The underlying
-single-thread multiplexing already ships via the v2 epoll
-runtime — see `examples/tcp_echo_epoll.vani`.
+**Arc 8 v3.1 sugar (compiler-driven state-machine codegen)
+OPTIONAL** — parser-level transform that scans `async fn`
+bodies containing `io_*_async` calls and auto-generates the
+struct + poll fn + constructor triples that users write by
+hand today. Multi-day compiler work (~500 lines: body scan +
+StructDecl synthesis + Function synthesis + thread-local
+registry flush + tests + lib tests + parity example).
+Doesn't honestly fit a single session.
 
-If/when v3 sugar lands, it would add:
-- A new prelude type `Task<T> = { env: u64, poll: fn(u64) -> Poll<T> }`
-  distinct from `Future<T>` (so v1 source stays compatible)
-- A check-time pass walking `async fn` bodies and splitting
-  at `await` points, emitting a state struct + poll-fn
+If/when v3.1 sugar lands, it would add:
+- A new prelude type `Task<T> = { state_tag: i64, /* per-fn fields */ }`
+  or per-fn `__TaskFor_<name>` struct synthesized by the
+  transform
+- A parser-level pass walking `async fn` bodies, finding
+  `io_*_async(args)` calls (suspend points), splitting at
+  each, emitting state struct + poll fn
 - `intent_event_loop_run<T>(task: Task<T>) -> T` driver
   over the existing epoll primitives
-- `examples/tcp_echo_async.vani` acceptance — same runtime
-  behavior as `tcp_echo_epoll.vani` but with the reactor
-  loop hidden behind `async fn` + `await`
+- `examples/tcp_echo_async.vani` acceptance — same byte-
+  identical runtime behavior as `tcp_echo_state_machine.vani`
+  but with the struct/poll/constructor triple hidden behind
+  `async fn` + `io_*_async` calls
 
-Estimated v3 effort: ~15–20h focused (state machines are
-the bulk; reactor + nb primitives already on `main`).
+Estimated v3.1 effort: ~15–20h focused.
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**

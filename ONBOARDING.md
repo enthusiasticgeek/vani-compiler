@@ -199,24 +199,24 @@ as ahead) include:
   **closure-as-value across fn boundaries** (commit `7cccc1b`).
   Arc 7 SysV full float-class + mixed int/float ≤ 16-byte
   struct FFI (commit `69b5ec0`). **Arc 8 FULLY COMPLETE**
-  — v1 surface `async fn` / `await` / `Future<T>` /
-  `Poll<T>` / `CancelToken` (commits `2e649ff`, `e50dc20`,
-  `25b5a84`) + v1.5 `sleep_ms` builtin (commit `d344828`) +
-  v1.6 full blocking TCP family (commits `9aaec41`,
-  `83010ab`) + **v2 epoll + non-blocking I/O runtime
-  with single-thread cooperative scheduling** (commit
-  `92864de`). Four acceptance examples cross-backend
-  parity-green: `async_io.vani`, `tcp_echo.vani`,
-  `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`. Arc 9 c+d
-  `pub(kosh)` + `pub use` re-exports.
+  — v1 surface + v1.5 `sleep_ms` + v1.6 full blocking TCP
+  family + **v2 epoll + non-blocking I/O runtime with
+  single-thread cooperative scheduling** (commit `92864de`)
+  + **v3 async-flavored aliases + hand-rolled state-machine
+  pattern** (commit `f7743a1`). Five acceptance examples
+  cross-backend parity-green: `async_io.vani`,
+  `tcp_echo.vani`, `tcp_multi_echo.vani`,
+  `tcp_echo_epoll.vani`, `tcp_echo_state_machine.vani`.
+  Arc 9 c+d `pub(kosh)` + `pub use` re-exports.
 
 Currently pending:
-- **Arc 8 v3 sugar layer (OPTIONAL)** — compiler-driven
-  state-machine codegen for `async fn` bodies with
-  `await(expr)` inside, auto-rewriting to poll-functions
-  over the existing v2 epoll reactor. Ergonomics polish —
-  the underlying single-thread multiplexing already ships.
-  See STATUS.md "📋 Arc 8 v3" block.
+- **Arc 8 v3.1 sugar layer (OPTIONAL)** — parser-level
+  compiler transform that auto-generates state-machine
+  struct + poll fn + constructor from `async fn` bodies
+  with `io_*_async` calls. The hand-rolled pattern already
+  ships via `tcp_echo_state_machine.vani`; v3.1 just
+  automates the boilerplate. See STATUS.md "📋 Arc 8 v3.1"
+  block.
 - Closure-as-value richer support (capture-by-ref, non-Copy
   captures, `.collect()`, lazy iterators, non-i64 element types
   in combinators, tuple-element `vec_zip`).

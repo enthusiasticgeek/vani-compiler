@@ -12,7 +12,8 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE — v1
 surface + v1.5 timers + v1.6 TCP + v2 epoll cooperative
-runtime all shipped this session**).
+runtime + v3 state-machine pattern + io async aliases all
+shipped this session**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -49,15 +50,26 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   varargs declare; errno via `__errno_location()` thunk.
   `examples/tcp_echo_epoll.vani` ships three concurrent
   clients multiplexed on ONE OS thread via the epoll reactor.
-  Both backends produce byte-identical stdout (17 echoed
-  bytes from "alpha" + "bravo" + "charlie"). 6 new lib
-  tests pin epoll + nb surface, including a regression test
-  for the `@intent_tcp_buf` emit when only `tcp_recv_nb`
-  is referenced.
+- **Step 8c sugar (v3 pattern)** (commit `f7743a1`) — three
+  new async-flavored builtin aliases (`io_recv_async` /
+  `io_send_async` / `io_accept_async`) name-reserve the
+  future suspend-point semantics; today they rewrite to
+  their v2 nb counterparts at the typed-IR boundary in
+  `check_epoll_builtin`. `examples/tcp_echo_state_machine.vani`
+  ships the hand-rolled state-machine pattern: an `EchoTask`
+  struct + an `echo_task_poll` fn returning -2 (Pending) / -1
+  (Error) / Ready-value, driven by a small loop that
+  epoll-waits on Pending. Both backends produce byte-
+  identical "echoed bytes: 2" (for "v2" payload). Demonstrates
+  the v3 user-facing technique TODAY. The parser-level
+  compiler-driven `async fn` → `Task<T>` transform that
+  would auto-generate these struct/poll/constructor triples
+  remains queued as v3.1 — multi-day compiler work that
+  doesn't honestly fit a single session.
 
-**1816 lib + 54 parity green** (parity includes
-`tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`
-byte-identical-stdout checks).
+**1817 lib + 54 parity green** (parity includes
+`tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
+`tcp_echo_state_machine.vani` byte-identical-stdout checks).
 
 ## ✅ Arc 8 fully complete (2026-06-04)
 
@@ -77,43 +89,55 @@ ships on `main` with byte-identical behavior on both backends:
   Composes into single-threaded cooperative scheduling —
   one OS thread, N concurrent connections, multiplexed by
   the kernel.
+- **Async-flavored aliases:** `io_recv_async` /
+  `io_send_async` / `io_accept_async` name-reserve the
+  future v3.1 suspend-point semantics; today they rewrite
+  to their v2 nb counterparts.
 - **Concurrency models — user's choice:**
   - Thread-per-task via existing `task` + `join` (race-free
     by construction per the affine checker)
   - Single-thread cooperative via epoll + nb variants
+  - Hand-rolled state-machine pattern (struct + poll fn +
+    driver loop) using `io_*_async` builtins
 - **Examples (all parity-green):**
   - `async_io.vani` — timer-driven async fn + task fan-out
   - `tcp_echo.vani` — single-client TCP echo
   - `tcp_multi_echo.vani` — 3 concurrent clients via tasks
   - `tcp_echo_epoll.vani` — 3 concurrent clients on **ONE
     thread** via epoll reactor
+  - `tcp_echo_state_machine.vani` — v3 state-machine pattern
+    (struct + poll fn + driver) using `io_*_async` aliases
 
-Web servers, scheduler demos, fan-out workloads, and
-single-thread multiplexed I/O all work TODAY. State-machine
-codegen (compiler auto-rewriting `async fn` bodies into
-poll-functions over the epoll reactor) is a SUGAR LAYER on
-top of the now-real underlying capability — queued as v3
-polish, not a missing feature.
+Web servers, scheduler demos, fan-out workloads, single-
+thread multiplexed I/O, AND hand-rolled cooperative state
+machines all work TODAY. Compiler-driven state-machine
+sugar (v3.1) that would auto-generate the struct/poll/
+constructor triples from an `async fn` body is queued as
+multi-day compiler work — the underlying capability
+already ships.
 
 ---
 
-## 📋 Arc 8 v3 (state-machine codegen — SUGAR LAYER, optional)
+## 📋 Arc 8 v3.1 (compiler-driven sugar transform — OPTIONAL)
 
-Arc 8 is FULLY COMPLETE today. The v3 polish arc would add
-compiler-driven sugar: an `async fn` body with `await(expr)`
-inside auto-rewrites to a poll-function over the epoll reactor
-instead of users writing the epoll loop by hand. This is an
-ergonomics win, not a missing capability — `examples/tcp_echo_epoll.vani`
-already demonstrates the underlying real single-thread
-multiplexing.
+Arc 8 is FULLY COMPLETE today including the v3 state-machine
+PATTERN (hand-rolled via `examples/tcp_echo_state_machine.vani`).
+v3.1 would add the COMPILER-DRIVEN transform that auto-rewrites
+`async fn` bodies containing `io_*_async` calls into the
+state-machine struct + poll fn + constructor triples that
+users today write by hand. This is multi-day compiler work
+(parser-level body scan + struct/fn AST synthesis + a thread-
+local registry to flush new decls into the program); it
+doesn't honestly fit a single session.
 
 Pick up a future session with this prompt if you want sugar:
 
-> Continue Arc 8 v3 sugar layer from where 2026-06-04 left
-> off. Underlying capability (epoll + nb I/O via 7 builtins,
-> single-thread cooperative scheduling, real concurrent
-> multiplexing) is COMPLETE on `main` (commit `92864de`).
-> v3 is purely an ergonomics win:
+> Continue Arc 8 v3.1 sugar layer from where 2026-06-04 left
+> off. v3 partial (commit `f7743a1`) ships the state-machine
+> PATTERN — users write the struct + poll fn + driver loop by
+> hand using `io_*_async` builtin aliases (see
+> `examples/tcp_echo_state_machine.vani`). v3.1 lifts that
+> pattern into compiler-driven sugar:
 >
 > **State-machine sugar.** Walk each `async fn` body at check
 > time. If it contains `await(expr)` calls, split the body at

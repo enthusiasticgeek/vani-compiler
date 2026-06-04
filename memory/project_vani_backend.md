@@ -166,14 +166,12 @@ deferred). `Drop for T` is suppressed when T has heap fields
 
 ## Test totals (2026-06-04)
 
-**1816 lib + 54 parity tests green**. New lib tests this
-session: 4 sleep_ms surface, 6 TCP surface (C emit, LLVM
-emit, arity, unused-gate, str-in-task-body interning), 6
-epoll + nb surface (typecheck both backends, C emit, LLVM
-emit, arity, unused-gate, `@intent_tcp_buf`-emit when only
-`tcp_recv_nb` is used). Parity sweep includes
-`tcp_echo.vani`, `tcp_multi_echo.vani`, and
-`tcp_echo_epoll.vani` via byte-identical-stdout checks. Cross-backend parity
+**1817 lib + 54 parity tests green**. New lib tests this
+session: 4 sleep_ms surface, 6 TCP surface, 6 epoll + nb
+surface, 1 io_*_async alias rewrite. Parity sweep includes
+`tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`,
+`tcp_echo_state_machine.vani` via byte-identical-stdout
+checks. Cross-backend parity
 runner covers all examples (now including closure-as-value,
 async fn, await, CancelToken — `examples/closure_as_value.vani`,
 `examples/async_fn.vani`, `examples/async_await.vani`). ASan /
@@ -251,47 +249,55 @@ that fire on Windows hosts only.)
   fcntl(O_NONBLOCK) / accept / recv via per-backend runtime
   helpers. LLVM IR builds `epoll_event` by hand (16-byte
   stack alloca + events at +0 = EPOLLIN + data.fd at +8);
-  fcntl declared as varargs (F_GETFL=3 / F_SETFL=4 /
-  O_NONBLOCK=2048); errno read via `__errno_location()`
-  thunk (glibc + musl). Walker `program_uses_tcp` extended
-  to also catch the nb variants so `@intent_tcp_buf` lands
-  for `tcp_recv_nb`-only programs.
-  `examples/tcp_echo_epoll.vani` — three concurrent clients
-  multiplexed on ONE OS thread via the epoll reactor; both
-  backends produce byte-identical stdout (17 echoed bytes
-  across "alpha" + "bravo" + "charlie"). This is the
-  underlying single-thread cooperative scheduling capability
-  that the optional Arc 8 v3 state-machine sugar would build
-  on top of.
+  fcntl declared as varargs; errno read via
+  `__errno_location()` thunk. `examples/tcp_echo_epoll.vani`
+  — three concurrent clients multiplexed on ONE OS thread
+  via the epoll reactor.
+- **Arc 8 v3 — async-flavored aliases + state-machine
+  pattern** (commit `f7743a1`). Three new builtin aliases:
+  `io_recv_async` / `io_send_async` / `io_accept_async`.
+  Aliases rewrite to their v2 nb counterparts at the typed-
+  IR boundary in `check_epoll_builtin` (same canonicalization
+  pattern used for str method-call sugar). The alias names
+  reserve future v3.1 suspend-point semantics: when the
+  compiler-driven transform lands, the rewrite will scan for
+  the alias names BEFORE canonicalization so suspend points
+  trigger correctly. `examples/tcp_echo_state_machine.vani`
+  demonstrates the v3 user-facing pattern — a struct +
+  poll-fn + driver loop, all in vāṇī source — which v3.1
+  compiler sugar would auto-generate from an `async fn` body.
 
 ## Arc 8 status (2026-06-04 — FULLY COMPLETE)
 
-The full Arc 8 user-visible feature set ships across four
+The full Arc 8 user-visible feature set ships across five
 acceptance examples, all byte-identical parity-green:
 - async fn / await syntax (parser-level desugar)
 - Future<T> / Poll<T> / CancelToken (prelude)
 - sleep_ms (POSIX nanosleep)
 - Full blocking TCP family (8 builtins)
-- Full epoll + non-blocking I/O (7 builtins): epoll_new /
-  epoll_add_read / epoll_wait_one / epoll_close /
-  tcp_set_nonblocking / tcp_accept_nb / tcp_recv_nb
+- Full epoll + non-blocking I/O (7 builtins)
+- Async-flavored aliases (3 builtins): io_recv_async /
+  io_send_async / io_accept_async
 - task + join concurrency (existing)
 - examples: async_io (timer), tcp_echo (1 client),
   tcp_multi_echo (3 task clients), tcp_echo_epoll (3
-  clients on ONE thread via epoll reactor)
+  clients on ONE thread via epoll), tcp_echo_state_machine
+  (hand-rolled state-machine pattern using io_*_async)
 
-Both concurrency models user-selectable: thread-per-task
-via task+join, OR single-thread cooperative via epoll +
-nb variants.
+Three concurrency models user-selectable:
+- thread-per-task via task+join
+- single-thread cooperative via epoll + nb variants
+- hand-rolled state machines using the v3 pattern
 
-OPTIONAL Arc 8 v3 sugar (NOT a missing capability):
-- State-machine codegen for async fn bodies with awaits —
-  compiler auto-rewrites to poll-functions over the v2
-  epoll reactor. Underlying single-thread multiplexing
-  already ships; v3 is the ergonomics polish.
+OPTIONAL Arc 8 v3.1 sugar (NOT a missing capability):
+- Parser-level transform: scan async fn bodies for
+  io_*_async calls, auto-generate per-fn Task struct +
+  poll fn + constructor. Multi-day compiler work.
 - `intent_event_loop_run<T>(task) -> T` driver
 - timerfd-based `sleep_ms_async` returning real `Future<i64>`
-- `examples/tcp_echo_async.vani` acceptance
+- `examples/tcp_echo_async.vani` acceptance — same runtime
+  behavior as tcp_echo_state_machine.vani but with the
+  struct + poll fn synthesized by the compiler
 - **Arc 9 c+d — `pub(kosh)` visibility tier + `pub use` chained
   re-exports** already on `main` via closures #257 + #258.
 

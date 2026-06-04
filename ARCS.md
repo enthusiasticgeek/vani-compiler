@@ -9,12 +9,14 @@
 > `d209e06`) + v1.6 full TCP networking family +
 > single/multi-client echo (`9aaec41`, `83010ab`) + **v2
 > epoll + non-blocking I/O runtime + single-threaded
-> cooperative echo example** (`92864de`). All four examples
-> are byte-identical-parity across both backends.
-> Compiler-driven state-machine sugar (auto-rewriting
-> `async fn` bodies into poll-functions over the existing
-> epoll reactor) is queued as an **optional** v3 polish
-> arc — the underlying capability already ships. Arc 9 c/d
+> cooperative echo example** (`92864de`) + **v3 async-
+> flavored aliases + hand-rolled state-machine pattern
+> example** (`f7743a1`). All FIVE examples are byte-identical-
+> parity across both backends. Compiler-driven v3.1 sugar
+> (auto-rewriting `async fn` bodies into struct/poll/
+> constructor triples) is queued as an **optional** future-
+> session arc — the underlying capability + the hand-
+> rolled pattern already ship. Arc 9 c/d
 > ✅ COMPLETE; a/b/e/f deferred pending registry choice.
 > Arc 10 BLOCKED on grammar consultant. Safety-standard
 > alignment ✅ COMPLETE; seven `intentc` audit CLIs all on
@@ -87,12 +89,12 @@ Goal: compiler-lowered async state machines (no `Pin`, no self-references) — t
 |---|---|---|---|
 | 8a | `Future<T>` generic enum in prelude (via Arc 6) — `Ready(T)` / `Pending` variants | ~1-2h | Arc 6 | ✅ shipped (commit `2e649ff`) |
 | 8b | `async fn` parser + parser-level desugar (body returns wrap to `Future.Ready`, `-> R` reshapes to `-> Future<R>`) | ~5-6h | 8a | ✅ shipped (commit `e50dc20`) |
-| 8c | State-machine codegen — auto-rewriting `async fn` bodies into poll-functions over the epoll reactor | ~6-8h | 8b | 📋 v3 sugar layer (optional polish, not a missing capability) |
+| 8c | State-machine codegen. **v3 pattern shipped** (commit `f7743a1`) — `io_*_async` builtin aliases + `tcp_echo_state_machine.vani` example demonstrate the hand-rolled state-machine pattern users write today. **v3.1 compiler-driven sugar** that auto-generates the struct/poll/constructor triples from an `async fn` body is queued as multi-day compiler work | ~6-8h | 8b | 🟡 v3 pattern shipped; v3.1 compiler transform optional |
 | 8d | Event-loop runtime — `intent_event_loop_run<T>(task) -> T` driver over the existing v2 epoll reactor | ~4-5h | 8c | 📋 v3 (the reactor primitives already ship via 8e v2) |
-| 8e | Non-blocking I/O primitives. **v1.5:** `sleep_ms` blocking (commit `d344828`). **v1.6:** full TCP family — `tcp_listen` / `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` / `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close` (commit `9aaec41`). **v2:** epoll + non-blocking variants — `epoll_new` / `epoll_add_read` / `epoll_wait_one` / `epoll_close` / `tcp_set_nonblocking` / `tcp_accept_nb` / `tcp_recv_nb` (commit `92864de`) | ~5-6h | 8d | ✅ shipped (timerfd-based `sleep_ms_async` is the only remaining v3 piece) |
+| 8e | Non-blocking I/O primitives. **v1.5:** `sleep_ms` (commit `d344828`). **v1.6:** full TCP family (commit `9aaec41`). **v2:** epoll + nb variants (commit `92864de`). **v3:** async-flavored aliases `io_recv_async` / `io_send_async` / `io_accept_async` (commit `f7743a1`) | ~5-6h | 8d | ✅ shipped (timerfd-based `sleep_ms_async` is the only remaining v3.1 piece) |
 | 8f | `await(expr)` desugar — `match expr { Future.Ready(__v) -> __v, Future.Pending -> 0 }` parser desugar | ~3-4h | 8a | ✅ shipped (commit `25b5a84`) |
 | 8g | Cancellation — `CancelToken` prelude struct passed by-ref; user threads through async fns and checks `.cancelled` at suspend points | ~2-3h | 8a | ✅ shipped (commit `25b5a84`) |
-| 8h | Examples — four cross-backend parity-green: `examples/async_io.vani` (timer + task fan-out) + `examples/tcp_echo.vani` (1 client) + `examples/tcp_multi_echo.vani` (3 task clients) + `examples/tcp_echo_epoll.vani` (3 clients on ONE thread via epoll). Commits `d209e06`, `9aaec41`, `83010ab`, `92864de` | ~2h | 8g | ✅ ALL SHIPPED — covers thread-per-task AND single-thread cooperative |
+| 8h | Examples — five cross-backend parity-green: `async_io.vani` (timer + task fan-out) + `tcp_echo.vani` (1 client) + `tcp_multi_echo.vani` (3 task clients) + `tcp_echo_epoll.vani` (3 clients on ONE thread via epoll) + `tcp_echo_state_machine.vani` (hand-rolled state-machine pattern). Commits `d209e06`, `9aaec41`, `83010ab`, `92864de`, `f7743a1` | ~2h | 8g | ✅ ALL SHIPPED — thread-per-task, single-thread cooperative, AND hand-rolled state machines |
 
 **Subtotal: ~30-40h, 8 commits.** Acceptance: timer fan-out + TCP echo server both work cross-backend with identical stdout.
 
