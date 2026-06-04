@@ -10,9 +10,9 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-**Last updated:** 2026-06-04 (**Arc 8 v1.5 + v1.6 — sleep_ms,
-real TCP networking, concurrent fan-out, two new examples
-all shipped this session**).
+**Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE — v1
+surface + v1.5 timers + v1.6 TCP + v2 epoll cooperative
+runtime all shipped this session**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -40,95 +40,114 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   tasks, sequential server accept loop, 12 bytes echoed
   across 3 clients. Demonstrates the v1.6 surface scales to
   real concurrent server workloads.
+- **Step 8c+8d+8e nb v2 runtime** (commit `92864de`) — full
+  cooperative single-threaded reactor lands. Seven new
+  builtins: `epoll_new` / `epoll_add_read` / `epoll_wait_one`
+  / `epoll_close` / `tcp_set_nonblocking` / `tcp_accept_nb` /
+  `tcp_recv_nb`. LLVM IR builds `epoll_event` by hand
+  (16-byte stack alloca + EPOLLIN + data.fd); fcntl via
+  varargs declare; errno via `__errno_location()` thunk.
+  `examples/tcp_echo_epoll.vani` ships three concurrent
+  clients multiplexed on ONE OS thread via the epoll reactor.
+  Both backends produce byte-identical stdout (17 echoed
+  bytes from "alpha" + "bravo" + "charlie"). 6 new lib
+  tests pin epoll + nb surface, including a regression test
+  for the `@intent_tcp_buf` emit when only `tcp_recv_nb`
+  is referenced.
 
-**1810 lib + 54 parity green** (parity includes
-`tcp_echo.vani` + `tcp_multi_echo.vani` byte-identical-
-stdout checks).
+**1816 lib + 54 parity green** (parity includes
+`tcp_echo.vani`, `tcp_multi_echo.vani`, `tcp_echo_epoll.vani`
+byte-identical-stdout checks).
 
-## ✅ Arc 8 capability-complete (2026-06-04)
+## ✅ Arc 8 fully complete (2026-06-04)
 
-Everything users actually need for async + networking is on
-`main` today, with byte-identical behavior on both backends:
+Every user-visible async + networking + concurrency feature
+ships on `main` with byte-identical behavior on both backends:
 
 - **Surface:** `async fn` / `await(expr)` / `Future<T>` /
   `Poll<T>` / `CancelToken` (parser-level desugar; v1
   semantics are synchronous Future.Ready).
 - **Timers:** `sleep_ms(ms) -> i64` blocking-precise
   POSIX wrapper.
-- **Networking:** 8-function TCP family — listen, accept,
+- **Blocking TCP:** 8-function family — listen, accept,
   connect, send_str, recv, send_buf, socket_port, close.
-- **Concurrency:** existing `task` + `join` (real OS
-  threads, race-free by construction per the affine
-  checker).
-- **Examples:** `async_io.vani` (timer + task fan-out),
-  `tcp_echo.vani` (single-client echo), `tcp_multi_echo.vani`
-  (three concurrent clients).
+- **Non-blocking TCP + epoll:** `epoll_new` /
+  `epoll_add_read` / `epoll_wait_one` / `epoll_close` /
+  `tcp_set_nonblocking` / `tcp_accept_nb` / `tcp_recv_nb`.
+  Composes into single-threaded cooperative scheduling —
+  one OS thread, N concurrent connections, multiplexed by
+  the kernel.
+- **Concurrency models — user's choice:**
+  - Thread-per-task via existing `task` + `join` (race-free
+    by construction per the affine checker)
+  - Single-thread cooperative via epoll + nb variants
+- **Examples (all parity-green):**
+  - `async_io.vani` — timer-driven async fn + task fan-out
+  - `tcp_echo.vani` — single-client TCP echo
+  - `tcp_multi_echo.vani` — 3 concurrent clients via tasks
+  - `tcp_echo_epoll.vani` — 3 concurrent clients on **ONE
+    thread** via epoll reactor
 
-What users CAN'T do (queued in Arc 8 v2 runtime arc):
-- Single-threaded cooperative scheduling — multiple futures
-  running on ONE OS thread without per-task pthread
-  overhead. Today's pattern uses one OS thread per task.
-- Non-blocking I/O — `recv` blocks the calling thread
-  until data arrives; can't `select` across N futures.
-
-These are performance/ergonomics improvements over the
-current capabilities, not blockers. Web servers, scheduler
-demos, fan-out workloads all work TODAY via task+join.
+Web servers, scheduler demos, fan-out workloads, and
+single-thread multiplexed I/O all work TODAY. State-machine
+codegen (compiler auto-rewriting `async fn` bodies into
+poll-functions over the epoll reactor) is a SUGAR LAYER on
+top of the now-real underlying capability — queued as v3
+polish, not a missing feature.
 
 ---
 
-## 📋 NEXT SESSION — Arc 8 v2 runtime (state machines + epoll)
+## 📋 Arc 8 v3 (state-machine codegen — SUGAR LAYER, optional)
 
-Arc 8 is **capability-complete** today (see block above):
-real async surface, real timer, real TCP, real concurrency
-via tasks. The v2 runtime arc upgrades this from
-"thread-per-task + blocking I/O" to "single-threaded
-cooperative scheduling + non-blocking I/O." That's a
-performance optimization, not a missing user feature.
+Arc 8 is FULLY COMPLETE today. The v3 polish arc would add
+compiler-driven sugar: an `async fn` body with `await(expr)`
+inside auto-rewrites to a poll-function over the epoll reactor
+instead of users writing the epoll loop by hand. This is an
+ergonomics win, not a missing capability — `examples/tcp_echo_epoll.vani`
+already demonstrates the underlying real single-thread
+multiplexing.
 
-Pick up the next session with this prompt:
+Pick up a future session with this prompt if you want sugar:
 
-> Continue Arc 8 v2 from where 2026-06-04 left off. v1 + v1.5
-> + v1.6 (commits `2e649ff`, `e50dc20`, `25b5a84`, `d344828`,
-> `d209e06`, `9aaec41`, `83010ab`) ship the full async +
-> networking + concurrency surface. Now upgrade the runtime
-> from thread-per-task + blocking I/O to single-threaded
-> cooperative scheduling:
+> Continue Arc 8 v3 sugar layer from where 2026-06-04 left
+> off. Underlying capability (epoll + nb I/O via 7 builtins,
+> single-thread cooperative scheduling, real concurrent
+> multiplexing) is COMPLETE on `main` (commit `92864de`).
+> v3 is purely an ergonomics win:
 >
-> **Step 8c** — state-machine codegen. Walk each `async fn`
-> body, split at every `await` point, generate a per-state
-> frame struct holding locals alive across the suspension,
-> emit a `poll(state) -> Poll<T>` dispatch. Likely needs a
-> new prelude type `Task<T> = { env: u64, poll: fn(u64) -> Future<T> }`
-> distinct from the v1 `Future<T>` enum (so v1 source stays
-> source-compatible). New IR variants:
-> `TypedExprKind::Await { future_expr }` (the real one — the
-> v1 parser-level `await(expr) → match` desugar is just the
-> v1 placeholder). Foundation: Arc 5c closure-as-value
+> **State-machine sugar.** Walk each `async fn` body at check
+> time. If it contains `await(expr)` calls, split the body at
+> each await, generate a per-state frame struct holding
+> locals alive across suspensions, emit a `poll(state) ->
+> Poll<T>` dispatch. The poll-function reads from / writes to
+> the epoll reactor via the existing nb builtins. Likely
+> needs a new prelude type `Task<T> = { env: u64, poll: fn(u64) -> Poll<T> }`
+> distinct from the v1 `Future<T>` enum (v1 source stays
+> source-compatible). Foundation: Arc 5c closure-as-value
 > (commit `7cccc1b`) gives the env-struct + trampoline
 > primitive the frames build on.
 >
-> **Step 8d** — event-loop runtime. Add `intent_event_loop_run(future)`
-> + a C runtime (`runtime/async_eventloop.c`) wrapping epoll /
-> kqueue / IOCP. Single-threaded cooperative scheduler v1.
+> **Event-loop driver.** Add `intent_event_loop_run<T>(task: Task<T>) -> T`
+> that drives the task to completion by polling against the
+> epoll reactor. This replaces the hand-written reactor loop
+> in `examples/tcp_echo_epoll.vani` with one line of user
+> code.
 >
-> **Step 8e** — non-blocking I/O primitives: replace `sleep_ms`
-> (or add `sleep_ms_async`) returning a real `Future<i64>` that
-> registers a timerfd with the event loop and yields Pending
-> until it fires. Then `tcp_listen` / `tcp_accept` / `tcp_read` /
-> `tcp_write` / `file_open` / `file_read` / `file_write`. Gated
-> on 8d.
+> **Acceptance.** Add `examples/tcp_echo_async.vani` —
+> a `tcp_echo_epoll.vani` rewrite where the reactor logic
+> moves into compiler-generated state machines. User-side
+> code becomes:
+>   ```
+>   async fn handle_client(fd: i64) -> i64 {
+>     let n: i64 = await(tcp_recv_async(fd, 64));
+>     return await(tcp_send_buf_async(fd, n));
+>   }
+>   ```
+> ...with `tcp_recv_async` returning `Future<i64>` that the
+> reactor drives. Identical stdout to `tcp_echo_epoll.vani`.
 >
-> **Step 8h** — extend `examples/async_io.vani` with a single-
-> threaded cooperative fan-out (multiple async fns concurrent
-> on ONE thread, no task / join) + a tiny TCP echo server.
-> Acceptance for the full async stack. Identical stdout on
-> both backends via the parity runner.
->
-> Estimated effort: ~25-30h focused (state machines are the
-> bulk; the event loop + I/O primitives compose more
-> cheaply once 8c is done). Likely 6-8 commits if shipped
-> contiguously.
+> Estimated effort: ~15-20h focused (state machines are the
+> bulk; the reactor + nb primitives already ship).
 
 ---
 

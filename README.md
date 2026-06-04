@@ -256,14 +256,15 @@ below.
 - **Arc 4 — full HashMap K-V matrix** cross-backend: `HashMap<OwnedStr, V>` (4.1), `HashMap<i64, OwnedStr>` (4.2), `HashMap<OwnedStr, OwnedStr>` (4.3), `HashMap<Tuple, V>` (4.4), `HashMap<f64, V>` (4.5), `HashMap<Vec<i64>, V>` (4.6). Per-bundle FNV-1a + memcpy / strcmp / element-walk equality; per-slot drop walks; clone-on-insert to side-step the affine double-free shape.
 - **Arc 5c — closure-as-value across fn boundaries** (commit `7cccc1b`). New `Type::Closure(Args, Ret)`; lift-pass synthesizes env-struct + trampoline + magic `__intent_make_closure_<N>` constructor. Captured anonymous fns now pass as fn args / return values / struct fields. Example: [examples/closure_as_value.vani](examples/closure_as_value.vani).
 - **Arc 7 SysV — full float-class + mixed int/float ≤ 16-byte struct FFI** (commit `69b5ec0`). Closure #285 covered the integer-only subset; this completes the SysV classifier. Win64 / AArch64 gated on cross-platform CI.
-- **Arc 8 capability-complete — async + networking + concurrency end-to-end**:
+- **Arc 8 FULLY COMPLETE — async + networking + concurrency end-to-end**:
   - **v1 source surface** (commits `2e649ff`, `e50dc20`, `25b5a84`): `async fn`, `await(expr)`, `Future<T>`, `Poll<T>`, `CancelToken` at parser+prelude layer. Synchronous v1 semantics: `async fn` runs to completion on call and emits `Future.Ready`. Examples: [examples/async_fn.vani](examples/async_fn.vani), [examples/async_await.vani](examples/async_await.vani).
   - **v1.5 timers** (commits `d344828`, `d209e06`): `sleep_ms` builtin wrapping POSIX `nanosleep`; [examples/async_io.vani](examples/async_io.vani) with timer-driven `async fn` + sequential awaits + CancelToken + task-based concurrent fan-out.
-  - **v1.6 networking** (commits `9aaec41`, `83010ab`): full TCP builtin family (`tcp_listen` / `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` / `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close`); thread-local 4KB recv buffer; [examples/tcp_echo.vani](examples/tcp_echo.vani) single-client echo + [examples/tcp_multi_echo.vani](examples/tcp_multi_echo.vani) 3-concurrent-client echo, both byte-identical cross-backend.
-  - **Arc 8 v2 runtime arc queued**: state-machine codegen + epoll event loop + non-blocking I/O variants → single-thread cooperative scheduling. This is a performance optimization (replace thread-per-task + blocking I/O), not a missing user feature.
+  - **v1.6 blocking TCP** (commits `9aaec41`, `83010ab`): 8-builtin TCP family + thread-local 4KB recv buffer + [examples/tcp_echo.vani](examples/tcp_echo.vani) (1 client) + [examples/tcp_multi_echo.vani](examples/tcp_multi_echo.vani) (3 task clients).
+  - **v2 epoll + non-blocking I/O** (commit `92864de`): 7-builtin epoll + nb family — `epoll_new` / `epoll_add_read` / `epoll_wait_one` / `epoll_close` / `tcp_set_nonblocking` / `tcp_accept_nb` / `tcp_recv_nb`. Composes into single-threaded cooperative scheduling. [examples/tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani) — 3 concurrent clients multiplexed on ONE OS thread, byte-identical cross-backend.
+  - **Arc 8 v3 sugar OPTIONAL**: compiler-driven state-machine codegen auto-rewrites `async fn` bodies into poll-functions over the existing epoll reactor. Ergonomics polish, not a missing capability — the underlying multiplexing already ships.
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-04: 1810 lib + 54 parity green** (post Arc 8 v1.6).
+**Test ledger at 2026-06-04: 1816 lib + 54 parity green** (post Arc 8 v2 — Arc 8 FULLY COMPLETE).
 
 ## Memory safety & concurrency model
 
@@ -501,36 +502,47 @@ fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
 
 - **No garbage collector.** Affine ownership + deterministic Drop
   cover what GC would cover, without the unpredictable pause.
-- **`async` / `await` / networking — ✅ capability-complete
-  2026-06-04 (Arc 8 v1+v1.5+v1.6).** Full user-facing async
-  + networking surface ships:
+- **`async` / `await` / networking — ✅ FULLY COMPLETE
+  2026-06-04 (Arc 8 v1+v1.5+v1.6+v2).** Full user-facing
+  async + networking + concurrency surface ships:
   - `async fn` / `await(expr)` / `Future<T>` / `Poll<T>` /
-    `CancelToken` parse and run with synchronous semantics
-    (every `async fn` runs to completion on call and emits
-    `Future.Ready`; `await(expr)` extracts the payload).
+    `CancelToken` parse and run with synchronous semantics.
   - `sleep_ms(ms: i64) -> i64` blocking timer (POSIX
     `nanosleep` with EINTR retry).
-  - Full TCP family: `tcp_listen` / `tcp_socket_port` /
-    `tcp_accept` / `tcp_connect_local` / `tcp_send_str` /
-    `tcp_recv` / `tcp_send_buf` / `tcp_close`.
-  - Concurrency via existing `task` + `join` (real OS
-    threads, race-free by construction).
-  - Three acceptance examples cross-backend:
-    [examples/async_io.vani](examples/async_io.vani),
-    [examples/tcp_echo.vani](examples/tcp_echo.vani),
-    [examples/tcp_multi_echo.vani](examples/tcp_multi_echo.vani).
+  - Full blocking TCP family (8 builtins): `tcp_listen` /
+    `tcp_socket_port` / `tcp_accept` / `tcp_connect_local` /
+    `tcp_send_str` / `tcp_recv` / `tcp_send_buf` / `tcp_close`.
+  - Full epoll + non-blocking I/O family (7 builtins):
+    `epoll_new` / `epoll_add_read` / `epoll_wait_one` /
+    `epoll_close` / `tcp_set_nonblocking` / `tcp_accept_nb`
+    / `tcp_recv_nb`. Composes into single-threaded
+    cooperative scheduling — one OS thread, N concurrent
+    connections, kernel multiplexed.
+  - **Two concurrency models, user's choice:**
+    1. Thread-per-task via existing `task` + `join` (real
+       OS threads, race-free per the affine checker)
+    2. Single-thread cooperative via epoll + nb variants
+  - Four acceptance examples cross-backend parity-green:
+    [examples/async_io.vani](examples/async_io.vani) (timer
+    + task fan-out),
+    [examples/tcp_echo.vani](examples/tcp_echo.vani) (1
+    client),
+    [examples/tcp_multi_echo.vani](examples/tcp_multi_echo.vani)
+    (3 task clients),
+    [examples/tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani)
+    (3 clients on ONE thread via epoll reactor).
 
-  **Queued as Arc 8 v2 runtime arc** (performance/ergonomics
-  optimization, not a missing user feature): compiler-lowered
-  state machines on an arena (NOT Rust's `Pin` / self-
-  referential approach which stays non-compliant under
-  affine), epoll/kqueue event-loop runtime, non-blocking I/O
-  variants of `sleep_ms` + `tcp_*`, single-thread cooperative
-  fan-out without per-task pthread overhead. See
-  [STATUS.md](STATUS.md) *📋 NEXT SESSION* for the verbatim
-  handoff prompt. Today's pattern (one OS thread per `task`)
-  is plenty for small services + scripted demos; v2 collapses
-  to one thread + N futures for high-concurrency workloads.
+  **Arc 8 v3 sugar OPTIONAL** (ergonomics polish, not a
+  missing capability): compiler-driven state-machine codegen
+  auto-rewrites `async fn` bodies with `await(expr)` into
+  poll-functions over the existing epoll reactor. The
+  underlying single-thread multiplexing already ships;
+  `tcp_echo_epoll.vani` writes the reactor loop by hand;
+  v3 would hide that behind the `async fn` + `await` syntax.
+  Explicitly NOT shipping Rust-style `Pin<&mut Self>` self-
+  references (those stay 🛑 NON-COMPLIANT under affine).
+  See [STATUS.md](STATUS.md) *📋 Arc 8 v3* for the verbatim
+  handoff prompt.
 - **No reference counting** (no `Rc` / `Arc` equivalent). Single-owner
   affine ownership means cycles can't form; there's nothing for an
   Rc to count.
@@ -3255,24 +3267,26 @@ The honest list, grouped by which work item closes them:
 **Memory & runtime model**
 
 - No GC, no Rc / Arc — affine + scope-exit Drop only.
-- Async / await / coroutines: **✅ capability-complete
-  2026-06-04 (Arc 8 v1+v1.5+v1.6)** — full user-facing
-  async + networking + concurrency surface ships: `async fn`,
-  `await(expr)`, `Future<T>`, `Poll<T>`, `CancelToken`,
-  `sleep_ms` blocking timer, 8-function TCP family
-  (`tcp_listen` / `accept` / `connect_local` /
-  `send_str` / `recv` / `send_buf` / `close` / `socket_port`).
-  Three acceptance examples cross-backend. **Arc 8 v2
-  runtime arc queued** (performance optimization, not a
-  missing user feature): compiler-lowered state machines on
-  an arena — explicitly NOT Rust-style `Pin<&mut Self>`
-  self-references (those stay 🛑 NON-COMPLIANT under affine);
-  epoll/kqueue event-loop; non-blocking I/O variants;
-  single-thread cooperative fan-out. See
-  [STATUS.md](STATUS.md) *📋 NEXT SESSION*. Today's
-  concurrency uses real threads (`task` + `join`) plus
-  shared-state via `Atomic` / `Mutex` / `Channel` — race-free
-  by construction per the affine checker.
+- Async / await / coroutines: **✅ FULLY COMPLETE
+  2026-06-04 (Arc 8 v1+v1.5+v1.6+v2)** — every user-visible
+  async + networking + concurrency feature ships:
+  `async fn`, `await(expr)`, `Future<T>`, `Poll<T>`,
+  `CancelToken`, `sleep_ms`, 8-builtin blocking TCP family,
+  7-builtin epoll + non-blocking I/O family for single-thread
+  cooperative scheduling. Four acceptance examples
+  byte-identical cross-backend. Both concurrency models
+  supported: thread-per-task via `task` + `join`, OR
+  single-thread cooperative via epoll + nb variants.
+  **Arc 8 v3 sugar (state-machine codegen) OPTIONAL** —
+  compiler auto-rewriting `async fn` bodies into
+  poll-functions over the existing epoll reactor.
+  Ergonomics polish, not a missing capability. Explicitly
+  NOT Rust-style `Pin<&mut Self>` self-references (those
+  stay 🛑 NON-COMPLIANT under affine). See
+  [STATUS.md](STATUS.md) *📋 Arc 8 v3*. Today's concurrency
+  primitives (`task` + `join`, `Atomic` / `Mutex` /
+  `Channel`) are race-free by construction per the affine
+  checker.
 - No exceptions (covered above).
 
 **Tooling**

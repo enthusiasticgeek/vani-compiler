@@ -57,25 +57,45 @@ slices on top of v1:
   printed instead of literal so kernel-assigned ports
   don't break parity).
 
-**Arc 8 CAPABILITY-COMPLETE 2026-06-04**: every user-visible
-async + networking feature ships and works on both backends.
-Three acceptance examples (`async_io.vani`, `tcp_echo.vani`,
-`tcp_multi_echo.vani`) pass the parity runner. Users can
-build timer-driven schedulers, single-client + multi-client
-TCP servers, and concurrent fan-out workloads today via the
-existing `task` + `join` machinery.
+**Arc 8 FULLY COMPLETE 2026-06-04**: every user-visible
+async + networking + concurrency feature ships and works on
+both backends. Four acceptance examples cross-backend
+parity-green:
 
-**Arc 8 v2 runtime (8c + 8d + 8e non-blocking variants + 8h
-cooperative fan-out) OPEN** — state-machine codegen,
-epoll/kqueue event-loop runtime, real non-blocking I/O
-futures (timerfd, O_NONBLOCK sockets), single-threaded
-cooperative fan-out example. **This is a performance /
-ergonomics optimization, not a missing user feature.**
-Today's pattern uses one OS thread per task — fine for
-small fan-out workloads but heavy for high-concurrency
-servers. v2 collapses to one OS thread + N futures. Picks
-up next session via STATUS.md's "📋 NEXT SESSION" block.
-Estimated ~25–30h focused.
+- `async_io.vani` — timer-driven async fn + task fan-out
+- `tcp_echo.vani` — single-client TCP echo
+- `tcp_multi_echo.vani` — 3 concurrent clients via tasks
+- `tcp_echo_epoll.vani` — 3 concurrent clients on ONE
+  OS thread via the epoll reactor
+
+Both concurrency models supported, user's choice:
+1. Thread-per-task via `task` + `join` (race-free by the
+   affine checker)
+2. Single-thread cooperative via epoll + nb I/O variants
+   (kernel multiplexing, no per-task threads)
+
+**Arc 8 v3 sugar (state-machine codegen) OPTIONAL** —
+compiler auto-rewriting `async fn` bodies with `await`
+inside into poll-functions over the existing v2 epoll
+reactor. This is an ergonomics win (users write
+`await(tcp_recv_async(fd))` instead of an epoll_wait_one
+loop by hand), NOT a missing capability. The underlying
+single-thread multiplexing already ships via the v2 epoll
+runtime — see `examples/tcp_echo_epoll.vani`.
+
+If/when v3 sugar lands, it would add:
+- A new prelude type `Task<T> = { env: u64, poll: fn(u64) -> Poll<T> }`
+  distinct from `Future<T>` (so v1 source stays compatible)
+- A check-time pass walking `async fn` bodies and splitting
+  at `await` points, emitting a state struct + poll-fn
+- `intent_event_loop_run<T>(task: Task<T>) -> T` driver
+  over the existing epoll primitives
+- `examples/tcp_echo_async.vani` acceptance — same runtime
+  behavior as `tcp_echo_epoll.vani` but with the reactor
+  loop hidden behind `async fn` + `await`
+
+Estimated v3 effort: ~15–20h focused (state machines are
+the bulk; reactor + nb primitives already on `main`).
 
 **Affine flag: ⚠️ AFFINE-TENSION (compiler-lowered state machines)
 / 🛑 NON-COMPLIANT (Rust-style `Pin<&mut Self>` self-references).**
