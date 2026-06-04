@@ -42,26 +42,28 @@ were also already on `main` (closures #281/#282 for generic
 type decls; closures #257/#258 for `pub use` re-exports +
 `pub(kosh)` visibility tier):
 
-- **Arc 5c** — Closure-as-value across fn boundaries (env-
-  struct + fn-ptr pair = `Closure(args) -> R` type).
-  - ✅ **Phase 1+2 shipped** (commit `67f16aa`): `Type::Closure(args, ret)`
-    IR variant with Display + byte-size; parser accepts
-    `Closure(T1, T2, …) -> R` type syntax.
-  - ✅ **Phase 3a shipped** (commit `8c409b4`): lift-pass
-    scaffolding — `hoisted_structs: &mut Vec<StructDecl>`
-    threaded through `lift_closures_in_block` +
-    `recurse_lift_closures_in_stmt`; `CLOSURE_MAKE_REGISTRY`
-    thread-local (name → trampoline + env-struct + capture
-    types + closure signature) added to `ast.rs`. Plumbing
-    is in place; synthesis bodies stay empty in this commit.
-  - 🟡 **Phase 3b+ open** (~3-5h focused): actual lift-pass
-    synthesis (env-struct decl + trampoline fn + magic
-    `__intent_make_closure_<N>` call substitution at the Let
-    RHS); checker recognition of the magic call name;
-    checker Call-on-Closure → CallIndirect-through-call-field
-    lowering; C + LLVM backend closure-struct typedef +
-    magic-call codegen + indirect-call dispatch. Unblocks
-    Arc 8 (Async).
+- **Arc 5c COMPLETE** (commit `7cccc1b`, 2026-06-03) —
+  closure-as-value across fn boundaries works end-to-end on
+  both backends. Captured anonymous fns can now be passed to
+  higher-order functions typed `Closure(args) -> R`.
+  Lift pass synthesizes an env-struct + trampoline + magic
+  `__intent_make_closure_<N>` constructor per closure-with-
+  captures. C backend emits per-(args, ret) closure struct
+  typedef `{uint64_t env; R (*call)(uint64_t, args);}` +
+  trampoline; LLVM emits `%intent_closure_<sig>` named struct
+  + trampoline with `inttoptr`/`getelementptr` to read env.
+  Call on Closure-typed value dispatches via
+  `c.call(c.env, args)`. **1792 lib + 55 parity green.**
+  Example: `examples/closure_as_value.vani`.
+
+  v1 restrictions: per-closure env stored in a static __thread
+  / module-global slot (no heap), so a Closure cannot outlive
+  the lift-instantiation site. By-value Copy captures only.
+  No FnPtr → Closure auto-coercion. Heap-env + ref-coercion
+  are queued v2 follow-ups.
+
+  **Unblocks Arc 8 (Async)** — `Future<T>` + `async fn` state
+  machines need closure-as-value to plumb resumes through.
 - **Arc 7 remainder** — full FFI classifier (float-class +
   mixed integer/float decomposition under SysV x86-64;
   Windows/ARM gated on CI availability). ~6-8h focused.
