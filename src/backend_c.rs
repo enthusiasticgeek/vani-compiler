@@ -11536,7 +11536,21 @@ return __intent_ret; }}\n",
                 }
                 _ => {}
             }
-            out.push_str(&format!("  {} = {};\n", lvalue, v));
+            // Phase 3f — C array-to-array assignment is invalid
+            // (arrays decay to pointers in `=` position). For
+            // array-typed fields, route through memcpy instead.
+            // Required by the v3.1 transform's NonSuspendLet
+            // pattern when an `[T; N]` local is hoisted into the
+            // task struct (`__t->arr = __v3_tmp_arr;` would
+            // otherwise fail to compile).
+            if matches!(value.ty, Type::Array { .. }) {
+                out.push_str(&format!(
+                    "  memcpy(&{}, &{}, sizeof({}));\n",
+                    lvalue, v, lvalue
+                ));
+            } else {
+                out.push_str(&format!("  {} = {};\n", lvalue, v));
+            }
         }
         TypedStmt::For {
             var,

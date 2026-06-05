@@ -97,6 +97,21 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3f ✅ COMPLETE 2026-06-04** (commit pending). Array
+> `[T; N]` locals in v3.1 async fns. Resolves the deferral from
+> Phase 3d. C backend's FieldAssign emits memcpy for Type::Array
+> values (`__t->arr = __v3_tmp_arr;` is invalid C; arrays decay to
+> pointers). Type gate adds `Type::Array { element, length }`
+> with the same recursive-on-element pattern as Vec; default-init
+> emits an ArrayLit with N copies of the recursive default.
+> examples/echo_p3f_array_local.vani parity-green. 2 new lib
+> tests + 1 prior rejection flipped to acceptance.
+>
+> **🎉 v3.1 affine-locals — ALL MAJOR COMPOSITE TYPES SHIPPED
+> 2026-06-04.** v3.1 async fns now accept locals of every common
+> shape: i64 + bool + f64 + Str + OwnedStr + Enum (unit OR
+> payloaded) + Vec<T> + Struct (recursive) + Array `[T; N]`.
+>
 > **Phase 3d ✅ COMPLETE 2026-06-04** (commit `64c93b0`). Vec + Struct
 > locals in v3.1 async fns. Adds Type::Vec(T) (1-element default
 > via `vec(default_T)`; empty `vec()` can't infer in StructLit
@@ -144,9 +159,8 @@
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3 non-i64 returns)
-> - 3f: Array [T; N] locals (deferred from 3d, ~4-6h —
->   synthesizer needs element-wise copy or memcpy hatch)
+>   on Phase 3 non-i64 returns — would extend the v3.1
+>   return-type gate similarly to the locals gate)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)

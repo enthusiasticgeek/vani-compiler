@@ -13,19 +13,18 @@
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c +
-3d + 3e shipped — compiler-driven `async fn → Task`
+3d + 3e + 3f shipped — compiler-driven `async fn → Task`
 transform handles linear bodies + non-suspending control
 flow + suspend-in-branch state-splitting + fall-through
 merge state + nested ifs + ANF lifting + match in async
 fn + match arms WITH suspends (Int + Bool + Str + Float
 + Variant + VariantWithBinding + Wildcard) + loops with
 suspend inside + break/continue inside loops + non-i64
-locals (bool / f64 / Str / OwnedStr / Enum / Vec / Struct).
-22 v3.1 acceptance examples parity-green. **v3.1 locals
-across await: i64 + bool + f64 + Str + OwnedStr + Enum
-(unit OR payloaded) + Vec<T> + Struct (recursive).**
-Array deferred (C array-to-array assignment limitation).
-Phase 2.4 (try) needs Phase 3 for non-i64 returns; macOS
+locals (bool / f64 / Str / OwnedStr / Enum / Vec / Struct
+/ Array). 23 v3.1 acceptance examples parity-green.
+**v3.1 locals across await: ALL major composite types
+shippable.** Phase 2.4 (try) needs Phase 3 for non-i64
+returns; macOS
 port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -164,6 +163,25 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3f — Array `[T; N]` locals + C backend memcpy
+  escape hatch** (commit pending). Resolves the deferral from
+  Phase 3d. The C backend's FieldAssign for `Type::Array` now
+  emits `memcpy(&lvalue, &v, sizeof(lvalue))` instead of
+  `lvalue = v;`, sidestepping C's "arrays decay to pointers in
+  `=`" restriction. The synthesizer's NonSuspendLet temp-and-
+  FieldAssign pattern now works uniformly for arrays. v3.1
+  Type gate adds `Type::Array { element, length }` when
+  `length > 0` and element is itself v31-allowed.
+  `v31_default_init_expr` for Array emits an ArrayLit with N
+  copies of the recursive default (overwritten by the state
+  machine before use).
+  - `examples/echo_p3f_array_local.vani` — `[i64; 4]` local
+    with arr[3] feeding into io_recv_async. mode=5 byte-
+    identical: arr=[1,2,3,5], recv(5) 4 bytes "abcd" →
+    4+1+2+3=10.
+  - 2 new lib tests (Array<i64> + Array<bool> acceptance);
+    Phase 3d Array-rejection test replaced with acceptance.
 
 - **v3.1 Phase 3d — Vec + Struct locals** (commit `64c93b0`).
   Fourth slice of Phase 3. Extends the v3.1 locals gate to

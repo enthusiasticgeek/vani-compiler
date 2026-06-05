@@ -1,0 +1,79 @@
+// Arc 8 v3.1 Phase 3f — Array `[T; N]` locals in async fn.
+//
+// Phase 3d shipped Vec + Struct support but deferred Array
+// because the C backend rejected the synthesizer's `__t->arr =
+// __v3_tmp_arr;` (arrays decay to pointers in C `=` position).
+// Phase 3f resolves this with a one-line C backend escape hatch:
+// in FieldAssign emission, route Type::Array values through
+// memcpy instead of `=`.
+//
+// The synthesizer's NonSuspendLet pattern now works uniformly:
+//   let __v3_tmp_arr: [i64; 4] = USER_EXPR;
+//   memcpy(&__t->arr, &__v3_tmp_arr, sizeof(__t->arr));  // C
+//   ; LLVM: store [4 x i64] %tmp, [4 x i64]* %fieldptr     // LLVM
+//
+// Phase 3f's gate is identical in shape to Phase 3d's Vec:
+//   `Type::Array { element, length }` allowed when length > 0
+//   AND element type is itself v31-allowed (recursive). Default-
+//   init synthesizes an ArrayLit with N copies of default(T).
+//   The literal is overwritten by the state machine before any
+//   read; the throwaway copies are harmless.
+//
+// build & run:
+//   intentc run examples/echo_p3f_array_local.vani                # LLVM
+//   intentc run examples/echo_p3f_array_local.vani --backend=c    # C
+
+intent "Phase 3f — Array local in async fn";
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Array local — Phase 3f makes this valid. Default-init emits
+  // `[0, 0, 0, 0]` (4 copies of default i64) in the task struct
+  // constructor; state machine overwrites with the user's actual
+  // literal before any read.
+  let arr: [i64; 4] = [1, 2, 3, mode];
+
+  // Suspend AFTER the array LET so the memcpy escape hatch runs
+  // in the state-0 prologue (not just inline). Exercises the
+  // hoist-to-task-struct path.
+  let n: i64 = io_recv_async(fd, arr[3]);
+  return n + arr[0] + arr[1] + arr[2];
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=5 -> arr=[1,2,3,5] -> recv(5)=4 -> 4+1+2+3=10
+  let t: Task__pick = pick(cfd, 5);
+  let r: i64 = drive(ep, mut ref t);
+  print "result:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

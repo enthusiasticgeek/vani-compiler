@@ -21698,31 +21698,52 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 3d — Array locals still rejected (C
-    /// backend can't do array-to-array assignment; deferred to
-    /// a future synthesizer slice with element-wise copy or
-    /// memcpy escape hatch).
+    /// Arc 8 v3.1 Phase 3f — Array locals now accepted (was
+    /// rejected in Phase 3d). The C backend's FieldAssign emits
+    /// memcpy for Type::Array values, sidestepping C's "arrays
+    /// decay to pointers in `=` position" restriction.
+    /// `v31_default_init_expr` synthesizes `[d0, d1, ..., dN-1]`
+    /// (N copies of default(T)).
     #[test]
-    fn v31_phase3d_array_local_still_rejected() {
+    fn v31_phase3f_array_local_accepted() {
         let source = r#"
             async fn pick(fd: i64, mode: i64) -> i64 {
               let arr: [i64; 4] = [1, 2, 3, mode];
-              let n: i64 = io_recv_async(fd, arr[0]);
-              return n;
+              let n: i64 = io_recv_async(fd, arr[3]);
+              return n + arr[0] + arr[1] + arr[2];
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err(
-            "Phase 3d defers Array locals (C array-to-array assignment unsupported)"
-        );
+        let c = compile_to_c(source).expect("Phase 3f Array local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3f Array local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+        // Confirm the memcpy escape hatch is actually emitted by
+        // the C backend for the array field assignment.
         assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 3") || m.contains("Array")
-            }),
-            "expected gate diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+            c.contains("memcpy(&") && c.contains("->arr"),
+            "C output should use memcpy for array field assignment"
         );
+    }
+
+    /// Arc 8 v3.1 Phase 3f — Array with non-i64 element types
+    /// (bool / f64 / Str etc.) also works since the per-element
+    /// default-init recurses through v31_default_init_expr.
+    #[test]
+    fn v31_phase3f_array_of_bool_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let flags: [bool; 3] = [true, false, mode > 0];
+              let n: i64 = io_recv_async(fd, 64);
+              if flags[2] { return n; }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3f bool-array must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3f bool-array must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside

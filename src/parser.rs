@@ -5453,13 +5453,17 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         // can't infer its element type in StructLit field
         // position).
         Type::Vec(inner) => v31_local_type_allowed(inner),
-        // Type::Array { element, length } is DEFERRED — the C
-        // backend doesn't allow array-to-array assignment
-        // (`__t->arr = __v3_tmp_arr;` is invalid C; arrays decay
-        // to pointers). The synthesizer's NonSuspendLet emits a
-        // FieldAssign that hits this. A Phase 3d-array slice
-        // would need either an element-wise copy loop OR a
-        // memcpy escape hatch in the synthesizer.
+        // Phase 3f — [T; N]: element type must be v31-allowed
+        // (default-init emits N copies of default(T) as an
+        // ArrayLit). The C backend's FieldAssign routes Array
+        // values through memcpy instead of `=` so the synthesizer's
+        // NonSuspendLet temp-and-FieldAssign pattern works
+        // uniformly. Forbid zero-length arrays as a defensive
+        // guard (empty ArrayLit can't infer in StructLit field
+        // position).
+        Type::Array { element, length } => {
+            *length > 0 && v31_local_type_allowed(element)
+        }
         _ => false,
     }
 }
@@ -5541,6 +5545,15 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
             name_span: span,
             args: vec![v31_default_init_expr(inner, span)],
         },
+        // Phase 3f — [T; N]: ArrayLit with N copies of default(T).
+        // The literal `[d0, d1, ..., dN-1]` typechecks as `[T; N]`
+        // when the field annotation matches. Validator already
+        // ensured length > 0 so the literal isn't empty.
+        Type::Array { element, length } => {
+            let default = v31_default_init_expr(element, span);
+            let elements: Vec<Expr> = (0..*length).map(|_| default.clone()).collect();
+            ExprKind::ArrayLit { elements }
+        }
         Type::Enum(name) | Type::Struct(name) => {
             // Phase 3d — if `name` is a registered struct (not an
             // enum), synthesize `StructName { f0: d0, f1: d1, ...
