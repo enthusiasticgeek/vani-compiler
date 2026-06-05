@@ -12,14 +12,15 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.5 + 2.5b shipped — compiler-driven `async fn → Task`
-transform handles linear bodies + non-suspending control
-flow + suspend-in-branch state-splitting + fall-through
-merge state + nested ifs + ANF lifting + match in async fn
-+ match arms WITH suspends (Int + Wildcard) + loops with
-suspend inside + break/continue inside loops. 14 v3.1
-acceptance examples parity-green. Phase 2.4 (try), 3-4
-queued; macOS port (Phase 5) recommended next**).
+2.3a + 2.3b + 2.5 + 2.5b shipped — compiler-driven
+`async fn → Task` transform handles linear bodies + non-
+suspending control flow + suspend-in-branch state-splitting
++ fall-through merge state + nested ifs + ANF lifting +
+match in async fn + match arms WITH suspends (Int + Bool
++ Str + Float + Wildcard) + loops with suspend inside +
+break/continue inside loops. 15 v3.1 acceptance examples
+parity-green. Phase 2.3c (Variant patterns), 2.4 (try),
+3-4 queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -136,6 +137,27 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - Existing rejection lib test flipped to acceptance +
     new mixed-arms acceptance test added (2 lib tests
     total covering 2.3a)
+
+- **v3.1 Phase 2.3b — Bool/Str/Float match patterns** (commit
+  pending). Extends Phase 2.3a's desugar to non-Int literal
+  patterns. Per-pattern shape only affects the comparison
+  RHS Expr synthesized; nesting machinery is unchanged.
+  Bool → `ExprKind::Bool(b)`, Str → `ExprKind::Str(s)`,
+  Float → `ExprKind::Float(f)`.
+  - Caveat: v3.1's i64-only param/local rule still applies.
+    Non-i64 scrutinees must be INLINE expressions (e.g.
+    `mode > 0`, `i64_to_str(x)`, `(x * 100) as f64 / 100.0`).
+    Persisting non-i64 values across await suspend points is
+    Phase 3 work.
+  - Pattern::Variant + Pattern::VariantWithBinding remain
+    rejected (need enum-tag dispatch at parse time, not
+    accessible until checker); deferred to Phase 2.3c.
+  - `examples/echo_match_b_s_f.vani` — three async fns
+    exercising Bool / Str / Float patterns with suspending
+    arms. All five outputs byte-identical: bool true → 3
+    (recv), bool false → 999, str=1 → 111, str=99 → -1,
+    f=2.0 → 222.
+  - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 2.5b — break/continue inside loops** (commit
   `4702cb6`). Adds `break` and `continue` keywords inside

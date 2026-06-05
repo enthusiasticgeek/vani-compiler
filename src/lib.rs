@@ -21252,6 +21252,104 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
+    /// Arc 8 v3.1 Phase 2.3b — Bool literal patterns in match
+    /// arms with suspends. Desugar emits `if SCRUT == true { ... }`
+    /// + `if SCRUT == false { ... }`. Scrutinee must be an
+    /// inline expression evaluating to bool (e.g. `mode > 0`).
+    #[test]
+    fn v31_phase23b_bool_pattern_match_with_suspend_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match mode > 0 {
+                true then io_recv_async(fd, 64),
+                false then 999
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3b bool patterns must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3b bool patterns must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3b — Str literal patterns in match
+    /// arms with suspends. Desugar emits `if SCRUT == "lit" { ... }`
+    /// which checker lowers to `strcmp() == 0`. Wildcard required.
+    #[test]
+    fn v31_phase23b_str_pattern_match_with_suspend_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match i64_to_str(mode) {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3b str patterns must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3b str patterns must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3b — Float literal patterns in match
+    /// arms with suspends. Desugar emits `if SCRUT == 1.0 { ... }`.
+    /// Wildcard required (float space is open).
+    #[test]
+    fn v31_phase23b_float_pattern_match_with_suspend_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match (mode * 100) as f64 / 100.0 {
+                1.0 then io_recv_async(fd, 64),
+                2.0 then 222,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3b float patterns must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3b float patterns must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3b — Variant patterns still rejected.
+    /// Phase 2.3c will handle enum-tag dispatch via the desugar
+    /// (or a post-typecheck rewrite); for now we expect a clear
+    /// future-sub-phase diagnostic.
+    #[test]
+    fn v31_phase23b_variant_pattern_match_with_suspend_rejected() {
+        let source = r#"
+            enum Color { Red, Green, Blue }
+
+            async fn pick(fd: i64, c: i64) -> i64 {
+              let col: Color = Color.Red;
+              let n: i64 = match col {
+                Color.Red then io_recv_async(fd, 64),
+                Color.Green then 1,
+                Color.Blue then 2
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 2.3b must reject Variant patterns");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 2.3a") || m.contains("unsupported pattern shape")
+                    || m.contains("match") || m.contains("must be i64")
+            }),
+            "expected unsupported-pattern diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside
     /// suspending loops. The collector maintains a loop_stack;
     /// break/continue translate to state_tag jumps targeting

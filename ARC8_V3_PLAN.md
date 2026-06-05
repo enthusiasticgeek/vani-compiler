@@ -34,6 +34,21 @@
 > new lib tests; existing rejection test flipped to
 > acceptance.
 >
+> **Phase 2.3b ✅ COMPLETE 2026-06-04** (commit pending).
+> Bool / Str / Float literal patterns in match arms with
+> suspends. Extends Phase 2.3a's desugar — per-pattern
+> shape only affects the comparison RHS Expr (Bool →
+> `ExprKind::Bool`, Str → `ExprKind::Str`, Float →
+> `ExprKind::Float`); nesting + state-splitting are
+> unchanged. Caveat: v3.1's i64-only param/local rule means
+> non-i64 scrutinees must be inline expressions (e.g.
+> `mode > 0`, `i64_to_str(x)`). Persisting non-i64 across
+> await is Phase 3 work. Pattern::Variant /
+> VariantWithBinding deferred to Phase 2.3c.
+> examples/echo_match_b_s_f.vani parity-green across 5
+> outputs (bool true/false, str=1/99, f=2.0). 4 new lib
+> tests (3 acceptance + 1 Variant-rejection).
+>
 > **🎉 v3.1 control-flow sugar — CAPABILITY-COMPLETE 2026-06-04.**
 > The compiler-driven `async fn → Task` transform handles
 > every common control-flow shape in vāṇī. Capstone:
@@ -41,7 +56,8 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.3b match arms — Variant/Bool/Str patterns (~6-8h)
+> - 2.3c match arms — Variant + VariantWithBinding (~6-10h,
+>   needs enum-tag metadata bridging or post-typecheck rewrite)
 > - 2.4 try keyword + Result propagation (~6-8h)
 > - 3 affine types across await — OwnedStr/Vec (~20-25h)
 > - 4 generics / nested async calls / multi-task (~25-30h)
@@ -391,11 +407,17 @@ needed by the acceptance example).
   parity-green. 2 new lib tests + 1 rejection test flipped
   to acceptance.
 
-- **Phase 2.3b** (queued, ~6-8h) — `match` arms with
-  Variant / VariantWithBinding / Bool / Str patterns. Same
-  desugar pattern but condition synthesis differs by
-  pattern shape (`scrut.tag == X`, `scrut == true`,
-  `strcmp(scrut, "lit") == 0`).
+- **Phase 2.3b ✅ DONE 2026-06-04** — `match` arms with
+  Bool / Str / Float literal patterns. Extends Phase 2.3a's
+  desugar with per-pattern literal-Expr synthesis. Bool/Str/
+  Float scrutinees must be inline expressions (v3.1 i64-only
+  param/local rule). 4 new lib tests + acceptance example.
+
+- **Phase 2.3c** (queued, ~6-10h) — `match` arms with
+  Variant / VariantWithBinding patterns. Needs enum-tag
+  metadata at desugar time (parse-time) OR post-typecheck
+  rewrite. Variant binding cases additionally inject a Let
+  for the destructured payload in the then_body.
 
 - **Phase 2.4** (queued, ~6-8h) — `try expr` keyword + Result
   propagation through the state machine.

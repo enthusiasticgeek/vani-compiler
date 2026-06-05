@@ -5003,8 +5003,13 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
 /// - Pattern::Wildcard catch-all (required as last arm)
 /// - Arm bodies that produce i64 values
 ///
-/// Rejected (deferred):
-/// - Bool / Str / Variant patterns
+/// Phase 2.3b extends literal-pattern support to:
+/// - Pattern::Bool — `match b { true then ..., false then ... }`
+/// - Pattern::Str  — `match s { "foo" then ..., _ then ... }`
+/// - Pattern::Float — `match f { 3.14 then ..., _ then ... }`
+///
+/// Rejected (deferred to Phase 2.3c — variant patterns):
+/// - Pattern::Variant / Pattern::VariantWithBinding
 /// - Wildcard not at the end
 /// - Multiple match expressions in one let
 fn try_desugar_let_match_with_suspends(
@@ -5021,29 +5026,39 @@ fn try_desugar_let_match_with_suspends(
     if !expr_contains_io_async(expr) {
         return None; // No suspends — Phase 2.3-narrow handles it.
     }
-    // Validate arms: Pattern::Int OR Pattern::Wildcard.
-    // Last arm must be Wildcard.
-    let mut int_arms: Vec<(i128, Expr, crate::span::Span)> = Vec::new();
+    // Validate arms: Pattern::Int | Bool | Str | Float OR
+    // trailing Pattern::Wildcard. Variant / VariantWithBinding
+    // bail (deferred to Phase 2.3c).
+    //
+    // Each lit_arm stores the pre-built comparison literal Expr
+    // alongside the arm body, so per-pattern shape is handled
+    // once at validation and the nesting loop stays uniform.
+    let mut lit_arms: Vec<(Expr, Expr, crate::span::Span)> = Vec::new();
     let mut default_arm: Option<(Expr, crate::span::Span)> = None;
     for (i, arm) in arms.iter().enumerate() {
         let is_last = i == arms.len() - 1;
-        match &arm.pattern {
-            crate::ast::Pattern::Int(lit) => {
-                if is_last && default_arm.is_none() {
-                    // Tolerate: last arm is Int (no wildcard).
-                    // Will produce a fallthrough that does nothing
-                    // for unmatched values; placeholder 0 stays.
-                }
-                int_arms.push((*lit, arm.body.clone(), arm.pattern_span));
-            }
+        let lit_expr_opt: Option<ExprKind> = match &arm.pattern {
+            crate::ast::Pattern::Int(lit) => Some(ExprKind::Int(*lit)),
+            crate::ast::Pattern::Bool(b) => Some(ExprKind::Bool(*b)),
+            crate::ast::Pattern::Str(s) => Some(ExprKind::Str(s.clone())),
+            crate::ast::Pattern::Float(f) => Some(ExprKind::Float(*f)),
             crate::ast::Pattern::Wildcard => {
                 if !is_last {
                     return None; // Wildcard must be last.
                 }
                 default_arm = Some((arm.body.clone(), arm.pattern_span));
+                None
             }
-            // Other patterns deferred to future sub-phase.
+            // Variant / VariantWithBinding deferred to Phase 2.3c
+            // (need enum-tag metadata not available at parse time).
             _ => return None,
+        };
+        if let Some(lit_kind) = lit_expr_opt {
+            let lit_expr = Expr {
+                kind: lit_kind,
+                span: arm.pattern_span,
+            };
+            lit_arms.push((lit_expr, arm.body.clone(), arm.pattern_span));
         }
     }
     // Build the placeholder Let + if-else-assign chain.
@@ -5066,16 +5081,13 @@ fn try_desugar_let_match_with_suspends(
         Vec::new()
     };
 
-    // Walk int_arms in REVERSE to nest if-else properly.
-    for (lit, arm_expr, arm_span) in int_arms.into_iter().rev() {
+    // Walk lit_arms in REVERSE to nest if-else properly.
+    for (lit_expr, arm_expr, arm_span) in lit_arms.into_iter().rev() {
         let cond = Expr {
             kind: ExprKind::Binary {
                 op: BinaryOp::Eq,
                 left: Box::new((**scrutinee).clone()),
-                right: Box::new(Expr {
-                    kind: ExprKind::Int(lit),
-                    span: arm_span,
-                }),
+                right: Box::new(lit_expr),
             },
             span: arm_span,
         };
