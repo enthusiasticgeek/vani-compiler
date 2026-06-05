@@ -162,7 +162,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 2.3d — VariantWithBinding patterns** (commit
-  pending). Extends Phase 2.3c's tag-extraction sub-match
+  `9fb16dc`). Extends Phase 2.3c's tag-extraction sub-match
   approach with SUBSTITUTION-based binding propagation:
   - For each `Opt.Some(v) then EXPR` arm, the desugar
     walks EXPR and substitutes every `Var(v)` with an

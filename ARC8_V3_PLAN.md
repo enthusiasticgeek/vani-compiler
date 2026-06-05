@@ -49,7 +49,7 @@
 > outputs (bool true/false, str=1/99, f=2.0). 4 new lib
 > tests (3 acceptance + 1 Variant-rejection).
 >
-> **Phase 2.3d ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 2.3d ✅ COMPLETE 2026-06-04** (commit `9fb16dc`).
 > VariantWithBinding patterns (`Opt.Some(v) then EXPR`). Uses
 > SUBSTITUTION (not a local LET) to propagate the binding into
 > the arm body: every `Var(v)` in EXPR is replaced inline with
