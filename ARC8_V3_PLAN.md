@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3b ✅ COMPLETE 2026-06-04** (commit pending). Str /
+> **Phase 3b ✅ COMPLETE 2026-06-04** (commit `defde20`). Str /
 > OwnedStr locals in v3.1 async fns. Extends Phase 3a's
 > type gate with Type::Str + Type::OwnedStr; default-init
 > emits `ExprKind::Str(String::new())` (empty string). No

@@ -162,7 +162,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
-- **v3.1 Phase 3b — Str / OwnedStr locals** (commit pending).
+- **v3.1 Phase 3b — Str / OwnedStr locals** (commit `defde20`).
   Second slice of Phase 3. Same `v31_local_type_allowed` gate
   is extended with `Type::Str` and `Type::OwnedStr`;
   `v31_default_init_expr` returns `ExprKind::Str(String::new())`
