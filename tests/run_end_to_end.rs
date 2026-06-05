@@ -838,6 +838,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_match_b_s_f.vani",
         "echo_match_variant.vani",
         "echo_match_binding.vani",
+        "echo_match_stress.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",

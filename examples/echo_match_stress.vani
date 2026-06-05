@@ -1,0 +1,169 @@
+// Arc 8 v3.1 — match-with-suspends STRESS TEST.
+//
+// Single async fn exercising ALL Phase 2.3a/b/c/d pattern
+// shapes in sequence:
+//   1. Int    (Phase 2.3a) — `match mode { 0 then ..., _ then ... }`
+//   2. Bool   (Phase 2.3b) — `match mode > 0 { true then ..., false then ... }`
+//   3. Str    (Phase 2.3b) — `match i64_to_str(mode) { "0" then ..., _ then ... }`
+//   4. Float  (Phase 2.3b) — `match (mode * 1) as f64 { 0.0 then ..., _ then ... }`
+//   5. Variant       (Phase 2.3c) — `match make_action(mode) { Action.Recv then ..., _ then ... }`
+//   6. VariantWithBinding (Phase 2.3d) — `match make_opt(mode) { Opt.Some(v) then ..., Opt.None then ... }`
+//
+// Each shape's arm either:
+//   - Performs a suspending io_recv_async(fd, K) where K varies by shape
+//   - OR returns a non-suspending sentinel
+//
+// The async fn accumulates the result of EACH match into a
+// running total `acc`, exercising the state machine through
+// all 6 match desugarings + 6 (or more) suspend points in
+// one driver-loop iteration.
+//
+// Verification: each shape contributes a known delta to `acc`
+// for mode=0. The expected total is hardcoded; both backends
+// must produce byte-identical output.
+//
+// build & run:
+//   intentc run examples/echo_match_stress.vani                # LLVM
+//   intentc run examples/echo_match_stress.vani --backend=c    # C
+
+intent "Phase 2.3a/b/c/d STRESS TEST — all match shapes in one async fn";
+
+enum Action { Recv, Skip }
+enum Opt { Some(i64), None }
+
+fn make_action(mode: i64) -> Action {
+  return match mode {
+    0 then Action.Recv,
+    _ then Action.Skip
+  };
+}
+
+fn make_opt(mode: i64) -> Opt {
+  return match mode {
+    0 then Opt.Some(50),
+    _ then Opt.None
+  };
+}
+
+async fn stress(fd: i64, mode: i64) -> i64 {
+  let acc: i64 = 0;
+
+  // ---- Shape 1: Int (Phase 2.3a) ----
+  // mode=0 → io_recv_async(fd, 64), receives "a" = 1 byte
+  // mode=1 → 10 (no suspend)
+  let r1: i64 = match mode {
+    0 then io_recv_async(fd, 64),
+    1 then 10,
+    _ then 0 - 1
+  };
+  acc = acc + r1;
+
+  // ---- Shape 2: Bool (Phase 2.3b) ----
+  // mode=0 → mode>0 = false → 20
+  // mode=1 → mode>0 = true → io_recv_async(fd, 64) (1 byte "b")
+  let r2: i64 = match mode > 0 {
+    true then io_recv_async(fd, 64),
+    false then 20
+  };
+  acc = acc + r2;
+
+  // ---- Shape 3: Str (Phase 2.3b) ----
+  // mode=0 → str="0" → io_recv_async(fd, 64) (1 byte "c")
+  // mode=1 → str="1" → 30
+  let r3: i64 = match i64_to_str(mode) {
+    "0" then io_recv_async(fd, 64),
+    "1" then 30,
+    _ then 0 - 1
+  };
+  acc = acc + r3;
+
+  // ---- Shape 4: Float (Phase 2.3b) ----
+  // mode=0 → 0.0 → io_recv_async(fd, 64) (1 byte "d")
+  // mode=1 → 1.0 → 40
+  let r4: i64 = match mode as f64 / 1.0 {
+    0.0 then io_recv_async(fd, 64),
+    1.0 then 40,
+    _ then 0 - 1
+  };
+  acc = acc + r4;
+
+  // ---- Shape 5: Variant (Phase 2.3c) ----
+  // mode=0 → Action.Recv → io_recv_async(fd, 64) (1 byte "e")
+  // mode=1 → Action.Skip → 50
+  let r5: i64 = match make_action(mode) {
+    Action.Recv then io_recv_async(fd, 64),
+    Action.Skip then 50
+  };
+  acc = acc + r5;
+
+  // ---- Shape 6: VariantWithBinding (Phase 2.3d) ----
+  // mode=0 → Opt.Some(50) → io_recv_async(fd, v + 14) = io_recv_async(fd, 64) (1 byte "f")
+  // mode=1 → Opt.None → 60
+  let r6: i64 = match make_opt(mode) {
+    Opt.Some(v) then io_recv_async(fd, v + 14),
+    Opt.None then 60
+  };
+  acc = acc + r6;
+
+  return acc;
+}
+
+fn drive(ep: i64, t: mut ref Task__stress) -> i64 {
+  while true {
+    let r: i64 = __poll_stress(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  // Peer sends 6 bytes (one per recv), with delays so each
+  // recv genuinely suspends and re-enters the state machine.
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "a");
+    let _ = sleep_ms(20);
+    let _ = tcp_send_str(c, "b");
+    let _ = sleep_ms(20);
+    let _ = tcp_send_str(c, "c");
+    let _ = sleep_ms(20);
+    let _ = tcp_send_str(c, "d");
+    let _ = sleep_ms(20);
+    let _ = tcp_send_str(c, "e");
+    let _ = sleep_ms(20);
+    let _ = tcp_send_str(c, "f");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 path (peer sends "abcdef" one byte at a time with 20ms gaps):
+  //   r1 (Int=0)        → io_recv_async → 1 byte "a"          = 1
+  //   r2 (Bool: 0>0)    → false branch                        = 20 (no suspend)
+  //   r3 (Str "0")      → io_recv_async → 1 byte "b"          = 1
+  //   r4 (Float 0.0)    → io_recv_async → 1 byte "c"          = 1
+  //   r5 (Variant Recv) → io_recv_async → 1 byte "d"          = 1
+  //   r6 (Opt.Some(50)) → io_recv_async(v+14=64) → 1 byte "e" = 1
+  // 5 of 6 sends consumed; "f" left in kernel buffer (recovered
+  // when close drains). Expected acc = 1+20+1+1+1+1 = 25.
+  // Both backends byte-identical.
+  let t: Task__stress = stress(cfd, 0);
+  let r: i64 = drive(ep, mut ref t);
+  print "stress mode=0:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
