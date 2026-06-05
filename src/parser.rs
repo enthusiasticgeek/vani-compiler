@@ -5008,10 +5008,19 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
 /// - Pattern::Str  — `match s { "foo" then ..., _ then ... }`
 /// - Pattern::Float — `match f { 3.14 then ..., _ then ... }`
 ///
-/// Rejected (deferred to Phase 2.3c — variant patterns):
-/// - Pattern::Variant / Pattern::VariantWithBinding
+/// Phase 2.3c extends to:
+/// - Pattern::Variant — `match c { Color.Red then ..., _ then ... }`
+///   Lowered via a tag-extraction sub-match: the original variant
+///   arms become an i64-returning match (`Color.Red then 0,
+///   Color.Green then 1, ...`) that runs via the existing
+///   variant-tag dispatch; then the if-chain dispatches on the
+///   synthesized i64 tag.
+///
+/// Rejected (deferred to Phase 2.3d):
+/// - Pattern::VariantWithBinding (binding scope across the
+///   tag-extraction → if-chain split needs explicit relifting)
+/// - Mixed Variant + non-Variant patterns in same match
 /// - Wildcard not at the end
-/// - Multiple match expressions in one let
 fn try_desugar_let_match_with_suspends(
     name: &str,
     annotation: &Option<Type>,
@@ -5026,9 +5035,29 @@ fn try_desugar_let_match_with_suspends(
     if !expr_contains_io_async(expr) {
         return None; // No suspends — Phase 2.3-narrow handles it.
     }
+    // Detect Variant arms. If any arm is Variant (without binding),
+    // route through the tag-extraction sub-match path. Mixed
+    // Variant + non-Variant patterns bail (would mismatch the
+    // sub-match's scrutinee type).
+    let has_variant = arms.iter().any(|a| {
+        matches!(&a.pattern, crate::ast::Pattern::Variant { .. })
+    });
+    let has_variant_with_binding = arms.iter().any(|a| {
+        matches!(&a.pattern, crate::ast::Pattern::VariantWithBinding { .. })
+    });
+    if has_variant_with_binding {
+        // Phase 2.3d will handle bindings. For now bail so the
+        // validator's diagnostic fires with the future-sub-phase
+        // pointer.
+        return None;
+    }
+    if has_variant {
+        return try_desugar_match_via_tag_extraction(
+            name, annotation, scrutinee, arms, span,
+        );
+    }
     // Validate arms: Pattern::Int | Bool | Str | Float OR
-    // trailing Pattern::Wildcard. Variant / VariantWithBinding
-    // bail (deferred to Phase 2.3c).
+    // trailing Pattern::Wildcard.
     //
     // Each lit_arm stores the pre-built comparison literal Expr
     // alongside the arm body, so per-pattern shape is handled
@@ -5049,8 +5078,7 @@ fn try_desugar_let_match_with_suspends(
                 default_arm = Some((arm.body.clone(), arm.pattern_span));
                 None
             }
-            // Variant / VariantWithBinding deferred to Phase 2.3c
-            // (need enum-tag metadata not available at parse time).
+            // Variant handled above; VariantWithBinding bailed above.
             _ => return None,
         };
         if let Some(lit_kind) = lit_expr_opt {
@@ -5088,6 +5116,155 @@ fn try_desugar_let_match_with_suspends(
                 op: BinaryOp::Eq,
                 left: Box::new((**scrutinee).clone()),
                 right: Box::new(lit_expr),
+            },
+            span: arm_span,
+        };
+        let then_body = vec![Stmt::Assign {
+            name: name.to_string(),
+            expr: arm_expr,
+            span: arm_span,
+        }];
+        current_else = vec![Stmt::If {
+            cond,
+            then_body,
+            else_body: std::mem::take(&mut current_else),
+            span: arm_span,
+        }];
+    }
+    out.extend(current_else);
+    Some(out)
+}
+
+/// Phase 2.3c — desugar `let X = match SCRUT { Color.Red then EXPR0,
+/// Color.Green then EXPR1, ..., _ then EXPRD };` (with suspends in
+/// any arm body) into:
+///
+/// ```vani
+/// let X: i64 = 0;
+/// let __match_tag_X: i64 = match SCRUT {
+///   Color.Red then 0,
+///   Color.Green then 1,
+///   ...
+///   _ then K
+/// };
+/// if __match_tag_X == 0 { X = EXPR0; }
+/// else if __match_tag_X == 1 { X = EXPR1; }
+/// ...
+/// else { X = EXPRD; }
+/// ```
+///
+/// The tag-extraction sub-match runs through the existing
+/// variant-dispatch path (Phase 2.3-narrow handles match in async
+/// fn when no arm suspends — and the tag arms here produce i64
+/// literals, so none suspend). The if-chain then handles the
+/// per-arm suspending bodies via Phase 2.1a/b's state-splitting.
+///
+/// Requires all non-wildcard arms be `Pattern::Variant` (unit
+/// variants only — VariantWithBinding is Phase 2.3d).
+fn try_desugar_match_via_tag_extraction(
+    name: &str,
+    annotation: &Option<Type>,
+    scrutinee: &Box<Expr>,
+    arms: &[crate::ast::MatchArm],
+    span: crate::span::Span,
+) -> Option<Vec<Stmt>> {
+    let mut variant_arms: Vec<(crate::ast::Pattern, Expr, crate::span::Span)> = Vec::new();
+    let mut default_arm: Option<(Expr, crate::span::Span)> = None;
+    for (i, arm) in arms.iter().enumerate() {
+        let is_last = i == arms.len() - 1;
+        match &arm.pattern {
+            crate::ast::Pattern::Variant { .. } => {
+                variant_arms.push((
+                    arm.pattern.clone(),
+                    arm.body.clone(),
+                    arm.pattern_span,
+                ));
+            }
+            crate::ast::Pattern::Wildcard => {
+                if !is_last {
+                    return None;
+                }
+                default_arm = Some((arm.body.clone(), arm.pattern_span));
+            }
+            // Mixed shapes bail.
+            _ => return None,
+        }
+    }
+
+    // Build the tag-extraction match arms: each variant arm
+    // maps to its index (0..N-1); wildcard maps to N.
+    let tag_local = format!("__match_tag_{}", name);
+    let mut tag_match_arms: Vec<crate::ast::MatchArm> = Vec::new();
+    for (idx, (pat, _body, pat_span)) in variant_arms.iter().enumerate() {
+        tag_match_arms.push(crate::ast::MatchArm {
+            pattern: pat.clone(),
+            pattern_span: *pat_span,
+            body: Expr {
+                kind: ExprKind::Int(idx as i128),
+                span: *pat_span,
+            },
+        });
+    }
+    let wildcard_tag = variant_arms.len() as i128;
+    if default_arm.is_some() {
+        tag_match_arms.push(crate::ast::MatchArm {
+            pattern: crate::ast::Pattern::Wildcard,
+            pattern_span: span,
+            body: Expr {
+                kind: ExprKind::Int(wildcard_tag),
+                span,
+            },
+        });
+    }
+    let tag_match_expr = Expr {
+        kind: ExprKind::Match {
+            scrutinee: scrutinee.clone(),
+            arms: tag_match_arms,
+        },
+        span,
+    };
+
+    // Emit: let X: i64 = 0; let __match_tag_X: i64 = <tag match>;
+    let mut out = Vec::new();
+    out.push(Stmt::Let {
+        name: name.to_string(),
+        annotation: annotation.clone(),
+        expr: Expr { kind: ExprKind::Int(0), span },
+        span,
+    });
+    out.push(Stmt::Let {
+        name: tag_local.clone(),
+        annotation: Some(Type::I64),
+        expr: tag_match_expr,
+        span,
+    });
+
+    // Build innermost else first.
+    let mut current_else: Vec<Stmt> = if let Some((dexpr, dspan)) = default_arm {
+        vec![Stmt::Assign {
+            name: name.to_string(),
+            expr: dexpr,
+            span: dspan,
+        }]
+    } else {
+        Vec::new()
+    };
+
+    // Walk variant_arms in REVERSE to nest if-else properly.
+    for (idx, (_pat, arm_expr, arm_span)) in variant_arms.into_iter().enumerate().rev() {
+        let tag_var = Expr {
+            kind: ExprKind::Var(tag_local.clone()),
+            span: arm_span,
+        };
+        let lit = Expr {
+            kind: ExprKind::Int(idx as i128),
+            span: arm_span,
+        };
+        let cond = Expr {
+            kind: ExprKind::Binary {
+                op: BinaryOp::Eq,
+                left: Box::new(tag_var),
+                right: Box::new(lit),
             },
             span: arm_span,
         };

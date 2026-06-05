@@ -21318,34 +21318,106 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 2.3b — Variant patterns still rejected.
-    /// Phase 2.3c will handle enum-tag dispatch via the desugar
-    /// (or a post-typecheck rewrite); for now we expect a clear
-    /// future-sub-phase diagnostic.
+    /// Arc 8 v3.1 Phase 2.3c — Variant (enum) patterns in match
+    /// arms with suspends. Desugars via a tag-extraction sub-
+    /// match: original variant arms become an i64-returning
+    /// sub-match (`Color.Red then 0, ...`) that runs via the
+    /// existing variant-dispatch path, then the if-chain
+    /// dispatches on the synthesized tag. Variant scrutinees
+    /// must be inline expressions (v3.1 i64-only locals rule).
     #[test]
-    fn v31_phase23b_variant_pattern_match_with_suspend_rejected() {
+    fn v31_phase23c_variant_pattern_match_with_suspend_accepted() {
         let source = r#"
-            enum Color { Red, Green, Blue }
+            enum Action { Recv, Constant, Wild }
 
-            async fn pick(fd: i64, c: i64) -> i64 {
-              let col: Color = Color.Red;
-              let n: i64 = match col {
-                Color.Red then io_recv_async(fd, 64),
-                Color.Green then 1,
-                Color.Blue then 2
+            fn make_action(mode: i64) -> Action {
+              return match mode {
+                0 then Action.Recv,
+                1 then Action.Constant,
+                _ then Action.Wild
+              };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match make_action(mode) {
+                Action.Recv then io_recv_async(fd, 64),
+                Action.Constant then 333,
+                Action.Wild then 0 - 1
               };
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 2.3b must reject Variant patterns");
+        let c = compile_to_c(source).expect("Phase 2.3c variant patterns must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3c variant patterns must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3c — Variant + Wildcard mix. Wildcard
+    /// arm maps to a sentinel tag (= number of variant arms);
+    /// the if-chain's else-tail handles it.
+    #[test]
+    fn v31_phase23c_variant_with_wildcard_accepted() {
+        let source = r#"
+            enum Action { Recv, Send, Idle }
+
+            fn make_action(mode: i64) -> Action {
+              return match mode {
+                0 then Action.Recv,
+                1 then Action.Send,
+                _ then Action.Idle
+              };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match make_action(mode) {
+                Action.Recv then io_recv_async(fd, 64),
+                _ then 99
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3c variant+wildcard must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3c variant+wildcard must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3d (deferred) — Pattern::VariantWithBinding
+    /// still rejected. The binding `v` in `Result.Ok(v)` would need
+    /// to be relifted across the tag-extraction → if-chain split
+    /// (each arm body that references `v` needs its own re-binding).
+    #[test]
+    fn v31_phase23d_variant_with_binding_still_rejected() {
+        let source = r#"
+            enum Opt { Some(i64), None }
+
+            fn make_opt(mode: i64) -> Opt {
+              return match mode {
+                0 then Opt.Some(7),
+                _ then Opt.None
+              };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match make_opt(mode) {
+                Opt.Some(v) then io_recv_async(fd, 64),
+                Opt.None then 0
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 2.3c must defer VariantWithBinding");
         assert!(
             errors.iter().any(|e| {
                 let m = e.message.as_str();
-                m.contains("Phase 2.3a") || m.contains("unsupported pattern shape")
-                    || m.contains("match") || m.contains("must be i64")
+                m.contains("Phase 2.3") || m.contains("unsupported pattern shape")
+                    || m.contains("match") || m.contains("v3.1")
             }),
-            "expected unsupported-pattern diagnostic; got: {:?}",
+            "expected deferred-binding diagnostic; got: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
         );
     }

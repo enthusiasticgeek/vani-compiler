@@ -49,6 +49,22 @@
 > outputs (bool true/false, str=1/99, f=2.0). 4 new lib
 > tests (3 acceptance + 1 Variant-rejection).
 >
+> **Phase 2.3c ✅ COMPLETE 2026-06-04** (commit pending).
+> Variant (enum) patterns in match arms with suspends, via
+> a TAG-EXTRACTION SUB-MATCH approach. The original variant
+> arms become an i64-returning sub-match that runs through
+> the existing Phase 2.3-narrow variant-dispatch path;
+> then the if-chain dispatches on the synthesized i64 tag,
+> routing per-arm suspending bodies through Phase 2.1a/b's
+> state-splitting without new infrastructure. Supports
+> unit variants (no payload). Pattern::VariantWithBinding
+> deferred to Phase 2.3d (binding scope across the
+> tag-extraction → if-chain split). Caveat: variant
+> scrutinees must be inline expressions (i64-only locals
+> rule). examples/echo_match_variant.vani parity-green
+> across 3 modes. 3 new lib tests (2 acceptance + 1 binding
+> rejection).
+>
 > **🎉 v3.1 control-flow sugar — CAPABILITY-COMPLETE 2026-06-04.**
 > The compiler-driven `async fn → Task` transform handles
 > every common control-flow shape in vāṇī. Capstone:
@@ -56,9 +72,10 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.3c match arms — Variant + VariantWithBinding (~6-10h,
->   needs enum-tag metadata bridging or post-typecheck rewrite)
-> - 2.4 try keyword + Result propagation (~6-8h)
+> - 2.3d match arms — VariantWithBinding (~4-6h, binding
+>   scope across tag-extraction → if-chain split)
+> - 2.4 try keyword + Result propagation (~6-8h, depends
+>   on Phase 3 for non-i64 returns)
 > - 3 affine types across await — OwnedStr/Vec (~20-25h)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
@@ -413,11 +430,22 @@ needed by the acceptance example).
   Float scrutinees must be inline expressions (v3.1 i64-only
   param/local rule). 4 new lib tests + acceptance example.
 
-- **Phase 2.3c** (queued, ~6-10h) — `match` arms with
-  Variant / VariantWithBinding patterns. Needs enum-tag
-  metadata at desugar time (parse-time) OR post-typecheck
-  rewrite. Variant binding cases additionally inject a Let
-  for the destructured payload in the then_body.
+- **Phase 2.3c ✅ DONE 2026-06-04** — `match` arms with
+  unit-Variant patterns via tag-extraction sub-match. The
+  desugar synthesizes an i64-returning sub-match that runs
+  through the existing variant-dispatch path; the outer
+  if-chain dispatches on the synthesized tag. 3 new lib
+  tests + acceptance example.
+
+- **Phase 2.3d** (queued, ~4-6h) — `match` arms with
+  Pattern::VariantWithBinding (`Result.Ok(v) then EXPR`).
+  Needs binding scope across the tag-extraction → if-chain
+  split: each then-body that references `v` must re-bind
+  it via either a manual re-match or a parser-level binding-
+  hoist. Possible approach: in the then-body, prepend
+  `let v: T = match SCRUT { Pat.Variant(v) then v, _ then
+  default_v };` so the binding is reconstituted before the
+  arm body executes.
 
 - **Phase 2.4** (queued, ~6-8h) — `try expr` keyword + Result
   propagation through the state machine.
