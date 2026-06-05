@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3f ✅ COMPLETE 2026-06-04** (commit pending). Array
+> **Phase 3f ✅ COMPLETE 2026-06-04** (commit `3bbbe83`). Array
 > `[T; N]` locals in v3.1 async fns. Resolves the deferral from
 > Phase 3d. C backend's FieldAssign emits memcpy for Type::Array
 > values (`__t->arr = __v3_tmp_arr;` is invalid C; arrays decay to

@@ -165,7 +165,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3f — Array `[T; N]` locals + C backend memcpy
-  escape hatch** (commit pending). Resolves the deferral from
+  escape hatch** (commit `3bbbe83`). Resolves the deferral from
   Phase 3d. The C backend's FieldAssign for `Type::Array` now
   emits `memcpy(&lvalue, &v, sizeof(lvalue))` instead of
   `lvalue = v;`, sidestepping C's "arrays decay to pointers in
