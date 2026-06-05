@@ -304,6 +304,57 @@ pub fn emit_c(program: &TypedProgram) -> String {
     if !used_dyn_ifaces_forward.is_empty() {
         body.push('\n');
     }
+    // Phase 3e fix (and pre-existing: structs containing
+    // payloaded-enum fields): emit payloaded enum typedefs
+    // BEFORE struct typedefs so a struct field of type
+    // `Enum_<Name>` resolves at declaration time. The same
+    // typedef bodies are emitted later (see the duplicated
+    // block below) — tracked in `enum_typedefs_pre_emitted`
+    // so the second pass skips them. Assumes no enum payload
+    // depends on a struct (a true Struct-in-Enum case would
+    // need topological sort across both kinds; track via
+    // ARC8_V3_PLAN.md if hit).
+    let mut enum_typedefs_pre_emitted: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    {
+        let mut any_pre = false;
+        for decl in &program.enums {
+            if !enum_has_payload(decl) {
+                continue;
+            }
+            if enum_has_mixed_payloads(decl) {
+                body.push_str("typedef struct { int32_t tag; union {\n");
+                for (variant, pty) in decl.variants.iter().zip(decl.payload_types.iter()) {
+                    let Some(payload_ty) = pty.as_ref() else { continue; };
+                    let member = enum_variant_member(variant);
+                    let payload_decl = match payload_ty {
+                        Type::Array { .. } => format_declarator(payload_ty, &member),
+                        _ => format!("{} {}", c_element_storage(payload_ty), member),
+                    };
+                    body.push_str(&format!("    {};\n", payload_decl));
+                }
+                body.push_str(&format!("}} u; }} {};\n", enum_c_name(&decl.name)));
+                enum_typedefs_pre_emitted.insert(decl.name.clone());
+                any_pre = true;
+                continue;
+            }
+            let Some(payload_ty) = enum_common_payload_ty(decl) else { continue; };
+            let payload_decl = match &payload_ty {
+                Type::Array { .. } => format_declarator(&payload_ty, "payload"),
+                _ => format!("{} payload", c_type_name(&payload_ty)),
+            };
+            body.push_str(&format!(
+                "typedef struct {{ int32_t tag; {}; }} {};\n",
+                payload_decl,
+                enum_c_name(&decl.name)
+            ));
+            enum_typedefs_pre_emitted.insert(decl.name.clone());
+            any_pre = true;
+        }
+        if any_pre {
+            body.push('\n');
+        }
+    }
     // Emit user-declared struct typedefs. Topologically sort
     // first so a struct that references another by value
     // (direct field of `Struct(S)` or `[S; N]`) is emitted
@@ -519,6 +570,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let mut any_enum_emitted = false;
     for decl in &program.enums {
         if !enum_has_payload(decl) {
+            continue;
+        }
+        // Phase 3e fix: payloaded enum typedefs that were
+        // pre-emitted (before struct typedefs) so struct fields
+        // can reference them must be skipped here to avoid a
+        // duplicate-typedef compile error.
+        if enum_typedefs_pre_emitted.contains(&decl.name) {
             continue;
         }
         // Closure #283: mixed-payload-type enums lay out

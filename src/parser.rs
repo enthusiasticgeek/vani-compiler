@@ -131,8 +131,8 @@ impl Parser {
                         // default-init synthesizer can find the
                         // first unit variant for enum locals.
                         crate::ast::V31_ENUM_REGISTRY.with(|reg| {
-                            let variants: Vec<(String, bool)> = e.variants.iter()
-                                .map(|v| (v.name.clone(), v.payload.is_empty()))
+                            let variants: Vec<(String, Vec<Type>)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.clone()))
                                 .collect();
                             reg.borrow_mut().insert(e.name.clone(), variants);
                         });
@@ -440,8 +440,8 @@ impl Parser {
                         // the bare-enum branch above; covers the
                         // pub/kosh-decorated enum site.
                         crate::ast::V31_ENUM_REGISTRY.with(|reg| {
-                            let variants: Vec<(String, bool)> = e.variants.iter()
-                                .map(|v| (v.name.clone(), v.payload.is_empty()))
+                            let variants: Vec<(String, Vec<Type>)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.clone()))
                                 .collect();
                             reg.borrow_mut().insert(e.name.clone(), variants);
                         });
@@ -5412,7 +5412,8 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         // Parser stamps user-typed identifiers as Type::Struct(name)
         // before the checker's pre-pass resolves them to Type::Enum.
         // Both forms route through V31_ENUM_REGISTRY: if the name
-        // is a registered enum with a unit variant, allow it.
+        // is a registered enum AND at least one variant has all-
+        // v31-allowed payload types, the local is allowed.
         Type::Enum(name) | Type::Struct(name) => {
             v31_enum_default_variant(name).is_some()
         }
@@ -5420,20 +5421,31 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
     }
 }
 
-/// Phase 3c — Look up the first unit variant of `enum_name` in
-/// the V31_ENUM_REGISTRY. Returns `None` if the enum isn't
-/// registered (not lexically visible before the async fn) OR has
-/// no unit variants (all variants carry payloads).
-fn v31_enum_default_variant(enum_name: &str) -> Option<String> {
+/// Phase 3c/3e — Look up the first variant of `enum_name` whose
+/// payload types are ALL v3.1-allowed (i.e. each payload type
+/// `v31_local_type_allowed`). Returns the variant name and its
+/// payload types. Unit variants (empty payload) are preferred
+/// since they emit a simple FieldAccess; payloaded variants
+/// (Phase 3e) emit a MethodCall constructor with each payload
+/// recursively default-inited.
+///
+/// Returns `None` if the enum isn't registered (not lexically
+/// visible before the async fn) OR no variant has fully-allowed
+/// payloads.
+fn v31_enum_default_variant(enum_name: &str) -> Option<(String, Vec<Type>)> {
     crate::ast::V31_ENUM_REGISTRY.with(|reg| {
-        reg.borrow()
-            .get(enum_name)
-            .and_then(|variants| {
-                variants
-                    .iter()
-                    .find(|(_, is_unit)| *is_unit)
-                    .map(|(name, _)| name.clone())
-            })
+        let reg_ref = reg.borrow();
+        let variants = reg_ref.get(enum_name)?;
+        // Prefer unit variants first.
+        if let Some((name, _)) = variants.iter().find(|(_, p)| p.is_empty()) {
+            return Some((name.clone(), Vec::new()));
+        }
+        // Phase 3e — fall back to a payloaded variant whose
+        // payload types are all v31-allowed.
+        variants
+            .iter()
+            .find(|(_, p)| p.iter().all(v31_local_type_allowed))
+            .map(|(name, payload)| (name.clone(), payload.clone()))
     })
 }
 
@@ -5446,21 +5458,40 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         Type::F64 => ExprKind::Float(0.0),
         Type::Str | Type::OwnedStr => ExprKind::Str(String::new()),
         Type::Enum(name) | Type::Struct(name) => {
-            // Phase 3c — synthesize `<EnumName>.<FirstUnitVariant>`
-            // as `FieldAccess { object: Var(EnumName), field:
-            // FirstUnitVariant }`. The checker resolves this to a
-            // variant constructor. Matches both Type::Enum (post-
-            // checker resolution) and Type::Struct (parser stamp
-            // for user-typed identifiers before resolution). The
-            // validator already ensured a unit variant exists; if
-            // not, we fall through to `Int(0)` (unreachable).
-            if let Some(variant) = v31_enum_default_variant(name) {
-                ExprKind::FieldAccess {
-                    object: Box::new(Expr {
-                        kind: ExprKind::Var(name.clone()),
-                        span,
-                    }),
-                    field: variant,
+            // Phase 3c/3e — synthesize the default variant of the
+            // registered enum. Unit variants emit `FieldAccess`
+            // (`EnumName.Variant`); payloaded variants emit a
+            // `MethodCall` constructor (`EnumName.Variant(d0, d1,
+            // ...)`) where each `di` is the recursive default-init
+            // for the payload type. The validator already ensured
+            // a suitable variant exists; if not, we fall through
+            // to `Int(0)` (unreachable in correct flow).
+            if let Some((variant, payload_types)) = v31_enum_default_variant(name) {
+                let enum_var = Box::new(Expr {
+                    kind: ExprKind::Var(name.clone()),
+                    span,
+                });
+                if payload_types.is_empty() {
+                    // Unit variant — `EnumName.Variant`.
+                    ExprKind::FieldAccess {
+                        object: enum_var,
+                        field: variant,
+                    }
+                } else {
+                    // Phase 3e — payloaded variant. Synthesize
+                    // `EnumName.Variant(d0, d1, ...)` as a
+                    // MethodCall. Each payload arg recursively
+                    // calls `v31_default_init_expr` for its type.
+                    let args: Vec<Expr> = payload_types
+                        .iter()
+                        .map(|t| v31_default_init_expr(t, span))
+                        .collect();
+                    ExprKind::MethodCall {
+                        receiver: enum_var,
+                        method: variant,
+                        method_span: span,
+                        args,
+                    }
                 }
             } else {
                 ExprKind::Int(0)

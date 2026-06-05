@@ -218,20 +218,19 @@ thread_local! {
     /// flow / affine types come in Phases 2-3.
     pub(crate) static V31_TASK_REGISTRY: std::cell::RefCell<Vec<(StructDecl, Function)>> =
         const { std::cell::RefCell::new(Vec::new()) };
-    /// Arc 8 v3.1 Phase 3c — registry of enum decls visible to
-    /// the v3.1 desugar. Populated by parse_program as enum decls
-    /// are parsed; consulted by `v31_default_init_expr` to find
-    /// the first UNIT variant (no payload) for use as the
-    /// default-init value of an enum local in the task struct
-    /// constructor.
+    /// Arc 8 v3.1 Phase 3c/3e — registry of enum decls visible
+    /// to the v3.1 desugar. Populated by parse_program as enum
+    /// decls are parsed; consulted by `v31_default_init_expr`
+    /// to find the first variant suitable for default-init of an
+    /// enum local in the task struct constructor.
     ///
-    /// Maps `enum_name → Vec<(variant_name, is_unit)>` in
-    /// declaration order. `is_unit` = `payload.is_empty()`. The
-    /// default-init synthesizer picks the first variant where
-    /// `is_unit == true`; if no unit variant exists, the type
-    /// gate rejects the local (Phase 3d will handle payloaded-
-    /// only enums via a richer constructor synthesis).
-    pub(crate) static V31_ENUM_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, bool)>>> =
+    /// Maps `enum_name → Vec<(variant_name, payload_types)>` in
+    /// declaration order. Empty `payload_types` means unit variant
+    /// (preferred for default-init since the synthesizer can emit
+    /// a simple FieldAccess). Phase 3e extends to payloaded
+    /// variants by recursing into each payload type's own
+    /// default-init.
+    pub(crate) static V31_ENUM_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, Vec<Type>)>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
 }
 

@@ -12,20 +12,20 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c
-shipped — compiler-driven `async fn → Task` transform
+2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c +
+3e shipped — compiler-driven `async fn → Task` transform
 handles linear bodies + non-suspending control flow +
 suspend-in-branch state-splitting + fall-through merge
 state + nested ifs + ANF lifting + match in async fn +
 match arms WITH suspends (Int + Bool + Str + Float +
 Variant + VariantWithBinding + Wildcard) + loops with
 suspend inside + break/continue inside loops + non-i64
-locals (bool / f64 / Str / OwnedStr / Enum-with-unit-
-variant). 20 v3.1 acceptance examples parity-green.
-**v3.1 locals across await: i64 + bool + f64 + Str +
-OwnedStr + Enum.** Phase 3d next (Struct/Vec/Array);
-Phase 2.4 (try) needs broader Phase 3 for non-i64
-returns; macOS port (Phase 5) for later**).
+locals (bool / f64 / Str / OwnedStr / Enum-any-variant).
+21 v3.1 acceptance examples parity-green. **v3.1 locals
+across await: i64 + bool + f64 + Str + OwnedStr + Enum
+(unit OR payloaded).** Phase 3d next (Struct/Vec/Array);
+Phase 2.4 (try) needs Phase 3 for non-i64 returns; macOS
+port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -163,6 +163,33 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3e — payloaded-only enum locals + C backend
+  enum-typedef ordering fix** (commit pending). Extends
+  Phase 3c's enum support to enums that have NO unit variant.
+  The default-init synthesizer picks the first variant whose
+  payload types are all v31-allowed and emits
+  `EnumName.Variant(d0, d1, ...)` as a MethodCall, where each
+  `di` is the recursive default-init for the payload type
+  (i64 → 0, bool → false, f64 → 0.0, Str/OwnedStr → "", nested
+  enum → recurses).
+  - `V31_ENUM_REGISTRY` upgraded to store full payload types
+    (was just `is_unit`); `v31_enum_default_variant` returns
+    `(name, payload_types)`.
+  - C backend FIX: payloaded enum typedefs now emit BEFORE
+    struct typedefs. Pre-existing bug — any user struct with
+    a payloaded-enum field (and now the synthesized v3.1
+    Task struct) couldn't compile on C because the enum
+    typedef came AFTER the struct that depended on it.
+    Forward-pass tracks pre-emitted enum names so the original
+    later block skips duplicate emit.
+  - `examples/echo_p3e_payloaded_enum.vani` — `enum Action {
+    Recv(i64), Skip(i64) }` (no unit variants). Two modes
+    byte-identical: Recv(64) → recv 5 bytes "abcde", Skip(444)
+    → 444. Both LLVM + C.
+  - 2 new acceptance lib tests (payloaded enum acceptance +
+    bool-payload variant); previous Phase 3c rejection test
+    flipped to acceptance.
 
 - **v3.1 Phase 3c — Enum locals (with unit variant)** (commit
   `af1d274`). Third slice of Phase 3. Adds `V31_ENUM_REGISTRY`

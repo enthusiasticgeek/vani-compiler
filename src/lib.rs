@@ -21587,34 +21587,65 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 3c — Enum with NO unit variants still
-    /// rejected (no clean default-init available). User would
-    /// have to refactor to add a unit variant or use a different
-    /// type.
+    /// Arc 8 v3.1 Phase 3e — Enum with only payloaded variants
+    /// now accepted (was rejected in Phase 3c). The default-init
+    /// synthesizer picks the first variant whose payload types
+    /// are all v3.1-allowed and emits `EnumName.Variant(d0, d1,
+    /// ...)` where each `di` is the recursive default-init.
     #[test]
-    fn v31_phase3c_enum_no_unit_variant_still_rejected() {
+    fn v31_phase3e_enum_with_only_payloaded_variants_accepted() {
         let source = r#"
             enum AllPayload { A(i64), B(i64) }
 
-            async fn pick(fd: i64) -> i64 {
-              let x: AllPayload = AllPayload.A(7);
-              let n: i64 = io_recv_async(fd, 64);
+            fn make_x(mode: i64) -> AllPayload {
+              return match mode {
+                0 then AllPayload.A(7),
+                _ then AllPayload.B(99)
+              };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let x: AllPayload = make_x(mode);
+              let n: i64 = match x {
+                AllPayload.A(v) then io_recv_async(fd, v + 10),
+                AllPayload.B(v) then v + 1
+              };
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err(
-            "Phase 3c must reject enums without a unit variant (no default-init)"
-        );
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 3") || m.contains("must be i64")
-                    || m.contains("AllPayload")
-            }),
-            "expected gate diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        let c = compile_to_c(source).expect("Phase 3e payloaded enum must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3e payloaded enum must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3e — Recursive payload-default. If the
+    /// first variant's payload includes a non-i64 v31-allowed
+    /// type (bool / f64 / Str), the recursive default-init Expr
+    /// must use the correct per-type default value.
+    #[test]
+    fn v31_phase3e_payloaded_enum_with_bool_payload_accepted() {
+        let source = r#"
+            enum Flagged { Marked(bool) }
+
+            fn make_f(mode: i64) -> Flagged {
+              return Flagged.Marked(mode > 0);
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let x: Flagged = make_f(mode);
+              let n: i64 = match x {
+                Flagged.Marked(v) then io_recv_async(fd, 64)
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3e bool-payload enum must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3e bool-payload enum must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
     /// Arc 8 v3.1 Phase 3c — Struct locals (not enum, but actual

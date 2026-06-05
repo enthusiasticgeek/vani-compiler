@@ -1,0 +1,102 @@
+// Arc 8 v3.1 Phase 3e — payloaded-only enum locals in async fn.
+//
+// Phase 3c shipped unit-variant enum support (`enum Action { Recv,
+// Constant, Wild }`). Phase 3e extends to enums whose variants all
+// carry payloads (`enum Result { Ok(i64), Err(i64) }`). The default-
+// init synthesizer picks the first variant whose payload types are
+// all v3.1-allowed (i64/bool/f64/Str/OwnedStr/enum-with-default)
+// and emits `EnumName.Variant(d0, d1, ...)` recursively.
+//
+// What's covered:
+//   - Enums with only payloaded variants — Phase 3c rejected these.
+//   - Mixed unit + payloaded — Phase 3c always preferred unit; same
+//     here.
+//   - Recursive payload defaults — i64 → 0, bool → false, f64 → 0.0,
+//     Str → "", OwnedStr → "", nested enum → recurses into its own
+//     default variant.
+//
+// What's still deferred:
+//   - Enum payloads of Struct / Vec / Array types (Phase 3d-e bridge).
+//
+// Companion bug-fix (in this commit): payloaded enum typedefs now
+// emit BEFORE struct typedefs in the C backend, so any struct
+// (including the synthesized v3.1 Task struct) that has an enum
+// field resolves correctly. Pre-existing bug surfaced by Phase 3e
+// (user structs containing payloaded enum fields hit the same
+// issue).
+//
+// build & run:
+//   intentc run examples/echo_p3e_payloaded_enum.vani                # LLVM
+//   intentc run examples/echo_p3e_payloaded_enum.vani --backend=c    # C
+
+intent "Phase 3e — payloaded-only enum local";
+
+enum Action {
+  Recv(i64),    // payload = how many bytes to recv
+  Skip(i64)    // payload = sentinel value to return
+}
+
+fn make_action(mode: i64) -> Action {
+  return match mode {
+    0 then Action.Recv(64),
+    _ then Action.Skip(444)
+  };
+}
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Enum with NO unit variants. Default-init picks the first
+  // variant (Action.Recv) and uses recursive defaults for its
+  // payload — `Action.Recv(0)` initially. The state machine
+  // overwrites this with `make_action(mode)` before the match
+  // runs.
+  let act: Action = make_action(mode);
+  let n: i64 = match act {
+    Action.Recv(cap) then io_recv_async(fd, cap),
+    Action.Skip(v) then v
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcde");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 -> Recv(64) -> io_recv_async(fd, 64), recv "abcde" = 5 bytes
+  let t0: Task__pick = pick(cfd, 0);
+  let r0: i64 = drive(ep, mut ref t0);
+  print "mode=0 (Recv(64)):", r0;
+
+  // mode=1 -> Skip(444) -> 444 (no suspend)
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "mode=1 (Skip(444)):", r1;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

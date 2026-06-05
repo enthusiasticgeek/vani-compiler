@@ -97,6 +97,16 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3e ✅ COMPLETE 2026-06-04** (commit pending). Payloaded-
+> only enum locals in v3.1 async fns. Default-init picks the first
+> variant whose payload types are all v31-allowed and emits
+> `EnumName.Variant(d0, d1, ...)` with recursive payload defaults.
+> Companion C-backend fix: payloaded enum typedefs emit BEFORE
+> struct typedefs so synthesized task struct (and any user struct)
+> with an enum field compiles on C. echo_p3e_payloaded_enum.vani
+> parity-green. 2 new acceptance lib tests + 1 prior rejection
+> flipped.
+>
 > **Phase 3c ✅ COMPLETE 2026-06-04** (commit `af1d274`). Enum
 > locals in v3.1 async fns. Adds `V31_ENUM_REGISTRY` populated
 > by parse_program as enum decls are parsed; the v3.1 type gate
@@ -123,10 +133,8 @@
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3d/e for non-i64 returns + Result type)
+>   on Phase 3d for non-i64 returns)
 > - 3d: Struct / Vec / Array locals across await (~10-15h)
-> - 3e: Payloaded-enum locals (allows enums without a unit
->   variant) (~4-6h, needs default-value design for payload)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
