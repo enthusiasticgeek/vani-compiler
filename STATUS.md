@@ -167,7 +167,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3-returns — non-i64 async fn return types**
-  (commit pending). Lifts the historical i64-only return-type
+  (commit `e6f747f`). Lifts the historical i64-only return-type
   rule mirroring the locals lift across Phases 3a-3f. ABI
   design: for T == i64 the poll fn keeps its historical return
   contract (returns the value directly with -2/-1 sentinels).

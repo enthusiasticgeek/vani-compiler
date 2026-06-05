@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3-returns ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 3-returns ✅ COMPLETE 2026-06-04** (commit `e6f747f`).
 > Lifts the i64-only async fn return-type rule. ABI split: i64
 > returns keep the historical poll-fn contract (return value
 > directly); non-i64 returns route the value through a
