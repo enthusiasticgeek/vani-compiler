@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3e ✅ COMPLETE 2026-06-04** (commit pending). Payloaded-
+> **Phase 3e ✅ COMPLETE 2026-06-04** (commit `40c4047`). Payloaded-
 > only enum locals in v3.1 async fns. Default-init picks the first
 > variant whose payload types are all v31-allowed and emits
 > `EnumName.Variant(d0, d1, ...)` with recursive payload defaults.

@@ -165,7 +165,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3e — payloaded-only enum locals + C backend
-  enum-typedef ordering fix** (commit pending). Extends
+  enum-typedef ordering fix** (commit `40c4047`). Extends
   Phase 3c's enum support to enums that have NO unit variant.
   The default-init synthesizer picks the first variant whose
   payload types are all v31-allowed and emits
