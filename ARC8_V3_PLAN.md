@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 2.4 ✅ COMPLETE 2026-06-04** (commit pending). `try EXPR`
+> **Phase 2.4 ✅ COMPLETE 2026-06-04** (commit `72fd8e7`). `try EXPR`
 > keyword in v3.1 async fn bodies. Parse-time desugar runs FIRST in
 > try_v31_transform (before ANF + validator). Lowers
 > `let X: T = try EXPR;` into a let-store + early-return-on-Err

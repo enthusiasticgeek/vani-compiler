@@ -167,7 +167,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 2.4 — `try EXPR` keyword in async fn bodies**
-  (commit pending). Parse-time desugar
+  (commit `72fd8e7`). Parse-time desugar
   `desugar_try_in_v31_body` runs FIRST in `try_v31_transform`
   (before ANF + validator). Lowers `let X: T = try EXPR;` into
   a multi-stmt sequence:
