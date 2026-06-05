@@ -165,7 +165,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3c — Enum locals (with unit variant)** (commit
-  pending). Third slice of Phase 3. Adds `V31_ENUM_REGISTRY`
+  `af1d274`). Third slice of Phase 3. Adds `V31_ENUM_REGISTRY`
   thread-local populated as `parse_program` walks enum decls
   (both bare-enum and pub/kosh-decorated decl sites). The
   type gate matches `Type::Enum(name)` AND `Type::Struct(name)`

@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3c ✅ COMPLETE 2026-06-04** (commit pending). Enum
+> **Phase 3c ✅ COMPLETE 2026-06-04** (commit `af1d274`). Enum
 > locals in v3.1 async fns. Adds `V31_ENUM_REGISTRY` populated
 > by parse_program as enum decls are parsed; the v3.1 type gate
 > matches both `Type::Enum(name)` and `Type::Struct(name)`
