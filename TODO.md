@@ -8,7 +8,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
   platform port (2 phases). **Phase 0 + 1 + 2 narrow +
   2.1a + 2.1b + 2.1c + 2.2 + 2.3-narrow + 2.3a + 2.3b + 2.3c +
-  2.3d + 2.5 + 2.5b + 3a + 3b + 3c + 3d + 3e + 3f +
+  2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b + 3c + 3d + 3e + 3f +
   3-returns ✅ COMPLETE 2026-06-04** — compiler-driven
   `async fn → Task` transform handles linear bodies +
   non-suspending control flow + suspend-in-branch state-
@@ -24,12 +24,11 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   `7566ab8`, `b1b8113`, `22fc622`, `d3a0af3`, `a77b799`,
   `4702cb6`, `7a19b68`, `eb2a8af`, `cc8c8de`, `9fb16dc`,
   `754c163`, `defde20`, `af1d274`, `40c4047`, `64c93b0`,
-  `3bbbe83`, plus pending 3-returns. **v3.1 affine-types
-  across the entire async-fn boundary: locals + returns +
-  params (params unchanged — still i64-only).** Phase 2.4
-  (try) NOW UNBLOCKED. **Next session recommended:
-  Phase 2.4 (try keyword + Result, ~6-8h)** or Phase 5
-  (macOS kqueue port, ~10-15h).
+  `3bbbe83`, `e6f747f`, plus pending 2.4. **v3.1
+  feature-complete: control-flow + non-i64 locals + non-i64
+  returns + `try` keyword for Result propagation. Params
+  remain i64-only.** **Next session recommended: Phase 5
+  (macOS kqueue port, ~10-15h)** or Phase 4 generics arc.
 - [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
   session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
   Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped

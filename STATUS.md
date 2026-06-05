@@ -12,21 +12,21 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c +
-3d + 3e + 3f + 3-returns shipped — compiler-driven
+2.3a + 2.3b + 2.3c + 2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b +
+3c + 3d + 3e + 3f + 3-returns shipped — compiler-driven
 `async fn → Task` transform handles linear bodies +
 non-suspending control flow + suspend-in-branch state-
 splitting + fall-through merge state + nested ifs + ANF
 lifting + match in async fn + match arms WITH suspends
 (Int + Bool + Str + Float + Variant + VariantWithBinding
 + Wildcard) + loops with suspend inside + break/continue
-inside loops + non-i64 LOCALS (bool / f64 / Str / OwnedStr
-/ Enum / Vec / Struct / Array) + non-i64 RETURN TYPES
-(via `__result: T` field + status-only poll ABI).
-24 v3.1 acceptance examples parity-green. **v3.1 affine
-locals + returns: ALL major composite types shippable
-ACROSS the entire async-fn boundary.** Phase 2.4 (try)
-NOW UNBLOCKED — depends only on Result type. macOS
+inside loops + **`try EXPR` keyword for Result propagation**
++ non-i64 LOCALS (bool / f64 / Str / OwnedStr / Enum /
+Vec / Struct / Array) + non-i64 RETURN TYPES (via
+`__result: T` field + status-only poll ABI).
+25 v3.1 acceptance examples parity-green. **v3.1 affine
++ Result types across the entire async-fn boundary
+(locals + returns + try-propagation).** macOS
 port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -165,6 +165,33 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 2.4 — `try EXPR` keyword in async fn bodies**
+  (commit pending). Parse-time desugar
+  `desugar_try_in_v31_body` runs FIRST in `try_v31_transform`
+  (before ANF + validator). Lowers `let X: T = try EXPR;` into
+  a multi-stmt sequence:
+  - `let __try_X_<n>: ResultType = EXPR;`
+  - `if match __try_X_<n> { ResultType.Ok(_) then 0, _ then 1
+    } == 1 { /* early-return propagation */ }`
+  - `let X: T = match __try_X_<n> { ResultType.Ok(v) then v,
+    _ then 0 };`
+
+  Early-return path uses Phase 3-returns ABI for non-i64
+  returns (`__t.__result = __try_X; return 0;`) so the
+  Verbatim-block processing doesn't hit the i64-vs-T type
+  mismatch. Companion `rewrite_vars_in_stmt` fix: added the
+  missing `Stmt::FieldAssign` case so the synthesized
+  FieldAssign's `value` gets rewritten too (`Var(__try_X)` →
+  `__t.__try_X`).
+  - Requires return type to be a registered enum with at
+    least one payloaded variant (the Ok arm).
+  - `examples/echo_p24_try_keyword.vani` — `try maybe_size(mode)`
+    in fetch fn. Two modes byte-identical: mode=0 succeeds →
+    Ok(2) (recv "ok"); mode=99 propagates → Err(-99) WITHOUT
+    entering io_recv_async.
+  - 3 new lib tests (try-accepted, i64-legacy-still-works,
+    non-enum-rejected).
 
 - **v3.1 Phase 3-returns — non-i64 async fn return types**
   (commit `e6f747f`). Lifts the historical i64-only return-type

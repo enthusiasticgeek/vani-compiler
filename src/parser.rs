@@ -5634,6 +5634,231 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
     Expr { kind, span }
 }
 
+/// Phase 2.4 — desugar `let X: T = try EXPR;` in v3.1 async fn
+/// bodies into a multi-stmt sequence that propagates Err early
+/// and extracts the Ok payload. See `try_v31_transform` for the
+/// full lowering shape.
+///
+/// The desugar requires:
+///   - `return_type` is a registered enum (in V31_ENUM_REGISTRY)
+///     OR `Type::Struct(name)` whose name is in the registry.
+///   - The enum has at least one variant with a payload (the
+///     "Ok" arm); we use its first payload type as T (so the
+///     LET's annotation must agree).
+///
+/// Bails with a clean diagnostic if the return type isn't an
+/// enum or the enum shape doesn't match.
+fn desugar_try_in_v31_body(
+    body: &[Stmt],
+    return_type: &Type,
+) -> Result<Vec<Stmt>, Diagnostic> {
+    // Fast path: no `try` anywhere → return body unchanged.
+    let has_try = body.iter().any(|s| match s {
+        Stmt::Let { expr, .. } => matches!(expr.kind, ExprKind::Try { .. }),
+        _ => false,
+    });
+    if !has_try {
+        return Ok(body.to_vec());
+    }
+    // Resolve return type to an enum registered in V31_ENUM_REGISTRY.
+    let enum_name = match return_type {
+        Type::Enum(n) | Type::Struct(n) => n.clone(),
+        _ => {
+            let span = body.first().map(|s| match s {
+                Stmt::Let { span, .. } => *span,
+                _ => crate::span::Span::new(0, 0),
+            }).unwrap_or(crate::span::Span::new(0, 0));
+            return Err(Diagnostic::new(
+                span,
+                format!(
+                    "v3.1 async fn uses `try` but return type {:?} is not an enum — \
+                     `try` requires the async fn to return a Result-like enum",
+                    return_type
+                ),
+            ));
+        }
+    };
+    let variants = crate::ast::V31_ENUM_REGISTRY.with(|reg| reg.borrow().get(&enum_name).cloned());
+    let Some(variants) = variants else {
+        let span = body.first().map(|s| match s {
+            Stmt::Let { span, .. } => *span,
+            _ => crate::span::Span::new(0, 0),
+        }).unwrap_or(crate::span::Span::new(0, 0));
+        return Err(Diagnostic::new(
+            span,
+            format!(
+                "v3.1 async fn uses `try` but return type `{}` is not a registered \
+                 enum (must be lexically declared before the async fn)",
+                enum_name
+            ),
+        ));
+    };
+    // Find the first payloaded variant — that's the "Ok" arm
+    // (extract its payload as T).
+    let ok_variant = variants.iter().find(|(_, p)| !p.is_empty());
+    let Some((ok_name, _ok_payload)) = ok_variant else {
+        let span = body.first().map(|s| match s {
+            Stmt::Let { span, .. } => *span,
+            _ => crate::span::Span::new(0, 0),
+        }).unwrap_or(crate::span::Span::new(0, 0));
+        return Err(Diagnostic::new(
+            span,
+            format!(
+                "v3.1 async fn uses `try` but return type enum `{}` has no \
+                 payloaded variant — `try` needs an Ok-like variant to extract",
+                enum_name
+            ),
+        ));
+    };
+    let ok_name = ok_name.clone();
+
+    let mut out: Vec<Stmt> = Vec::new();
+    let mut counter: usize = 0;
+    for s in body {
+        match s {
+            Stmt::Let {
+                name: let_name,
+                annotation,
+                expr,
+                span,
+            } if matches!(expr.kind, ExprKind::Try { .. }) => {
+                let ExprKind::Try { inner } = &expr.kind else { unreachable!() };
+                let n = counter;
+                counter += 1;
+                let try_local = format!("__try_{}_{}", let_name, n);
+                let try_local_span = *span;
+                let pat_binding = format!("__pat_{}_{}", let_name, n);
+
+                // 1) let __try_X_<n>: ResultType = EXPR;
+                out.push(Stmt::Let {
+                    name: try_local.clone(),
+                    annotation: Some(return_type.clone()),
+                    expr: (**inner).clone(),
+                    span: try_local_span,
+                });
+
+                // 2) if (match __try_X_<n> { Enum.Ok(_) then 0, _ then 1 }) == 1 {
+                //      return __try_X_<n>;
+                //    }
+                let is_err_match = Expr {
+                    kind: ExprKind::Match {
+                        scrutinee: Box::new(Expr {
+                            kind: ExprKind::Var(try_local.clone()),
+                            span: try_local_span,
+                        }),
+                        arms: vec![
+                            crate::ast::MatchArm {
+                                pattern: crate::ast::Pattern::VariantWithBinding {
+                                    enum_name: enum_name.clone(),
+                                    variant: ok_name.clone(),
+                                    binding: format!("__discard_ok_{}", n),
+                                },
+                                pattern_span: try_local_span,
+                                body: Expr { kind: ExprKind::Int(0), span: try_local_span },
+                            },
+                            crate::ast::MatchArm {
+                                pattern: crate::ast::Pattern::Wildcard,
+                                pattern_span: try_local_span,
+                                body: Expr { kind: ExprKind::Int(1), span: try_local_span },
+                            },
+                        ],
+                    },
+                    span: try_local_span,
+                };
+                let cond = Expr {
+                    kind: ExprKind::Binary {
+                        op: BinaryOp::Eq,
+                        left: Box::new(is_err_match),
+                        right: Box::new(Expr { kind: ExprKind::Int(1), span: try_local_span }),
+                    },
+                    span: try_local_span,
+                };
+                // The early-return propagates the Err. For non-
+                // i64 async fn return types, route through
+                // `__t.__result` + `return 0` (mirrors what the
+                // synthesizer's Seg::Return emits) so the
+                // Verbatim-block processing doesn't hit the
+                // i64-vs-T type mismatch. For i64 returns, plain
+                // `return __try_X` is correct since the legacy
+                // ABI returns the value directly.
+                let early_return = if matches!(return_type, Type::I64) {
+                    vec![Stmt::Return {
+                        expr: Expr {
+                            kind: ExprKind::Var(try_local.clone()),
+                            span: try_local_span,
+                        },
+                        span: try_local_span,
+                    }]
+                } else {
+                    vec![
+                        Stmt::FieldAssign {
+                            object: Expr {
+                                kind: ExprKind::Var("__t".to_string()),
+                                span: try_local_span,
+                            },
+                            field: "__result".to_string(),
+                            field_span: try_local_span,
+                            value: Expr {
+                                kind: ExprKind::Var(try_local.clone()),
+                                span: try_local_span,
+                            },
+                            span: try_local_span,
+                        },
+                        Stmt::Return {
+                            expr: Expr { kind: ExprKind::Int(0), span: try_local_span },
+                            span: try_local_span,
+                        },
+                    ]
+                };
+                out.push(Stmt::If {
+                    cond,
+                    then_body: early_return,
+                    else_body: Vec::new(),
+                    span: try_local_span,
+                });
+
+                // 3) let X: T = match __try_X_<n> { Enum.Ok(<pat>) then <pat>, _ then 0 };
+                let extract_match = Expr {
+                    kind: ExprKind::Match {
+                        scrutinee: Box::new(Expr {
+                            kind: ExprKind::Var(try_local.clone()),
+                            span: try_local_span,
+                        }),
+                        arms: vec![
+                            crate::ast::MatchArm {
+                                pattern: crate::ast::Pattern::VariantWithBinding {
+                                    enum_name: enum_name.clone(),
+                                    variant: ok_name.clone(),
+                                    binding: pat_binding.clone(),
+                                },
+                                pattern_span: try_local_span,
+                                body: Expr {
+                                    kind: ExprKind::Var(pat_binding.clone()),
+                                    span: try_local_span,
+                                },
+                            },
+                            crate::ast::MatchArm {
+                                pattern: crate::ast::Pattern::Wildcard,
+                                pattern_span: try_local_span,
+                                body: Expr { kind: ExprKind::Int(0), span: try_local_span },
+                            },
+                        ],
+                    },
+                    span: try_local_span,
+                };
+                out.push(Stmt::Let {
+                    name: let_name.clone(),
+                    annotation: annotation.clone(),
+                    expr: extract_match,
+                    span: *span,
+                });
+            }
+            other => out.push(other.clone()),
+        }
+    }
+    Ok(out)
+}
+
 /// Substitute every `Var(target)` in `expr` with `replacement`.
 /// Walks all common expression shapes (binary, unary, call,
 /// match, method-call, tuple, struct lit, field access, etc).
@@ -6306,6 +6531,22 @@ fn rewrite_vars_in_stmt(
             expr: rewrite_vars_to_fields(expr, rename_set, obj_name),
             span: *span,
         },
+        // Phase 2.4 — pre-existing FieldAssign (e.g. emitted by
+        // the try-desugar's early-return path: `__t.__result =
+        // __try_X;`) needs its `value` rewritten so any local-
+        // var refs inside it route to `__t.<name>`. Without this,
+        // the FieldAssign falls through the default `other =>
+        // other.clone()` arm and `Var("__try_X")` stays as a
+        // bare local reference that doesn't exist in scope.
+        Stmt::FieldAssign { object, field, field_span, value, span } => {
+            Stmt::FieldAssign {
+                object: rewrite_vars_to_fields(object, rename_set, obj_name),
+                field: field.clone(),
+                field_span: *field_span,
+                value: rewrite_vars_to_fields(value, rename_set, obj_name),
+                span: *span,
+            }
+        }
         Stmt::Assign { name, expr, span } => {
             // If the LHS is an outer-scope name, this becomes
             // a FieldAssign on __t.<name>. Otherwise (inner
@@ -6482,6 +6723,28 @@ pub(crate) fn try_v31_transform(
     if !body_uses_io_async(body) {
         return None; // Caller falls through to v1 desugar.
     }
+    // Phase 2.4 — `try EXPR` desugar for v3.1 async fn bodies.
+    // Runs FIRST so subsequent passes (ANF, validator,
+    // state-machine collector) see only Match expressions —
+    // never the Try keyword. Lowers
+    //   let X: T = try EXPR;
+    // into
+    //   let __try_X_<n>: ResultType = EXPR;
+    //   if match __try_X_<n> { ResultType.Ok(_) then 0, _ then 1 } == 1 {
+    //     return __try_X_<n>;          // propagate Err
+    //   }
+    //   let X: T = match __try_X_<n> { ResultType.Ok(v) then v, _ then 0 };
+    // where ResultType is the async fn's return type (must be a
+    // registered enum with a payloaded first variant — the "Ok"
+    // arm — and any second variant as the "Err" propagation case).
+    let try_desugared_body: Vec<Stmt>;
+    let body = match desugar_try_in_v31_body(body, return_type) {
+        Ok(v) => {
+            try_desugared_body = v;
+            try_desugared_body.as_slice()
+        }
+        Err(d) => return Some(Err(d)),
+    };
     // Phase 2.2 — ANF lift nested io_*_async calls out of
     // compound expressions into fresh Let bindings BEFORE
     // running the validator + collector. The lifted body has

@@ -1,0 +1,109 @@
+// Arc 8 v3.1 Phase 2.4 — `try EXPR` keyword in async fn bodies.
+//
+// Phase 2.4 unlocks the `try EXPR;` shorthand for Result-style
+// error propagation inside v3.1 async fns. The parse-time
+// desugar (`desugar_try_in_v31_body`) lowers:
+//
+//   let X: T = try EXPR;
+//
+// into:
+//
+//   let __try_X_<n>: ResultType = EXPR;
+//   if match __try_X_<n> { ResultType.Ok(_) then 0, _ then 1 } == 1 {
+//     // For non-i64 return types (Phase 3-returns ABI):
+//     __t.__result = __try_X_<n>;
+//     return 0;
+//     // For i64 returns (legacy ABI):
+//     // return __try_X_<n>;
+//   }
+//   let X: T = match __try_X_<n> { ResultType.Ok(v) then v, _ then 0 };
+//
+// Depends on Phase 3-returns (e6f747f): the async fn must
+// return the same Result-like enum so the early-return
+// typechecks.
+//
+// Requirements:
+//   - Return type is a registered enum (V31_ENUM_REGISTRY).
+//   - The enum has at least one payloaded variant (used as Ok).
+//   - The first payloaded variant's first payload is T (the
+//     extracted value type; LET annotation should agree).
+//
+// build & run:
+//   intentc run examples/echo_p24_try_keyword.vani                # LLVM
+//   intentc run examples/echo_p24_try_keyword.vani --backend=c    # C
+
+intent "Phase 2.4 — try keyword in async fn (Result propagation)";
+
+enum FetchResult { Ok(i64), Err(i64) }
+
+fn maybe_size(mode: i64) -> FetchResult {
+  return match mode {
+    0 then FetchResult.Ok(64),    // Ok path: 64 bytes
+    1 then FetchResult.Ok(32),    // Ok path: 32 bytes
+    _ then FetchResult.Err(0 - 99) // Err path: propagate
+  };
+}
+
+async fn fetch(fd: i64, mode: i64) -> FetchResult {
+  // Phase 2.4 — `try maybe_size(mode)` desugars to the
+  // multi-stmt sequence above. If maybe_size returns Err, the
+  // async fn early-returns the Err WITHOUT entering the
+  // suspend below.
+  let size: i64 = try maybe_size(mode);
+  let n: i64 = io_recv_async(fd, size);
+  return FetchResult.Ok(n);
+}
+
+fn drive(ep: i64, t: mut ref Task__fetch) -> FetchResult {
+  while true {
+    let r: i64 = __poll_fetch(t);
+    if r == 0 { return t.__result; }       // Ready
+    if r == 0 - 1 { return FetchResult.Err(0 - 1); } // poll Error
+    let _ = epoll_wait_one(ep, 1000);      // Pending → wait
+  }
+  return FetchResult.Err(0);
+}
+
+fn result_to_i64(r: FetchResult) -> i64 {
+  return match r {
+    FetchResult.Ok(v) then v,
+    FetchResult.Err(e) then e
+  };
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ok");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 — try succeeds (size=64), recv returns 2 bytes "ok",
+  // async fn returns Ok(2).
+  let t0: Task__fetch = fetch(cfd, 0);
+  let r0: FetchResult = drive(ep, mut ref t0);
+  print "fetch(0) (try-succeeds):", result_to_i64(r0);
+
+  // mode=99 — try propagates Err(-99) WITHOUT calling
+  // io_recv_async (the early-return fires before the suspend).
+  let t9: Task__fetch = fetch(cfd, 99);
+  let r9: FetchResult = drive(ep, mut ref t9);
+  print "fetch(99) (try-propagates):", result_to_i64(r9);
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

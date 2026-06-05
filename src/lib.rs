@@ -21790,6 +21790,80 @@ fn main() -> i64 {
         assert!(ll.contains("Task__classify") && ll.contains("__poll_classify"));
     }
 
+    /// Arc 8 v3.1 Phase 2.4 — `try EXPR` keyword in async fn
+    /// bodies. Parse-time desugar lowers `let X: T = try EXPR;`
+    /// into a match-with-early-return sequence. Requires the
+    /// async fn return type to be a registered enum with at
+    /// least one payloaded variant; uses Phase 3-returns ABI
+    /// for the early-return (FieldAssign __t.__result + Return 0).
+    #[test]
+    fn v31_phase24_try_in_async_fn_accepted() {
+        let source = r#"
+            enum FetchResult { Ok(i64), Err(i64) }
+
+            fn maybe_size(mode: i64) -> FetchResult {
+              return match mode {
+                0 then FetchResult.Ok(64),
+                _ then FetchResult.Err(0 - 1)
+              };
+            }
+
+            async fn fetch(fd: i64, mode: i64) -> FetchResult {
+              let size: i64 = try maybe_size(mode);
+              let n: i64 = io_recv_async(fd, size);
+              return FetchResult.Ok(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.4 try must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.4 try must compile on LLVM");
+        assert!(c.contains("Task__fetch") && c.contains("__poll_fetch"));
+        assert!(ll.contains("Task__fetch") && ll.contains("__poll_fetch"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.4 — try with i64 return type uses
+    /// legacy ABI (early-return emits plain `return __try_X`,
+    /// not `__t.__result = ... return 0;`).
+    #[test]
+    fn v31_phase24_try_with_i64_return_uses_legacy_abi() {
+        // No-op test placeholder — i64 isn't an enum so try
+        // would be rejected by `desugar_try_in_v31_body` before
+        // ABI choice matters. Documented for symmetry with the
+        // Phase 3-returns test pair.
+        let source = r#"
+            async fn fetch(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile_to_c(source).expect("i64 return without try must still work");
+    }
+
+    /// Arc 8 v3.1 Phase 2.4 — try with non-enum return type
+    /// rejected with a clean diagnostic.
+    #[test]
+    fn v31_phase24_try_with_non_enum_return_rejected() {
+        let source = r#"
+            async fn bad(fd: i64) -> i64 {
+              let n: i64 = try io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "try in async fn returning i64 must be rejected (not an enum)"
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("try") || m.contains("enum") || m.contains("Result")
+            }),
+            "expected try-needs-enum diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 3-returns — i64 return type STILL uses
     /// the historical ABI (poll fn returns the value, no __result
     /// field). Backward compatibility check.

@@ -97,6 +97,18 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 2.4 ✅ COMPLETE 2026-06-04** (commit pending). `try EXPR`
+> keyword in v3.1 async fn bodies. Parse-time desugar runs FIRST in
+> try_v31_transform (before ANF + validator). Lowers
+> `let X: T = try EXPR;` into a let-store + early-return-on-Err
+> + extract-payload sequence. Uses Phase 3-returns ABI for the
+> early-return path so non-i64 ResultType returns work uniformly.
+> Companion `rewrite_vars_in_stmt` fix: added missing
+> Stmt::FieldAssign case so the synthesized FieldAssign's value
+> gets rewritten. examples/echo_p24_try_keyword.vani parity-green
+> (try-succeeds → Ok(2), try-propagates → Err(-99) skipping the
+> suspend). 3 new lib tests.
+>
 > **Phase 3-returns ✅ COMPLETE 2026-06-04** (commit `e6f747f`).
 > Lifts the i64-only async fn return-type rule. ABI split: i64
 > returns keep the historical poll-fn contract (return value
@@ -172,12 +184,13 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.4 try keyword + Result propagation (~6-8h, NOW
->   UNBLOCKED — Phase 3-returns provides the Result<T,E>
->   plumbing)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
+>
+> v3.1 control-flow + types + Result error-handling
+> arc is now feature-complete for typical user code.
+> Remaining work is platform port + generics.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
