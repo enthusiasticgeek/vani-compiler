@@ -94,16 +94,23 @@
 > `v31_local_type_allowed` gate + `v31_default_init_expr`
 > for per-type constructor defaults + threads `ty` through
 > `Seg::NonSuspendLet` so the synthesizer's temp local
-> annotation matches. Str / Enum / Struct / Vec deferred
-> to later Phase 3 sub-phases (need ownership-across-await
-> design). examples/echo_p3a_nonint_locals.vani parity-green
-> (bool + f64 in one async fn). 3 new lib tests.
+> annotation matches. examples/echo_p3a_nonint_locals.vani
+> parity-green (bool + f64 in one async fn). 3 new lib tests.
+>
+> **Phase 3b ✅ COMPLETE 2026-06-04** (commit pending). Str /
+> OwnedStr locals in v3.1 async fns. Extends Phase 3a's
+> type gate with Type::Str + Type::OwnedStr; default-init
+> emits `ExprKind::Str(String::new())` (empty string). No
+> other infrastructure changes — Phase 3a's type-threading
+> already routes through. examples/echo_p3b_str_local.vani
+> parity-green (Str scrutinee + 4-arm match). 3 new lib tests
+> (Str acceptance + OwnedStr acceptance + Enum rejection
+> pinning Phase 3c).
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3b/c/d for non-i64 returns)
-> - 3b: Str/OwnedStr locals across await (~6-10h)
+>   on Phase 3c/d for non-i64 returns + Result type)
 > - 3c: Enum locals across await (~6-10h, needs default-
 >   value design — first-variant convention or sentinel)
 > - 3d: Struct / Vec / Array locals across await (~10-15h)

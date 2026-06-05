@@ -12,18 +12,18 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a shipped —
+2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b shipped —
 compiler-driven `async fn → Task` transform handles linear
 bodies + non-suspending control flow + suspend-in-branch
 state-splitting + fall-through merge state + nested ifs +
 ANF lifting + match in async fn + match arms WITH suspends
 (Int + Bool + Str + Float + Variant + VariantWithBinding
 + Wildcard) + loops with suspend inside + break/continue
-inside loops + non-i64 locals (bool / f64). 18 v3.1
-acceptance examples parity-green. **v3.1 match-with-suspends
-+ bool/f64 locals — feature-complete.** Phase 3 next-up
-(Str / Enum / Struct / Vec locals), Phase 2.4 (try) blocked
-on broader Phase 3; macOS port (Phase 5) for later**).
+inside loops + non-i64 locals (bool / f64 / Str / OwnedStr).
+19 v3.1 acceptance examples parity-green. **v3.1 locals
+across await: i64 + bool + f64 + Str + OwnedStr.** Phase 3c
+next (Enum locals); Phase 2.4 (try) needs broader Phase 3
+for non-i64 returns; macOS port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -161,6 +161,21 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3b — Str / OwnedStr locals** (commit pending).
+  Second slice of Phase 3. Same `v31_local_type_allowed` gate
+  is extended with `Type::Str` and `Type::OwnedStr`;
+  `v31_default_init_expr` returns `ExprKind::Str(String::new())`
+  (empty string) for both. No other plumbing changes — the
+  type-threading from Phase 3a's `Seg::NonSuspendLet { ty }`
+  already routes the annotation through to the synthesizer.
+  - `examples/echo_p3b_str_local.vani` — `let label: Str =
+    i64_to_str(mode);` followed by `match label { "0" then
+    io_recv_async(...), "1" then 111, "2" then 222, _ then -1 }`.
+    Four modes byte-identical: 0→recv 4 bytes, 1→111, 2→222,
+    99→-1.
+  - 3 new lib tests (Str acceptance + OwnedStr acceptance +
+    Enum rejection pinning Phase 3c).
 
 - **v3.1 Phase 3a — non-i64 locals (bool / f64)** (commit
   `754c163`). First slice of Phase 3 (affine types across

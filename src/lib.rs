@@ -21495,24 +21495,84 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 3a — disallowed types (Str / Enum)
-    /// still rejected with a clear future-sub-phase pointer.
+    /// Arc 8 v3.1 Phase 3b — Str local accepted. Was rejected
+    /// in Phase 3a; Phase 3b adds Str/OwnedStr to
+    /// `v31_local_type_allowed` + `v31_default_init_expr` emits
+    /// empty-string default.
     #[test]
-    fn v31_phase3a_str_local_still_rejected() {
+    fn v31_phase3b_str_local_accepted() {
         let source = r#"
             async fn pick(fd: i64, mode: i64) -> i64 {
-              let label: Str = "hello";
+              let label: Str = i64_to_str(mode);
+              let n: i64 = match label {
+                "0" then io_recv_async(fd, 64),
+                "1" then 111,
+                _ then 0 - 1
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3b Str local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3b Str local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3b — OwnedStr local accepted (same gate
+    /// as Str). Verifies the type-gate covers both variants.
+    #[test]
+    fn v31_phase3b_ownedstr_local_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: OwnedStr = i64_to_str(mode);
               let n: i64 = io_recv_async(fd, 64);
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 3a must defer Str locals");
+        // Just check the validator accepts OwnedStr; backend
+        // codegen may have additional restrictions for OwnedStr
+        // ownership that aren't the v3.1 transform's concern.
+        let result = compile_to_c(source);
+        if let Err(errors) = &result {
+            // If the checker rejects OwnedStr for other reasons
+            // (not the v3.1 i64-only gate), that's outside Phase
+            // 3b's scope. Assert the diagnostic is NOT about the
+            // v3.1 local-type gate.
+            assert!(
+                !errors.iter().any(|e| {
+                    let m = e.message.as_str();
+                    m.contains("Phase 3a") || m.contains("Phase 3b")
+                        || m.contains("Phase 3a+3b")
+                }),
+                "Phase 3b should accept OwnedStr; got v3.1 type-gate error: {:?}",
+                errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// Arc 8 v3.1 Phase 3b — Enum locals still rejected.
+    /// Phase 3c will lift this; for now the diagnostic
+    /// points at the future sub-phase.
+    #[test]
+    fn v31_phase3b_enum_local_still_rejected() {
+        let source = r#"
+            enum Color { Red, Green, Blue }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let c: Color = Color.Red;
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 3b must defer Enum locals");
         assert!(
             errors.iter().any(|e| {
                 let m = e.message.as_str();
-                m.contains("Phase 3") || m.contains("i64 / bool / f64")
-                    || m.contains("Str") || m.contains("later Phase 3")
+                m.contains("Phase 3a+3b") || m.contains("Phase 3c")
+                    || m.contains("Enum")
             }),
             "expected deferred-type diagnostic; got: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()

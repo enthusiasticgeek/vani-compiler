@@ -1,0 +1,86 @@
+// Arc 8 v3.1 Phase 3b — Str / OwnedStr locals in async fn.
+//
+// Phase 3b extends Phase 3a's non-i64 locals to include Str
+// (default-init: `""`). The task struct's Str field is
+// initialized to an empty string in the constructor and gets
+// overwritten by the state machine when the user's LET runs.
+//
+// Use case: precompute a label/key/route string from i64 inputs,
+// then dispatch on it via match. Without Phase 3b, the user would
+// have to inline `i64_to_str(mode)` at every match-arm comparison
+// or smuggle the value through a different i64-encoded form.
+//
+// build & run:
+//   intentc run examples/echo_p3b_str_local.vani                # LLVM
+//   intentc run examples/echo_p3b_str_local.vani --backend=c    # C
+
+intent "Phase 3b — Str local in async fn";
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Str local — Phase 3b makes this valid.
+  let label: Str = i64_to_str(mode);
+
+  // Dispatch on the Str local. Phase 2.3b's Str-pattern
+  // desugar handles the suspending-arm match.
+  let n: i64 = match label {
+    "0" then io_recv_async(fd, 64),
+    "1" then 111,
+    "2" then 222,
+    _ then 0 - 1
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 -> label="0" -> recv "abcd" = 4 bytes
+  let t0: Task__pick = pick(cfd, 0);
+  let r0: i64 = drive(ep, mut ref t0);
+  print "mode=0 (recv):", r0;
+
+  // mode=1 -> label="1" -> 111
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "mode=1:", r1;
+
+  // mode=2 -> label="2" -> 222
+  let t2: Task__pick = pick(cfd, 2);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "mode=2:", r2;
+
+  // mode=99 -> label="99" -> wildcard -1
+  let t9: Task__pick = pick(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "mode=99 (wild):", r9;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

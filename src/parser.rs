@@ -5362,32 +5362,35 @@ fn try_desugar_match_via_tag_extraction(
 /// into fresh Let bindings emitted BEFORE the original stmt.
 /// Recurses into nested if/while branches. Phase 2.3a
 /// desugars `let X = match {...}` with suspending arms into
-/// Phase 3a — Whether `ty` is permitted as a v3.1 async fn
-/// local type. The hard requirement is that the constructor can
-/// emit a sensible default-init for it (since locals start at
-/// 0 / false / NaN / "" before being assigned). Currently allows:
-///   - I64 (the historical baseline)
-///   - Bool   — default-inits to `false`
-///   - F64    — default-inits to `0.0`
+/// Whether `ty` is permitted as a v3.1 async fn local type. The
+/// hard requirement is that the constructor can emit a sensible
+/// default-init Expr (since locals start at 0 / false / "" before
+/// being assigned by the state machine). Currently allows:
+///   - I64        — default-inits to `0`        (historical baseline)
+///   - Bool       — default-inits to `false`    (Phase 3a)
+///   - F64        — default-inits to `0.0`      (Phase 3a)
+///   - Str        — default-inits to `""`       (Phase 3b)
+///   - OwnedStr   — default-inits to `""`       (Phase 3b)
 ///
-/// Types deferred to a later sub-phase:
-///   - Str / OwnedStr (no obvious "uninit safe" default; empty
-///     string `""` is fine but Phase 3 needs to think about
-///     ownership across await)
+/// Types deferred to later Phase 3 sub-phases:
 ///   - Enum(name) (no clean default without enum metadata at
-///     desugar time)
-///   - Struct(name) / Vec / Array
+///     desugar time — Phase 3c)
+///   - Struct(name) / Vec / Array (need design — Phase 3d)
 fn v31_local_type_allowed(ty: &Type) -> bool {
-    matches!(ty, Type::I64 | Type::Bool | Type::F64)
+    matches!(
+        ty,
+        Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr
+    )
 }
 
-/// Phase 3a — Build a default-init Expr for a v3.1 local field
-/// type. Caller has already validated via `v31_local_type_allowed`.
+/// Build a default-init Expr for a v3.1 local field type. Caller
+/// has already validated via `v31_local_type_allowed`.
 fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
     let kind = match ty {
         Type::I64 => ExprKind::Int(0),
         Type::Bool => ExprKind::Bool(false),
         Type::F64 => ExprKind::Float(0.0),
+        Type::Str | Type::OwnedStr => ExprKind::Str(String::new()),
         _ => ExprKind::Int(0), // unreachable: validator gates the type
     };
     Expr { kind, span }
@@ -5721,7 +5724,7 @@ fn validate_v31_phase_21a_branch(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: {} local '{}' has type {:?} — Phase 3a allows i64 / bool / f64 only; other types arrive in later Phase 3 sub-phases",
+                            "v3.1 async fn: {} local '{}' has type {:?} — Phase 3a+3b allow i64 / bool / f64 / Str / OwnedStr only; Enum / Struct / Vec / Array arrive in Phase 3c-d",
                             branch_label, name, ty
                         ),
                     ));
@@ -5882,7 +5885,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — Phase 3a allows i64 / bool / f64 only; other types (Str/Enum/Struct/Vec) arrive in later Phase 3 sub-phases",
+                            "v3.1 async fn local '{}' has type {:?} — Phase 3a+3b allow i64 / bool / f64 / Str / OwnedStr only; Enum / Struct / Vec / Array arrive in Phase 3c-d",
                             name, ty
                         ),
                     ));
