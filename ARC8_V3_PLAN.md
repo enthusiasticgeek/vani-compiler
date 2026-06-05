@@ -34,7 +34,7 @@
 > new lib tests; existing rejection test flipped to
 > acceptance.
 >
-> **Phase 2.3b ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 2.3b ✅ COMPLETE 2026-06-04** (commit `eb2a8af`).
 > Bool / Str / Float literal patterns in match arms with
 > suspends. Extends Phase 2.3a's desugar — per-pattern
 > shape only affects the comparison RHS Expr (Bool →

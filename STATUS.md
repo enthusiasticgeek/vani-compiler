@@ -139,7 +139,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     total covering 2.3a)
 
 - **v3.1 Phase 2.3b — Bool/Str/Float match patterns** (commit
-  pending). Extends Phase 2.3a's desugar to non-Int literal
+  `eb2a8af`). Extends Phase 2.3a's desugar to non-Int literal
   patterns. Per-pattern shape only affects the comparison
   RHS Expr synthesized; nesting machinery is unchanged.
   Bool → `ExprKind::Bool(b)`, Str → `ExprKind::Str(s)`,
