@@ -165,7 +165,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
-- **v3.1 Phase 3d — Vec + Struct locals** (commit pending).
+- **v3.1 Phase 3d — Vec + Struct locals** (commit `64c93b0`).
   Fourth slice of Phase 3. Extends the v3.1 locals gate to
   container types:
   - `Type::Vec(T)`: allowed when `T` is itself v31-allowed.

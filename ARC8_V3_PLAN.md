@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 3d ✅ COMPLETE 2026-06-04** (commit pending). Vec + Struct
+> **Phase 3d ✅ COMPLETE 2026-06-04** (commit `64c93b0`). Vec + Struct
 > locals in v3.1 async fns. Adds Type::Vec(T) (1-element default
 > via `vec(default_T)`; empty `vec()` can't infer in StructLit
 > field position) and Type::Struct(name) via new V31_STRUCT_REGISTRY
