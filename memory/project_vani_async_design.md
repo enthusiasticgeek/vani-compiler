@@ -59,20 +59,22 @@ slices on top of v1:
 
 **Arc 8 FULLY COMPLETE 2026-06-04 + v3.1 Phase 0 + Phase 1
 + Phase 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a + 2.3b
-+ 2.3c + 2.5 + 2.5b shipped**: every user-visible async +
-networking + concurrency feature ships AND the compiler-
-driven `async fn → Task` transform now auto-generates
-state-machine struct/poll/constructor triples for:
-linear async-fn bodies; non-suspending control flow
++ 2.3c + 2.3d + 2.5 + 2.5b shipped**: every user-visible
+async + networking + concurrency feature ships AND the
+compiler-driven `async fn → Task` transform now auto-
+generates state-machine struct/poll/constructor triples
+for: linear async-fn bodies; non-suspending control flow
 (if/while/Assign/Print + mid-body return); suspend-in-
 branch state-splitting (if + while bodies); fall-through
 merge state; nested ifs in suspending branches; ANF
 lifting of `io_*_async` from compound expressions; match
-expressions (suspending arms desugared via Phase 2.3a/b/c's
-if-else-assign chain for Int + Bool + Str + Float +
-Wildcard literal patterns, plus unit-Variant patterns via
-a tag-extraction sub-match); break/continue inside
-suspending loops. See `ARC8_V3_PLAN.md` for the phased
+expressions with suspending arms — desugared via Phase
+2.3a/b/c/d to cover all literal + enum pattern shapes
+(Int / Bool / Str / Float / Variant / VariantWithBinding /
+Wildcard) through if-else-assign chains, tag-extraction
+sub-matches, and inline substitution; break/continue
+inside suspending loops. **v3.1 match-with-suspends
+feature-complete.** See `ARC8_V3_PLAN.md` for the phased
 plan-of-record (canonical source; this memory is a brief
 overview only).
 

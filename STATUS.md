@@ -12,16 +12,17 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.5 + 2.5b shipped — compiler-driven
-`async fn → Task` transform handles linear bodies + non-
-suspending control flow + suspend-in-branch state-splitting
-+ fall-through merge state + nested ifs + ANF lifting +
-match in async fn + match arms WITH suspends (Int + Bool
-+ Str + Float + Variant + Wildcard) + loops with suspend
-inside + break/continue inside loops. 16 v3.1 acceptance
-examples parity-green. Phase 2.3d (VariantWithBinding),
-2.4 (try), 3-4 queued; macOS port (Phase 5) recommended
-next**).
+2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b shipped — compiler-
+driven `async fn → Task` transform handles linear bodies +
+non-suspending control flow + suspend-in-branch state-
+splitting + fall-through merge state + nested ifs + ANF
+lifting + match in async fn + match arms WITH suspends
+(Int + Bool + Str + Float + Variant + VariantWithBinding
++ Wildcard) + loops with suspend inside + break/continue
+inside loops. 17 v3.1 acceptance examples parity-green.
+**v3.1 match-with-suspends — feature-complete for all
+literal + enum pattern shapes.** Phase 2.4 (try), 3-4
+queued; macOS port (Phase 5) recommended next**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -159,6 +160,36 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 2.3d — VariantWithBinding patterns** (commit
+  pending). Extends Phase 2.3c's tag-extraction sub-match
+  approach with SUBSTITUTION-based binding propagation:
+  - For each `Opt.Some(v) then EXPR` arm, the desugar
+    walks EXPR and substitutes every `Var(v)` with an
+    inline re-extraction match expression
+    `match SCRUT { Opt.Some(__pat_v) then __pat_v, _ then 0 }`.
+    The substituted EXPR becomes the assign value in the
+    corresponding if-branch.
+  - SUBSTITUTION (not a local LET) sidesteps a subtle bug:
+    a branch-local LET whose name collides with a task
+    struct field creates a disconnect — the local LET
+    writes to a local, but subsequent reads get rewritten
+    to `__t.<name>` (uninitialized). Inlining the extraction
+    at each binding-use point bypasses the issue.
+  - New helper `substitute_var_in_expr` walks all common
+    expression shapes (Binary, Unary, Cast, Call, Index, Len,
+    Ref/RefMut, Match, MethodCall, Tuple/TupleAccess,
+    FieldAccess, StructLit, ArrayLit) and substitutes.
+  - Inner pattern binding uses fresh `__pat_<binding>` to
+    avoid name collisions with the rename set.
+  - Caveat: a binding used N times re-evaluates the scrutinee
+    N times. Fine for pure helper-fn scrutinees (the typical
+    pattern in v3.1 due to i64-only locals constraint).
+  - `examples/echo_match_binding.vani` — three binding-carrying
+    modes byte-identical: Recv(10) → 5 (recv 5 bytes), Constant(444)
+    → 445 (val+1), Idle → -1 (no binding).
+  - 2 new acceptance lib tests (single binding + multiple
+    binding-arms); previous rejection test flipped to acceptance.
 
 - **v3.1 Phase 2.3c — Variant patterns with suspends** (commit
   `cc8c8de`). Tag-extraction sub-match approach:

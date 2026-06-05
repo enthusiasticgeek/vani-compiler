@@ -49,6 +49,25 @@
 > outputs (bool true/false, str=1/99, f=2.0). 4 new lib
 > tests (3 acceptance + 1 Variant-rejection).
 >
+> **Phase 2.3d ✅ COMPLETE 2026-06-04** (commit pending).
+> VariantWithBinding patterns (`Opt.Some(v) then EXPR`). Uses
+> SUBSTITUTION (not a local LET) to propagate the binding into
+> the arm body: every `Var(v)` in EXPR is replaced inline with
+> `match SCRUT { Opt.Some(__pat_v) then __pat_v, _ then 0 }`.
+> Sidesteps a subtle local-LET vs task-field disconnect that
+> a naive LET-based approach hit (the LET wrote to a local while
+> reads got rewritten to `__t.<name>`). Caveat: binding used N
+> times re-evaluates SCRUT N times — fine for pure helper-fn
+> scrutinees (the typical v3.1 pattern). examples/echo_match_binding.vani
+> parity-green: Recv(10) → 5 (recv 5 bytes), Constant(444) → 445,
+> Idle → -1. 2 new acceptance lib tests + 1 prior rejection
+> flipped to acceptance.
+>
+> **🎉 v3.1 match-with-suspends — FEATURE-COMPLETE 2026-06-04**
+> for all literal + enum pattern shapes (Int, Bool, Str, Float,
+> Variant, VariantWithBinding, Wildcard) via the desugar +
+> tag-extraction + substitution combination.
+>
 > **Phase 2.3c ✅ COMPLETE 2026-06-04** (commit `cc8c8de`).
 > Variant (enum) patterns in match arms with suspends, via
 > a TAG-EXTRACTION SUB-MATCH approach. The original variant
@@ -72,8 +91,6 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.3d match arms — VariantWithBinding (~4-6h, binding
->   scope across tag-extraction → if-chain split)
 > - 2.4 try keyword + Result propagation (~6-8h, depends
 >   on Phase 3 for non-i64 returns)
 > - 3 affine types across await — OwnedStr/Vec (~20-25h)
@@ -437,15 +454,14 @@ needed by the acceptance example).
   if-chain dispatches on the synthesized tag. 3 new lib
   tests + acceptance example.
 
-- **Phase 2.3d** (queued, ~4-6h) — `match` arms with
+- **Phase 2.3d ✅ DONE 2026-06-04** — `match` arms with
   Pattern::VariantWithBinding (`Result.Ok(v) then EXPR`).
-  Needs binding scope across the tag-extraction → if-chain
-  split: each then-body that references `v` must re-bind
-  it via either a manual re-match or a parser-level binding-
-  hoist. Possible approach: in the then-body, prepend
-  `let v: T = match SCRUT { Pat.Variant(v) then v, _ then
-  default_v };` so the binding is reconstituted before the
-  arm body executes.
+  Substitution-based: `Var(v)` in EXPR is replaced inline
+  with `match SCRUT { Pat.Variant(__pat_v) then __pat_v, _
+  then 0 }`. Sidesteps the local-LET vs task-field disconnect
+  that a naive let-based binding-resurrection hit. New helper
+  `substitute_var_in_expr`. 2 new acceptance lib tests +
+  acceptance example.
 
 - **Phase 2.4** (queued, ~6-8h) — `try expr` keyword + Result
   propagation through the state machine.

@@ -8,21 +8,21 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
   platform port (2 phases). **Phase 0 + 1 + 2 narrow +
   2.1a + 2.1b + 2.1c + 2.2 + 2.3-narrow + 2.3a + 2.3b + 2.3c +
-  2.5 + 2.5b ✅ COMPLETE 2026-06-04** —
+  2.3d + 2.5 + 2.5b ✅ COMPLETE 2026-06-04** —
   compiler-driven `async fn → Task` transform handles
   linear bodies + non-suspending control flow + suspend-
   in-branch state-splitting + fall-through merge state +
   nested ifs in suspending branches + ANF lifting +
   match arms WITH suspends (Int + Bool + Str + Float +
-  Variant + Wildcard) + loops with suspend in body +
-  break/continue inside loops. Shipped via commits
-  `eac1bf6`, `51748d6`, `7d47ff6`, `a3cab5b`, `7566ab8`,
-  `b1b8113`, `22fc622`, `d3a0af3`, `a77b799`, `4702cb6`,
-  `7a19b68`, `eb2a8af`, plus pending 2.3c.
-  Phase 2.3d (VariantWithBinding), 2.4 (try), 3-4 queued.
-  **Next session recommended: Phase 5 (macOS kqueue
-  port, ~10-15h)** or Phase 2.3d (~4-6h) or Phase 2.4
-  try keyword (~6-8h).
+  Variant + VariantWithBinding + Wildcard) + loops with
+  suspend in body + break/continue inside loops. Shipped
+  via commits `eac1bf6`, `51748d6`, `7d47ff6`, `a3cab5b`,
+  `7566ab8`, `b1b8113`, `22fc622`, `d3a0af3`, `a77b799`,
+  `4702cb6`, `7a19b68`, `eb2a8af`, `cc8c8de`, plus pending
+  2.3d. **v3.1 match-with-suspends feature-complete for
+  all literal + enum patterns.** Phase 2.4 (try), 3-4
+  queued. **Next session recommended: Phase 5 (macOS
+  kqueue port, ~10-15h)** or Phase 2.4 try keyword (~6-8h).
 - [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
   session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
   Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped

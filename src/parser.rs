@@ -5035,22 +5035,17 @@ fn try_desugar_let_match_with_suspends(
     if !expr_contains_io_async(expr) {
         return None; // No suspends — Phase 2.3-narrow handles it.
     }
-    // Detect Variant arms. If any arm is Variant (without binding),
-    // route through the tag-extraction sub-match path. Mixed
-    // Variant + non-Variant patterns bail (would mismatch the
-    // sub-match's scrutinee type).
+    // Detect Variant / VariantWithBinding arms. If ANY arm is
+    // Variant-shaped, route through the tag-extraction sub-match
+    // path. Mixed Variant + non-Variant patterns bail (would
+    // mismatch the sub-match's scrutinee type).
     let has_variant = arms.iter().any(|a| {
-        matches!(&a.pattern, crate::ast::Pattern::Variant { .. })
+        matches!(
+            &a.pattern,
+            crate::ast::Pattern::Variant { .. }
+                | crate::ast::Pattern::VariantWithBinding { .. }
+        )
     });
-    let has_variant_with_binding = arms.iter().any(|a| {
-        matches!(&a.pattern, crate::ast::Pattern::VariantWithBinding { .. })
-    });
-    if has_variant_with_binding {
-        // Phase 2.3d will handle bindings. For now bail so the
-        // validator's diagnostic fires with the future-sub-phase
-        // pointer.
-        return None;
-    }
     if has_variant {
         return try_desugar_match_via_tag_extraction(
             name, annotation, scrutinee, arms, span,
@@ -5159,8 +5154,25 @@ fn try_desugar_let_match_with_suspends(
 /// literals, so none suspend). The if-chain then handles the
 /// per-arm suspending bodies via Phase 2.1a/b's state-splitting.
 ///
-/// Requires all non-wildcard arms be `Pattern::Variant` (unit
-/// variants only — VariantWithBinding is Phase 2.3d).
+/// Supports `Pattern::Variant` (unit variants, no payload) and
+/// `Pattern::VariantWithBinding` (single-binding payload). For
+/// VariantWithBinding arms, additionally prepends a re-extraction
+/// `let <binding>: i64 = match SCRUT { Pat.Variant(<binding>) then
+/// <binding>, _ then 0 };` at the start of the corresponding if-
+/// branch so the arm body's references to the binding resolve.
+///
+/// Caveat: Variant scrutinees must be inline (v3.1 i64-only locals
+/// rule). The SCRUT is re-evaluated once per VariantWithBinding
+/// arm — fine for pure helper-fn scrutinees, surprising for
+/// impure ones. The user can hoist impure scrutinees into a helper
+/// fn that returns the variant.
+///
+/// Caveat: bindings must be i64 typed (v3.1's i64-only locals
+/// rule). Non-i64 payloads (e.g. `Result.Err(Str)`) reach the
+/// checker with the user's intended payload type but the
+/// synthesized `let <binding>: i64` annotation causes a checker
+/// type-mismatch — Phase 3 will lift this once non-i64 locals
+/// across await are supported.
 fn try_desugar_match_via_tag_extraction(
     name: &str,
     annotation: &Option<Type>,
@@ -5173,7 +5185,8 @@ fn try_desugar_match_via_tag_extraction(
     for (i, arm) in arms.iter().enumerate() {
         let is_last = i == arms.len() - 1;
         match &arm.pattern {
-            crate::ast::Pattern::Variant { .. } => {
+            crate::ast::Pattern::Variant { .. }
+            | crate::ast::Pattern::VariantWithBinding { .. } => {
                 variant_arms.push((
                     arm.pattern.clone(),
                     arm.body.clone(),
@@ -5192,7 +5205,10 @@ fn try_desugar_match_via_tag_extraction(
     }
 
     // Build the tag-extraction match arms: each variant arm
-    // maps to its index (0..N-1); wildcard maps to N.
+    // maps to its index (0..N-1); wildcard maps to N. For
+    // VariantWithBinding arms, the binding is preserved in the
+    // tag-extraction pattern but the arm body just returns the
+    // tag literal — the binding is unused at this step.
     let tag_local = format!("__match_tag_{}", name);
     let mut tag_match_arms: Vec<crate::ast::MatchArm> = Vec::new();
     for (idx, (pat, _body, pat_span)) in variant_arms.iter().enumerate() {
@@ -5251,7 +5267,7 @@ fn try_desugar_match_via_tag_extraction(
     };
 
     // Walk variant_arms in REVERSE to nest if-else properly.
-    for (idx, (_pat, arm_expr, arm_span)) in variant_arms.into_iter().enumerate().rev() {
+    for (idx, (pat, arm_expr, arm_span)) in variant_arms.into_iter().enumerate().rev() {
         let tag_var = Expr {
             kind: ExprKind::Var(tag_local.clone()),
             span: arm_span,
@@ -5268,9 +5284,66 @@ fn try_desugar_match_via_tag_extraction(
             },
             span: arm_span,
         };
+
+        // For VariantWithBinding, SUBSTITUTE `Var(binding)` in the
+        // arm body with an inline re-extraction match expression.
+        // We can't use an inner LET because branch-local LETs that
+        // collide with task struct field names create a disconnect:
+        // the local LET writes to a local, but subsequent reads
+        // get rewritten to `__t.<name>` (uninitialized field).
+        // Substituting inline sidesteps the LET/field collision.
+        //
+        // The inner pattern binding uses a fresh `__pat_<binding>`
+        // name to keep it out of the task struct's rename set (so
+        // the inner match's arm body's read of the payload isn't
+        // rewritten).
+        //
+        // Tradeoff: a binding used N times in the arm body causes
+        // N re-evaluations of the scrutinee. Fine for pure helper
+        // fn scrutinees, which is the typical pattern.
+        let effective_arm_expr = if let crate::ast::Pattern::VariantWithBinding {
+            enum_name,
+            variant,
+            binding,
+        } = &pat
+        {
+            let pat_binding = format!("__pat_{}", binding);
+            let extract_arms = vec![
+                crate::ast::MatchArm {
+                    pattern: crate::ast::Pattern::VariantWithBinding {
+                        enum_name: enum_name.clone(),
+                        variant: variant.clone(),
+                        binding: pat_binding.clone(),
+                    },
+                    pattern_span: arm_span,
+                    body: Expr {
+                        kind: ExprKind::Var(pat_binding.clone()),
+                        span: arm_span,
+                    },
+                },
+                crate::ast::MatchArm {
+                    pattern: crate::ast::Pattern::Wildcard,
+                    pattern_span: arm_span,
+                    body: Expr {
+                        kind: ExprKind::Int(0),
+                        span: arm_span,
+                    },
+                },
+            ];
+            let extract_match = Expr {
+                kind: ExprKind::Match {
+                    scrutinee: scrutinee.clone(),
+                    arms: extract_arms,
+                },
+                span: arm_span,
+            };
+            substitute_var_in_expr(&arm_expr, binding, &extract_match)
+        } else {
+            arm_expr
+        };
         let then_body = vec![Stmt::Assign {
             name: name.to_string(),
-            expr: arm_expr,
+            expr: effective_arm_expr,
             span: arm_span,
         }];
         current_else = vec![Stmt::If {
@@ -5289,6 +5362,85 @@ fn try_desugar_match_via_tag_extraction(
 /// into fresh Let bindings emitted BEFORE the original stmt.
 /// Recurses into nested if/while branches. Phase 2.3a
 /// desugars `let X = match {...}` with suspending arms into
+/// Substitute every `Var(target)` in `expr` with `replacement`.
+/// Walks all common expression shapes (binary, unary, call,
+/// match, method-call, tuple, struct lit, field access, etc).
+/// Used by Phase 2.3d's VariantWithBinding desugar to inline a
+/// re-extraction match in place of the user's binding.
+fn substitute_var_in_expr(expr: &Expr, target: &str, replacement: &Expr) -> Expr {
+    let kind = match &expr.kind {
+        ExprKind::Var(name) if name == target => return replacement.clone(),
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op: *op,
+            left: Box::new(substitute_var_in_expr(left, target, replacement)),
+            right: Box::new(substitute_var_in_expr(right, target, replacement)),
+        },
+        ExprKind::Unary { op, expr: e } => ExprKind::Unary {
+            op: *op,
+            expr: Box::new(substitute_var_in_expr(e, target, replacement)),
+        },
+        ExprKind::Cast { expr: e, ty } => ExprKind::Cast {
+            expr: Box::new(substitute_var_in_expr(e, target, replacement)),
+            ty: ty.clone(),
+        },
+        ExprKind::Call { name, name_span, args } => ExprKind::Call {
+            name: name.clone(),
+            name_span: *name_span,
+            args: args.iter().map(|a| substitute_var_in_expr(a, target, replacement)).collect(),
+        },
+        ExprKind::Index { array, index } => ExprKind::Index {
+            array: Box::new(substitute_var_in_expr(array, target, replacement)),
+            index: Box::new(substitute_var_in_expr(index, target, replacement)),
+        },
+        ExprKind::Len { array } => ExprKind::Len {
+            array: Box::new(substitute_var_in_expr(array, target, replacement)),
+        },
+        ExprKind::Ref { inner } => ExprKind::Ref {
+            inner: Box::new(substitute_var_in_expr(inner, target, replacement)),
+        },
+        ExprKind::RefMut { inner } => ExprKind::RefMut {
+            inner: Box::new(substitute_var_in_expr(inner, target, replacement)),
+        },
+        ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+            scrutinee: Box::new(substitute_var_in_expr(scrutinee, target, replacement)),
+            arms: arms.iter().map(|a| crate::ast::MatchArm {
+                pattern: a.pattern.clone(),
+                pattern_span: a.pattern_span,
+                body: substitute_var_in_expr(&a.body, target, replacement),
+            }).collect(),
+        },
+        ExprKind::MethodCall { receiver, method, method_span, args } => ExprKind::MethodCall {
+            receiver: Box::new(substitute_var_in_expr(receiver, target, replacement)),
+            method: method.clone(),
+            method_span: *method_span,
+            args: args.iter().map(|a| substitute_var_in_expr(a, target, replacement)).collect(),
+        },
+        ExprKind::Tuple(elements) => ExprKind::Tuple(
+            elements.iter().map(|e| substitute_var_in_expr(e, target, replacement)).collect(),
+        ),
+        ExprKind::TupleAccess { tuple, index } => ExprKind::TupleAccess {
+            tuple: Box::new(substitute_var_in_expr(tuple, target, replacement)),
+            index: *index,
+        },
+        ExprKind::FieldAccess { object, field } => ExprKind::FieldAccess {
+            object: Box::new(substitute_var_in_expr(object, target, replacement)),
+            field: field.clone(),
+        },
+        ExprKind::StructLit { type_name, type_name_span, fields } => ExprKind::StructLit {
+            type_name: type_name.clone(),
+            type_name_span: *type_name_span,
+            fields: fields.iter().map(|(n, e)| {
+                (n.clone(), substitute_var_in_expr(e, target, replacement))
+            }).collect(),
+        },
+        ExprKind::ArrayLit { elements } => ExprKind::ArrayLit {
+            elements: elements.iter().map(|e| substitute_var_in_expr(e, target, replacement)).collect(),
+        },
+        other => other.clone(),
+    };
+    Expr { kind, span: expr.span }
+}
+
 /// `let X = 0; if SCRUT == p0 { X = e0; } else if ...` BEFORE
 /// running ANF on each piece.
 fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {

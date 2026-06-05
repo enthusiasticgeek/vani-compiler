@@ -21385,12 +21385,13 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 2.3d (deferred) — Pattern::VariantWithBinding
-    /// still rejected. The binding `v` in `Result.Ok(v)` would need
-    /// to be relifted across the tag-extraction → if-chain split
-    /// (each arm body that references `v` needs its own re-binding).
+    /// Arc 8 v3.1 Phase 2.3d — Pattern::VariantWithBinding
+    /// (`Opt.Some(v) then EXPR`). Extends Phase 2.3c's tag-
+    /// extraction sub-match approach with a per-arm RE-EXTRACTION
+    /// LET that resurrects the binding inside the if-branch.
+    /// Binding type must be i64 (v3.1 i64-only locals rule).
     #[test]
-    fn v31_phase23d_variant_with_binding_still_rejected() {
+    fn v31_phase23d_variant_with_binding_accepted() {
         let source = r#"
             enum Opt { Some(i64), None }
 
@@ -21403,23 +21404,49 @@ fn main() -> i64 {
 
             async fn pick(fd: i64, mode: i64) -> i64 {
               let n: i64 = match make_opt(mode) {
-                Opt.Some(v) then io_recv_async(fd, 64),
+                Opt.Some(v) then io_recv_async(fd, v + 10),
                 Opt.None then 0
               };
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 2.3c must defer VariantWithBinding");
-        assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("Phase 2.3") || m.contains("unsupported pattern shape")
-                    || m.contains("match") || m.contains("v3.1")
-            }),
-            "expected deferred-binding diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
-        );
+        let c = compile_to_c(source).expect("Phase 2.3d VariantWithBinding must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3d VariantWithBinding must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 2.3d — VariantWithBinding works with
+    /// multiple binding-carrying arms. Each arm's then-body
+    /// prepends its own re-extraction LET for the binding.
+    #[test]
+    fn v31_phase23d_multiple_binding_arms_accepted() {
+        let source = r#"
+            enum Pair { Left(i64), Right(i64), None }
+
+            fn make_pair(mode: i64) -> Pair {
+              return match mode {
+                0 then Pair.Left(11),
+                1 then Pair.Right(22),
+                _ then Pair.None
+              };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let n: i64 = match make_pair(mode) {
+                Pair.Left(a) then io_recv_async(fd, a + 1),
+                Pair.Right(b) then b * 2,
+                Pair.None then 0
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 2.3d multiple-binding-arms must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 2.3d multiple-binding-arms must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside

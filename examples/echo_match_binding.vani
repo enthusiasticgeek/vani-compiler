@@ -1,0 +1,120 @@
+// Arc 8 v3.1 Phase 2.3d — Pattern::VariantWithBinding in match
+// arms with suspends.
+//
+// Phase 2.3d extends Phase 2.3c's tag-extraction sub-match
+// approach. For each VariantWithBinding arm, the desugar
+// additionally prepends a RE-EXTRACTION LET inside the if-
+// branch that resurrects the binding via a single-arm match:
+//
+//   let n = match make_opt(mode) {
+//     Opt.Some(v) then io_recv_async(fd, v + 10),
+//     Opt.None then 0
+//   };
+//
+// lowers to:
+//
+//   let n: i64 = 0;
+//   let __match_tag_n: i64 = match make_opt(mode) {
+//     Opt.Some(v) then 0,
+//     Opt.None then 1
+//   };
+//   if __match_tag_n == 0 {
+//     let v: i64 = match make_opt(mode) {
+//       Opt.Some(v) then v,
+//       _ then 0
+//     };
+//     n = io_recv_async(fd, v + 10);
+//   }
+//   else if __match_tag_n == 1 { n = 0; }
+//
+// Supported in v3.1 Phase 2.3d:
+//   - Pattern::Variant (Phase 2.3c)
+//   - Pattern::VariantWithBinding (NEW) — single i64 binding per arm
+//   - Optional trailing Pattern::Wildcard
+//   - Multiple binding-carrying arms in the same match
+//
+// Caveat: bindings must be i64 typed (v3.1 i64-only locals rule).
+// Non-i64 payloads (`Result.Err(Str)`) reach the checker but cause
+// a type mismatch on the synthesized `let <binding>: i64`. Phase 3
+// will lift this once non-i64 locals across await are supported.
+//
+// Caveat: the scrutinee is re-evaluated once per binding arm (for
+// the re-extraction match). Helper-fn scrutinees should be pure;
+// impure scrutinees would produce surprising behavior.
+//
+// build & run:
+//   intentc run examples/echo_match_binding.vani                # LLVM
+//   intentc run examples/echo_match_binding.vani --backend=c    # C
+
+intent "Phase 2.3d — VariantWithBinding patterns with suspends";
+
+enum Action { Recv(i64), Constant(i64), Idle }
+
+fn make_action(mode: i64) -> Action {
+  return match mode {
+    0 then Action.Recv(10),
+    1 then Action.Constant(444),
+    _ then Action.Idle
+  };
+}
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Two binding-carrying arms (Recv + Constant) + one unit arm
+  // (Idle). The desugar emits a re-extraction LET inside each
+  // binding-carrying if-branch.
+  let n: i64 = match make_action(mode) {
+    Action.Recv(cap) then io_recv_async(fd, cap),
+    Action.Constant(val) then val + 1,
+    Action.Idle then 0 - 1
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcde");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 -> Action.Recv(10) -> io_recv_async(fd, 10); recv "abcde" = 5 bytes
+  let t0: Task__pick = pick(cfd, 0);
+  let r0: i64 = drive(ep, mut ref t0);
+  print "Recv(10) -> recv 5 bytes:", r0;
+
+  // mode=1 -> Action.Constant(444) -> 444+1 = 445
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "Constant(444):", r1;
+
+  // mode=99 -> Action.Idle -> -1
+  let t9: Task__pick = pick(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "Idle:", r9;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
