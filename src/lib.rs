@@ -21449,6 +21449,76 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
+    /// Arc 8 v3.1 Phase 3a — non-i64 locals (bool + f64). Lifts
+    /// the historical i64-only rule for locals with obvious
+    /// defaults. Task struct fields take the actual annotation;
+    /// the constructor emits per-type default-init (`false` /
+    /// `0.0`); `Seg::NonSuspendLet { ty }` threads the type to
+    /// the synthesizer so the temp local annotation matches.
+    #[test]
+    fn v31_phase3a_bool_local_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let flag: bool = mode > 0;
+              let n: i64 = match flag {
+                true then io_recv_async(fd, 64),
+                false then 999
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3a bool local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3a bool local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3a — f64 locals.
+    #[test]
+    fn v31_phase3a_f64_local_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let factor: f64 = mode as f64 * 1.5;
+              let n: i64 = match factor {
+                0.0 then 0 - 1,
+                1.5 then io_recv_async(fd, 64),
+                _ then 100
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3a f64 local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3a f64 local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3a — disallowed types (Str / Enum)
+    /// still rejected with a clear future-sub-phase pointer.
+    #[test]
+    fn v31_phase3a_str_local_still_rejected() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let label: Str = "hello";
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("Phase 3a must defer Str locals");
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 3") || m.contains("i64 / bool / f64")
+                    || m.contains("Str") || m.contains("later Phase 3")
+            }),
+            "expected deferred-type diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.5b — `break` / `continue` inside
     /// suspending loops. The collector maintains a loop_stack;
     /// break/continue translate to state_tag jumps targeting

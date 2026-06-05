@@ -12,17 +12,18 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b shipped — compiler-
-driven `async fn → Task` transform handles linear bodies +
-non-suspending control flow + suspend-in-branch state-
-splitting + fall-through merge state + nested ifs + ANF
-lifting + match in async fn + match arms WITH suspends
+2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a shipped —
+compiler-driven `async fn → Task` transform handles linear
+bodies + non-suspending control flow + suspend-in-branch
+state-splitting + fall-through merge state + nested ifs +
+ANF lifting + match in async fn + match arms WITH suspends
 (Int + Bool + Str + Float + Variant + VariantWithBinding
 + Wildcard) + loops with suspend inside + break/continue
-inside loops. 17 v3.1 acceptance examples parity-green.
-**v3.1 match-with-suspends — feature-complete for all
-literal + enum pattern shapes.** Phase 2.4 (try), 3-4
-queued; macOS port (Phase 5) recommended next**).
+inside loops + non-i64 locals (bool / f64). 18 v3.1
+acceptance examples parity-green. **v3.1 match-with-suspends
++ bool/f64 locals — feature-complete.** Phase 3 next-up
+(Str / Enum / Struct / Vec locals), Phase 2.4 (try) blocked
+on broader Phase 3; macOS port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -160,6 +161,27 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3a — non-i64 locals (bool / f64)** (commit
+  pending). First slice of Phase 3 (affine types across
+  await). Lifts the historical i64-only locals rule for the
+  two types with obvious defaults:
+  - `v31_local_type_allowed(ty)` gates v3.1 local types
+    (I64 / Bool / F64). Str / Enum / Struct / Vec deferred.
+  - `v31_default_init_expr(ty, span)` emits per-type default
+    init for the task struct constructor's StructLit
+    (`Int(0)` / `Bool(false)` / `Float(0.0)`).
+  - `Seg::NonSuspendLet { ty, ... }` carries the local's
+    annotation so the synthesizer's `let __v3_tmp_<name>:
+    <ty> = ...;` temp matches (previously hardcoded i64).
+  - `validate_v31_linear_body` + `validate_v31_phase_21a_branch`
+    + `collect_branch_locals_recursive` all route through
+    `v31_local_type_allowed`.
+  - `examples/echo_p3a_nonint_locals.vani` — bool flag +
+    f64 factor in one async fn, both modes parity-green
+    (true→recv 3 bytes, false→0).
+  - 3 new lib tests (bool acceptance + f64 acceptance + Str
+    rejection pinning the next-sub-phase boundary).
 
 - **v3.1 Phase 2.3d — VariantWithBinding patterns** (commit
   `9fb16dc`). Extends Phase 2.3c's tag-extraction sub-match

@@ -5362,6 +5362,37 @@ fn try_desugar_match_via_tag_extraction(
 /// into fresh Let bindings emitted BEFORE the original stmt.
 /// Recurses into nested if/while branches. Phase 2.3a
 /// desugars `let X = match {...}` with suspending arms into
+/// Phase 3a — Whether `ty` is permitted as a v3.1 async fn
+/// local type. The hard requirement is that the constructor can
+/// emit a sensible default-init for it (since locals start at
+/// 0 / false / NaN / "" before being assigned). Currently allows:
+///   - I64 (the historical baseline)
+///   - Bool   — default-inits to `false`
+///   - F64    — default-inits to `0.0`
+///
+/// Types deferred to a later sub-phase:
+///   - Str / OwnedStr (no obvious "uninit safe" default; empty
+///     string `""` is fine but Phase 3 needs to think about
+///     ownership across await)
+///   - Enum(name) (no clean default without enum metadata at
+///     desugar time)
+///   - Struct(name) / Vec / Array
+fn v31_local_type_allowed(ty: &Type) -> bool {
+    matches!(ty, Type::I64 | Type::Bool | Type::F64)
+}
+
+/// Phase 3a — Build a default-init Expr for a v3.1 local field
+/// type. Caller has already validated via `v31_local_type_allowed`.
+fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
+    let kind = match ty {
+        Type::I64 => ExprKind::Int(0),
+        Type::Bool => ExprKind::Bool(false),
+        Type::F64 => ExprKind::Float(0.0),
+        _ => ExprKind::Int(0), // unreachable: validator gates the type
+    };
+    Expr { kind, span }
+}
+
 /// Substitute every `Var(target)` in `expr` with `replacement`.
 /// Walks all common expression shapes (binary, unary, call,
 /// match, method-call, tuple, struct lit, field access, etc).
@@ -5646,7 +5677,11 @@ fn collect_branch_locals_recursive(
         match s {
             Stmt::Let { name, annotation, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
-                if name != "_" && matches!(ty, Type::I64) {
+                // Phase 3a — accept i64 / bool / f64; other types
+                // would have been rejected by the branch validator
+                // already, so reaching here with a non-allowed type
+                // is a no-op.
+                if name != "_" && v31_local_type_allowed(&ty) {
                     out.push((name.clone(), ty, *span));
                 }
             }
@@ -5682,11 +5717,11 @@ fn validate_v31_phase_21a_branch(
         match s {
             Stmt::Let { name, annotation, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
-                if !matches!(ty, Type::I64) {
+                if !v31_local_type_allowed(&ty) {
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: {} local '{}' must be i64 (got {:?}); non-i64 across await arrives in Phase 3",
+                            "v3.1 async fn: {} local '{}' has type {:?} — Phase 3a allows i64 / bool / f64 only; other types arrive in later Phase 3 sub-phases",
                             branch_label, name, ty
                         ),
                     ));
@@ -5843,11 +5878,11 @@ fn validate_v31_linear_body(
         match s {
             Stmt::Let { name, annotation, expr, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
-                if !matches!(ty, Type::I64) {
+                if !v31_local_type_allowed(&ty) {
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' must be i64 (got {:?}); non-i64 locals arrive in Phase 3 (affine types across await)",
+                            "v3.1 async fn local '{}' has type {:?} — Phase 3a allows i64 / bool / f64 only; other types (Str/Enum/Struct/Vec) arrive in later Phase 3 sub-phases",
                             name, ty
                         ),
                     ));
@@ -6309,7 +6344,12 @@ pub(crate) fn try_v31_transform(
     //     poll fn naturally without changing the outer state
     //     transitions).
     enum Seg {
-        NonSuspendLet { name: String, expr: Expr, span: crate::span::Span },
+        /// Phase 3a — carries the local's annotation so the
+        /// synthesizer's temp local + task struct field codegen
+        /// uses the correct type (Bool / f64 / Str / Enum / Struct).
+        /// Defaults to I64 when the user wrote `let x = ...;`
+        /// without an explicit annotation.
+        NonSuspendLet { name: String, ty: Type, expr: Expr, span: crate::span::Span },
         /// Phase 2.1 — Suspend carries explicit `bump_to`
         /// because with branching the next state isn't always
         /// `current_index + 1`. Phase 1 sequential bodies still
@@ -6386,7 +6426,7 @@ pub(crate) fn try_v31_transform(
                 break;
             }
             match s {
-                Stmt::Let { name, expr, span, .. } => {
+                Stmt::Let { name, annotation, expr, span, .. } => {
                     let is_discard = name == "_";
                     if let ExprKind::Call { name: cname, args, .. } = &expr.kind {
                         if matches!(
@@ -6426,6 +6466,7 @@ pub(crate) fn try_v31_transform(
                     } else {
                         state_bodies[*current_state].push(Seg::NonSuspendLet {
                             name: name.clone(),
+                            ty: annotation.clone().unwrap_or(Type::I64),
                             expr: expr.clone(),
                             span: *span,
                         });
@@ -6677,14 +6718,15 @@ pub(crate) fn try_v31_transform(
 
         for seg in state_segs {
             match seg {
-                Seg::NonSuspendLet { name, expr, span } => {
-                    // Emit `let <synth>: i64 = <rewritten expr>;` then
-                    // assign to t.<name>.
+                Seg::NonSuspendLet { name, ty, expr, span } => {
+                    // Emit `let <synth>: <ty> = <rewritten expr>;` then
+                    // assign to t.<name>. Phase 3a — `ty` carries the
+                    // user-written annotation (Type::I64 by default).
                     let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
                     let synth_local = format!("__v3_tmp_{}", name);
                     then_body.push(Stmt::Let {
                         name: synth_local.clone(),
-                        annotation: Some(Type::I64),
+                        annotation: Some(ty.clone()),
                         expr: rewritten_expr,
                         span: *span,
                     });
@@ -6989,10 +7031,12 @@ pub(crate) fn try_v31_transform(
             },
         ));
     }
-    for (name, _, span) in &locals {
+    for (name, ty, span) in &locals {
+        // Phase 3a — emit type-appropriate default-init so the
+        // constructor's StructLit typechecks for non-i64 fields.
         ctor_fields.push((
             name.clone(),
-            Expr { kind: ExprKind::Int(0), span: *span },
+            v31_default_init_expr(ty, *span),
         ));
     }
     let ctor_body = vec![Stmt::Return {

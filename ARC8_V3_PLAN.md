@@ -89,11 +89,24 @@
 > every common control-flow shape in vāṇī. Capstone:
 > `examples/async_showcase.vani` (commit `3c46e31`).
 >
+> **Phase 3a ✅ COMPLETE 2026-06-04** (commit pending).
+> Non-i64 locals (bool / f64) in v3.1 async fns. Adds
+> `v31_local_type_allowed` gate + `v31_default_init_expr`
+> for per-type constructor defaults + threads `ty` through
+> `Seg::NonSuspendLet` so the synthesizer's temp local
+> annotation matches. Str / Enum / Struct / Vec deferred
+> to later Phase 3 sub-phases (need ownership-across-await
+> design). examples/echo_p3a_nonint_locals.vani parity-green
+> (bool + f64 in one async fn). 3 new lib tests.
+>
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3 for non-i64 returns)
-> - 3 affine types across await — OwnedStr/Vec (~20-25h)
+>   on Phase 3b/c/d for non-i64 returns)
+> - 3b: Str/OwnedStr locals across await (~6-10h)
+> - 3c: Enum locals across await (~6-10h, needs default-
+>   value design — first-variant convention or sentinel)
+> - 3d: Struct / Vec / Array locals across await (~10-15h)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)

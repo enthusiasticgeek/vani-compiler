@@ -1,0 +1,97 @@
+// Arc 8 v3.1 Phase 3a — non-i64 locals (bool / f64) in async fn.
+//
+// v3.1 historically required all locals + params be `i64` so the
+// state-machine task struct fields had a uniform, default-init-safe
+// type. Phase 3a relaxes this for the two types with obvious
+// defaults: `bool` (default `false`) and `f64` (default `0.0`).
+//
+// This unlocks the common pattern:
+//
+//   async fn pick(fd: i64, mode: i64) -> i64 {
+//     let flag: bool = mode > 0;        // bool local
+//     let factor: f64 = mode as f64;    // f64 local
+//     let n: i64 = match flag { ... };
+//     ...
+//   }
+//
+// without forcing the user to either inline the expression at every
+// use site or smuggle the value through an i64 (e.g.
+// `let flag_i: i64 = if mode > 0 { 1 } else { 0 };`).
+//
+// Implementation:
+//   - `v31_local_type_allowed(ty)` is the gate: I64 / Bool / F64.
+//   - `v31_default_init_expr(ty, span)` emits the per-type default
+//     for the task struct constructor's StructLit field init.
+//   - `Seg::NonSuspendLet { ty, ... }` carries the local's type so
+//     the synthesizer's `let __v3_tmp_<name>: <ty> = ...;` temp
+//     uses the correct annotation (previously hardcoded `i64`).
+//
+// Phase 3a does NOT yet handle:
+//   - `Str` / `OwnedStr` locals (no clean default + ownership
+//     semantics across await need design)
+//   - `Enum(name)` locals (no clean default without enum metadata
+//     at desugar time)
+//   - `Struct(name)` / `Vec` / `Array` locals
+//
+// build & run:
+//   intentc run examples/echo_p3a_nonint_locals.vani                # LLVM
+//   intentc run examples/echo_p3a_nonint_locals.vani --backend=c    # C
+
+intent "Phase 3a — bool + f64 locals in async fn";
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // bool local — gates the match-with-suspend.
+  let flag: bool = mode > 0;
+  // f64 local — used later as a fallback multiplier.
+  let factor: f64 = mode as f64 * 1.5;
+
+  let n: i64 = match flag {
+    true then io_recv_async(fd, 64),
+    false then (factor * 100.0) as i64
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abc");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=5 -> flag=true -> recv "abc" = 3 bytes
+  let t: Task__pick = pick(cfd, 5);
+  let r: i64 = drive(ep, mut ref t);
+  print "mode=5 flag=true (recv):", r;
+
+  // mode=0 -> flag=false -> factor=0.0 -> (0.0 * 100.0) as i64 = 0
+  let t2: Task__pick = pick(cfd, 0);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "mode=0 flag=false (factor*100):", r2;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
