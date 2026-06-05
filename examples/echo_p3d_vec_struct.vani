@@ -1,0 +1,96 @@
+// Arc 8 v3.1 Phase 3d — Vec + Struct locals in async fn.
+//
+// Phase 3d extends Phase 3a-c's non-i64 locals to include
+// container types: Vec<T> (any v31-allowed element T) and
+// Struct(name) (user struct with all v31-allowed fields).
+// Default-init synthesis:
+//   - Vec<T>: 1-element `vec(default_T)`. An empty `vec()`
+//     can't infer its element type in StructLit field position.
+//     The throwaway element is overwritten by the state
+//     machine before any read.
+//   - Struct(name): `StructName { f0: default(T0), f1:
+//     default(T1), ... }`. Recursive per-field defaults; cycle-
+//     safe via a thread-local visited set.
+//
+// Deferred to a future sub-phase:
+//   - Array `[T; N]`: C backend can't do array-to-array
+//     assignment (the synthesizer's NonSuspendLet emits a
+//     FieldAssign that hits invalid C). Future work: element-
+//     wise copy loop or memcpy escape hatch in the synthesizer.
+//
+// Caveat: Vec default-init allocates 1 throwaway element per
+// task. For tasks created in a hot path with many Vec locals,
+// this is a minor cost. Reasonable users won't notice.
+//
+// build & run:
+//   intentc run examples/echo_p3d_vec_struct.vani                # LLVM
+//   intentc run examples/echo_p3d_vec_struct.vani --backend=c    # C
+
+intent "Phase 3d — Vec + Struct locals in async fn";
+
+struct Config {
+  cap: i64,
+  base: i64
+}
+
+fn make_config(mode: i64) -> Config {
+  return Config { cap: 16 * mode, base: 100 * mode };
+}
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Struct local — Phase 3d makes this valid. Default-init
+  // emits `Config { cap: 0, base: 0 }` in the task struct
+  // constructor; state machine overwrites with `make_config(mode)`.
+  let cfg: Config = make_config(mode);
+
+  // Vec local — Phase 3d. Default-init emits `vec(0)` (1-element
+  // vec) so the empty Vec<i64> typechecks; state machine
+  // overwrites with the user's actual `vec(...)`.
+  let xs: Vec<i64> = vec(cfg.base, cfg.base + 1, cfg.base + 2);
+  let total: i64 = vec_sum(ref xs);
+
+  // Suspend after computing — exercise the state-split.
+  let n: i64 = io_recv_async(fd, cfg.cap);
+
+  return n + total;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=2 -> cfg={cap:32, base:200} -> xs=[200,201,202] sum=603
+  //         -> recv(32)=4 bytes "abcd" -> 4+603=607
+  let t: Task__pick = pick(cfd, 2);
+  let r: i64 = drive(ep, mut ref t);
+  print "result:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

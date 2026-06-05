@@ -21648,29 +21648,77 @@ fn main() -> i64 {
         assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
     }
 
-    /// Arc 8 v3.1 Phase 3c — Struct locals (not enum, but actual
-    /// user struct) still rejected. The gate distinguishes via
-    /// the enum registry: `Type::Struct(name)` where `name`
-    /// is NOT in V31_ENUM_REGISTRY bails.
+    /// Arc 8 v3.1 Phase 3d — Vec locals. Was rejected in Phase
+    /// 3a-c; Phase 3d adds Type::Vec(T) when T is itself v31-
+    /// allowed. Default-init synthesizes `vec(default_T)` (a
+    /// 1-element vec; empty `vec()` can't infer element type in
+    /// StructLit field position).
     #[test]
-    fn v31_phase3c_struct_local_still_rejected() {
+    fn v31_phase3d_vec_local_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, mode);
+              let total: i64 = vec_sum(ref xs);
+              let n: i64 = io_recv_async(fd, total);
+              return n + total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3d Vec local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3d Vec local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3d — Struct locals. Was rejected in
+    /// Phase 3a-c; Phase 3d adds Type::Struct(name) (non-enum)
+    /// via V31_STRUCT_REGISTRY populated at parse-time. Default-
+    /// init synthesizes `StructName { f0: d0, f1: d1, ... }`
+    /// with recursive per-field defaults; cycle-safe via a
+    /// thread-local visited set.
+    #[test]
+    fn v31_phase3d_struct_local_accepted() {
         let source = r#"
             struct Point { x: i64, y: i64 }
 
-            async fn pick(fd: i64) -> i64 {
-              let p: Point = Point { x: 1, y: 2 };
-              let n: i64 = io_recv_async(fd, 64);
+            fn make_point(mode: i64) -> Point {
+              return Point { x: mode, y: mode * 2 };
+            }
+
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let p: Point = make_point(mode);
+              let n: i64 = io_recv_async(fd, p.x);
+              return n + p.x + p.y;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3d Struct local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3d Struct local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3d — Array locals still rejected (C
+    /// backend can't do array-to-array assignment; deferred to
+    /// a future synthesizer slice with element-wise copy or
+    /// memcpy escape hatch).
+    #[test]
+    fn v31_phase3d_array_local_still_rejected() {
+        let source = r#"
+            async fn pick(fd: i64, mode: i64) -> i64 {
+              let arr: [i64; 4] = [1, 2, 3, mode];
+              let n: i64 = io_recv_async(fd, arr[0]);
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
         let errors = compile(source).expect_err(
-            "Phase 3c must reject genuine Struct locals (deferred to Phase 3d)"
+            "Phase 3d defers Array locals (C array-to-array assignment unsupported)"
         );
         assert!(
             errors.iter().any(|e| {
                 let m = e.message.as_str();
-                m.contains("Phase 3") || m.contains("Struct") || m.contains("Point")
+                m.contains("Phase 3") || m.contains("Array")
             }),
             "expected gate diagnostic; got: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()

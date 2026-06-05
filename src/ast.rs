@@ -232,6 +232,19 @@ thread_local! {
     /// default-init.
     pub(crate) static V31_ENUM_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, Vec<Type>)>>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Arc 8 v3.1 Phase 3d — registry of struct decls visible to
+    /// the v3.1 desugar. Populated by parse_program as struct
+    /// decls are parsed; consulted by `v31_default_init_expr` to
+    /// synthesize a per-field default-init StructLit for a struct
+    /// local in the task struct constructor.
+    ///
+    /// Maps `struct_name → Vec<(field_name, field_type)>` in
+    /// declaration order. The default-init only succeeds if EVERY
+    /// field type is itself v31-allowed; recursive (a struct can
+    /// hold another struct provided that inner struct's fields
+    /// are also v31-allowed transitively).
+    pub(crate) static V31_STRUCT_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, Vec<(String, Type)>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 pub fn set_user_drop_by_ref<I: IntoIterator<Item = String>>(names: I) {

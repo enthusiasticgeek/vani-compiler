@@ -8,23 +8,24 @@ refresh landed. Order is rough priority (size + payoff), not strict.
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
   platform port (2 phases). **Phase 0 + 1 + 2 narrow +
   2.1a + 2.1b + 2.1c + 2.2 + 2.3-narrow + 2.3a + 2.3b + 2.3c +
-  2.3d + 2.5 + 2.5b + 3a + 3b + 3c + 3e ✅ COMPLETE 2026-06-04** —
-  compiler-driven `async fn → Task` transform handles
-  linear bodies + non-suspending control flow + suspend-
-  in-branch state-splitting + fall-through merge state +
-  nested ifs in suspending branches + ANF lifting +
-  match arms WITH suspends (Int + Bool + Str + Float +
+  2.3d + 2.5 + 2.5b + 3a + 3b + 3c + 3d + 3e ✅ COMPLETE
+  2026-06-04** — compiler-driven `async fn → Task` transform
+  handles linear bodies + non-suspending control flow +
+  suspend-in-branch state-splitting + fall-through merge
+  state + nested ifs in suspending branches + ANF lifting
+  + match arms WITH suspends (Int + Bool + Str + Float +
   Variant + VariantWithBinding + Wildcard) + loops with
-  suspend in body + break/continue inside loops +
-  non-i64 locals (bool / f64 / Str / OwnedStr / Enum
-  unit OR payloaded). Shipped via commits `eac1bf6`,
-  `51748d6`, `7d47ff6`, `a3cab5b`, `7566ab8`, `b1b8113`,
-  `22fc622`, `d3a0af3`, `a77b799`, `4702cb6`, `7a19b68`,
-  `eb2a8af`, `cc8c8de`, `9fb16dc`, `754c163`, `defde20`,
-  `af1d274`, plus pending 3e. Phase 3d (Struct/Vec/Array
-  locals) queued. Phase 2.4 (try) needs Phase 3 for
-  non-i64 returns. **Next session recommended: Phase 3d
-  (Struct/Vec/Array, ~10-15h)** or Phase 5 (macOS port).
+  suspend in body + break/continue inside loops + non-i64
+  locals (bool / f64 / Str / OwnedStr / Enum / Vec / Struct).
+  Array [T; N] locals DEFERRED (C array-to-array assignment).
+  Shipped via commits `eac1bf6`, `51748d6`, `7d47ff6`,
+  `a3cab5b`, `7566ab8`, `b1b8113`, `22fc622`, `d3a0af3`,
+  `a77b799`, `4702cb6`, `7a19b68`, `eb2a8af`, `cc8c8de`,
+  `9fb16dc`, `754c163`, `defde20`, `af1d274`, `40c4047`,
+  plus pending 3d. Phase 2.4 (try) needs Phase 3 for
+  non-i64 returns; Phase 3f (Array) needs synthesizer hatch.
+  **Next session recommended: Phase 5 (macOS kqueue port,
+  ~10-15h)** or Phase 3f (Array, ~4-6h).
 - [ARCS.md](ARCS.md) — granular sub-step plan for the multi-
   session arcs. **Current state:** Arcs 1, 2, 3, 4 ✅ COMPLETE.
   Arc 5 ✅ COMPLETE (5a/5b/5d were on `main`; 5c shipped

@@ -97,6 +97,17 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3d ✅ COMPLETE 2026-06-04** (commit pending). Vec + Struct
+> locals in v3.1 async fns. Adds Type::Vec(T) (1-element default
+> via `vec(default_T)`; empty `vec()` can't infer in StructLit
+> field position) and Type::Struct(name) via new V31_STRUCT_REGISTRY
+> populated by parse_program. Recursive per-field defaults; cycle-
+> safe. Array [T; N] DEFERRED — C backend can't do array-to-array
+> assignment in FieldAssign; needs synthesizer escape hatch.
+> examples/echo_p3d_vec_struct.vani parity-green. 3 new lib tests
+> (Vec + Struct acceptance + Array rejection pinning the
+> deferred boundary).
+>
 > **Phase 3e ✅ COMPLETE 2026-06-04** (commit `40c4047`). Payloaded-
 > only enum locals in v3.1 async fns. Default-init picks the first
 > variant whose payload types are all v31-allowed and emits
@@ -133,8 +144,9 @@
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3d for non-i64 returns)
-> - 3d: Struct / Vec / Array locals across await (~10-15h)
+>   on Phase 3 non-i64 returns)
+> - 3f: Array [T; N] locals (deferred from 3d, ~4-6h —
+>   synthesizer needs element-wise copy or memcpy hatch)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)

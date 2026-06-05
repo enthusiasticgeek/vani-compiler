@@ -13,17 +13,18 @@
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c +
-3e shipped — compiler-driven `async fn → Task` transform
-handles linear bodies + non-suspending control flow +
-suspend-in-branch state-splitting + fall-through merge
-state + nested ifs + ANF lifting + match in async fn +
-match arms WITH suspends (Int + Bool + Str + Float +
-Variant + VariantWithBinding + Wildcard) + loops with
+3d + 3e shipped — compiler-driven `async fn → Task`
+transform handles linear bodies + non-suspending control
+flow + suspend-in-branch state-splitting + fall-through
+merge state + nested ifs + ANF lifting + match in async
+fn + match arms WITH suspends (Int + Bool + Str + Float
++ Variant + VariantWithBinding + Wildcard) + loops with
 suspend inside + break/continue inside loops + non-i64
-locals (bool / f64 / Str / OwnedStr / Enum-any-variant).
-21 v3.1 acceptance examples parity-green. **v3.1 locals
+locals (bool / f64 / Str / OwnedStr / Enum / Vec / Struct).
+22 v3.1 acceptance examples parity-green. **v3.1 locals
 across await: i64 + bool + f64 + Str + OwnedStr + Enum
-(unit OR payloaded).** Phase 3d next (Struct/Vec/Array);
+(unit OR payloaded) + Vec<T> + Struct (recursive).**
+Array deferred (C array-to-array assignment limitation).
 Phase 2.4 (try) needs Phase 3 for non-i64 returns; macOS
 port (Phase 5) for later**).
 
@@ -163,6 +164,35 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3d — Vec + Struct locals** (commit pending).
+  Fourth slice of Phase 3. Extends the v3.1 locals gate to
+  container types:
+  - `Type::Vec(T)`: allowed when `T` is itself v31-allowed.
+    Default-init synthesizes `vec(default_T)` — a 1-element
+    vec containing the element's default. An empty `vec()`
+    can't infer its element type in StructLit field position;
+    the throwaway element is overwritten by the state machine
+    before any read.
+  - `Type::Struct(name)`: allowed via new `V31_STRUCT_REGISTRY`
+    (parallel to V31_ENUM_REGISTRY; populated by parse_program
+    as struct decls are parsed). Default-init synthesizes
+    `StructName { f0: default(T0), f1: default(T1), ... }` with
+    recursive per-field defaults. Cycle-safe via a thread-local
+    visited set on self-referential struct chains.
+  - **Array `[T; N]` DEFERRED** — the C backend can't do
+    array-to-array assignment (`__t->arr = __v3_tmp_arr;` is
+    invalid C; arrays decay to pointers). The synthesizer's
+    NonSuspendLet emits a FieldAssign that hits this. A future
+    Phase 3d-array slice would need element-wise copy loop or
+    memcpy escape hatch in the synthesizer.
+  - `examples/echo_p3d_vec_struct.vani` — both Vec and Struct
+    locals in one async fn. mode=2 byte-identical: cfg={cap:32,
+    base:200}, xs=[200,201,202] sum=603, recv(32) 4 bytes
+    "abcd" → 4+603=607.
+  - 3 new lib tests (Vec acceptance + Struct acceptance + Array
+    rejection pinning the deferred-slice boundary). Previous
+    Phase 3c Struct-rejection test replaced.
 
 - **v3.1 Phase 3e — payloaded-only enum locals + C backend
   enum-typedef ordering fix** (commit `40c4047`). Extends

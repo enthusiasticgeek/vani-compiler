@@ -842,6 +842,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_p3a_nonint_locals.vani",
         "echo_p3b_str_local.vani",
         "echo_p3c_enum_local.vani",
+        "echo_p3d_vec_struct.vani",
         "echo_p3e_payloaded_enum.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",

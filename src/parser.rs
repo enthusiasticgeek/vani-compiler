@@ -64,6 +64,10 @@ impl Parser {
         // the same reason. Populated as enum decls are parsed
         // (see the EnumDecl path inside the parse loop).
         crate::ast::V31_ENUM_REGISTRY.with(|r| r.borrow_mut().clear());
+        // Phase 3d — clear the struct-name → fields registry.
+        // Populated as struct decls are parsed (see the StructDecl
+        // paths inside the parse loop).
+        crate::ast::V31_STRUCT_REGISTRY.with(|r| r.borrow_mut().clear());
 
         let mut intents = Vec::new();
         let mut functions = Vec::new();
@@ -117,7 +121,18 @@ impl Parser {
                 }
             } else if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
-                    Ok(s) => structs.push(s),
+                    Ok(s) => {
+                        // Phase 3d — stash struct_name → fields so
+                        // the v3.1 desugar can synthesize per-field
+                        // default-init for struct locals.
+                        crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+                            let fields: Vec<(String, Type)> = s.fields.iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(s.name.clone(), fields);
+                        });
+                        structs.push(s);
+                    }
                     Err(e) => {
                         self.errors.push(e);
                         self.sync_to_top_level();
@@ -427,6 +442,15 @@ impl Parser {
             if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
+                        // Phase 3d — same registry population as
+                        // the bare-struct branch above; covers
+                        // pub/kosh-decorated struct decl sites.
+                        crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+                            let fields: Vec<(String, Type)> = s.fields.iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(s.name.clone(), fields);
+                        });
                         structs.push(s);
                         vis.structs_pub.push(is_pub);
                         vis.structs_kosh_only.push(is_kosh_only);
@@ -5411,14 +5435,61 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr => true,
         // Parser stamps user-typed identifiers as Type::Struct(name)
         // before the checker's pre-pass resolves them to Type::Enum.
-        // Both forms route through V31_ENUM_REGISTRY: if the name
-        // is a registered enum AND at least one variant has all-
-        // v31-allowed payload types, the local is allowed.
+        // Try enum registry first; fall back to struct registry
+        // (Phase 3d). If neither has the name, reject.
         Type::Enum(name) | Type::Struct(name) => {
-            v31_enum_default_variant(name).is_some()
+            if v31_enum_default_variant(name).is_some() {
+                return true;
+            }
+            // Phase 3d — struct local: allowed only if every field
+            // type is itself v31-allowed (recursive). Recursion
+            // tracking via STRUCT_VISITING_DEFAULT prevents infinite
+            // loops on self-referential structs.
+            v31_struct_default_allowed(name)
         }
+        // Phase 3d — Vec<T>: element type must also be v31-
+        // allowed since the default-init synthesizes a 1-element
+        // vec containing the element's default (the empty `vec()`
+        // can't infer its element type in StructLit field
+        // position).
+        Type::Vec(inner) => v31_local_type_allowed(inner),
+        // Type::Array { element, length } is DEFERRED — the C
+        // backend doesn't allow array-to-array assignment
+        // (`__t->arr = __v3_tmp_arr;` is invalid C; arrays decay
+        // to pointers). The synthesizer's NonSuspendLet emits a
+        // FieldAssign that hits this. A Phase 3d-array slice
+        // would need either an element-wise copy loop OR a
+        // memcpy escape hatch in the synthesizer.
         _ => false,
     }
+}
+
+/// Phase 3d — Whether a struct type can have its default-init
+/// synthesized. Requires every field type to be v31-allowed
+/// (recursive). Uses a thread-local visited set to break cycles
+/// on self-referential structs.
+fn v31_struct_default_allowed(struct_name: &str) -> bool {
+    thread_local! {
+        static VISITING: std::cell::RefCell<std::collections::HashSet<String>> =
+            std::cell::RefCell::new(std::collections::HashSet::new());
+    }
+    VISITING.with(|v| {
+        if v.borrow().contains(struct_name) {
+            // Cycle — assume disallowed (self-referential structs
+            // can't have a finite default).
+            return false;
+        }
+        let fields_opt = crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+            reg.borrow().get(struct_name).cloned()
+        });
+        let Some(fields) = fields_opt else {
+            return false;
+        };
+        v.borrow_mut().insert(struct_name.to_string());
+        let ok = fields.iter().all(|(_, ty)| v31_local_type_allowed(ty));
+        v.borrow_mut().remove(struct_name);
+        ok
+    })
 }
 
 /// Phase 3c/3e — Look up the first variant of `enum_name` whose
@@ -5457,7 +5528,42 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         Type::Bool => ExprKind::Bool(false),
         Type::F64 => ExprKind::Float(0.0),
         Type::Str | Type::OwnedStr => ExprKind::Str(String::new()),
+        // Phase 3d — Vec<T>: 1-element vec containing the
+        // element's recursive default. An empty `vec()` would
+        // typecheck-fail in StructLit field position (the checker
+        // can't infer the element type without a context-aware
+        // annotation hook). One default element supplies the
+        // inference; the state machine overwrites the field with
+        // the user's actual vec() before any read, so the
+        // throwaway default is harmless.
+        Type::Vec(inner) => ExprKind::Call {
+            name: "vec".to_string(),
+            name_span: span,
+            args: vec![v31_default_init_expr(inner, span)],
+        },
         Type::Enum(name) | Type::Struct(name) => {
+            // Phase 3d — if `name` is a registered struct (not an
+            // enum), synthesize `StructName { f0: d0, f1: d1, ...
+            // }` with recursive per-field defaults.
+            let struct_fields = crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+                reg.borrow().get(name).cloned()
+            });
+            if let Some(fields) = struct_fields {
+                let init_fields: Vec<(String, Expr)> = fields
+                    .iter()
+                    .map(|(fname, fty)| {
+                        (fname.clone(), v31_default_init_expr(fty, span))
+                    })
+                    .collect();
+                return Expr {
+                    kind: ExprKind::StructLit {
+                        type_name: name.clone(),
+                        type_name_span: span,
+                        fields: init_fields,
+                    },
+                    span,
+                };
+            }
             // Phase 3c/3e — synthesize the default variant of the
             // registered enum. Unit variants emit `FieldAccess`
             // (`EnumName.Variant`); payloaded variants emit a
