@@ -21726,6 +21726,86 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3.1 Phase 3-returns — bool return type. Was
+    /// rejected (i64-only return); now accepted. Poll fn
+    /// returns status only; value routed through `__t.__result`.
+    #[test]
+    fn v31_phase3r_bool_return_accepted() {
+        let source = r#"
+            async fn is_long(fd: i64, threshold: i64) -> bool {
+              let n: i64 = io_recv_async(fd, 64);
+              return n > threshold;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3r bool return must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3r bool return must compile on LLVM");
+        // C backend names struct fields; LLVM uses positional
+        // indexes (no field names in the IR). Verify the C output
+        // gains the __result field; LLVM's struct shape carries
+        // an extra i1 trailing slot for the bool result.
+        assert!(c.contains("__result"), "C task struct should have __result field");
+        assert!(ll.contains("i1"), "LLVM Task struct should include the i1 result slot");
+        assert!(c.contains("Task__is_long") && c.contains("__poll_is_long"));
+        assert!(ll.contains("Task__is_long") && ll.contains("__poll_is_long"));
+    }
+
+    /// Arc 8 v3.1 Phase 3-returns — Str return type. Recursive
+    /// default-init for the __result field uses `""`.
+    #[test]
+    fn v31_phase3r_str_return_accepted() {
+        let source = r#"
+            async fn fetch_label(fd: i64, mode: i64) -> Str {
+              let n: i64 = io_recv_async(fd, 64);
+              return match mode {
+                0 then "zero",
+                _ then "other"
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3r Str return must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3r Str return must compile on LLVM");
+        assert!(c.contains("Task__fetch_label") && c.contains("__poll_fetch_label"));
+        assert!(ll.contains("Task__fetch_label") && ll.contains("__poll_fetch_label"));
+    }
+
+    /// Arc 8 v3.1 Phase 3-returns — Enum return type (registered
+    /// enum with a unit variant; default-init picks the first
+    /// unit variant).
+    #[test]
+    fn v31_phase3r_enum_return_accepted() {
+        let source = r#"
+            enum Action { Recv, Skip }
+
+            async fn classify(fd: i64, mode: i64) -> Action {
+              let n: i64 = io_recv_async(fd, 64);
+              return match mode { 0 then Action.Recv, _ then Action.Skip };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3r Enum return must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3r Enum return must compile on LLVM");
+        assert!(c.contains("Task__classify") && c.contains("__poll_classify"));
+        assert!(ll.contains("Task__classify") && ll.contains("__poll_classify"));
+    }
+
+    /// Arc 8 v3.1 Phase 3-returns — i64 return type STILL uses
+    /// the historical ABI (poll fn returns the value, no __result
+    /// field). Backward compatibility check.
+    #[test]
+    fn v31_phase3r_i64_return_still_uses_legacy_abi() {
+        let source = r#"
+            async fn count(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("i64 return must still compile");
+        assert!(!c.contains("__result"), "i64 return should NOT add __result field");
+    }
+
     /// Arc 8 v3.1 Phase 3f — Array with non-i64 element types
     /// (bool / f64 / Str etc.) also works since the per-element
     /// default-init recurses through v31_default_init_expr.

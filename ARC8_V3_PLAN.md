@@ -97,6 +97,20 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3-returns ✅ COMPLETE 2026-06-04** (commit pending).
+> Lifts the i64-only async fn return-type rule. ABI split: i64
+> returns keep the historical poll-fn contract (return value
+> directly); non-i64 returns route the value through a
+> synthesized `__result: T` task struct field with the poll fn
+> returning 0=Ready/-2=Pending/-1=Error status. Driver pattern
+> for non-i64 returns reads `t.__result` on status 0.
+> v31_local_type_allowed gates BOTH locals and returns
+> uniformly. examples/echo_p3r_nonint_returns.vani parity-green
+> across bool / Str / Enum return types. 4 new lib tests
+> (bool/Str/Enum acceptance + i64 legacy-ABI regression check).
+> **Unblocks Phase 2.4 (try keyword) since Result<T,E> can now
+> be a return type.**
+>
 > **Phase 3f ✅ COMPLETE 2026-06-04** (commit `3bbbe83`). Array
 > `[T; N]` locals in v3.1 async fns. Resolves the deferral from
 > Phase 3d. C backend's FieldAssign emits memcpy for Type::Array
@@ -158,9 +172,9 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3 non-i64 returns — would extend the v3.1
->   return-type gate similarly to the locals gate)
+> - 2.4 try keyword + Result propagation (~6-8h, NOW
+>   UNBLOCKED — Phase 3-returns provides the Result<T,E>
+>   plumbing)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)

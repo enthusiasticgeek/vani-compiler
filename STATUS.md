@@ -13,18 +13,20 @@
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c +
-3d + 3e + 3f shipped — compiler-driven `async fn → Task`
-transform handles linear bodies + non-suspending control
-flow + suspend-in-branch state-splitting + fall-through
-merge state + nested ifs + ANF lifting + match in async
-fn + match arms WITH suspends (Int + Bool + Str + Float
-+ Variant + VariantWithBinding + Wildcard) + loops with
-suspend inside + break/continue inside loops + non-i64
-locals (bool / f64 / Str / OwnedStr / Enum / Vec / Struct
-/ Array). 23 v3.1 acceptance examples parity-green.
-**v3.1 locals across await: ALL major composite types
-shippable.** Phase 2.4 (try) needs Phase 3 for non-i64
-returns; macOS
+3d + 3e + 3f + 3-returns shipped — compiler-driven
+`async fn → Task` transform handles linear bodies +
+non-suspending control flow + suspend-in-branch state-
+splitting + fall-through merge state + nested ifs + ANF
+lifting + match in async fn + match arms WITH suspends
+(Int + Bool + Str + Float + Variant + VariantWithBinding
++ Wildcard) + loops with suspend inside + break/continue
+inside loops + non-i64 LOCALS (bool / f64 / Str / OwnedStr
+/ Enum / Vec / Struct / Array) + non-i64 RETURN TYPES
+(via `__result: T` field + status-only poll ABI).
+24 v3.1 acceptance examples parity-green. **v3.1 affine
+locals + returns: ALL major composite types shippable
+ACROSS the entire async-fn boundary.** Phase 2.4 (try)
+NOW UNBLOCKED — depends only on Result type. macOS
 port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -163,6 +165,32 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3-returns — non-i64 async fn return types**
+  (commit pending). Lifts the historical i64-only return-type
+  rule mirroring the locals lift across Phases 3a-3f. ABI
+  design: for T == i64 the poll fn keeps its historical return
+  contract (returns the value directly with -2/-1 sentinels).
+  For non-i64 T, the synthesized task struct gains a
+  `__result: T` field, the Seg::Return emit routes
+  `__t.__result = expr; return 0;`, and the driver pattern
+  changes to read `t.__result` on status 0:
+  - `validate_v31_linear_body` return-type gate uses
+    `v31_local_type_allowed` (mirrors locals gate) so any
+    composite type from Phase 3a-3f works as a return type:
+    bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct /
+    Array.
+  - Synthesizer adds `__result: T` to task struct fields +
+    initializes it via `v31_default_init_expr` in the
+    constructor.
+  - Backward compatibility: existing i64-returning examples
+    unchanged (no `__result` field; legacy ABI).
+  - `examples/echo_p3r_nonint_returns.vani` — three async fns
+    returning bool / Str / Enum. All three byte-identical:
+    is_long(2) → true, fetch_label(1) → "one",
+    classify(0) → Action.Recv (encoded 1).
+  - 4 new lib tests (bool / Str / Enum acceptance + i64
+    legacy-ABI assertion).
 
 - **v3.1 Phase 3f — Array `[T; N]` locals + C backend memcpy
   escape hatch** (commit `3bbbe83`). Resolves the deferral from

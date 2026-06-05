@@ -6082,8 +6082,10 @@ fn validate_v31_linear_body(
     body: &[Stmt],
     return_type: &Type,
 ) -> Result<Vec<(String, Type, crate::span::Span)>, Diagnostic> {
-    // Return type must be i64.
-    if !matches!(return_type, Type::I64) {
+    // Phase 3-returns: return type must be v31-allowed. Non-i64
+    // returns route through a synthesized `__result: T` field;
+    // poll fn returns status (0 = Ready) instead of the value.
+    if !v31_local_type_allowed(return_type) {
         return Err(Diagnostic::new(
             body.first().map(|s| match s {
                 Stmt::Let { span, .. }
@@ -6091,7 +6093,10 @@ fn validate_v31_linear_body(
                 _ => crate::span::Span::new(0, 0),
             }).unwrap_or(crate::span::Span::new(0, 0)),
             format!(
-                "v3.1 async fn must return i64 (got {:?}); other return types arrive in Phase 3 (affine types across await)",
+                "v3.1 async fn return type {:?} not yet supported \
+                — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
+                Enum (registered) / Vec<T> / Struct (registered) / \
+                Array<T,N>",
                 return_type
             ),
         ));
@@ -6532,6 +6537,20 @@ pub(crate) fn try_v31_transform(
             name: name.clone(),
             ty: ty.clone(),
             span: *span,
+        });
+    }
+    // Phase 3-returns — non-i64 async fn return types route the
+    // result through a synthesized `__result: T` field. Poll fn
+    // returns status (0 = Ready, -2 = Pending, -1 = Error)
+    // instead of the value; driver reads `t.__result` on status
+    // == 0. For T == i64 the old ABI (poll returns the value)
+    // stays in effect so existing examples keep working.
+    let return_via_field = !matches!(return_type, Type::I64);
+    if return_via_field {
+        struct_fields.push(StructField {
+            name: "__result".to_string(),
+            ty: return_type.clone(),
+            span: fn_name_span,
         });
     }
 
@@ -7103,10 +7122,34 @@ pub(crate) fn try_v31_transform(
                 }
                 Seg::Return { expr, span } => {
                     let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
-                    then_body.push(Stmt::Return {
-                        expr: rewritten_expr,
-                        span: *span,
-                    });
+                    // Phase 3-returns — for non-i64 returns route
+                    // the value through `__t.__result`, then
+                    // return 0 (Ready status). i64 returns keep
+                    // the historical ABI (poll returns the value).
+                    if return_via_field {
+                        then_body.push(Stmt::FieldAssign {
+                            object: Expr {
+                                kind: ExprKind::Var(t_param_name.clone()),
+                                span: *span,
+                            },
+                            field: "__result".to_string(),
+                            field_span: *span,
+                            value: rewritten_expr,
+                            span: *span,
+                        });
+                        then_body.push(Stmt::Return {
+                            expr: Expr {
+                                kind: ExprKind::Int(0),
+                                span: *span,
+                            },
+                            span: *span,
+                        });
+                    } else {
+                        then_body.push(Stmt::Return {
+                            expr: rewritten_expr,
+                            span: *span,
+                        });
+                    }
                 }
                 Seg::Verbatim(stmt) => {
                     // Phase 2 narrow: if/while/Assign/Print at
@@ -7278,6 +7321,16 @@ pub(crate) fn try_v31_transform(
         ctor_fields.push((
             name.clone(),
             v31_default_init_expr(ty, *span),
+        ));
+    }
+    // Phase 3-returns — default-init the synthesized `__result`
+    // field if the async fn has a non-i64 return type. Uses the
+    // same per-type defaults as locals so any v31_local_type_allowed
+    // type works uniformly.
+    if return_via_field {
+        ctor_fields.push((
+            "__result".to_string(),
+            v31_default_init_expr(return_type, fn_name_span),
         ));
     }
     let ctor_body = vec![Stmt::Return {

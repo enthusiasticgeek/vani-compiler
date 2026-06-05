@@ -1,0 +1,142 @@
+// Arc 8 v3.1 Phase 3-returns — non-i64 async fn return types.
+//
+// Historically v3.1 async fns could only return `i64` because
+// the synthesized poll fn returned `i64` carrying both status
+// (-2 Pending, -1 Error) and the Ready value on the same channel.
+// Phase 3-returns splits these: for non-i64 return types, the
+// poll fn returns *only* status (0 Ready / -2 Pending / -1 Error)
+// and the actual T value lives in a synthesized `__result: T`
+// field on the task struct. Driver pattern adapts accordingly.
+//
+// Backward compatibility: T == i64 keeps the historical ABI
+// (poll returns the value directly). Existing examples need no
+// changes.
+//
+// Supported in Phase 3-returns:
+//   - Any T that satisfies `v31_local_type_allowed`: i64, bool,
+//     f64, Str, OwnedStr, registered Enum (unit or payloaded),
+//     Vec<T'>, registered Struct (recursive), Array `[T'; N]`.
+//
+// Driver pattern for non-i64 returns:
+//
+//   fn drive<...>(ep: i64, t: mut ref Task__X) -> T {
+//     while true {
+//       let r: i64 = __poll_X(t);
+//       if r == 0       { return t.__result; }     // Ready
+//       if r == 0 - 1   { return DEFAULT_T;  }     // Error
+//       let _ = epoll_wait_one(ep, 1000);          // Pending -> yield
+//     }
+//     return DEFAULT_T;
+//   }
+//
+// build & run:
+//   intentc run examples/echo_p3r_nonint_returns.vani                # LLVM
+//   intentc run examples/echo_p3r_nonint_returns.vani --backend=c    # C
+
+intent "Phase 3-returns — bool / Str / Enum async-fn returns";
+
+enum Action { Recv, Skip, Wild }
+
+// --- bool-returning async fn ----------------------------------
+async fn is_long(fd: i64, threshold: i64) -> bool {
+  let n: i64 = io_recv_async(fd, 64);
+  return n > threshold;
+}
+
+fn drive_bool(ep: i64, t: mut ref Task__is_long) -> bool {
+  while true {
+    let r: i64 = __poll_is_long(t);
+    if r == 0 { return t.__result; }
+    if r == 0 - 1 { return false; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return false;
+}
+
+// --- Str-returning async fn -----------------------------------
+async fn fetch_label(fd: i64, mode: i64) -> Str {
+  let n: i64 = io_recv_async(fd, 64);
+  return match mode {
+    0 then "zero",
+    1 then "one",
+    _ then "other"
+  };
+}
+
+fn drive_str(ep: i64, t: mut ref Task__fetch_label) -> Str {
+  while true {
+    let r: i64 = __poll_fetch_label(t);
+    if r == 0 { return t.__result; }
+    if r == 0 - 1 { return "ERR"; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return "";
+}
+
+// --- Enum-returning async fn ----------------------------------
+async fn classify(fd: i64, mode: i64) -> Action {
+  let n: i64 = io_recv_async(fd, 64);
+  return match mode {
+    0 then Action.Recv,
+    1 then Action.Skip,
+    _ then Action.Wild
+  };
+}
+
+fn drive_action(ep: i64, t: mut ref Task__classify) -> Action {
+  while true {
+    let r: i64 = __poll_classify(t);
+    if r == 0 { return t.__result; }
+    if r == 0 - 1 { return Action.Wild; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return Action.Wild;
+}
+
+fn action_to_i64(a: Action) -> i64 {
+  return match a {
+    Action.Recv then 1,
+    Action.Skip then 2,
+    Action.Wild then 9
+  };
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // bool return: n=4 (recv "abcd"); threshold=2; 4 > 2 = true
+  let tb: Task__is_long = is_long(cfd, 2);
+  let b: bool = drive_bool(ep, mut ref tb);
+  print "is_long(2):", b;
+
+  // Str return: mode=1 -> "one"
+  let ts: Task__fetch_label = fetch_label(cfd, 1);
+  let s: Str = drive_str(ep, mut ref ts);
+  print "fetch_label(1):", s;
+
+  // Enum return: mode=0 -> Action.Recv (encoded as 1)
+  let ta: Task__classify = classify(cfd, 0);
+  let a: Action = drive_action(ep, mut ref ta);
+  print "classify(0) encoded:", action_to_i64(a);
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
