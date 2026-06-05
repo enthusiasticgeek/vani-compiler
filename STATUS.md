@@ -12,18 +12,20 @@
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b shipped —
-compiler-driven `async fn → Task` transform handles linear
-bodies + non-suspending control flow + suspend-in-branch
-state-splitting + fall-through merge state + nested ifs +
-ANF lifting + match in async fn + match arms WITH suspends
-(Int + Bool + Str + Float + Variant + VariantWithBinding
-+ Wildcard) + loops with suspend inside + break/continue
-inside loops + non-i64 locals (bool / f64 / Str / OwnedStr).
-19 v3.1 acceptance examples parity-green. **v3.1 locals
-across await: i64 + bool + f64 + Str + OwnedStr.** Phase 3c
-next (Enum locals); Phase 2.4 (try) needs broader Phase 3
-for non-i64 returns; macOS port (Phase 5) for later**).
+2.3a + 2.3b + 2.3c + 2.3d + 2.5 + 2.5b + 3a + 3b + 3c
+shipped — compiler-driven `async fn → Task` transform
+handles linear bodies + non-suspending control flow +
+suspend-in-branch state-splitting + fall-through merge
+state + nested ifs + ANF lifting + match in async fn +
+match arms WITH suspends (Int + Bool + Str + Float +
+Variant + VariantWithBinding + Wildcard) + loops with
+suspend inside + break/continue inside loops + non-i64
+locals (bool / f64 / Str / OwnedStr / Enum-with-unit-
+variant). 20 v3.1 acceptance examples parity-green.
+**v3.1 locals across await: i64 + bool + f64 + Str +
+OwnedStr + Enum.** Phase 3d next (Struct/Vec/Array);
+Phase 2.4 (try) needs broader Phase 3 for non-i64
+returns; macOS port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`
@@ -161,6 +163,25 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3c — Enum locals (with unit variant)** (commit
+  pending). Third slice of Phase 3. Adds `V31_ENUM_REGISTRY`
+  thread-local populated as `parse_program` walks enum decls
+  (both bare-enum and pub/kosh-decorated decl sites). The
+  type gate matches `Type::Enum(name)` AND `Type::Struct(name)`
+  (parser stamps user-typed identifiers as `Struct` before
+  the checker's pre-pass resolves them to `Enum`) and allows
+  the local only if the registered enum has at least one
+  unit (no-payload) variant. Default-init synthesizes
+  `<EnumName>.<FirstUnitVariant>` via `FieldAccess` so the
+  task struct constructor's StructLit typechecks.
+  - `examples/echo_p3c_enum_local.vani` — `let act: Action =
+    make_action(mode);` followed by `match act { Action.Recv
+    then io_recv_async(...), Action.Constant then 333,
+    Action.Wild then -1 }`. Three modes byte-identical across
+    LLVM + C.
+  - 3 new lib tests — Enum acceptance, enum-with-no-unit-
+    variant rejection, genuine-Struct rejection.
 
 - **v3.1 Phase 3b — Str / OwnedStr locals** (commit `defde20`).
   Second slice of Phase 3. Same `v31_local_type_allowed` gate

@@ -841,6 +841,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_match_stress.vani",
         "echo_p3a_nonint_locals.vani",
         "echo_p3b_str_local.vani",
+        "echo_p3c_enum_local.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",

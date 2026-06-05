@@ -60,6 +60,10 @@ impl Parser {
         // don't accumulate stale synthesized struct/poll-fn
         // pairs from earlier compiles in the same process.
         crate::ast::V31_TASK_REGISTRY.with(|r| r.borrow_mut().clear());
+        // Phase 3c — clear the enum-name → variants registry for
+        // the same reason. Populated as enum decls are parsed
+        // (see the EnumDecl path inside the parse loop).
+        crate::ast::V31_ENUM_REGISTRY.with(|r| r.borrow_mut().clear());
 
         let mut intents = Vec::new();
         let mut functions = Vec::new();
@@ -121,7 +125,19 @@ impl Parser {
                 }
             } else if self.check(|k| matches!(k, TokenKind::Enum)) {
                 match self.parse_enum_decl() {
-                    Ok(e) => enums.push(e),
+                    Ok(e) => {
+                        // Phase 3c — stash enum_name → variants
+                        // into V31_ENUM_REGISTRY so the v3.1
+                        // default-init synthesizer can find the
+                        // first unit variant for enum locals.
+                        crate::ast::V31_ENUM_REGISTRY.with(|reg| {
+                            let variants: Vec<(String, bool)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.is_empty()))
+                                .collect();
+                            reg.borrow_mut().insert(e.name.clone(), variants);
+                        });
+                        enums.push(e);
+                    }
                     Err(err) => {
                         self.errors.push(err);
                         self.sync_to_top_level();
@@ -420,6 +436,15 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Enum)) {
                 match self.parse_enum_decl() {
                     Ok(e) => {
+                        // Phase 3c — same registry population as
+                        // the bare-enum branch above; covers the
+                        // pub/kosh-decorated enum site.
+                        crate::ast::V31_ENUM_REGISTRY.with(|reg| {
+                            let variants: Vec<(String, bool)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.is_empty()))
+                                .collect();
+                            reg.borrow_mut().insert(e.name.clone(), variants);
+                        });
                         enums.push(e);
                         vis.enums_pub.push(is_pub);
                         vis.enums_kosh_only.push(is_kosh_only);
@@ -5364,23 +5389,52 @@ fn try_desugar_match_via_tag_extraction(
 /// desugars `let X = match {...}` with suspending arms into
 /// Whether `ty` is permitted as a v3.1 async fn local type. The
 /// hard requirement is that the constructor can emit a sensible
-/// default-init Expr (since locals start at 0 / false / "" before
-/// being assigned by the state machine). Currently allows:
-///   - I64        — default-inits to `0`        (historical baseline)
-///   - Bool       — default-inits to `false`    (Phase 3a)
-///   - F64        — default-inits to `0.0`      (Phase 3a)
-///   - Str        — default-inits to `""`       (Phase 3b)
-///   - OwnedStr   — default-inits to `""`       (Phase 3b)
+/// default-init Expr (since locals start at 0 / false / "" / first-
+/// variant before being assigned by the state machine).
+///
+/// Currently allows:
+///   - I64        — default-inits to `0`              (baseline)
+///   - Bool       — default-inits to `false`          (Phase 3a)
+///   - F64        — default-inits to `0.0`            (Phase 3a)
+///   - Str        — default-inits to `""`             (Phase 3b)
+///   - OwnedStr   — default-inits to `""`             (Phase 3b)
+///   - Enum(name) — default-inits to first UNIT       (Phase 3c)
+///                  variant of the enum. Requires the enum decl
+///                  to be visible to the parser (lexically before
+///                  the async fn) via V31_ENUM_REGISTRY AND to
+///                  have at least one unit variant.
 ///
 /// Types deferred to later Phase 3 sub-phases:
-///   - Enum(name) (no clean default without enum metadata at
-///     desugar time — Phase 3c)
-///   - Struct(name) / Vec / Array (need design — Phase 3d)
+///   - Struct(name) / Vec / Array (Phase 3d)
 fn v31_local_type_allowed(ty: &Type) -> bool {
-    matches!(
-        ty,
-        Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr
-    )
+    match ty {
+        Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr => true,
+        // Parser stamps user-typed identifiers as Type::Struct(name)
+        // before the checker's pre-pass resolves them to Type::Enum.
+        // Both forms route through V31_ENUM_REGISTRY: if the name
+        // is a registered enum with a unit variant, allow it.
+        Type::Enum(name) | Type::Struct(name) => {
+            v31_enum_default_variant(name).is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Phase 3c — Look up the first unit variant of `enum_name` in
+/// the V31_ENUM_REGISTRY. Returns `None` if the enum isn't
+/// registered (not lexically visible before the async fn) OR has
+/// no unit variants (all variants carry payloads).
+fn v31_enum_default_variant(enum_name: &str) -> Option<String> {
+    crate::ast::V31_ENUM_REGISTRY.with(|reg| {
+        reg.borrow()
+            .get(enum_name)
+            .and_then(|variants| {
+                variants
+                    .iter()
+                    .find(|(_, is_unit)| *is_unit)
+                    .map(|(name, _)| name.clone())
+            })
+    })
 }
 
 /// Build a default-init Expr for a v3.1 local field type. Caller
@@ -5391,6 +5445,27 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         Type::Bool => ExprKind::Bool(false),
         Type::F64 => ExprKind::Float(0.0),
         Type::Str | Type::OwnedStr => ExprKind::Str(String::new()),
+        Type::Enum(name) | Type::Struct(name) => {
+            // Phase 3c — synthesize `<EnumName>.<FirstUnitVariant>`
+            // as `FieldAccess { object: Var(EnumName), field:
+            // FirstUnitVariant }`. The checker resolves this to a
+            // variant constructor. Matches both Type::Enum (post-
+            // checker resolution) and Type::Struct (parser stamp
+            // for user-typed identifiers before resolution). The
+            // validator already ensured a unit variant exists; if
+            // not, we fall through to `Int(0)` (unreachable).
+            if let Some(variant) = v31_enum_default_variant(name) {
+                ExprKind::FieldAccess {
+                    object: Box::new(Expr {
+                        kind: ExprKind::Var(name.clone()),
+                        span,
+                    }),
+                    field: variant,
+                }
+            } else {
+                ExprKind::Int(0)
+            }
+        }
         _ => ExprKind::Int(0), // unreachable: validator gates the type
     };
     Expr { kind, span }

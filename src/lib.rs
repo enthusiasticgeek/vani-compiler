@@ -21552,29 +21552,96 @@ fn main() -> i64 {
         }
     }
 
-    /// Arc 8 v3.1 Phase 3b — Enum locals still rejected.
-    /// Phase 3c will lift this; for now the diagnostic
-    /// points at the future sub-phase.
+    /// Arc 8 v3.1 Phase 3c — Enum local accepted. Was rejected
+    /// in Phase 3a/3b; Phase 3c adds Enum(name) to the type gate
+    /// (provided the enum has a unit variant) and synthesizes
+    /// the first unit variant as default-init via the
+    /// `V31_ENUM_REGISTRY` populated at parse-time from enum decls.
     #[test]
-    fn v31_phase3b_enum_local_still_rejected() {
+    fn v31_phase3c_enum_local_accepted() {
         let source = r#"
-            enum Color { Red, Green, Blue }
+            enum Action { Recv, Constant, Wild }
+
+            fn make_action(mode: i64) -> Action {
+              return match mode {
+                0 then Action.Recv,
+                1 then Action.Constant,
+                _ then Action.Wild
+              };
+            }
 
             async fn pick(fd: i64, mode: i64) -> i64 {
-              let c: Color = Color.Red;
+              let act: Action = make_action(mode);
+              let n: i64 = match act {
+                Action.Recv then io_recv_async(fd, 64),
+                Action.Constant then 333,
+                Action.Wild then 0 - 1
+              };
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3c Enum local must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3c Enum local must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3c — Enum with NO unit variants still
+    /// rejected (no clean default-init available). User would
+    /// have to refactor to add a unit variant or use a different
+    /// type.
+    #[test]
+    fn v31_phase3c_enum_no_unit_variant_still_rejected() {
+        let source = r#"
+            enum AllPayload { A(i64), B(i64) }
+
+            async fn pick(fd: i64) -> i64 {
+              let x: AllPayload = AllPayload.A(7);
               let n: i64 = io_recv_async(fd, 64);
               return n;
             }
             fn main() -> i64 { return 0; }
         "#;
-        let errors = compile(source).expect_err("Phase 3b must defer Enum locals");
+        let errors = compile(source).expect_err(
+            "Phase 3c must reject enums without a unit variant (no default-init)"
+        );
         assert!(
             errors.iter().any(|e| {
                 let m = e.message.as_str();
-                m.contains("Phase 3a+3b") || m.contains("Phase 3c")
-                    || m.contains("Enum")
+                m.contains("Phase 3") || m.contains("must be i64")
+                    || m.contains("AllPayload")
             }),
-            "expected deferred-type diagnostic; got: {:?}",
+            "expected gate diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    /// Arc 8 v3.1 Phase 3c — Struct locals (not enum, but actual
+    /// user struct) still rejected. The gate distinguishes via
+    /// the enum registry: `Type::Struct(name)` where `name`
+    /// is NOT in V31_ENUM_REGISTRY bails.
+    #[test]
+    fn v31_phase3c_struct_local_still_rejected() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+
+            async fn pick(fd: i64) -> i64 {
+              let p: Point = Point { x: 1, y: 2 };
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "Phase 3c must reject genuine Struct locals (deferred to Phase 3d)"
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 3") || m.contains("Struct") || m.contains("Point")
+            }),
+            "expected gate diagnostic; got: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
         );
     }

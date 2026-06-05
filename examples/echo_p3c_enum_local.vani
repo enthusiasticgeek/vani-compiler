@@ -1,0 +1,99 @@
+// Arc 8 v3.1 Phase 3c — Enum locals in async fn.
+//
+// Phase 3c extends Phase 3a/3b's non-i64 locals to include
+// user-defined enums (those that have at least one unit variant).
+// Default-init synthesizes `<EnumName>.<FirstUnitVariant>` for the
+// task struct constructor — populated via `V31_ENUM_REGISTRY` that
+// the parser fills as enum decls are parsed.
+//
+// Why unit variants only:
+//   The constructor's StructLit requires every field to have a
+//   value. For payloaded variants (`Some(i64)`, `Err(Str)`), the
+//   default would also need a payload value — which requires
+//   defaults for the payload type. Phase 3c sidesteps this by
+//   restricting to the cheaper case: pick the first variant with
+//   no payload.
+//
+// Why this matters:
+//   Without Phase 3c, every async fn that wants to dispatch on an
+//   enum had to either inline the constructor (`match make_action(mode)
+//   { ... }` everywhere) or smuggle the value through an i64 tag.
+//   With Phase 3c, the user writes `let act: Action = ...;` once
+//   and re-uses the value naturally.
+//
+// build & run:
+//   intentc run examples/echo_p3c_enum_local.vani                # LLVM
+//   intentc run examples/echo_p3c_enum_local.vani --backend=c    # C
+
+intent "Phase 3c — Enum local in async fn";
+
+enum Action { Recv, Constant, Wild }
+
+fn make_action(mode: i64) -> Action {
+  return match mode {
+    0 then Action.Recv,
+    1 then Action.Constant,
+    _ then Action.Wild
+  };
+}
+
+async fn pick(fd: i64, mode: i64) -> i64 {
+  // Enum local — Phase 3c makes this valid. Task struct field
+  // `act: Action` defaults to `Action.Recv` (first unit variant)
+  // in the constructor; the state machine overwrites it with
+  // `make_action(mode)` before the match runs.
+  let act: Action = make_action(mode);
+
+  let n: i64 = match act {
+    Action.Recv then io_recv_async(fd, 64),
+    Action.Constant then 333,
+    Action.Wild then 0 - 1
+  };
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__pick) -> i64 {
+  while true {
+    let r: i64 = __poll_pick(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  let t0: Task__pick = pick(cfd, 0);
+  let r0: i64 = drive(ep, mut ref t0);
+  print "mode=0 (Recv):", r0;
+
+  let t1: Task__pick = pick(cfd, 1);
+  let r1: i64 = drive(ep, mut ref t1);
+  print "mode=1 (Constant):", r1;
+
+  let t9: Task__pick = pick(cfd, 99);
+  let r9: i64 = drive(ep, mut ref t9);
+  print "mode=99 (Wild):", r9;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

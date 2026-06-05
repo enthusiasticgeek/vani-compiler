@@ -97,6 +97,19 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3c ✅ COMPLETE 2026-06-04** (commit pending). Enum
+> locals in v3.1 async fns. Adds `V31_ENUM_REGISTRY` populated
+> by parse_program as enum decls are parsed; the v3.1 type gate
+> matches both `Type::Enum(name)` and `Type::Struct(name)`
+> (parser stamps user-typed identifiers as Struct pre-checker
+> resolution). Allows the local only if the registered enum
+> has at least one unit (no-payload) variant; default-init
+> synthesizes `<EnumName>.<FirstUnitVariant>`. Examples:
+> echo_p3c_enum_local.vani parity-green (Action.Recv/Constant/
+> Wild dispatch with one variant suspending). 3 new lib tests
+> (acceptance + enum-without-unit-variant rejection + genuine-
+> Struct rejection).
+>
 > **Phase 3b ✅ COMPLETE 2026-06-04** (commit `defde20`). Str /
 > OwnedStr locals in v3.1 async fns. Extends Phase 3a's
 > type gate with Type::Str + Type::OwnedStr; default-init
@@ -110,10 +123,10 @@
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
 > - 2.4 try keyword + Result propagation (~6-8h, depends
->   on Phase 3c/d for non-i64 returns + Result type)
-> - 3c: Enum locals across await (~6-10h, needs default-
->   value design — first-variant convention or sentinel)
+>   on Phase 3d/e for non-i64 returns + Result type)
 > - 3d: Struct / Vec / Array locals across await (~10-15h)
+> - 3e: Payloaded-enum locals (allows enums without a unit
+>   variant) (~4-6h, needs default-value design for payload)
 > - 4 generics / nested async calls / multi-task (~25-30h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
