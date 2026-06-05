@@ -1,0 +1,138 @@
+// Arc 8 v3.1 Phase 3 — COMPREHENSIVE LOCALS STRESS TEST.
+//
+// Single async fn exercising EVERY non-i64 local type unlocked
+// by Phases 3a-3f all in one body. Validates that the task
+// struct constructor can default-init every shape simultaneously
+// and that the state machine carries every value across the
+// suspend point:
+//   - bool             (Phase 3a — default `false`)
+//   - f64              (Phase 3a — default `0.0`)
+//   - Str              (Phase 3b — default `""`)
+//   - Enum (unit)      (Phase 3c — default first unit variant)
+//   - Enum (payloaded) (Phase 3e — default first variant with
+//                       recursive payload defaults)
+//   - Vec<T>           (Phase 3d — default 1-element vec)
+//   - Struct           (Phase 3d — recursive per-field default)
+//   - Array [T; N]     (Phase 3f — default N copies of default(T),
+//                       FieldAssign routes through C memcpy)
+//
+// All 8 locals are assigned BEFORE the suspend point so the task
+// struct carries their values across the await. After the
+// suspend, the body reads each one (or a derived value) into the
+// final result so the compiler can't dead-code-eliminate.
+//
+// build & run:
+//   intentc run examples/echo_p3_locals_stress.vani                # LLVM
+//   intentc run examples/echo_p3_locals_stress.vani --backend=c    # C
+
+intent "Phase 3 stress — every non-i64 local across one await";
+
+enum Mode { Normal, Special }
+enum Payloaded { A(i64), B(i64) }
+struct Cfg { cap: i64, base: i64 }
+
+fn make_mode(m: i64) -> Mode {
+  return match m { 0 then Mode.Normal, _ then Mode.Special };
+}
+
+fn make_payloaded(m: i64) -> Payloaded {
+  return match m { 0 then Payloaded.A(7), _ then Payloaded.B(99) };
+}
+
+fn make_cfg(m: i64) -> Cfg {
+  return Cfg { cap: m * 10, base: m * 100 };
+}
+
+async fn stress(fd: i64, mode: i64) -> i64 {
+  let flag: bool = mode > 0;                  // Phase 3a — bool
+  let factor: f64 = (mode as f64) * 0.5;      // Phase 3a — f64
+  let label: Str = i64_to_str(mode);          // Phase 3b — Str
+  let unit_e: Mode = make_mode(mode);         // Phase 3c — unit Enum
+  let pl_e: Payloaded = make_payloaded(mode); // Phase 3e — payloaded Enum
+  let xs: Vec<i64> = vec(mode, mode + 1);     // Phase 3d — Vec<i64>
+  let cfg: Cfg = make_cfg(mode);              // Phase 3d — Struct
+  let arr: [i64; 3] = [mode, mode * 2, mode * 3]; // Phase 3f — Array
+
+  // Suspend ONCE — all 8 locals must be preserved into state 1.
+  let n: i64 = io_recv_async(fd, cfg.cap);
+
+  // Read every local to keep them live + feed into the result.
+  let bool_contrib: i64 = match flag { true then 100, false then 200 };
+  let float_contrib: i64 = (factor * 10.0) as i64;
+  let str_contrib: i64 = match label {
+    "0" then 1000,
+    _ then 2000
+  };
+  let unit_e_contrib: i64 = match unit_e {
+    Mode.Normal then 10000,
+    Mode.Special then 20000
+  };
+  let pl_e_contrib: i64 = match pl_e {
+    Payloaded.A(v) then v + 100000,
+    Payloaded.B(v) then v + 200000
+  };
+  let vec_contrib: i64 = vec_sum(ref xs) * 1000000;
+  let cfg_contrib: i64 = cfg.base * 10000000;
+  let arr_contrib: i64 = (arr[0] + arr[1] + arr[2]) * 100000000;
+
+  return n
+    + bool_contrib
+    + float_contrib
+    + str_contrib
+    + unit_e_contrib
+    + pl_e_contrib
+    + vec_contrib
+    + cfg_contrib
+    + arr_contrib;
+}
+
+fn drive(ep: i64, t: mut ref Task__stress) -> i64 {
+  while true {
+    let r: i64 = __poll_stress(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "abcd");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 path:
+  //   flag = false        -> bool_contrib  = 200
+  //   factor = 0.0        -> float_contrib = 0
+  //   label = "0"         -> str_contrib   = 1000
+  //   unit_e = Normal     -> unit_e_contrib= 10000
+  //   pl_e = A(7)         -> pl_e_contrib  = 7 + 100000 = 100007
+  //   xs = [0, 1] sum=1   -> vec_contrib   = 1 * 1000000 = 1000000
+  //   cfg.base = 0        -> cfg_contrib   = 0
+  //   arr = [0, 0, 0] s=0 -> arr_contrib   = 0
+  //   n = io_recv(0)      -> peer sends "abcd" only after sleep_ms(10)
+  //                          but cfg.cap=0 means recv(0) returns 0 bytes!
+  //                          Actually io_recv_async(fd, 0) -> 0 with no suspend.
+  // Total = 0 + 200 + 0 + 1000 + 10000 + 100007 + 1000000 + 0 + 0 = 1111207
+  let t: Task__stress = stress(cfd, 0);
+  let r: i64 = drive(ep, mut ref t);
+  print "stress mode=0:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
