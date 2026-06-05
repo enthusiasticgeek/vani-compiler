@@ -49,7 +49,7 @@
 > outputs (bool true/false, str=1/99, f=2.0). 4 new lib
 > tests (3 acceptance + 1 Variant-rejection).
 >
-> **Phase 2.3c ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 2.3c ✅ COMPLETE 2026-06-04** (commit `cc8c8de`).
 > Variant (enum) patterns in match arms with suspends, via
 > a TAG-EXTRACTION SUB-MATCH approach. The original variant
 > arms become an i64-returning sub-match that runs through

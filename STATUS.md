@@ -161,7 +161,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 2.3c — Variant patterns with suspends** (commit
-  pending). Tag-extraction sub-match approach:
+  `cc8c8de`). Tag-extraction sub-match approach:
   - `try_desugar_match_via_tag_extraction` synthesizes a
     sub-match returning i64 tag (arm idx) for each variant arm.
     The sub-match's arms are unit variants returning literal
