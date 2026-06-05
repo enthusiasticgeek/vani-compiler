@@ -210,25 +210,27 @@ as ahead) include:
   Arc 9 c+d `pub(kosh)` + `pub use` re-exports.
 
 Currently pending:
-- **Arc 8 v3.1 sugar layer (OPTIONAL)** — parser-level
-  compiler transform that auto-generates state-machine
-  struct + poll fn + constructor from `async fn` bodies
-  with `io_*_async` calls. The hand-rolled pattern already
-  ships via `tcp_echo_state_machine.vani`; v3.1 automates
-  the boilerplate. **15 design caveats** documented in
-  STATUS.md (body shape, local liveness, affine-types-
-  across-await, multi-await ANF lifting, ref params,
-  CancelToken, error propagation, nested async calls,
-  generics, multi-task scheduling, `sleep_ms_async`,
-  diagnostics).
-- **Arc 8 platform port** — all Arc 8 v1.5/v1.6/v2/v3
+- **Arc 8 v3.1 sugar layer — SUBSTANTIALLY SHIPPED 2026-06-04**.
+  Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d
+  + 2.5 + 2.5b on `main`. Compiler-driven `async fn → Task`
+  transform handles linear bodies + non-suspending control flow
+  + suspend-in-branch state-splitting + fall-through merge state
+  + nested ifs + ANF lifting + match-with-suspends
+  (FEATURE-COMPLETE for Int / Bool / Str / Float / Variant /
+  VariantWithBinding / Wildcard) + loops + break/continue.
+  17 acceptance examples cross-backend parity-green. Phase 2.4
+  (`try` keyword) + Phase 3 (affine types across await — non-i64
+  locals + OwnedStr/Vec) + Phase 4 (generics + nested async +
+  multi-task) queued. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)
+  for the phased plan-of-record.
+- **Arc 8 platform port (Phase 5/6)** — all Arc 8 v1.5/v1.6/v2/v3
   runtime helpers are **Linux-only** today (epoll +
   nanosleep + glibc errno thunk). macOS port = kqueue
-  shim (~8-12h); Windows port = IOCP rewrite (~25-35h).
+  shim (~10-15h); Windows port = IOCP rewrite (~25-35h).
   Threading is already cross-platform. Until ports land,
-  Windows / macOS builds need a compile-time gate that
-  fails loud (currently they break silently at link
-  time). See STATUS.md "🪟 Platform support".
+  Windows / macOS builds compile-time panic via the
+  `host_is_linux()` gate when any Arc 8 I/O helper is
+  referenced. See STATUS.md "🪟 Platform support".
 - Closure-as-value richer support (capture-by-ref, non-Copy
   captures, `.collect()`, lazy iterators, non-i64 element types
   in combinators, tuple-element `vec_zip`).
