@@ -163,7 +163,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3a — non-i64 locals (bool / f64)** (commit
-  pending). First slice of Phase 3 (affine types across
+  `754c163`). First slice of Phase 3 (affine types across
   await). Lifts the historical i64-only locals rule for the
   two types with obvious defaults:
   - `v31_local_type_allowed(ty)` gates v3.1 local types

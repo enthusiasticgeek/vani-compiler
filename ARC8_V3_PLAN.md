@@ -89,7 +89,7 @@
 > every common control-flow shape in vāṇī. Capstone:
 > `examples/async_showcase.vani` (commit `3c46e31`).
 >
-> **Phase 3a ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 3a ✅ COMPLETE 2026-06-04** (commit `754c163`).
 > Non-i64 locals (bool / f64) in v3.1 async fns. Adds
 > `v31_local_type_allowed` gate + `v31_default_init_expr`
 > for per-type constructor defaults + threads `ty` through
