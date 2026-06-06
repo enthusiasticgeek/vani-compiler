@@ -5,12 +5,19 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 
 ---
 
-## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (2026-06-04)
+## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06)
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
 examples; 1883 lib + 72 parity green; clean warning-free build).
-Remaining work splits into **three tiers**, ordered by tractability
-from a fresh Linux session:
+Remaining work, in execution order (USER DIRECTION 2026-06-06):
+
+  **Backlog item first** → **Tier 1** → **Tier 2 + Tier 3 code-only
+  (verification deferred — no macOS/Windows access available)** →
+  **Linux re-verification of everything**
+
+User has no macOS/Windows access. Phase 5/6 code will land with a
+clear "VERIFICATION DEFERRED — needs platform access" note. Linux
+verification continues across all incremental Phase 5/6 commits.
 
 ### Tier 1 — Phase 4c-broad (testable on Linux; tackle FIRST)
 
@@ -48,10 +55,12 @@ parameter on `try_v31_transform` is kept as scaffolding.
 familiarity. Documented in ARC8_V3_PLAN.md's Phase 4c-broad
 attempt notes.
 
-### Tier 2 — Phase 5 macOS port (code on Linux; verification needs macOS)
+### Tier 2 — Phase 5 macOS port (CODE-ONLY; verification DEFERRED — no macOS access)
 
 Each sub-item depends on the previous within the tier (gates →
-errno → kqueue → timer). Parity sweep (5e) is the hard blocker.
+errno → kqueue → timer). 5e is the verification gate — DEFER per
+user direction 2026-06-06 (no macOS access). Every Phase 5 commit
+should note "VERIFICATION DEFERRED — macOS access pending".
 
 5. **5a — `host_is_darwin()` helper + platform gate**
    Mirror `host_is_linux()` / `host_uses_win32_threading()`.
@@ -77,11 +86,14 @@ errno → kqueue → timer). Parity sweep (5e) is the hard blocker.
 **Estimated effort:** ~10-15h. Code writable on Linux; final
 verification needs macOS access.
 
-### Tier 3 — Phase 6 Windows IOCP port (heaviest; needs Windows)
+### Tier 3 — Phase 6 Windows IOCP port (CODE-ONLY; verification DEFERRED — no Windows access)
 
 IOCP's completion-notification model differs fundamentally from
 epoll's readiness model. The cross-platform `epoll_*` family stays
-Linux/macOS-only; Windows gets a NEW `iocp_*` family.
+Linux/macOS-only; Windows gets a NEW `iocp_*` family. 6h is the
+verification gate — DEFER per user direction 2026-06-06 (no Windows
+access). Every Phase 6 commit should note "VERIFICATION DEFERRED —
+Windows access pending".
 
 10. **6a — WSAStartup / WSACleanup boilerplate**
     Wrap every TCP-using program in a startup call. Single runtime
@@ -110,14 +122,29 @@ Linux/macOS-only; Windows gets a NEW `iocp_*` family.
     Both backends select POSIX vs IOCP paths based on
     `host_uses_win32_threading()`.
 
-17. **6h — Windows parity sweep** *(BLOCKER: requires Windows testing)*
+17. **6h — Windows parity sweep** *(DEFERRED — requires Windows testing)*
     Verify Arc 8 examples produce byte-identical output across
-    LLVM + C on Windows.
+    LLVM + C on Windows. Skip per user direction 2026-06-06.
 
 **Estimated effort:** ~25-35h. Most involved port; final
-verification needs Windows access.
+verification deferred (Windows access pending).
 
-### Backlog (independent of v3.1 / platform work)
+### Tier 4 — Linux re-verification after Phase 5/6 land (USER DIRECTION 2026-06-06)
+
+After Phase 5 + Phase 6 code lands (verification deferred for
+platforms), re-run the full Linux suite to confirm:
+  - No regressions in the existing 1883 lib tests.
+  - No regressions in the existing 72 parity-sweep examples.
+  - The per-host conditional emit (host_is_linux / host_is_darwin /
+    host_uses_win32_threading) still routes Linux correctly.
+  - Any newly-added cross-platform abstractions compile cleanly
+    against Linux feature flags.
+
+This tier is single-task: run `cargo test` + parity sweep + visual
+check of C/LLVM emit on a Linux test program. Document any
+regressions found during platform-port work that need cleanup.
+
+### Backlog → BOOTSTRAP for the fresh session (TACKLE FIRST per user direction 2026-06-06)
 
 18. **Vec<Struct>-in-struct-field C backend codegen** — pre-existing
     bug. Affects any user code with `struct Holder { items:

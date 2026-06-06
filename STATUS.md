@@ -10,12 +10,17 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-> **📋 NEXT SESSION HANDOFF**: [TODO.md § *NEXT SESSION HANDOFF*](TODO.md#-next-session-handoff--dependency-ordered-plan-2026-06-04)
-> has the dependency-ordered remaining work split into three tiers
-> (Phase 4c-broad — testable on Linux; Phase 5 macOS port — code
-> on Linux but verification on macOS; Phase 6 Windows IOCP). Pick
-> Tier 1 first — it's the only tier where verification doesn't need
-> platform access.
+> **📋 NEXT SESSION HANDOFF (refreshed 2026-06-06)**: [TODO.md §
+> *NEXT SESSION HANDOFF*](TODO.md#-next-session-handoff--dependency-ordered-plan-refreshed-2026-06-06)
+> has the dependency-ordered remaining work. Execution order per
+> user direction:
+>
+>   1. **Backlog item — Vec<Struct>-in-struct-field C codegen**
+>      (pre-existing bug; tackle FIRST as the fresh-session bootstrap).
+>   2. **Tier 1 — Phase 4c-broad** (full generic async fns; testable on Linux).
+>   3. **Tier 2 — Phase 5 macOS port** (CODE-ONLY; macOS verification deferred — no platform access).
+>   4. **Tier 3 — Phase 6 Windows IOCP** (CODE-ONLY; Windows verification deferred — no platform access).
+>   5. **Tier 4 — Linux re-verification** (final pass to catch regressions from Phase 5/6 code).
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
