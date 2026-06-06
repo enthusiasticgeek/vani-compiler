@@ -166,6 +166,31 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
+- **v3.1 Phase 4a-narrow — nested async task locals** (commit
+  pending). First slice of Phase 4 (generics + nested async +
+  multi-task). Auto-registers each synthesized Task__X struct
+  in `V31_STRUCT_REGISTRY` so OTHER async fns can declare a
+  local of that type. Type-allowed gate already accepts
+  registered structs via Phase 3d's `v31_struct_default_allowed`
+  helper — no new plumbing needed beyond the registration
+  side-effect in try_v31_transform.
+  - `examples/echo_p4a_nested_async.vani` — `outer` fn
+    constructs a `let sub: Task__inner = inner(fd);` local and
+    manually polls it via `__poll_inner(mut ref sub)`.
+    Compiles + runs to a deterministic value on both backends.
+  - 2 new lib tests (Task__X local accepted +
+    Task__nonexistent rejected).
+  - **Phase 4a-broad (future)**: First-class `await sub`
+    desugar that integrates sub-task polling into the outer's
+    state machine. Today the user writes the poll loop
+    manually (or accepts that the call counts as a regular
+    NonSuspendLet so the outer doesn't yield while inner is
+    Pending — workaround: pair with a separate io_*_async
+    suspend).
+  - Diagnostic refresh: v3.1 locals-rejection message now
+    accurately lists ALL accepted types (was stale at "Phase
+    3a+3b only").
+
 - **v3.1 Phase 3-params — non-i64 async fn parameter types**
   (commit `9002d29`). Mirrors Phase 3a-f (locals) + Phase
   3-returns (returns). The validator's param-type check

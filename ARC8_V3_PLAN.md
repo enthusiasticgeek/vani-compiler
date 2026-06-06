@@ -97,6 +97,16 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 4a-narrow ✅ COMPLETE 2026-06-04** (commit pending).
+> First slice of Phase 4. Auto-registers synthesized Task__X
+> structs in V31_STRUCT_REGISTRY so other async fns can declare
+> sub-task locals (`let sub: Task__inner = inner(args);`).
+> Type-allowed gate already accepted registered structs via
+> Phase 3d's helper — registration side-effect in
+> try_v31_transform is the only plumbing change. Phase 4a-broad
+> (first-class `await sub` desugar) is follow-up. 2 new lib
+> tests + acceptance example.
+>
 > **Phase 3-params ✅ COMPLETE 2026-06-04** (commit `9002d29`).
 > Non-i64 async fn parameter types via the same
 > `v31_local_type_allowed` gate as locals + returns. Each param
@@ -194,13 +204,16 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 4 generics / nested async calls / multi-task (~25-30h)
+> - 4a-broad: `await sub` desugar — integrate sub-task
+>   polling into the outer's state machine (~6-10h)
+> - 4b: multi-task scheduling — multiple concurrent sub-
+>   tasks from one async fn (~10-15h)
+> - 4c: generics in async fn (~10-15h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
 >
-> v3.1 control-flow + types + Result error-handling
-> arc is now feature-complete for typical user code.
-> Remaining work is platform port + generics.
+> v3.1 control-flow + types + Result error-handling + nested
+> task construction arc is now feature-complete.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into

@@ -21790,6 +21790,64 @@ fn main() -> i64 {
         assert!(ll.contains("Task__classify") && ll.contains("__poll_classify"));
     }
 
+    /// Arc 8 v3.1 Phase 4a-narrow — nested async (Task__X
+    /// auto-registered as a struct type so other async fns can
+    /// declare a local of that type). Validates the infrastructure
+    /// shipped this slice. Full `await sub` semantic sugar is
+    /// Phase 4a-broad.
+    #[test]
+    fn v31_phase4a_nested_async_task_local_accepted() {
+        let source = r#"
+            async fn inner(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n * 100;
+            }
+
+            async fn outer(fd: i64) -> i64 {
+              let sub: Task__inner = inner(fd);
+              let p: i64 = __poll_inner(mut ref sub);
+              let _ = io_recv_async(fd, 0);
+              return p;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 4a-narrow must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 4a-narrow must compile on LLVM");
+        assert!(c.contains("Task__inner") && c.contains("Task__outer"));
+        assert!(c.contains("__poll_inner") && c.contains("__poll_outer"));
+        assert!(ll.contains("Task__inner") && ll.contains("Task__outer"));
+    }
+
+    /// Arc 8 v3.1 Phase 4a-narrow — without auto-registration the
+    /// Task__X type wouldn't pass the v3.1 locals gate. Verify
+    /// the gate diagnostic mentions registered Struct.
+    #[test]
+    fn v31_phase4a_unregistered_task_type_local_rejected() {
+        // A hypothetical bare "Task__nonexistent" with no
+        // corresponding async fn is treated as an unregistered
+        // Struct name, so the v3.1 gate rejects it.
+        let source = r#"
+            async fn outer(fd: i64) -> i64 {
+              let sub: Task__nonexistent = 0;
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "unregistered Task__X type must be rejected"
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Task__nonexistent") || m.contains("Struct")
+                    || m.contains("registered")
+            }),
+            "expected unregistered-struct diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 3-params — non-i64 async fn parameter
     /// types (mirrors Phase 3a-f for locals + Phase 3-returns
     /// for return types). Same `v31_local_type_allowed` gate;

@@ -6357,7 +6357,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — Phase 3a+3b allow i64 / bool / f64 / Str / OwnedStr only; Enum / Struct / Vec / Array arrive in Phase 3c-d",
+                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>",
                             name, ty
                         ),
                     ));
@@ -7615,6 +7615,21 @@ pub(crate) fn try_v31_transform(
         span: fn_name_span,
     }];
 
+    // Phase 4 — also register the synthesized Task__X struct in
+    // V31_STRUCT_REGISTRY so OTHER v3.1 async fns can declare a
+    // local of this type (`let sub: Task__inner = inner(args);`)
+    // and the type-allowed gate accepts it. The struct's fields
+    // are already typed (we built them above), so the recursive
+    // field-default check works for sub-task locals just like
+    // any other user struct.
+    crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+        let fields: Vec<(String, Type)> = task_struct
+            .fields
+            .iter()
+            .map(|f| (f.name.clone(), f.ty.clone()))
+            .collect();
+        reg.borrow_mut().insert(task_struct_name.clone(), fields);
+    });
     // Push the synthesized struct + poll fn into the registry.
     crate::ast::V31_TASK_REGISTRY.with(|reg| {
         reg.borrow_mut().push((task_struct, poll_fn));

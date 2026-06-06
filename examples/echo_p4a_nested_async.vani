@@ -1,0 +1,110 @@
+// Arc 8 v3.1 Phase 4a-narrow — nested async tasks.
+//
+// Phase 4 unlocks one async fn declaring a sub-task of another
+// async fn type as a LOCAL. After this slice, async fn `outer`
+// can write `let sub: Task__inner = inner(args);` and then drive
+// the sub-task via `__poll_<inner>(mut ref sub)` calls inside
+// the outer's body.
+//
+// What this slice ships (Phase 4a-narrow):
+//   - Synthesized Task__X structs now auto-register into
+//     `V31_STRUCT_REGISTRY` so they pass the v3.1 locals gate.
+//   - Outer can construct a sub-task + read its result after
+//     polling.
+//
+// What this slice does NOT yet ship (Phase 4a-broad):
+//   - First-class `await sub` syntactic sugar that desugars to
+//     "poll until Ready, then extract __result" inside the
+//     outer's state machine. Users currently write the poll
+//     loop manually.
+//   - Special-case handling so `__poll_<inner>` counts as a
+//     suspend point in the outer's state graph (lets the outer
+//     yield Pending while inner is Pending). Today the call is
+//     a regular NonSuspendLet so it polls once per outer state
+//     entry. Workaround: pair with a separate `io_*_async`
+//     suspend so the outer yields between inner polls.
+//
+// Example flow: outer constructs inner, kicks off the first
+// poll, then suspends on its own io_recv_async for cooperative
+// scheduling. The driver loop bridges Pending statuses for
+// both tasks naturally.
+//
+// build & run:
+//   intentc run examples/echo_p4a_nested_async.vani                # LLVM
+//   intentc run examples/echo_p4a_nested_async.vani --backend=c    # C
+
+intent "Phase 4a-narrow — nested async tasks";
+
+async fn inner(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n * 100;
+}
+
+async fn outer(fd: i64) -> i64 {
+  // Construct a sub-task. Phase 4a unlocks this LOCAL of a
+  // synthesized Task__X type.
+  let sub: Task__inner = inner(fd);
+
+  // Kick off the first poll. Returns -2 (Pending) on the first
+  // call since `inner` hasn't received yet — driver will retry.
+  let p: i64 = __poll_inner(mut ref sub);
+
+  // Yield outer's state so the driver loop can poll inner via
+  // re-entering outer's state machine. Without this, outer
+  // returns immediately without giving inner a chance to make
+  // progress.
+  let _ = io_recv_async(fd, 0);
+
+  // After the suspend, poll inner again — by now it should be
+  // Ready (peer has sent).
+  let q: i64 = __poll_inner(mut ref sub);
+
+  // Return the final result. q is the inner's value (Ready) or
+  // a sentinel (-2 Pending / -1 Error). For this minimal
+  // example we just return q directly.
+  return q;
+}
+
+fn drive(ep: i64, t: mut ref Task__outer) -> i64 {
+  while true {
+    let r: i64 = __poll_outer(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  let t: Task__outer = outer(cfd);
+  let r: i64 = drive(ep, mut ref t);
+  // Both backends produce the same byte-identical value
+  // (whatever the current sub-task polling semantics yield).
+  // The acceptance criterion for this slice is "compiles and
+  // runs to a deterministic value across LLVM + C"; nailing
+  // down the exact value requires the Phase 4a-broad
+  // `await sub` desugar.
+  print "outer result (parity check):", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}
