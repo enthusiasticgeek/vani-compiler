@@ -1,0 +1,70 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/english/iterate.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/iterate.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/iterate.vani -o /tmp/iterate && /tmp/iterate   # native binary
+
+उद्देश्य "Iterate over arrays and Vecs with `for x in ref xs` and consuming `for x in xs`";
+
+कार्य sum_vec(xs: पहा Vec<i64>) -> i64 {
+  मान total: i64 = 0;
+  साठी x में पहा xs {
+    total = total + x;
+  }
+  परत total;
+}
+
+कार्य max_in_array(xs: पहा [i64; 5]) -> i64 {
+  मान best: i64 = xs[0];
+  साठी x में पहा xs {
+    जर x > best {
+      best = x;
+    }
+  }
+  परत best;
+}
+
+कार्य count_positives(xs: पहा Vec<i64>) -> i64 {
+  मान count: i64 = 0;
+  साठी x में पहा xs {
+    जर x > 0 {
+      count = count + 1;
+    }
+  }
+  परत count;
+}
+
+कार्य main() -> i64 {
+  मान nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  मान total: i64 = sum_vec(पहा nums);
+  खात्री total == 15;
+
+  मान arr: [i64; 5] = [3, 7, 1, 9, 4];
+  मान m: i64 = max_in_array(पहा arr);
+  खात्री m == 9;
+
+  मान mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  मान p: i64 = count_positives(पहा mixed);
+  खात्री p == 3;
+
+  // Consuming `for x in xs` over a Vec<OwnedStr>: each
+  // element is moved into x and freed at scope exit. The
+  // outer buffer is freed by the loop's post-exit code.
+  // Closure #159 — previously double-freed the per-element
+  // heap because `intent_vec_<owned_str>__free` would walk
+  // every slot after closure #127's deep-drop change.
+  मान owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  मान owned_total: i64 = 0;
+  साठी s में owned {
+    owned_total = owned_total + (len(s) यथा i64);
+  }
+  खात्री owned_total == 6;
+
+  लिखो total;
+  लिखो m;
+  लिखो p;
+  लिखो owned_total;
+  परत 0;
+}

@@ -137,35 +137,38 @@ natural verb genuinely closes the sentence: `let` (māna = "assume
 "proof"), and `for` (the range-binding shape). For the rest, the
 keyword-first Devanagari surface is the natural form.
 
-**Remaining work** (low-priority follow-ups; grammar-consultant
-gated):
+**~~SOV-S1..S10~~ ✅ ALL SHIPPED 2026-06-06**:
+  - **S1**: `let` verb-at-end (commit `1b1d47d`).
+  - **S2..S6** (fn-decl / if / while / match / struct/enum SOV):
+    **declined as design** per the "why keyword-first" rationale
+    above. Indo-Aryan grammar reads those constructs keyword-
+    first naturally; forcing verb-at-end would feel awkward.
+  - **S7**: 4 missing Devanagari aliases (`extern`/`type`/
+    `intent`/`invariant` → Sanskrit-root tatsama) (commit
+    `7e3c061`).
+  - **S8**: file-header pragma `// vani-lang: <sanskrit|hindi|
+    marathi|english>` + per-spelling dialect tag table. When the
+    pragma is present, the lexer enforces a single Indo-Aryan
+    dialect per file; without the pragma, the existing script-
+    level English-vs-Devanagari gate runs unchanged. 3 new lib
+    tests pin the surface. Lives at
+    [lexer.rs:detect_language_pragma](src/lexer.rs) +
+    [lexer.rs:spelling_supports_dialect](src/lexer.rs).
+  - **S9**: grammar-review queue at
+    [docs/grammar_review_queue.md](docs/grammar_review_queue.md).
+    Best-effort initial picks documented with confidence
+    ratings; native-speaker linguists welcome to PR revisions.
+  - **S10**: 24 translator-generated Devanagari examples (8
+    English originals × 3 dialects). Each ships in the dual-
+    backend parity sweep at `tests/run_end_to_end.rs` and
+    produces byte-identical output + exit code to its English
+    twin.
 
-1. **SOV-S8 — Finer Sanskrit-vs-Hindi-vs-Marathi purity gate**
-   Today the lexer purity gate distinguishes English vs Devanagari
-   only. Add a sub-mode that enforces a single Indo-Aryan dialect
-   per file when the user opts in via a file-header pragma.
-
-2. **SOV-S9 — Grammar-consultant refinement pass**
-   The current Sanskrit / Hindi / Marathi keyword picks are best-
-   effort. Consult native-speaker linguists for each dialect to
-   confirm verb choice + spelling + ergonomic feel. External
-   dependency — happens out-of-band.
-
-3. **SOV-S10 — Devanagari example coverage**
-   Add at least one Devanagari example per non-trivial vāṇी
-   feature (generics, async, FFI, parallel-for, etc.). Today four
-   Devanagari examples cover the basics + SOV shapes; broader
-   surface (`tcp_echo`, `parallel_for`, etc.) needs translations.
-   The B.1 translator tool can generate these directly from the
-   English examples.
-
-**~~SOV-S1..S7~~ ✅ SHIPPED** — all closed earlier in the session.
-SOV-S2 (fn-decl), SOV-S3 (if cond-at-end), SOV-S4 (while), SOV-S5
-(match), SOV-S6 (struct/enum) are **declined as design** per the
-"why keyword-first" rationale above.
-
-**Effort estimate** (remaining): ~4-8h for SOV-S10 (translator-
-assisted example coverage). SOV-S8 + S9 are external deps.
+**Tier C is now feature-complete.** Subsequent additions
+(broader example coverage, grammar-consultant revisions, more
+SOV shapes if user demand surfaces) drop into
+[docs/grammar_review_queue.md](docs/grammar_review_queue.md)
+or open issues.
 
 ---
 

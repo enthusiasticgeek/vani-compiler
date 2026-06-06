@@ -1,0 +1,29 @@
+// श्री।
+// vani-lang: hindi
+//
+// build & run:
+//   vanic run examples/language/english/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+
+उद्देश्य "Compute a small score with checked constraints";
+
+फलन add(a: i64, b: i64) -> i64 {
+  लौटाओ a + b;
+}
+
+फलन bounded_score(base: i64) -> i64
+चाहिए base >= 0;
+{
+  माना doubled: i64 = base * 2;
+  सुनिश्चित doubled >= base;
+  लौटाओ add(doubled, 2);
+}
+
+फलन main() -> i64 {
+  माना answer = bounded_score(20);
+  सिद्ध करो 2 + 2 == 4;
+  सुनिश्चित answer >= 0;
+  लिखो answer;
+  लौटाओ 0;
+}

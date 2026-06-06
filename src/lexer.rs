@@ -252,6 +252,7 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         // ref
         "पहा" => TokenKind::Ref,          // pahā (Marathi: "see/look")
         "देखो" => TokenKind::Ref,         // dekho (Hindi: "see!")
+        "दृष्ट्या" => TokenKind::Ref,     // dṛṣṭyā (Sanskrit: instrumental "via sight / by reference") — SOV-S10 add 2026-06-06
         // mut — closure #267 fills Sanskrit + Hindi gaps
         "बदल" => TokenKind::Mut,          // badla (Marathi root: "change")
         "परिवर्तनीय" => TokenKind::Mut,   // parivartanīya (Sanskrit/Hindi: "mutable")
@@ -398,6 +399,14 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
 /// `फलन add(a: i64, b: i64) -> i64`. The gate looks only at
 /// structure keywords.
 fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnostic> {
+    // SOV-S8 (2026-06-06): optional per-dialect purity. If the
+    // source begins with a `// vani-lang: <sanskrit|hindi|marathi
+    // |english>` pragma (first ~5 lines, scanned via raw text),
+    // enforce that every Devanagari structure keyword's spelling
+    // is supported by the declared dialect. Without the pragma,
+    // the existing script-level English-vs-Devanagari purity
+    // gate runs unchanged (back-compat).
+    let declared = detect_language_pragma(source);
     let mut english_keyword: Option<Span> = None;
     let mut devanagari_keyword: Option<Span> = None;
     for tok in tokens {
@@ -426,6 +435,35 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                     ),
                 ));
             }
+            // SOV-S8: per-dialect check. Only fires when the user
+            // opted in via `// vani-lang: sanskrit|hindi|marathi`.
+            if let Some(lang) = declared {
+                if lang == DialectLang::English {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `english` but the file \
+                             uses a Devanagari structure keyword `{}` — pick \
+                             one dialect per file or drop the pragma to fall \
+                             back to script-level purity.",
+                            text
+                        ),
+                    ));
+                }
+                if !spelling_supports_dialect(text, lang) {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `{}` but Devanagari \
+                             keyword `{}` is not in that dialect's keyword \
+                             set. Use an alias supported by your declared \
+                             dialect, or drop the pragma to allow any \
+                             Devanagari alias.",
+                            lang.name(), text
+                        ),
+                    ));
+                }
+            }
         } else {
             if english_keyword.is_none() {
                 english_keyword = Some(tok.span);
@@ -442,9 +480,217 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                     ),
                 ));
             }
+            // SOV-S8: an `english`-declared pragma + Devanagari
+            // keyword would already be caught by the Devanagari
+            // arm above. We DELIBERATELY do NOT reject English
+            // keywords in a Devanagari-pragma file when no
+            // Devanagari keyword appears — that scenario happens
+            // when `vanic fmt` canonicalizes a Devanagari source
+            // to English while preserving the pragma comment.
+            // The output is a pure-English file; the pragma is
+            // a no-op there (the script-level gate catches real
+            // mismatches). Sanity-check the inverse — `english`
+            // pragma + Devanagari keyword — that's the only
+            // direction worth gating here.
         }
     }
     Ok(())
+}
+
+/// SOV-S8 — the four supported language pragmas for finer-than-
+/// script-level purity. `English` is included so the user can
+/// explicitly opt out of mixed-script files even when the source
+/// is purely English-keyword (otherwise the gate is no-op there).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum DialectLang {
+    Sanskrit,
+    Hindi,
+    Marathi,
+    English,
+}
+
+impl DialectLang {
+    fn name(self) -> &'static str {
+        match self {
+            DialectLang::Sanskrit => "sanskrit",
+            DialectLang::Hindi => "hindi",
+            DialectLang::Marathi => "marathi",
+            DialectLang::English => "english",
+        }
+    }
+}
+
+/// Scan the first ~10 lines of source for a `// vani-lang: <name>`
+/// pragma comment. Returns the declared dialect when found, or
+/// None for back-compat (no pragma → script-level purity only).
+fn detect_language_pragma(source: &str) -> Option<DialectLang> {
+    for (i, line) in source.lines().enumerate() {
+        if i > 10 {
+            break;
+        }
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("//") {
+            continue;
+        }
+        let body = trimmed.trim_start_matches("//").trim();
+        // Accept `vani-lang: <lang>` (lowercase tag, optional
+        // spaces). Reject malformed forms silently — the pragma
+        // is opt-in and shouldn't break files that happen to
+        // contain `vani-lang` in unrelated comments.
+        let Some(rest) = body.strip_prefix("vani-lang:").or_else(|| {
+            body.strip_prefix("vani-lang :")
+        }) else {
+            continue;
+        };
+        let name = rest.trim().to_ascii_lowercase();
+        return match name.as_str() {
+            "sanskrit" | "saṁskṛta" | "sa" => Some(DialectLang::Sanskrit),
+            "hindi" | "hindī" | "hi" => Some(DialectLang::Hindi),
+            "marathi" | "marāṭhī" | "mr" => Some(DialectLang::Marathi),
+            "english" | "en" => Some(DialectLang::English),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// SOV-S8 — language-tag table for Devanagari spellings. Each
+/// spelling maps to the set of Indo-Aryan dialects that natively
+/// support it. Source: per-line comments in `devanagari_keyword`
+/// + `multi_word_devanagari_keyword` above. Tatsama (Sanskrit-
+/// root loanwords used in Hindi/Marathi) tag all three dialects.
+fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
+    // Order matters: list each spelling once with all dialects
+    // that support it. Fallthrough returns true for unknown
+    // spellings (forward-compat: a future alias addition shouldn't
+    // need to update this table simultaneously to avoid
+    // false rejections; the script-level gate above catches the
+    // real cross-language errors).
+    use DialectLang::*;
+    let langs: &[DialectLang] = match spelling {
+        // === DECLARATIONS ===
+        "फलन" => &[Hindi, Marathi],
+        "कार्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "मान" => &[Marathi],
+        "माना" => &[Sanskrit, Hindi],
+        "मानो" => &[Hindi],
+        "संरचना" => &[Sanskrit, Hindi, Marathi],
+        "विकल्प" => &[Sanskrit],
+        "गणन" => &[Hindi, Marathi],
+        "स्थिर" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "नियत" => &[Hindi, Marathi],
+        // === VISIBILITY / MODULES ===
+        "सार्वजनिक" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "खण्ड" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "मॉड्यूल" => &[Hindi, Marathi],
+        "उपयोग" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "यथा" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        // === CONTROL FLOW ===
+        "परत" => &[Marathi],
+        "लौटाओ" => &[Hindi],
+        "पुनरागम" => &[Sanskrit],
+        "यदि" => &[Sanskrit, Hindi],
+        "अगर" => &[Hindi],
+        "जर" => &[Marathi],
+        "अन्यथा" => &[Sanskrit],
+        "वरना" => &[Hindi],
+        "नाहीतर" => &[Marathi],
+        "यावत्" => &[Sanskrit],
+        "जबतक" => &[Hindi],
+        "जोपर्यंत" => &[Marathi],
+        "प्रति" => &[Sanskrit],
+        "साठी" => &[Marathi],
+        // Indo-Aryan postpositions widely understood across all
+        // three dialects in modern usage (including modern
+        // Sanskrit pedagogy). Tagged as shared so a Sanskrit-
+        // pragma file can still use the natural `0 से 3 तक`
+        // range syntax without dropping into the pragma-free
+        // back-compat mode.
+        "में" => &[Sanskrit, Hindi, Marathi],
+        "से" => &[Sanskrit, Hindi, Marathi],
+        "तक" => &[Sanskrit, Hindi, Marathi],
+        "तदा" => &[Sanskrit],
+        "तो" => &[Hindi],
+        "तर" => &[Marathi],
+        "विराम" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "रुको" => &[Hindi],
+        "थांब" => &[Marathi],
+        "अग्रे" => &[Sanskrit],
+        "पुढे" => &[Marathi],
+        "आगे" => &[Hindi],
+        // === REFS / MUT ===
+        "पहा" => &[Marathi],
+        "देखो" => &[Hindi],
+        "दृष्ट्या" => &[Sanskrit],
+        "बदल" => &[Marathi],
+        "परिवर्तनीय" => &[Sanskrit, Hindi],
+        // === MATCH ===
+        "जुळवा" => &[Marathi],
+        "मिलान" => &[Hindi],
+        "मेल" => &[Sanskrit],
+        // === VERIFICATION ===
+        "खात्री" => &[Marathi],
+        "सुनिश्चित" => &[Hindi],
+        "सिद्धम्" => &[Sanskrit],
+        "सिद्ध" => &[Sanskrit, Hindi, Marathi],  // tatsama root
+        "प्रमाण" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "प्रमाणित" => &[Hindi, Marathi],
+        "दर्शाओ" => &[Hindi],
+        "दाखवा" => &[Marathi],
+        "अपेक्षित" => &[Sanskrit],
+        "चाहिए" => &[Hindi],
+        "पाहिजे" => &[Marathi],
+        "निश्चित" => &[Hindi, Marathi],
+        "सुनिश्चयित" => &[Sanskrit],
+        // === BOOL / PRINT ===
+        "सत्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "सही" => &[Hindi, Marathi],
+        "असत्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "अशुद्ध" => &[Hindi, Marathi],
+        "लिख" => &[Sanskrit],
+        "लिखो" => &[Hindi, Marathi],
+        // === PURITY / PARALLELISM ===
+        "शुद्ध" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "समानांतर" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "संक्षेप" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "सह" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        // === INTERFACES / METHODS ===
+        "संकेत" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "अंतरापृष्ठ" => &[Sanskrit],
+        "कार्यान्वित" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "विधि" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        // === BOUNDS ===
+        "जहाँ" => &[Hindi],
+        "यत्र" => &[Sanskrit],
+        "जिथे" => &[Marathi],
+        "है" => &[Hindi],
+        "अस्ति" => &[Sanskrit],
+        "आहे" => &[Marathi],
+        // === CONCURRENCY ===
+        "प्रयास" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "नियोग" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "संयोजन" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        // === EMBEDDED ===
+        "असुरक्षित" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        "क्षेत्र" => &[Sanskrit, Hindi, Marathi],  // tatsama
+        // === SOV-S7 ADDS (all Sanskrit-root tatsama) ===
+        "उद्देश्य" => &[Sanskrit, Hindi, Marathi],
+        "प्रकार" => &[Sanskrit, Hindi, Marathi],
+        "बाह्य" => &[Sanskrit, Hindi, Marathi],
+        "अपरिवर्तनीय" => &[Sanskrit, Hindi, Marathi],
+        // === MULTI-WORD ALIASES ===
+        // (the lexer fuses these post-tokenization; the span text
+        // is the full multi-word phrase)
+        "नहीं तो" => &[Hindi],
+        "के लिए" => &[Hindi],
+        "सिद्ध करो" => &[Hindi],
+        "सिद्ध करा" => &[Marathi],
+        "समान्तर प्रति" => &[Sanskrit],
+        // Unknown spelling — be permissive. The script-level
+        // gate above already catches structural mistakes.
+        _ => return true,
+    };
+    langs.contains(&lang)
 }
 
 /// Returns true when the token is a *structure* keyword — the

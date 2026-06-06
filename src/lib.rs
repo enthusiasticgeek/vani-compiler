@@ -26965,6 +26965,61 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn sov_s8_pragma_pure_sanskrit_compiles() {
+        // SOV-S8: `// vani-lang: sanskrit` pragma + only
+        // Sanskrit-tagged keywords should compile cleanly.
+        let source = r#"
+            // vani-lang: sanskrit
+            उद्देश्य "pure Sanskrit pragma test";
+            कार्य main() -> i64 {
+              doubled: i64 = 5 * 2 माना;
+              doubled लिख;
+              0 पुनरागम;
+            }
+        "#;
+        compile(source).expect("pure-Sanskrit file with pragma should compile");
+    }
+
+    #[test]
+    fn sov_s8_pragma_sanskrit_rejects_hindi_keyword() {
+        // SOV-S8: declaring `sanskrit` pragma + using a Hindi-
+        // only keyword (`लौटाओ`) should fail with a clear error.
+        let source = r#"
+            // vani-lang: sanskrit
+            उद्देश्य "should fail";
+            कार्य main() -> i64 {
+              0 लौटाओ;
+            }
+        "#;
+        let err = compile(source).expect_err(
+            "Hindi keyword in Sanskrit-declared file should be rejected"
+        );
+        assert!(
+            err.iter().any(|d| d.message.contains("vani-lang pragma declared `sanskrit`")
+                && d.message.contains("लौटाओ")),
+            "expected per-dialect rejection diagnostic, got: {:?}",
+            err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sov_s8_no_pragma_allows_mixed_devanagari_aliases() {
+        // SOV-S8: without a pragma, the per-dialect gate is off
+        // (back-compat). Mixing Devanagari aliases across
+        // dialects (Sanskrit `पुनरागम` + Marathi-rooted `मान`)
+        // should still compile — the script-level gate only
+        // fires on Devanagari-vs-English.
+        let source = r#"
+            उद्देश्य "no pragma; mixed Devanagari aliases ok";
+            कार्य main() -> i64 {
+              मान x: i64 = 5;
+              x पुनरागम;
+            }
+        "#;
+        compile(source).expect("no-pragma mixed-dialect file should compile");
+    }
+
+    #[test]
     fn sov_verb_at_end_let_compiles_and_binds() {
         // SOV-S1 (2026-06-06): let-binding verb-at-end. The
         // natural Sanskrit / Hindi / Marathi grammar for "let

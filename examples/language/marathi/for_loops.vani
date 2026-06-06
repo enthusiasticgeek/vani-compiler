@@ -1,0 +1,41 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/english/for_loops.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/for_loops.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/for_loops.vani -o /tmp/for_loops && /tmp/for_loops   # native binary
+
+उद्देश्य "for-loops over integer ranges";
+
+कार्य sum_squares(n: i64) -> i64 {
+  मान total: i64 = 0;
+  साठी i से 1 तक n {
+    total = total + i * i;
+  }
+  परत total;
+}
+
+कार्य find_first_zero(xs: पहा [i64; 5]) -> i64 {
+  मान result: i64 = 0 - 1;
+  साठी i से 0 तक len(xs) {
+    जर xs[i] == 0 {
+      result = i यथा i64;
+      थांब;
+    }
+  }
+  परत result;
+}
+
+कार्य main() -> i64 {
+  मान s: i64 = sum_squares(5);
+  खात्री s == 30;
+
+  मान xs: [i64; 5] = [3, 7, 0, 9, 1];
+  मान idx: i64 = find_first_zero(पहा xs);
+  खात्री idx == 2;
+
+  लिखो s;
+  लिखो idx;
+  परत 0;
+}

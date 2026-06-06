@@ -1,0 +1,42 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/english/control_flow.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/control_flow.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/control_flow.vani -o /tmp/control_flow && /tmp/control_flow   # native binary
+
+उद्देश्य "Demonstrate if/else and while loops with Vec mutation";
+
+कार्य sum(xs: दृष्ट्या Vec<i64>) -> i64 {
+  माना total: i64 = 0;
+  माना i: u64 = 0;
+  माना n: u64 = len(xs);
+  यावत् i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  पुनरागम total;
+}
+
+कार्य build_range(n: i64) -> Vec<i64> {
+  माना xs: Vec<i64> = vec(0);
+  माना i: i64 = 1;
+  यावत् i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  पुनरागम xs;
+}
+
+कार्य main() -> i64 {
+  माना xs: Vec<i64> = build_range(5);
+  माना total: i64 = sum(दृष्ट्या xs);
+  यदि total > 5 {
+    सिद्धम् total == 10;
+  } अन्यथा {
+    सिद्धम् total <= 5;
+  }
+  लिख total;
+  पुनरागम 0;
+}

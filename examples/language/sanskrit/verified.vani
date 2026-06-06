@@ -1,0 +1,38 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/english/verified.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/verified.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/verified.vani -o /tmp/verified && /tmp/verified   # native binary
+
+उद्देश्य "Use the SMT verifier to discharge preconditions";
+
+कार्य clamp_low(x: i64, lo: i64) -> i64
+अपेक्षित lo >= 0;
+{
+  यदि x < lo {
+    पुनरागम lo;
+  } अन्यथा {
+    पुनरागम x;
+  }
+}
+
+कार्य safe_subtract(a: i64, b: i64) -> i64
+अपेक्षित a >= b;
+अपेक्षित b >= 0;
+{
+  प्रमाण a - b >= 0;
+  पुनरागम a - b;
+}
+
+कार्य main() -> i64 {
+  माना x: i64 = clamp_low(0 - 5, 0);
+  सिद्धम् x == 0;
+
+  माना d: i64 = safe_subtract(10, 3);
+  सिद्धम् d == 7;
+
+  लिख d;
+  पुनरागम 0;
+}

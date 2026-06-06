@@ -295,7 +295,8 @@ def main() -> int:
     parser.add_argument(
         "--add-sri-header",
         action="store_true",
-        help="prepend the Sanskrit `// श्री।` invocation header when "
+        help="prepend the Sanskrit `// श्री।` invocation header AND "
+             "the SOV-S8 `// vani-lang: <lang>` purity pragma when "
              "translating to a Devanagari-script language (sanskrit / hindi / marathi)",
     )
     args = parser.parse_args()
@@ -306,7 +307,12 @@ def main() -> int:
     translated = translate(source, args.target_lang)
     if args.add_sri_header and args.target_lang in ("sanskrit", "hindi", "marathi"):
         if not translated.lstrip().startswith("// श्री।"):
-            translated = "// श्री।\n//\n" + translated
+            translated = (
+                f"// श्री।\n"
+                f"// vani-lang: {args.target_lang}\n"
+                f"//\n"
+                + translated
+            )
     if args.output:
         args.output.write_text(translated, encoding="utf-8")
     else:

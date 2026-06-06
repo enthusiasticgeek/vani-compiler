@@ -1,0 +1,55 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/english/option_types.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/option_types.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/option_types.vani -o /tmp/option_types && /tmp/option_types   # native binary
+
+उद्देश्य "Demonstrate payloaded enums via Option<i64>";
+
+// T1.3 phase 2b: payloaded enums compile end-to-end via the
+// tree-C backend. The compiler lays the enum out as a
+// tagged-union struct (`typedef struct { i32 tag; i64 payload;
+// } Enum_Opt;`); `Opt.Some(x)` builds the struct literal,
+// `match` dispatches on `.tag`, and `Opt.Some(v) then …`
+// extracts `.payload` into the binding `v` for the arm body.
+//
+// V1 limits: single Copy payload field per variant; all
+// payload-bearing variants of an enum must share the same
+// payload type. LLVM tagged-union codegen ships in a
+// follow-up — for now run with `--backend=c`.
+
+गणन Opt { Some(i64), None }
+
+कार्य unwrap_or(o: Opt, def: i64) -> i64 {
+  परत जुळवा o {
+    Opt.Some(v) तर v,
+    Opt.None तर def,
+  };
+}
+
+कार्य is_some(o: Opt) -> i64 {
+  परत जुळवा o {
+    Opt.Some(v) तर 1,
+    Opt.None तर 0,
+  };
+}
+
+कार्य main() -> i64 {
+  मान a: Opt = Opt.Some(42);
+  मान b: Opt = Opt.None;
+
+  // Pattern destructure pulls the payload out into `v`.
+  मान x: i64 = unwrap_or(a, 0);
+  मान y: i64 = unwrap_or(b, 100);
+
+  खात्री x == 42;
+  खात्री y == 100;
+  खात्री is_some(a) == 1;
+  खात्री is_some(b) == 0;
+
+  लिखो "Some(42) unwrapped =", x;
+  लिखो "None unwrapped with default 100 =", y;
+  परत 0;
+}

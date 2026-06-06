@@ -1,7 +1,12 @@
 // श्री।
+// vani-lang: sanskrit
 //
 // SOV demo (Subject-Object-Verb, verb-final) — Sanskrit natural
-// grammar applied to vāṇī's main statement shapes.
+// grammar applied to vāṇī's main statement shapes. The
+// `vani-lang: sanskrit` pragma at the top opts the file into
+// SOV-S8 per-dialect purity: the lexer now rejects Hindi-only
+// or Marathi-only keyword spellings, ensuring a pure-Sanskrit
+// reading experience.
 //
 // build & run:
 //   vanic run examples/language/sanskrit/sov_demo.vani                 # LLVM
@@ -13,7 +18,7 @@
 //   • `लिख` (likh) verb-at-end for `print`
 //   • `सिद्धम्` (siddham) verb-at-end for `assert`
 //   • `प्रमाण` (pramāṇa) verb-at-end for `prove`
-//   • `के लिए` (ke liye) range-for SOV (Hindi form)
+//   • `प्रति` (prati) range-for SOV (Sanskrit form)
 //   • Keyword-first for if / fn / struct (naturally read keyword-
 //     first in Sanskrit's `यदि...तदा` and noun-introduction style)
 
@@ -34,11 +39,11 @@
   triple >= doubled सिद्धम्;
   "doubled = ", doubled, ", triple = ", triple लिख;
 
-  // Existing SOV: range-for (Hindi multi-word `के लिए`).
+  // Existing SOV: range-for (Sanskrit `प्रति`).
   // Note: `माना` (mānā) is always a let-binding (not re-
   // assignment); use the bare `=` operator for in-loop mutation.
   acc: i64 = 0 माना;
-  i के लिए 0 से 3 तक {
+  i प्रति 0 से 3 तक {
     acc = acc + i;
   }
   "loop sum = ", acc लिख;

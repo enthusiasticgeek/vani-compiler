@@ -931,6 +931,34 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "rng.vani",
         "../sanskrit/keywords.vani",  // A.2 reorg: lives at examples/language/sanskrit/keywords.vani
         "../sanskrit/sov_demo.vani",  // SOV-S1 demo: let-binding verb-at-end
+        // SOV-S10 translator-generated Devanagari coverage —
+        // 24 files (8 examples × 3 Indo-Aryan dialects). Each
+        // mirrors its English original byte-for-byte at the AST
+        // level and runs to identical stdout + exit code.
+        "../sanskrit/basics.vani",
+        "../hindi/basics.vani",
+        "../marathi/basics.vani",
+        "../sanskrit/control_flow.vani",
+        "../hindi/control_flow.vani",
+        "../marathi/control_flow.vani",
+        "../sanskrit/for_loops.vani",
+        "../hindi/for_loops.vani",
+        "../marathi/for_loops.vani",
+        "../sanskrit/vec_invariants.vani",
+        "../hindi/vec_invariants.vani",
+        "../marathi/vec_invariants.vani",
+        "../sanskrit/option_types.vani",
+        "../hindi/option_types.vani",
+        "../marathi/option_types.vani",
+        "../sanskrit/verified.vani",
+        "../hindi/verified.vani",
+        "../marathi/verified.vani",
+        "../sanskrit/early_exit.vani",
+        "../hindi/early_exit.vani",
+        "../marathi/early_exit.vani",
+        "../sanskrit/iterate.vani",
+        "../hindi/iterate.vani",
+        "../marathi/iterate.vani",
         "scopes.vani",
         "skiplist.vani",
         "sort.vani",

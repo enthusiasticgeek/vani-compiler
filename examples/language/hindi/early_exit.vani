@@ -1,0 +1,47 @@
+// श्री।
+// vani-lang: hindi
+//
+// build & run:
+//   vanic run examples/language/english/early_exit.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/early_exit.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/early_exit.vani -o /tmp/early_exit && /tmp/early_exit   # native binary
+
+उद्देश्य "break and continue for early exit and skip";
+
+फलन find_first_negative(xs: देखो Vec<i64>) -> i64 {
+  माना i: u64 = 0;
+  माना result: i64 = 0 - 1;
+  जबतक i < len(xs) {
+    अगर xs[i] < 0 {
+      result = xs[i];
+      रुको;
+    }
+    i = i + 1;
+  }
+  लौटाओ result;
+}
+
+फलन count_positive(xs: देखो Vec<i64>) -> i64 {
+  माना i: u64 = 0;
+  माना count: i64 = 0;
+  जबतक i < len(xs) {
+    अगर xs[i] <= 0 {
+      i = i + 1;
+      आगे;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  लौटाओ count;
+}
+
+फलन main() -> i64 {
+  माना xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  माना first_neg: i64 = find_first_negative(देखो xs);
+  माना positives: i64 = count_positive(देखो xs);
+  सुनिश्चित first_neg == 0 - 3;
+  सुनिश्चित positives == 3;
+  लिखो first_neg;
+  लिखो positives;
+  लौटाओ 0;
+}
