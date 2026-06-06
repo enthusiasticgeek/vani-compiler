@@ -271,10 +271,37 @@ impl Parser {
         // synthesized by try_v31_transform during parse_function.
         // Each entry contributes one struct + one poll fn into
         // the program-level decls.
+        //
+        // Span rewrite: each synthesized item gets a span AFTER
+        // all user-level decls (max_user_pos + N). This matters
+        // for the `intentc fmt` pass which sorts top-items by
+        // span.start — without the rewrite, the poll fn (which
+        // inherits its source async fn's span) would interleave
+        // back-to-back with the original fn instead of landing
+        // at end-of-program where `parse_program` puts it.
+        // Pre-Phase-4c-fix the round-trip diverged for async_*
+        // examples.
+        let max_user_pos: usize = functions
+            .iter()
+            .map(|f| f.span.end)
+            .chain(structs.iter().map(|s| s.span.end))
+            .max()
+            .unwrap_or(0);
         let mut functions = functions;
         let mut structs = structs;
         crate::ast::V31_TASK_REGISTRY.with(|reg| {
-            for (s, f) in reg.borrow_mut().drain(..) {
+            let mut bump: usize = 1;
+            for (mut s, mut f) in reg.borrow_mut().drain(..) {
+                let s_start = max_user_pos + bump;
+                bump += 1;
+                let s_end = max_user_pos + bump;
+                bump += 1;
+                s.span = crate::span::Span::new(s_start, s_end);
+                let f_start = max_user_pos + bump;
+                bump += 1;
+                let f_end = max_user_pos + bump;
+                bump += 1;
+                f.span = crate::span::Span::new(f_start, f_end);
                 structs.push(s);
                 functions.push(f);
             }
@@ -4313,12 +4340,26 @@ impl Parser {
                 // For module-qualified names like `foo__Point`
                 // the LAST segment's capitalization is what
                 // counts.
+                // Heuristic: a name is "struct-shaped" when either
+                // its FIRST segment OR its LAST segment starts
+                // uppercase. This catches both module-qualified
+                // user structs (`foo::Point` → `foo__Point`,
+                // last segment upper) AND v3.1-synthesized
+                // names (`Task__showcase`, first segment upper)
+                // whose suffix after `__` is the user's
+                // lowercase async-fn name.
                 let last_segment: &str = name.rsplit("__").next().unwrap_or(&name);
-                let starts_uppercase = last_segment
+                let last_upper = last_segment
                     .chars()
                     .next()
                     .map(|c| c.is_ascii_uppercase())
                     .unwrap_or(false);
+                let first_upper = name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_ascii_uppercase())
+                    .unwrap_or(false);
+                let starts_uppercase = last_upper || first_upper;
                 let starts_with_lbrace = matches!(self.current().kind, TokenKind::LBrace);
                 let inner_is_field = matches!(
                     self.tokens.get(self.pos + 1).map(|t| &t.kind),

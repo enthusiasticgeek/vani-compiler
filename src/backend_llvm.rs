@@ -41758,67 +41758,88 @@ mod tests {
         // the outlined fn, then on exit reads the shadow and
         // writes `icmp ne i8 …, 0` back into the original i1
         // alloca.
-        let source = r#"
-            fn main() -> i64 {
-              let flags: [bool; 3] = [false, false, true];
-              let any: bool = false;
-              parallel for i from 0 to 3
-              reduce any with ||;
-              {
-                any = any || flags[i];
-              }
-              if any { return 1; } else { return 0; }
-            }
-        "#;
-        let checked = compile(source).expect("bool reduction compiles");
-        let ll = LlvmBackend.emit(&checked.ir);
-        assert!(
-            ll.contains("atomicrmw or i8*"),
-            "expected atomicrmw or on i8 shadow:\n{ll}"
-        );
-        assert!(
-            ll.contains("zext i1"),
-            "expected zext i1 on increment:\n{ll}"
-        );
-        assert!(
-            ll.contains("icmp ne i8"),
-            "expected icmp ne on shadow writeback:\n{ll}"
-        );
-        // No more "lowers sequentially" fallback comment.
-        assert!(
-            !ll.contains("parallel for with bool reduction lowers sequentially"),
-            "sequential-fallback comment should be gone:\n{ll}"
-        );
-        // And the parallel-for must actually outline (a real
-        // @__intent_par_<N> definition should appear).
-        assert!(
-            ll.contains("define internal void @__intent_par_"),
-            "expected outlined parallel-for function:\n{ll}"
-        );
+        //
+        // Stack: same deep-recursion path as the `&&` sibling
+        // test below — run on a 32MB-stack worker thread so the
+        // test passes without RUST_MIN_STACK in env.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let source = r#"
+                    fn main() -> i64 {
+                      let flags: [bool; 3] = [false, false, true];
+                      let any: bool = false;
+                      parallel for i from 0 to 3
+                      reduce any with ||;
+                      {
+                        any = any || flags[i];
+                      }
+                      if any { return 1; } else { return 0; }
+                    }
+                "#;
+                let checked = compile(source).expect("bool reduction compiles");
+                let ll = LlvmBackend.emit(&checked.ir);
+                assert!(
+                    ll.contains("atomicrmw or i8*"),
+                    "expected atomicrmw or on i8 shadow:\n{ll}"
+                );
+                assert!(
+                    ll.contains("zext i1"),
+                    "expected zext i1 on increment:\n{ll}"
+                );
+                assert!(
+                    ll.contains("icmp ne i8"),
+                    "expected icmp ne on shadow writeback:\n{ll}"
+                );
+                assert!(
+                    !ll.contains("parallel for with bool reduction lowers sequentially"),
+                    "sequential-fallback comment should be gone:\n{ll}"
+                );
+                assert!(
+                    ll.contains("define internal void @__intent_par_"),
+                    "expected outlined parallel-for function:\n{ll}"
+                );
+            })
+            .expect("spawn worker thread")
+            .join()
+            .expect("worker thread completed without panic");
     }
 
     #[test]
     fn emits_atomicrmw_and_on_i8_shadow_for_bool_and_reduction() {
         // Same shape as the `||` test but for `&&`. Verifies the
         // shadow path is symmetric.
-        let source = r#"
-            fn main() -> i64 {
-              let flags: [bool; 3] = [true, true, true];
-              let all: bool = true;
-              parallel for i from 0 to 3
-              reduce all with &&;
-              {
-                all = all && flags[i];
-              }
-              if all { return 1; } else { return 0; }
-            }
-        "#;
-        let checked = compile(source).expect("bool reduction compiles");
-        let ll = LlvmBackend.emit(&checked.ir);
-        assert!(
-            ll.contains("atomicrmw and i8*"),
-            "expected atomicrmw and on i8 shadow:\n{ll}"
-        );
+        //
+        // The vāṇī checker + SMT verifier path for parallel-for
+        // with bool reduction recurses deeper than Rust's default
+        // 2MB test-thread stack on debug builds. Run the body on
+        // a 32MB-stack worker thread so the test passes without
+        // requiring RUST_MIN_STACK in the env.
+        std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(|| {
+                let source = r#"
+                    fn main() -> i64 {
+                      let flags: [bool; 3] = [true, true, true];
+                      let all: bool = true;
+                      parallel for i from 0 to 3
+                      reduce all with &&;
+                      {
+                        all = all && flags[i];
+                      }
+                      if all { return 1; } else { return 0; }
+                    }
+                "#;
+                let checked = compile(source).expect("bool reduction compiles");
+                let ll = LlvmBackend.emit(&checked.ir);
+                assert!(
+                    ll.contains("atomicrmw and i8*"),
+                    "expected atomicrmw and on i8 shadow:\n{ll}"
+                );
+            })
+            .expect("spawn worker thread")
+            .join()
+            .expect("worker thread completed without panic");
     }
 
     #[test]

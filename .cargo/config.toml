@@ -1,0 +1,11 @@
+# Cargo configuration for the vāṇī compiler.
+#
+# `RUST_MIN_STACK` controls the per-thread stack size for test
+# workers (and for the main thread under cargo run). Several
+# vāṇī tests — notably the LLVM backend's parallel-for /
+# atomicrmw shadow tests + the SMT verifier's reduction paths —
+# recurse deeper than Rust's default 2MB thread-stack on debug
+# builds. Setting 32MB here keeps `cargo test` clean without
+# requiring contributors to remember an env var.
+[env]
+RUST_MIN_STACK = "33554432"

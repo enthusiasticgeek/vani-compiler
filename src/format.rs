@@ -554,8 +554,23 @@ fn format_module_decl(
 /// contain `__` in practice, so the substitution is safe.
 fn type_to_source(ty: &crate::ast::Type) -> String {
     use crate::ast::Type;
+    // v3.1-synthesized struct names (`Task__X`, `Task__X__T`)
+    // use `__` as a legitimate name separator — they're NOT
+    // module paths. Keep them literal so the round-trip
+    // re-parses the same mangled name. Same for any name that
+    // contains a `__` segment NOT at the top of a known module
+    // path: pragmatic heuristic is to keep the literal form
+    // for names starting with `Task__` (Arc 8 v3.1) or
+    // containing more than one `__` group (multi-mangled
+    // generic specializations).
+    fn type_struct_to_source(name: &str) -> String {
+        if name.starts_with("Task__") || name.starts_with("__poll_") {
+            return name.to_string();
+        }
+        name.replace("__", "::")
+    }
     match ty {
-        Type::Struct(name) | Type::Enum(name) => name.replace("__", "::"),
+        Type::Struct(name) | Type::Enum(name) => type_struct_to_source(name),
         Type::Array { element, length } => {
             format!("[{}; {}]", type_to_source(element), length)
         }
