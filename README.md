@@ -1301,6 +1301,46 @@ purity. The lexer then rejects any keyword spelling not native to
 the declared dialect. Without the pragma, the existing script-
 level English-vs-Devanagari gate still applies (back-compat).
 
+The pragma also turns on **dialect-aware error rendering**:
+diagnostics emit their `error:` / `note:` labels in the declared
+dialect (Sanskrit `त्रुटिः`, Hindi `त्रुटि`, Marathi `चूक`), and
+the leading prefix of the most common error families translates
+to the dialect (e.g. `unknown variable` → `अज्ञातं चरम्` in
+Sanskrit). The English wording is retained after the dialect
+phrase so search-engine queries and existing documentation still
+match.
+
+### Devanagari numerals, type names, identifiers
+
+Inside a `.vani` source file, every category of token can be
+Devanagari:
+
+- **Numerals**: integer + float literals accept Devanagari digits
+  `०१२३४५६७८९` (U+0966–U+096F). `५ * २` parses as `5 * 2`; `३.१४`
+  parses as the f64 `3.14`. Mixed ASCII / Devanagari digits in
+  the same literal are NOT supported (pick one per number).
+- **Type names**: `पूर्णांक` (i64), `दशांश` (f64), `तर्क` (bool),
+  `सूची` (Vec), `पूर्णांक८/१६/३२/६४` (i8/i16/i32/i64 width-
+  explicit), `अहस्ताक्षरित८/.../६४` (u8..u64 unsigned). All are
+  Sanskrit-root tatsama forms working as loanwords in Hindi +
+  Marathi, so a single Devanagari spelling works across all
+  three dialects.
+- **Identifiers**: user-defined function / variable / struct /
+  field names accept any Devanagari letter. The LLVM backend
+  mangles non-ASCII names to `_uHHHH` per codepoint behind the
+  scenes (e.g. `द्विपदगुणक` → `_u0926...`); the C backend uses
+  the UTF-8 bytes directly (gcc / clang accept UTF-8 in
+  identifiers natively).
+
+A fully-Devanagari program is now possible — see
+[`examples/language/sanskrit/pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani)
+for a complete Pascal's-triangle-row example using Sanskrit
+keywords + Sanskrit identifiers + Sanskrit comments + Devanagari
+numerals + SOV verb-at-end statements + function-level
+`अपेक्षित` (requires) contracts. The reading experience is meant
+to feel like Sanskrit prose with the verb closing each clause —
+not a transliterated English program.
+
 Pronunciation guide for the diacritics used in the romanizations:
 
 | Mark | Roman | Sound | Example |

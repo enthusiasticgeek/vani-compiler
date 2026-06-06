@@ -59,7 +59,7 @@ landed in this session (commits 4feb5fc → d139691):
    return type literally `i64` uses direct-return. Acceptable for
    v1; documented in [parser.rs:try_v31_transform](src/parser.rs).
 
-## 🟡 Language surface — partially shipped (Sanskrit-derived SOV)
+## 🟢 Language surface — Devanagari purity arc complete (Sanskrit-derived)
 
 vāṇी's first-class target is the Sanskrit-derived family —
 Sanskrit, Hindi, Marathi, and the broader Indo-Aryan group — with
@@ -77,6 +77,20 @@ global languages queued after. Honest status:
 - **Per-file script purity**: English vs Devanagari, auto-detected
   on first keyword ([lexer.rs:393–441](src/lexer.rs#L393-L441)).
   Finer Sanskrit-vs-Hindi-vs-Marathi distinction deferred.
+- **Devanagari numerals**: integer (०-९) + float (`३.१४`)
+  literals supported in lexer ([lexer.rs:lex_devanagari_number](src/lexer.rs)).
+- **Devanagari type names**: `पूर्णांक` (i64), `दशांश` (f64),
+  `तर्क` (bool), `सूची` (Vec), plus width-explicit variants.
+- **Devanagari identifiers**: user names with Devanagari chars
+  work on both C and LLVM backends — LLVM via
+  `llvm_mangle_ident` hex-encoding non-ASCII codepoints.
+- **Dialect-aware error rendering**: `// vani-lang:` pragma
+  triggers Sanskrit / Hindi / Marathi error labels + message-
+  prefix translations at diagnostic-render time
+  ([diagnostic.rs:detect_diag_lang](src/diagnostic.rs)).
+- **Pure-Devanagari example**: [`pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani)
+  runs on both backends with Sanskrit keywords + types + idents +
+  numerals + SOV statements + requires-clauses.
 - **Global languages** (Spanish, Mandarin, Arabic, etc.) — not
   started.
 
