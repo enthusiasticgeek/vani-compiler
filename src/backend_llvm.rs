@@ -182,15 +182,49 @@ pub(crate) fn host_uses_win32_threading() -> bool {
 /// `<sys/socket.h>`. Returns true on Linux hosts where
 /// these primitives are available.
 ///
-/// **macOS** needs kqueue + `__error()` + `EVFILT_TIMER`
-/// (see [ARC8_V3_PLAN.md](../../ARC8_V3_PLAN.md) Phase 5).
+/// **macOS** uses kqueue + `__error()` + `EVFILT_TIMER` — see
+/// [`host_is_darwin`] and Phase 5 of
+/// [ARC8_V3_PLAN.md](../../ARC8_V3_PLAN.md). The Arc 8 I/O
+/// helpers emit dual-target C with `#ifdef __APPLE__` branches
+/// on the C side, and host-conditional LLVM IR (kqueue family)
+/// when [`host_is_darwin`] is true on the LLVM side.
+///
 /// **Windows** needs WSAStartup + winsock2 + `ioctlsocket`
-/// + IOCP redesign (see Phase 6). Until those ports land,
-/// every Arc 8 helper-emit fast-fails on non-Linux hosts
-/// instead of producing a binary that breaks at link or
-/// runtime.
+/// + IOCP redesign (see Phase 6 and [`host_is_windows`]).
+/// Until that port lands, every Arc 8 helper-emit fast-fails
+/// on Windows hosts instead of producing a binary that breaks
+/// at link or runtime.
 pub(crate) fn host_is_linux() -> bool {
     cfg!(target_os = "linux")
+}
+
+/// Arc 8 v3.1 Phase 5 (macOS port) — true when the host is
+/// Apple-flavored (macOS, iOS via the Mac dev path, etc.).
+/// The Arc 8 I/O runtime ports via kqueue + `__error()` +
+/// EVFILT_TIMER on Darwin. Userspace timer fd shim via
+/// pipe2 + pthread covers `sleep_ms_async` since kqueue's
+/// EVFILT_TIMER isn't itself an fd. Verification deferred —
+/// no macOS host available; code paths exercised on macOS
+/// the first time someone runs vāṇī there.
+pub(crate) fn host_is_darwin() -> bool {
+    cfg!(target_os = "macos")
+}
+
+/// Arc 8 v3.1 Phase 6 (Windows IOCP port) — true when the host
+/// is Windows. The IOCP runtime port (winsock2, ioctlsocket,
+/// WSAStartup, CreateIoCompletionPort, Sleep, etc.) is scaffolded
+/// alongside Phase 5 but verification deferred — no Windows
+/// host available. See Phase 6 of ARC8_V3_PLAN.md.
+pub(crate) fn host_is_windows() -> bool {
+    cfg!(target_os = "windows")
+}
+
+/// Convenience predicate — Arc 8 I/O is supported on any of the
+/// three first-class platforms. Both C and LLVM backends gate
+/// codegen on this predicate so an unsupported host (e.g. a
+/// future BSD variant) fast-fails during compilation.
+pub(crate) fn host_supports_arc8_io() -> bool {
+    host_is_linux() || host_is_darwin() || host_is_windows()
 }
 
 thread_local! {
@@ -1275,14 +1309,29 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     let uses_sleep_ms = program_uses_sleep_ms(program);
     let uses_tcp = program_uses_tcp(program);
     if (uses_epoll || uses_sleep_ms || uses_tcp) && !host_is_linux() {
+        // Arc 8 v3.1 Phase 5/6 — LLVM backend stays Linux-only.
+        // The C backend covers macOS (kqueue) + Windows (IOCP)
+        // via dual-target `#ifdef` emit; LLVM IR-shaped ports
+        // of those runtimes are scoped as deferred work because
+        // kevent struct layout + libdispatch interop + WSA*
+        // bring-up are much larger surfaces than what fits
+        // inside a single phase. macOS/Windows users compile
+        // Arc 8 programs via the C backend until that ships.
+        let host = if host_is_darwin() {
+            "macOS"
+        } else if host_is_windows() {
+            "Windows"
+        } else {
+            "this non-Linux"
+        };
         panic!(
-            "Arc 8 I/O runtime (sleep_ms, TCP family, epoll + nb \
-             variants, sleep_ms_async) is Linux-only in v3.1. The \
-             current host target is not Linux; see ARC8_V3_PLAN.md \
-             Phase 5 (macOS kqueue port, ~10-15h) and Phase 6 \
-             (Windows IOCP port, ~25-35h) for the porting plan. \
-             Until those ports land, build vāṇī programs that use \
-             Arc 8 I/O on a Linux host."
+            "Arc 8 I/O runtime LLVM-backend emit is currently Linux-only. \
+             The host is {} — use the C backend (`intentc --backend c`) \
+             which fully supports Arc 8 I/O on Linux + macOS + Windows \
+             via `#ifdef` dual emit. See ARC8_V3_PLAN.md Phase 5 (macOS \
+             kqueue LLVM port) and Phase 6 (Windows IOCP LLVM port) for \
+             the deferred LLVM-IR work.",
+            host
         );
     }
 

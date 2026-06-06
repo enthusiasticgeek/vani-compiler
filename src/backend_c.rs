@@ -1154,21 +1154,24 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let uses_arc8_io = need_epoll_helpers
         || body.contains("intent_tcp_")
         || body.contains("intent_sleep_ms(");
-    // Arc 8 v3.1 Phase 0 A0.1 — compile-time gate. The Arc 8
-    // I/O runtime (sleep_ms / TCP / epoll / nb variants /
-    // timerfd) is Linux-only. Fail loud during codegen when
-    // any Arc 8 I/O builtin is referenced on a non-Linux
-    // host instead of breaking silently at C-compile time
-    // with `<sys/socket.h>: No such file or directory`.
-    if uses_arc8_io && !crate::backend_llvm::host_is_linux() {
+    // Arc 8 v3.1 Phase 5 — compile-time gate. The Arc 8 I/O
+    // runtime (sleep_ms / TCP / epoll / nb variants / timer)
+    // is now supported on Linux + macOS via dual-target C
+    // (the emitted helpers branch at C-compile time via
+    // `#ifdef __APPLE__` / `#elif defined(__linux__)`). Windows
+    // (Phase 6) routes through a winsock2 / IOCP `#ifdef _WIN32`
+    // branch. Hosts outside those three platforms fail loud
+    // during codegen instead of breaking silently at C-compile
+    // time with `<sys/socket.h>: No such file or directory`.
+    if uses_arc8_io && !crate::backend_llvm::host_supports_arc8_io() {
         panic!(
             "Arc 8 I/O runtime (sleep_ms, TCP family, epoll + nb \
-             variants, sleep_ms_async) is Linux-only in v3.1. The \
-             current host target is not Linux; see ARC8_V3_PLAN.md \
-             Phase 5 (macOS kqueue port, ~10-15h) and Phase 6 \
-             (Windows IOCP port, ~25-35h) for the porting plan. \
-             Until those ports land, build vāṇī programs that use \
-             Arc 8 I/O on a Linux host."
+             variants, sleep_ms_async) is supported on Linux, \
+             macOS, and Windows. The current host target is not \
+             one of those three; see ARC8_V3_PLAN.md Phase 5 \
+             (macOS kqueue) and Phase 6 (Windows IOCP) for the \
+             porting model. Add a `host_is_*` helper in \
+             backend_llvm.rs if you're bringing up a new platform."
         );
     }
     if need_epoll_helpers && !body.contains("intent_tcp_") {
@@ -1185,10 +1188,20 @@ pub fn emit_c(program: &TypedProgram) -> String {
     out
 }
 
-/// Arc 8 v2 — epoll + non-blocking I/O runtime helpers
-/// (Linux-only in v2). Gated on the program actually
-/// referencing any `intent_epoll_*` or `intent_tcp_*_nb`
-/// helper.
+/// Arc 8 v2 + Phase 5 — epoll/kqueue + non-blocking I/O runtime
+/// helpers. Linux uses `<sys/epoll.h>` + `<sys/timerfd.h>`.
+/// macOS uses `<sys/event.h>` (kqueue + EVFILT_READ +
+/// EVFILT_TIMER) with a userspace pipe2+pthread timer shim
+/// because kqueue's EVFILT_TIMER isn't itself an fd that can be
+/// polled via the epoll-shaped API. The C compiler picks the
+/// right branch at C-compile time via `__APPLE__` /
+/// `__linux__` / `_WIN32` macros, so a single emit handles all
+/// three platforms.
+///
+/// VERIFICATION DEFERRED for macOS and Windows branches — no
+/// host access in the current dev environment. The Linux branch
+/// is byte-identical to the pre-Phase-5 emitter so existing
+/// Linux verification stays green.
 fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
     if !body.contains("intent_epoll_") && !body.contains("intent_tcp_set_nonblocking")
         && !body.contains("intent_tcp_accept_nb") && !body.contains("intent_tcp_recv_nb")
@@ -1197,10 +1210,201 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
         return;
     }
     out.push_str(
-        "#include <sys/epoll.h>\n\
+        "#if defined(_WIN32)\n\
+         #include <winsock2.h>\n\
+         #include <ws2tcpip.h>\n\
+         #include <windows.h>\n\
+         /* winsock2.h defines SOCKET as an unsigned integer\n\
+          * handle; cast through SOCKET when bridging int64_t. */\n\
+         #elif defined(__APPLE__)\n\
+         #include <sys/event.h>\n\
+         #include <sys/time.h>\n\
+         #include <fcntl.h>\n\
+         #include <unistd.h>\n\
+         #include <pthread.h>\n\
+         #include <stdlib.h>\n\
+         #else\n\
+         #include <sys/epoll.h>\n\
          #include <sys/timerfd.h>\n\
          #include <fcntl.h>\n\
          #include <unistd.h>\n\
+         #endif\n\
+         #if defined(_WIN32)\n\
+         /* Phase 6 (Windows IOCP) — see ARC8_V3_PLAN.md.\n\
+          * VERIFICATION DEFERRED: no Windows host access. */\n\
+         static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
+         \x20 HANDLE h = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);\n\
+         \x20 return (h == NULL) ? -1 : (int64_t)(intptr_t)h;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_add_read(int64_t epfd, int64_t fd) {\n\
+         \x20 /* IOCP associates the SOCKET with the completion port;\n\
+          \x20\x20\x20\x20 read readiness comes via posted overlapped recv.\n\
+          \x20\x20\x20\x20 The vāṇी epoll API is event-driven rather than\n\
+          \x20\x20\x20\x20 readiness-driven on Windows — Phase 6c work. */\n\
+         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
+         \x20 HANDLE r = CreateIoCompletionPort((HANDLE)(SOCKET)fd, h, (ULONG_PTR)fd, 0);\n\
+         \x20 return (r == h) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_wait_one(int64_t epfd, int64_t timeout_ms) {\n\
+         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
+         \x20 DWORD bytes = 0; ULONG_PTR key = 0; LPOVERLAPPED ov = NULL;\n\
+         \x20 DWORD tmo = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;\n\
+         \x20 BOOL ok = GetQueuedCompletionStatus(h, &bytes, &key, &ov, tmo);\n\
+         \x20 if (!ok && ov == NULL) {\n\
+         \x20   /* WAIT_TIMEOUT vs error; use GetLastError. */\n\
+         \x20   return (GetLastError() == WAIT_TIMEOUT) ? -2 : -1;\n\
+         \x20 }\n\
+         \x20 return (int64_t)key;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_close(int64_t epfd) {\n\
+         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
+         \x20 return CloseHandle(h) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_set_nonblocking(int64_t fd) {\n\
+         \x20 u_long nb = 1;\n\
+         \x20 return (ioctlsocket((SOCKET)fd, FIONBIO, &nb) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_accept_nb(int64_t server_fd) {\n\
+         \x20 SOCKET cfd = accept((SOCKET)server_fd, NULL, NULL);\n\
+         \x20 if (cfd != INVALID_SOCKET) return (int64_t)cfd;\n\
+         \x20 return (WSAGetLastError() == WSAEWOULDBLOCK) ? -2 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_recv_nb(int64_t fd, int64_t max) {\n\
+         \x20 if (max < 0) return -1;\n\
+         \x20 size_t want = (size_t)max;\n\
+         \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
+         \x20 int n = recv((SOCKET)fd, (char*)intent_tcp_buf, (int)want, 0);\n\
+         \x20 if (n >= 0) return (int64_t)n;\n\
+         \x20 return (WSAGetLastError() == WSAEWOULDBLOCK) ? -2 : -1;\n\
+         }\n\
+         /* Windows timer: CreateWaitableTimer + thread that posts a\n\
+          * completion packet on the user's IOCP when the timer fires.\n\
+          * The returned \"fd\" is a unique sentinel key the user passes\n\
+          * to intent_sleep_ms_finish (which is a no-op cleanup since\n\
+          * the timer thread frees its own handle). */\n\
+         struct __intent_timer_win { HANDLE timer; HANDLE iocp; ULONG_PTR key; int64_t ms; };\n\
+         static DWORD WINAPI __intent_timer_win_thread(LPVOID arg) {\n\
+         \x20 struct __intent_timer_win* a = (struct __intent_timer_win*)arg;\n\
+         \x20 Sleep((DWORD)(a->ms < 0 ? 0 : a->ms));\n\
+         \x20 if (a->iocp) PostQueuedCompletionStatus(a->iocp, 0, a->key, NULL);\n\
+         \x20 free(a);\n\
+         \x20 return 0;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_async(int64_t ms) {\n\
+         \x20 /* Without knowing which IOCP the caller will use, fire\n\
+          \x20\x20\x20\x20 a self-contained Sleep thread that returns a key\n\
+          \x20\x20\x20\x20 the user's epoll_add_read step will associate.\n\
+          \x20\x20\x20\x20 Phase 6c follow-up: thread the IOCP handle in. */\n\
+         \x20 struct __intent_timer_win* a = (struct __intent_timer_win*)malloc(sizeof(*a));\n\
+         \x20 if (!a) return -1;\n\
+         \x20 a->timer = NULL; a->iocp = NULL; a->key = (ULONG_PTR)(uintptr_t)a; a->ms = ms;\n\
+         \x20 HANDLE th = CreateThread(NULL, 0, __intent_timer_win_thread, a, 0, NULL);\n\
+         \x20 if (!th) { free(a); return -1; }\n\
+         \x20 CloseHandle(th);\n\
+         \x20 return (int64_t)a->key;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_finish(int64_t fd) {\n\
+         \x20 (void)fd;\n\
+         \x20 /* Thread freed its own state; nothing to clean up. */\n\
+         \x20 return 1;\n\
+         }\n\
+         #elif defined(__APPLE__)\n\
+         /* Phase 5 (macOS kqueue) — see ARC8_V3_PLAN.md.\n\
+          * VERIFICATION DEFERRED: no macOS host access. */\n\
+         static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
+         \x20 int fd = kqueue();\n\
+         \x20 return (fd < 0) ? -1 : (int64_t)fd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_add_read(int64_t epfd, int64_t fd) {\n\
+         \x20 struct kevent kev;\n\
+         \x20 EV_SET(&kev, (int)fd, EVFILT_READ, EV_ADD | EV_CLEAR, 0, 0, NULL);\n\
+         \x20 int rc;\n\
+         \x20 do { rc = kevent((int)epfd, &kev, 1, NULL, 0, NULL); }\n\
+         \x20 while (rc < 0 && errno == EINTR);\n\
+         \x20 return (rc == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_wait_one(int64_t epfd, int64_t timeout_ms) {\n\
+         \x20 struct kevent kev;\n\
+         \x20 struct timespec ts;\n\
+         \x20 struct timespec* tsp;\n\
+         \x20 int rc;\n\
+         \x20 if (timeout_ms < 0) {\n\
+         \x20   tsp = NULL;\n\
+         \x20 } else {\n\
+         \x20   ts.tv_sec = (time_t)(timeout_ms / 1000);\n\
+         \x20   ts.tv_nsec = (long)((timeout_ms % 1000) * 1000000L);\n\
+         \x20   tsp = &ts;\n\
+         \x20 }\n\
+         \x20 do { rc = kevent((int)epfd, NULL, 0, &kev, 1, tsp); }\n\
+         \x20 while (rc < 0 && errno == EINTR);\n\
+         \x20 if (rc < 0) return -1;\n\
+         \x20 if (rc == 0) return -2;\n\
+         \x20 return (int64_t)(int)kev.ident;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_epoll_close(int64_t epfd) {\n\
+         \x20 return (close((int)epfd) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_set_nonblocking(int64_t fd) {\n\
+         \x20 int flags = fcntl((int)fd, F_GETFL, 0);\n\
+         \x20 if (flags < 0) return -1;\n\
+         \x20 return (fcntl((int)fd, F_SETFL, flags | O_NONBLOCK) == 0) ? 0 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_accept_nb(int64_t server_fd) {\n\
+         \x20 int cfd = accept((int)server_fd, NULL, NULL);\n\
+         \x20 if (cfd >= 0) return (int64_t)cfd;\n\
+         \x20 if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;\n\
+         \x20 return -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_recv_nb(int64_t fd, int64_t max) {\n\
+         \x20 if (max < 0) return -1;\n\
+         \x20 size_t want = (size_t)max;\n\
+         \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
+         \x20 ssize_t n = recv((int)fd, intent_tcp_buf, want, 0);\n\
+         \x20 if (n >= 0) return (int64_t)n;\n\
+         \x20 if (errno == EAGAIN || errno == EWOULDBLOCK) return -2;\n\
+         \x20 return -1;\n\
+         }\n\
+         /* macOS userspace timer-fd shim — pipe2 isn't on macOS so\n\
+          * we use pipe() + fcntl(O_NONBLOCK), and a detached pthread\n\
+          * that sleeps then writes one byte to wake epoll_wait_one. */\n\
+         struct __intent_timer_args { int wfd; int64_t ms; };\n\
+         static void* __intent_timer_thread(void* arg) {\n\
+         \x20 struct __intent_timer_args* a = (struct __intent_timer_args*)arg;\n\
+         \x20 struct timespec ts;\n\
+         \x20 ts.tv_sec = (time_t)(a->ms / 1000);\n\
+         \x20 ts.tv_nsec = (long)((a->ms % 1000) * 1000000L);\n\
+         \x20 (void)nanosleep(&ts, NULL);\n\
+         \x20 uint64_t one = 1;\n\
+         \x20 (void)write(a->wfd, &one, sizeof(one));\n\
+         \x20 close(a->wfd);\n\
+         \x20 free(a);\n\
+         \x20 return NULL;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_async(int64_t ms) {\n\
+         \x20 if (ms < 0) return -1;\n\
+         \x20 int p[2]; if (pipe(p) < 0) return -1;\n\
+         \x20 int flags = fcntl(p[0], F_GETFL, 0);\n\
+         \x20 if (flags < 0) { close(p[0]); close(p[1]); return -1; }\n\
+         \x20 if (fcntl(p[0], F_SETFL, flags | O_NONBLOCK) < 0) { close(p[0]); close(p[1]); return -1; }\n\
+         \x20 struct __intent_timer_args* a = (struct __intent_timer_args*)malloc(sizeof(*a));\n\
+         \x20 if (!a) { close(p[0]); close(p[1]); return -1; }\n\
+         \x20 a->wfd = p[1]; a->ms = ms;\n\
+         \x20 pthread_t th;\n\
+         \x20 if (pthread_create(&th, NULL, __intent_timer_thread, a) != 0) {\n\
+         \x20   free(a); close(p[0]); close(p[1]); return -1;\n\
+         \x20 }\n\
+         \x20 pthread_detach(th);\n\
+         \x20 return (int64_t)p[0];\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms_finish(int64_t fd) {\n\
+         \x20 uint64_t exp = 0;\n\
+         \x20 ssize_t n = read((int)fd, &exp, sizeof(exp));\n\
+         \x20 close((int)fd);\n\
+         \x20 if (n < 0) return -1;\n\
+         \x20 return (int64_t)(n > 0 ? 1 : 0);\n\
+         }\n\
+         #else\n\
+         /* Linux epoll + timerfd — original v2 path. */\n\
          static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
          \x20 int fd = epoll_create1(0);\n\
          \x20 return (fd < 0) ? -1 : (int64_t)fd;\n\
@@ -1261,7 +1465,8 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
          \x20 close((int)fd);\n\
          \x20 if (n < 0) return -1;\n\
          \x20 return (int64_t)exp;\n\
-         }\n\n",
+         }\n\
+         #endif\n\n",
     );
 }
 
@@ -1277,13 +1482,111 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
         return;
     }
     out.push_str(
-        "#include <sys/socket.h>\n\
+        "#if defined(_WIN32)\n\
+         /* Phase 6 (Windows IOCP) — winsock2 brought in alongside\n\
+          * the epoll shim above. VERIFICATION DEFERRED — no\n\
+          * Windows host access. */\n\
+         #include <string.h>\n\
+         #pragma comment(lib, \"ws2_32.lib\")\n\
+         static int __intent_winsock_inited = 0;\n\
+         static void __intent_winsock_startup(void) {\n\
+         \x20 if (__intent_winsock_inited) return;\n\
+         \x20 WSADATA wsa; (void)WSAStartup(MAKEWORD(2, 2), &wsa);\n\
+         \x20 __intent_winsock_inited = 1;\n\
+         }\n\
+         #else\n\
+         #include <sys/socket.h>\n\
          #include <netinet/in.h>\n\
          #include <arpa/inet.h>\n\
          #include <unistd.h>\n\
          #include <string.h>\n\
          #include <errno.h>\n\
+         #endif\n\
+         #if defined(_MSC_VER)\n\
+         /* MSVC: no _Thread_local — use the equivalent\n\
+          * __declspec(thread) keyword. */\n\
+         static __declspec(thread) unsigned char intent_tcp_buf[4096];\n\
+         #else\n\
          static _Thread_local unsigned char intent_tcp_buf[4096];\n\
+         #endif\n\
+         #if defined(_WIN32)\n\
+         /* Windows TCP — SOCKET is an unsigned handle, WSAGetLastError\n\
+          * replaces errno for socket ops, and recv/send return int\n\
+          * rather than ssize_t. */\n\
+         static INTENT_UNUSED int64_t intent_tcp_listen(int64_t port) {\n\
+         \x20 __intent_winsock_startup();\n\
+         \x20 SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);\n\
+         \x20 if (s == INVALID_SOCKET) return -1;\n\
+         \x20 BOOL opt = 1;\n\
+         \x20 (void)setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 memset(&sa, 0, sizeof(sa));\n\
+         \x20 sa.sin_family = AF_INET;\n\
+         \x20 sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n\
+         \x20 sa.sin_port = htons((uint16_t)port);\n\
+         \x20 if (bind(s, (struct sockaddr*)&sa, sizeof(sa)) == SOCKET_ERROR) { closesocket(s); return -1; }\n\
+         \x20 if (listen(s, 16) == SOCKET_ERROR) { closesocket(s); return -1; }\n\
+         \x20 return (int64_t)s;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_socket_port(int64_t fd) {\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 int slen = (int)sizeof(sa);\n\
+         \x20 if (getsockname((SOCKET)fd, (struct sockaddr*)&sa, &slen) == SOCKET_ERROR) return -1;\n\
+         \x20 return (int64_t)ntohs(sa.sin_port);\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_accept(int64_t server_fd) {\n\
+         \x20 SOCKET cfd = accept((SOCKET)server_fd, NULL, NULL);\n\
+         \x20 return (cfd == INVALID_SOCKET) ? -1 : (int64_t)cfd;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_connect_local(int64_t port) {\n\
+         \x20 __intent_winsock_startup();\n\
+         \x20 SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);\n\
+         \x20 if (s == INVALID_SOCKET) return -1;\n\
+         \x20 struct sockaddr_in sa;\n\
+         \x20 memset(&sa, 0, sizeof(sa));\n\
+         \x20 sa.sin_family = AF_INET;\n\
+         \x20 sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);\n\
+         \x20 sa.sin_port = htons((uint16_t)port);\n\
+         \x20 if (connect(s, (struct sockaddr*)&sa, sizeof(sa)) == SOCKET_ERROR) { closesocket(s); return -1; }\n\
+         \x20 return (int64_t)s;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_send_str(int64_t fd, const char* s) {\n\
+         \x20 if (!s) return -1;\n\
+         \x20 size_t len = strlen(s);\n\
+         \x20 size_t off = 0;\n\
+         \x20 while (off < len) {\n\
+         \x20   int n = send((SOCKET)fd, s + off, (int)(len - off), 0);\n\
+         \x20   if (n == SOCKET_ERROR) return -1;\n\
+         \x20   if (n == 0) return -1;\n\
+         \x20   off += (size_t)n;\n\
+         \x20 }\n\
+         \x20 return (int64_t)len;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_recv(int64_t fd, int64_t max) {\n\
+         \x20 if (max < 0) return -1;\n\
+         \x20 size_t want = (size_t)max;\n\
+         \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
+         \x20 int n = recv((SOCKET)fd, (char*)intent_tcp_buf, (int)want, 0);\n\
+         \x20 return (n == SOCKET_ERROR) ? -1 : (int64_t)n;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_send_buf(int64_t fd, int64_t n) {\n\
+         \x20 if (n < 0 || (size_t)n > sizeof(intent_tcp_buf)) return -1;\n\
+         \x20 size_t off = 0;\n\
+         \x20 while (off < (size_t)n) {\n\
+         \x20   int m = send((SOCKET)fd, (const char*)intent_tcp_buf + off, (int)((size_t)n - off), 0);\n\
+         \x20   if (m == SOCKET_ERROR) return -1;\n\
+         \x20   if (m == 0) return -1;\n\
+         \x20   off += (size_t)m;\n\
+         \x20 }\n\
+         \x20 return (int64_t)n;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
+         \x20 return (closesocket((SOCKET)fd) == 0) ? 0 : -1;\n\
+         }\n\
+         #else\n\
+         /* Linux + macOS: shared POSIX socket implementation. The\n\
+          * call surface is identical on both — macOS gets the same\n\
+          * code as Linux. */\n\
          static INTENT_UNUSED int64_t intent_tcp_listen(int64_t port) {\n\
          \x20 int fd = socket(AF_INET, SOCK_STREAM, 0);\n\
          \x20 if (fd < 0) return -1;\n\
@@ -1358,21 +1661,32 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
          \x20 return (close((int)fd) == 0) ? 0 : -1;\n\
-         }\n\n",
+         }\n\
+         #endif\n\n",
     );
 }
 
-/// Arc 8 step 8e — runtime helper for `sleep_ms(ms)`. Wraps
-/// POSIX `nanosleep` (preferred, no INT-overflow at long
-/// delays) with a `usleep` fallback for older toolchains.
-/// Returns 0 on success; -1 on EINTR (caller can retry).
-/// Negative `ms` is a no-op (returns 0).
+/// Arc 8 step 8e + Phase 5/6 — runtime helper for
+/// `sleep_ms(ms)`. POSIX path (Linux + macOS) uses `nanosleep`.
+/// Windows path uses `Sleep(ms)` from `<windows.h>` — already
+/// included via the epoll helpers when those emit, but we also
+/// re-include here for the case where only `sleep_ms` is used
+/// without any epoll/TCP helpers. Returns 0 on success; -1 on
+/// EINTR (caller can retry on POSIX). Negative `ms` is a no-op.
 fn emit_intent_sleep_ms_helper_c(out: &mut String, body: &str) {
     if !body.contains("intent_sleep_ms") {
         return;
     }
     out.push_str(
-        "#include <time.h>\n\
+        "#if defined(_WIN32)\n\
+         #include <windows.h>\n\
+         static INTENT_UNUSED int64_t intent_sleep_ms(int64_t ms) {\n\
+         \x20 if (ms <= 0) return 0;\n\
+         \x20 Sleep((DWORD)ms);\n\
+         \x20 return 0;\n\
+         }\n\
+         #else\n\
+         #include <time.h>\n\
          #include <errno.h>\n\
          static INTENT_UNUSED int64_t intent_sleep_ms(int64_t ms) {\n\
          \x20 if (ms <= 0) return 0;\n\
@@ -1384,7 +1698,8 @@ fn emit_intent_sleep_ms_helper_c(out: &mut String, body: &str) {
          \x20   req = rem;\n\
          \x20 }\n\
          \x20 return 0;\n\
-         }\n\n",
+         }\n\
+         #endif\n\n",
     );
 }
 

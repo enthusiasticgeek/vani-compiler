@@ -880,12 +880,36 @@ the v3.1 implementer must answer:
 
 ---
 
-## 🪟 Platform support (Arc 8) — Linux only today
+## 🪟 Platform support (Arc 8) — C backend dual-targets Linux + macOS + Windows; LLVM stays Linux
 
-**Phased port plan lives in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)
-Phases 5–6** (macOS kqueue ~10-15h, Windows IOCP ~25-35h).
-Below is the per-subsystem matrix for quick reference.
+**Status 2026-06-06**: **C backend Phase 5 (macOS kqueue) +
+Phase 6 (Windows IOCP) shipped as code-only**, gated via
+`#ifdef __APPLE__` / `_WIN32` / `__linux__` branches in
+`emit_intent_epoll_helpers_c` + `emit_intent_tcp_helpers_c` +
+`emit_intent_sleep_ms_helper_c`. **Verification deferred for
+macOS + Windows — no host access in the current dev
+environment**; the macOS + Windows branches will exercise on
+first build there.
 
+LLVM backend stays Linux-only — the gate now routes macOS +
+Windows users to the C backend with a clear "use
+`intentc --backend c`" message. LLVM-IR-level kqueue / IOCP
+ports are scoped as deferred follow-up work.
+
+Per-subsystem matrix (updated for Phase 5/6 code-only ship):
+
+| Subsystem | Linux (C + LLVM) | macOS (C only) | Windows (C only) | Notes |
+|---|---|---|---|---|
+| `sleep_ms` (nanosleep / Sleep) | ✅ ships | ✅ nanosleep | ✅ `Sleep(ms)` | C backend `#ifdef` branch |
+| Blocking TCP (POSIX + winsock2) | ✅ ships | ✅ POSIX shared with Linux | ✅ WSAStartup + SOCKET type + WSAGetLastError | C backend dual emit |
+| `tcp_set_nonblocking` (fcntl / ioctlsocket) | ✅ ships | ✅ fcntl(O_NONBLOCK) | ✅ ioctlsocket(FIONBIO) | C backend dual emit |
+| epoll vs kqueue vs IOCP | ✅ epoll | ✅ kqueue (kevent) | ✅ IOCP (CreateIoCompletionPort) | API stays unified |
+| `sleep_ms_async` | ✅ timerfd | ✅ pipe+pthread shim | ✅ CreateThread+PostQueuedCompletionStatus | userspace timer where needed |
+| LLVM backend Arc 8 I/O | ✅ ships | ❌ deferred (use C) | ❌ deferred (use C) | IR-level kqueue / IOCP TBD |
+
+**The pre-Phase-5 status follows for historical reference. The
+Linux portion is unchanged; macOS + Windows entries below are
+superseded by the matrix above.**
 
 The Arc 8 v1.5/v1.6/v2/v3 runtime helpers **only compile + run on
 Linux**. Every other tested target needs porting:

@@ -981,6 +981,14 @@ async calls compose affine state).
 
 ### Phase 5 — macOS port (kqueue shim)
 
+> **Status 2026-06-06**: C backend ✅ SHIPPED (commit
+> _pending_, see below). LLVM backend deferred to a future
+> session (IR-level kqueue is a larger surface; macOS LLVM
+> users compile via the C backend in the meantime). All Linux
+> verification remains green; **macOS verification deferred —
+> no Darwin host access in the current dev environment**.
+> The macOS branch will exercise on first build there.
+
 **Goal.** Lift the Linux-only restriction for macOS users.
 The biggest delta is `epoll` → `kqueue`; everything else
 (sockets, fcntl, nanosleep, threading) already works on
@@ -1036,6 +1044,18 @@ with v3.1 phases.
 ---
 
 ### Phase 6 — Windows port (IOCP + winsock)
+
+> **Status 2026-06-06**: C backend scaffolding ✅ SHIPPED in
+> the same commit as Phase 5. The Windows branch routes
+> `intent_epoll_*` through `CreateIoCompletionPort` /
+> `GetQueuedCompletionStatus` / `PostQueuedCompletionStatus`,
+> with a basic `CreateThread + Sleep + PostQueuedCompletionStatus`
+> userspace timer for `sleep_ms_async`. **Verification deferred
+> — no Windows host access**; the Windows branch will need
+> empirical tuning when first exercised, especially the IOCP
+> ↔ readiness-shaped vāṇी epoll API impedance mismatch noted
+> in R8 below. LLVM-IR Windows port is deferred to a future
+> session same as the macOS LLVM port.
 
 **Goal.** Lift the Linux-only restriction for Windows users.
 This is the biggest single port because the IOCP programming
