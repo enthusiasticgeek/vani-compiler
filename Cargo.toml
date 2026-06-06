@@ -4,15 +4,30 @@ version = "0.1.0"
 edition = "2021"
 description = "VANI (वाणी) — Verbose Alternative Natural Interface: a verifiable language designed to read like speech, not punctuation."
 license = "MIT"
-# `intentc` is the primary CLI; `intent-lsp` is a sibling binary
-# invoked by editors. Naming the default keeps `cargo run` working
-# without a `--bin` flag for the common case.
-default-run = "intentc"
+# `vanic` is the primary CLI as of 2026-06-06 (renamed from
+# `intentc`, which stays as a legacy alias for one release cycle).
+# `intent-lsp` is a sibling binary invoked by editors. Naming the
+# default keeps `cargo run` working without a `--bin` flag for the
+# common case.
+default-run = "vanic"
 
 [lib]
 name = "vani"
 path = "src/lib.rs"
 
+# The primary CLI. Identical to `intentc` (both compile from the
+# same `src/main.rs`); the new name maps to the project's vāṇी /
+# VANI brand. Build cost: ~2x compile time + ~2x disk vs a single
+# binary; acceptable trade-off pending an eventual main.rs →
+# lib::cli::run() refactor that would let two thin bin wrappers
+# share one compilation. Tracked in TODO.md §*CLI rename*.
+[[bin]]
+name = "vanic"
+path = "src/main.rs"
+
+# Legacy alias — kept for back-compat one release cycle. Tests
+# reference this via CARGO_BIN_EXE_intentc; user scripts may have
+# `intentc` baked in. Both binaries are byte-identical.
 [[bin]]
 name = "intentc"
 path = "src/main.rs"

@@ -118,7 +118,7 @@ pub fn try_satisfiable(
     }
     out.push_str("(check-sat)\n");
 
-    if std::env::var("INTENTC_SMT_DEBUG").is_ok() {
+    if smt_debug_enabled() {
         eprintln!("--- SMT sat-query ---\n{}---", out);
     }
     let output = match run_z3(&out, &z3) {
@@ -134,14 +134,32 @@ pub fn try_satisfiable(
 }
 
 /// Returns `true` when the user has opted out of compile-time
-/// verification by setting `INTENTC_NO_VERIFY=1`. Verifier entry
-/// points consult this to skip the SMT round-trip and accept the
-/// claim. Runtime safety guards (bounds, divisor, shift,
-/// `requires`/`assert` lowering) are unaffected — the program still
-/// runs safely, but proof-only bugs won't surface at compile time.
-/// Do not set this in CI.
+/// verification by setting `VANIC_NO_VERIFY=1` (or the legacy
+/// `INTENTC_NO_VERIFY=1` alias). Verifier entry points consult
+/// this to skip the SMT round-trip and accept the claim. Runtime
+/// safety guards (bounds, divisor, shift, `requires`/`assert`
+/// lowering) are unaffected — the program still runs safely, but
+/// proof-only bugs won't surface at compile time. Do not set this
+/// in CI.
 pub fn verifier_disabled() -> bool {
-    std::env::var("INTENTC_NO_VERIFY").is_ok()
+    std::env::var("VANIC_NO_VERIFY").is_ok()
+        || std::env::var("INTENTC_NO_VERIFY").is_ok()
+}
+
+/// Returns `true` when SMT debug output is requested via either
+/// `VANIC_SMT_DEBUG=1` or the legacy `INTENTC_SMT_DEBUG=1`. Used
+/// by all `eprintln!("--- SMT …")` sites in the verifier and
+/// cache layers below.
+pub(crate) fn smt_debug_enabled() -> bool {
+    std::env::var("VANIC_SMT_DEBUG").is_ok()
+        || std::env::var("INTENTC_SMT_DEBUG").is_ok()
+}
+
+/// Returns `true` when SMT caching is disabled via either
+/// `VANIC_SMT_NO_CACHE=1` or the legacy `INTENTC_SMT_NO_CACHE=1`.
+pub(crate) fn smt_cache_disabled() -> bool {
+    std::env::var("VANIC_SMT_NO_CACHE").is_ok()
+        || std::env::var("INTENTC_SMT_NO_CACHE").is_ok()
 }
 
 /// Process-wide cache: SMT query string → raw z3 stdout.
@@ -159,7 +177,7 @@ static SMT_CACHE: std::sync::Mutex<Option<std::collections::HashMap<String, Stri
     std::sync::Mutex::new(None);
 
 fn cache_lookup(query: &str) -> Option<String> {
-    if std::env::var("INTENTC_SMT_NO_CACHE").is_ok() {
+    if smt_cache_disabled() {
         return None;
     }
     let guard = SMT_CACHE.lock().ok()?;
@@ -167,7 +185,7 @@ fn cache_lookup(query: &str) -> Option<String> {
 }
 
 fn cache_store(query: String, output: String) {
-    if std::env::var("INTENTC_SMT_NO_CACHE").is_ok() {
+    if smt_cache_disabled() {
         return;
     }
     let Ok(mut guard) = SMT_CACHE.lock() else {
@@ -194,12 +212,12 @@ pub fn try_prove(
     // Append `(get-model)` so z3 prints the assignment on `sat`. On `unsat`
     // it's silently ignored, so we never have to do a second query.
     let query = format!("{}{}", query, "(get-model)\n");
-    if std::env::var("INTENTC_SMT_DEBUG").is_ok() {
+    if smt_debug_enabled() {
         eprintln!("--- SMT query ---\n{}---", query);
     }
 
     if let Some(cached) = cache_lookup(&query) {
-        if std::env::var("INTENTC_SMT_DEBUG").is_ok() {
+        if smt_debug_enabled() {
             eprintln!("--- SMT output (cached) ---\n{}---", cached);
         }
         return parse_verdict(&cached, vars);
@@ -207,7 +225,7 @@ pub fn try_prove(
 
     match run_z3(&query, &z3) {
         Ok(output) => {
-            if std::env::var("INTENTC_SMT_DEBUG").is_ok() {
+            if smt_debug_enabled() {
                 eprintln!("--- SMT output ---\n{}---", output);
             }
             cache_store(query, output.clone());

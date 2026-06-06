@@ -731,10 +731,12 @@ use std::process::{Command, ExitCode};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const HELP: &str = "\
-intentc — vāṇī language compiler driver
+vanic — vāṇी language compiler driver
+                  (legacy alias: `intentc`; identical binary)
 
 USAGE:
-    intentc <COMMAND> [ARGS]
+    vanic <COMMAND> [ARGS]
+        # or: intentc <COMMAND> [ARGS]  (legacy)
 
 COMMANDS:
     check <path>... [--json] [--no-verify] [--smt-debug]
@@ -908,7 +910,13 @@ fn run() -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         "-V" | "--version" => {
-            println!("intentc {}", env!("CARGO_PKG_VERSION"));
+            // Use argv[0] to report whichever name the user invoked
+            // (`vanic` or the legacy `intentc`).
+            let bin = std::path::Path::new(&args[0])
+                .file_name()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "vanic".to_string());
+            println!("{} {}", bin, env!("CARGO_PKG_VERSION"));
             Ok(ExitCode::SUCCESS)
         }
         "check" => {
@@ -925,19 +933,20 @@ fn run() -> Result<ExitCode, String> {
                 match arg.as_str() {
                     "--json" => json = true,
                     "--no-verify" => {
-                        // Same effect as INTENTC_NO_VERIFY=1 — sets
-                        // the env var for the remainder of the
-                        // process so the checker's gates fire.
-                        std::env::set_var("INTENTC_NO_VERIFY", "1");
+                        // Same effect as VANIC_NO_VERIFY=1 (or the
+                        // legacy INTENTC_NO_VERIFY=1) — sets the env
+                        // var for the remainder of the process so
+                        // the checker's gates fire.
+                        std::env::set_var("VANIC_NO_VERIFY", "1");
                     }
                     "--smt-debug" => {
-                        // Surface the existing INTENTC_SMT_DEBUG=1
-                        // toggle as a CLI flag so users debugging
-                        // a `prove` failure don't have to
-                        // rediscover the env var. The verifier
-                        // dumps each SMT query + z3 response to
-                        // stderr.
-                        std::env::set_var("INTENTC_SMT_DEBUG", "1");
+                        // Surface the existing VANIC_SMT_DEBUG=1
+                        // (legacy: INTENTC_SMT_DEBUG=1) toggle as a
+                        // CLI flag so users debugging a `prove`
+                        // failure don't have to rediscover the env
+                        // var. The verifier dumps each SMT query +
+                        // z3 response to stderr.
+                        std::env::set_var("VANIC_SMT_DEBUG", "1");
                     }
                     other if other.starts_with('-') => {
                         return Err(format!("unexpected argument '{}'", other));
@@ -1686,7 +1695,7 @@ fn run() -> Result<ExitCode, String> {
             for arg in args.iter().skip(2) {
                 match arg.as_str() {
                     "--smt-debug" => {
-                        std::env::set_var("INTENTC_SMT_DEBUG", "1");
+                        std::env::set_var("VANIC_SMT_DEBUG", "1");
                     }
                     "--json" => json = true,
                     other if other.starts_with('-') => {
