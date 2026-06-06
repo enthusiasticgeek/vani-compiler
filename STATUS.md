@@ -166,6 +166,31 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
+- **v3.1 Phase 4a-broad — `__poll_X` as suspend point in outer**
+  (commit pending). Builds on 4a-narrow's auto-registration.
+  Extends the segment collector + `body_uses_io_async` +
+  `expr_contains_io_async` to recognize ANY `__poll_<inner>`
+  call as a suspend point alongside the io_*_async family.
+  User-facing: `let n: i64 = __poll_inner(mut ref sub);` is
+  now the canonical `await sub` idiom — outer's state machine
+  yields -2 while inner is Pending, resumes with inner's
+  Ready value on the next poll.
+  - Three call sites updated: collector's Stmt::Let case, the
+    body-level `body_uses_io_async`, and the expression-level
+    `expr_contains_io_async`. Any name starting with
+    `__poll_` triggers the suspend pattern (alongside the io_*
+    family). Canonicalization passes the name through
+    unchanged (no rewrite to a *_nb variant).
+  - `examples/echo_p4b_await_sub.vani` — outer awaits inner's
+    bytes via `__poll_inner` and returns result + 1.
+    Byte-identical 201 on both backends (recv "ab" 2 bytes,
+    inner returns 200, outer returns 201).
+  - 2 new lib tests (suspend-point recognition + body-only-
+    poll triggers v3.1 transform).
+  - Caveat: works cleanly for inner async fns with i64 returns
+    (legacy ABI). For non-i64 returns (Phase 3-returns ABI),
+    the user reads `sub.__result` after the poll suspend.
+
 - **v3.1 Phase 4a-narrow — nested async task locals** (commit
   `3373e56`). First slice of Phase 4 (generics + nested async +
   multi-task). Auto-registers each synthesized Task__X struct

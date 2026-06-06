@@ -21818,6 +21818,66 @@ fn main() -> i64 {
         assert!(ll.contains("Task__inner") && ll.contains("Task__outer"));
     }
 
+    /// Arc 8 v3.1 Phase 4a-broad — `__poll_X(mut ref sub)`
+    /// recognized as a suspend point. The outer's state machine
+    /// emits the Seg::Suspend pattern (Pending yields outer;
+    /// Error propagates; otherwise stores value + advances state).
+    /// User-facing pattern: `let n: i64 = __poll_inner(mut ref
+    /// sub);` is the equivalent of `await sub` in other languages.
+    #[test]
+    fn v31_phase4b_await_sub_as_suspend_point() {
+        let source = r#"
+            async fn inner(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n * 100;
+            }
+
+            async fn outer(fd: i64) -> i64 {
+              let sub: Task__inner = inner(fd);
+              let result: i64 = __poll_inner(mut ref sub);
+              return result + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 4b must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 4b must compile on LLVM");
+        // The outer's poll fn should include the Pending-yield
+        // pattern around the __poll_inner call.
+        assert!(
+            c.contains("__poll_inner") && c.contains("Task__outer"),
+            "C output should include both __poll_inner call site + outer task struct"
+        );
+        assert!(ll.contains("Task__outer"));
+    }
+
+    /// Arc 8 v3.1 Phase 4a-broad — an async fn whose body has
+    /// ONLY a __poll_X call (no other suspends) still triggers
+    /// the v3.1 transform. body_uses_io_async recognizes the
+    /// __poll_ prefix.
+    #[test]
+    fn v31_phase4b_async_with_only_poll_call_still_v31() {
+        let source = r#"
+            async fn inner(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+
+            async fn outer(fd: i64) -> i64 {
+              let sub: Task__inner = inner(fd);
+              let result: i64 = __poll_inner(mut ref sub);
+              return result;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 4b must compile on C");
+        // Outer should be transformed into a Task__outer + poll
+        // fn (NOT a Future__i64). Check the task struct exists.
+        assert!(
+            c.contains("Task__outer") && c.contains("__poll_outer"),
+            "outer should be v3.1-transformed when body only has __poll_X (no io_*_async)"
+        );
+    }
+
     /// Arc 8 v3.1 Phase 4a-narrow — without auto-registration the
     /// Task__X type wouldn't pass the v3.1 locals gate. Verify
     /// the gate diagnostic mentions registered Struct.

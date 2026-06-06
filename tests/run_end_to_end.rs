@@ -850,6 +850,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_p24_try_keyword.vani",
         "echo_p3p_nonint_params.vani",
         "echo_p4a_nested_async.vani",
+        "echo_p4b_await_sub.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",

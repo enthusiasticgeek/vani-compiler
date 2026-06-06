@@ -4784,7 +4784,11 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
     fn expr_uses(e: &Expr) -> bool {
         match &e.kind {
             ExprKind::Call { name, args, .. } => {
-                if matches!(
+                // Phase 4a-broad — `__poll_<inner>` calls trigger
+                // the v3.1 transform on their callers too, so an
+                // async fn that only awaits sub-tasks (no
+                // io_*_async itself) still gets state-machined.
+                if name.starts_with("__poll_") || matches!(
                     name.as_str(),
                     "io_recv_async" | "io_send_async" | "io_accept_async"
                 ) {
@@ -4854,7 +4858,11 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
 fn expr_contains_io_async(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Call { name, args, .. } => {
-            if matches!(
+            // Phase 4a-broad — recognize `__poll_<inner>` calls
+            // alongside the io_*_async family so the v3.1
+            // transform fires when an async fn body only contains
+            // sub-task polls (no other suspends).
+            if name.starts_with("__poll_") || matches!(
                 name.as_str(),
                 "io_recv_async" | "io_send_async" | "io_accept_async"
             ) {
@@ -6959,7 +6967,18 @@ pub(crate) fn try_v31_transform(
                 Stmt::Let { name, annotation, expr, span, .. } => {
                     let is_discard = name == "_";
                     if let ExprKind::Call { name: cname, args, .. } = &expr.kind {
-                        if matches!(
+                        // Phase 4a-broad: any `__poll_<inner>` call
+                        // is treated as a suspend point alongside
+                        // the io_*_async family. The user's
+                        // pattern
+                        //   let n: i64 = __poll_inner(mut ref sub);
+                        // becomes a true suspend in the outer's
+                        // state machine: -2 yields outer, < 0
+                        // propagates error, otherwise stores the
+                        // value + bumps state. Matches the user-
+                        // facing `await sub` semantics.
+                        let is_poll_call = cname.starts_with("__poll_");
+                        if is_poll_call || matches!(
                             cname.as_str(),
                             "io_recv_async" | "io_send_async" | "io_accept_async"
                         ) {

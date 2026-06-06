@@ -1,0 +1,94 @@
+// Arc 8 v3.1 Phase 4a-broad — `__poll_X(mut ref sub)` as a
+// first-class suspend point in the outer's state machine.
+//
+// Phase 4a-narrow shipped the infrastructure: `let sub:
+// Task__inner = inner(args);` is a valid local. The user could
+// then call `__poll_inner(mut ref sub)` but it was treated as a
+// regular non-suspending call — outer would run it once per
+// state entry without yielding while inner was Pending.
+//
+// Phase 4a-broad lifts that limitation: the segment collector +
+// `body_uses_io_async` + `expr_contains_io_async` now recognize
+// ANY `__poll_<inner>` call as a suspend point alongside the
+// io_*_async family. The state machine emits the same
+// Seg::Suspend pattern:
+//
+//   r = __poll_inner(mut ref __t.sub);
+//   if r == -2: return -2          // outer yields; driver retries
+//   if r < 0: return -1            // error propagation
+//   __t.<local> = r;
+//   __t.state_tag = bump_to;
+//
+// User-facing: writing `let n: i64 = __poll_inner(mut ref sub);`
+// inside an async fn body is now the equivalent of `let n = await
+// sub;` in other languages. The outer naturally yields while inner
+// is Pending and resumes with the value once Ready.
+//
+// Caveat: for inner async fns that use the Phase 3-returns ABI
+// (non-i64 return type), the poll fn returns status (0/-2/-1)
+// and the value lives in `sub.__result`. The user reads
+// `sub.__result` after a successful poll. Phase 4a-broad
+// handles the i64-return case cleanly; non-i64 returns work
+// but require manual `sub.__result` reads.
+//
+// build & run:
+//   intentc run examples/echo_p4b_await_sub.vani                # LLVM
+//   intentc run examples/echo_p4b_await_sub.vani --backend=c    # C
+
+intent "Phase 4a-broad — __poll_X as a suspend point (await sub semantics)";
+
+async fn inner(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n * 100;
+}
+
+async fn outer(fd: i64) -> i64 {
+  let sub: Task__inner = inner(fd);
+  // Phase 4a-broad: this is treated as a SUSPEND POINT. The
+  // outer state machine yields -2 while inner is Pending and
+  // resumes with inner's Ready value (`result`) once available.
+  let result: i64 = __poll_inner(mut ref sub);
+  return result + 1;
+}
+
+fn drive(ep: i64, t: mut ref Task__outer) -> i64 {
+  while true {
+    let r: i64 = __poll_outer(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // Expected:
+  //   peer sends "ab" = 2 bytes
+  //   inner: n = recv(64) = 2, returns n * 100 = 200
+  //   outer: result = await sub = 200, returns 200 + 1 = 201
+  let t: Task__outer = outer(cfd);
+  let r: i64 = drive(ep, mut ref t);
+  print "outer (await sub) result:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

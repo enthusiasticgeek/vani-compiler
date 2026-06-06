@@ -97,6 +97,20 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 4a-broad ✅ COMPLETE 2026-06-04** (commit pending).
+> Builds on 4a-narrow. Extends the v3.1 suspend-point recognition
+> from `io_*_async` to ALSO match any `__poll_<inner>` call.
+> Three call sites (segment collector + body_uses_io_async +
+> expr_contains_io_async) now use `name.starts_with("__poll_")`.
+> The user writes `let n: i64 = __poll_inner(mut ref sub);`
+> inside an async fn body — the outer state machine emits the
+> standard Seg::Suspend pattern: -2 yields outer, <0 propagates
+> error, otherwise stores value + advances state. Effectively
+> the `await sub` idiom for inner fns with i64 returns; non-i64
+> returns read `sub.__result` after the suspend.
+> examples/echo_p4b_await_sub.vani parity-green (outer awaits
+> inner's recv, returns 201 = 200 + 1). 2 new lib tests.
+>
 > **Phase 4a-narrow ✅ COMPLETE 2026-06-04** (commit `3373e56`).
 > First slice of Phase 4. Auto-registers synthesized Task__X
 > structs in V31_STRUCT_REGISTRY so other async fns can declare
@@ -204,16 +218,15 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 4a-broad: `await sub` desugar — integrate sub-task
->   polling into the outer's state machine (~6-10h)
 > - 4b: multi-task scheduling — multiple concurrent sub-
 >   tasks from one async fn (~10-15h)
 > - 4c: generics in async fn (~10-15h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
 >
-> v3.1 control-flow + types + Result error-handling + nested
-> task construction arc is now feature-complete.
+> v3.1 single-task arc is now feature-complete: control-flow
+> + types + Result error-handling + nested task construction +
+> `await sub` suspend integration.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
