@@ -10,6 +10,13 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+> **📋 NEXT SESSION HANDOFF**: [TODO.md § *NEXT SESSION HANDOFF*](TODO.md#-next-session-handoff--dependency-ordered-plan-2026-06-04)
+> has the dependency-ordered remaining work split into three tiers
+> (Phase 4c-broad — testable on Linux; Phase 5 macOS port — code
+> on Linux but verification on macOS; Phase 6 Windows IOCP). Pick
+> Tier 1 first — it's the only tier where verification doesn't need
+> platform access.
+
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b +

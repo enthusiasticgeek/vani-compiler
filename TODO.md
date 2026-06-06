@@ -3,6 +3,138 @@
 Snapshot from 2026-05-18 after min/max reductions + parallelism docs
 refresh landed. Order is rough priority (size + payoff), not strict.
 
+---
+
+## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (2026-06-04)
+
+The v3.1 single+multi-task arc is feature-complete (28 acceptance
+examples; 1883 lib + 72 parity green; clean warning-free build).
+Remaining work splits into **three tiers**, ordered by tractability
+from a fresh Linux session:
+
+### Tier 1 — Phase 4c-broad (testable on Linux; tackle FIRST)
+
+Full generic async fn support. Validator gate lift was scaffolded
+in commit `bd67dce` but reverted to Phase 4c-narrow clean rejection
+because the synthesized declarations don't integrate with vāṇī's
+monomorphization pipeline. The `_fn_type_params: &[String]`
+parameter on `try_v31_transform` is kept as scaffolding.
+
+1. **4c-broad.b — StructLit type-arg threading**
+   The synthesized ctor body emits `Task__name { state_tag: 0,
+   ... }` (bare name). vāṇī's mono resolves this to
+   `Task__name__Param__T__` instead of inferring T from field
+   initializers. Need to emit explicit type-args (or fix mono's
+   inference path) so the ctor's StructLit resolves to
+   `Task__name<T>` and mono specializes correctly.
+
+2. **4c-broad.c — User call-site mono** *(depends on 4c-broad.b)*
+   User code like `let _ = identity(server, 42)` fails the mono
+   pre-pass with "unknown struct type". Should fall out naturally
+   once b is fixed.
+
+3. **4c-broad.a — `__poll_<name>` concrete instantiation**
+   *(depends on b+c)* Mono pre-pass flags "generic fn declared but
+   never called with concrete types" even when the user IS calling
+   it via `__poll_inner(mut ref sub)`. Likely resolved by b+c since
+   the typed sub-task would force `__poll_inner` to mono.
+
+4. **4c-broad.full — Verification** *(depends on a+b+c)*
+   End-to-end smoke test of a generic async fn called from a
+   concrete site, then acceptance example + lib test + parity
+   sweep + commit + ledger.
+
+**Estimated effort:** ~15-20h focused, requires mono-internals
+familiarity. Documented in ARC8_V3_PLAN.md's Phase 4c-broad
+attempt notes.
+
+### Tier 2 — Phase 5 macOS port (code on Linux; verification needs macOS)
+
+Each sub-item depends on the previous within the tier (gates →
+errno → kqueue → timer). Parity sweep (5e) is the hard blocker.
+
+5. **5a — `host_is_darwin()` helper + platform gate**
+   Mirror `host_is_linux()` / `host_uses_win32_threading()`.
+   Relax the Arc 8 helper-emit gate so macOS reaches codegen.
+
+6. **5b — errno thunk** *(depends on 5a)*
+   Per-host emit: `__error()` on Darwin vs `__errno_location()`
+   on Linux. Single emit-site touched per helper.
+
+7. **5c — kqueue shim** *(depends on 5a/b)*
+   `intent_epoll_new` → `kqueue()`; `_add_read` → `kevent` with
+   `EV_ADD | EV_ENABLE`; `_wait_one` → `kevent` blocking;
+   `_close` → `close()`. User-facing API stays unchanged.
+
+8. **5d — `EVFILT_TIMER` for sleep_ms_async** *(depends on 5c)*
+   Replace timerfd with kqueue's `EVFILT_TIMER`.
+
+9. **5e — macOS parity sweep** *(BLOCKER: requires macOS testing)*
+   Verify the 5 Arc 8 examples (`async_io`, `tcp_echo`,
+   `tcp_multi_echo`, `tcp_echo_epoll`, `tcp_echo_state_machine`)
+   produce byte-identical output across LLVM + C on macOS.
+
+**Estimated effort:** ~10-15h. Code writable on Linux; final
+verification needs macOS access.
+
+### Tier 3 — Phase 6 Windows IOCP port (heaviest; needs Windows)
+
+IOCP's completion-notification model differs fundamentally from
+epoll's readiness model. The cross-platform `epoll_*` family stays
+Linux/macOS-only; Windows gets a NEW `iocp_*` family.
+
+10. **6a — WSAStartup / WSACleanup boilerplate**
+    Wrap every TCP-using program in a startup call. Single runtime
+    helper invoked once at `main` entry.
+
+11. **6b — Win32 SOCKET type** *(depends on 6a)*
+    Windows `SOCKET` = `UINT_PTR` (64-bit on x64), not `int`.
+    Adjust internal types while keeping i64 user surface.
+
+12. **6c — `ioctlsocket(FIONBIO)` for non-blocking** *(depends on 6a/b)*
+    Replaces `fcntl(F_SETFL, O_NONBLOCK)` on Windows.
+
+13. **6d — Win32 errno** *(depends on 6a/b)*
+    `_errno()` for CRT errors; `WSAGetLastError()` for socket
+    errors. Pick the right one per call site.
+
+14. **6e — IOCP family builtins** *(depends on 6a-d)*
+    NEW family: `iocp_new` / `iocp_associate` / `iocp_wait_one` /
+    `iocp_post` / `iocp_close`. Document as Win32-native API
+    (cross-platform `epoll_*` stays Linux/macOS-only).
+
+15. **6f — `Sleep(ms)` for `sleep_ms`**
+    Easy 1:1 swap from `nanosleep`.
+
+16. **6g — Conditional emit** *(depends on all 6a-f)*
+    Both backends select POSIX vs IOCP paths based on
+    `host_uses_win32_threading()`.
+
+17. **6h — Windows parity sweep** *(BLOCKER: requires Windows testing)*
+    Verify Arc 8 examples produce byte-identical output across
+    LLVM + C on Windows.
+
+**Estimated effort:** ~25-35h. Most involved port; final
+verification needs Windows access.
+
+### Backlog (independent of v3.1 / platform work)
+
+18. **Vec<Struct>-in-struct-field C backend codegen** — pre-existing
+    bug. Affects any user code with `struct Holder { items:
+    Vec<Point> }`, not just async. The Vec bundle references
+    `Struct_Point*` + `sizeof(Struct_Point)`, both needing the
+    struct typedef. Vec bundles currently emit BEFORE struct
+    typedefs. Fix requires a topological sort across struct
+    typedefs + Vec bundles. Documented inline in
+    `v31_local_type_allowed`. LLVM backend handles this correctly;
+    only C breaks. Workaround: `Vec<i64>` indices into a parallel
+    fixed-size array. Attempted but reverted in this session
+    (commit `9295498` — design notes).
+
+---
+
+
+
 **Top-of-queue planning docs (2026-06-04):**
 - [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) — phased execution plan
   for Arc 8 v3.1 compiler-driven sugar (5 phases) + Arc 8
