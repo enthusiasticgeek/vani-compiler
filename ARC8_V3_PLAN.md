@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 4a-broad ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 4a-broad ✅ COMPLETE 2026-06-04** (commit `3967206`).
 > Builds on 4a-narrow. Extends the v3.1 suspend-point recognition
 > from `io_*_async` to ALSO match any `__poll_<inner>` call.
 > Three call sites (segment collector + body_uses_io_async +

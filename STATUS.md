@@ -167,7 +167,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 4a-broad — `__poll_X` as suspend point in outer**
-  (commit pending). Builds on 4a-narrow's auto-registration.
+  (commit `3967206`). Builds on 4a-narrow's auto-registration.
   Extends the segment collector + `body_uses_io_async` +
   `expr_contains_io_async` to recognize ANY `__poll_<inner>`
   call as a suspend point alongside the io_*_async family.
