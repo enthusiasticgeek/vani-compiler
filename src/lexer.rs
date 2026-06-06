@@ -359,6 +359,13 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         // loanword in Hindi/Marathi. Layer 5 of the embedded
         // plan.
         "क्षेत्र" => TokenKind::RegionKw,  // kṣetra (Sanskrit/Hindi/Marathi: "region/area")
+        // SOV-S7 (2026-06-06): close the four English-only gaps.
+        // All four are Sanskrit-root tatsama forms — work as
+        // loanwords in Hindi + Marathi too.
+        "उद्देश्य" => TokenKind::Intent,    // uddeśya (Sanskrit/Hindi/Marathi: "goal/intent")
+        "प्रकार" => TokenKind::Type,        // prakāra (Sanskrit/Hindi/Marathi: "type/kind")
+        "बाह्य" => TokenKind::Extern,       // bāhya (Sanskrit/Hindi/Marathi: "external")
+        "अपरिवर्तनीय" => TokenKind::Invariant, // aparivartanīya (Sanskrit/Hindi/Marathi: "unchanging")
         _ => return None,
     };
     Some(kind)
