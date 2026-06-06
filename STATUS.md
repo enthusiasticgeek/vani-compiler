@@ -167,7 +167,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 3-params — non-i64 async fn parameter types**
-  (commit pending). Mirrors Phase 3a-f (locals) + Phase
+  (commit `9002d29`). Mirrors Phase 3a-f (locals) + Phase
   3-returns (returns). The validator's param-type check
   routes through `v31_local_type_allowed`; task struct field
   types now use `p.ty.clone()` instead of `Type::I64`. Each
