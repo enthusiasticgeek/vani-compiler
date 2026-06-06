@@ -5462,18 +5462,10 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         // can't infer its element type in StructLit field
         // position).
         //
-        // Known C-backend limitation: Vec<Struct(name)> compiles
-        // on LLVM but fails on C with "Struct_<name> undeclared"
-        // because the Vec bundle (which references `Struct_X*`
-        // AND `sizeof(Struct_X)`) emits BEFORE struct typedefs.
-        // Fixing requires a topological sort across structs +
-        // Vec<Struct> bundles (Vec bundle needs the struct's full
-        // typedef AFTER pre-emitting forward decls, but the user
-        // struct that CONTAINS the Vec<Struct> field needs the
-        // Vec bundle's typedef visible). Pre-existing bug —
-        // affects any user code with `struct S { v: Vec<P> }`.
-        // Workaround: use parallel Vec<i64> indices or store
-        // structs by value in fixed-size arrays.
+        // C backend Vec<Struct(name)> case fixed 2026-06-06
+        // (commit 4feb5fc) via unified topological emit across
+        // struct typedefs + Vec bundles. No backend-side
+        // workaround needed.
         Type::Vec(inner) => v31_local_type_allowed(inner),
         // Phase 3f — [T; N]: element type must be v31-allowed
         // (default-init emits N copies of default(T) as an

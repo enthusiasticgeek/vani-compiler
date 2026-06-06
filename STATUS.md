@@ -180,6 +180,24 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
+- **C backend fix — unified topological emit for Vec<UserStruct>
+  in struct fields** (commit `4feb5fc`). Pre-existing bug:
+  `struct Holder { items: Vec<Point> }` failed on C because
+  intent_vec_Struct_Point's typedef (referencing Struct_Point* +
+  sizeof(Struct_Point)) emitted BEFORE Struct_Point's. Closure
+  #164's struct-only topo missed this because it didn't track
+  Vec-bundle deps. Fix: two-phase emit — Vec<primitive> bundles
+  still go early (enums-with-Vec-payload depend on them), but
+  Vec<UserStruct> bundles defer into a unified iterate-to-fixpoint
+  loop alongside struct typedefs. Each node emits only when all
+  its dependencies are satisfied. Order becomes Vec<primitive> →
+  struct deps → Vec<UserStruct> → structs that use Vec<UserStruct>.
+  - `examples/vec_struct_field.vani` — 3-element Vec<Point> in a
+    Holder struct. Byte-identical across both backends.
+  - 1 new lib test pinning the struct + bundle co-presence in C.
+  - LLVM unchanged (forward-declared named types handle this).
+  - Also unblocks v3.1 task structs with `Vec<UserStruct>` fields.
+
 - **LLVM backend fix — match-arm phi tracks div_ok / shift_ok
   blocks** (commit `314fe2e`). Pre-existing bug surfaced during
   Phase 3-params smoke testing: an `enum-match` whose arm

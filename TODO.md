@@ -144,19 +144,13 @@ This tier is single-task: run `cargo test` + parity sweep + visual
 check of C/LLVM emit on a Linux test program. Document any
 regressions found during platform-port work that need cleanup.
 
-### Backlog → BOOTSTRAP for the fresh session (TACKLE FIRST per user direction 2026-06-06)
+### Backlog → ✅ BOOTSTRAP COMPLETE (commit `4feb5fc`, 2026-06-06)
 
-18. **Vec<Struct>-in-struct-field C backend codegen** — pre-existing
-    bug. Affects any user code with `struct Holder { items:
-    Vec<Point> }`, not just async. The Vec bundle references
-    `Struct_Point*` + `sizeof(Struct_Point)`, both needing the
-    struct typedef. Vec bundles currently emit BEFORE struct
-    typedefs. Fix requires a topological sort across struct
-    typedefs + Vec bundles. Documented inline in
-    `v31_local_type_allowed`. LLVM backend handles this correctly;
-    only C breaks. Workaround: `Vec<i64>` indices into a parallel
-    fixed-size array. Attempted but reverted in this session
-    (commit `9295498` — design notes).
+18. **Vec<Struct>-in-struct-field C backend codegen** ✅ FIXED.
+    Unified topological emit across struct typedefs + Vec bundles.
+    Two-phase emit: Vec<primitive> early (for enums-with-Vec-payload
+    deps), Vec<UserStruct> deferred into iterate-to-fixpoint loop
+    alongside struct typedefs. 1884 lib + 73 parity examples green.
 
 ---
 
