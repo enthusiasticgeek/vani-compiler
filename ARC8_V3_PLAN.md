@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 4a-narrow ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 4a-narrow ✅ COMPLETE 2026-06-04** (commit `3373e56`).
 > First slice of Phase 4. Auto-registers synthesized Task__X
 > structs in V31_STRUCT_REGISTRY so other async fns can declare
 > sub-task locals (`let sub: Task__inner = inner(args);`).

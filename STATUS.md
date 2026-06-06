@@ -167,7 +167,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 4a-narrow — nested async task locals** (commit
-  pending). First slice of Phase 4 (generics + nested async +
+  `3373e56`). First slice of Phase 4 (generics + nested async +
   multi-task). Auto-registers each synthesized Task__X struct
   in `V31_STRUCT_REGISTRY` so OTHER async fns can declare a
   local of that type. Type-allowed gate already accepts
