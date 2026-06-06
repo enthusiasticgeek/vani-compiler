@@ -1,0 +1,54 @@
+// ARC 4.1 — HashMap<OwnedStr, V>: string keys with FNV-1a byte
+// hash and strcmp equality. The map clones each key internally
+// (matches Rust's `m.insert(key.clone(), v)` ergonomics); the
+// caller retains ownership of the OwnedStr passed in.
+//
+// build & run:
+//   vanic run examples/language/english/hashmap_str.vani                   # LLVM backend
+//   vanic run examples/language/english/hashmap_str.vani --backend=c       # C backend
+
+intent "HashMap<OwnedStr, V> — string-keyed open-addressing map (ARC 4.1)";
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
+
+fn main() -> i64 {
+  let m: HashMap<OwnedStr, i64> = hashmap_new();
+
+  let ka: OwnedStr = i64_to_str(1);
+  let kb: OwnedStr = i64_to_str(2);
+  let p1: Option<i64> = hashmap_insert(mut ref m, ka, 100);
+  let p2: Option<i64> = hashmap_insert(mut ref m, kb, 200);
+  let ka2: OwnedStr = i64_to_str(1);
+  let p3: Option<i64> = hashmap_insert(mut ref m, ka2, 999);
+  print "insert k=\"1\" prev (None):", unwrap_or(p1, 0 - 1);
+  print "insert k=\"2\" prev (None):", unwrap_or(p2, 0 - 1);
+  print "overwrite k=\"1\" prev (100):", unwrap_or(p3, 0 - 1);
+
+  let lk1: OwnedStr = i64_to_str(1);
+  print "get k=\"1\" (999):", unwrap_or(hashmap_get(ref m, lk1), 0 - 1);
+  let lk2: OwnedStr = i64_to_str(2);
+  print "get k=\"2\" (200):", unwrap_or(hashmap_get(ref m, lk2), 0 - 1);
+  let lk_miss: OwnedStr = i64_to_str(42);
+  print "get k=\"42\" (none):", unwrap_or(hashmap_get(ref m, lk_miss), 0 - 1);
+
+  let ck1: OwnedStr = i64_to_str(1);
+  print "contains \"1\":", hashmap_contains_key(ref m, ck1);
+  let ck_miss: OwnedStr = i64_to_str(42);
+  print "contains \"42\":", hashmap_contains_key(ref m, ck_miss);
+
+  let rk1: OwnedStr = i64_to_str(1);
+  let r1: Option<i64> = hashmap_remove(mut ref m, rk1);
+  print "remove k=\"1\" prev (999):", unwrap_or(r1, 0 - 1);
+  let ck1b: OwnedStr = i64_to_str(1);
+  print "contains \"1\" after remove:", hashmap_contains_key(ref m, ck1b);
+
+  let n: i64 = hashmap_len(ref m);
+  print "len after remove (1):", n;
+
+  return 0;
+}

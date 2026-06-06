@@ -1,0 +1,79 @@
+// Arc 8 v3.1 Phase 2.1a — suspend in branch.
+//
+// Phase 2.1a lifts Phase 2 narrow's "no suspend in branches"
+// restriction: an `if` / `else` inside an `async fn` body
+// can now contain `io_*_async` calls in either or both
+// branches, provided both branches end with `return`.
+//
+// The compiler synthesizes one state per suspend per branch +
+// a decision state at the if. The state-machine cascade
+// pattern relies on monotonic state advances: the decision
+// state allocates branch starting states AFTER itself, then
+// each branch's suspends allocate further states.
+//
+// build & run:
+//   vanic run examples/language/english/tcp_echo_async_branched.vani                # LLVM
+//   vanic run examples/language/english/tcp_echo_async_branched.vani --backend=c    # C
+
+intent "Phase 2.1a — async fn with suspend in conditional branch";
+
+// Phase 2.1a body: `if cond { suspend then return } else { return }`.
+// Compiler synthesizes:
+//   - Decision state evaluating mode > 0
+//   - Then-branch: state with tcp_recv_nb + state with tcp_send_buf + return state
+//   - Else-branch: return state
+async fn echo_if_positive(fd: i64, mode: i64) -> i64 {
+  if mode > 0 {
+    let n: i64 = io_recv_async(fd, 64);
+    let _ = io_send_async(fd, n);
+    return n;
+  } else {
+    return 0 - 99;
+  }
+}
+
+fn drive(ep: i64, t: mut ref Task__echo_if_positive) -> i64 {
+  while true {
+    let r: i64 = __poll_echo_if_positive(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task client {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "phase21a");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // Take the then-branch (mode = 1 > 0). The compiler routed
+  // the state machine through recv → send → return n.
+  let t: Task__echo_if_positive = echo_if_positive(cfd, 1);
+  let bytes: i64 = drive(ep, mut ref t);
+  print "then-branch echoed bytes:", bytes;
+
+  // Take the else-branch (mode = 0). No I/O happens — the
+  // state machine routes directly to the else-branch's return.
+  let t2: Task__echo_if_positive = echo_if_positive(cfd, 0);
+  let r2: i64 = drive(ep, mut ref t2);
+  print "else-branch return:", r2;
+
+  join client;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

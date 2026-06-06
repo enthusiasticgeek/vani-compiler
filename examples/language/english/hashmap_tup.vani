@@ -1,0 +1,44 @@
+// ARC 4.4 — HashMap<(i64, i64, …, i64), V>: tuple keys via
+// FNV-1a per-element hash_combine + pairwise field equality.
+// Elements are Copy (i64) so no drop walk needed.
+//
+// build & run:
+//   vanic run examples/language/english/hashmap_tup.vani                   # LLVM backend
+//   vanic run examples/language/english/hashmap_tup.vani --backend=c       # C backend
+
+intent "HashMap<(i64, i64), V> — tuple-keyed open-addressing map (ARC 4.4)";
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
+
+fn main() -> i64 {
+  let m: HashMap<(i64, i64), i64> = hashmap_new();
+
+  let p1: Option<i64> = hashmap_insert(mut ref m, (1, 2), 100);
+  let p2: Option<i64> = hashmap_insert(mut ref m, (3, 4), 200);
+  let p3: Option<i64> = hashmap_insert(mut ref m, (1, 2), 999);
+  print "insert (1,2) prev (None):", unwrap_or(p1, 0 - 1);
+  print "insert (3,4) prev (None):", unwrap_or(p2, 0 - 1);
+  print "overwrite (1,2) prev (100):", unwrap_or(p3, 0 - 1);
+
+  print "get (1,2) (999):", unwrap_or(hashmap_get(ref m, (1, 2)), 0 - 1);
+  print "get (3,4) (200):", unwrap_or(hashmap_get(ref m, (3, 4)), 0 - 1);
+  print "get (5,6) (none):", unwrap_or(hashmap_get(ref m, (5, 6)), 0 - 1);
+
+  // Distinct first element, same second — must hash to a
+  // different bucket than (1, 2).
+  print "contains (1,2):", hashmap_contains_key(ref m, (1, 2));
+  print "contains (2,2):", hashmap_contains_key(ref m, (2, 2));
+
+  let r1: Option<i64> = hashmap_remove(mut ref m, (1, 2));
+  print "remove (1,2) prev (999):", unwrap_or(r1, 0 - 1);
+  print "contains (1,2) after remove:", hashmap_contains_key(ref m, (1, 2));
+
+  print "len after remove (1):", hashmap_len(ref m);
+
+  return 0;
+}

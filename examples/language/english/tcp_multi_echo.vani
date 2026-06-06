@@ -1,0 +1,79 @@
+// Arc 8 step 8e proper — multi-client TCP echo server.
+//
+// Demonstrates that the v1.6 TCP builtin family + `task` +
+// `join` scale to real concurrent server workloads. Three
+// client tasks connect in parallel; the server accepts them
+// sequentially and echoes each one's payload back.
+//
+// Total echoed bytes = 3 ("aaa") + 4 ("bbbb") + 5 ("ccccc")
+// = 12 — both backends report this identically via the
+// cross-backend parity runner.
+//
+// **v1.6 limitation:** the server uses a sequential accept
+// loop (one task per client would need `task` inside `while`,
+// which is an Arc 8 v2 polish item). For typical web-server
+// workloads, the right v2 fix is single-threaded cooperative
+// scheduling via state-machine codegen + epoll — that lands
+// in the Arc 8 runtime arc. Today's pattern is plenty for
+// scripted tests + small services.
+//
+// build & run:
+//   vanic run examples/language/english/tcp_multi_echo.vani                # LLVM
+//   vanic run examples/language/english/tcp_multi_echo.vani --backend=c    # C
+
+intent "Multi-client TCP echo (3 concurrent clients) — Arc 8 step 8e v1.6";
+
+fn tcp_recv_then_echo_once(server: i64) -> i64 {
+  let cfd: i64 = tcp_accept(server);
+  if cfd < 0 { return 0; }
+  let n: i64 = tcp_recv(cfd, 64);
+  let _ = tcp_send_buf(cfd, n);
+  let _ = tcp_close(cfd);
+  return n;
+}
+
+fn main() -> i64 {
+  let server: i64 = tcp_listen(0);
+  if server < 0 {
+    print "tcp_listen failed";
+    return 1;
+  }
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  // Three client tasks running concurrently on real OS
+  // threads. The small sleep_ms() staggers reduce the chance
+  // of the kernel's accept-queue ordering varying across
+  // runs — the parity runner needs stable stdout.
+  task c1 {
+    let _ = sleep_ms(10);
+    let fd: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(fd, "aaa");
+    let _ = sleep_ms(30);
+    let _ = tcp_close(fd);
+  }
+  task c2 {
+    let _ = sleep_ms(15);
+    let fd: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(fd, "bbbb");
+    let _ = sleep_ms(30);
+    let _ = tcp_close(fd);
+  }
+  task c3 {
+    let _ = sleep_ms(20);
+    let fd: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(fd, "ccccc");
+    let _ = sleep_ms(30);
+    let _ = tcp_close(fd);
+  }
+
+  // Server accepts three clients sequentially and echoes each.
+  let n1: i64 = tcp_recv_then_echo_once(server);
+  let n2: i64 = tcp_recv_then_echo_once(server);
+  let n3: i64 = tcp_recv_then_echo_once(server);
+  print "echoed bytes:", n1 + n2 + n3;
+
+  join c1; join c2; join c3;
+  let _ = tcp_close(server);
+  return 0;
+}

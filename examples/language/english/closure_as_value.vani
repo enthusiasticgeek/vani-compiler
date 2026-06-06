@@ -1,0 +1,38 @@
+// Arc 5c — closure-as-value across fn boundaries.
+//
+// `Closure(args) -> R` is a fat-pointer struct `{env, call}`
+// where `env` is an opaque pointer to the captured environment
+// and `call` is a trampoline fn-pointer. Captured anonymous
+// fns materialize as Closure values; higher-order fns can
+// receive them by-value and call them indirectly.
+//
+// v1 restriction: env is stored in a per-closure global slot,
+// so a Closure cannot outlive the lift-pass instantiation
+// site. That's sufficient for "pass to higher-order fn" — the
+// common case — without requiring heap allocation.
+//
+// build & run:
+//   vanic run examples/language/english/closure_as_value.vani                # LLVM
+//   vanic run examples/language/english/closure_as_value.vani --backend=c    # C
+
+intent "Closure-as-value: captured anon-fns pass through fn boundaries (Arc 5c)";
+
+fn apply(f: Closure(i64) -> i64, x: i64) -> i64 {
+  return f(x);
+}
+
+fn main() -> i64 {
+  let n: i64 = 10;
+  let add_n = fn(y: i64) -> i64 { return n + y; };
+  let r: i64 = apply(add_n, 5);
+  print "result (15):", r;
+
+  // Different capture value, same closure shape — independent
+  // env slot, no cross-talk.
+  let m: i64 = 100;
+  let add_m = fn(y: i64) -> i64 { return m + y; };
+  let r2: i64 = apply(add_m, 3);
+  print "result2 (103):", r2;
+
+  return 0;
+}

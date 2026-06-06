@@ -1,0 +1,55 @@
+// build & run:
+//   vanic run examples/language/english/ffi.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/ffi.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/ffi.vani -o /tmp/ffi && /tmp/ffi   # native binary
+
+intent "FFI — calling C-ABI functions from vāṇी";
+
+// `extern "C" fn name(params) -> R;` declares a function whose
+// implementation lives in another translation unit (the C
+// standard library, a Rust staticlib, a C++ object file, …).
+// vāṇी emits a forward declaration (LLVM `declare`, C `extern`)
+// against the bare C-ABI symbol and lets the linker bind it at
+// build time. The checker accepts a body-less prototype; the
+// codegen path skips the "must return" rule.
+//
+// Effects: extern fns are conservatively treated as impure —
+// the SMT engine cannot reason across the FFI boundary, so any
+// `prove`/`assume` involving an extern call must rest on
+// caller-side invariants. Pure-fn bodies reject impure extern
+// calls.
+//
+// Pure opt-in: `pure extern "C" fn name(...) -> R;` declares
+// the foreign function as side-effect-free and deterministic,
+// allowing it to be called from `pure fn` bodies. The caller
+// asserts purity — vāṇी can't verify across the FFI boundary.
+//
+// ABI scope (v1): scalars (i8..i64, u8..u64, f32/f64, bool),
+// `Str` (NUL-terminated `i8*`), and any `ref T` / `mut ref T`.
+// Aggregate by value (struct / tuple / array / enum) is
+// rejected with a `ref T` migration hint to prevent silent
+// ABI corruption.
+//
+// Linking external code: `vanic build … --link-with helper.c`
+// hands extra objects/sources to cc; `-l<name>` (e.g. `-lm`,
+// `-lcurl`) forwards a library-link flag.
+
+// libc — links by default, conservatively impure
+extern "C" fn atoi(x: Str) -> i32;
+
+// libc — declared as pure (atoll is side-effect-free and
+// deterministic, so opt into purity for use from pure fn bodies)
+pure extern "C" fn atoll(x: Str) -> i64;
+
+// Pure callers can compose pure externs
+pure fn parse_sum(a: Str, b: Str) -> i64 {
+  return atoll(a) + atoll(b);
+}
+
+fn main() -> i64 {
+  let a: i32 = atoi("7");
+  let s: i64 = parse_sum("3", "4");
+  write "atoi(7) =", a;
+  write "parse_sum(3, 4) =", s;
+  return 0;
+}

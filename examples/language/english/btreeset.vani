@@ -1,0 +1,115 @@
+// build & run:
+//   vanic run examples/language/english/btreeset.vani                          # LLVM backend
+//   vanic run examples/language/english/btreeset.vani --backend=c              # C backend
+//   vanic build examples/language/english/btreeset.vani -o /tmp/btreeset && /tmp/btreeset
+
+intent "BTreeSet<i64> — ordered set on sorted-Vec backing (Level 2 #5)";
+
+// v1 design: sorted Vec<i64> with binary-search lower_bound for
+// O(log n) lookup and memmove-based insert/remove for O(n)
+// shift. A real B-tree node arena is queued for Level 4
+// (closures + arenas land there). Affine ownership is honored:
+// mut ref for mutators, ref for readers; scope-exit Drop frees
+// the heap key buffer.
+//
+//   btreeset_new() -> BTreeSet<i64>            empty
+//   btreeset_insert(mut ref s, v) -> bool      true iff newly inserted
+//   btreeset_contains(ref s, v) -> bool
+//   btreeset_remove(mut ref s, v) -> bool      true iff was present
+//   btreeset_len(ref s) -> i64
+//   btreeset_range(ref s, lo, hi, mut ref out: Vec<i64>) -> i64   [closure #346]
+//       Appends every key k in [lo, hi] (inclusive) to `out` in
+//       sorted ascending order; returns the count appended.
+//       O(log n + matches).
+//   btreeset_min(ref s) -> Option<i64>                            [closure #352]
+//   btreeset_max(ref s) -> Option<i64>                            [closure #352]
+//       O(1) — keys[0] is the smallest, keys[len-1] the largest
+//       since the backing is sorted ascending. None on empty.
+//
+// Restrictions: v1 = i64 element only; full iteration via closures
+// queued in Level 3.
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
+
+fn main() -> i64 {
+  let s: BTreeSet<i64> = btreeset_new();
+
+  // First-time inserts return true; duplicates return false.
+  let a: bool = btreeset_insert(mut ref s, 5);
+  let b: bool = btreeset_insert(mut ref s, 3);
+  let c: bool = btreeset_insert(mut ref s, 7);
+  let d: bool = btreeset_insert(mut ref s, 5);
+  if a { print "5 inserted first time"; }
+  if b { print "3 inserted first time"; }
+  if c { print "7 inserted first time"; }
+  if !d { print "5 already present on second insert"; }
+
+  // Membership.
+  print "contains 3:", btreeset_contains(ref s, 3);
+  print "contains 4:", btreeset_contains(ref s, 4);
+  print "contains 7:", btreeset_contains(ref s, 7);
+  print "len so far:", btreeset_len(ref s);
+
+  // Bulk insert triggers buffer grow.
+  let i: i64 = 0;
+  while i < 50 {
+    let _ = btreeset_insert(mut ref s, i * 2);
+    i = i + 1;
+  }
+  print "after bulk insert len:", btreeset_len(ref s);
+  print "contains 84 (= 42*2):", btreeset_contains(ref s, 84);
+  print "contains 85:", btreeset_contains(ref s, 85);
+  print "contains 98 (= 49*2):", btreeset_contains(ref s, 98);
+
+  // Remove: returns true iff actually removed.
+  let r1: bool = btreeset_remove(mut ref s, 3);
+  let r2: bool = btreeset_remove(mut ref s, 999);
+  if r1 { print "removed 3"; }
+  if !r2 { print "999 was never there"; }
+  print "contains 3 after remove:", btreeset_contains(ref s, 3);
+  print "len after remove:", btreeset_len(ref s);
+
+  // Drain a chunk via remove; duplicate removes report false.
+  let drained: i64 = 0;
+  let j: i64 = 0;
+  while j < 20 {
+    if btreeset_remove(mut ref s, j * 2) {
+      drained = drained + 1;
+    }
+    j = j + 1;
+  }
+  print "drained from 0..40 step 2:", drained;
+  print "final len:", btreeset_len(ref s);
+
+  // Closure #346: range query. Returns every key in [lo, hi] in
+  // sorted ascending order. Bounds are inclusive on both sides.
+  // The output Vec is appended to (not cleared), so callers can
+  // reuse it for batch collections; here we pass a fresh empty.
+  let mid: Vec<i64> = vec();
+  let n_mid: i64 = s.range(40, 70, mut ref mid);
+  print "range 40..=70 count:", n_mid;
+  for i from 0 to n_mid {
+    print "  k:", mid[i];
+  }
+
+  // Empty range when lo > hi or no keys in [lo, hi].
+  let none: Vec<i64> = vec();
+  let n_none: i64 = btreeset_range(ref s, 1000, 9999, mut ref none);
+  print "range 1000..=9999 count (0):", n_none;
+  let inv: Vec<i64> = vec();
+  let n_inv: i64 = btreeset_range(ref s, 100, 50, mut ref inv);
+  print "range 100..=50 (lo>hi) count (0):", n_inv;
+
+  // Closure #352: O(1) min / max via direct array access on
+  // the sorted-Vec backing. Returns Option<i64> (None on
+  // empty). Method sugar reads `s.min()` / `s.max()`.
+  print "min:", unwrap_or(s.min(), 0 - 1);
+  print "max:", unwrap_or(s.max(), 0 - 1);
+
+  return 0;
+}

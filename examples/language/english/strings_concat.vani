@@ -1,0 +1,88 @@
+// build & run:
+//   vanic run examples/language/english/strings_concat.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/english/strings_concat.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/english/strings_concat.vani -o /tmp/strings_concat && /tmp/strings_concat   # native binary
+
+intent "Heap-allocated string concatenation via OwnedStr";
+
+// `Str + Str` (or any combination of Str/OwnedStr) produces a
+// fresh `OwnedStr` — heap-allocated, NUL-terminated, affine. The
+// compiler tracks ownership and inserts a `free` at scope exit
+// (or when the value is moved into another concat, returned, etc.).
+// The runtime helper `intent_str_concat` mallocs the joined buffer
+// in one pass and frees any OwnedStr operand it consumes.
+
+fn greet(name: Str) -> OwnedStr {
+  // `name` is a borrowed Str; concat with a literal Str returns a
+  // fresh OwnedStr that the caller owns.
+  return "Hello, " + name;
+}
+
+fn main() -> i64 {
+  let g1: OwnedStr = greet("alice");
+  let g2: OwnedStr = greet("bob");
+
+  // Each OwnedStr is consumed by the next concat; the helper frees
+  // the original buffer before returning the joined one. After
+  // these lines, `g1` and `g2` are moved and unusable.
+  let bang: OwnedStr = g1 + "!";
+  let dot: OwnedStr = g2 + ".";
+
+  print bang;
+  print dot;
+
+  // Closure #133: reassigning an `OwnedStr` binding frees the
+  // previous heap string before storing the new one. The RHS
+  // (which doesn't consume `current` in this case) is
+  // evaluated into a temp first so the binding stays valid
+  // for any reads in the RHS.
+  let current: OwnedStr = "step-" + "1";
+  print "before: ", current;
+  current = "step-" + "2";
+  print "after:  ", current;
+
+  // Closure #134: `let _ = expr;` (and the bare-call form
+  // `make_something();`) frees the returned heap string
+  // immediately. Previously the SSA-C, tree-C, and
+  // tree-LLVM Discard handlers all silently leaked an
+  // OwnedStr return value.
+  let _ = greet("carol");
+  print "discarded greet OK";
+
+  // Closure #135: `print make_owned_str();` and
+  // `print "a" + "b";` now free the printed heap string
+  // after the write. Print of a Var-OwnedStr (or any
+  // binding-owned OwnedStr — e.g. a struct field access)
+  // stays a non-consuming read, since the binding's
+  // scope-exit Drop frees the heap.
+  print greet("dan");
+
+  // Closure #136: `Vec<OwnedStr>` now compiles. The C
+  // backend's element-tag generator was leaking the `*`
+  // of `char*` into the typedef name (`intent_vec_char*`),
+  // producing invalid C. Each slot owns its heap string;
+  // the Vec's `__free` walks every live element and
+  // releases each one before freeing the buffer.
+  let names: Vec<OwnedStr> = vec(
+    "first" + "-name",
+    "second" + "-name",
+    "third" + "-name"
+  );
+  print "Vec<OwnedStr> built OK";
+
+  // Closure #138: `make() == "literal"` and similar
+  // strcmp shapes now free a fresh OwnedStr operand
+  // after the comparison. Was leaking — strcmp doesn't
+  // consume args, and Call / Binary `+` produce a heap
+  // with no other owner.
+  if greet("ed") == "Hello, ed" {
+    print "strcmp branch hit";
+  }
+
+  // Closure #139: `len(make_owned_str())` now frees the
+  // fresh heap after strlen. Same Call/Binary whitelist
+  // as strcmp — Var/FieldAccess operands skip the drop.
+  let n: u64 = len(greet("fay"));
+  print "len of fresh:", n;
+  return 0;
+}

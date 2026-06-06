@@ -1,0 +1,74 @@
+// Arc 8 step 8h v1.5 — timer-driven async fn example.
+//
+// Demonstrates the v1 async surface (`async fn` / `await` /
+// `Future<T>` / `CancelToken`) composed with the v1.5
+// `sleep_ms` builtin to produce real timer-driven flows.
+// Concurrent timer fan-out works TODAY via `task` + `join`
+// (real OS threads); see the third block below.
+//
+// **Limitations of v1.5:** `async fn` desugars synchronously
+// (every async fn runs to completion on call and emits
+// `Future.Ready`), so `sleep_ms` blocks the calling OS
+// thread. Single-threaded cooperative fan-out via
+// epoll-driven event loop is queued in Arc 8 step 8c
+// (state-machine codegen) + step 8d (event-loop runtime).
+// Real TCP / file non-blocking I/O futures land alongside.
+//
+// build & run:
+//   vanic run examples/language/english/async_io.vani                # LLVM
+//   vanic run examples/language/english/async_io.vani --backend=c    # C
+
+intent "async timer + CancelToken + task fan-out — Arc 8 step 8h v1.5";
+
+async fn delay_value(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  return v;
+}
+
+async fn delay_with_cancel(ms: i64, v: i64, token: ref CancelToken) -> i64 {
+  if token.cancelled {
+    return 0 - 1;
+  }
+  sleep_ms(ms);
+  if token.cancelled {
+    return 0 - 1;
+  }
+  return v;
+}
+
+fn main() -> i64 {
+  // (1) Plain timer-driven async fn.
+  let r1: i64 = await(delay_value(20, 42));
+  print "await delay_value(20, 42) (42):", r1;
+
+  // (2) Sequential awaits — total elapsed is 30 + 20 = 50ms.
+  let a: i64 = await(delay_value(30, 7));
+  let b: i64 = await(delay_value(20, 11));
+  print "sequential sum (18):", a + b;
+
+  // (3) CancelToken short-circuits before the sleep.
+  let tok: CancelToken = CancelToken { cancelled: true };
+  let r2: i64 = await(delay_with_cancel(50, 99, ref tok));
+  print "cancelled before sleep (-1):", r2;
+
+  // (4) CancelToken not set — runs to completion.
+  let tok2: CancelToken = CancelToken { cancelled: false };
+  let r3: i64 = await(delay_with_cancel(15, 88, ref tok2));
+  print "uncancelled (88):", r3;
+
+  // (5) Concurrent timer fan-out — three real OS threads
+  // each sleeping 30ms. Wall-clock total ~30ms, not 90ms,
+  // because they run in parallel on a pthread each.
+  // The verifier proves each body race-free (pure-with-
+  // captures); spawn lowers to pthread_create, join to
+  // pthread_join.
+  task ta { let _ = sleep_ms(30); }
+  task tb { let _ = sleep_ms(30); }
+  task tc { let _ = sleep_ms(30); }
+  join ta;
+  join tb;
+  join tc;
+  print "concurrent fan-out done (0):", 0;
+
+  return 0;
+}
