@@ -243,45 +243,55 @@
 > rejection. Scaffolding (`_fn_type_params: &[String]` parameter
 > on try_v31_transform) kept in place to avoid signature churn.
 >
-> **Concrete blocker identified 2026-06-06**: vāṇī's fn-mono
-> pass (`monomorphize_generics_in_program`) specializes a
-> generic fn by:
->   - cloning the template,
->   - calling `substitute_type_param` on params + return type,
->   - calling `substitute_type_param_in_stmt` on body stmts.
+> **Three layered blockers identified 2026-06-06**:
 >
-> `substitute_type_param_in_stmt` only walks Let annotations
-> + If/While body recursion. It DOES NOT recurse into
-> expressions and DOES NOT rewrite `StructLit { type_name, .. }`
-> strings. So when the v3.1-synthesized ctor body
+>   1. **substitute_type_param_in_stmt was Expr-blind** —
+>      ✅ FIXED THIS SESSION: extended to recurse into Expr
+>      forms (Binary/Unary/Match/MethodCall/Ref/Index/FieldAccess/
+>      Tuple/ArrayLit/Cast). For `StructLit { type_name }`
+>      and `Call { name }` starting with `Task__` /
+>      `__poll_` respectively, mangles the name to its
+>      specialized form alongside type substitution. Limited
+>      to v3.1-synthesized prefixes to avoid breaking user-
+>      declared generic structs (Box<T>, etc.).
 >
->   `return Task__identity { state_tag: 0, fd: fd, x: x };`
+>   2. **rewrite_apply_in_ty + add_if_needed treated
+>      Param-bearing args as concrete** — ✅ FIXED THIS
+>      SESSION: both now skip Type::Apply use-sites whose
+>      args contain Type::Param (those occur inside generic
+>      fn templates and would mangle to garbage names like
+>      `Task__identity__Param_T_`). Concrete specializations
+>      arrive via fn-mono's substitute_type_param, which now
+>      collapses fully-concrete Type::Apply → Type::Struct(mangled).
 >
-> is specialized for T=i64, the surrounding fn becomes
-> `identity__i64`, but the StructLit's `type_name: "Task__identity"`
-> stays bare. The checker then looks up `Task__identity` in
-> program.structs, finds the now-mono'd-to-i64 generic decl
-> dropped, and errors "unknown struct type".
+>   3. **infer_concrete_type_for_call uses the first arg's
+>      type literally** — ❌ NOT YET FIXED. The blocker for
+>      Phase 4c-broad. For `__poll_identity(mut ref sub)` where
+>      `sub: Task__identity<i64>`, mono infers T = RefMut(
+>      Task__identity<i64>) instead of T=i64. Needs
+>      structural unwrapping: when the called fn's first param
+>      is declared as `mut ref Task__X<T>`, extract T from
+>      the user's arg type. Or accept explicit type-arg syntax
+>      at the call site (`__poll_identity::<i64>(t)`).
 >
-> **Fix sketch for next implementer**:
->   1. Extend `substitute_type_param_in_stmt` to recurse into
->      Expr forms, in particular `StructLit { type_name }` and
->      `Call { name }` so generic struct ctor names and
->      generic helper-fn names get rewritten to their
->      specialized variants. The mangled name is
->      `format!("{}__{}", original, type_mangle(concrete))` —
->      same pattern used in `monomorphize_generics_in_program`
->      at the fn-name level.
->   2. (Optional) Add ergonomics so users don't have to write
->      `Task__identity<i64>` everywhere — i.e. the synthesized
->      ctor's return Type::Apply lets vāṇī infer T from the
->      construct-site arg types, which propagates naturally.
+> Blockers 1+2 are PRE-EXISTING fixes that improve generic
+> code in general — they stay shipped even though the wider
+> Phase 4c-broad arc isn't done.
+>
+> **Fix sketch for next implementer (blocker 3)**:
+>   - Extend `infer_concrete_type_for_call` to also check
+>     subsequent args + extract T from `mut ref Task__X<T>`
+>     declared-param-type patterns by structural unification
+>     with the user's arg type.
+>   - OR add explicit type-arg syntax at the call site
+>     (`identity::<i64>(server, 42)` and
+>     `__poll_identity::<i64>(t)`). This is more invasive at
+>     the parser level but simpler at the mono level.
 >
 > **Smaller-scope alternative**: REJECT generic async fns
-> cleanly (current Phase 4c-narrow behavior) until vāṇī's mono
-> grows StructLit-name rewriting. Users can manually write
-> non-generic state machines using the hand-rolled v3 pattern
-> for the rare generic-async case.
+> cleanly (current Phase 4c-narrow behavior). Users can
+> manually write non-generic state machines using the
+> hand-rolled v3 pattern for the rare generic-async case.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into

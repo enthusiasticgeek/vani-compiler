@@ -6322,20 +6322,14 @@ fn validate_v31_linear_body(
                 "v3.1 async fn return type {:?} not yet supported \
                 — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
                 Enum (registered) / Vec<T> / Struct (registered) / \
-                Array<T,N>. Generic returns (Type::Param) are
-                deferred to Phase 4c-broad — needs vāṇī mono to
-                rewrite StructLit type_names during fn-template
-                specialization (see ARC8_V3_PLAN.md Phase 4c-broad
-                blockers).",
+                Array<T,N>. Generic returns (Type::Param) deferred \
+                to Phase 4c-broad (see ARC8_V3_PLAN.md blocker notes).",
                 return_type
             ),
         ));
     }
     // Phase 3-params (Phase 3p): params route through v31_local_
-    // type_allowed — same gate as locals + returns. Each param is
-    // already stored in the task struct as a constructor input,
-    // so any v31-allowed type (bool / f64 / Str / OwnedStr /
-    // Enum / Vec<T> / Struct / Array) works uniformly.
+    // type_allowed.
     for p in params {
         if !v31_local_type_allowed(&p.ty) {
             return Err(Diagnostic::new(
@@ -6362,7 +6356,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. Generic locals (Type::Param) are deferred to Phase 4c-broad.",
+                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. Generic locals (Type::Param) deferred to Phase 4c-broad.",
                             name, ty
                         ),
                     ));
@@ -6725,19 +6719,24 @@ fn rewrite_vars_to_fields(
 pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
-    // Phase 4c-broad parking: the original async fn's type_params
-    // are passed through as scaffolding for a future
-    // implementation. Currently unused — generic async fns hit
-    // the return-type / locals gates before reaching synthesis.
-    // Concrete blocker: vāṇī's `substitute_type_param_in_stmt`
-    // only walks Let annotations + If/While bodies, not Expr
-    // contents — the synthesized ctor body's bare-name
-    // StructLit `Task__X { ... }` therefore can't be rewritten
-    // to `Task__X__i64 { ... }` during fn-template
-    // specialization. Fix requires extending mono's stmt walker
-    // to recursively rewrite StructLit type_names alongside
-    // type-substitutions (or another vāṇī-internal change to
-    // make the bare type_name follow the function's mono).
+    // Phase 4c-broad parking: scaffolding for the eventual full
+    // generic-async implementation. Three layered blockers exist
+    // (see ARC8_V3_PLAN.md Phase 4c-broad notes):
+    //   1. mono's substitute_type_param_in_stmt doesn't recurse
+    //      into Expr / rewrite StructLit type_names — FIXED in
+    //      this session's WIP but not yet wired through.
+    //   2. monomorphize_type_decls_in_program tries to mangle
+    //      Type::Apply with Param args, producing garbage names
+    //      — FIXED via has_param skip in rewrite_apply_in_ty +
+    //      add_if_needed.
+    //   3. infer_concrete_type_for_call uses the first arg's
+    //      type literally; for `__poll_X(mut ref sub)` where sub:
+    //      Task__X<i64>, it infers T = RefMut(Task__X<i64>)
+    //      instead of T=i64. NOT YET FIXED. Needs structural
+    //      unwrapping: when the called fn's first param type is
+    //      `mut ref Task__X<T>` and the user's arg is
+    //      `mut ref sub` with sub: Task__X<concrete>`, extract
+    //      `concrete` from sub's type.
     _fn_type_params: &[String],
     params: &[Param],
     body: &[Stmt],
@@ -7624,9 +7623,7 @@ pub(crate) fn try_v31_transform(
         ));
     }
     // Phase 3-returns — default-init the synthesized `__result`
-    // field if the async fn has a non-i64 return type. Uses the
-    // same per-type defaults as locals so any v31_local_type_allowed
-    // type works uniformly.
+    // field if the async fn has a non-i64 return type.
     if return_via_field {
         ctor_fields.push((
             "__result".to_string(),

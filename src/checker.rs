@@ -5922,6 +5922,31 @@ fn monomorphize_type_decls_in_program(
         needed_structs: &mut Vec<(String, Vec<Type>)>,
         needed_enums: &mut Vec<(String, Vec<Type>)>,
     ) {
+        // Phase 4c-broad: skip Type::Apply use-sites whose args
+        // contain unresolved Type::Param — those occur inside
+        // generic fn templates (e.g. v3.1-synthesized
+        // `Task__identity<T>` referenced by the generic
+        // identity<T> ctor's return type). Specializing such
+        // a use-site would produce a garbage mangled name like
+        // `Task__identity__Param__T__`. Concrete specializations
+        // come via the call-sites in non-generic fns after
+        // fn-mono propagates concrete T into Type::Apply args.
+        fn has_param(ty: &Type) -> bool {
+            match ty {
+                Type::Param(_) => true,
+                Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
+                | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
+                | Type::Channel(t, _) => has_param(t),
+                Type::Array { element, .. } => has_param(element),
+                Type::Tuple(elements) => elements.iter().any(has_param),
+                Type::FnPtr(params, ret) => params.iter().any(has_param) || has_param(ret),
+                Type::Apply { args, .. } => args.iter().any(has_param),
+                _ => false,
+            }
+        }
+        if args.iter().any(has_param) {
+            return;
+        }
         if struct_templates.contains_key(name) {
             if !needed_structs.iter().any(|(n, a)| n == name && a == args) {
                 needed_structs.push((name.to_string(), args.to_vec()));
@@ -6439,6 +6464,30 @@ fn rewrite_apply_in_ty(
             for a in args.iter_mut() {
                 rewrite_apply_in_ty(a, struct_names, enum_names);
             }
+            // Phase 4c-broad: skip Param-bearing Type::Apply.
+            // These occur inside generic fn templates (e.g. the
+            // v3.1-synthesized ctor's return Task__identity<T>);
+            // mangling them produces garbage names like
+            // `Task__identity__Param_T_`. Concrete specializations
+            // arrive via fn-mono's substitute_type_param, which
+            // collapses concrete Type::Apply → Type::Struct in
+            // each per-T specialization.
+            fn has_param_local(ty: &Type) -> bool {
+                match ty {
+                    Type::Param(_) => true,
+                    Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
+                    | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
+                    | Type::Channel(t, _) => has_param_local(t),
+                    Type::Array { element, .. } => has_param_local(element),
+                    Type::Tuple(elements) => elements.iter().any(has_param_local),
+                    Type::FnPtr(params, ret) => params.iter().any(has_param_local) || has_param_local(ret),
+                    Type::Apply { args, .. } => args.iter().any(has_param_local),
+                    _ => false,
+                }
+            }
+            if args.iter().any(has_param_local) {
+                return;
+            }
             let mangled = mangle_generic_decl(name, args);
             *ty = if struct_names.contains(name) {
                 Type::Struct(mangled)
@@ -6653,6 +6702,18 @@ fn type_mangle(ty: &Type) -> String {
 }
 
 /// Substitute Type::Param(t_name) → concrete in a Type.
+///
+/// Phase 4c-broad extension (2026-06-06): after substituting,
+/// any `Type::Apply { name, args }` whose args become all-
+/// concrete (no remaining Type::Param) collapses into
+/// `Type::Struct(format!("{}__{}", name, type_mangle(args[0])))`
+/// — the mangled specialized struct name. This matches the
+/// naming convention used by monomorphize_type_decls so the
+/// downstream lookup finds the right specialization.
+///
+/// Currently mangles only one type arg (matches the v1-supported
+/// `template.type_params.len() != 1` check at fn-mono); multi-
+/// arg generics will need richer mangling when they ship.
 fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
     match ty {
         Type::Param(n) if n == t_name => {
@@ -6679,22 +6740,84 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
             for a in args.iter_mut() {
                 substitute_type_param(a, t_name, concrete);
             }
+            // Phase 4c-broad: if args are now all-concrete,
+            // collapse to Type::Struct(mangled). Mirrors what
+            // monomorphize_type_decls_in_program does for use-
+            // sites that started already-concrete.
+            fn is_concrete(ty: &Type) -> bool {
+                match ty {
+                    Type::Param(_) => false,
+                    Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
+                    | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
+                    | Type::Channel(t, _) => is_concrete(t),
+                    Type::Array { element, .. } => is_concrete(element),
+                    Type::Tuple(elements) => elements.iter().all(is_concrete),
+                    Type::FnPtr(params, ret) => params.iter().all(is_concrete) && is_concrete(ret),
+                    Type::Apply { args, .. } => args.iter().all(is_concrete),
+                    _ => true,
+                }
+            }
+            if args.iter().all(is_concrete) {
+                if let Type::Apply { name, args } = ty.clone() {
+                    if args.len() == 1 {
+                        let mangled = format!("{}__{}", name, type_mangle(&args[0]));
+                        *ty = Type::Struct(mangled);
+                    }
+                }
+            }
         }
         _ => {}
     }
 }
 
 /// Substitute Type::Param(t_name) → concrete in a Stmt's
-/// type annotations. Doesn't touch expression sub-trees
-/// (those don't carry Type::Param in v1 — type params only
-/// appear in declarations).
+/// type annotations + expression contents.
+///
+/// Phase 4c-broad extension (2026-06-06): also recurses into
+/// expressions to rewrite:
+///   - `StructLit { type_name }` — generic struct constructor
+///     references get mangled to their specialized name (e.g.
+///     `Task__identity` → `Task__identity__i64`). Required so
+///     the v3.1-synthesized constructor body's bare-name
+///     StructLit gets specialized in lockstep with the enclosing
+///     fn template.
+///   - `Call { name }` — generic helper-fn calls likewise get
+///     mangled (e.g. user-code `__poll_identity(...)` inside a
+///     non-generic driver fn's body needs the qualified name
+///     after specialization).
+///
+/// The mangle pattern matches `monomorphize_generics_in_program`:
+/// `format!("{}__{}", original, type_mangle(concrete))`.
 fn substitute_type_param_in_stmt(stmt: &mut Stmt, t_name: &str, concrete: &Type) {
     use crate::ast::Stmt as S;
     match stmt {
-        S::Let { annotation: Some(a), .. } | S::LetTuple { annotation: Some(a), .. } => {
+        S::Let { annotation: Some(a), expr, .. }
+        | S::LetTuple { annotation: Some(a), expr, .. } => {
             substitute_type_param(a, t_name, concrete);
+            substitute_type_param_in_expr(expr, t_name, concrete);
         }
-        S::If { then_body, else_body, .. } => {
+        S::Let { expr, .. } | S::LetTuple { expr, .. } => {
+            substitute_type_param_in_expr(expr, t_name, concrete);
+        }
+        S::Return { expr, .. } => {
+            substitute_type_param_in_expr(expr, t_name, concrete);
+        }
+        S::Assign { expr, .. } => {
+            substitute_type_param_in_expr(expr, t_name, concrete);
+        }
+        S::FieldAssign { object, value, .. } => {
+            substitute_type_param_in_expr(object, t_name, concrete);
+            substitute_type_param_in_expr(value, t_name, concrete);
+        }
+        S::Print { items, .. } => {
+            for it in items.iter_mut() {
+                if let crate::ast::PrintItem::Expr(e) = it {
+                    substitute_type_param_in_expr(e, t_name, concrete);
+                }
+            }
+        }
+        S::If { cond, then_body, else_body, .. } => {
+            substitute_type_param_in_expr(cond, t_name, concrete);
             for s in then_body.iter_mut() {
                 substitute_type_param_in_stmt(s, t_name, concrete);
             }
@@ -6702,9 +6825,81 @@ fn substitute_type_param_in_stmt(stmt: &mut Stmt, t_name: &str, concrete: &Type)
                 substitute_type_param_in_stmt(s, t_name, concrete);
             }
         }
-        S::While { body, .. } => {
+        S::While { cond, body, .. } => {
+            substitute_type_param_in_expr(cond, t_name, concrete);
             for s in body.iter_mut() {
                 substitute_type_param_in_stmt(s, t_name, concrete);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Phase 4c-broad helper: substitute Type::Param + rewrite
+/// generic struct/fn name references inside an expression tree.
+/// Mirrors substitute_type_param_in_stmt for the expression
+/// side of v3.1-synthesized ctor bodies.
+fn substitute_type_param_in_expr(expr: &mut Expr, t_name: &str, concrete: &Type) {
+    use crate::ast::ExprKind as E;
+    match &mut expr.kind {
+        E::StructLit { type_name, fields, .. } => {
+            // Phase 4c-broad: ONLY rewrite v3.1-synthesized
+            // Task__X struct names. User-declared generic structs
+            // (`Box<T>` etc.) are NOT touched here — they get
+            // resolved via vāṇī's existing StructLit inference
+            // path. The Task__-prefix is unique to the v3.1
+            // synthesizer's name mangling so this is safe.
+            if type_name.starts_with("Task__") {
+                *type_name = format!("{}__{}", type_name, type_mangle(concrete));
+            }
+            for (_, v) in fields.iter_mut() {
+                substitute_type_param_in_expr(v, t_name, concrete);
+            }
+        }
+        E::Call { name, args, .. } => {
+            // Phase 4c-broad: rewrite ONLY v3.1-synthesized
+            // poll-fn calls (`__poll_X`). Non-v3.1 generic Calls
+            // are NOT touched here — they're handled by the
+            // existing `rewrite_generic_calls_in_stmt` pass.
+            if name.starts_with("__poll_") {
+                *name = format!("{}__{}", name, type_mangle(concrete));
+            }
+            for a in args.iter_mut() {
+                substitute_type_param_in_expr(a, t_name, concrete);
+            }
+        }
+        E::Binary { left, right, .. } => {
+            substitute_type_param_in_expr(left, t_name, concrete);
+            substitute_type_param_in_expr(right, t_name, concrete);
+        }
+        E::Unary { expr, .. } | E::Cast { expr, .. } => {
+            substitute_type_param_in_expr(expr, t_name, concrete);
+        }
+        E::Match { scrutinee, arms } => {
+            substitute_type_param_in_expr(scrutinee, t_name, concrete);
+            for a in arms.iter_mut() {
+                substitute_type_param_in_expr(&mut a.body, t_name, concrete);
+            }
+        }
+        E::MethodCall { receiver, args, .. } => {
+            substitute_type_param_in_expr(receiver, t_name, concrete);
+            for a in args.iter_mut() {
+                substitute_type_param_in_expr(a, t_name, concrete);
+            }
+        }
+        E::Ref { inner } | E::RefMut { inner } => {
+            substitute_type_param_in_expr(inner, t_name, concrete);
+        }
+        E::Index { array, index } => {
+            substitute_type_param_in_expr(array, t_name, concrete);
+            substitute_type_param_in_expr(index, t_name, concrete);
+        }
+        E::FieldAccess { object, .. } => {
+            substitute_type_param_in_expr(object, t_name, concrete);
+        }
+        E::Tuple(es) | E::ArrayLit { elements: es } => {
+            for e in es.iter_mut() {
+                substitute_type_param_in_expr(e, t_name, concrete);
             }
         }
         _ => {}
