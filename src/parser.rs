@@ -5440,7 +5440,20 @@ fn try_desugar_match_via_tag_extraction(
 /// Types deferred to later Phase 3 sub-phases:
 ///   - Struct(name) / Vec / Array (Phase 3d)
 fn v31_local_type_allowed(ty: &Type) -> bool {
+    v31_local_type_allowed_with_params(ty, &[])
+}
+
+/// Phase 4c-broad — generic-aware variant. When `type_params` is
+/// non-empty, accepts `Type::Param(name)` whose `name` matches
+/// one of the enclosing fn's declared type params. This lifts
+/// the narrow-gate rejection so generic async fns reach the
+/// v3.1 synthesizer. Recurses with the same `type_params` for
+/// container types (Vec<T>, Array<T,N>) so a Vec<T> param
+/// type allows when T is in type_params.
+fn v31_local_type_allowed_with_params(ty: &Type, type_params: &[String]) -> bool {
     match ty {
+        // Phase 4c-broad: accept generic type params.
+        Type::Param(name) => type_params.iter().any(|t| t == name),
         Type::I64 | Type::Bool | Type::F64 | Type::Str | Type::OwnedStr => true,
         // Parser stamps user-typed identifiers as Type::Struct(name)
         // before the checker's pre-pass resolves them to Type::Enum.
@@ -5466,7 +5479,7 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         // (commit 4feb5fc) via unified topological emit across
         // struct typedefs + Vec bundles. No backend-side
         // workaround needed.
-        Type::Vec(inner) => v31_local_type_allowed(inner),
+        Type::Vec(inner) => v31_local_type_allowed_with_params(inner, type_params),
         // Phase 3f — [T; N]: element type must be v31-allowed
         // (default-init emits N copies of default(T) as an
         // ArrayLit). The C backend's FieldAssign routes Array
@@ -5476,7 +5489,7 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
         // guard (empty ArrayLit can't infer in StructLit field
         // position).
         Type::Array { element, length } => {
-            *length > 0 && v31_local_type_allowed(element)
+            *length > 0 && v31_local_type_allowed_with_params(element, type_params)
         }
         _ => false,
     }
@@ -6304,14 +6317,50 @@ fn validate_v31_phase_21a_branch(
 /// Bodies that do contain suspends inside control flow are
 /// rejected with a "suspend in branch — Phase 2.1" pointer.
 fn validate_v31_linear_body(
+    type_params: &[String],
     params: &[Param],
     body: &[Stmt],
     return_type: &Type,
 ) -> Result<Vec<(String, Type, crate::span::Span)>, Diagnostic> {
+    // Phase 4c-broad: when the async fn declares type params,
+    // type-allow checks accept Type::Param(name) for any
+    // declared param. For non-generic async fns, type_params
+    // is empty so behavior matches Phase 3.
+    //
+    // Phase 4c-broad — when return_type is a bare Type::Param,
+    // we require at least one fn param to share the same
+    // Type::Param so the synthesizer can seed the ctor's
+    // `__result` default to that param's runtime value. Without
+    // a matching seed, default-init for a generic T has no
+    // well-typed value at template time. The smoke pattern
+    // `fn identity<T>(fd: i64, x: T) -> T` satisfies this
+    // (x: T seeds __result).
+    if let Type::Param(ret_name) = return_type {
+        let any_param_matches = params.iter().any(|p| {
+            matches!(&p.ty, Type::Param(n) if n == ret_name)
+        });
+        if !any_param_matches {
+            return Err(Diagnostic::new(
+                body.first().map(|s| match s {
+                    Stmt::Let { span, .. }
+                    | Stmt::Return { span, .. } => *span,
+                    _ => crate::span::Span::new(0, 0),
+                }).unwrap_or(crate::span::Span::new(0, 0)),
+                format!(
+                    "v3.1 async fn with generic return type `{}` must \
+                     have at least one parameter of the same generic \
+                     type to seed the `__result` default at template \
+                     time. The smoke pattern is `fn name<{}>(... x: {} \
+                     ...) -> {}`.",
+                    ret_name, ret_name, ret_name, ret_name
+                ),
+            ));
+        }
+    }
     // Phase 3-returns: return type must be v31-allowed. Non-i64
     // returns route through a synthesized `__result: T` field;
     // poll fn returns status (0 = Ready) instead of the value.
-    if !v31_local_type_allowed(return_type) {
+    if !v31_local_type_allowed_with_params(return_type, type_params) {
         return Err(Diagnostic::new(
             body.first().map(|s| match s {
                 Stmt::Let { span, .. }
@@ -6331,7 +6380,7 @@ fn validate_v31_linear_body(
     // Phase 3-params (Phase 3p): params route through v31_local_
     // type_allowed.
     for p in params {
-        if !v31_local_type_allowed(&p.ty) {
+        if !v31_local_type_allowed_with_params(&p.ty, type_params) {
             return Err(Diagnostic::new(
                 p.span,
                 format!(
@@ -6352,11 +6401,41 @@ fn validate_v31_linear_body(
         match s {
             Stmt::Let { name, annotation, expr, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
-                if !v31_local_type_allowed(&ty) {
+                // Phase 4c-broad: reject locals whose type
+                // contains a Type::Param. Unlike params (which
+                // receive a runtime value from the caller) and
+                // the return-via-`__result` slot (which the
+                // validator routes through a same-typed param
+                // for the initial seed), a fresh local has no
+                // well-typed default for generic T at template
+                // time. The synthesizer's `v31_default_init_expr`
+                // can't produce one either.
+                fn ty_has_param(ty: &Type) -> bool {
+                    match ty {
+                        Type::Param(_) => true,
+                        Type::Vec(t) | Type::Ref(t) | Type::RefMut(t) => ty_has_param(t),
+                        Type::Array { element, .. } => ty_has_param(element),
+                        Type::Apply { args, .. } => args.iter().any(ty_has_param),
+                        Type::Tuple(es) => es.iter().any(ty_has_param),
+                        _ => false,
+                    }
+                }
+                if ty_has_param(&ty) {
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. Generic locals (Type::Param) deferred to Phase 4c-broad.",
+                            "v3.1 async fn local '{}' has type {:?} containing a generic Type::Param. \
+                             Phase 4c-broad accepts Type::Param ONLY in params and return type — \
+                             generic locals have no well-typed default value at template time.",
+                            name, ty
+                        ),
+                    ));
+                }
+                if !v31_local_type_allowed_with_params(&ty, type_params) {
+                    return Err(Diagnostic::new(
+                        *span,
+                        format!(
+                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. For generic async fns, locals stay concrete (Type::Param is allowed only in params and return type).",
                             name, ty
                         ),
                     ));
@@ -6719,25 +6798,19 @@ fn rewrite_vars_to_fields(
 pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
-    // Phase 4c-broad parking: scaffolding for the eventual full
-    // generic-async implementation. Three layered blockers exist
-    // (see ARC8_V3_PLAN.md Phase 4c-broad notes):
-    //   1. mono's substitute_type_param_in_stmt doesn't recurse
-    //      into Expr / rewrite StructLit type_names — FIXED in
-    //      this session's WIP but not yet wired through.
-    //   2. monomorphize_type_decls_in_program tries to mangle
-    //      Type::Apply with Param args, producing garbage names
-    //      — FIXED via has_param skip in rewrite_apply_in_ty +
-    //      add_if_needed.
-    //   3. infer_concrete_type_for_call uses the first arg's
-    //      type literally; for `__poll_X(mut ref sub)` where sub:
-    //      Task__X<i64>, it infers T = RefMut(Task__X<i64>)
-    //      instead of T=i64. NOT YET FIXED. Needs structural
-    //      unwrapping: when the called fn's first param type is
-    //      `mut ref Task__X<T>` and the user's arg is
-    //      `mut ref sub` with sub: Task__X<concrete>`, extract
-    //      `concrete` from sub's type.
-    _fn_type_params: &[String],
+    // Phase 4c-broad: threaded through to the validator so
+    // Type::Param(name) is accepted in params + return types
+    // when `name` is one of the declared type params. Three
+    // pre-existing mono blockers all shipped in this arc:
+    //   1. substitute_type_param_in_stmt recurses into Expr
+    //      and rewrites Task__/`__poll_` names (commit 4620e98).
+    //   2. rewrite_apply_in_ty + add_if_needed skip Param-
+    //      bearing Type::Apply use-sites (commit 4620e98).
+    //   3. infer_concrete_type_for_call walks the called fn's
+    //      declared params to find the T-bearing slot, with
+    //      structural unwrap for v3.1 `__poll_*` calls (this
+    //      session — checker.rs).
+    fn_type_params: &[String],
     params: &[Param],
     body: &[Stmt],
     return_type: &Type,
@@ -6779,7 +6852,9 @@ pub(crate) fn try_v31_transform(
     let lifted_body = anf_lift_body(body, &mut anf_counter);
     let body = lifted_body.as_slice();
 
-    let locals = match validate_v31_linear_body(params, body, return_type) {
+    let locals = match validate_v31_linear_body(
+        fn_type_params, params, body, return_type
+    ) {
         Ok(ls) => ls,
         Err(d) => return Some(Err(d)),
     };
@@ -6842,10 +6917,15 @@ pub(crate) fn try_v31_transform(
         });
     }
 
+    // Phase 4c-broad: forward the enclosing fn's type params to
+    // the synthesized Task__X struct so its field types (which
+    // may reference Type::Param(T)) typecheck at template time.
+    // Mono later specializes the struct alongside the fn —
+    // Task__identity<T> → Task__identity__i64 etc.
     let task_struct = StructDecl {
         name: task_struct_name.clone(),
         name_span: fn_name_span,
-        type_params: vec![],
+        type_params: fn_type_params.to_vec(),
         fields: struct_fields,
         span: fn_name_span,
     };
@@ -7570,14 +7650,34 @@ pub(crate) fn try_v31_transform(
     ];
     let poll_body = wrapped_poll_body;
 
-    // Build the poll Function.
+    // Build the poll Function. Phase 4c-broad: when the
+    // enclosing async fn is generic, the poll fn is too. Its
+    // single param's type is `mut ref Task__X<T1, T2, ...>`
+    // (Type::Apply) so mono can substitute T per call site
+    // and re-collapse Apply<concrete> → Struct(mangled) via
+    // substitute_type_param's Type::Apply branch. For non-
+    // generic templates, Type::Apply with empty args degrades
+    // gracefully to Type::Struct(name) under existing
+    // rewrite_apply_in_ty paths.
+    let task_ref_ty = if fn_type_params.is_empty() {
+        Type::RefMut(Box::new(Type::Struct(task_struct_name.clone())))
+    } else {
+        let apply_args: Vec<Type> = fn_type_params
+            .iter()
+            .map(|n| Type::Param(n.clone()))
+            .collect();
+        Type::RefMut(Box::new(Type::Apply {
+            name: task_struct_name.clone(),
+            args: apply_args,
+        }))
+    };
     let poll_fn = Function {
         name: poll_fn_name,
-        type_params: vec![],
+        type_params: fn_type_params.to_vec(),
         where_clauses: vec![],
         params: vec![Param {
             name: t_param_name.clone(),
-            ty: Type::RefMut(Box::new(Type::Struct(task_struct_name.clone()))),
+            ty: task_ref_ty,
             name_span: fn_name_span,
             span: fn_name_span,
         }],
@@ -7624,11 +7724,32 @@ pub(crate) fn try_v31_transform(
     }
     // Phase 3-returns — default-init the synthesized `__result`
     // field if the async fn has a non-i64 return type.
+    //
+    // Phase 4c-broad: when return_type is Type::Param(name),
+    // seed __result from a same-typed param (the validator
+    // already enforced that one exists). At template time we
+    // can't conjure a default value of generic T, but we CAN
+    // reuse a parameter's runtime value as the initial slot
+    // contents — the poll fn overwrites `__result` before the
+    // first read anyway, so the seed is just a typecheck-
+    // satisfying placeholder.
     if return_via_field {
-        ctor_fields.push((
-            "__result".to_string(),
-            v31_default_init_expr(return_type, fn_name_span),
-        ));
+        let init_expr = if let Type::Param(ret_name) = return_type {
+            let seed_param = params
+                .iter()
+                .find(|p| matches!(&p.ty, Type::Param(n) if n == ret_name))
+                .expect(
+                    "validator guarantees a matching-T param for generic \
+                     return type (Phase 4c-broad invariant)",
+                );
+            Expr {
+                kind: ExprKind::Var(seed_param.name.clone()),
+                span: seed_param.span,
+            }
+        } else {
+            v31_default_init_expr(return_type, fn_name_span)
+        };
+        ctor_fields.push(("__result".to_string(), init_expr));
     }
     let ctor_body = vec![Stmt::Return {
         expr: Expr {
@@ -7662,5 +7783,22 @@ pub(crate) fn try_v31_transform(
         reg.borrow_mut().push((task_struct, poll_fn));
     });
 
-    Some(Ok((Type::Struct(task_struct_name), ctor_body)))
+    // Phase 4c-broad: when the async fn is generic, the
+    // original fn's new return type is `Task__X<T1, T2, ...>`
+    // (Type::Apply) so mono recognizes it as a generic use
+    // site and specializes per call. Non-generic templates
+    // keep the bare Type::Struct return as before.
+    let new_return_ty = if fn_type_params.is_empty() {
+        Type::Struct(task_struct_name)
+    } else {
+        let apply_args: Vec<Type> = fn_type_params
+            .iter()
+            .map(|n| Type::Param(n.clone()))
+            .collect();
+        Type::Apply {
+            name: task_struct_name,
+            args: apply_args,
+        }
+    };
+    Some(Ok((new_return_ty, ctor_body)))
 }

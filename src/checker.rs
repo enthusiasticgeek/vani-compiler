@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, EnumDecl, Expr, ExprKind, Function, Program, Stmt, StructDecl, Type, UnaryOp};
+use crate::ast::{BinaryOp, EnumDecl, Expr, ExprKind, Function, Param, Program, Stmt, StructDecl, Type, UnaryOp};
 use crate::diagnostic::Diagnostic;
 use crate::ir::{
     TypedConst, TypedExpr, TypedExprKind, TypedFunction, TypedParam, TypedProgram, TypedStmt,
@@ -5729,10 +5729,10 @@ fn collect_generic_calls_in_expr(
 ) {
     match &expr.kind {
         ExprKind::Call { name, args, .. } => {
-            if generics.contains_key(name) {
-                if let Some(t) =
-                    infer_concrete_type_for_call(args, scope, diagnostics, expr.span)
-                {
+            if let Some(template) = generics.get(name) {
+                if let Some(t) = infer_concrete_type_for_call(
+                    name, &template.params, args, scope, diagnostics, expr.span,
+                ) {
                     let pair = (name.clone(), t);
                     if !needed.contains(&pair) {
                         needed.push(pair);
@@ -5754,25 +5754,88 @@ fn collect_generic_calls_in_expr(
     }
 }
 
-/// Infer the concrete type for a generic call from its first
-/// argument. v1 supports literal arguments (Int/Float/Bool)
-/// plus Var arguments that resolve through the local scope
-/// map (annotated lets + function params).
+/// Infer the concrete type for a generic call by matching the
+/// called fn's declared params against the actual args. Finds
+/// the first param whose declared type is `Type::Param(T)` and
+/// extracts T from the corresponding actual arg's type.
+///
+/// Phase 4c-broad refactor (2026-06-06): previously this used
+/// the FIRST arg's type literally. That broke when T wasn't
+/// the first param (e.g. `fn identity<T>(fd: i64, x: T)`). Now
+/// we walk the declared params, find the first generic one,
+/// and infer from the matching actual arg.
+///
+/// For v3.1 `__poll_*` calls — the called fn's first param is
+/// declared as `mut ref Task__X<T>` — we apply structural
+/// unwrap (peel RefMut/Ref, peel single-arg Type::Apply) on
+/// the actual arg's resolved type to extract T. Restricted to
+/// `__poll_*` call names so non-v3.1 generic-fn callsites keep
+/// their direct param-type-IS-T inference semantics.
 fn infer_concrete_type_for_call(
+    call_name: &str,
+    params: &[Param],
     args: &[Expr],
     scope: &std::collections::HashMap<String, Type>,
     diagnostics: &mut Vec<Diagnostic>,
     span: Span,
 ) -> Option<Type> {
-    let first = args.first()?;
-    match &first.kind {
-        ExprKind::Int(_) => Some(Type::I64),
-        ExprKind::Float(_) => Some(Type::F64),
-        ExprKind::Bool(_) => Some(Type::Bool),
-        ExprKind::Var(name) => {
-            if let Some(ty) = scope.get(name) {
-                Some(ty.clone())
-            } else {
+    let is_v31_poll = call_name.starts_with("__poll_");
+    // Find the first param whose declared type structurally
+    // contains a Type::Param — that's the T-bearing slot.
+    // Recurse through Ref/RefMut/Apply/Vec/Array to find it.
+    fn first_param_idx_with_t(params: &[Param]) -> Option<usize> {
+        fn ty_has_param(ty: &Type) -> bool {
+            match ty {
+                Type::Param(_) => true,
+                Type::Ref(t) | Type::RefMut(t) | Type::Vec(t) => ty_has_param(t),
+                Type::Array { element, .. } => ty_has_param(element),
+                Type::Apply { args, .. } => args.iter().any(ty_has_param),
+                Type::Tuple(es) => es.iter().any(ty_has_param),
+                _ => false,
+            }
+        }
+        params.iter().position(|p| ty_has_param(&p.ty))
+    }
+    // v3.1 structural-unwrap helper. Peels Ref/RefMut at the
+    // type level, then peels a single-arg Type::Apply. Also
+    // parses ALREADY-COLLAPSED Type::Struct names back into T
+    // — `monomorphize_type_decls_in_program` runs before
+    // `monomorphize_generics_in_program`, so the user's
+    // non-generic call site (e.g. `drive(t: mut ref
+    // Task__identity<i64>)`) has had its Type::Apply collapsed
+    // to `Type::Struct("Task__identity__i64")` by the time we
+    // get here. Suffix-parse recovers T=I64 from the trailing
+    // `__i64` token.
+    fn extract_t_v31(ty: &Type) -> Type {
+        match ty {
+            Type::RefMut(inner) | Type::Ref(inner) => extract_t_v31(inner),
+            Type::Apply { args, .. } if args.len() == 1 => args[0].clone(),
+            Type::Struct(name) => {
+                if let Some(suffix) = name.rsplit("__").next() {
+                    match suffix {
+                        "i64" => return Type::I64,
+                        "f64" => return Type::F64,
+                        "bool" => return Type::Bool,
+                        "Str" => return Type::Str,
+                        "OwnedStr" => return Type::OwnedStr,
+                        _ => {}
+                    }
+                }
+                ty.clone()
+            }
+            _ => ty.clone(),
+        }
+    }
+    // Resolve an Expr to a concrete type via the scope + the
+    // is_v31_poll structural unwrap. Returns None + diagnostic
+    // for unsupported shapes.
+    let resolve_arg = |arg: &Expr, scope: &std::collections::HashMap<String, Type>,
+                       diagnostics: &mut Vec<Diagnostic>| -> Option<Type> {
+        let raw = match &arg.kind {
+            ExprKind::Int(_) => Some(Type::I64),
+            ExprKind::Float(_) => Some(Type::F64),
+            ExprKind::Bool(_) => Some(Type::Bool),
+            ExprKind::Var(name) => scope.get(name).cloned().or_else(|| {
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!(
@@ -5784,19 +5847,44 @@ fn infer_concrete_type_for_call(
                     ),
                 ));
                 None
+            }),
+            // Phase 4c-broad blocker 3: peel expr-level Ref/RefMut.
+            ExprKind::Ref { inner } | ExprKind::RefMut { inner } if is_v31_poll => {
+                if let ExprKind::Var(name) = &inner.kind {
+                    scope.get(name).cloned().or_else(|| {
+                        diagnostics.push(Diagnostic::new(
+                            span,
+                            format!(
+                                "cannot infer generic type parameter from variable '{}' \
+                                 inside a Ref/RefMut at the call site",
+                                name
+                            ),
+                        ));
+                        None
+                    })
+                } else {
+                    None
+                }
             }
-        }
-        _ => {
-            diagnostics.push(Diagnostic::new(
-                span,
-                "v1 generic-call inference supports literal arguments \
-                 (integer / float / bool) or annotated variable bindings \
-                 at the first position. More complex first-arg expressions \
-                 need full type-checking context.",
-            ));
-            None
-        }
-    }
+            _ => {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    "v1 generic-call inference supports literal arguments \
+                     (integer / float / bool), Var, or (v3.1 only) Ref/RefMut(Var) \
+                     at the T-position. More complex argument expressions need \
+                     full type-checking context.",
+                ));
+                None
+            }
+        };
+        raw.map(|ty| if is_v31_poll { extract_t_v31(&ty) } else { ty })
+    };
+    // Pick the T-bearing slot. Default to position 0 when no
+    // param mentions Type::Param (degenerate case — kept for
+    // compat with existing non-generic-shaped templates).
+    let t_idx = first_param_idx_with_t(params).unwrap_or(0);
+    let arg = args.get(t_idx)?;
+    resolve_arg(arg, scope, diagnostics)
 }
 
 /// Rewrite `Call { name: generic_fn, args }` to use the
@@ -5848,14 +5936,23 @@ fn rewrite_generic_calls_in_expr(
     scope: &std::collections::HashMap<String, Type>,
 ) {
     if let ExprKind::Call { name, args, .. } = &mut expr.kind {
-        if generics.contains_key(name) {
-            let inferred = args.first().and_then(|a| match &a.kind {
-                ExprKind::Int(_) => Some(Type::I64),
-                ExprKind::Float(_) => Some(Type::F64),
-                ExprKind::Bool(_) => Some(Type::Bool),
-                ExprKind::Var(n) => scope.get(n).cloned(),
-                _ => None,
-            });
+        if let Some(template) = generics.get(name).cloned() {
+            // Phase 4c-broad: route through the shared
+            // infer_concrete_type_for_call so the call-name
+            // mangling stays in lockstep with the
+            // collect_generic_calls_in_expr pre-pass. The
+            // shared logic walks the called fn's declared
+            // params to find the T-bearing slot AND applies
+            // structural unwrap for v3.1 `__poll_*` calls.
+            let mut local_diags: Vec<Diagnostic> = Vec::new();
+            let inferred = infer_concrete_type_for_call(
+                name,
+                &template.params,
+                args,
+                scope,
+                &mut local_diags,
+                expr.span,
+            );
             if let Some(t) = inferred {
                 *name = format!("{}__{}", name, type_mangle(&t));
             }

@@ -21908,37 +21908,54 @@ fn main() -> i64 {
         assert!(ll.contains("Task__outer"));
     }
 
-    /// Arc 8 v3.1 Phase 4c-narrow — generic async fns currently
-    /// hit a clean validator diagnostic. Full generics support
-    /// requires post-monomorphization re-transformation (deferred).
-    /// This test pins the diagnostic shape so the user gets a
-    /// clear message pointing at what types ARE accepted.
+    /// Arc 8 v3.1 Phase 4c-broad — generic async fns now compile
+    /// end-to-end. The validator accepts `Type::Param` in params
+    /// + return types when the enclosing fn declares the type
+    /// param; mono specializes the synthesized Task struct and
+    /// poll fn per concrete T; `infer_concrete_type_for_call`
+    /// finds the T-bearing slot in the called fn's signature
+    /// and structurally unwraps `mut ref Task__X<T>` patterns
+    /// for v3.1 `__poll_*` calls.
     #[test]
-    fn v31_phase4c_generic_async_fn_rejected_with_clear_diagnostic() {
+    fn v31_phase4c_broad_generic_async_fn_compiles_and_specializes() {
         let source = r#"
             async fn identity<T>(fd: i64, x: T) -> T {
               let n: i64 = io_recv_async(fd, 64);
               return x;
             }
+
+            fn drive(ep: i64, t: mut ref Task__identity<i64>) -> i64 {
+              while true {
+                let r: i64 = __poll_identity(t);
+                if r != 0 - 2 { return r; }
+                let _ = epoll_wait_one(ep, 0);
+              }
+              return 0;
+            }
+
             fn main() -> i64 {
               let server: i64 = tcp_listen(0);
-              let _ = identity(server, 42);
+              let t: Task__identity<i64> = identity(server, 42);
               let _ = tcp_close(server);
               return 0;
             }
         "#;
-        let errors = compile(source).expect_err(
-            "generic async fns should still hit v3.1 type-gate rejection"
+        let c = compile_to_c(source)
+            .expect("Phase 4c-broad: generic async fn must compile via C backend");
+        // The C output must include the SPECIALIZED struct +
+        // poll fn names (mangled with the concrete T=i64).
+        assert!(
+            c.contains("Task__identity__i64"),
+            "expected mangled Task__identity__i64 in C output"
         );
         assert!(
-            errors.iter().any(|e| {
-                let m = e.message.as_str();
-                m.contains("v3.1 async fn return type")
-                    && m.contains("not yet supported")
-                    && m.contains("Phase 3 accepts")
-            }),
-            "expected v3.1 return-type gate diagnostic; got: {:?}",
-            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+            c.contains("fn___poll_identity__i64") || c.contains("__poll_identity__i64"),
+            "expected mangled __poll_identity__i64 in C output"
+        );
+        // The __result field carries the generic return value.
+        assert!(
+            c.contains("__result"),
+            "expected __result field in specialized Task struct"
         );
     }
 
