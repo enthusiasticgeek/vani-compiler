@@ -4991,7 +4991,8 @@ fn desugar_try_let_in_program(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    use crate::ast::EnumDecl;
+    // EnumDecl is already imported at the file's top-level `use`;
+    // drop the redundant local re-import.
     // Build a quick enum registry: name → decl, so the
     // rewriter can find Some-like / None-like variants.
     let enum_by_name: std::collections::HashMap<String, EnumDecl> =

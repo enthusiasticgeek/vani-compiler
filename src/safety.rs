@@ -1479,7 +1479,7 @@ fn check_misra_13_expr(
 ) {
     use crate::ast::BinaryOp;
     use crate::ir::TypedExprKind as E;
-    if let E::Binary { op, left, right, .. } = &expr.kind {
+    if let E::Binary { op, left: _, right, .. } = &expr.kind {
         if matches!(op, BinaryOp::And | BinaryOp::Or) {
             if expr_contains_impure_call(right, sig_pure) {
                 diagnostics.push(Diagnostic::new(

@@ -38448,12 +38448,11 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
             let parts: Vec<String> = elements.iter().map(vec_struct_tag).collect();
             format!("tuple_{}", parts.join("_"))
         }
-        // Nested `Vec<Vec<T>>` and `Vec<Array<...>>` flatten
-        // through their inner tag recursively.
-        Type::Vec(inner) => format!("vec_{}", vec_struct_tag(inner)),
-        Type::Array { element: inner, length } => {
-            format!("arr_{}_{}", length, vec_struct_tag(inner))
-        }
+        // Note: Type::Vec(_) and Type::Array { .. } are handled
+        // by the leading arms of this match (lines 38416-38418) —
+        // earlier-arm shadowing made the trailing duplicates
+        // unreachable. Removed.
+
         // Scalars + ref/atomic/channel go through the
         // existing leaf spelling, with `%`/`*`/space replaced
         // by `_` so the identifier stays well-formed.
