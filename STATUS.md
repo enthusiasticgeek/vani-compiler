@@ -169,7 +169,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **v3.1 Phase 4b + 4c-narrow — multi-task + clean generic
-  rejection** (commit pending). Zero compiler changes — both
+  rejection** (commit `7f7b3d7`). Zero compiler changes — both
   slices are integration-level verifications of work already
   shipped in 4a-narrow + 4a-broad:
   - **4b multi-task**: an outer async fn constructing + awaiting

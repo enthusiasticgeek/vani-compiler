@@ -97,7 +97,7 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
-> **Phase 4b + 4c-narrow ✅ COMPLETE 2026-06-04** (commit pending).
+> **Phase 4b + 4c-narrow ✅ COMPLETE 2026-06-04** (commit `7f7b3d7`).
 > Multi-task scheduling (4b) works via the existing Phase 4a-broad
 > infrastructure — no compiler changes needed. Generic async fns
 > (4c) cleanly hit the v3.1 type-gate with a precise diagnostic
