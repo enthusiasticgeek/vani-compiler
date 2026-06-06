@@ -26965,6 +26965,41 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn sov_verb_at_end_let_compiles_and_binds() {
+        // SOV-S1 (2026-06-06): let-binding verb-at-end. The
+        // natural Sanskrit / Hindi / Marathi grammar for "let
+        // doubled equal 5 times 2" is "doubled, of type i64,
+        // [equals] 5 times 2, [is] let" — verb anchoring the
+        // sentence at the end. The lookahead detector finds
+        // `Let` immediately before `;` and routes through the
+        // SOV-let parse handler (parse_sov_verb_stmt arm).
+        let source = r#"
+            कार्य main() -> i64 {
+              doubled: i64 = 5 * 2 माना;
+              triple: i64 = doubled * 3 / 2 माना;
+              triple >= doubled सिद्धम्;
+              "values:", doubled, triple लिख;
+              पुनरागम 0;
+            }
+        "#;
+        compile(source).expect("SOV let compiles");
+    }
+
+    #[test]
+    fn sov_verb_at_end_let_with_no_annotation() {
+        // SOV-let WITHOUT an explicit type annotation: the
+        // annotation is optional in both the keyword-first
+        // (`माना x = 5;`) and SOV (`x = 5 माना;`) shapes.
+        let source = r#"
+            कार्य main() -> i64 {
+              x = 42 माना;
+              x पुनरागम;
+            }
+        "#;
+        compile(source).expect("SOV let without annotation compiles");
+    }
+
+    #[test]
     fn devanagari_three_way_alias_parity_fills_gaps() {
         // Closure #267: fills the Sanskrit / Hindi / Marathi
         // alias parity gaps surveyed in TODO.md #30. Pure-

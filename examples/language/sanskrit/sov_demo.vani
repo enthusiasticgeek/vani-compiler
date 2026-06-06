@@ -1,0 +1,52 @@
+// श्री।
+//
+// SOV demo (Subject-Object-Verb, verb-final) — Sanskrit natural
+// grammar applied to vāṇī's main statement shapes.
+//
+// build & run:
+//   vanic run examples/language/sanskrit/sov_demo.vani                 # LLVM
+//   vanic run examples/language/sanskrit/sov_demo.vani --backend=c     # C
+//
+// Constructs shown:
+//   • `माना` (mānā) verb-at-end for `let` bindings
+//   • `पुनरागम` (punarāgama) verb-at-end for `return`
+//   • `लिख` (likh) verb-at-end for `print`
+//   • `सिद्धम्` (siddham) verb-at-end for `assert`
+//   • `प्रमाण` (pramāṇa) verb-at-end for `prove`
+//   • `के लिए` (ke liye) range-for SOV (Hindi form)
+//   • Keyword-first for if / fn / struct (naturally read keyword-
+//     first in Sanskrit's `यदि...तदा` and noun-introduction style)
+
+उद्देश्य "Sanskrit SOV showcase — all verb-at-end shapes in one file";
+
+कार्य add(a: i64, b: i64) -> i64 {
+  a + b पुनरागम;
+}
+
+कार्य main() -> i64 {
+  // SOV-S1: let-binding verb-at-end. Reads as
+  // "doubled of type i64 [equals] 5 times 2 [is] let".
+  doubled: i64 = 5 * 2 माना;
+  triple: i64 = doubled * 3 / 2 माना;
+
+  // Existing SOV: prove + assert + print verb-at-end.
+  2 + 2 == 4 प्रमाण;
+  triple >= doubled सिद्धम्;
+  "doubled = ", doubled, ", triple = ", triple लिख;
+
+  // Existing SOV: range-for (Hindi multi-word `के लिए`).
+  // Note: `माना` (mānā) is always a let-binding (not re-
+  // assignment); use the bare `=` operator for in-loop mutation.
+  acc: i64 = 0 माना;
+  i के लिए 0 से 3 तक {
+    acc = acc + i;
+  }
+  "loop sum = ", acc लिख;
+
+  // Function call + return verb-at-end. Print the result (so the
+  // demo shows the computed value) and exit 0 (so the test
+  // runner's exit-code gate sees success).
+  result: i64 = add(doubled, triple) माना;
+  "add(doubled, triple) = ", result लिख;
+  0 पुनरागम;
+}

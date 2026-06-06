@@ -930,6 +930,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "push_mut.vani",
         "rng.vani",
         "../sanskrit/keywords.vani",  // A.2 reorg: lives at examples/language/sanskrit/keywords.vani
+        "../sanskrit/sov_demo.vani",  // SOV-S1 demo: let-binding verb-at-end
         "scopes.vani",
         "skiplist.vani",
         "sort.vani",

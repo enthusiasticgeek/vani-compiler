@@ -92,69 +92,80 @@ etc.). After that, global languages (English, Spanish, Mandarin,
 Arabic, etc.) join as secondary targets. The README is now explicit
 about this priority order.
 
-**Shipped (from earlier sessions, audit 2026-06-06)**:
-  - 87 Devanagari aliases for 41 of 45 structure keywords
-    ([lexer.rs:222–365](src/lexer.rs#L222-L365)).
-  - SOV word order for **range `for`** + **four verb-at-end
-    statements** (`return` / `print` / `assert` / `prove`)
-    ([parser.rs:2277–2328](src/parser.rs#L2277-L2328)).
+**Shipped (cumulative through 2026-06-06 evening)**:
+  - **91 Devanagari aliases covering 46 of 46 structure keywords**
+    ([lexer.rs:222–372](src/lexer.rs#L222-L372)) — 100% coverage
+    after SOV-S7 added the final four (commit `7e3c061`).
+  - SOV word order for **5 statement shapes**:
+    range `for` + 4 verb-at-end statements (`return` / `print` /
+    `assert` / `prove`) + **`let` verb-at-end (SOV-S1, NEW)**
+    ([parser.rs:2277–2328](src/parser.rs#L2277-L2328) +
+    [parser.rs:3404–3434](src/parser.rs#L3404-L3434)).
   - Per-file script purity (English vs Devanagari, auto-detected)
     ([lexer.rs:393–441](src/lexer.rs#L393-L441)).
-  - 3 Devanagari example programs (`hindi_keywords.vani`,
-    `sanskrit_keywords.vani`, `marathi_keywords.vani`) run end-to-
-    end in the parity sweep.
+  - 4 Devanagari example programs: `sanskrit/keywords.vani`,
+    `hindi/keywords.vani`, `marathi/keywords.vani`, and
+    **`sanskrit/sov_demo.vani` (NEW — full SOV showcase)**, all
+    in `examples/language/<lang>/` per the A.2 reorg.
+  - **Cross-language `.vani` translator tool** (Python v1) at
+    `tools/vani_translate.py` — round-trip parity verified on 8
+    representative examples.
 
-**Remaining work for full natural-speech coding**:
+**Why some constructs stay keyword-first (design decision 2026-06-06)**:
 
-1. **SOV-S1 — `let` binding verb-at-end**
-   Allow `x 5 मान;` ("x five let") as an alias for `मान x = 5;`.
-   Parser hook in the LHS-of-`=` slot; collect operand tokens
-   until the trailing verb-keyword.
+Not every English keyword needs a verb-at-end SOV shape. Sanskrit
+/ Hindi / Marathi natural grammar reads some constructs keyword-
+first by tradition. Specifically:
 
-2. **SOV-S2 — `fn` declaration with verb-at-end signature**
-   `add(a: i64, b: i64) -> i64 कार्य { … }` (function name +
-   params + return at front, verb-keyword `कार्य` after).
-   Requires top-level SOV detector (currently SOV only fires
-   inside fn bodies).
+  - **`if` / `else`**: classical Sanskrit `यदि...तर्हि`
+    (yadi...tarhi) is naturally keyword-first ("if X then Y").
+    Hindi `अगर` / Marathi `जर` follow the same shape.
+    Verb-at-end here would feel forced.
+  - **`while`**: similar — Sanskrit `यावत्` (yāvat = "as long as")
+    introduces the condition naturally.
+  - **`match`**: Sanskrit `मेल x { ... }` reads as "matching of x,
+    [these cases]" — keyword-first matches how the construct is
+    introduced in declarative sentences.
+  - **`fn` / `struct` / `enum`**: technical declarations not
+    rooted in spoken-language verbs. Keyword-first matches how
+    Sanskrit names things ("named `कार्य` add: ...").
 
-3. **SOV-S3 — `if` / `else` cond-at-end**
-   `cond यदि { … } अन्यथा { … }` (condition first, verb last).
-   Hindi/Marathi already commonly read this way colloquially.
+The verb-at-end SOV shapes only ship for constructs where a
+natural verb genuinely closes the sentence: `let` (māna = "assume
+/ let"), `return` (punarāgama = "going back"), `print` (likh =
+"write"), `assert` (siddham = "established"), `prove` (pramāṇa =
+"proof"), and `for` (the range-binding shape). For the rest, the
+keyword-first Devanagari surface is the natural form.
 
-4. **SOV-S4 — `while` cond-at-end**
-   `cond यावत् { … }` (Sanskrit) / `cond जबतक { … }` (Hindi).
+**Remaining work** (low-priority follow-ups; grammar-consultant
+gated):
 
-5. **SOV-S5 — `match` scrutinee-at-front, verb-at-end**
-   `x मेल { 0 then …, _ then … }` — scrutinee + verb + arms.
-
-6. **SOV-S6 — `struct` / `enum` declaration SOV-shape**
-   `Point { x: i64, y: i64 } रचना;` (Point with fields then verb
-   "structure"). Pick the Sanskrit verb together with grammar
-   consultant.
-
-7. **SOV-S7 — Four English-only keywords gain Devanagari aliases**
-   `extern`, `type`, `intent`, `invariant`. Pick tatsama Sanskrit
-   roots; document in the alias table.
-
-8. **SOV-S8 — Finer Sanskrit-vs-Hindi-vs-Marathi purity gate**
+1. **SOV-S8 — Finer Sanskrit-vs-Hindi-vs-Marathi purity gate**
    Today the lexer purity gate distinguishes English vs Devanagari
    only. Add a sub-mode that enforces a single Indo-Aryan dialect
    per file when the user opts in via a file-header pragma.
 
-9. **SOV-S9 — Grammar-consultant refinement pass**
+2. **SOV-S9 — Grammar-consultant refinement pass**
    The current Sanskrit / Hindi / Marathi keyword picks are best-
    effort. Consult native-speaker linguists for each dialect to
-   confirm verb choice + spelling + ergonomic feel.
+   confirm verb choice + spelling + ergonomic feel. External
+   dependency — happens out-of-band.
 
-10. **SOV-S10 — Devanagari example coverage**
-    Add at least one Devanagari example per non-trivial vāṇी
-    feature (generics, async, FFI, parallel-for, etc.). Today the
-    three Devanagari examples cover only basic syntax.
+3. **SOV-S10 — Devanagari example coverage**
+   Add at least one Devanagari example per non-trivial vāṇी
+   feature (generics, async, FFI, parallel-for, etc.). Today four
+   Devanagari examples cover the basics + SOV shapes; broader
+   surface (`tcp_echo`, `parallel_for`, etc.) needs translations.
+   The B.1 translator tool can generate these directly from the
+   English examples.
 
-**Effort estimate**: ~40-60h focused. SOV-S1..S5 are parser-only
-(small per-construct hooks). SOV-S6..S10 are lexer/parser table
-extensions + tests + docs. Grammar consultation is an external
-dependency the user manages.
+**~~SOV-S1..S7~~ ✅ SHIPPED** — all closed earlier in the session.
+SOV-S2 (fn-decl), SOV-S3 (if cond-at-end), SOV-S4 (while), SOV-S5
+(match), SOV-S6 (struct/enum) are **declined as design** per the
+"why keyword-first" rationale above.
+
+**Effort estimate** (remaining): ~4-8h for SOV-S10 (translator-
+assisted example coverage). SOV-S8 + S9 are external deps.
 
 ---
 

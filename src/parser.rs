@@ -2517,12 +2517,23 @@ impl Parser {
                         return None;
                     }
                     let prev = &self.tokens[i - 1];
+                    // Tier C SOV-S1 (2026-06-06): added `Let` to
+                    // the SOV verb-at-end set. Natural Indo-
+                    // Aryan grammar puts `माना` (mānā = "let /
+                    // assume") at the end of a binding clause:
+                    //   `doubled: i64 = base * 2 माना;`
+                    // reads as "doubled, of type i64, equals
+                    // base times two, [is] let" with the verb
+                    // anchoring the sentence at the end. Hindi
+                    // and Marathi use the same shape with their
+                    // own forms (`मानो` / `मान`).
                     if matches!(
                         prev.kind,
                         TokenKind::Return
                             | TokenKind::Print
                             | TokenKind::Assert
                             | TokenKind::Prove
+                            | TokenKind::Let
                     ) {
                         return Some(prev.kind.clone());
                     }
@@ -3395,6 +3406,36 @@ impl Parser {
                 self.bump(); // consume Return
                 let semi = self.expect_keyword("';'", |k| matches!(k, TokenKind::Semicolon))?;
                 Ok(Stmt::Return {
+                    expr,
+                    span: start_span.merge(semi.span),
+                })
+            }
+            // Tier C SOV-S1 (2026-06-06): `<name>[: <type>] = <expr> माना;`
+            // — Sanskrit / Hindi / Marathi natural shape for a
+            // let-binding. The variable name + optional type
+            // annotation + initializer expression all appear
+            // before the verb `माना` (mānā) which closes the
+            // sentence. Identifier-of-name is the first token;
+            // the existing parse_let_binding handles
+            // <type> + = + <expr>, so reuse it after bumping
+            // past the leading IDENT and faking a keyword-first
+            // shape, then consume the trailing Let verb.
+            TokenKind::Let => {
+                let name_tok = self.expect_ident()?;
+                let name = ident_text(name_tok);
+                let annotation = if self.match_token(|k| matches!(k, TokenKind::Colon)).is_some() {
+                    Some(self.parse_type()?)
+                } else {
+                    None
+                };
+                self.expect_keyword("'=' (SOV let needs an initializer)",
+                    |k| matches!(k, TokenKind::Equal))?;
+                let expr = self.parse_expr()?;
+                self.bump(); // consume Let verb
+                let semi = self.expect_keyword("';'", |k| matches!(k, TokenKind::Semicolon))?;
+                Ok(Stmt::Let {
+                    name,
+                    annotation,
                     expr,
                     span: start_span.merge(semi.span),
                 })

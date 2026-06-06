@@ -29,29 +29,38 @@ adaptations. The compiler core is script- and grammar-agnostic; the
 surface is a token-alias layer + a parser word-order hook. Adding
 a new language is a lexer table + a small parser test.
 
-> **Honest status (2026-06-06)**: SOV + natural-speech coding for
-> Sanskrit / Hindi / Marathi is **partially shipped**, not complete:
+> **Status (2026-06-06 evening)**: SOV + natural-speech coding for
+> Sanskrit / Hindi / Marathi is **substantially shipped**:
 >
-> - **87 Devanagari aliases** cover **41 of 45** structure keywords
->   ([lexer.rs:222–365](src/lexer.rs#L222-L365)). Four keywords —
->   `extern`, `type`, `intent`, `invariant` — are still English-only.
-> - **SOV word order** is wired for **range `for` loops** + four
->   **verb-at-end statements** (`return`, `print`, `assert`, `prove`)
->   ([parser.rs:2277–2328](src/parser.rs#L2277-L2328)). Most
->   constructs (`let`, `fn`, `struct`, `enum`, `if`, `while`,
->   `match`, top-level decls) **still require keyword-first
->   syntax** even in Devanagari mode.
+> - **91 Devanagari aliases** cover **46 of 46** structure keywords
+>   ([lexer.rs:222–372](src/lexer.rs#L222-L372)) — full coverage.
+> - **SOV word order** wired for **6 statement shapes**: range `for`
+>   loops + **`let` binding verb-at-end** (`x: i64 = 5 माना;`) +
+>   four verb-at-end stmts (`return` / `print` / `assert` /
+>   `prove`)
+>   ([parser.rs:2277–2328](src/parser.rs#L2277-L2328) +
+>   [parser.rs:3404–3434](src/parser.rs#L3404-L3434)).
+> - Other constructs (`if`, `while`, `match`, `fn`, `struct`,
+>   `enum`) **stay keyword-first by design** — Sanskrit
+>   `यदि...तर्हि` / Hindi `अगर...तो` are naturally keyword-first
+>   in Indo-Aryan grammar; forcing verb-at-end here would feel
+>   unnatural. See [TODO.md](TODO.md) §*Why some constructs stay
+>   keyword-first* for the per-construct rationale.
 > - **Per-file purity** is at the script level (English vs
 >   Devanagari, [lexer.rs:393–441](src/lexer.rs#L393-L441)). Finer-
 >   grained Sanskrit-vs-Hindi-vs-Marathi enforcement is deferred
->   pending grammar-consultant review.
+>   pending grammar-consultant review (SOV-S8).
+> - **Cross-language translator** ships at
+>   [`tools/vani_translate.py`](tools/vani_translate.py) — rewrite
+>   any `.vani` source between English / Sanskrit / Hindi /
+>   Marathi, round-trip parity verified on 8 representative
+>   examples.
 > - **Global languages** (Spanish, Mandarin, etc.) — **not started**.
 >   The lexer table is the right shape to receive them; the work is
 >   curating the keyword sets.
 >
-> See [TODO.md](TODO.md) §*Sanskrit-derived SOV completion* for the
-> remaining work list and §*Global language surface* for the queue
-> beyond that.
+> See [TODO.md](TODO.md) §*Open work — DEPENDENCY-ORDERED* for the
+> dependency-ordered remaining queue.
 
 ## Philosophy
 
