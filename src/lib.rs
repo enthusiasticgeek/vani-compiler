@@ -21790,6 +21790,66 @@ fn main() -> i64 {
         assert!(ll.contains("Task__classify") && ll.contains("__poll_classify"));
     }
 
+    /// Arc 8 v3.1 Phase 3-params — non-i64 async fn parameter
+    /// types (mirrors Phase 3a-f for locals + Phase 3-returns
+    /// for return types). Same `v31_local_type_allowed` gate;
+    /// each param is already stored in the task struct as a
+    /// constructor input so any v31-allowed type works.
+    #[test]
+    fn v31_phase3p_bool_param_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, eager: bool) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return match eager { true then n * 2, false then n };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3p bool param must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3p bool param must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3-params — Str param accepted.
+    #[test]
+    fn v31_phase3p_str_param_accepted() {
+        let source = r#"
+            async fn pick(fd: i64, tag: Str) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return match tag { "a" then n + 100, _ then n };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 3p Str param must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 3p Str param must compile on LLVM");
+        assert!(c.contains("Task__pick") && c.contains("__poll_pick"));
+        assert!(ll.contains("Task__pick") && ll.contains("__poll_pick"));
+    }
+
+    /// Arc 8 v3.1 Phase 3-params — params with type Type::Tuple
+    /// or other v31-disallowed types still rejected.
+    #[test]
+    fn v31_phase3p_tuple_param_still_rejected() {
+        let source = r#"
+            async fn bad(fd: i64, pair: (i64, i64)) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err(
+            "Tuple param must still be rejected (not in v31_local_type_allowed)"
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("Phase 3") || m.contains("parameter") || m.contains("Tuple")
+            }),
+            "expected gate diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 2.4 — `try EXPR` keyword in async fn
     /// bodies. Parse-time desugar lowers `let X: T = try EXPR;`
     /// into a match-with-early-return sequence. Requires the

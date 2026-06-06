@@ -1,0 +1,74 @@
+// Arc 8 v3.1 Phase 3-params — non-i64 async fn parameter types.
+//
+// Mirrors Phase 3a-f (non-i64 locals) and Phase 3-returns
+// (non-i64 return types). Same `v31_local_type_allowed` gate;
+// each param is already stored in the task struct as a
+// constructor input so any v31-allowed type works without
+// further plumbing.
+//
+// Supported: i64 (baseline), bool, f64, Str, OwnedStr,
+// Enum (registered), Vec<T>, Struct (registered),
+// Array `[T; N]`.
+//
+// Note: passing a non-i64 enum with multiple unit variants and
+// then matching on it inside an async fn body trips a pre-
+// existing LLVM IR emit bug (unrelated to Phase 3-params).
+// Workaround: use a helper fn that converts the enum to i64 OR
+// pass i64 + reconstitute the enum inside.
+//
+// build & run:
+//   intentc run examples/echo_p3p_nonint_params.vani                # LLVM
+//   intentc run examples/echo_p3p_nonint_params.vani --backend=c    # C
+
+intent "Phase 3-params — non-i64 async fn params";
+
+async fn fetch(fd: i64, eager: bool, tag: Str) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  let multiplier: i64 = match eager { true then 10, false then 1 };
+  let tag_bonus: i64 = match tag {
+    "alpha" then 1000,
+    "beta" then 2000,
+    _ then 0
+  };
+  return n * multiplier + tag_bonus;
+}
+
+fn drive(ep: i64, t: mut ref Task__fetch) -> i64 {
+  while true {
+    let r: i64 = __poll_fetch(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ok");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // eager=true, tag="beta": recv 2 bytes "ok", multiplier=10,
+  // tag_bonus=2000, result = 2*10 + 2000 = 2020.
+  let t: Task__fetch = fetch(cfd, true, "beta");
+  let r: i64 = drive(ep, mut ref t);
+  print "result:", r;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

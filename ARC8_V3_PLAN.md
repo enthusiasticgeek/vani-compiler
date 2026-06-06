@@ -97,6 +97,16 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 3-params ✅ COMPLETE 2026-06-04** (commit pending).
+> Non-i64 async fn parameter types via the same
+> `v31_local_type_allowed` gate as locals + returns. Each param
+> already lives as a task struct field; lifting the type
+> restriction (changing Type::I64 force to p.ty.clone()) is the
+> minimal change. examples/echo_p3p_nonint_params.vani parity-
+> green (bool + Str params combined). 3 new lib tests.
+> v3.1 affine types now span the ENTIRE async-fn boundary:
+> params + locals + returns.
+>
 > **Phase 2.4 ✅ COMPLETE 2026-06-04** (commit `72fd8e7`). `try EXPR`
 > keyword in v3.1 async fn bodies. Parse-time desugar runs FIRST in
 > try_v31_transform (before ANF + validator). Lowers

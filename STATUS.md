@@ -13,7 +13,7 @@
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b +
-3c + 3d + 3e + 3f + 3-returns shipped — compiler-driven
+3c + 3d + 3e + 3f + 3-returns + 3-params shipped — compiler-driven
 `async fn → Task` transform handles linear bodies +
 non-suspending control flow + suspend-in-branch state-
 splitting + fall-through merge state + nested ifs + ANF
@@ -24,9 +24,9 @@ inside loops + **`try EXPR` keyword for Result propagation**
 + non-i64 LOCALS (bool / f64 / Str / OwnedStr / Enum /
 Vec / Struct / Array) + non-i64 RETURN TYPES (via
 `__result: T` field + status-only poll ABI).
-25 v3.1 acceptance examples parity-green. **v3.1 affine
+26 v3.1 acceptance examples parity-green. **v3.1 affine
 + Result types across the entire async-fn boundary
-(locals + returns + try-propagation).** macOS
+(locals + returns + PARAMS + try-propagation).** macOS
 port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -165,6 +165,27 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 3-params — non-i64 async fn parameter types**
+  (commit pending). Mirrors Phase 3a-f (locals) + Phase
+  3-returns (returns). The validator's param-type check
+  routes through `v31_local_type_allowed`; task struct field
+  types now use `p.ty.clone()` instead of `Type::I64`. Each
+  param is already stored as a constructor input + task
+  struct field, so any v31-allowed type works uniformly with
+  no further plumbing changes.
+  - `examples/echo_p3p_nonint_params.vani` — `fetch(fd, eager:
+    bool, tag: Str) -> i64` exercising both bool + Str
+    params. recv "ok" 2 bytes * 10 (eager=true) + 2000 (tag
+    "beta") = 2020 byte-identical on both backends.
+  - 3 new lib tests (bool acceptance + Str acceptance + Tuple
+    rejection pinning the gate boundary).
+  - **Known LLVM pre-existing bug**: passing a non-i64 enum with
+    multiple unit variants AND matching on it inside the
+    async fn body produces "Bad module" LLVM IR. Unrelated to
+    Phase 3-params — reproduces in non-async code too. C
+    backend works fine; LLVM enum-match codegen needs a
+    separate fix.
 
 - **v3.1 Phase 2.4 — `try EXPR` keyword in async fn bodies**
   (commit `72fd8e7`). Parse-time desugar

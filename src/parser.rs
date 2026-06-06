@@ -6326,13 +6326,17 @@ fn validate_v31_linear_body(
             ),
         ));
     }
-    // All params must be i64 (no ref T, no other types).
+    // Phase 3-params (Phase 3p): params route through v31_local_
+    // type_allowed — same gate as locals + returns. Each param is
+    // already stored in the task struct as a constructor input,
+    // so any v31-allowed type (bool / f64 / Str / OwnedStr /
+    // Enum / Vec<T> / Struct / Array) works uniformly.
     for p in params {
-        if !matches!(p.ty, Type::I64) {
+        if !v31_local_type_allowed(&p.ty) {
             return Err(Diagnostic::new(
                 p.span,
                 format!(
-                    "v3.1 async fn parameter '{}' must be i64 (got {:?}); ref / non-i64 params arrive in Phase 3-4",
+                    "v3.1 async fn parameter '{}' has type {:?} — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / Enum (registered) / Vec<T> / Struct (registered) / Array<T,N>",
                     p.name, p.ty
                 ),
             ));
@@ -6789,9 +6793,12 @@ pub(crate) fn try_v31_transform(
         span: fn_name_span,
     });
     for p in params {
+        // Phase 3-params — keep the user's annotation so non-i64
+        // params (bool / Str / Enum / etc.) become task struct
+        // fields of the correct type, not forced to i64.
         struct_fields.push(StructField {
             name: p.name.clone(),
-            ty: Type::I64,
+            ty: p.ty.clone(),
             span: p.span,
         });
     }
