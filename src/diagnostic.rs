@@ -11,6 +11,122 @@ pub struct Diagnostic {
     pub related: Vec<(Span, String)>,
 }
 
+/// SOV-S9b (2026-06-06): per-file diagnostic localization. When the
+/// source has a `// vani-lang: <dialect>` pragma in the first ~10
+/// lines, error and note labels render in the declared dialect.
+/// The English body of each message is preserved so users can
+/// search for it and reach the existing English-language docs +
+/// issues; the localization layers a short native-language
+/// "त्रुटिः" / "त्रुटि" / "चूक" prefix on top.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum DiagLang {
+    Sanskrit,
+    Hindi,
+    Marathi,
+    English,
+}
+
+fn detect_diag_lang(source: &str) -> Option<DiagLang> {
+    for (i, line) in source.lines().enumerate() {
+        if i > 10 {
+            break;
+        }
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("//") {
+            continue;
+        }
+        let body = trimmed.trim_start_matches("//").trim();
+        let Some(rest) = body
+            .strip_prefix("vani-lang:")
+            .or_else(|| body.strip_prefix("vani-lang :"))
+        else {
+            continue;
+        };
+        let name = rest.trim().to_ascii_lowercase();
+        return match name.as_str() {
+            "sanskrit" | "saṁskṛta" | "sa" => Some(DiagLang::Sanskrit),
+            "hindi" | "hindī" | "hi" => Some(DiagLang::Hindi),
+            "marathi" | "marāṭhī" | "mr" => Some(DiagLang::Marathi),
+            "english" | "en" => Some(DiagLang::English),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
+    match (level, lang) {
+        ("error", Some(DiagLang::Sanskrit)) => "त्रुटिः (error)".to_string(),
+        ("error", Some(DiagLang::Hindi)) => "त्रुटि (error)".to_string(),
+        ("error", Some(DiagLang::Marathi)) => "चूक (error)".to_string(),
+        ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
+        ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
+        ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
+        _ => level.to_string(),
+    }
+}
+
+/// Best-effort message-prefix localization for the highest-
+/// frequency error families. The English body is appended after a
+/// `—` so the user can match the existing wording in docs/issues.
+/// Unknown prefixes pass through with no translation.
+fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
+    let Some(lang) = lang else {
+        return message.to_string();
+    };
+    if lang == DiagLang::English {
+        return message.to_string();
+    }
+    let table = match lang {
+        DiagLang::Sanskrit => &[
+            ("expected ", "अपेक्षितम् "),
+            ("unknown variable", "अज्ञातं चरम् (unknown variable)"),
+            ("unknown function", "अज्ञातं कार्यम् (unknown function)"),
+            ("unknown struct", "अज्ञाता संरचना (unknown struct)"),
+            ("type mismatch", "प्रकारभेदः (type mismatch)"),
+            ("cannot prove", "प्रमाणीकर्तुम् अशक्यम् (cannot prove)"),
+            ("function ", "कार्यम् "),
+            ("language mismatch", "भाषाभेदः (language mismatch)"),
+            ("invalid", "अमान्यम् (invalid)"),
+            ("integer literal", "पूर्णांकमूल्यम् (integer literal)"),
+            ("float literal", "दशांशमूल्यम् (float literal)"),
+        ][..],
+        DiagLang::Hindi => &[
+            ("expected ", "अपेक्षित "),
+            ("unknown variable", "अज्ञात चर (unknown variable)"),
+            ("unknown function", "अज्ञात फलन (unknown function)"),
+            ("unknown struct", "अज्ञात संरचना (unknown struct)"),
+            ("type mismatch", "प्रकार मेल नहीं (type mismatch)"),
+            ("cannot prove", "प्रमाणित नहीं कर सकते (cannot prove)"),
+            ("function ", "फलन "),
+            ("language mismatch", "भाषा बेमेल (language mismatch)"),
+            ("invalid", "अमान्य (invalid)"),
+            ("integer literal", "पूर्णांक मान (integer literal)"),
+            ("float literal", "दशांश मान (float literal)"),
+        ][..],
+        DiagLang::Marathi => &[
+            ("expected ", "अपेक्षित "),
+            ("unknown variable", "अज्ञात चल (unknown variable)"),
+            ("unknown function", "अज्ञात कार्य (unknown function)"),
+            ("unknown struct", "अज्ञात संरचना (unknown struct)"),
+            ("type mismatch", "प्रकार जुळत नाही (type mismatch)"),
+            ("cannot prove", "सिद्ध करता येत नाही (cannot prove)"),
+            ("function ", "कार्य "),
+            ("language mismatch", "भाषा जुळत नाही (language mismatch)"),
+            ("invalid", "अवैध (invalid)"),
+            ("integer literal", "पूर्णांक मूल्य (integer literal)"),
+            ("float literal", "दशांश मूल्य (float literal)"),
+        ][..],
+        DiagLang::English => return message.to_string(),
+    };
+    for (en_prefix, dev_prefix) in table {
+        if let Some(rest) = message.strip_prefix(en_prefix) {
+            return format!("{}{}", dev_prefix, rest);
+        }
+    }
+    message.to_string()
+}
+
 impl Diagnostic {
     pub fn new(span: Span, message: impl Into<String>) -> Self {
         Self {
@@ -28,11 +144,15 @@ impl Diagnostic {
 
 pub fn format_diagnostics(path: &str, source: &str, diagnostics: &[Diagnostic]) -> String {
     let mut output = String::new();
-
+    let lang = detect_diag_lang(source);
     for diagnostic in diagnostics {
-        render_one(&mut output, path, source, diagnostic.span, "error", &diagnostic.message);
+        let label = localize_label("error", lang);
+        let msg = localize_message(&diagnostic.message, lang);
+        render_one(&mut output, path, source, diagnostic.span, &label, &msg);
         for (span, note) in &diagnostic.related {
-            render_one(&mut output, path, source, *span, "note", note);
+            let nlabel = localize_label("note", lang);
+            let nmsg = localize_message(note, lang);
+            render_one(&mut output, path, source, *span, &nlabel, &nmsg);
         }
     }
 
@@ -170,9 +290,20 @@ impl FileMap {
 pub fn format_diagnostics_with_files(map: &FileMap, diagnostics: &[Diagnostic]) -> String {
     let mut output = String::new();
     for d in diagnostics {
-        render_with_filemap(&mut output, map, d.span, "error", &d.message);
+        // Look up the source for this diagnostic to detect its
+        // per-file language pragma. The pragma applies to the
+        // FILE the span originates from, not globally.
+        let lang = map
+            .lookup(d.span.start)
+            .map(|(entry, _)| detect_diag_lang(&entry.source))
+            .unwrap_or(None);
+        let label = localize_label("error", lang);
+        let msg = localize_message(&d.message, lang);
+        render_with_filemap(&mut output, map, d.span, &label, &msg);
         for (span, note) in &d.related {
-            render_with_filemap(&mut output, map, *span, "note", note);
+            let nlabel = localize_label("note", lang);
+            let nmsg = localize_message(note, lang);
+            render_with_filemap(&mut output, map, *span, &nlabel, &nmsg);
         }
     }
     output

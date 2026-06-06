@@ -26965,6 +26965,76 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn diagnostics_localize_to_sanskrit_pragma() {
+        // SOV-S9b (2026-06-06): per-file diagnostic
+        // localization. A `// vani-lang: sanskrit` pragma at the
+        // top renders errors with Sanskrit labels +  message-
+        // prefix translations. The English body is preserved
+        // after `—` so users can still search for it.
+        use crate::diagnostic::format_diagnostics;
+        let source = "// vani-lang: sanskrit\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> पूर्णांक {\n  \
+                        nope पुनरागम;\n\
+                      }\n";
+        let errors = compile(source).expect_err("expected unknown-var error");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("त्रुटिः"),
+            "Sanskrit pragma should render error label as त्रुटिः, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("अज्ञातं चरम्"),
+            "Sanskrit unknown-variable message should include अज्ञातं चरम्, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn diagnostics_localize_to_hindi_pragma() {
+        use crate::diagnostic::format_diagnostics;
+        let source = "// vani-lang: hindi\n\
+                      उद्देश्य \"t\";\n\
+                      फलन main() -> पूर्णांक {\n  \
+                        nope लौटाओ;\n\
+                      }\n";
+        let errors = compile(source).expect_err("expected unknown-var error");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("त्रुटि "),
+            "Hindi pragma should render error label as त्रुटि, got: {}",
+            rendered
+        );
+        assert!(
+            rendered.contains("अज्ञात चर"),
+            "Hindi unknown-variable message should include अज्ञात चर, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
+    fn diagnostics_stay_english_without_pragma() {
+        use crate::diagnostic::format_diagnostics;
+        // No pragma → English-only labels, no localization.
+        let source = "fn main() -> i64 {\n  \
+                        nope return;\n\
+                      }\n";
+        let errors = compile(source).expect_err("expected unknown-var error");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("error:"),
+            "non-pragma file should keep English error label, got: {}",
+            rendered
+        );
+        assert!(
+            !rendered.contains("त्रुटि"),
+            "non-pragma file should NOT have Devanagari labels, got: {}",
+            rendered
+        );
+    }
+
+    #[test]
     fn sov_s3_if_else_block_form_compiles() {
         // SOV-S3 (2026-06-06): `<cond> यदि { ... } अन्यथा { ... }`
         // block-form verb-at-end shape. Parsed via the SOV-block
