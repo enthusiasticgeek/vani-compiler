@@ -1363,6 +1363,7 @@ impl Parser {
             match try_v31_transform(
                 &name,
                 fn_token.span.merge(name_span),
+                &type_params,
                 &params,
                 &body,
                 &return_type,
@@ -6195,7 +6196,7 @@ fn validate_v31_phase_21a_branch(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: {} local '{}' has type {:?} — Phase 3a+3b allow i64 / bool / f64 / Str / OwnedStr only; Enum / Struct / Vec / Array arrive in Phase 3c-d",
+                            "v3.1 async fn: {} local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N> (Phase 4c-broad generic locals not yet supported inside branches)",
                             branch_label, name, ty
                         ),
                     ));
@@ -6329,7 +6330,10 @@ fn validate_v31_linear_body(
                 "v3.1 async fn return type {:?} not yet supported \
                 — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
                 Enum (registered) / Vec<T> / Struct (registered) / \
-                Array<T,N>",
+                Array<T,N>. Generic returns (Type::Param) are
+                deferred to Phase 4c-broad; the v3.1 transform's
+                synthesized declarations don't yet integrate with
+                vāṇī's monomorphization pipeline.",
                 return_type
             ),
         ));
@@ -6365,7 +6369,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>",
+                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. Generic locals (Type::Param) are deferred to Phase 4c-broad.",
                             name, ty
                         ),
                     ));
@@ -6728,6 +6732,13 @@ fn rewrite_vars_to_fields(
 pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
+    // Phase 4c-broad parking: the original async fn's type_params
+    // are passed through so a future full-generics implementation
+    // can wire them into the synthesized Task struct + poll fn
+    // declarations. Currently unused — generic async fns hit the
+    // earlier return-type / locals gate before reaching the
+    // synthesis stage.
+    _fn_type_params: &[String],
     params: &[Param],
     body: &[Stmt],
     return_type: &Type,

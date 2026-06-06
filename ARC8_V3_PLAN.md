@@ -227,14 +227,44 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 4c-broad: full generic async fn support (re-run v3.1
->   transform per monomorphization instance, ~15-20h)
+> - 4c-broad: full generic async fn support — attempted but
+>   blocked on vāṇī monomorphization integration (see notes
+>   below); ~15-20h focused arc for someone with mono-internals
+>   familiarity
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
 >
 > v3.1 single-task + multi-task arc is now feature-complete:
 > control-flow + types + Result + nested + multi-task + clean
 > generic rejection. Generics fully and platform ports remain.
+>
+> **Phase 4c-broad attempt notes (2026-06-04)**: lifted the
+> validator gate for Type::Param params + return + locals and
+> threaded `fn_type_params` through try_v31_transform. The
+> synthesized Task struct + poll fn + ctor return type were
+> updated to be generic (`type_params: fn_type_params.to_vec()`
+> on StructDecl + Function, `Type::Apply { name, args: [Param(T)] }`
+> on ctor return). Smoke testing exposed three downstream issues
+> from vāṇī's monomorphization pipeline:
+>
+>   1. The generic synthesized `__poll_<name>` fn is never
+>      called from a concrete site by the v3.1-narrow user code
+>      pattern (`let sub = inner(args); __poll_inner(mut ref sub);`
+>      lands in v3.1's outer body, but the standalone mono pass
+>      still flags "declared but never called with concrete types").
+>   2. The synthesized StructLit at the ctor body uses the bare
+>      `Task__inner` name with no type-args; vāṇī's mono mangles
+>      the resolved name to `Task__inner__Param__T__` instead of
+>      picking up the param's T from field initializers.
+>   3. The user's `let _ = identity(server, 42)` succeeds at
+>      parse but fails at mono with "unknown struct type".
+>
+> Resolution requires deeper changes to the monomorphization
+> pre-pass: (a) treat v3.1-synthesized decls as eligible for
+> mono via concrete usage of the constructor, (b) explicit
+> type-arg threading in StructLit. Scaffolding kept in place
+> (`_fn_type_params` parameter on try_v31_transform); the gate
+> was reverted to the Phase 4c-narrow clean-rejection state.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
