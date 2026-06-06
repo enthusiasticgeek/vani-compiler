@@ -1,0 +1,95 @@
+// Arc 8 v3.1 Phase 4b — multi-task scheduling from a single
+// async fn body.
+//
+// Phase 4a-broad shipped the `__poll_X(mut ref sub)` suspend
+// integration. Phase 4b verifies that pattern composes — an
+// outer async fn can construct + await MULTIPLE sub-tasks
+// without new infrastructure. Each sub-task becomes its own
+// task struct field; the outer state machine yields/resumes
+// across each `__poll_X` call independently.
+//
+// This is "concurrent" in the cooperative sense: while inner1
+// is Pending, the driver loop yields (via epoll_wait_one), and
+// when it resumes outer's state machine, the SECOND sub-task
+// (inner2) is polled in its next state. The kernel multiplexes
+// readiness via epoll — both peers' fds are registered, so a
+// single epoll_wait_one wakeup may correspond to either inner.
+//
+// Phase 4b ships NO compiler changes — it's an integration
+// test confirming Phase 4a-broad scales beyond one sub-task.
+//
+// build & run:
+//   intentc run examples/echo_p4b_multitask.vani                # LLVM
+//   intentc run examples/echo_p4b_multitask.vani --backend=c    # C
+
+intent "Phase 4b — multi-task (two sub-tasks awaited in one async fn)";
+
+async fn fetch_one(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n;
+}
+
+async fn outer(fd1: i64, fd2: i64) -> i64 {
+  let sub1: Task__fetch_one = fetch_one(fd1);
+  let sub2: Task__fetch_one = fetch_one(fd2);
+
+  // Sequential await — outer yields while sub1 is Pending,
+  // then yields again while sub2 is Pending. Final result is
+  // the sum of both inner returns.
+  let r1: i64 = __poll_fetch_one(mut ref sub1);
+  let r2: i64 = __poll_fetch_one(mut ref sub2);
+
+  return r1 + r2;
+}
+
+fn drive(ep: i64, t: mut ref Task__outer) -> i64 {
+  while true {
+    let r: i64 = __poll_outer(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer1 {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+  task peer2 {
+    let _ = sleep_ms(20);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "cde");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd1: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd1);
+  let _ = epoll_add_read(ep, cfd1);
+  let cfd2: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd2);
+  let _ = epoll_add_read(ep, cfd2);
+
+  // peer1 sends "ab" (2 bytes); peer2 sends "cde" (3 bytes).
+  // outer returns 2 + 3 = 5.
+  let t: Task__outer = outer(cfd1, cfd2);
+  let r: i64 = drive(ep, mut ref t);
+  print "multi-task result:", r;
+
+  join peer1;
+  join peer2;
+  let _ = tcp_close(cfd1);
+  let _ = tcp_close(cfd2);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

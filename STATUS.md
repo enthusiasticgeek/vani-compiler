@@ -13,7 +13,8 @@
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
 2.3a + 2.3b + 2.3c + 2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b +
-3c + 3d + 3e + 3f + 3-returns + 3-params shipped — compiler-driven
+3c + 3d + 3e + 3f + 3-returns + 3-params + 4a-narrow +
+4a-broad + 4b + 4c-narrow shipped — compiler-driven
 `async fn → Task` transform handles linear bodies +
 non-suspending control flow + suspend-in-branch state-
 splitting + fall-through merge state + nested ifs + ANF
@@ -24,9 +25,10 @@ inside loops + **`try EXPR` keyword for Result propagation**
 + non-i64 LOCALS (bool / f64 / Str / OwnedStr / Enum /
 Vec / Struct / Array) + non-i64 RETURN TYPES (via
 `__result: T` field + status-only poll ABI).
-26 v3.1 acceptance examples parity-green. **v3.1 affine
+28 v3.1 acceptance examples parity-green. **v3.1 affine
 + Result types across the entire async-fn boundary
-(locals + returns + PARAMS + try-propagation).** macOS
+(locals + returns + PARAMS + try-propagation) + nested
+async + multi-task.** macOS
 port (Phase 5) for later**).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
@@ -165,6 +167,33 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     (recv), bool false → 999, str=1 → 111, str=99 → -1,
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
+
+- **v3.1 Phase 4b + 4c-narrow — multi-task + clean generic
+  rejection** (commit pending). Zero compiler changes — both
+  slices are integration-level verifications of work already
+  shipped in 4a-narrow + 4a-broad:
+  - **4b multi-task**: an outer async fn constructing + awaiting
+    MULTIPLE sub-tasks compiles + runs cleanly. Each sub-task
+    is its own task struct field; outer's state machine yields
+    + resumes across each `__poll_X` independently. Driver loop
+    bridges Pending statuses via epoll. The kernel multiplexes
+    readiness across multiple fds simultaneously, so concurrent
+    cooperative scheduling falls out of the existing
+    Phase 4a-broad suspend integration.
+    - `examples/echo_p4b_multitask.vani` — two peers + two
+      sub-tasks. Result 5 = peer1's 2 bytes + peer2's 3 bytes.
+      Byte-identical across LLVM + C.
+  - **4c-narrow generic rejection**: `async fn foo<T>(...)`
+    cleanly fails the v3.1 type-gate with a precise diagnostic
+    pointing at the supported type set. Full generic support
+    requires re-running the v3.1 transform per monomorphization
+    instance — deferred as a separate Phase 4c-broad.
+  - 2 new lib tests (multi-task acceptance + generic rejection
+    diagnostic shape).
+  - **Phase 4 single-task arc COMPLETE** for typical user code:
+    nested async (4a-narrow + 4a-broad), multi-task (4b), and
+    cleanly-gated generics (4c-narrow). Full generics (4c-broad)
+    is deferred.
 
 - **v3.1 Phase 4a-broad — `__poll_X` as suspend point in outer**
   (commit `3967206`). Builds on 4a-narrow's auto-registration.

@@ -21878,6 +21878,70 @@ fn main() -> i64 {
         );
     }
 
+    /// Arc 8 v3.1 Phase 4b — multi-task: an outer async fn can
+    /// construct + await MULTIPLE sub-tasks. Ships no compiler
+    /// changes; verifies Phase 4a-broad scales beyond one
+    /// sub-task per outer.
+    #[test]
+    fn v31_phase4b_multitask_accepted() {
+        let source = r#"
+            async fn fetch_one(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+
+            async fn outer(fd1: i64, fd2: i64) -> i64 {
+              let sub1: Task__fetch_one = fetch_one(fd1);
+              let sub2: Task__fetch_one = fetch_one(fd2);
+              let r1: i64 = __poll_fetch_one(mut ref sub1);
+              let r2: i64 = __poll_fetch_one(mut ref sub2);
+              return r1 + r2;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("Phase 4b multi-task must compile on C");
+        let ll = compile_to_llvm(source).expect("Phase 4b multi-task must compile on LLVM");
+        // outer's task struct should contain sub1 + sub2 fields
+        // of type Task__fetch_one.
+        assert!(c.contains("Task__outer") && c.contains("Task__fetch_one"));
+        assert!(c.contains("sub1") && c.contains("sub2"));
+        assert!(ll.contains("Task__outer"));
+    }
+
+    /// Arc 8 v3.1 Phase 4c-narrow — generic async fns currently
+    /// hit a clean validator diagnostic. Full generics support
+    /// requires post-monomorphization re-transformation (deferred).
+    /// This test pins the diagnostic shape so the user gets a
+    /// clear message pointing at what types ARE accepted.
+    #[test]
+    fn v31_phase4c_generic_async_fn_rejected_with_clear_diagnostic() {
+        let source = r#"
+            async fn identity<T>(fd: i64, x: T) -> T {
+              let n: i64 = io_recv_async(fd, 64);
+              return x;
+            }
+            fn main() -> i64 {
+              let server: i64 = tcp_listen(0);
+              let _ = identity(server, 42);
+              let _ = tcp_close(server);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err(
+            "generic async fns should still hit v3.1 type-gate rejection"
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let m = e.message.as_str();
+                m.contains("v3.1 async fn return type")
+                    && m.contains("not yet supported")
+                    && m.contains("Phase 3 accepts")
+            }),
+            "expected v3.1 return-type gate diagnostic; got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     /// Arc 8 v3.1 Phase 4a-narrow — without auto-registration the
     /// Task__X type wouldn't pass the v3.1 locals gate. Verify
     /// the gate diagnostic mentions registered Struct.

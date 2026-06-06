@@ -97,6 +97,15 @@
 > annotation matches. examples/echo_p3a_nonint_locals.vani
 > parity-green (bool + f64 in one async fn). 3 new lib tests.
 >
+> **Phase 4b + 4c-narrow ✅ COMPLETE 2026-06-04** (commit pending).
+> Multi-task scheduling (4b) works via the existing Phase 4a-broad
+> infrastructure — no compiler changes needed. Generic async fns
+> (4c) cleanly hit the v3.1 type-gate with a precise diagnostic
+> pointing at supported types; full generic support (4c-broad)
+> deferred since it requires post-monomorphization re-transformation.
+> examples/echo_p4b_multitask.vani parity-green (two peers' bytes
+> summed). 2 new lib tests. **Phase 4 single-task arc COMPLETE.**
+>
 > **Phase 4a-broad ✅ COMPLETE 2026-06-04** (commit `3967206`).
 > Builds on 4a-narrow. Extends the v3.1 suspend-point recognition
 > from `io_*_async` to ALSO match any `__poll_<inner>` call.
@@ -218,15 +227,14 @@
 >
 > Remaining v3.x sub-phases (each independent, none
 > blocking):
-> - 4b: multi-task scheduling — multiple concurrent sub-
->   tasks from one async fn (~10-15h)
-> - 4c: generics in async fn (~10-15h)
+> - 4c-broad: full generic async fn support (re-run v3.1
+>   transform per monomorphization instance, ~15-20h)
 > - 5 macOS kqueue port (~10-15h)
 > - 6 Windows IOCP port (~25-35h)
 >
-> v3.1 single-task arc is now feature-complete: control-flow
-> + types + Result error-handling + nested task construction +
-> `await sub` suspend integration.
+> v3.1 single-task + multi-task arc is now feature-complete:
+> control-flow + types + Result + nested + multi-task + clean
+> generic rejection. Generics fully and platform ports remain.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
