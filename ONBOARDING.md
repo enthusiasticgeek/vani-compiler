@@ -210,19 +210,22 @@ as ahead) include:
   Arc 9 c+d `pub(kosh)` + `pub use` re-exports.
 
 Currently pending:
-- **Arc 8 v3.1 sugar layer — SUBSTANTIALLY SHIPPED 2026-06-04**.
-  Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d
-  + 2.5 + 2.5b on `main`. Compiler-driven `async fn → Task`
-  transform handles linear bodies + non-suspending control flow
-  + suspend-in-branch state-splitting + fall-through merge state
-  + nested ifs + ANF lifting + match-with-suspends
-  (FEATURE-COMPLETE for Int / Bool / Str / Float / Variant /
-  VariantWithBinding / Wildcard) + loops + break/continue.
-  17 acceptance examples cross-backend parity-green. Phase 2.4
-  (`try` keyword) + Phase 3 (affine types across await — non-i64
-  locals + OwnedStr/Vec) + Phase 4 (generics + nested async +
-  multi-task) queued. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)
-  for the phased plan-of-record.
+- **Arc 8 v3.1 sugar layer — FEATURE-COMPLETE 2026-06-04** for
+  typical user code. All Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2
+  + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f
+  + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow
+  on `main`. The compiler-driven `async fn → Task` transform
+  covers: linear bodies + control flow (if/while/match/loop/
+  break/continue/try) + match-with-suspends for every pattern
+  shape + `try EXPR` for Result propagation + non-i64 types
+  across the entire async-fn boundary (params + locals + returns:
+  bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array)
+  + nested async (`__poll_inner(mut ref sub)` as `await sub`) +
+  multi-task scheduling within one async fn. 28 acceptance
+  examples cross-backend parity-green. Remaining: Phase 4c-broad
+  (full generic async fns — needs post-monomorphization re-
+  transformation, ~15-20h focused) + Phase 5/6 platform ports.
+  See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
 - **Arc 8 platform port (Phase 5/6)** — all Arc 8 v1.5/v1.6/v2/v3
   runtime helpers are **Linux-only** today (epoll +
   nanosleep + glibc errno thunk). macOS port = kqueue
