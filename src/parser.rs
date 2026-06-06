@@ -6323,9 +6323,10 @@ fn validate_v31_linear_body(
                 — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
                 Enum (registered) / Vec<T> / Struct (registered) / \
                 Array<T,N>. Generic returns (Type::Param) are
-                deferred to Phase 4c-broad; the v3.1 transform's
-                synthesized declarations don't yet integrate with
-                vāṇī's monomorphization pipeline.",
+                deferred to Phase 4c-broad — needs vāṇī mono to
+                rewrite StructLit type_names during fn-template
+                specialization (see ARC8_V3_PLAN.md Phase 4c-broad
+                blockers).",
                 return_type
             ),
         ));
@@ -6725,11 +6726,18 @@ pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
     // Phase 4c-broad parking: the original async fn's type_params
-    // are passed through so a future full-generics implementation
-    // can wire them into the synthesized Task struct + poll fn
-    // declarations. Currently unused — generic async fns hit the
-    // earlier return-type / locals gate before reaching the
-    // synthesis stage.
+    // are passed through as scaffolding for a future
+    // implementation. Currently unused — generic async fns hit
+    // the return-type / locals gates before reaching synthesis.
+    // Concrete blocker: vāṇī's `substitute_type_param_in_stmt`
+    // only walks Let annotations + If/While bodies, not Expr
+    // contents — the synthesized ctor body's bare-name
+    // StructLit `Task__X { ... }` therefore can't be rewritten
+    // to `Task__X__i64 { ... }` during fn-template
+    // specialization. Fix requires extending mono's stmt walker
+    // to recursively rewrite StructLit type_names alongside
+    // type-substitutions (or another vāṇī-internal change to
+    // make the bare type_name follow the function's mono).
     _fn_type_params: &[String],
     params: &[Param],
     body: &[Stmt],

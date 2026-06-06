@@ -238,33 +238,50 @@
 > control-flow + types + Result + nested + multi-task + clean
 > generic rejection. Generics fully and platform ports remain.
 >
-> **Phase 4c-broad attempt notes (2026-06-04)**: lifted the
-> validator gate for Type::Param params + return + locals and
-> threaded `fn_type_params` through try_v31_transform. The
-> synthesized Task struct + poll fn + ctor return type were
-> updated to be generic (`type_params: fn_type_params.to_vec()`
-> on StructDecl + Function, `Type::Apply { name, args: [Param(T)] }`
-> on ctor return). Smoke testing exposed three downstream issues
-> from vāṇī's monomorphization pipeline:
+> **Phase 4c-broad attempt notes (refreshed 2026-06-06)**: TWO
+> attempts so far, both reverted to Phase 4c-narrow's clean
+> rejection. Scaffolding (`_fn_type_params: &[String]` parameter
+> on try_v31_transform) kept in place to avoid signature churn.
 >
->   1. The generic synthesized `__poll_<name>` fn is never
->      called from a concrete site by the v3.1-narrow user code
->      pattern (`let sub = inner(args); __poll_inner(mut ref sub);`
->      lands in v3.1's outer body, but the standalone mono pass
->      still flags "declared but never called with concrete types").
->   2. The synthesized StructLit at the ctor body uses the bare
->      `Task__inner` name with no type-args; vāṇī's mono mangles
->      the resolved name to `Task__inner__Param__T__` instead of
->      picking up the param's T from field initializers.
->   3. The user's `let _ = identity(server, 42)` succeeds at
->      parse but fails at mono with "unknown struct type".
+> **Concrete blocker identified 2026-06-06**: vāṇī's fn-mono
+> pass (`monomorphize_generics_in_program`) specializes a
+> generic fn by:
+>   - cloning the template,
+>   - calling `substitute_type_param` on params + return type,
+>   - calling `substitute_type_param_in_stmt` on body stmts.
 >
-> Resolution requires deeper changes to the monomorphization
-> pre-pass: (a) treat v3.1-synthesized decls as eligible for
-> mono via concrete usage of the constructor, (b) explicit
-> type-arg threading in StructLit. Scaffolding kept in place
-> (`_fn_type_params` parameter on try_v31_transform); the gate
-> was reverted to the Phase 4c-narrow clean-rejection state.
+> `substitute_type_param_in_stmt` only walks Let annotations
+> + If/While body recursion. It DOES NOT recurse into
+> expressions and DOES NOT rewrite `StructLit { type_name, .. }`
+> strings. So when the v3.1-synthesized ctor body
+>
+>   `return Task__identity { state_tag: 0, fd: fd, x: x };`
+>
+> is specialized for T=i64, the surrounding fn becomes
+> `identity__i64`, but the StructLit's `type_name: "Task__identity"`
+> stays bare. The checker then looks up `Task__identity` in
+> program.structs, finds the now-mono'd-to-i64 generic decl
+> dropped, and errors "unknown struct type".
+>
+> **Fix sketch for next implementer**:
+>   1. Extend `substitute_type_param_in_stmt` to recurse into
+>      Expr forms, in particular `StructLit { type_name }` and
+>      `Call { name }` so generic struct ctor names and
+>      generic helper-fn names get rewritten to their
+>      specialized variants. The mangled name is
+>      `format!("{}__{}", original, type_mangle(concrete))` —
+>      same pattern used in `monomorphize_generics_in_program`
+>      at the fn-name level.
+>   2. (Optional) Add ergonomics so users don't have to write
+>      `Task__identity<i64>` everywhere — i.e. the synthesized
+>      ctor's return Type::Apply lets vāṇī infer T from the
+>      construct-site arg types, which propagates naturally.
+>
+> **Smaller-scope alternative**: REJECT generic async fns
+> cleanly (current Phase 4c-narrow behavior) until vāṇī's mono
+> grows StructLit-name rewriting. Users can manually write
+> non-generic state machines using the hand-rolled v3 pattern
+> for the rare generic-async case.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
