@@ -3854,6 +3854,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         out.push_str("  call void @abort()\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
+                        // LLVM phi-block-tracking fix: subsequent
+                        // instructions land in the `ok` block, not
+                        // the pre-check block. Callers (e.g. match
+                        // arm phi merges) rely on
+                        // `ctx.current_block` to label their phi
+                        // incoming edges correctly. Without this
+                        // update, the phi tags this branch with
+                        // the wrong predecessor block and module
+                        // verification fails ("Bad module").
+                        ctx.current_block = ok;
                     }
                     BinaryOp::Shl | BinaryOp::Shr => {
                         let bits = left.ty.bits().unwrap_or(64) as i64;
@@ -3893,6 +3903,12 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         out.push_str("  call void @abort()\n");
                         out.push_str("  unreachable\n");
                         out.push_str(&format!("{}:\n", ok));
+                        // Same phi-block-tracking fix as the
+                        // div/rem case above — the shift's safety
+                        // check introduces a new basic block, so
+                        // surrounding phi merges need to see the
+                        // shift_ok label as the actual predecessor.
+                        ctx.current_block = ok;
                     }
                     _ => {}
                 }

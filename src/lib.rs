@@ -21942,6 +21942,48 @@ fn main() -> i64 {
         );
     }
 
+    /// LLVM backend: divide-by-zero check + match-arm phi
+    /// interaction (the `div_ok` block must be tracked as the
+    /// predecessor in surrounding phi merges, not the
+    /// `match_arm_<N>` label). Without the
+    /// `ctx.current_block = ok` update after the div safety
+    /// check, the phi attaches the sdiv result to the wrong
+    /// predecessor block and LLVM's module verifier rejects
+    /// the IR ("Bad module").
+    ///
+    /// Reproducer is non-async (the bug pre-existed Phase 4)
+    /// and surfaces in any match whose arm contains a
+    /// safety-checked div/rem (or shift). Pinned via a string
+    /// search on the emitted IR.
+    #[test]
+    fn llvm_match_arm_div_phi_uses_correct_predecessor() {
+        let source = r#"
+            enum Mode { Normal, Eager, Lazy }
+
+            fn classify(m: Mode, n: i64) -> i64 {
+              return match m {
+                Mode.Normal then n,
+                Mode.Eager then n * 10,
+                Mode.Lazy then n / 2
+              };
+            }
+
+            fn main() -> i64 { return classify(Mode.Eager, 2); }
+        "#;
+        let ll = compile_to_llvm(source).expect("must compile");
+        // The phi at match_merge0 should NOT name `match_arm_24`
+        // (the arm's opening block) as the predecessor for the
+        // div result. After the fix, the sdiv produces its
+        // value in `div_ok<N>` so that label should appear in
+        // the phi instead.
+        assert!(
+            !ll.contains("phi i64 [ %t1, %match_arm_02 ], [ %t3, %match_arm_13 ], [ %t6, %match_arm_24 ]"),
+            "regression: phi uses match_arm_24 instead of div_ok block"
+        );
+        // The sdiv must be emitted (no other regression masking the fix).
+        assert!(ll.contains("sdiv"), "expected sdiv emit");
+    }
+
     /// Arc 8 v3.1 Phase 4a-narrow — without auto-registration the
     /// Task__X type wouldn't pass the v3.1 locals gate. Verify
     /// the gate diagnostic mentions registered Struct.

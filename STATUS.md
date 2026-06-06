@@ -168,6 +168,26 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
     f=2.0 → 222.
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
+- **LLVM backend fix — match-arm phi tracks div_ok / shift_ok
+  blocks** (commit pending). Pre-existing bug surfaced during
+  Phase 3-params smoke testing: an `enum-match` whose arm
+  contained a safety-checked div/rem (or shl/shr) emitted IR
+  that failed LLVM module verification with "Bad module". The
+  div safety-check introduced a `div_ok<N>` block but didn't
+  update `ctx.current_block` to point at it; the surrounding
+  match's phi at `match_merge` then named `match_arm_<N>` as
+  the predecessor (the arm's opening block), but the sdiv was
+  emitted in `div_ok<N>` — wrong predecessor → invalid IR.
+  Fix: two extra `ctx.current_block = ok;` lines in
+  `src/backend_llvm.rs` after the Binary div/rem + shl/shr
+  ok-block label emits. Pre-existing bug since the
+  safety-checked Binary ops landed; benefits any user code
+  doing `match X { ... then n / 2, ... }`.
+  - `examples/llvm_match_arm_div.vani` — three modes
+    byte-identical: Lazy → 3 (n / 2), Eager → 60 (n * 10),
+    Normal → 6 (n).
+  - 1 new lib test pinning the phi-predecessor string shape.
+
 - **v3.1 Phase 4b + 4c-narrow — multi-task + clean generic
   rejection** (commit `7f7b3d7`). Zero compiler changes — both
   slices are integration-level verifications of work already
