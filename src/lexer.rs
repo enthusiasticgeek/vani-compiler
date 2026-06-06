@@ -367,6 +367,27 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "प्रकार" => TokenKind::Type,        // prakāra (Sanskrit/Hindi/Marathi: "type/kind")
         "बाह्य" => TokenKind::Extern,       // bāhya (Sanskrit/Hindi/Marathi: "external")
         "अपरिवर्तनीय" => TokenKind::Invariant, // aparivartanīya (Sanskrit/Hindi/Marathi: "unchanging")
+        // === Devanagari type-name aliases (2026-06-06) ===
+        // Type names stay outside the structure-purity gate per
+        // src/lexer.rs:is_structure_keyword_kind, so these are
+        // freely mixable in any dialect (or with English type
+        // names). All are Sanskrit-root tatsama working as
+        // loanwords in Hindi + Marathi.
+        "पूर्णांक" => TokenKind::I64,       // pūrṇāṅka (Sanskrit/Hindi/Marathi: "integer")
+        "पूर्णांक८" => TokenKind::I8,       // pūrṇāṅka-8
+        "पूर्णांक१६" => TokenKind::I16,
+        "पूर्णांक३२" => TokenKind::I32,
+        "पूर्णांक६४" => TokenKind::I64,
+        "अहस्ताक्षरित८" => TokenKind::U8,   // ahastākṣarita-8 (unsigned-8)
+        "अहस्ताक्षरित१६" => TokenKind::U16,
+        "अहस्ताक्षरित३२" => TokenKind::U32,
+        "अहस्ताक्षरित६४" => TokenKind::U64,
+        "दशांश" => TokenKind::F64,         // daśāṁśa (Sanskrit/Hindi/Marathi: "decimal/fractional")
+        "दशांश३२" => TokenKind::F32,
+        "दशांश६४" => TokenKind::F64,
+        "तर्क" => TokenKind::Bool,         // tarka (Sanskrit/Hindi/Marathi: "logic/reasoning")
+        "बूल" => TokenKind::Bool,          // būla (transliterated "bool" — short common form)
+        "सूची" => TokenKind::Vec,          // sūcī (Sanskrit/Hindi/Marathi: "list")
         _ => return None,
     };
     Some(kind)
@@ -1068,22 +1089,65 @@ impl<'a> Lexer<'a> {
             self.advance(); // 0xA5
             self.advance(); // digit
         }
+        // Devanagari float support (2026-06-06): a `.` immediately
+        // after the integer part followed by another Devanagari
+        // digit makes this a float literal. Matches the ASCII path
+        // shape (`peek == '.' && peek_next ∈ digit`).
+        let mut is_float = false;
+        let dev_digit_starts = |b0: Option<u8>, b1: Option<u8>, b2: Option<u8>| -> bool {
+            b0 == Some(0xE0) && b1 == Some(0xA5) && matches!(b2, Some(0xA6..=0xAF))
+        };
+        if self.peek() == Some(b'.')
+            && dev_digit_starts(
+                self.bytes.get(self.pos + 1).copied(),
+                self.bytes.get(self.pos + 2).copied(),
+                self.bytes.get(self.pos + 3).copied(),
+            )
+        {
+            is_float = true;
+            self.advance(); // '.'
+            while self.peek() == Some(0xE0)
+                && self.peek_next() == Some(0xA5)
+                && matches!(
+                    self.bytes.get(self.pos + 2).copied(),
+                    Some(0xA6..=0xAF)
+                )
+            {
+                self.advance();
+                self.advance();
+                self.advance();
+            }
+        }
         let span = Span::new(start, self.pos);
         let raw = &self.source[start..self.pos];
         let mut ascii_digits = String::with_capacity(raw.chars().count());
         for ch in raw.chars() {
-            // Devanagari digit codepoints U+0966..U+096F map to
-            // ASCII '0'..'9' by subtracting 0x0966.
-            let code = ch as u32;
-            ascii_digits.push((b'0' + (code - 0x0966) as u8) as char);
+            if ch == '.' {
+                ascii_digits.push('.');
+            } else {
+                // Devanagari digit codepoints U+0966..U+096F map
+                // to ASCII '0'..'9' by subtracting 0x0966.
+                let code = ch as u32;
+                ascii_digits.push((b'0' + (code - 0x0966) as u8) as char);
+            }
         }
-        let value: i128 = ascii_digits.parse().map_err(|_| {
-            Diagnostic::new(span, format!("invalid Devanagari integer '{}'", raw))
-        })?;
-        self.tokens.push(Token {
-            kind: TokenKind::Int(value),
-            span,
-        });
+        if is_float {
+            let value = ascii_digits.parse::<f64>().map_err(|_| {
+                Diagnostic::new(span, format!("invalid Devanagari float '{}'", raw))
+            })?;
+            self.tokens.push(Token {
+                kind: TokenKind::Float(value),
+                span,
+            });
+        } else {
+            let value: i128 = ascii_digits.parse().map_err(|_| {
+                Diagnostic::new(span, format!("invalid Devanagari integer '{}'", raw))
+            })?;
+            self.tokens.push(Token {
+                kind: TokenKind::Int(value),
+                span,
+            });
+        }
         Ok(())
     }
 

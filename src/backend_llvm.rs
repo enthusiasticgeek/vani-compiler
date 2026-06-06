@@ -227,6 +227,34 @@ pub(crate) fn host_supports_arc8_io() -> bool {
     host_is_linux() || host_is_darwin() || host_is_windows()
 }
 
+/// LLVM IR bare identifiers are restricted to printable ASCII.
+/// Devanagari-script vāṇी identifiers (e.g. `द्विपदगुणक`) fail to
+/// emit with the raw byte sequence. Mangle each non-ASCII char to
+/// `_uHHHH` (uppercase hex of the Unicode codepoint) so the result
+/// is a valid bare identifier. ASCII-only names pass through
+/// untouched (so existing examples keep their canonical IR).
+///
+/// Example:
+///   `द्विपदगुणक` → `_u0926_u094D_u0935_u093F_u092A_u0926_u0917_u0941_u0923_u0915`
+pub(crate) fn llvm_mangle_ident(name: &str) -> String {
+    if name.bytes().all(|b| b < 0x80) {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len() * 2);
+    for ch in name.chars() {
+        let code = ch as u32;
+        if code < 0x80 {
+            out.push(ch);
+        } else {
+            // Pad to at least 4 hex digits; codepoints > 0xFFFF
+            // get more (chars > U+FFFF naturally extend the
+            // format width).
+            out.push_str(&format!("_u{:04X}", code));
+        }
+    }
+    out
+}
+
 thread_local! {
     /// Per-program registry of enum payload types. Populated
     /// at the start of `emit_llvm` from `program.enums`.
@@ -1653,7 +1681,7 @@ fn emit_function(
         out.push_str(")\n");
         return;
     }
-    out.push_str(&format!("define {} @fn_{}(", ret_ty, function.name));
+    out.push_str(&format!("define {} @fn_{}(", ret_ty, llvm_mangle_ident(&function.name)));
     for (i, param) in function.params.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
@@ -2404,7 +2432,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         let ret = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = call i64 @fn_{}_drop({}* {})\n",
-                            ret, struct_name, s_ty, addr
+                            ret, llvm_mangle_ident(struct_name), s_ty, addr
                         ));
                     }
                     // Fall through to per-field cleanup below.
@@ -2419,7 +2447,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         let ret = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = call i64 @fn_{}_drop({} {})\n",
-                            ret, struct_name, s_ty, loaded
+                            ret, llvm_mangle_ident(struct_name), s_ty, loaded
                         ));
                     }
                     return;
@@ -2728,7 +2756,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     let ret = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = call i64 @fn_{}_drop({} {})\n",
-                        ret, struct_name, s_ty, value
+                        ret, llvm_mangle_ident(struct_name), s_ty, value
                     ));
                     return;
                 }
@@ -2744,7 +2772,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         let ret = ctx.fresh_tmp();
                         out.push_str(&format!(
                             "  {} = call i64 @fn_{}_drop({}* {})\n",
-                            ret, struct_name, s_ty, addr
+                            ret, llvm_mangle_ident(struct_name), s_ty, addr
                         ));
                     }
                     let empty: std::collections::HashSet<&String> =
@@ -13159,7 +13187,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             let symbol = if is_extern {
                 format!("@{}", name)
             } else {
-                format!("@fn_{}", name)
+                format!("@fn_{}", llvm_mangle_ident(name))
             };
             // Closure #288: lowered return type for extern
             // struct returns (if any).

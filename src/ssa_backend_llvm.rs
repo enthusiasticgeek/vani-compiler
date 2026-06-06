@@ -384,7 +384,7 @@ fn emit_function(
     out.push_str(&format!(
         "define {} @fn_{}(",
         llvm_type_string(&f.return_type)?,
-        f.name
+        crate::backend_llvm::llvm_mangle_ident(&f.name)
     ));
     for (i, (name, ty, vid)) in f.params.iter().enumerate() {
         if i > 0 {
@@ -4241,7 +4241,7 @@ fn emit_instr(
             let symbol = if is_extern {
                 format!("@{}", name)
             } else {
-                format!("@fn_{}", name)
+                format!("@fn_{}", crate::backend_llvm::llvm_mangle_ident(name))
             };
             out.push_str(&format!(
                 "  %v_{} = call {} {}({})\n",

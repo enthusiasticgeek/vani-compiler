@@ -931,6 +931,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "rng.vani",
         "../sanskrit/keywords.vani",  // A.2 reorg: lives at examples/language/sanskrit/keywords.vani
         "../sanskrit/sov_demo.vani",  // SOV-S1 demo: let-binding verb-at-end
+        "../sanskrit/pure_devanagari.vani",  // Pure Sanskrit showcase: keywords + types + identifiers + numerals all Devanagari
         // SOV-S10 translator-generated Devanagari coverage —
         // 24 files (8 examples × 3 Indo-Aryan dialects). Each
         // mirrors its English original byte-for-byte at the AST

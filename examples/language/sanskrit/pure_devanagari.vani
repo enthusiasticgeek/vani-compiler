@@ -1,0 +1,51 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// शुद्ध-संस्कृत-वाणी उदाहरणम् — pure Sanskrit vāṇī showcase.
+//
+// इदं उदाहरणं संस्कृतस्य पूर्णतायाः परीक्षणाय — keywords, type
+// names, identifiers, numerals all in Devanagari. The program
+// shouldn't read like an English-keyword file with one or two
+// Sanskrit words sprinkled in; it should read like Sanskrit
+// prose with the verb-final SOV grammar at every clause.
+//
+// निर्माणं प्रचालनं च (build & run):
+//   vanic run examples/language/sanskrit/pure_devanagari.vani --backend=c
+
+उद्देश्य "Sanskrit pure-Devanagari showcase: नतुलि-गणन (n choose k) via पुनरावृत्ति";
+
+// द्विपदगुणक: nCk (n choose k). Recursive Pascal-style identity:
+// C(n, k) = C(n-1, k-1) + C(n-1, k); with base cases C(n, 0) = 1
+// and C(n, n) = 1.
+कार्य द्विपदगुणक(n: पूर्णांक, k: पूर्णांक) -> पूर्णांक
+  अपेक्षित n >= ०;
+  अपेक्षित k >= ०;
+  अपेक्षित k <= n;
+{
+  k == ० यदि {
+    १ पुनरागम;
+  }
+  k == n यदि {
+    १ पुनरागम;
+  }
+  // C(n-1, k-1) + C(n-1, k)
+  वामभाग: पूर्णांक = द्विपदगुणक(n - १, k - १) माना;
+  दक्षिणभाग: पूर्णांक = द्विपदगुणक(n - १, k) माना;
+  वामभाग + दक्षिणभाग पुनरागम;
+}
+
+कार्य main() -> पूर्णांक {
+  // पञ्चविंशतिः कार्याणि: print Pascal's-triangle row 5 — (5 choose 0)
+  // through (5 choose 5) — i.e., 1 5 10 10 5 1.
+  i: पूर्णांक = ० माना;
+  i <= ५ यावत् {
+    मूल्य: पूर्णांक = द्विपदगुणक(५, i) माना;
+    "C(५, ", i, ") = ", मूल्य लिख;
+    i = i + १;
+  }
+  // सिद्धान्तपरीक्षा: C(5, 2) = 10 (one of the values printed above)
+  द्विपदगुणक(५, २) == १० सिद्धम्;
+  // सिद्धान्तपरीक्षा: n=0, k=0 always yields 1
+  द्विपदगुणक(०, ०) == १ सिद्धम्;
+  ० पुनरागम;
+}
