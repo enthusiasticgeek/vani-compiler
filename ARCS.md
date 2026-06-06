@@ -44,9 +44,22 @@
 > 5. **D.1 Windows LLVM TCP IR** ✅ SHIPPED 2026-06-06. i64-SOCKET + winsock2
 >    declare surface (deferred from Phase 6).
 >
-> **Tier E** (depends on Tier C — same pattern):
-> 6. **E.1 Global-language surface** — Spanish, Mandarin,
->    Arabic, Japanese, etc.
+> **Tier E** (depends on Tier C; Indian-subcontinent-first, then
+> global, per user direction 2026-06-06):
+> 6. **E.I Indian-subcontinent rollout** — Bengali, Gujarati,
+>    Punjabi, Tamil, Telugu, Kannada, Malayalam, Urdu, Odia,
+>    Assamese, Sindhi, Nepali, Konkani, Maithili, Sinhala, and
+>    smaller subcontinent languages. Devanagari-script additions
+>    are trivial extensions of the shipped Sanskrit/Hindi/Marathi
+>    pipeline; non-Devanagari Brahmi-derived scripts need a per-
+>    script Unicode-block addition; Perso-Arabic RTL languages
+>    need bidi parser support.
+> 7. **E.II Global rollout** (after Tier I) — Spanish, Mandarin
+>    Chinese, Japanese, Russian, German, French in that order,
+>    then Arabic, Portuguese, Korean, Vietnamese, Indonesian,
+>    Swahili, Turkish, etc. See
+>    [TODO.md §*Language rollout*](TODO.md) for full per-
+>    language effort estimates.
 >
 > **Tier F** (external dependencies):
 > 7. **F.1 macOS empirical verification** — Darwin host needed.

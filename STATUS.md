@@ -106,8 +106,20 @@ sequence:
       consultant pass; Devanagari example coverage
   - **Tier D — independent code work**:
     - **D.1** Windows LLVM TCP IR
-  - **Tier E — depends on Tier C** (same surface patterns):
-    - **E.1** Global-language surface (Spanish, Mandarin, Arabic, …)
+  - **Tier E — Indian-subcontinent-first, then global** (depends
+    on Tier C; same surface patterns):
+    - **E.I** Indian subcontinent rollout (priority): Bengali →
+      Gujarati → Punjabi → Tamil → Telugu → Kannada → Malayalam →
+      Urdu → Odia → Assamese → Sindhi → Nepali → Konkani → Maithili
+      → Sinhala → smaller tail. Devanagari-script additions first
+      (Nepali / Maithili / Konkani-Dev); Brahmi-derived non-
+      Devanagari next; Perso-Arabic RTL last.
+    - **E.II** Global rollout (after Tier I): Spanish → Mandarin
+      Chinese → Japanese → Russian → German → French → tail
+      (Arabic / Portuguese / Korean / Vietnamese / Indonesian /
+      Swahili / Turkish / …). See
+      [TODO.md §*Language rollout — Tier I → Tier II*](TODO.md)
+      for the full table with effort estimates per language.
   - **Tier F — external dependencies** (verification + CI + registry):
     - **F.1** macOS empirical verification (Darwin host needed)
     - **F.2** Windows empirical verification (Win host needed)

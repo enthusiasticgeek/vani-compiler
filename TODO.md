@@ -69,9 +69,36 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 >          [backend_llvm.rs](src/backend_llvm.rs). Verification
 >          deferred (no Windows host access).
 >
-> Tier E (depends on Tier C — same surface patterns)
->   E.1 ▸ Global-language surface (Spanish,
->          Mandarin, Arabic, Japanese, ...)
+> Tier E — Indian-subcontinent-first then global language rollout
+>          (depends on Tier C; same surface patterns)
+>
+>   E.I  ▸ INDIAN SUBCONTINENT FAMILY (priority — extend the
+>          shipped Sanskrit/Hindi/Marathi pipeline). Order:
+>          Bengali → Gujarati → Punjabi → Tamil → Telugu →
+>          Kannada → Malayalam → Urdu → Odia → Assamese →
+>          Sindhi → Nepali → Konkani → Maithili → Sinhala →
+>          ... (smaller subcontinent languages tail).
+>          Devanagari-script languages (Nepali / Konkani /
+>          Maithili) are trivial extensions of the shipped
+>          pipeline; Brahmi-derived non-Devanagari scripts
+>          (Bengali / Gujarati / Punjabi-Gurmukhi / Tamil /
+>          Telugu / Kannada / Malayalam / Odia / Assamese /
+>          Sinhala) need a per-script Unicode-block extension
+>          in `enforce_language_purity`. Perso-Arabic scripts
+>          (Urdu / Punjabi-Shahmukhi / Sindhi) need RTL parser
+>          support.
+>
+>   E.II ▸ GLOBAL ROLLOUT (after Tier I is comprehensive).
+>          User-specified priority order:
+>            1. Spanish (SVO Latin)
+>            2. Mandarin Chinese (SVO Han logograms; needs CJK
+>               tokenizer)
+>            3. Japanese (SOV — vāṇी's SOV plumbing transfers)
+>            4. Russian (SVO Cyrillic + free order)
+>            5. German (V2 + SOV subordinate)
+>            6. French (SVO Latin)
+>          Then: Arabic, Portuguese, Korean, Vietnamese, Indonesian,
+>          Swahili, Turkish, and the global tail.
 >
 > Tier F (external — host access / external choices needed)
 >   F.1 ▸ macOS empirical verification (Darwin host required)
@@ -329,6 +356,114 @@ to a working v1; native Rust subcommand is the long-term home.
 **Acceptance test**: take `examples/language/english/tcp_echo.vani`,
 run `vani-translate --to sanskrit`, get a Sanskrit version with
 `// श्री।` header that compiles + runs identically.
+
+---
+
+## 🌏 Language rollout — Tier I (Indian subcontinent) → Tier II (global)
+
+> **User direction 2026-06-06**: "prioritize Indian languages
+> over global. first all Indian subcontinent major languages
+> then global. for global plan spanish, chinese, japanese,
+> russian, german, french in that order and then other
+> languages"
+
+### Tier I — Indian subcontinent (priority extension of shipped pipeline)
+
+Each row extends the lexer + parser surface already proven for
+Sanskrit / Hindi / Marathi. Adoption order optimized for fast
+incremental shipping: Devanagari-script languages reuse the
+existing pipeline; Brahmi-derived non-Devanagari scripts need a
+per-script Unicode-block extension in `enforce_language_purity`
+(an ~80-line addition per script); Perso-Arabic-scripted
+languages also need bidirectional-text parser support.
+
+| # | Language | Native | Script | Approx. speakers | Effort | Status |
+|---|---|---|---|---|---|---|
+| 1 | Sanskrit | संस्कृत | Devanagari | 24K native + heritage | — | ✅ SHIPPED |
+| 2 | Hindi | हिन्दी | Devanagari | 600M | — | ✅ SHIPPED |
+| 3 | Marathi | मराठी | Devanagari | 83M | — | ✅ SHIPPED |
+| 4 | Bengali | বাংলা | Bengali | 270M | medium | Queued — Brahmi-derived script, SOV |
+| 5 | Gujarati | ગુજરાતી | Gujarati | 56M | medium | Queued — similar to Marathi |
+| 6 | Punjabi (Indian) | ਪੰਜਾਬੀ | Gurmukhi | 113M total | medium | Queued — Gurmukhi script |
+| 7 | Punjabi (Pakistani) | پنجابی | Shahmukhi | — | hard | Queued — RTL Perso-Arabic |
+| 8 | Tamil | தமிழ் | Tamil | 86M | medium-hard | Queued — Dravidian family; agglutinative + SOV; no Sanskrit tatsama shortcut |
+| 9 | Telugu | తెలుగు | Telugu | 96M | medium-hard | Queued — Dravidian SOV |
+| 10 | Kannada | ಕನ್ನಡ | Kannada | 59M | medium-hard | Queued — Dravidian SOV |
+| 11 | Malayalam | മലയാളം | Malayalam | 38M | medium-hard | Queued — Dravidian SOV |
+| 12 | Urdu | اردو | Perso-Arabic | 230M | hard | Queued — RTL; Hindi-Urdu shared spoken core, register splits at script |
+| 13 | Odia | ଓଡ଼ିଆ | Odia | 38M | medium | Queued — Brahmi-derived |
+| 14 | Assamese | অসমীয়া | Assamese (~Bengali) | 24M | medium | Queued — close to Bengali |
+| 15 | Sindhi | سنڌي | Perso-Arabic (+ Devanagari rare) | 25M | hard | Queued — RTL bi-script |
+| 16 | Nepali | नेपाली | Devanagari | 32M | small | Queued — trivial Devanagari extension |
+| 17 | Konkani | कोंकणी | Devanagari + Kannada + Roman + Malayalam | 2.5M | small (Devanagari) | Queued — multi-script; ship Devanagari variant first |
+| 18 | Maithili | मैथिली | Devanagari (+ historic Tirhuta) | 50M | small | Queued — Devanagari extension |
+| 19 | Sinhala | සිංහල | Sinhala | 17M | medium | Queued — Sri Lankan Indo-Aryan SOV |
+| ... | (smaller subcontinent languages) | | | | | Queued tail |
+
+**Strategy**: ship Devanagari extensions first (Nepali, Konkani-
+Dev, Maithili — same lexer pipeline). Then Brahmi-derived scripts
+(Bengali / Gujarati / Odia / Assamese first; Tamil / Telugu /
+Kannada / Malayalam / Sinhala second). Perso-Arabic RTL scripts
+last (Urdu / Punjabi-Shahmukhi / Sindhi) since they require
+parser bidi support.
+
+### Tier II — Global rollout (after Tier I is comprehensive)
+
+User-specified priority order, in sequence:
+
+| # | Language | Native | Script | Word order | Effort | Notes |
+|---|---|---|---|---|---|---|
+| 1 | Spanish | español | Latin | SVO | small | Tier II opener; Latin script + SVO is closest to English |
+| 2 | Mandarin Chinese | 中文 | Han logograms | SVO + topic-prominent | hard | Needs CJK word-boundary tokenizer; no native whitespace between words |
+| 3 | Japanese | 日本語 | Kanji + Hiragana + Katakana | **SOV** | medium | vāṇी's SOV plumbing transfers directly; 3-script mix needs lexer awareness |
+| 4 | Russian | русский | Cyrillic | SVO + free order | small | Cyrillic block + SVO; case-marked free order is parser-friendly |
+| 5 | German | deutsch | Latin | V2 + SOV subordinate | medium | Partial SOV reuse for subordinate clauses |
+| 6 | French | français | Latin | SVO | small | Standard Latin SVO |
+
+After 1-6 ships, the global tail unblocks:
+
+| Language | Script | Word order | Notes |
+|---|---|---|---|
+| Arabic | Arabic (RTL) | VSO/SVO | RTL parser support needed |
+| Portuguese | Latin | SVO | Trivial after Spanish |
+| Korean | Hangul | **SOV** | SOV pipeline reuse |
+| Vietnamese | Latin (extended) | SVO | Tones via diacritics |
+| Indonesian | Latin | SVO | Trivial Latin extension |
+| Swahili | Latin | SVO | Bantu family |
+| Turkish | Latin | **SOV** | Agglutinative; SOV reuse |
+| ... | various | various | Long tail |
+
+### Effort + dependency notes
+
+- **Per-language work**: lexer alias table (~50-70 keyword forms),
+  per-spelling dialect tag entries, parser word-order hooks where
+  needed, lib tests pinning the keyword surface, example
+  translations via the existing translator at
+  [`tools/vani_translate.py`](tools/vani_translate.py).
+- **Per-script work** (new Unicode block): extension to
+  `enforce_language_purity` to recognize the script, ~20 lines.
+  Brahmi-derived scripts share grammar with the shipped Devanagari
+  pipeline so the per-LANGUAGE work shrinks once per-SCRIPT work
+  is done.
+- **Per-grammar work**: SOV plumbing is shipped; SVO + V2 + RTL +
+  CJK-tokenization are net-new parser modes.
+
+**Effort estimates** (per language, post-script-extension):
+  - Devanagari additions (Nepali / Maithili / Konkani-Dev): ~1-2h
+    each
+  - Brahmi-derived non-Devanagari: ~6-10h each (first one is
+    ~15h to set up the script abstraction)
+  - Dravidian (Tamil / Telugu / Kannada / Malayalam): ~10-15h
+    each (no Sanskrit tatsama shortcut means more original
+    keyword work + grammar consultant gating)
+  - Perso-Arabic RTL: ~25-40h each (RTL parser support is the
+    expensive piece)
+  - CJK (Mandarin / Japanese): ~30-50h (tokenizer overhaul)
+
+Grammar-consultant gating per language tracked in
+[docs/grammar_review_queue.md](docs/grammar_review_queue.md).
+
+---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
 examples; 1883 lib + 72 parity green; clean warning-free build).

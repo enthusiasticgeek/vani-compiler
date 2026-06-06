@@ -26965,6 +26965,44 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn sov_s3_if_else_block_form_compiles() {
+        // SOV-S3 (2026-06-06): `<cond> यदि { ... } अन्यथा { ... }`
+        // block-form verb-at-end shape. Parsed via the SOV-block
+        // detector that runs BEFORE the SOV-verb-at-end detector
+        // (which would otherwise over-consume into the body's
+        // `;`-terminated statements).
+        let source = r#"
+            कार्य main() -> i64 {
+              x: i64 = 7 माना;
+              x > 0 यदि {
+                "positive" लिख;
+              } अन्यथा {
+                "non-positive" लिख;
+              }
+              0 पुनरागम;
+            }
+        "#;
+        compile(source).expect("SOV-if block form compiles");
+    }
+
+    #[test]
+    fn sov_s4_while_block_form_compiles() {
+        // SOV-S4 (2026-06-06): `<cond> यावत् { ... }` block-form
+        // verb-at-end shape. Same detector as SOV-S3.
+        let source = r#"
+            कार्य main() -> i64 {
+              i: i64 = 0 माना;
+              i < 3 यावत् {
+                "iter", i लिख;
+                i = i + 1;
+              }
+              0 पुनरागम;
+            }
+        "#;
+        compile(source).expect("SOV-while block form compiles");
+    }
+
+    #[test]
     fn sov_s8_pragma_pure_sanskrit_compiles() {
         // SOV-S8: `// vani-lang: sanskrit` pragma + only
         // Sanskrit-tagged keywords should compile cleanly.

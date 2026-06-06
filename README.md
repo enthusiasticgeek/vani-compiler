@@ -12,22 +12,83 @@ stress on the second syllable). वाणी is the Sanskrit word for *speech*,
 
 ## Language targeting (priority order)
 
-vāṇī's first-class target is the family of **Sanskrit-derived
-SOV languages** — **Sanskrit (saṁskṛta)**, **Hindi (hindī)**,
-**Marathi (marāṭhī)**, and the broader Indo-Aryan branch (Bengali,
-Gujarati, Punjabi, Nepali, Konkani, Odia, Assamese, etc.) which all
-share verb-final (Subject–Object–Verb) grammar and a Devanagari- /
-Brahmi-derived script lineage. The goal is that someone fluent in
-any of those languages can write a program that reads like prose in
-their mother tongue — verb at the end of the sentence, postpositions
-attached to the noun, no keyword salad in a script they don't read.
+vāṇी treats human-spoken languages as a first-class concern. The
+adoption order is **Indian subcontinent languages first**, then
+global. The reasoning: SOV (Subject–Object–Verb) word order +
+Devanagari-script-or-relative writing systems are widely shared
+across the Indian subcontinent, so a single parser + lexer
+abstraction extends naturally across all of them. After that, the
+global rollout adds languages with significantly different grammar
+(SVO, head-final, RTL, logographic, etc.) one at a time.
 
-After the Sanskrit-derived family, vāṇी opens up to **global
-languages** — English, Spanish, Mandarin, Arabic, Japanese, etc. —
-each with its own keyword aliases and (where applicable) word-order
-adaptations. The compiler core is script- and grammar-agnostic; the
-surface is a token-alias layer + a parser word-order hook. Adding
-a new language is a lexer table + a small parser test.
+### Tier I — Indian subcontinent (priority)
+
+> Major languages of the Indian subcontinent, ordered by speaker
+> count + typological proximity to the already-shipped Sanskrit-
+> derived three. Devanagari-script languages are easiest to wire
+> up (they share the existing lexer pipeline); Brahmi-derived
+> non-Devanagari scripts (Tamil / Telugu / Kannada / Malayalam /
+> Gujarati / Punjabi-Gurmukhi / Bengali / Odia / Assamese / Sinhala)
+> require a per-script Unicode-block extension in
+> `enforce_language_purity` but share the SOV grammar pattern.
+
+| # | Language | Script | Status |
+|---|---|---|---|
+| 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ **SHIPPED** — 91 keyword aliases, 8 SOV statement shapes, per-dialect purity pragma, 9 example programs |
+| 2 | Hindi (*hindī*) | Devanagari | ✅ **SHIPPED** — same surface as Sanskrit; 9 example programs |
+| 3 | Marathi (*marāṭhī*) | Devanagari | ✅ **SHIPPED** — same surface; 9 example programs |
+| 4 | Bengali (*baṅlā*) | Bengali (Brahmi-derived) | Queued — most speakers in the subcontinent after Hindi; SOV grammar shared |
+| 5 | Gujarati (*gujarātī*) | Gujarati (Brahmi-derived) | Queued — close to Marathi grammatically |
+| 6 | Punjabi (*pañjābī*) | Gurmukhi (Brahmi-derived) + Shahmukhi (Perso-Arabic, RTL) | Queued — bi-script: Gurmukhi for Indian Punjabi, Shahmukhi for Pakistani Punjabi |
+| 7 | Tamil (*tamiḻ*) | Tamil (Brahmi-derived, distinct family — Dravidian, not Indo-Aryan) | Queued — agglutinative, postpositional; SOV; different keyword roots (no tatsama from Sanskrit by default) |
+| 8 | Telugu (*telugu*) | Telugu | Queued — Dravidian SOV |
+| 9 | Kannada (*kannaḍa*) | Kannada | Queued — Dravidian SOV |
+| 10 | Malayalam (*malayāḷam*) | Malayalam | Queued — Dravidian SOV |
+| 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | Queued — Hindi-Urdu shared vocabulary at the spoken level; surface forks at script + register |
+| 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | Queued — Indo-Aryan SOV |
+| 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | Queued — Indo-Aryan SOV |
+| 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) + Devanagari (rare) | Queued — bi-script; Indo-Aryan SOV |
+| 15 | Nepali (*nepālī*) | Devanagari | Queued — direct Indo-Aryan SOV; trivial extension since Devanagari pipeline shipped |
+| 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | Queued — Indo-Aryan SOV; Goan and Karnataka variants |
+| 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | Queued — Indo-Aryan SOV |
+| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | Queued — Indo-Aryan SOV; Sri Lankan |
+| ... | (smaller subcontinent languages) | various | Queued |
+
+### Tier II — Global (after Tier I)
+
+> Major world languages ordered by the user's stated rollout
+> priority. Each requires a new keyword table; grammar adaptations
+> (SVO order for most, head-final for Japanese, RTL for Arabic
+> already covered in Tier I) drop in as separate parser hooks.
+
+| # | Language | Script | Word order | Status |
+|---|---|---|---|---|
+| 1 | Spanish (*español*) | Latin | SVO | Queued — Tier II priority 1 |
+| 2 | Mandarin Chinese (*zhōngwén*) | Han logograms | SVO + topic-prominent | Queued — Tier II priority 2; tokenizer needs CJK word boundaries |
+| 3 | Japanese (*nihongo*) | Kanji + Hiragana + Katakana | **SOV** | Queued — Tier II priority 3; vāṇी's SOV plumbing transfers directly |
+| 4 | Russian (*russkiy*) | Cyrillic | SVO + free order (case-marked) | Queued — Tier II priority 4 |
+| 5 | German (*deutsch*) | Latin | V2 + SOV in subordinate clauses | Queued — Tier II priority 5; partial SOV reuse |
+| 6 | French (*français*) | Latin | SVO | Queued — Tier II priority 6 |
+| ... | Arabic, Portuguese, Korean, Vietnamese, Indonesian, Swahili, Turkish, ... | various | various | Queued — Tier II tail |
+
+### Why Indian-subcontinent-first
+
+1. **Underserved by mainstream programming languages.** The
+   subcontinent's 1.4B speakers + ~600M secondary speakers have
+   essentially zero programming-language support in their mother
+   tongues. Every mainstream language assumes English keywords.
+2. **Typological cohesion**. SOV + postpositions + Brahmi-or-
+   relative scripts mean the parser/lexer abstraction generalizes
+   cleanly across the family. Tier I rolls out fast once the first
+   three languages ship (which they have).
+3. **Cultural alignment.** vāṇी's name (वाणी = "speech"), Sanskrit
+   provenance, and the अ → ज्ञ pronunciation conventions all root
+   the project in the subcontinent. Honoring that with
+   first-class support is the design promise.
+
+After the subcontinent family is comprehensive (~18 languages in
+Tier I), Tier II opens with Spanish — the simplest non-SOV
+addition — and works through the global priority list.
 
 > **Status (2026-06-06 evening)**: SOV + natural-speech coding for
 > Sanskrit / Hindi / Marathi is **substantially shipped**:
@@ -1118,29 +1179,127 @@ fn add(a: i64, b: i64) -> i64 { return a + b; }
 // kārya add(a: i64, b: i64) -> i64 { parat a + b; }
 ```
 
-The alias table below gives each keyword in script + romanization. Read
-the romanization aloud — that's the pronunciation contract for the
-language.
+The complete alias table below gives **every English keyword** in
+its Devanagari spelling + romanization for each of the three
+shipped Indo-Aryan dialects. **100% coverage**: 46 of 46 structure
+keywords have at least one Devanagari alias.
+
+> **Reading order**: Romanizations follow IAST (International
+> Alphabet of Sanskrit Transliteration). Read each cell aloud —
+> that's the pronunciation contract.
+
+### Declarations + visibility
 
 | English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
 |---|---|---|---|
 | `fn` | `कार्य` *kārya* | `फलन` *phalan* | `कार्य` *kārya* |
-| `let` | `माना` *mānā* | `मानो` *māno* | `मान` *māna* |
-| `return` | `पुनरागम` *punarāgama* | `लौटाओ` *lauṭāo* | `परत` *parat* |
+| `let` / `assign` | `माना` *mānā* | `माना` *mānā* | `मान` *māna* |
+| `struct` | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* |
+| `enum` | `विकल्प` *vikalpa* | `गणन` *gaṇan* | `गणन` *gaṇan* |
+| `const` | `स्थिर` *sthira* | `स्थिर` *sthira* | `स्थिर` *sthira* |
+| `type` | `प्रकार` *prakāra* | `प्रकार` *prakāra* | `प्रकार` *prakāra* |
+| `intent` | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* |
+| `extern` | `बाह्य` *bāhya* | `बाह्य` *bāhya* | `बाह्य` *bāhya* |
+| `pub` / `public` | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* |
+| `module` / `mod` | `खण्ड` *khaṇḍa* | `मॉड्यूल` *mōḍyūla* | `मॉड्यूल` *mōḍyūla* |
+| `use` | `उपयोग` *upayog* | `उपयोग` *upayog* | `उपयोग` *upayog* |
+| `as` | `यथा` *yathā* | `यथा` *yathā* | `यथा` *yathā* |
+
+### Control flow
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `return` / `give` / `give_back` | `पुनरागम` *punarāgama* | `लौटाओ` *lauṭāo* | `परत` *parat* |
 | `if` | `यदि` *yadi* | `अगर` *agar* | `जर` *jar* |
-| `else` | `अन्यथा` *anyathā* | `नहीं तो` *nahīṁ to* | `नाहीतर` *nāhītar* |
+| `else` | `अन्यथा` *anyathā* | `वरना` *varnā* / `नहीं तो` *nahīṁ to* | `नाहीतर` *nāhītar* |
 | `while` | `यावत्` *yāvat* | `जबतक` *jab tak* | `जोपर्यंत` *jopa­ryanta* |
 | `for` | `प्रति` *prati* | `के लिए` *ke liye* | `साठी` *sāṭhī* |
+| `in` | `में` *meṁ* | `में` *meṁ* | `में` *meṁ* |
+| `from` | `से` *se* | `से` *se* | `से` *se* |
+| `to` | `तक` *tak* | `तक` *tak* | `तक` *tak* |
+| `break` | `विराम` *virāma* | `रुको` *ruko* | `थांब` *thāmba* |
+| `continue` | `अग्रे` *agre* | `आगे` *āge* | `पुढे` *puḍhe* |
 | `then` | `तदा` *tadā* | `तो` *to* | `तर` *tar* |
-| `ref` / `mut ref` | `दृष्ट्या` *dṛṣṭyā* / `लिखित दृष्ट्या` *likhita dṛṣṭyā* | `देखो` *dekho* / `बदलो` *badlo* | `पहा` *pahā* / `बदला` *badlā* |
 | `match` | `मेल` *mela* | `मिलान` *milān* | `जुळवा` *juḷvā* |
+
+### References + mutation
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `ref` | `दृष्ट्या` *dṛṣṭyā* | `देखो` *dekho* | `पहा` *pahā* |
+| `mut` | `परिवर्तनीय` *parivartanīya* | `परिवर्तनीय` *parivartanīya* | `बदल` *badla* |
+
+### Verification (SMT-discharged)
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
 | `assert` | `सिद्धम्` *siddham* | `सुनिश्चित` *sunishchit* | `खात्री` *khātrī* |
-| `prove` | `प्रमाणयति` *pramāṇayati* | `सिद्ध करो` *siddha karo* | `सिद्ध करा` *siddha karā* |
-| `requires` | `अपेक्षते` *apekṣate* | `चाहिए` *cāhiye* | `पाहिजे` *pāhije* |
-| `ensures` | `सुनिश्चयति` *sunishchayati* | `निश्चित` *nishchit* | `निश्चित` *nishchit* |
-| `parallel for` | `समान्तर प्रति` *samāntara prati* | `समानांतर` *samānāntar* | `समांतर` *samāntar* |
-| `task` / `join` | `कार्य` *kārya* / `संयुज्` *saṁyuj* | `काम` *kām* / `जोड़ो` *joṛo* | `काम` *kām* / `जुळवा` *juḷvā* |
-| `fn main()` (entry-point name) | `मुख्य` *mukhya* / `प्रमुख` *pramukh* / `प्रधान` *pradhāna* | same | same |
+| `prove` | `प्रमाण` *pramāṇa* / `सिद्ध` *siddha* | `सिद्ध करो` *siddha karo* / `प्रमाणित` *pramāṇita* | `सिद्ध करा` *siddha karā* / `दाखवा` *dākhvā* |
+| `requires` | `अपेक्षित` *apekṣita* | `चाहिए` *cāhiye* | `पाहिजे` *pāhije* |
+| `ensures` | `सुनिश्चयित` *sunishchayita* | `निश्चित` *nishchit* | `निश्चित` *nishchit* |
+| `invariant` | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* |
+
+### Booleans + I/O
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `true` | `सत्य` *satya* | `सत्य` *satya* / `सही` *sahī* | `सत्य` *satya* / `सही` *sahī* |
+| `false` | `असत्य` *asatya* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* |
+| `print` / `write` | `लिख` *likh* | `लिखो` *likho* | `लिखो` *likho* |
+
+### Concurrency + parallelism
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `pure` | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* |
+| `parallel` | `समानांतर` *samānāntara* / `समान्तर प्रति` *samāntara prati* | `समानांतर` *samānāntara* | `समानांतर` *samānāntara* |
+| `reduce` | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* |
+| `with` | `सह` *saha* | `सह` *saha* | `सह` *saha* |
+| `task` | `नियोग` *niyog* | `नियोग` *niyog* | `नियोग` *niyog* |
+| `join` | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* |
+| `try` | `प्रयास` *prayās* | `प्रयास` *prayās* | `प्रयास` *prayās* |
+
+### Interfaces, generics, embedded
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `interface` / `trait` | `संकेत` *saṅket* / `अंतरापृष्ठ` *antarāpṛṣṭha* | `संकेत` *saṅket* | `संकेत` *saṅket* |
+| `implement` / `impl` | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* |
+| `methods` | `विधि` *vidhi* | `विधि` *vidhi* | `विधि` *vidhi* |
+| `where` | `यत्र` *yatra* | `जहाँ` *jahām̐* | `जिथे` *jithe* |
+| `is` | `अस्ति` *asti* | `है` *hai* | `आहे` *āhe* |
+| `unsafe` | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* |
+| `region` | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* |
+
+### SOV (Subject-Object-Verb) statement shapes
+
+When the user opts into Sanskrit / Hindi / Marathi grammar
+naturally, vāṇी accepts **verb-at-end SOV order** for these
+common shapes alongside the keyword-first English order:
+
+| Construct | Keyword-first | SOV verb-at-end |
+|---|---|---|
+| `let` | `माना x: i64 = 5;` | `x: i64 = 5 माना;` |
+| `return` | `पुनरागम x;` | `x पुनरागम;` |
+| `print` | `लिख x;` | `x लिख;` |
+| `assert` | `सिद्धम् cond;` | `cond सिद्धम्;` |
+| `prove` | `प्रमाण expr;` | `expr प्रमाण;` |
+| range `for` | (no English shape) | `i प्रति 0 से 3 तक { ... }` |
+| `if` / `else` | `यदि cond { ... }` | `cond यदि { ... } अन्यथा { ... }` |
+| `while` | `यावत् cond { ... }` | `cond यावत् { ... }` |
+
+Top-level declarations (`fn` / `struct` / `enum`) read naturally
+keyword-first in Indo-Aryan grammar; SOV reshape there would feel
+forced and is intentionally not supported. `match` SOV is available
+inside SOV-let (`let r: T = scrutinee match { ... } माना;`).
+
+### Per-file dialect purity (opt-in)
+
+Drop a `// vani-lang: <sanskrit|hindi|marathi|english>` comment in
+the first 10 lines of any `.vani` file to enforce single-dialect
+purity. The lexer then rejects any keyword spelling not native to
+the declared dialect. Without the pragma, the existing script-
+level English-vs-Devanagari gate still applies (back-compat).
 
 Pronunciation guide for the diacritics used in the romanizations:
 

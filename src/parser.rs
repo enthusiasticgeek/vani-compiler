@@ -2319,6 +2319,22 @@ impl Parser {
             Ok(Stmt::Continue {
                 span: token.span.merge(semi.span),
             })
+        } else if let Some(verb) = self.looks_like_sov_block_verb() {
+            // Tier C SOV-S3/S4 (2026-06-06): SOV block-form
+            // verb-at-end for `if` / `while`. Indo-Aryan natural
+            // shape puts the verb after the condition before the
+            // body block: `cond यदि { ... }` / `cond यावत् { ... }`.
+            // The classical keyword-first shape (`यदि cond { ... }`)
+            // also still works; the detector only fires when the
+            // verb is immediately followed by `{` at depth 0.
+            //
+            // Must run BEFORE looks_like_sov_verb_at_end because
+            // the latter's `;`-anchored scan would over-consume
+            // into subsequent statements (the SOV-block form has
+            // no terminal `;` of its own, so verb-at-end would
+            // find a later stmt's `;` and return that stmt's
+            // verb).
+            self.parse_sov_block_stmt(verb)
         } else if let Some(verb) = self.looks_like_sov_verb_at_end() {
             // Closure #266: Devanagari SOV verb-at-end. Statements
             // that read naturally with the verb at the end
@@ -2475,6 +2491,60 @@ impl Parser {
             self.tokens.get(self.pos + 1).map(|t| &t.kind),
             Some(TokenKind::For)
         )
+    }
+
+    /// Tier C SOV-S3/S4 (2026-06-06): SOV block-form verb-at-end
+    /// detector. Scans forward from `self.pos` looking for an
+    /// `If` / `While` / `Match` keyword that's:
+    ///   (a) at brace/paren depth 0 (i.e. not inside a sub-
+    ///       expression's parentheses or block), and
+    ///   (b) immediately followed by `{`
+    /// — that combination is the SOV signature
+    /// (`<cond> यदि { body }`). Returns the verb's TokenKind so
+    /// the dispatcher can route to the matching SOV block parser.
+    ///
+    /// Returns None on:
+    ///   - `;` at depth 0 (statement terminator before any block
+    ///     verb — not SOV form)
+    ///   - EOF reached without finding a verb+brace at depth 0
+    ///   - verb found at the very start (`self.pos`) — that means
+    ///     the keyword-first form is being used; let the existing
+    ///     dispatchers handle it
+    fn looks_like_sov_block_verb(&self) -> Option<TokenKind> {
+        let mut depth: i32 = 0;
+        let mut i = self.pos;
+        loop {
+            let Some(tok) = self.tokens.get(i) else {
+                return None;
+            };
+            match &tok.kind {
+                TokenKind::If | TokenKind::While | TokenKind::Match if depth == 0 => {
+                    if i <= self.pos {
+                        return None; // keyword-first form
+                    }
+                    if let Some(next) = self.tokens.get(i + 1) {
+                        if matches!(next.kind, TokenKind::LBrace) {
+                            return Some(tok.kind.clone());
+                        }
+                    }
+                    // Otherwise this If/While/Match is inside an
+                    // expression (e.g. if-as-expression); skip.
+                }
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => {
+                    depth += 1;
+                }
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth < 0 {
+                        return None;
+                    }
+                }
+                TokenKind::Semicolon if depth == 0 => return None,
+                TokenKind::Eof => return None,
+                _ => {}
+            }
+            i += 1;
+        }
     }
 
     /// `… VERB ;` — Devanagari SOV statement detector
@@ -3398,6 +3468,107 @@ impl Parser {
     /// route to the matching parser. All four AST shapes are
     /// identical to their English counterparts — the only
     /// thing that changed is the surface order.
+    /// Tier C SOV-S3/S4 (2026-06-06): parse a SOV block-form
+    /// statement (`if`/`while` with the verb between the cond
+    /// and the body). The AST shape produced is identical to
+    /// the keyword-first form's, so downstream passes don't need
+    /// to know which surface was used.
+    fn parse_sov_block_stmt(&mut self, verb: TokenKind) -> Result<Stmt, Diagnostic> {
+        let start_span = self.current().span;
+        // Parse the cond expression (parse_expr stops at the
+        // verb since If/While/Match aren't binary operators).
+        let cond = self.parse_expr()?;
+        // Consume the verb keyword.
+        let verb_tok = self.bump();
+        match verb {
+            TokenKind::If => {
+                self.expect_keyword(
+                    "'{' (SOV-if then-block)",
+                    |k| matches!(k, TokenKind::LBrace),
+                )?;
+                let mut then_body = Vec::new();
+                while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+                    then_body.push(self.parse_stmt()?);
+                }
+                let then_close = self.expect_keyword(
+                    "'}' (SOV-if then-block)",
+                    |k| matches!(k, TokenKind::RBrace),
+                )?;
+                let (else_body, end_span) = if self
+                    .match_token(|k| matches!(k, TokenKind::Else))
+                    .is_some()
+                {
+                    // `else { … }` block. We don't support
+                    // `else if` chaining in SOV form (the
+                    // keyword-first form should be used for
+                    // chains; the SOV detector only fires on
+                    // the outer-most cond + verb pair).
+                    self.expect_keyword(
+                        "'{' (SOV-if else-block)",
+                        |k| matches!(k, TokenKind::LBrace),
+                    )?;
+                    let mut else_body = Vec::new();
+                    while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+                        else_body.push(self.parse_stmt()?);
+                    }
+                    let else_close = self.expect_keyword(
+                        "'}' (SOV-if else-block)",
+                        |k| matches!(k, TokenKind::RBrace),
+                    )?;
+                    (else_body, else_close.span)
+                } else {
+                    (vec![], then_close.span)
+                };
+                Ok(Stmt::If {
+                    cond,
+                    then_body,
+                    else_body,
+                    span: start_span.merge(end_span),
+                })
+            }
+            TokenKind::While => {
+                self.expect_keyword(
+                    "'{' (SOV-while body)",
+                    |k| matches!(k, TokenKind::LBrace),
+                )?;
+                let mut body = Vec::new();
+                while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+                    body.push(self.parse_stmt()?);
+                }
+                let close = self.expect_keyword(
+                    "'}' (SOV-while body)",
+                    |k| matches!(k, TokenKind::RBrace),
+                )?;
+                Ok(Stmt::While {
+                    cond,
+                    invariants: vec![],
+                    body,
+                    span: start_span.merge(close.span),
+                })
+            }
+            // `match` at statement position is uncommon (vāṇी
+            // match is an expression). The SOV-match shape is
+            // implicitly available through SOV-let:
+            //   `let r: i64 = scrutinee match { ... } माना;`
+            // wraps a match-expression in a SOV-let. The
+            // detector reaches here only when match is at
+            // statement position WITHOUT an enclosing let, which
+            // is unusual; report a clear diagnostic.
+            TokenKind::Match => Err(Diagnostic::new(
+                verb_tok.span,
+                "SOV-match at statement position is unsupported. Match is an expression in vāṇी; wrap it in a SOV-let (`let r: T = scrutinee match { ... } माना;`) or use the keyword-first form (`match scrutinee { ... }`).".to_string(),
+            )),
+            other => Err(Diagnostic::new(
+                verb_tok.span,
+                format!(
+                    "internal: unexpected SOV block verb {:?} — \
+                     expected If / While / Match",
+                    other
+                ),
+            )),
+        }
+    }
+
     fn parse_sov_verb_stmt(&mut self, verb: TokenKind) -> Result<Stmt, Diagnostic> {
         let start_span = self.current().span;
         match verb {
