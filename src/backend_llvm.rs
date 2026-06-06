@@ -1308,30 +1308,24 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     let uses_epoll = program_uses_epoll(program);
     let uses_sleep_ms = program_uses_sleep_ms(program);
     let uses_tcp = program_uses_tcp(program);
-    if (uses_epoll || uses_sleep_ms || uses_tcp) && !host_is_linux() {
-        // Arc 8 v3.1 Phase 5/6 — LLVM backend stays Linux-only.
-        // The C backend covers macOS (kqueue) + Windows (IOCP)
-        // via dual-target `#ifdef` emit; LLVM IR-shaped ports
-        // of those runtimes are scoped as deferred work because
-        // kevent struct layout + libdispatch interop + WSA*
-        // bring-up are much larger surfaces than what fits
-        // inside a single phase. macOS/Windows users compile
-        // Arc 8 programs via the C backend until that ships.
-        let host = if host_is_darwin() {
-            "macOS"
-        } else if host_is_windows() {
-            "Windows"
-        } else {
-            "this non-Linux"
-        };
+    if (uses_epoll || uses_sleep_ms || uses_tcp) && !host_supports_arc8_io() {
+        // Arc 8 v3.1 Phase 5/6 — LLVM backend now emits IR for
+        // Linux (epoll + timerfd + glibc errno), macOS (kqueue
+        // + EVFILT_READ + `__error()` errno + pipe/pthread
+        // timer shim declares), and Windows (IOCP + winsock2 +
+        // WSAGetLastError + CreateThread/Sleep helpers).
+        //
+        // VERIFICATION DEFERRED for macOS + Windows IR branches
+        // — no host access in the current dev environment. The
+        // Linux branch is byte-identical to pre-Phase-5 emit so
+        // existing Linux verification stays green. macOS/Windows
+        // hosts beyond those three (FreeBSD, etc.) still hit
+        // this gate.
         panic!(
-            "Arc 8 I/O runtime LLVM-backend emit is currently Linux-only. \
-             The host is {} — use the C backend (`intentc --backend c`) \
-             which fully supports Arc 8 I/O on Linux + macOS + Windows \
-             via `#ifdef` dual emit. See ARC8_V3_PLAN.md Phase 5 (macOS \
-             kqueue LLVM port) and Phase 6 (Windows IOCP LLVM port) for \
-             the deferred LLVM-IR work.",
-            host
+            "Arc 8 I/O runtime needs Linux, macOS, or Windows host \
+             support. The current host is none of those — file an issue \
+             with the platform name and we'll add a `host_is_*` predicate. \
+             Until then, the C backend covers more platforms via `#ifdef`."
         );
     }
 
@@ -22348,6 +22342,25 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
 /// (little-endian host stores big-endian network → bytes
 /// `7F 00 00 01` on the wire).
 fn emit_intent_tcp_helpers_llvm(out: &mut String) {
+    // Phase 5/6 — Linux + macOS share the POSIX socket IR. On
+    // macOS the same `int fd` model + BSD sockets work, so no
+    // separate path is needed. Windows would need an i64 SOCKET
+    // handle + winsock2 declares + WSAGetLastError; that IR
+    // surface is much larger and is scoped as a deferred follow-
+    // up. Windows users compile TCP programs via the C backend
+    // (which has full winsock2 support) — the panic below
+    // points them there. VERIFICATION DEFERRED for both
+    // non-Linux paths until host access is available.
+    if host_is_windows() {
+        panic!(
+            "Arc 8 TCP runtime LLVM IR emit on Windows is deferred — \
+             the IR-shaped winsock2 surface (SOCKET=i64, WSAGetLastError, \
+             WSAStartup, etc.) is larger than what fits this phase. The C \
+             backend (`intentc --backend c`) has full Windows TCP support \
+             via dual `#ifdef _WIN32` emit. Phase 6 LLVM TCP IR port is \
+             tracked in ARC8_V3_PLAN.md."
+        );
+    }
     out.push_str(
         "declare i32 @socket(i32, i32, i32)\n\
          declare i32 @bind(i32, i8*, i32)\n\
@@ -22631,6 +22644,21 @@ fn program_uses_epoll(program: &TypedProgram) -> bool {
 /// errno is accessed via the libc `__errno_location()` thunk
 /// (glibc + musl convention).
 fn emit_intent_epoll_helpers_llvm(out: &mut String) {
+    // Phase 5/6 — branch on host. Each host emits an IR surface
+    // matching its native I/O multiplexer:
+    //   - Linux: epoll + timerfd (the v2 path; unchanged)
+    //   - macOS: kqueue + EVFILT_READ + pipe/pthread userspace
+    //     timer (Phase 5; VERIFICATION DEFERRED — no Darwin host)
+    //   - Windows: IOCP + winsock2 + CreateThread timer (Phase 6;
+    //     VERIFICATION DEFERRED — no Windows host)
+    if host_is_darwin() {
+        emit_intent_epoll_helpers_llvm_darwin(out);
+        return;
+    }
+    if host_is_windows() {
+        emit_intent_epoll_helpers_llvm_windows(out);
+        return;
+    }
     out.push_str(
         "declare i32 @epoll_create1(i32)\n\
          declare i32 @epoll_ctl(i32, i32, i32, i8*)\n\
@@ -22809,6 +22837,432 @@ fn emit_intent_epoll_helpers_llvm(out: &mut String) {
     );
 }
 
+/// Arc 8 v3.1 Phase 5 — macOS LLVM emit. kqueue + EVFILT_READ
+/// for the epoll family, `__error()` for errno, and a
+/// pipe + pthread userspace timer shim for sleep_ms_async.
+/// VERIFICATION DEFERRED — no macOS host access at landing time.
+///
+/// kevent struct (32 bytes on macOS x86_64 / arm64):
+///   uintptr_t ident;   // 0..8
+///   int16_t filter;    // 8..10
+///   uint16_t flags;    // 10..12
+///   uint32_t fflags;   // 12..16
+///   intptr_t data;     // 16..24
+///   void* udata;       // 24..32
+///
+/// EVFILT_READ = -1, EV_ADD = 0x0001, EV_CLEAR = 0x0020.
+fn emit_intent_epoll_helpers_llvm_darwin(out: &mut String) {
+    out.push_str(
+        "declare i32 @kqueue()\n\
+         declare i32 @kevent(i32, i8*, i32, i8*, i32, i8*)\n\
+         declare i32 @fcntl(i32, i32, ...)\n\
+         declare i32 @pipe(i32*)\n\
+         declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)\n\
+         declare i32 @pthread_detach(i8*)\n\
+         declare i8* @malloc(i64)\n\
+         declare void @free(i8*)\n\
+         declare i64 @write(i32, i8*, i64)\n\
+         declare i64 @read(i32, i8*, i64)\n\
+         declare i32 @nanosleep(i8*, i8*)\n\
+         declare i32* @__error()\n\
+         define i64 @intent_epoll_new() {\n\
+         entry:\n\
+         \x20 %fd = call i32 @kqueue()\n\
+         \x20 %neg = icmp slt i32 %fd, 0\n\
+         \x20 %fd_i64 = sext i32 %fd to i64\n\
+         \x20 %res = select i1 %neg, i64 -1, i64 %fd_i64\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_add_read(i64 %epfd, i64 %fd) {\n\
+         entry:\n\
+         \x20 %kev = alloca [32 x i8], align 8\n\
+         \x20 %kev_i8 = getelementptr [32 x i8], [32 x i8]* %kev, i32 0, i32 0\n\
+         \x20 %_z = call i8* @memset(i8* %kev_i8, i32 0, i64 32)\n\
+         \x20 %ident_ptr = bitcast i8* %kev_i8 to i64*\n\
+         \x20 store i64 %fd, i64* %ident_ptr\n\
+         \x20 %filter_p_i8 = getelementptr i8, i8* %kev_i8, i64 8\n\
+         \x20 %filter_p = bitcast i8* %filter_p_i8 to i16*\n\
+         \x20 store i16 -1, i16* %filter_p\n\
+         \x20 %flags_p_i8 = getelementptr i8, i8* %kev_i8, i64 10\n\
+         \x20 %flags_p = bitcast i8* %flags_p_i8 to i16*\n\
+         \x20 store i16 33, i16* %flags_p\n\
+         \x20 %epfd_i32 = trunc i64 %epfd to i32\n\
+         \x20 %rc = call i32 @kevent(i32 %epfd_i32, i8* %kev_i8, i32 1, i8* null, i32 0, i8* null)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_wait_one(i64 %epfd, i64 %timeout_ms) {\n\
+         entry:\n\
+         \x20 %kev = alloca [32 x i8], align 8\n\
+         \x20 %kev_i8 = getelementptr [32 x i8], [32 x i8]* %kev, i32 0, i32 0\n\
+         \x20 %ts = alloca [16 x i8], align 8\n\
+         \x20 %ts_i8 = getelementptr [16 x i8], [16 x i8]* %ts, i32 0, i32 0\n\
+         \x20 %neg = icmp slt i64 %timeout_ms, 0\n\
+         \x20 br i1 %neg, label %do_block, label %set_ts\n\
+         set_ts:\n\
+         \x20 %sec = sdiv i64 %timeout_ms, 1000\n\
+         \x20 %ms_mod = srem i64 %timeout_ms, 1000\n\
+         \x20 %nsec = mul i64 %ms_mod, 1000000\n\
+         \x20 %sec_p = bitcast i8* %ts_i8 to i64*\n\
+         \x20 store i64 %sec, i64* %sec_p\n\
+         \x20 %nsec_p_i8 = getelementptr i8, i8* %ts_i8, i64 8\n\
+         \x20 %nsec_p = bitcast i8* %nsec_p_i8 to i64*\n\
+         \x20 store i64 %nsec, i64* %nsec_p\n\
+         \x20 %epfd_i32_a = trunc i64 %epfd to i32\n\
+         \x20 %rc_a = call i32 @kevent(i32 %epfd_i32_a, i8* null, i32 0, i8* %kev_i8, i32 1, i8* %ts_i8)\n\
+         \x20 br label %check\n\
+         do_block:\n\
+         \x20 %epfd_i32_b = trunc i64 %epfd to i32\n\
+         \x20 %rc_b = call i32 @kevent(i32 %epfd_i32_b, i8* null, i32 0, i8* %kev_i8, i32 1, i8* null)\n\
+         \x20 br label %check\n\
+         check:\n\
+         \x20 %rc = phi i32 [ %rc_a, %set_ts ], [ %rc_b, %do_block ]\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 br i1 %err, label %ret_err, label %check_timeout\n\
+         check_timeout:\n\
+         \x20 %is_zero = icmp eq i32 %rc, 0\n\
+         \x20 br i1 %is_zero, label %ret_timeout, label %read_ident\n\
+         read_ident:\n\
+         \x20 %ident_p2 = bitcast i8* %kev_i8 to i64*\n\
+         \x20 %fd_i64 = load i64, i64* %ident_p2\n\
+         \x20 ret i64 %fd_i64\n\
+         ret_timeout:\n\
+         \x20 ret i64 -2\n\
+         ret_err:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_epoll_close(i64 %epfd) {\n\
+         entry:\n\
+         \x20 %epfd_i32 = trunc i64 %epfd to i32\n\
+         \x20 %rc = call i32 @close(i32 %epfd_i32)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_set_nonblocking(i64 %fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %flags = call i32 (i32, i32, ...) @fcntl(i32 %fd_i32, i32 3)\n\
+         \x20 %flags_err = icmp slt i32 %flags, 0\n\
+         \x20 br i1 %flags_err, label %ret_neg1, label %do_set\n\
+         do_set:\n\
+         \x20 ; O_NONBLOCK = 4 on macOS (differs from Linux 2048)\n\
+         \x20 %new_flags = or i32 %flags, 4\n\
+         \x20 %rc = call i32 (i32, i32, ...) @fcntl(i32 %fd_i32, i32 4, i32 %new_flags)\n\
+         \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_accept_nb(i64 %server_fd) {\n\
+         entry:\n\
+         \x20 %fd_i32 = trunc i64 %server_fd to i32\n\
+         \x20 %cfd = call i32 @accept(i32 %fd_i32, i8* null, i32* null)\n\
+         \x20 %ok = icmp sge i32 %cfd, 0\n\
+         \x20 br i1 %ok, label %ret_ok, label %check_eagain\n\
+         ret_ok:\n\
+         \x20 %cfd_i64 = sext i32 %cfd to i64\n\
+         \x20 ret i64 %cfd_i64\n\
+         check_eagain:\n\
+         \x20 ; macOS EAGAIN = 35\n\
+         \x20 %errno_p = call i32* @__error()\n\
+         \x20 %err_v = load i32, i32* %errno_p\n\
+         \x20 %is_eagain = icmp eq i32 %err_v, 35\n\
+         \x20 %res = select i1 %is_eagain, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_recv_nb(i64 %fd, i64 %max) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %max, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %clamp\n\
+         clamp:\n\
+         \x20 %too_big = icmp sgt i64 %max, 4096\n\
+         \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %n = call i64 @recv(i32 %fd_i32, i8* %buf_ptr, i64 %want, i32 0)\n\
+         \x20 %ok = icmp sge i64 %n, 0\n\
+         \x20 br i1 %ok, label %ret_n, label %check_eagain\n\
+         ret_n:\n\
+         \x20 ret i64 %n\n\
+         check_eagain:\n\
+         \x20 %errno_p = call i32* @__error()\n\
+         \x20 %err_v = load i32, i32* %errno_p\n\
+         \x20 %is_eagain = icmp eq i32 %err_v, 35\n\
+         \x20 %res = select i1 %is_eagain, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define internal i8* @__intent_macos_timer_thread(i8* %arg) {\n\
+         entry:\n\
+         \x20 %args_i32_p = bitcast i8* %arg to i32*\n\
+         \x20 %wfd = load i32, i32* %args_i32_p\n\
+         \x20 %ms_p_i8 = getelementptr i8, i8* %arg, i64 8\n\
+         \x20 %ms_p = bitcast i8* %ms_p_i8 to i64*\n\
+         \x20 %ms = load i64, i64* %ms_p\n\
+         \x20 %ts = alloca [2 x i64], align 8\n\
+         \x20 %ts_i8 = getelementptr [2 x i64], [2 x i64]* %ts, i32 0, i32 0\n\
+         \x20 %sec = sdiv i64 %ms, 1000\n\
+         \x20 %ms_mod = srem i64 %ms, 1000\n\
+         \x20 %nsec = mul i64 %ms_mod, 1000000\n\
+         \x20 store i64 %sec, i64* %ts_i8\n\
+         \x20 %ts_n_p = getelementptr [2 x i64], [2 x i64]* %ts, i32 0, i32 1\n\
+         \x20 store i64 %nsec, i64* %ts_n_p\n\
+         \x20 %ts_i8c = bitcast i64* %ts_i8 to i8*\n\
+         \x20 %_s = call i32 @nanosleep(i8* %ts_i8c, i8* null)\n\
+         \x20 %one_buf = alloca i64, align 8\n\
+         \x20 store i64 1, i64* %one_buf\n\
+         \x20 %one_i8 = bitcast i64* %one_buf to i8*\n\
+         \x20 %_w = call i64 @write(i32 %wfd, i8* %one_i8, i64 8)\n\
+         \x20 %_c = call i32 @close(i32 %wfd)\n\
+         \x20 call void @free(i8* %arg)\n\
+         \x20 ret i8* null\n\
+         }\n\
+         define i64 @intent_sleep_ms_async(i64 %ms) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %ms, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %do_pipe\n\
+         do_pipe:\n\
+         \x20 %fds = alloca [2 x i32], align 4\n\
+         \x20 %fds_p = getelementptr [2 x i32], [2 x i32]* %fds, i32 0, i32 0\n\
+         \x20 %pipe_rc = call i32 @pipe(i32* %fds_p)\n\
+         \x20 %pipe_err = icmp slt i32 %pipe_rc, 0\n\
+         \x20 br i1 %pipe_err, label %ret_neg1, label %set_nb\n\
+         set_nb:\n\
+         \x20 %rfd = load i32, i32* %fds_p\n\
+         \x20 %wfd_p = getelementptr [2 x i32], [2 x i32]* %fds, i32 0, i32 1\n\
+         \x20 %wfd = load i32, i32* %wfd_p\n\
+         \x20 %flags = call i32 (i32, i32, ...) @fcntl(i32 %rfd, i32 3)\n\
+         \x20 %new_flags = or i32 %flags, 4\n\
+         \x20 %_sf = call i32 (i32, i32, ...) @fcntl(i32 %rfd, i32 4, i32 %new_flags)\n\
+         \x20 %args_i8 = call i8* @malloc(i64 16)\n\
+         \x20 %args_null = icmp eq i8* %args_i8, null\n\
+         \x20 br i1 %args_null, label %close_neg1, label %do_thread\n\
+         do_thread:\n\
+         \x20 %args_i32 = bitcast i8* %args_i8 to i32*\n\
+         \x20 store i32 %wfd, i32* %args_i32\n\
+         \x20 %ms_p_off = getelementptr i8, i8* %args_i8, i64 8\n\
+         \x20 %ms_p = bitcast i8* %ms_p_off to i64*\n\
+         \x20 store i64 %ms, i64* %ms_p\n\
+         \x20 %th = alloca i8*, align 8\n\
+         \x20 %th_i8 = bitcast i8** %th to i8*\n\
+         \x20 %tc_rc = call i32 @pthread_create(i8* %th_i8, i8* null, i8* (i8*)* @__intent_macos_timer_thread, i8* %args_i8)\n\
+         \x20 %tc_err = icmp ne i32 %tc_rc, 0\n\
+         \x20 br i1 %tc_err, label %free_and_neg1, label %detach\n\
+         detach:\n\
+         \x20 %th_v = load i8*, i8** %th\n\
+         \x20 %_d = call i32 @pthread_detach(i8* %th_v)\n\
+         \x20 %rfd_i64 = sext i32 %rfd to i64\n\
+         \x20 ret i64 %rfd_i64\n\
+         free_and_neg1:\n\
+         \x20 call void @free(i8* %args_i8)\n\
+         \x20 %_c1 = call i32 @close(i32 %rfd)\n\
+         \x20 %_c2 = call i32 @close(i32 %wfd)\n\
+         \x20 ret i64 -1\n\
+         close_neg1:\n\
+         \x20 %_cc1 = call i32 @close(i32 %rfd)\n\
+         \x20 %_cc2 = call i32 @close(i32 %wfd)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_sleep_ms_finish(i64 %fd) {\n\
+         entry:\n\
+         \x20 %exp = alloca i64, align 8\n\
+         \x20 %exp_i8 = bitcast i64* %exp to i8*\n\
+         \x20 %fd_i32 = trunc i64 %fd to i32\n\
+         \x20 %n = call i64 @read(i32 %fd_i32, i8* %exp_i8, i64 8)\n\
+         \x20 %_close = call i32 @close(i32 %fd_i32)\n\
+         \x20 %err = icmp slt i64 %n, 0\n\
+         \x20 br i1 %err, label %ret_neg1, label %ret_one\n\
+         ret_one:\n\
+         \x20 %got = icmp sgt i64 %n, 0\n\
+         \x20 %res = select i1 %got, i64 1, i64 0\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\n",
+    );
+}
+
+/// Arc 8 v3.1 Phase 6 — Windows LLVM emit. IOCP +
+/// CreateThread + winsock2 + WSAGetLastError. VERIFICATION
+/// DEFERRED — no Windows host access at landing time.
+///
+/// The IOCP completion-key model approximates epoll readiness
+/// by treating each PostQueuedCompletionStatus as a "wake the
+/// reader for this key" event. For production-grade Windows
+/// I/O a Win32-native `iocp_*` family is the long-term path.
+fn emit_intent_epoll_helpers_llvm_windows(out: &mut String) {
+    out.push_str(
+        "declare i8* @CreateIoCompletionPort(i8*, i8*, i64, i32)\n\
+         declare i32 @GetQueuedCompletionStatus(i8*, i32*, i64*, i8**, i32)\n\
+         declare i32 @PostQueuedCompletionStatus(i8*, i32, i64, i8*)\n\
+         declare i32 @CloseHandle(i8*)\n\
+         declare i32 @GetLastError()\n\
+         declare i32 @WSAGetLastError()\n\
+         declare i32 @ioctlsocket(i64, i32, i32*)\n\
+         declare i8* @CreateThread(i8*, i64, i32 (i8*)*, i8*, i32, i32*)\n\
+         declare void @Sleep(i32)\n\
+         declare i8* @malloc(i64)\n\
+         declare void @free(i8*)\n\
+         declare i64 @recv(i64, i8*, i32, i32)\n\
+         declare i64 @accept(i64, i8*, i32*)\n\
+         define i64 @intent_epoll_new() {\n\
+         entry:\n\
+         \x20 %h = call i8* @CreateIoCompletionPort(i8* inttoptr (i64 -1 to i8*), i8* null, i64 0, i32 0)\n\
+         \x20 %null = icmp eq i8* %h, null\n\
+         \x20 %h_i64 = ptrtoint i8* %h to i64\n\
+         \x20 %res = select i1 %null, i64 -1, i64 %h_i64\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_add_read(i64 %epfd, i64 %fd) {\n\
+         entry:\n\
+         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
+         \x20 %sock_h = inttoptr i64 %fd to i8*\n\
+         \x20 %r = call i8* @CreateIoCompletionPort(i8* %sock_h, i8* %iocp, i64 %fd, i32 0)\n\
+         \x20 %ok = icmp eq i8* %r, %iocp\n\
+         \x20 %res = select i1 %ok, i64 0, i64 -1\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_epoll_wait_one(i64 %epfd, i64 %timeout_ms) {\n\
+         entry:\n\
+         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
+         \x20 %bytes = alloca i32, align 4\n\
+         \x20 %key = alloca i64, align 8\n\
+         \x20 %ov = alloca i8*, align 8\n\
+         \x20 store i32 0, i32* %bytes\n\
+         \x20 store i64 0, i64* %key\n\
+         \x20 store i8* null, i8** %ov\n\
+         \x20 %tmo = trunc i64 %timeout_ms to i32\n\
+         \x20 %is_neg = icmp slt i64 %timeout_ms, 0\n\
+         \x20 %tmo_final = select i1 %is_neg, i32 -1, i32 %tmo\n\
+         \x20 %ok = call i32 @GetQueuedCompletionStatus(i8* %iocp, i32* %bytes, i64* %key, i8** %ov, i32 %tmo_final)\n\
+         \x20 %fail = icmp eq i32 %ok, 0\n\
+         \x20 br i1 %fail, label %check_to, label %ret_key\n\
+         check_to:\n\
+         \x20 %le = call i32 @GetLastError()\n\
+         \x20 %is_to = icmp eq i32 %le, 258\n\
+         \x20 %res = select i1 %is_to, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         ret_key:\n\
+         \x20 %k = load i64, i64* %key\n\
+         \x20 ret i64 %k\n\
+         }\n\
+         define i64 @intent_epoll_close(i64 %epfd) {\n\
+         entry:\n\
+         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
+         \x20 %rc = call i32 @CloseHandle(i8* %iocp)\n\
+         \x20 %ok = icmp ne i32 %rc, 0\n\
+         \x20 %res = select i1 %ok, i64 0, i64 -1\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_set_nonblocking(i64 %fd) {\n\
+         entry:\n\
+         \x20 %nb_p = alloca i32, align 4\n\
+         \x20 store i32 1, i32* %nb_p\n\
+         \x20 ; FIONBIO = 0x8004667E\n\
+         \x20 %rc = call i32 @ioctlsocket(i64 %fd, i32 -2147195266, i32* %nb_p)\n\
+         \x20 %err = icmp ne i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_accept_nb(i64 %server_fd) {\n\
+         entry:\n\
+         \x20 %cfd = call i64 @accept(i64 %server_fd, i8* null, i32* null)\n\
+         \x20 %is_inv = icmp eq i64 %cfd, -1\n\
+         \x20 br i1 %is_inv, label %check_wb, label %ret_ok\n\
+         ret_ok:\n\
+         \x20 ret i64 %cfd\n\
+         check_wb:\n\
+         \x20 %le = call i32 @WSAGetLastError()\n\
+         \x20 %is_wb = icmp eq i32 %le, 10035\n\
+         \x20 %res = select i1 %is_wb, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_recv_nb(i64 %fd, i64 %max) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %max, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %clamp\n\
+         clamp:\n\
+         \x20 %too_big = icmp sgt i64 %max, 4096\n\
+         \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
+         \x20 %want_i32 = trunc i64 %want to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %n = call i64 @recv(i64 %fd, i8* %buf_ptr, i32 %want_i32, i32 0)\n\
+         \x20 %neg_n = icmp slt i64 %n, 0\n\
+         \x20 br i1 %neg_n, label %check_wb, label %ret_n\n\
+         ret_n:\n\
+         \x20 ret i64 %n\n\
+         check_wb:\n\
+         \x20 %le = call i32 @WSAGetLastError()\n\
+         \x20 %is_wb = icmp eq i32 %le, 10035\n\
+         \x20 %res = select i1 %is_wb, i64 -2, i64 -1\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define internal i32 @__intent_win_timer_thread(i8* %arg) {\n\
+         entry:\n\
+         \x20 %iocp_p = bitcast i8* %arg to i8**\n\
+         \x20 %iocp = load i8*, i8** %iocp_p\n\
+         \x20 %key_p_i8 = getelementptr i8, i8* %arg, i64 8\n\
+         \x20 %key_p = bitcast i8* %key_p_i8 to i64*\n\
+         \x20 %key = load i64, i64* %key_p\n\
+         \x20 %ms_p_i8 = getelementptr i8, i8* %arg, i64 16\n\
+         \x20 %ms_p = bitcast i8* %ms_p_i8 to i64*\n\
+         \x20 %ms = load i64, i64* %ms_p\n\
+         \x20 %neg = icmp slt i64 %ms, 0\n\
+         \x20 %ms_safe = select i1 %neg, i64 0, i64 %ms\n\
+         \x20 %ms_i32 = trunc i64 %ms_safe to i32\n\
+         \x20 call void @Sleep(i32 %ms_i32)\n\
+         \x20 %null_iocp = icmp eq i8* %iocp, null\n\
+         \x20 br i1 %null_iocp, label %done, label %post\n\
+         post:\n\
+         \x20 %_p = call i32 @PostQueuedCompletionStatus(i8* %iocp, i32 0, i64 %key, i8* null)\n\
+         \x20 br label %done\n\
+         done:\n\
+         \x20 call void @free(i8* %arg)\n\
+         \x20 ret i32 0\n\
+         }\n\
+         define i64 @intent_sleep_ms_async(i64 %ms) {\n\
+         entry:\n\
+         \x20 %args_i8 = call i8* @malloc(i64 32)\n\
+         \x20 %args_null = icmp eq i8* %args_i8, null\n\
+         \x20 br i1 %args_null, label %ret_neg1, label %fill\n\
+         fill:\n\
+         \x20 %iocp_p = bitcast i8* %args_i8 to i8**\n\
+         \x20 store i8* null, i8** %iocp_p\n\
+         \x20 %key_val = ptrtoint i8* %args_i8 to i64\n\
+         \x20 %key_p_i8 = getelementptr i8, i8* %args_i8, i64 8\n\
+         \x20 %key_p = bitcast i8* %key_p_i8 to i64*\n\
+         \x20 store i64 %key_val, i64* %key_p\n\
+         \x20 %ms_p_i8 = getelementptr i8, i8* %args_i8, i64 16\n\
+         \x20 %ms_p = bitcast i8* %ms_p_i8 to i64*\n\
+         \x20 store i64 %ms, i64* %ms_p\n\
+         \x20 %th = call i8* @CreateThread(i8* null, i64 0, i32 (i8*)* @__intent_win_timer_thread, i8* %args_i8, i32 0, i32* null)\n\
+         \x20 %th_null = icmp eq i8* %th, null\n\
+         \x20 br i1 %th_null, label %free_and_neg1, label %ret_key\n\
+         ret_key:\n\
+         \x20 %_c = call i32 @CloseHandle(i8* %th)\n\
+         \x20 ret i64 %key_val\n\
+         free_and_neg1:\n\
+         \x20 call void @free(i8* %args_i8)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_sleep_ms_finish(i64 %fd) {\n\
+         entry:\n\
+         \x20 ; Windows thread frees its own state; nothing to clean.\n\
+         \x20 ret i64 1\n\
+         }\n\n",
+    );
+}
+
 /// Arc 8 step 8e — emit `@intent_sleep_ms(i64 ms) -> i64` and
 /// the libc `@nanosleep` declare. Uses a stack-allocated
 /// `[2 x i64]` as the timespec — valid on Linux/macOS x86_64
@@ -22816,6 +23270,26 @@ fn emit_intent_epoll_helpers_llvm(out: &mut String) {
 /// 32-bit targets need a different layout; out of scope for
 /// v1 since vāṇī's tested triples are all 64-bit.
 fn emit_intent_sleep_ms_helper_llvm(out: &mut String) {
+    // Phase 6 — Windows uses Win32 @Sleep(DWORD); macOS shares
+    // the POSIX nanosleep path with Linux. VERIFICATION DEFERRED
+    // for Windows — no host access in current dev environment.
+    if host_is_windows() {
+        out.push_str(
+            "declare void @Sleep(i32)\n\
+             define i64 @intent_sleep_ms(i64 %ms) {\n\
+             entry:\n\
+             \x20 %neg = icmp sle i64 %ms, 0\n\
+             \x20 br i1 %neg, label %ret_zero, label %do_sleep\n\
+             ret_zero:\n\
+             \x20 ret i64 0\n\
+             do_sleep:\n\
+             \x20 %ms_i32 = trunc i64 %ms to i32\n\
+             \x20 call void @Sleep(i32 %ms_i32)\n\
+             \x20 ret i64 0\n\
+             }\n\n",
+        );
+        return;
+    }
     out.push_str(
         "declare i32 @nanosleep(i8*, i8*)\n\
          define i64 @intent_sleep_ms(i64 %ms) {\n\
