@@ -4,8 +4,8 @@
 // _remove transfers V ownership to caller; _get returns a clone.
 //
 // build & run:
-//   intentc run examples/hashmap_strv.vani                   # LLVM backend
-//   intentc run examples/hashmap_strv.vani --backend=c       # C backend
+//   vanic run examples/hashmap_strv.vani                   # LLVM backend
+//   vanic run examples/hashmap_strv.vani --backend=c       # C backend
 
 intent "HashMap<i64, OwnedStr> — i64-keyed string-value map (ARC 4.2)";
 

@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/vec_invariants.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/vec_invariants.vani --backend=c              # C backend, gcc
-//   intentc build examples/vec_invariants.vani -o /tmp/vec_invariants && /tmp/vec_invariants   # native binary
+//   vanic run examples/vec_invariants.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/vec_invariants.vani --backend=c              # C backend, gcc
+//   vanic build examples/vec_invariants.vani -o /tmp/vec_invariants && /tmp/vec_invariants   # native binary
 
 intent "Loop invariants over Vec length, end-to-end";
 

@@ -12,8 +12,8 @@
 // each branch's suspends allocate further states.
 //
 // build & run:
-//   intentc run examples/tcp_echo_async_branched.vani                # LLVM
-//   intentc run examples/tcp_echo_async_branched.vani --backend=c    # C
+//   vanic run examples/tcp_echo_async_branched.vani                # LLVM
+//   vanic run examples/tcp_echo_async_branched.vani --backend=c    # C
 
 intent "Phase 2.1a — async fn with suspend in conditional branch";
 

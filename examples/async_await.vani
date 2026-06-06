@@ -15,8 +15,8 @@
 //   step 8c) ships.
 //
 // build & run:
-//   intentc run examples/async_await.vani                   # LLVM
-//   intentc run examples/async_await.vani --backend=c       # C
+//   vanic run examples/async_await.vani                   # LLVM
+//   vanic run examples/async_await.vani --backend=c       # C
 
 intent "async fn + await + CancelToken — v1 (Arc 8 steps 8a/8b/8f/8g)";
 

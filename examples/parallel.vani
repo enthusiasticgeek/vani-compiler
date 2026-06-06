@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/parallel.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/parallel.vani --backend=c              # C backend, gcc
-//   intentc build examples/parallel.vani -o /tmp/parallel && /tmp/parallel   # native binary
+//   vanic run examples/parallel.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/parallel.vani --backend=c              # C backend, gcc
+//   vanic build examples/parallel.vani -o /tmp/parallel && /tmp/parallel   # native binary
 
 intent "Effects/ownership verifier: pure functions and race-free parallel loops";
 

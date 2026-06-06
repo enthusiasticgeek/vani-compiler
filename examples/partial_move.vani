@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/partial_move.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/partial_move.vani --backend=c              # C backend, gcc
-//   intentc build examples/partial_move.vani -o /tmp/partial_move && /tmp/partial_move   # native binary
+//   vanic run examples/partial_move.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/partial_move.vani --backend=c              # C backend, gcc
+//   vanic build examples/partial_move.vani -o /tmp/partial_move && /tmp/partial_move   # native binary
 
 intent "Partial-move tracking — move a struct field while the struct lives";
 

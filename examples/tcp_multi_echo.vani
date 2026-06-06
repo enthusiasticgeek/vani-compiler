@@ -18,8 +18,8 @@
 // scripted tests + small services.
 //
 // build & run:
-//   intentc run examples/tcp_multi_echo.vani                # LLVM
-//   intentc run examples/tcp_multi_echo.vani --backend=c    # C
+//   vanic run examples/tcp_multi_echo.vani                # LLVM
+//   vanic run examples/tcp_multi_echo.vani --backend=c    # C
 
 intent "Multi-client TCP echo (3 concurrent clients) — Arc 8 step 8e v1.6";
 

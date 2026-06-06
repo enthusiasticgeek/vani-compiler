@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/ffi.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/ffi.vani --backend=c              # C backend, gcc
-//   intentc build examples/ffi.vani -o /tmp/ffi && /tmp/ffi   # native binary
+//   vanic run examples/ffi.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/ffi.vani --backend=c              # C backend, gcc
+//   vanic build examples/ffi.vani -o /tmp/ffi && /tmp/ffi   # native binary
 
 intent "FFI — calling C-ABI functions from vāṇी";
 
@@ -30,7 +30,7 @@ intent "FFI — calling C-ABI functions from vāṇी";
 // rejected with a `ref T` migration hint to prevent silent
 // ABI corruption.
 //
-// Linking external code: `intentc build … --link-with helper.c`
+// Linking external code: `vanic build … --link-with helper.c`
 // hands extra objects/sources to cc; `-l<name>` (e.g. `-lm`,
 // `-lcurl`) forwards a library-link flag.
 

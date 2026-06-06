@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/option_types.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/option_types.vani --backend=c              # C backend, gcc
-//   intentc build examples/option_types.vani -o /tmp/option_types && /tmp/option_types   # native binary
+//   vanic run examples/option_types.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/option_types.vani --backend=c              # C backend, gcc
+//   vanic build examples/option_types.vani -o /tmp/option_types && /tmp/option_types   # native binary
 
 intent "Demonstrate payloaded enums via Option<i64>";
 

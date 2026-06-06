@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/binary_heap.vani                          # LLVM backend
-//   intentc run examples/binary_heap.vani --backend=c              # C backend
-//   intentc build examples/binary_heap.vani -o /tmp/bh && /tmp/bh
+//   vanic run examples/binary_heap.vani                          # LLVM backend
+//   vanic run examples/binary_heap.vani --backend=c              # C backend
+//   vanic build examples/binary_heap.vani -o /tmp/bh && /tmp/bh
 
 intent "BinaryHeap<i64> — dedicated min-heap wrapper type (Level 4 #2)";
 

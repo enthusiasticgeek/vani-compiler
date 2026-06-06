@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/assert_messages.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/assert_messages.vani --backend=c              # C backend, gcc
-//   intentc build examples/assert_messages.vani -o /tmp/assert_messages && /tmp/assert_messages   # native binary
+//   vanic run examples/assert_messages.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/assert_messages.vani --backend=c              # C backend, gcc
+//   vanic build examples/assert_messages.vani -o /tmp/assert_messages && /tmp/assert_messages   # native binary
 
 intent "Runtime assertions with custom error messages";
 

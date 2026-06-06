@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/option_error_propagation.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/option_error_propagation.vani --backend=c              # C backend, gcc
-//   intentc build examples/option_error_propagation.vani -o /tmp/option_error_propagation && /tmp/option_error_propagation   # native binary
+//   vanic run examples/option_error_propagation.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/option_error_propagation.vani --backend=c              # C backend, gcc
+//   vanic build examples/option_error_propagation.vani -o /tmp/option_error_propagation && /tmp/option_error_propagation   # native binary
 
 intent "Manual Option error-propagation pattern (workaround until `try` Phase 2)";
 

@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/bounded_generics.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/bounded_generics.vani --backend=c              # C backend, gcc
-//   intentc build examples/bounded_generics.vani -o /tmp/bounded_generics && /tmp/bounded_generics   # native binary
+//   vanic run examples/bounded_generics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/bounded_generics.vani --backend=c              # C backend, gcc
+//   vanic build examples/bounded_generics.vani -o /tmp/bounded_generics && /tmp/bounded_generics   # native binary
 
 intent "T1.5 phase 2: bounded generics — fn min<T> where T is Cmp";
 

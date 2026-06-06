@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/bst_avl.vani                          # LLVM backend
-//   intentc run examples/bst_avl.vani --backend=c              # C backend
-//   intentc build examples/bst_avl.vani -o /tmp/avl && /tmp/avl
+//   vanic run examples/bst_avl.vani                          # LLVM backend
+//   vanic run examples/bst_avl.vani --backend=c              # C backend
+//   vanic build examples/bst_avl.vani -o /tmp/avl && /tmp/avl
 
 intent "Bst<T> AVL stress: sorted-input balancing (Level 4 #3 extension, closure #332)";
 

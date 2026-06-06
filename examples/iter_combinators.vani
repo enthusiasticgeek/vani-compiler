@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/iter_combinators.vani                          # LLVM backend
-//   intentc run examples/iter_combinators.vani --backend=c              # C backend
-//   intentc build examples/iter_combinators.vani -o /tmp/iter && /tmp/iter
+//   vanic run examples/iter_combinators.vani                          # LLVM backend
+//   vanic run examples/iter_combinators.vani --backend=c              # C backend
+//   vanic build examples/iter_combinators.vani -o /tmp/iter && /tmp/iter
 
 intent "Iterator combinators on Vec<i64> — eager .map / .filter / .fold via fn-ptr (Level 3 #2)";
 

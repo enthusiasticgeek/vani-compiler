@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/sort.vani                          # LLVM backend
-//   intentc run examples/sort.vani --backend=c              # C backend
-//   intentc build examples/sort.vani -o /tmp/sort && /tmp/sort
+//   vanic run examples/sort.vani                          # LLVM backend
+//   vanic run examples/sort.vani --backend=c              # C backend
+//   vanic build examples/sort.vani -o /tmp/sort && /tmp/sort
 
 intent "sort + sort_by on Vec<i64>: Level 1 of the data-structures roadmap";
 

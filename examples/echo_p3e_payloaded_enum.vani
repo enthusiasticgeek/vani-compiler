@@ -26,8 +26,8 @@
 // issue).
 //
 // build & run:
-//   intentc run examples/echo_p3e_payloaded_enum.vani                # LLVM
-//   intentc run examples/echo_p3e_payloaded_enum.vani --backend=c    # C
+//   vanic run examples/echo_p3e_payloaded_enum.vani                # LLVM
+//   vanic run examples/echo_p3e_payloaded_enum.vani --backend=c    # C
 
 intent "Phase 3e — payloaded-only enum local";
 

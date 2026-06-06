@@ -11,8 +11,8 @@
 // or smuggle the value through a different i64-encoded form.
 //
 // build & run:
-//   intentc run examples/echo_p3b_str_local.vani                # LLVM
-//   intentc run examples/echo_p3b_str_local.vani --backend=c    # C
+//   vanic run examples/echo_p3b_str_local.vani                # LLVM
+//   vanic run examples/echo_p3b_str_local.vani --backend=c    # C
 
 intent "Phase 3b — Str local in async fn";
 

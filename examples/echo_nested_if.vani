@@ -8,8 +8,8 @@
 // branch validator was blocking it.
 //
 // build & run:
-//   intentc run examples/echo_nested_if.vani                # LLVM
-//   intentc run examples/echo_nested_if.vani --backend=c    # C
+//   vanic run examples/echo_nested_if.vani                # LLVM
+//   vanic run examples/echo_nested_if.vani --backend=c    # C
 
 intent "Phase 2.1c — nested ifs inside a suspending branch";
 

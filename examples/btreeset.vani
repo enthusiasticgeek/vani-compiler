@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/btreeset.vani                          # LLVM backend
-//   intentc run examples/btreeset.vani --backend=c              # C backend
-//   intentc build examples/btreeset.vani -o /tmp/btreeset && /tmp/btreeset
+//   vanic run examples/btreeset.vani                          # LLVM backend
+//   vanic run examples/btreeset.vani --backend=c              # C backend
+//   vanic build examples/btreeset.vani -o /tmp/btreeset && /tmp/btreeset
 
 intent "BTreeSet<i64> — ordered set on sorted-Vec backing (Level 2 #5)";
 

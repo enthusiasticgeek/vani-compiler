@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/dyn_dispatch.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/dyn_dispatch.vani --backend=c              # C backend, gcc
-//   intentc build examples/dyn_dispatch.vani -o /tmp/dyn_dispatch && /tmp/dyn_dispatch   # native binary
+//   vanic run examples/dyn_dispatch.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/dyn_dispatch.vani --backend=c              # C backend, gcc
+//   vanic build examples/dyn_dispatch.vani -o /tmp/dyn_dispatch && /tmp/dyn_dispatch   # native binary
 
 intent "T1.5 phase 3: dynamic dispatch via `dyn Iface` fat pointers";
 

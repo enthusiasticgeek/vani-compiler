@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/hash.vani                          # LLVM backend
-//   intentc run examples/hash.vani --backend=c              # C backend
-//   intentc build examples/hash.vani -o /tmp/hash && /tmp/hash
+//   vanic run examples/hash.vani                          # LLVM backend
+//   vanic run examples/hash.vani --backend=c              # C backend
+//   vanic build examples/hash.vani -o /tmp/hash && /tmp/hash
 
 intent "Hash builtins — FNV-1a + SipHash-2-4 for i64 / f64 / Str";
 

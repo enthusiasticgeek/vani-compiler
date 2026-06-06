@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/struct_mixed_fields.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/struct_mixed_fields.vani --backend=c              # C backend, gcc
-//   intentc build examples/struct_mixed_fields.vani -o /tmp/struct_mixed_fields && /tmp/struct_mixed_fields   # native binary
+//   vanic run examples/struct_mixed_fields.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/struct_mixed_fields.vani --backend=c              # C backend, gcc
+//   vanic build examples/struct_mixed_fields.vani -o /tmp/struct_mixed_fields && /tmp/struct_mixed_fields   # native binary
 
 intent "T1.2 phase 2b: structs with mixed affine fields";
 

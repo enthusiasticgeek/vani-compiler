@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/bloom_filter.vani                          # LLVM backend
-//   intentc run examples/bloom_filter.vani --backend=c              # C backend
-//   intentc build examples/bloom_filter.vani -o /tmp/bf && /tmp/bf
+//   vanic run examples/bloom_filter.vani                          # LLVM backend
+//   vanic run examples/bloom_filter.vani --backend=c              # C backend
+//   vanic build examples/bloom_filter.vani -o /tmp/bf && /tmp/bf
 
 intent "BloomFilter — probabilistic membership tester (Level 4 #6)";
 

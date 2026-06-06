@@ -23,8 +23,8 @@
 // runner.
 //
 // build & run:
-//   intentc run examples/tcp_echo_epoll.vani                # LLVM
-//   intentc run examples/tcp_echo_epoll.vani --backend=c    # C
+//   vanic run examples/tcp_echo_epoll.vani                # LLVM
+//   vanic run examples/tcp_echo_epoll.vani --backend=c    # C
 
 intent "Single-threaded epoll echo (Arc 8 v2 fully cooperative)";
 

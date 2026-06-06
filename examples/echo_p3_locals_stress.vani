@@ -22,8 +22,8 @@
 // final result so the compiler can't dead-code-eliminate.
 //
 // build & run:
-//   intentc run examples/echo_p3_locals_stress.vani                # LLVM
-//   intentc run examples/echo_p3_locals_stress.vani --backend=c    # C
+//   vanic run examples/echo_p3_locals_stress.vani                # LLVM
+//   vanic run examples/echo_p3_locals_stress.vani --backend=c    # C
 
 intent "Phase 3 stress — every non-i64 local across one await";
 

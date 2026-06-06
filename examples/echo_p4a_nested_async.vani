@@ -30,8 +30,8 @@
 // both tasks naturally.
 //
 // build & run:
-//   intentc run examples/echo_p4a_nested_async.vani                # LLVM
-//   intentc run examples/echo_p4a_nested_async.vani --backend=c    # C
+//   vanic run examples/echo_p4a_nested_async.vani                # LLVM
+//   vanic run examples/echo_p4a_nested_async.vani --backend=c    # C
 
 intent "Phase 4a-narrow — nested async tasks";
 

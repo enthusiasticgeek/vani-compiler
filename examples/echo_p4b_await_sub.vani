@@ -32,8 +32,8 @@
 // but require manual `sub.__result` reads.
 //
 // build & run:
-//   intentc run examples/echo_p4b_await_sub.vani                # LLVM
-//   intentc run examples/echo_p4b_await_sub.vani --backend=c    # C
+//   vanic run examples/echo_p4b_await_sub.vani                # LLVM
+//   vanic run examples/echo_p4b_await_sub.vani --backend=c    # C
 
 intent "Phase 4a-broad — __poll_X as a suspend point (await sub semantics)";
 

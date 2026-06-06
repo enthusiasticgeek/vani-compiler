@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/condvar.vani                          # LLVM backend
-//   intentc run examples/condvar.vani --backend=c              # C backend
-//   intentc build examples/condvar.vani -o /tmp/condvar && /tmp/condvar
+//   vanic run examples/condvar.vani                          # LLVM backend
+//   vanic run examples/condvar.vani --backend=c              # C backend
+//   vanic build examples/condvar.vani -o /tmp/condvar && /tmp/condvar
 
 intent "Condition variables — Condvar pairs with Mutex<T> + Guard<T> for wait-until-predicate patterns";
 

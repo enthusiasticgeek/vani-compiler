@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/closures.vani                          # LLVM backend
-//   intentc run examples/closures.vani --backend=c              # C backend
-//   intentc build examples/closures.vani -o /tmp/closures && /tmp/closures
+//   vanic run examples/closures.vani                          # LLVM backend
+//   vanic run examples/closures.vani --backend=c              # C backend
+//   vanic build examples/closures.vani -o /tmp/closures && /tmp/closures
 
 intent "Closures with captured environment — capture-by-value of Copy outer bindings (Level 3 #1 phase 2)";
 

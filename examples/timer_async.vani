@@ -12,8 +12,8 @@
 // `sleep_ms_async` and `sleep_ms_finish`.
 //
 // build & run:
-//   intentc run examples/timer_async.vani                # LLVM
-//   intentc run examples/timer_async.vani --backend=c    # C
+//   vanic run examples/timer_async.vani                # LLVM
+//   vanic run examples/timer_async.vani --backend=c    # C
 
 intent "Cooperative timerfd sleep — Arc 8 v3.1 Phase 0";
 

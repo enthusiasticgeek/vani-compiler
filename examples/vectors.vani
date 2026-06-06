@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/vectors.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/vectors.vani --backend=c              # C backend, gcc
-//   intentc build examples/vectors.vani -o /tmp/vectors && /tmp/vectors   # native binary
+//   vanic run examples/vectors.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/vectors.vani --backend=c              # C backend, gcc
+//   vanic build examples/vectors.vani -o /tmp/vectors && /tmp/vectors   # native binary
 
 intent "Exercise Vec<T> with affine ownership and functional update";
 

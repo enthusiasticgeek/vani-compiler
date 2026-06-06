@@ -15,8 +15,8 @@
 // Real TCP / file non-blocking I/O futures land alongside.
 //
 // build & run:
-//   intentc run examples/async_io.vani                # LLVM
-//   intentc run examples/async_io.vani --backend=c    # C
+//   vanic run examples/async_io.vani                # LLVM
+//   vanic run examples/async_io.vani --backend=c    # C
 
 intent "async timer + CancelToken + task fan-out — Arc 8 step 8h v1.5";
 

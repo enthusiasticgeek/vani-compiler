@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/tasks.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/tasks.vani --backend=c              # C backend, gcc
-//   intentc build examples/tasks.vani -o /tmp/tasks && /tmp/tasks   # native binary
+//   vanic run examples/tasks.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/tasks.vani --backend=c              # C backend, gcc
+//   vanic build examples/tasks.vani -o /tmp/tasks && /tmp/tasks   # native binary
 
 intent "Affine task handles: declare units of work that the verifier proves race-free";
 

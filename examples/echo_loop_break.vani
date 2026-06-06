@@ -13,8 +13,8 @@
 // wrapping the poll fn body.
 //
 // build & run:
-//   intentc run examples/echo_loop_break.vani                # LLVM
-//   intentc run examples/echo_loop_break.vani --backend=c    # C
+//   vanic run examples/echo_loop_break.vani                # LLVM
+//   vanic run examples/echo_loop_break.vani --backend=c    # C
 
 intent "Phase 2.5b — break inside a suspending while loop";
 

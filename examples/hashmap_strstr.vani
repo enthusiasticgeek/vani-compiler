@@ -5,8 +5,8 @@
 // remove transfers V ownership to caller while freeing K.
 //
 // build & run:
-//   intentc run examples/hashmap_strstr.vani                   # LLVM backend
-//   intentc run examples/hashmap_strstr.vani --backend=c       # C backend
+//   vanic run examples/hashmap_strstr.vani                   # LLVM backend
+//   vanic run examples/hashmap_strstr.vani --backend=c       # C backend
 
 intent "HashMap<OwnedStr, OwnedStr> — string-keyed, string-valued map (ARC 4.3)";
 

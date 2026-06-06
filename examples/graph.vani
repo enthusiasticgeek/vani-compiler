@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/graph.vani                          # LLVM backend
-//   intentc run examples/graph.vani --backend=c              # C backend
-//   intentc build examples/graph.vani -o /tmp/graph && /tmp/graph
+//   vanic run examples/graph.vani                          # LLVM backend
+//   vanic run examples/graph.vani --backend=c              # C backend
+//   vanic build examples/graph.vani -o /tmp/graph && /tmp/graph
 
 intent "Graph — weighted directed graph + BFS / DFS / Dijkstra (Level 4 #5)";
 

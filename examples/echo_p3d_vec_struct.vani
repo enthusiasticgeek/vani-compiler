@@ -23,8 +23,8 @@
 // this is a minor cost. Reasonable users won't notice.
 //
 // build & run:
-//   intentc run examples/echo_p3d_vec_struct.vani                # LLVM
-//   intentc run examples/echo_p3d_vec_struct.vani --backend=c    # C
+//   vanic run examples/echo_p3d_vec_struct.vani                # LLVM
+//   vanic run examples/echo_p3d_vec_struct.vani --backend=c    # C
 
 intent "Phase 3d — Vec + Struct locals in async fn";
 

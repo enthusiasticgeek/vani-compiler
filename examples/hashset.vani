@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/hashset.vani                          # LLVM backend
-//   intentc run examples/hashset.vani --backend=c              # C backend
-//   intentc build examples/hashset.vani -o /tmp/hashset && /tmp/hashset
+//   vanic run examples/hashset.vani                          # LLVM backend
+//   vanic run examples/hashset.vani --backend=c              # C backend
+//   vanic build examples/hashset.vani -o /tmp/hashset && /tmp/hashset
 
 intent "HashSet<i64> — open-addressing hash set (Level 2 #3 + closure #342)";
 

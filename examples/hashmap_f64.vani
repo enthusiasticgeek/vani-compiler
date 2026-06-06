@@ -2,8 +2,8 @@
 // reinterpret-bits FNV-1a hashing.
 //
 // build & run:
-//   intentc run examples/hashmap_f64.vani                   # LLVM backend
-//   intentc run examples/hashmap_f64.vani --backend=c       # C backend
+//   vanic run examples/hashmap_f64.vani                   # LLVM backend
+//   vanic run examples/hashmap_f64.vani --backend=c       # C backend
 //
 // NaN caveat: NaN != NaN per IEEE 754, so a NaN key inserted
 // into the map cannot ever be looked up by another NaN. Use

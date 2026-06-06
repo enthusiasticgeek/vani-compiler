@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/enum_vec_payload.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/enum_vec_payload.vani --backend=c              # C backend, gcc
-//   intentc build examples/enum_vec_payload.vani -o /tmp/enum_vec_payload && /tmp/enum_vec_payload   # native binary
+//   vanic run examples/enum_vec_payload.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/enum_vec_payload.vani --backend=c              # C backend, gcc
+//   vanic build examples/enum_vec_payload.vani -o /tmp/enum_vec_payload && /tmp/enum_vec_payload   # native binary
 
 intent "Enum with Vec<T> payload — heap-aware Drop on the Vec";
 

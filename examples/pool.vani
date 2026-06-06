@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/pool.vani                          # LLVM backend
-//   intentc run examples/pool.vani --backend=c              # C backend
-//   intentc build examples/pool.vani -o /tmp/pool && /tmp/pool
+//   vanic run examples/pool.vani                          # LLVM backend
+//   vanic run examples/pool.vani --backend=c              # C backend
+//   vanic build examples/pool.vani -o /tmp/pool && /tmp/pool
 
 intent "Pool<i64> / Handle<i64> — generational handles (Layer 2 of unsafe.md)";
 

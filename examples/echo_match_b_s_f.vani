@@ -28,8 +28,8 @@
 // await suspend points is Phase 3 work.
 //
 // build & run:
-//   intentc run examples/echo_match_b_s_f.vani                # LLVM
-//   intentc run examples/echo_match_b_s_f.vani --backend=c    # C
+//   vanic run examples/echo_match_b_s_f.vani                # LLVM
+//   vanic run examples/echo_match_b_s_f.vani --backend=c    # C
 
 intent "Phase 2.3b — Bool / Str / Float match patterns with suspends";
 

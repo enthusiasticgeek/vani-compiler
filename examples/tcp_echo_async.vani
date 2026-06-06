@@ -16,8 +16,8 @@
 // arrives in a later phase).
 //
 // build & run:
-//   intentc run examples/tcp_echo_async.vani                # LLVM
-//   intentc run examples/tcp_echo_async.vani --backend=c    # C
+//   vanic run examples/tcp_echo_async.vani                # LLVM
+//   vanic run examples/tcp_echo_async.vani --backend=c    # C
 
 intent "Compiler-driven async fn → Task — Arc 8 v3.1 Phase 1";
 

@@ -1,6 +1,6 @@
 // build & run:
-//   intentc run examples/graph_csr.vani                          # LLVM backend
-//   intentc run examples/graph_csr.vani --backend=c              # C backend
+//   vanic run examples/graph_csr.vani                          # LLVM backend
+//   vanic run examples/graph_csr.vani --backend=c              # C backend
 
 intent "Graph CSR adjacency cache (closure #336) — BFS/DFS now O(V+E)";
 

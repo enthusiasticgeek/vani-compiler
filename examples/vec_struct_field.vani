@@ -20,8 +20,8 @@
 // field.
 //
 // build & run:
-//   intentc run examples/vec_struct_field.vani                # LLVM
-//   intentc run examples/vec_struct_field.vani --backend=c    # C
+//   vanic run examples/vec_struct_field.vani                # LLVM
+//   vanic run examples/vec_struct_field.vani --backend=c    # C
 
 intent "Vec<UserStruct> as a struct field — C backend topo-sort fix";
 

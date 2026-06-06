@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/btreemap.vani                          # LLVM backend
-//   intentc run examples/btreemap.vani --backend=c              # C backend
-//   intentc build examples/btreemap.vani -o /tmp/btreemap && /tmp/btreemap
+//   vanic run examples/btreemap.vani                          # LLVM backend
+//   vanic run examples/btreemap.vani --backend=c              # C backend
+//   vanic build examples/btreemap.vani -o /tmp/btreemap && /tmp/btreemap
 
 intent "BTreeMap<i64, i64> — ordered key/value map on sorted-Vec backing (Level 2 #6)";
 

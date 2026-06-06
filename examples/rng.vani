@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/rng.vani                          # LLVM backend
-//   intentc run examples/rng.vani --backend=c              # C backend
-//   intentc build examples/rng.vani -o /tmp/rng && /tmp/rng
+//   vanic run examples/rng.vani                          # LLVM backend
+//   vanic run examples/rng.vani --backend=c              # C backend
+//   vanic build examples/rng.vani -o /tmp/rng && /tmp/rng
 
 intent "Random number generation — seeded, deterministic xorshift64";
 

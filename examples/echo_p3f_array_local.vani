@@ -20,8 +20,8 @@
 //   read; the throwaway copies are harmless.
 //
 // build & run:
-//   intentc run examples/echo_p3f_array_local.vani                # LLVM
-//   intentc run examples/echo_p3f_array_local.vani --backend=c    # C
+//   vanic run examples/echo_p3f_array_local.vani                # LLVM
+//   vanic run examples/echo_p3f_array_local.vani --backend=c    # C
 
 intent "Phase 3f — Array local in async fn";
 

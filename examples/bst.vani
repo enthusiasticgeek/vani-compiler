@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/bst.vani                          # LLVM backend
-//   intentc run examples/bst.vani --backend=c              # C backend
-//   intentc build examples/bst.vani -o /tmp/bst && /tmp/bst
+//   vanic run examples/bst.vani                          # LLVM backend
+//   vanic run examples/bst.vani --backend=c              # C backend
+//   vanic build examples/bst.vani -o /tmp/bst && /tmp/bst
 
 intent "Bst<T> — binary search tree on a node arena (Level 4 #3)";
 

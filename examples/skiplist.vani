@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/skiplist.vani                          # LLVM backend
-//   intentc run examples/skiplist.vani --backend=c              # C backend
-//   intentc build examples/skiplist.vani -o /tmp/sl && /tmp/sl
+//   vanic run examples/skiplist.vani                          # LLVM backend
+//   vanic run examples/skiplist.vani --backend=c              # C backend
+//   vanic build examples/skiplist.vani -o /tmp/sl && /tmp/sl
 
 intent "SkipList<T> — probabilistic ordered set (Level 4 #7)";
 

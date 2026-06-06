@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/mixed_place_assign.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/mixed_place_assign.vani --backend=c              # C backend, gcc
-//   intentc build examples/mixed_place_assign.vani -o /tmp/mixed_place_assign && /tmp/mixed_place_assign   # native binary
+//   vanic run examples/mixed_place_assign.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/mixed_place_assign.vani --backend=c              # C backend, gcc
+//   vanic build examples/mixed_place_assign.vani -o /tmp/mixed_place_assign && /tmp/mixed_place_assign   # native binary
 
 intent "Mixed-place assignment: `xs[i].field = v`";
 

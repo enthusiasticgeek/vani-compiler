@@ -24,8 +24,8 @@
 // transform ships, hand-rolling is the way.
 //
 // build & run:
-//   intentc run examples/tcp_echo_state_machine.vani                # LLVM
-//   intentc run examples/tcp_echo_state_machine.vani --backend=c    # C
+//   vanic run examples/tcp_echo_state_machine.vani                # LLVM
+//   vanic run examples/tcp_echo_state_machine.vani --backend=c    # C
 
 intent "Hand-rolled state machine pattern — Arc 8 v3";
 

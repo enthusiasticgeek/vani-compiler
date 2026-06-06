@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/string_ops.vani                          # LLVM backend
-//   intentc run examples/string_ops.vani --backend=c              # C backend
-//   intentc build examples/string_ops.vani -o /tmp/string_ops && /tmp/string_ops
+//   vanic run examples/string_ops.vani                          # LLVM backend
+//   vanic run examples/string_ops.vani --backend=c              # C backend
+//   vanic build examples/string_ops.vani -o /tmp/string_ops && /tmp/string_ops
 
 intent "String surface — predicates, parsers, trim, replace, split";
 

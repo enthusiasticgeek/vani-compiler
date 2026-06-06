@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/container_method_sugar.vani                          # LLVM backend
-//   intentc run examples/container_method_sugar.vani --backend=c              # C backend
-//   intentc build examples/container_method_sugar.vani -o /tmp/cms && /tmp/cms
+//   vanic run examples/container_method_sugar.vani                          # LLVM backend
+//   vanic run examples/container_method_sugar.vani --backend=c              # C backend
+//   vanic build examples/container_method_sugar.vani -o /tmp/cms && /tmp/cms
 
 intent "Method-call sugar for affine containers — HashMap / HashSet / BTreeMap / BTreeSet / Deque (closure #312)";
 

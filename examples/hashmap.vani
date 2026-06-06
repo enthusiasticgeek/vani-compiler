@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/hashmap.vani                          # LLVM backend
-//   intentc run examples/hashmap.vani --backend=c              # C backend
-//   intentc build examples/hashmap.vani -o /tmp/hashmap && /tmp/hashmap
+//   vanic run examples/hashmap.vani                          # LLVM backend
+//   vanic run examples/hashmap.vani --backend=c              # C backend
+//   vanic build examples/hashmap.vani -o /tmp/hashmap && /tmp/hashmap
 
 intent "HashMap<i64, i64> — open-addressing key/value map (Level 2 #4)";
 

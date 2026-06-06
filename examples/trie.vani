@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/trie.vani                          # LLVM backend
-//   intentc run examples/trie.vani --backend=c              # C backend
-//   intentc build examples/trie.vani -o /tmp/trie && /tmp/trie
+//   vanic run examples/trie.vani                          # LLVM backend
+//   vanic run examples/trie.vani --backend=c              # C backend
+//   vanic build examples/trie.vani -o /tmp/trie && /tmp/trie
 
 intent "Trie — prefix tree on a node arena (Level 4 #4)";
 

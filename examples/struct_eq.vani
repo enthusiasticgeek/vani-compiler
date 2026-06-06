@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/struct_eq.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/struct_eq.vani --backend=c              # C backend, gcc
-//   intentc build examples/struct_eq.vani -o /tmp/struct_eq && /tmp/struct_eq   # native binary
+//   vanic run examples/struct_eq.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/struct_eq.vani --backend=c              # C backend, gcc
+//   vanic build examples/struct_eq.vani -o /tmp/struct_eq && /tmp/struct_eq   # native binary
 
 intent "User-defined `==` via `implement Eq for T`";
 

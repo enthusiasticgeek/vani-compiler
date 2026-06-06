@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/heap.vani                          # LLVM backend
-//   intentc run examples/heap.vani --backend=c              # C backend
-//   intentc build examples/heap.vani -o /tmp/heap && /tmp/heap
+//   vanic run examples/heap.vani                          # LLVM backend
+//   vanic run examples/heap.vani --backend=c              # C backend
+//   vanic build examples/heap.vani -o /tmp/heap && /tmp/heap
 
 intent "BinaryHeap on Vec<i64> — min-heap priority queue (Level 2 #1)";
 

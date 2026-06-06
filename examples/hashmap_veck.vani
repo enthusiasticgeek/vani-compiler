@@ -6,8 +6,8 @@
 // walks free each stored data buffer.
 //
 // build & run:
-//   intentc run examples/hashmap_veck.vani                   # LLVM backend
-//   intentc run examples/hashmap_veck.vani --backend=c       # C backend
+//   vanic run examples/hashmap_veck.vani                   # LLVM backend
+//   vanic run examples/hashmap_veck.vani --backend=c       # C backend
 
 intent "HashMap<Vec<i64>, V> — Vec-keyed open-addressing map (ARC 4.6)";
 

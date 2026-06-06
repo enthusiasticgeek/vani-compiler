@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/atomics.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/atomics.vani --backend=c              # C backend, gcc
-//   intentc build examples/atomics.vani -o /tmp/atomics && /tmp/atomics   # native binary
+//   vanic run examples/atomics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/atomics.vani --backend=c              # C backend, gcc
+//   vanic build examples/atomics.vani -o /tmp/atomics && /tmp/atomics   # native binary
 
 intent "Atomic<T> — opt-in cells that read/write safely across threads";
 

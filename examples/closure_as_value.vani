@@ -12,8 +12,8 @@
 // common case — without requiring heap allocation.
 //
 // build & run:
-//   intentc run examples/closure_as_value.vani                # LLVM
-//   intentc run examples/closure_as_value.vani --backend=c    # C
+//   vanic run examples/closure_as_value.vani                # LLVM
+//   vanic run examples/closure_as_value.vani --backend=c    # C
 
 intent "Closure-as-value: captured anon-fns pass through fn boundaries (Arc 5c)";
 

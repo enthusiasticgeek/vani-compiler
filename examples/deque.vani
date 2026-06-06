@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/deque.vani                          # LLVM backend
-//   intentc run examples/deque.vani --backend=c              # C backend
-//   intentc build examples/deque.vani -o /tmp/deque && /tmp/deque
+//   vanic run examples/deque.vani                          # LLVM backend
+//   vanic run examples/deque.vani --backend=c              # C backend
+//   vanic build examples/deque.vani -o /tmp/deque && /tmp/deque
 
 intent "Deque<i64> — double-ended ring buffer (Level 2 #2)";
 

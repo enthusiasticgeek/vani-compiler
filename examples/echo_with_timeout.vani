@@ -12,8 +12,8 @@
 // failure, woven through real I/O suspend points.
 //
 // build & run:
-//   intentc run examples/echo_with_timeout.vani                # LLVM
-//   intentc run examples/echo_with_timeout.vani --backend=c    # C
+//   vanic run examples/echo_with_timeout.vani                # LLVM
+//   vanic run examples/echo_with_timeout.vani --backend=c    # C
 
 intent "Phase 2 narrow control flow — async fn with early-return + Assign";
 

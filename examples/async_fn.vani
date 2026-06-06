@@ -12,8 +12,8 @@
 // steps 8c-h.
 //
 // build & run:
-//   intentc run examples/async_fn.vani                   # LLVM
-//   intentc run examples/async_fn.vani --backend=c       # C
+//   vanic run examples/async_fn.vani                   # LLVM
+//   vanic run examples/async_fn.vani --backend=c       # C
 
 intent "async fn — parser-level desugar wraps body returns into Future.Ready (Arc 8 step 8b)";
 

@@ -17,8 +17,8 @@
 // threaded cooperative scheduling without breaking source.
 //
 // build & run:
-//   intentc run examples/tcp_echo.vani                # LLVM
-//   intentc run examples/tcp_echo.vani --backend=c    # C
+//   vanic run examples/tcp_echo.vani                # LLVM
+//   vanic run examples/tcp_echo.vani --backend=c    # C
 
 intent "TCP echo server (loopback, single message) — Arc 8 step 8e v1.6";
 

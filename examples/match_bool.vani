@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/match_bool.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/match_bool.vani --backend=c              # C backend, gcc
-//   intentc build examples/match_bool.vani -o /tmp/match_bool && /tmp/match_bool   # native binary
+//   vanic run examples/match_bool.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/match_bool.vani --backend=c              # C backend, gcc
+//   vanic build examples/match_bool.vani -o /tmp/match_bool && /tmp/match_bool   # native binary
 
 intent "Match on bool scrutinee — `true` / `false` patterns";
 

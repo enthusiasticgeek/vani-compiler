@@ -22,8 +22,8 @@
 //   and re-uses the value naturally.
 //
 // build & run:
-//   intentc run examples/echo_p3c_enum_local.vani                # LLVM
-//   intentc run examples/echo_p3c_enum_local.vani --backend=c    # C
+//   vanic run examples/echo_p3c_enum_local.vani                # LLVM
+//   vanic run examples/echo_p3c_enum_local.vani --backend=c    # C
 
 intent "Phase 3c — Enum local in async fn";
 

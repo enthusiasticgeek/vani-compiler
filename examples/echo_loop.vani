@@ -12,8 +12,8 @@
 // first iteration and exit normally.
 //
 // build & run:
-//   intentc run examples/echo_loop.vani                # LLVM
-//   intentc run examples/echo_loop.vani --backend=c    # C
+//   vanic run examples/echo_loop.vani                # LLVM
+//   vanic run examples/echo_loop.vani --backend=c    # C
 
 intent "Phase 2.5 — loops with suspend";
 

@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/concurrency.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/concurrency.vani --backend=c              # C backend, gcc
-//   intentc build examples/concurrency.vani -o /tmp/concurrency && /tmp/concurrency   # native binary
+//   vanic run examples/concurrency.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/concurrency.vani --backend=c              # C backend, gcc
+//   vanic build examples/concurrency.vani -o /tmp/concurrency && /tmp/concurrency   # native binary
 
 intent "Channels + Mutex / Guard: escape hatches for shared state the affine model can't express";
 

@@ -4,8 +4,8 @@
 // caller retains ownership of the OwnedStr passed in.
 //
 // build & run:
-//   intentc run examples/hashmap_str.vani                   # LLVM backend
-//   intentc run examples/hashmap_str.vani --backend=c       # C backend
+//   vanic run examples/hashmap_str.vani                   # LLVM backend
+//   vanic run examples/hashmap_str.vani --backend=c       # C backend
 
 intent "HashMap<OwnedStr, V> — string-keyed open-addressing map (ARC 4.1)";
 

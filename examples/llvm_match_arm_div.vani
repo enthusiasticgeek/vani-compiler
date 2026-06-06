@@ -19,8 +19,8 @@
 // byte-identical output.
 //
 // build & run:
-//   intentc run examples/llvm_match_arm_div.vani                # LLVM
-//   intentc run examples/llvm_match_arm_div.vani --backend=c    # C
+//   vanic run examples/llvm_match_arm_div.vani                # LLVM
+//   vanic run examples/llvm_match_arm_div.vani --backend=c    # C
 
 intent "LLVM div-in-match-arm phi-block tracking regression check";
 

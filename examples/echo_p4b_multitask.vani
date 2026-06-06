@@ -19,8 +19,8 @@
 // test confirming Phase 4a-broad scales beyond one sub-task.
 //
 // build & run:
-//   intentc run examples/echo_p4b_multitask.vani                # LLVM
-//   intentc run examples/echo_p4b_multitask.vani --backend=c    # C
+//   vanic run examples/echo_p4b_multitask.vani                # LLVM
+//   vanic run examples/echo_p4b_multitask.vani --backend=c    # C
 
 intent "Phase 4b — multi-task (two sub-tasks awaited in one async fn)";
 

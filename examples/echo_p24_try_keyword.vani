@@ -29,8 +29,8 @@
 //     extracted value type; LET annotation should agree).
 //
 // build & run:
-//   intentc run examples/echo_p24_try_keyword.vani                # LLVM
-//   intentc run examples/echo_p24_try_keyword.vani --backend=c    # C
+//   vanic run examples/echo_p24_try_keyword.vani                # LLVM
+//   vanic run examples/echo_p24_try_keyword.vani --backend=c    # C
 
 intent "Phase 2.4 — try keyword in async fn (Result propagation)";
 

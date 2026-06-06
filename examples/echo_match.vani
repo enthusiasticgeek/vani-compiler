@@ -12,8 +12,8 @@
 // validator rejects them with a clear phase pointer.
 //
 // build & run:
-//   intentc run examples/echo_match.vani                # LLVM
-//   intentc run examples/echo_match.vani --backend=c    # C
+//   vanic run examples/echo_match.vani                # LLVM
+//   vanic run examples/echo_match.vani --backend=c    # C
 
 intent "Phase 2.3-narrow — match in async fn (no suspends in arms)";
 

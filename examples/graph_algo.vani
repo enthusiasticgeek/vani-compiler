@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/graph_algo.vani                          # LLVM backend
-//   intentc run examples/graph_algo.vani --backend=c              # C backend
-//   intentc build examples/graph_algo.vani -o /tmp/ga && /tmp/ga
+//   vanic run examples/graph_algo.vani                          # LLVM backend
+//   vanic run examples/graph_algo.vani --backend=c              # C backend
+//   vanic build examples/graph_algo.vani -o /tmp/ga && /tmp/ga
 
 intent "Graph algorithm extensions: has_cycle / mst_kruskal / mst_prim (Level 4 #5 + closure #333)";
 

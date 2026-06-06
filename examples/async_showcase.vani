@@ -22,8 +22,8 @@
 //              header/post-loop states)
 //
 // build & run:
-//   intentc run examples/async_showcase.vani                # LLVM
-//   intentc run examples/async_showcase.vani --backend=c    # C
+//   vanic run examples/async_showcase.vani                # LLVM
+//   vanic run examples/async_showcase.vani --backend=c    # C
 
 intent "v3.1 capstone — all compiler-driven sugar features in one async fn";
 

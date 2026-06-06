@@ -45,8 +45,8 @@
 // the i64-only locals constraint.
 //
 // build & run:
-//   intentc run examples/echo_match_variant.vani                # LLVM
-//   intentc run examples/echo_match_variant.vani --backend=c    # C
+//   vanic run examples/echo_match_variant.vani                # LLVM
+//   vanic run examples/echo_match_variant.vani --backend=c    # C
 
 intent "Phase 2.3c — Variant patterns with suspends";
 

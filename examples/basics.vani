@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/basics.vani                          # LLVM backend, JIT via lli
-//   intentc run examples/basics.vani --backend=c              # C backend, gcc
-//   intentc build examples/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//   vanic run examples/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/basics.vani -o /tmp/basics && /tmp/basics   # native binary
 
 intent "Compute a small score with checked constraints";
 

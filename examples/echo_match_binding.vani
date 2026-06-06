@@ -43,8 +43,8 @@
 // impure scrutinees would produce surprising behavior.
 //
 // build & run:
-//   intentc run examples/echo_match_binding.vani                # LLVM
-//   intentc run examples/echo_match_binding.vani --backend=c    # C
+//   vanic run examples/echo_match_binding.vani                # LLVM
+//   vanic run examples/echo_match_binding.vani --backend=c    # C
 
 intent "Phase 2.3d — VariantWithBinding patterns with suspends";
 

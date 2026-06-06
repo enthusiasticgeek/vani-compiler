@@ -34,8 +34,8 @@
 //   - `Struct(name)` / `Vec` / `Array` locals
 //
 // build & run:
-//   intentc run examples/echo_p3a_nonint_locals.vani                # LLVM
-//   intentc run examples/echo_p3a_nonint_locals.vani --backend=c    # C
+//   vanic run examples/echo_p3a_nonint_locals.vani                # LLVM
+//   vanic run examples/echo_p3a_nonint_locals.vani --backend=c    # C
 
 intent "Phase 3a — bool + f64 locals in async fn";
 

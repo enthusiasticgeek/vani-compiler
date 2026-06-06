@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/math_ops.vani                          # LLVM backend
-//   intentc run examples/math_ops.vani --backend=c              # C backend
-//   intentc build examples/math_ops.vani -o /tmp/math && /tmp/math
+//   vanic run examples/math_ops.vani                          # LLVM backend
+//   vanic run examples/math_ops.vani --backend=c              # C backend
+//   vanic build examples/math_ops.vani -o /tmp/math && /tmp/math
 
 intent "Math surface — libm-backed scalar functions";
 

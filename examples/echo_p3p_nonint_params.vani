@@ -17,8 +17,8 @@
 // pass i64 + reconstitute the enum inside.
 //
 // build & run:
-//   intentc run examples/echo_p3p_nonint_params.vani                # LLVM
-//   intentc run examples/echo_p3p_nonint_params.vani --backend=c    # C
+//   vanic run examples/echo_p3p_nonint_params.vani                # LLVM
+//   vanic run examples/echo_p3p_nonint_params.vani --backend=c    # C
 
 intent "Phase 3-params — non-i64 async fn params";
 

@@ -30,8 +30,8 @@
 //   }
 //
 // build & run:
-//   intentc run examples/echo_p3r_nonint_returns.vani                # LLVM
-//   intentc run examples/echo_p3r_nonint_returns.vani --backend=c    # C
+//   vanic run examples/echo_p3r_nonint_returns.vani                # LLVM
+//   vanic run examples/echo_p3r_nonint_returns.vani --backend=c    # C
 
 intent "Phase 3-returns — bool / Str / Enum async-fn returns";
 

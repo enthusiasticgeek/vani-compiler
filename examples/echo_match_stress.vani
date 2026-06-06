@@ -23,8 +23,8 @@
 // must produce byte-identical output.
 //
 // build & run:
-//   intentc run examples/echo_match_stress.vani                # LLVM
-//   intentc run examples/echo_match_stress.vani --backend=c    # C
+//   vanic run examples/echo_match_stress.vani                # LLVM
+//   vanic run examples/echo_match_stress.vani --backend=c    # C
 
 intent "Phase 2.3a/b/c/d STRESS TEST — all match shapes in one async fn";
 

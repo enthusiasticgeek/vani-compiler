@@ -1,7 +1,7 @@
 // build & run:
-//   intentc run examples/anon_fn.vani                          # LLVM backend
-//   intentc run examples/anon_fn.vani --backend=c              # C backend
-//   intentc build examples/anon_fn.vani -o /tmp/anon_fn && /tmp/anon_fn
+//   vanic run examples/anon_fn.vani                          # LLVM backend
+//   vanic run examples/anon_fn.vani --backend=c              # C backend
+//   vanic build examples/anon_fn.vani -o /tmp/anon_fn && /tmp/anon_fn
 
 intent "Anonymous fn expressions — lambda literals without captured environment (Level 3 #1)";
 
