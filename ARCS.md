@@ -1,40 +1,48 @@
 # Multi-Session Arc Plan (Arcs 1–10)
 
-> **Status (2026-06-04):** Arcs 1, 2, 3, 4, 5, 6 ✅ COMPLETE.
-> Arc 7 SysV (scalars + float-field + mixed int/float ≤ 16
-> bytes) ✅ COMPLETE; Win64 / AArch64 gated on cross-platform
-> CI. Arc 8 **FULLY COMPLETE 2026-06-04** — v1 source surface
-> (commits `2e649ff`, `e50dc20`, `25b5a84`) + v1.5
-> `sleep_ms` + timer-driven async examples (`d344828`,
-> `d209e06`) + v1.6 full TCP networking family +
-> single/multi-client echo (`9aaec41`, `83010ab`) + **v2
-> epoll + non-blocking I/O runtime + single-threaded
-> cooperative echo example** (`92864de`) + **v3 async-
-> flavored aliases + hand-rolled state-machine pattern
-> example** (`f7743a1`). All FIVE examples are byte-identical-
-> parity across both backends. Compiler-driven v3.1 sugar
-> (auto-rewriting `async fn` bodies into struct/poll/
-> constructor triples) is queued as an **optional** future-
-> session arc — the underlying capability + the hand-
-> rolled pattern already ship. Arc 9 c/d
-> ✅ COMPLETE; a/b/e/f deferred pending registry choice.
-> Arc 10 BLOCKED on grammar consultant. Safety-standard
-> alignment ✅ COMPLETE; seven `intentc` audit CLIs all on
-> `main`. See [STATUS.md](STATUS.md) for per-commit ledger.
+> **Status (2026-06-06 end-of-day):** Arcs 1–6 ✅ COMPLETE.
+> Arc 7 SysV ✅ COMPLETE; Win64 / AArch64 gated on cross-
+> platform CI. Arc 8 **FULLY COMPLETE through v3.1 Phase
+> 4c-broad** + **Phase 5 (macOS) + Phase 6 (Windows) C-backend
+> + LLVM IR** all shipped this session (commits `4feb5fc` →
+> `d139691`). Generic async fns (`async fn identity<T>(...) -> T`)
+> compile + run end-to-end on Linux via both backends. macOS +
+> Windows code paths in place; **VERIFICATION DEFERRED** for both
+> (no host access at landing). Arc 9 c/d ✅ COMPLETE; a/b/e/f
+> deferred pending registry choice. Arc 10 **PARTIALLY SHIPPED**
+> (Devanagari aliases for 41 of 45 keywords + SOV for range-for
+> + 4 verb-at-end statements; see TODO §*Sanskrit-derived SOV
+> completion* for the rest — the user's PRIMARY language target).
+> Safety-standard alignment ✅ COMPLETE; seven `intentc` audit
+> CLIs all on `main`. See [STATUS.md](STATUS.md) for per-commit
+> ledger.
 >
-> **Open queue:**
-> 1. **Arc 8 v3.1 sugar** — compiler-driven state-machine
->    codegen. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phases
->    0–4 (~78-98h across 11-17 sessions). 15 design caveats
->    captured in STATUS.md.
-> 2. **Arc 8 platform port** — macOS kqueue + Windows IOCP.
->    See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phases 5–6
->    (~35-50h across 5-8 sessions). Parallel-safe with v3.1.
-> 3. **Arc 10** Devanagari SOV grammar — blocked on
->    consultant.
-> 4. **Arc 9 a/b/e/f** Kosh package manager — deferred
->    pending registry choice.
-> 5. **Arc 7 Win64/AArch64** — gated on CI.
+> **Open queue (refreshed 2026-06-06 end-of-day):**
+> 1. **macOS empirical verification** — Arc 8 examples +
+>    Phase 4c-broad smoke + atomicrmw tests on a Darwin host
+>    (both backends). VERIFICATION DEFERRED.
+> 2. **Windows empirical verification** — same suite on a Win
+>    host. Plus: write the Windows LLVM TCP IR (deferred
+>    surface). VERIFICATION DEFERRED.
+> 3. **Arc 10 — Sanskrit-derived SOV completion** (PRIMARY
+>    language-target completion). Extend SOV to `let` / `fn` /
+>    `struct` / `if` / `while` / `match` / top-level decls;
+>    add Devanagari aliases for `extern` / `type` / `intent` /
+>    `invariant`; finer purity gates. Pursued in parallel with
+>    grammar consultant. See TODO §*Sanskrit-derived SOV
+>    completion*.
+> 4. **CLI rename** — `intentc` → `vanic` (or similar). See
+>    TODO §*CLI rename*.
+> 5. **Examples reorganization** — `examples/language/{english,
+>    sanskrit,hindi,marathi}/` subfolder layout + `श्री।`
+>    invocation header on Devanagari examples. See TODO
+>    §*Examples reorganization*.
+> 6. **Cross-language `.vani` translator tool** — rewrite a
+>    source's keywords between English / Sanskrit / Hindi /
+>    Marathi. See TODO §*Cross-language `.vani` translator*.
+> 7. **Arc 9 a/b/e/f** Kosh package manager — deferred pending
+>    registry choice.
+> 8. **Arc 7 Win64/AArch64** — gated on CI.
 
 ## Arcs 5–10 — granular sub-step plan
 

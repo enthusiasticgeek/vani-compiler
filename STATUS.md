@@ -1,4 +1,4 @@
-# vāṇī (वाणी) — Project Status
+# vāṇी (वाणी) — Project Status
 
 > The project was renamed from `future_compiler` to **VANI** (वाणी, Sanskrit for "speech")
 > on 2026-05-21. "VANI" expands to *Verbose Alternative Natural Interface* — the
@@ -10,17 +10,92 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-> **📋 NEXT SESSION HANDOFF (refreshed 2026-06-06)**: [TODO.md §
-> *NEXT SESSION HANDOFF*](TODO.md#-next-session-handoff--dependency-ordered-plan-refreshed-2026-06-06)
-> has the dependency-ordered remaining work. Execution order per
-> user direction:
->
->   1. **Backlog item — Vec<Struct>-in-struct-field C codegen**
->      (pre-existing bug; tackle FIRST as the fresh-session bootstrap).
->   2. **Tier 1 — Phase 4c-broad** (full generic async fns; testable on Linux).
->   3. **Tier 2 — Phase 5 macOS port** (CODE-ONLY; macOS verification deferred — no platform access).
->   4. **Tier 3 — Phase 6 Windows IOCP** (CODE-ONLY; Windows verification deferred — no platform access).
->   5. **Tier 4 — Linux re-verification** (final pass to catch regressions from Phase 5/6 code).
+## 🟢 Session 2026-06-06 — Tiers 1–4 all shipped
+
+All five items on the cross-platform porting + generic async arc
+landed in this session (commits 4feb5fc → d139691):
+
+| # | Tier | Status | Commit | Verification |
+|---|---|---|---|---|
+| 0 | Bootstrap: Vec<Struct>-in-struct-field C codegen | ✅ shipped | `4feb5fc` + `ab6bc10` | Linux ✅ |
+| 1 | Phase 4c-broad — full generic async fns | ✅ shipped | `4620e98` + `afbc7b5` | Linux ✅ end-to-end |
+| 2 | Phase 5 — macOS port (C backend + LLVM IR) | ✅ shipped | `c4823b9` + `8281cda` | **macOS DEFERRED** (no host access) |
+| 3 | Phase 6 — Windows port (C backend + LLVM IR, minus TCP IR) | ✅ shipped | `c4823b9` + `8281cda` | **Windows DEFERRED** (no host access) |
+| 4 | Linux re-verification | ✅ green | — | 1884 lib + 54 parity + 5 Arc 8 smokes |
+| 5 | Pre-existing baselines: fmt-roundtrip + LLVM stack-overflow | ✅ fixed | `d139691` | Linux clean out-of-the-box |
+
+**Known limitations / caveats (must be empirically verified later):**
+
+1. **macOS LLVM IR — VERIFICATION DEFERRED**. Hot spots: kevent
+   struct alignment (32-byte i8 GEP layout), `EV_CLEAR` semantics,
+   EAGAIN=35, O_NONBLOCK=4, `@__error()` thunk resolution, pipe +
+   pthread userspace timer shim (`@__intent_macos_timer_thread`).
+   Code paths in [backend_llvm.rs:emit_intent_epoll_helpers_llvm_darwin](src/backend_llvm.rs).
+2. **Windows LLVM IR — VERIFICATION DEFERRED**. Hot spots: IOCP
+   completion-key vs epoll-readiness model mismatch (see Phase 6
+   R8 in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)), WSAStartup ordering,
+   FIONBIO ioctl (0x8004667E), `Sleep + PostQueuedCompletionStatus`
+   timer shim. Code in
+   [backend_llvm.rs:emit_intent_epoll_helpers_llvm_windows](src/backend_llvm.rs).
+3. **Windows LLVM TCP IR — NOT IMPLEMENTED**. The i64-SOCKET +
+   winsock2 declare surface is larger than fit this phase. Windows
+   users with TCP programs route through the C backend
+   (`intentc --backend c`), which has full winsock2 coverage.
+4. **macOS + Windows C backends** — `#ifdef` branches present in
+   `emit_intent_epoll_helpers_c` / `emit_intent_tcp_helpers_c` /
+   `emit_intent_sleep_ms_helper_c`. The Linux branch is byte-
+   identical to pre-Phase-5 so Linux verification is unaffected;
+   the other branches haven't been exercised on a real host.
+5. **Phase 4c-broad ABI quirk**: generic async fns route returns
+   through `__result: T` field (the v3.1 non-i64 ABI), even when
+   T monomorphizes to i64. A hand-written non-generic Task with
+   return type literally `i64` uses direct-return. Acceptable for
+   v1; documented in [parser.rs:try_v31_transform](src/parser.rs).
+
+## 🟡 Language surface — partially shipped (Sanskrit-derived SOV)
+
+vāṇी's first-class target is the Sanskrit-derived family —
+Sanskrit, Hindi, Marathi, and the broader Indo-Aryan group — with
+global languages queued after. Honest status:
+
+- **Devanagari aliases**: 87 aliases covering 41 of 45 structure
+  keywords ([lexer.rs:222–365](src/lexer.rs#L222-L365)). Four
+  keywords still English-only: `extern`, `type`, `intent`,
+  `invariant`.
+- **SOV word order**: works for **range `for`** loops + **four
+  verb-at-end statements** (`return` / `print` / `assert` /
+  `prove`). Most constructs still keyword-first only —
+  `let`, `fn`, `struct`, `enum`, `if`, `while`, `match`, and all
+  top-level declarations have no SOV path yet.
+- **Per-file script purity**: English vs Devanagari, auto-detected
+  on first keyword ([lexer.rs:393–441](src/lexer.rs#L393-L441)).
+  Finer Sanskrit-vs-Hindi-vs-Marathi distinction deferred.
+- **Global languages** (Spanish, Mandarin, Arabic, etc.) — not
+  started.
+
+A "code as you speak" experience in pure Sanskrit / Hindi / Marathi
+is the next language-surface milestone, not a shipped one. See
+[TODO.md](TODO.md) §*Sanskrit-derived SOV completion*.
+
+## 📋 Remaining work (post-2026-06-06)
+
+  1. **macOS empirical verification** — run the 5 Arc 8 examples +
+     Phase 4c-broad smoke + atomicrmw tests on a Darwin host (both
+     backends).
+  2. **Windows empirical verification** — same suite on a Win host.
+     Plus: write the Windows LLVM TCP IR (i64-SOCKET + winsock2
+     declares).
+  3. **Sanskrit-derived SOV completion** — extend SOV to `let` /
+     `fn` / `struct` / `if` / `while` / `match` / top-level decls;
+     add Devanagari aliases for `extern` / `type` / `intent` /
+     `invariant`; finer purity gates.
+  4. **Cross-language `.vani` translator tool** — rewrite a source
+     file's keywords between English / Sanskrit / Hindi / Marathi.
+  5. **Examples reorganization** — move to
+     `examples/language/{english,sanskrit,hindi,marathi}/` with
+     `श्री।` invocation comment on every Devanagari example.
+  6. **CLI rename** — `intentc` → `vanic` (or similar). Legacy
+     name carried over from the `future_compiler` / `intent` era.
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +

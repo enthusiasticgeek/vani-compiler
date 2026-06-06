@@ -10,6 +10,49 @@ Pronounced **vaa-NEE** (Sanskrit *vāṇī* — long-a, retroflex-n, long-i;
 stress on the second syllable). वाणी is the Sanskrit word for *speech*,
 *voice*, or *language itself*.
 
+## Language targeting (priority order)
+
+vāṇī's first-class target is the family of **Sanskrit-derived
+SOV languages** — **Sanskrit (saṁskṛta)**, **Hindi (hindī)**,
+**Marathi (marāṭhī)**, and the broader Indo-Aryan branch (Bengali,
+Gujarati, Punjabi, Nepali, Konkani, Odia, Assamese, etc.) which all
+share verb-final (Subject–Object–Verb) grammar and a Devanagari- /
+Brahmi-derived script lineage. The goal is that someone fluent in
+any of those languages can write a program that reads like prose in
+their mother tongue — verb at the end of the sentence, postpositions
+attached to the noun, no keyword salad in a script they don't read.
+
+After the Sanskrit-derived family, vāṇी opens up to **global
+languages** — English, Spanish, Mandarin, Arabic, Japanese, etc. —
+each with its own keyword aliases and (where applicable) word-order
+adaptations. The compiler core is script- and grammar-agnostic; the
+surface is a token-alias layer + a parser word-order hook. Adding
+a new language is a lexer table + a small parser test.
+
+> **Honest status (2026-06-06)**: SOV + natural-speech coding for
+> Sanskrit / Hindi / Marathi is **partially shipped**, not complete:
+>
+> - **87 Devanagari aliases** cover **41 of 45** structure keywords
+>   ([lexer.rs:222–365](src/lexer.rs#L222-L365)). Four keywords —
+>   `extern`, `type`, `intent`, `invariant` — are still English-only.
+> - **SOV word order** is wired for **range `for` loops** + four
+>   **verb-at-end statements** (`return`, `print`, `assert`, `prove`)
+>   ([parser.rs:2277–2328](src/parser.rs#L2277-L2328)). Most
+>   constructs (`let`, `fn`, `struct`, `enum`, `if`, `while`,
+>   `match`, top-level decls) **still require keyword-first
+>   syntax** even in Devanagari mode.
+> - **Per-file purity** is at the script level (English vs
+>   Devanagari, [lexer.rs:393–441](src/lexer.rs#L393-L441)). Finer-
+>   grained Sanskrit-vs-Hindi-vs-Marathi enforcement is deferred
+>   pending grammar-consultant review.
+> - **Global languages** (Spanish, Mandarin, etc.) — **not started**.
+>   The lexer table is the right shape to receive them; the work is
+>   curating the keyword sets.
+>
+> See [TODO.md](TODO.md) §*Sanskrit-derived SOV completion* for the
+> remaining work list and §*Global language surface* for the queue
+> beyond that.
+
 ## Philosophy
 
 vāṇī is a small systems language **inspired by Rust and C/C++** in
@@ -134,7 +177,10 @@ semantic model **borrowed from Rust** and a code-generator that
 - `intentc check` (typecheck + SMT), `emit` (lowered source), `run`
   (compile + execute), `build` (AOT to native binary), `fmt`
   (formatter with round-trip + comment preservation), `ast` (AST
-  dump), LSP integration.
+  dump), LSP integration. *(The `intentc` binary name is a legacy
+  carryover from the project's earlier "future_compiler" / "intent"
+  names; a rename to `vanic` is queued — see
+  [TODO.md](TODO.md) §*CLI rename*.)*
 - Cross-backend parity test pins identical stdout + exit code on
   every example under both backends.
 
@@ -982,37 +1028,61 @@ treats them as the same token.
 **Phase 1** (closures #235–#237) shipped single-word Devanagari
 aliases for the core control / declaration keywords plus multi-word
 phrases like `नहीं तो` (else), `के लिए` (for), `सिद्ध करो` (prove) —
-fused by a post-lex merger. Per-file language purity lets users opt
-into a single language (Hindi-only, Sanskrit-only, Marathi-only,
-English-only) via a file header.
+fused by a post-lex merger. Per-file script purity (English vs
+Devanagari) is enforced automatically: the first structure keyword
+sets the script, and the lexer rejects mixing thereafter
+([lexer.rs:393–441](src/lexer.rs#L393-L441)). No header opt-in
+required.
 
-**Phase 2** (closures #265–#267) closes the two biggest ergonomic
-gaps:
+**Phase 2** (closures #265–#267) added two ergonomic features:
 
-1. **SOV word order.** Indo-Aryan grammar is verb-final
-   (postpositions follow the noun). The parser now accepts the
+1. **SOV word order (partial).** Indo-Aryan grammar is verb-final
+   (postpositions follow the noun). The parser accepts the
    natural shape `i के लिए 0 से 5 तक { … }` (range for) and
    `X पुनरागम;` / `"x =", x लिखो;` / `cond सुनिश्चित;` /
    `expr प्रमाण;` (return / print / assert / prove with the
    verb at the end). The English keyword-first order still works
    — the SOV detector only fires when the leading token isn't
    a verb-keyword.
-2. **3-way alias parity.** Sanskrit / Hindi / Marathi now each
-   have a viable form for every previously English-only
-   keyword (else `वरना`, mut `परिवर्तनीय`, continue `अग्रे`,
-   pub `सार्वजनिक`, module `खण्ड` / `मॉड्यूल`, use `उपयोग`,
-   as `यथा`, where `यत्र` / `जहाँ` / `जिथे`, is `अस्ति` /
-   `है` / `आहे`, plus interface / implement / methods / try /
-   task / join / parallel single-word). Sanskrit-root words
-   that work as tatsama (loanwords) in Hindi + Marathi are
-   documented as shared across the three.
+2. **3-way alias parity.** Sanskrit / Hindi / Marathi each have a
+   viable form for ~41 of 45 structure keywords (else `वरना`,
+   mut `परिवर्तनीय`, continue `अग्रे`, pub `सार्वजनिक`, module
+   `खण्ड` / `मॉड्यूल`, use `उपयोग`, as `यथा`, where `यत्र` /
+   `जहाँ` / `जिथे`, is `अस्ति` / `है` / `आहे`, plus interface
+   / implement / methods / try / task / join / parallel single-
+   word). Sanskrit-root words that work as tatsama (loanwords)
+   in Hindi + Marathi are documented as shared across the three.
 
-A pure-Hindi or pure-Sanskrit or pure-Marathi program now reads
-top-to-bottom in natural grammar with no English fall-back.
+> **What "partial" actually means (honest status 2026-06-06)**:
+> SOV is wired for **range `for` + four verb-at-end statements**
+> (`return` / `print` / `assert` / `prove`). Most constructs —
+> `let`, `fn`, `struct`, `enum`, `if`, `while`, `match`, top-level
+> declarations — **still require keyword-first syntax even in
+> Devanagari mode**. A "code as you speak" experience for full
+> programs (verb-final everywhere, postpositions everywhere) is the
+> next milestone, not a shipped one. See [TODO.md](TODO.md)
+> §*Sanskrit-derived SOV completion*.
 
-**Still queued**: grammar-consultant refinement pass — the
-Phase-2 picks are best-effort and welcome dialect-specific
-revision. See TODO.md for the closure-by-closure log.
+**Still queued**:
+- Full SOV coverage across the remaining ~10 statement categories
+  (`let`-binding verb-at-end, `if`/`while` cond-at-end with
+  postposition, `fn` declaration with verb-at-end signature, struct
+  / enum decl SOV-shape, match-arm SOV shape).
+- Four English-only keywords gain Devanagari aliases: `extern`,
+  `type`, `intent`, `invariant`.
+- Finer-grained Sanskrit-vs-Hindi-vs-Marathi purity gate (today
+  it's only English-vs-Devanagari at the script level).
+- Grammar-consultant refinement pass — Phase-2 picks are best-
+  effort and welcome dialect-specific revision.
+- **Cross-language `.vani` source translator** (planned tool):
+  one-shot rewrite of a program's keywords between English /
+  Sanskrit / Hindi / Marathi so a user can read someone else's
+  source in their preferred dialect without losing semantics.
+- **Examples reorganization**: each script gets its own subfolder
+  under `examples/language/` (`english/`, `sanskrit/`, `hindi/`,
+  `marathi/`) and every Devanagari example begins with a
+  `श्री।` invocation comment (pūrṇa daṇḍa terminator) per the
+  classical convention.
 
 Romanizations follow **IAST** (International Alphabet of Sanskrit
 Transliteration) for Sanskrit and a Hunterian-style transliteration for

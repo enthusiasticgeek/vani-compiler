@@ -238,60 +238,67 @@
 > control-flow + types + Result + nested + multi-task + clean
 > generic rejection. Generics fully and platform ports remain.
 >
-> **Phase 4c-broad attempt notes (refreshed 2026-06-06)**: TWO
-> attempts so far, both reverted to Phase 4c-narrow's clean
-> rejection. Scaffolding (`_fn_type_params: &[String]` parameter
-> on try_v31_transform) kept in place to avoid signature churn.
+> **Phase 4c-broad ✅ SHIPPED 2026-06-06 end-of-day** (commits
+> `4620e98` + `afbc7b5`). Generic async fns compile and run end-
+> to-end on Linux via both backends. Smoke test:
 >
-> **Three layered blockers identified 2026-06-06**:
+> ```vani
+> async fn identity<T>(fd: i64, x: T) -> T {
+>   let n: i64 = io_recv_async(fd, 64);  // suspends
+>   return x;
+> }
+> fn drive(ep: i64, t: mut ref Task__identity<i64>) -> i64 { ... }
+> fn main() {
+>   let t: Task__identity<i64> = identity(cfd, 42);
+>   let r: i64 = drive(ep, mut ref t);  // status = 0 (Ready)
+>   print "identity __result:", t.__result;  // → 42
+> }
+> ```
+>
+> All three originally-identified blockers are fixed:
 >
 >   1. **substitute_type_param_in_stmt was Expr-blind** —
->      ✅ FIXED THIS SESSION: extended to recurse into Expr
+>      ✅ FIXED (commit `4620e98`): extended to recurse into Expr
 >      forms (Binary/Unary/Match/MethodCall/Ref/Index/FieldAccess/
 >      Tuple/ArrayLit/Cast). For `StructLit { type_name }`
->      and `Call { name }` starting with `Task__` /
->      `__poll_` respectively, mangles the name to its
->      specialized form alongside type substitution. Limited
->      to v3.1-synthesized prefixes to avoid breaking user-
->      declared generic structs (Box<T>, etc.).
+>      and `Call { name }` starting with `Task__` / `__poll_`
+>      respectively, mangles the name to its specialized form
+>      alongside type substitution. Limited to v3.1-synthesized
+>      prefixes to avoid breaking user-declared generic structs
+>      (Box<T>, etc.).
 >
->   2. **rewrite_apply_in_ty + add_if_needed treated
->      Param-bearing args as concrete** — ✅ FIXED THIS
->      SESSION: both now skip Type::Apply use-sites whose
->      args contain Type::Param (those occur inside generic
->      fn templates and would mangle to garbage names like
->      `Task__identity__Param_T_`). Concrete specializations
->      arrive via fn-mono's substitute_type_param, which now
->      collapses fully-concrete Type::Apply → Type::Struct(mangled).
+>   2. **rewrite_apply_in_ty + add_if_needed treated Param-
+>      bearing args as concrete** — ✅ FIXED (commit `4620e98`):
+>      both skip Type::Apply use-sites whose args contain
+>      Type::Param. Concrete specializations arrive via fn-mono's
+>      substitute_type_param, which collapses fully-concrete
+>      Type::Apply → Type::Struct(mangled).
 >
 >   3. **infer_concrete_type_for_call uses the first arg's
->      type literally** — ❌ NOT YET FIXED. The blocker for
->      Phase 4c-broad. For `__poll_identity(mut ref sub)` where
->      `sub: Task__identity<i64>`, mono infers T = RefMut(
->      Task__identity<i64>) instead of T=i64. Needs
->      structural unwrapping: when the called fn's first param
->      is declared as `mut ref Task__X<T>`, extract T from
->      the user's arg type. Or accept explicit type-arg syntax
->      at the call site (`__poll_identity::<i64>(t)`).
+>      type literally** — ✅ FIXED (commit `afbc7b5`): the
+>      function now walks the called fn's declared params to
+>      find the first param whose type structurally contains a
+>      Type::Param, then infers T from the matching actual arg.
+>      For v3.1 `__poll_*` calls, structural unwrap peels
+>      `RefMut/Ref/Apply/Struct-suffix` to recover T from
+>      already-collapsed mangled names (e.g.
+>      `Task__identity__i64` → `i64`).
 >
-> Blockers 1+2 are PRE-EXISTING fixes that improve generic
-> code in general — they stay shipped even though the wider
-> Phase 4c-broad arc isn't done.
+> **ABI quirk to document**: the v3.1 transform routes returns
+> through `__result: T` field whenever the return type is non-i64
+> AT TEMPLATE TIME. For generic templates, `return_type` is
+> Type::Param("T") which doesn't match Type::I64, so
+> `return_via_field=true`. After mono specializes T=i64, the
+> specialized fn still uses field-return — different ABI from a
+> hand-written non-generic Task<i64>. Acceptable for v1;
+> documented in [parser.rs:try_v31_transform](src/parser.rs).
 >
-> **Fix sketch for next implementer (blocker 3)**:
->   - Extend `infer_concrete_type_for_call` to also check
->     subsequent args + extract T from `mut ref Task__X<T>`
->     declared-param-type patterns by structural unification
->     with the user's arg type.
->   - OR add explicit type-arg syntax at the call site
->     (`identity::<i64>(server, 42)` and
->     `__poll_identity::<i64>(t)`). This is more invasive at
->     the parser level but simpler at the mono level.
->
-> **Smaller-scope alternative**: REJECT generic async fns
-> cleanly (current Phase 4c-narrow behavior). Users can
-> manually write non-generic state machines using the
-> hand-rolled v3 pattern for the rare generic-async case.
+> **Lib + parity acceptance**:
+>   - Updated lib test
+>     `v31_phase4c_broad_generic_async_fn_compiles_and_specializes`
+>     pins the C-emit includes `Task__identity__i64` +
+>     `__poll_identity__i64` + `__result` field.
+>   - 1884 lib + 54 parity tests green.
 >
 > **Phase 2.5b ✅ COMPLETE 2026-06-04** (commit `4702cb6`).
 > `break` / `continue` inside suspending loops. collect_into
@@ -981,13 +988,38 @@ async calls compose affine state).
 
 ### Phase 5 — macOS port (kqueue shim)
 
-> **Status 2026-06-06**: C backend ✅ SHIPPED (commit
-> _pending_, see below). LLVM backend deferred to a future
-> session (IR-level kqueue is a larger surface; macOS LLVM
-> users compile via the C backend in the meantime). All Linux
-> verification remains green; **macOS verification deferred —
-> no Darwin host access in the current dev environment**.
-> The macOS branch will exercise on first build there.
+> **Status 2026-06-06 end-of-day**: BOTH backends ✅ SHIPPED.
+>   - **C backend** (commit `c4823b9`): dual-emit via
+>     `#if defined(__APPLE__)` branch in
+>     `emit_intent_epoll_helpers_c` / `emit_intent_tcp_helpers_c` /
+>     `emit_intent_sleep_ms_helper_c`. Uses kqueue + EVFILT_READ +
+>     a pipe + pthread userspace timer for sleep_ms_async (kqueue's
+>     EVFILT_TIMER isn't itself a pollable fd).
+>   - **LLVM IR** (commit `8281cda`): `emit_intent_epoll_helpers_llvm_darwin`
+>     emits inline kqueue + kevent IR with the 32-byte struct laid
+>     out via i8* GEP. `@__error()` thunk replaces `@__errno_location()`.
+>     macOS EAGAIN=35, O_NONBLOCK=4 are baked in.
+>     `@__intent_macos_timer_thread` is the pthread_create callback
+>     for the userspace timer shim.
+>
+> **Linux verification remains green**: 1884 lib + 54 parity tests
+> + 5 Arc 8 examples + Phase 4c-broad smoke all pass.
+>
+> **VERIFICATION DEFERRED — macOS hot spots for first-host
+> verification**:
+>   1. kevent struct alignment (the 32-byte i8* GEP — verify
+>      `ident` at +0, `filter` at +8, `flags` at +10, etc.).
+>   2. `EV_CLEAR` edge-triggered semantics under a real read-
+>      ready socket workload.
+>   3. EAGAIN value (Darwin = 35 vs Linux = 11) — wrong value
+>      causes `nb` recv/accept to spin instead of yielding.
+>   4. O_NONBLOCK value (Darwin = 4 vs Linux = 2048) — wrong
+>      value silently doesn't make the fd non-blocking.
+>   5. `@__error()` thunk symbol resolution (different from
+>      glibc's `@__errno_location()`).
+>   6. Pipe-pthread timer shim: pthread_create's third-arg
+>      function signature, pthread_detach call ordering, write
+>      of 8-byte sentinel to the pipe wakes epoll_wait correctly.
 
 **Goal.** Lift the Linux-only restriction for macOS users.
 The biggest delta is `epoll` → `kqueue`; everything else
@@ -1045,17 +1077,58 @@ with v3.1 phases.
 
 ### Phase 6 — Windows port (IOCP + winsock)
 
-> **Status 2026-06-06**: C backend scaffolding ✅ SHIPPED in
-> the same commit as Phase 5. The Windows branch routes
-> `intent_epoll_*` through `CreateIoCompletionPort` /
-> `GetQueuedCompletionStatus` / `PostQueuedCompletionStatus`,
-> with a basic `CreateThread + Sleep + PostQueuedCompletionStatus`
-> userspace timer for `sleep_ms_async`. **Verification deferred
-> — no Windows host access**; the Windows branch will need
-> empirical tuning when first exercised, especially the IOCP
-> ↔ readiness-shaped vāṇी epoll API impedance mismatch noted
-> in R8 below. LLVM-IR Windows port is deferred to a future
-> session same as the macOS LLVM port.
+> **Status 2026-06-06 end-of-day**: C backend + most of LLVM IR
+> ✅ SHIPPED.
+>   - **C backend** (commit `c4823b9`): `#if defined(_WIN32)`
+>     branches across the three helper-emit functions. Uses
+>     `CreateIoCompletionPort` / `GetQueuedCompletionStatus` /
+>     `PostQueuedCompletionStatus`. winsock2 sockets with
+>     `SOCKET` handle type, `WSAGetLastError`, `WSAStartup` via
+>     `__intent_winsock_startup` (called once per process).
+>     `Sleep(DWORD)` for sync sleep; CreateThread + Sleep +
+>     PostQueuedCompletionStatus shim for `sleep_ms_async`.
+>   - **LLVM IR — partial** (commit `8281cda`):
+>     `emit_intent_epoll_helpers_llvm_windows` emits inline IOCP +
+>     `CreateThread` IR with the userspace timer thread.
+>     `@WSAGetLastError` checks WSAEWOULDBLOCK=10035; FIONBIO ioctl
+>     value (0x8004667E sign-extended) baked into intent_tcp_set_nonblocking.
+>   - **LLVM TCP IR — NOT IMPLEMENTED**. The i64-SOCKET surface +
+>     full winsock2 declares (`@socket(i32,i32,i32) -> i64` instead
+>     of `-> i32`, etc.) is a larger lift. Windows users compiling
+>     TCP programs via LLVM get a panic-with-pointer:
+>     `intentc --backend c` covers full Windows TCP.
+>
+> **Linux verification remains green**: 1884 lib + 54 parity tests
+> + 5 Arc 8 examples + Phase 4c-broad smoke all pass.
+>
+> **VERIFICATION DEFERRED — Windows hot spots for first-host
+> verification**:
+>   1. **IOCP ↔ readiness model mismatch** (R8). The vāṇी epoll
+>      API is readiness-shaped; IOCP is completion-shaped. The
+>      current shim treats each `PostQueuedCompletionStatus` as a
+>      "wake the reader" event. For real Windows I/O workloads
+>      (overlapped recv → completion routine), the user is better
+>      served by a Win32-native `iocp_*` builtin family. The
+>      current epoll-on-IOCP shim is a v1 compromise.
+>   2. **WSAStartup ordering** — `__intent_winsock_startup` is
+>      called once per process before any socket op; verify on a
+>      multi-threaded program that the once-init is race-safe
+>      (the current `static int __intent_winsock_inited` is not
+>      atomic; under threading we need `InitOnceExecuteOnce` or
+>      similar).
+>   3. **FIONBIO ioctl** — value 0x8004667E (sign-extended to i32
+>      as -2147195266 in IR) is the winsock2 magic; verify with a
+>      real socket that the call returns 0 + the socket becomes
+>      non-blocking.
+>   4. **`Sleep + PostQueuedCompletionStatus` timer shim** — the
+>      thread frees its own args; the returned "fd" is a sentinel
+>      key (allocated pointer cast to i64) that the user passes
+>      to `epoll_add_read`. Verify the key uniqueness assumption
+>      holds under repeated timer creation.
+>   5. **Windows LLVM TCP IR** — write the full winsock2-shaped
+>      IR with i64-SOCKET return values + WSAGetLastError errno
+>      checks. Until then, LLVM Windows users with TCP programs
+>      hit the redirect-to-C-backend panic.
 
 **Goal.** Lift the Linux-only restriction for Windows users.
 This is the biggest single port because the IOCP programming

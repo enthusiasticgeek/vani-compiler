@@ -7,8 +7,10 @@ checklist.
 
 ## Before you open a PR
 
-1. **`cargo test`** (full suite — 1255 lib + 54 e2e + 11 vtables-phase3 +
-   2 user-drop-by-ref + 1 ssa-examples in ~90s).
+1. **`cargo test`** (full suite — 1884 lib + 54 e2e + 11 vtables-phase3 +
+   2 user-drop-by-ref + 1 ssa-examples in ~90s. `.cargo/config.toml`
+   sets `RUST_MIN_STACK=32MB` so parallel-for + reduction tests have
+   stack headroom.).
 2. **`cargo clippy`** (3 known warnings are tolerated;
    anything new should be addressed or justified).
 3. **`cargo build`** — clean with no new warnings.
@@ -21,9 +23,13 @@ checklist.
 ## Code conventions
 
 * LLVM is the default backend. New work targets it first.
-* The C backend (`backend_c.rs`) is on the deprecation path —
-  see its module-top comment for the retirement plan. Don't add
-  features there unless they're trivially mirrored in LLVM.
+* **The C backend (`backend_c.rs`) is NOT deprecated anymore** — it
+  carries first-class macOS + Windows support via `#ifdef`-branched
+  emit ([backend_c.rs:emit_intent_epoll_helpers_c](src/backend_c.rs))
+  that the LLVM backend hasn't matched yet (Windows LLVM TCP IR is
+  deferred). Treat the two backends as peers; mirror new features
+  across both where the platform matters. The module-top deprecation
+  comment is stale and queued for removal in [TODO.md](TODO.md).
 * The verifier's failure modes are conservative: when SMT
   can't discharge a goal, the elision pass leaves runtime
   guards in place. Sound-then-precise.

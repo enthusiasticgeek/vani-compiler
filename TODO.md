@@ -5,33 +5,272 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 
 ---
 
-## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06)
+## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06 end-of-day)
 
-> **Session-end status (2026-06-06)**:
->   - ✅ Bootstrap Vec<Struct>-in-struct-field C codegen (commits
->     `4feb5fc` + `ab6bc10`).
->   - ✅ Tier 1 — Phase 4c-broad **blockers 1+2** (commit `4620e98`).
->     **Blocker 3 (infer_concrete_type_for_call structural
->     unwrapping) parked with documented fix sketch.**
->   - ✅ Tier 2 — Phase 5 macOS **C backend** (commit `c4823b9`).
->     LLVM-IR port deferred. VERIFICATION DEFERRED — no macOS access.
->   - ✅ Tier 3 — Phase 6 Windows **C backend** (commit `c4823b9`,
->     same as Phase 5). LLVM-IR port deferred. VERIFICATION DEFERRED
->     — no Windows access.
->   - ✅ Tier 4 — Linux re-verification: 1884 lib + 53 parity tests
->     green; 4 Arc 8 examples (C backend) + 1 (LLVM backend) ran
->     end-to-end on Linux.
+> **Session-end status (2026-06-06)** — ALL FIVE TIERS SHIPPED:
+>   - ✅ Bootstrap: Vec<Struct>-in-struct-field C codegen
+>     (commits `4feb5fc` + `ab6bc10`).
+>   - ✅ Tier 1: Phase 4c-broad — full generic async fns
+>     (commits `4620e98` + `afbc7b5`). Generic `identity<T>(fd, x: T)
+>     -> T` compiles + runs end-to-end on Linux via both backends.
+>   - ✅ Tier 2: Phase 5 — macOS port. C backend (commit `c4823b9`)
+>     + LLVM IR (commit `8281cda`). **VERIFICATION DEFERRED** — no
+>     macOS access at landing time.
+>   - ✅ Tier 3: Phase 6 — Windows port. C backend (commit `c4823b9`)
+>     + LLVM IR (commit `8281cda`, except Windows LLVM TCP IR).
+>     **VERIFICATION DEFERRED** — no Windows access at landing time.
+>   - ✅ Tier 4: Linux re-verification. 1884 lib + 54 parity tests
+>     green out-of-the-box; 4 Arc 8 examples (C) + 1 (LLVM) +
+>     Phase 4c-broad generic smoke all run end-to-end.
+>   - ✅ Pre-existing baselines fixed (commit `d139691`):
+>     async_showcase fmt-roundtrip + atomicrmw LLVM stack-overflow.
 >
-> **Open work for the next session**:
->   - LLVM-IR macOS port (kqueue + EVFILT_TIMER + `__error()` thunk
->     at the IR level).
->   - LLVM-IR Windows port (IOCP + winsock2 + WSAGetLastError at the
->     IR level).
->   - Phase 4c-broad blocker 3 — infer_concrete_type_for_call
->     structural unwrapping for `mut ref Task__X<T>` patterns.
->   - macOS empirical verification (whenever a Darwin host is
->     available).
->   - Windows empirical verification (whenever a Win host is available).
+> **Open work** (no Linux-blocker items):
+>   1. **macOS empirical verification** — run 5 Arc 8 examples +
+>      Phase 4c-broad smoke + atomicrmw tests on a Darwin host
+>      (both backends).
+>   2. **Windows empirical verification** — same suite on a Win host.
+>      Plus: write the Windows LLVM TCP IR (deferred — i64-SOCKET +
+>      winsock2 declare surface; Windows TCP users compile via C
+>      backend in the meantime).
+>   3. **Sanskrit-derived SOV completion** (see new section below).
+>   4. **CLI rename**: `intentc` → `vanic` (see new section).
+>   5. **Examples reorganization**: `examples/language/{lang}/`
+>      subfolder layout + `श्री।` invocation header on every
+>      Devanagari example (see new section).
+>   6. **Cross-language `.vani` translator tool** (see new section).
+
+---
+
+## 🟡 Sanskrit-derived SOV completion (PRIORITY — user direction 2026-06-06)
+
+vāṇी's PRIMARY target is the Sanskrit-derived family (SOV: Subject–
+Object–Verb): Sanskrit, Hindi, Marathi, and the broader Indo-Aryan
+group (Bengali, Gujarati, Punjabi, Nepali, Konkani, Odia, Assamese,
+etc.). After that, global languages (English, Spanish, Mandarin,
+Arabic, etc.) join as secondary targets. The README is now explicit
+about this priority order.
+
+**Shipped (from earlier sessions, audit 2026-06-06)**:
+  - 87 Devanagari aliases for 41 of 45 structure keywords
+    ([lexer.rs:222–365](src/lexer.rs#L222-L365)).
+  - SOV word order for **range `for`** + **four verb-at-end
+    statements** (`return` / `print` / `assert` / `prove`)
+    ([parser.rs:2277–2328](src/parser.rs#L2277-L2328)).
+  - Per-file script purity (English vs Devanagari, auto-detected)
+    ([lexer.rs:393–441](src/lexer.rs#L393-L441)).
+  - 3 Devanagari example programs (`hindi_keywords.vani`,
+    `sanskrit_keywords.vani`, `marathi_keywords.vani`) run end-to-
+    end in the parity sweep.
+
+**Remaining work for full natural-speech coding**:
+
+1. **SOV-S1 — `let` binding verb-at-end**
+   Allow `x 5 मान;` ("x five let") as an alias for `मान x = 5;`.
+   Parser hook in the LHS-of-`=` slot; collect operand tokens
+   until the trailing verb-keyword.
+
+2. **SOV-S2 — `fn` declaration with verb-at-end signature**
+   `add(a: i64, b: i64) -> i64 कार्य { … }` (function name +
+   params + return at front, verb-keyword `कार्य` after).
+   Requires top-level SOV detector (currently SOV only fires
+   inside fn bodies).
+
+3. **SOV-S3 — `if` / `else` cond-at-end**
+   `cond यदि { … } अन्यथा { … }` (condition first, verb last).
+   Hindi/Marathi already commonly read this way colloquially.
+
+4. **SOV-S4 — `while` cond-at-end**
+   `cond यावत् { … }` (Sanskrit) / `cond जबतक { … }` (Hindi).
+
+5. **SOV-S5 — `match` scrutinee-at-front, verb-at-end**
+   `x मेल { 0 then …, _ then … }` — scrutinee + verb + arms.
+
+6. **SOV-S6 — `struct` / `enum` declaration SOV-shape**
+   `Point { x: i64, y: i64 } रचना;` (Point with fields then verb
+   "structure"). Pick the Sanskrit verb together with grammar
+   consultant.
+
+7. **SOV-S7 — Four English-only keywords gain Devanagari aliases**
+   `extern`, `type`, `intent`, `invariant`. Pick tatsama Sanskrit
+   roots; document in the alias table.
+
+8. **SOV-S8 — Finer Sanskrit-vs-Hindi-vs-Marathi purity gate**
+   Today the lexer purity gate distinguishes English vs Devanagari
+   only. Add a sub-mode that enforces a single Indo-Aryan dialect
+   per file when the user opts in via a file-header pragma.
+
+9. **SOV-S9 — Grammar-consultant refinement pass**
+   The current Sanskrit / Hindi / Marathi keyword picks are best-
+   effort. Consult native-speaker linguists for each dialect to
+   confirm verb choice + spelling + ergonomic feel.
+
+10. **SOV-S10 — Devanagari example coverage**
+    Add at least one Devanagari example per non-trivial vāṇी
+    feature (generics, async, FFI, parallel-for, etc.). Today the
+    three Devanagari examples cover only basic syntax.
+
+**Effort estimate**: ~40-60h focused. SOV-S1..S5 are parser-only
+(small per-construct hooks). SOV-S6..S10 are lexer/parser table
+extensions + tests + docs. Grammar consultation is an external
+dependency the user manages.
+
+---
+
+## 🛠️ CLI rename — `intentc` → `vanic` (user direction 2026-06-06)
+
+> "I don't like intentc — instead of intent it should be something
+> like vanic or similar."
+
+The `intentc` binary name is a carryover from the project's
+earlier `future_compiler` / `intent` naming. The current `vāṇी`
+brand maps more naturally to `vanic` (or a similar short form
+like `vc` or `vāṇी-c`).
+
+**Work items**:
+1. **CLI-1** — Pick the final name. Candidates: `vanic`, `vc`,
+   `vanic-c`, `vānī-c`. ASCII-only for shell ergonomics.
+2. **CLI-2** — Rename the binary in `Cargo.toml` (`[[bin]] name =
+   "vanic"`). Update `default-run`.
+3. **CLI-3** — Update every reference in:
+   - `README.md` (~5 locations)
+   - `STATUS.md` (~15 locations)
+   - `TODO.md` (~20 locations)
+   - `ONBOARDING.md`
+   - `CONTRIBUTING.md`
+   - All `examples/*.vani` shebang-style comments
+   - `tests/run_end_to_end.rs` (test binary path)
+   - All `src/main.rs` help-text strings
+   - All `docs/*.md`
+4. **CLI-4** — Add a transitional `intentc` shim that warns and
+   forwards to `vanic` for one release cycle, then is removed.
+5. **CLI-5** — Update onboarding link `ShareOnboardingGuide` if
+   any references hardcode the binary name.
+
+**Effort estimate**: ~3-5h. Mostly mechanical find-and-replace +
+two short transition shims.
+
+---
+
+## 📁 Examples reorganization (user direction 2026-06-06)
+
+> "I want to move natural-speaking-language examples into their own
+> subfolders under examples/language/<lang>/."
+
+**Current state**: all examples live flat under `examples/*.vani`.
+Three Devanagari examples (`hindi_keywords.vani`,
+`sanskrit_keywords.vani`, `marathi_keywords.vani`) sit alongside
+the English-keyword examples.
+
+**Target layout**:
+```
+examples/
+├── language/
+│   ├── english/      # all current English-keyword examples
+│   │   ├── tcp_echo.vani
+│   │   ├── async_showcase.vani
+│   │   └── …
+│   ├── sanskrit/     # Sanskrit-keyword examples
+│   │   └── sanskrit_keywords.vani (renamed/moved)
+│   ├── hindi/        # Hindi-keyword examples
+│   │   └── hindi_keywords.vani (renamed/moved)
+│   ├── marathi/      # Marathi-keyword examples
+│   │   └── marathi_keywords.vani (renamed/moved)
+│   ├── bengali/      # placeholder for future Indo-Aryan
+│   ├── gujarati/     # …
+│   └── …
+└── …
+```
+
+**Devanagari header convention** (user direction): every Devanagari
+example begins with a Sanskrit invocation comment:
+
+```vani
+// श्री।
+```
+
+`श्री` (śrī) = an auspicious-beginning invocation; `।` (pūrṇa
+daṇḍa) = the Sanskrit / Devanagari full stop. This is the
+classical "may auspiciousness attend this work" opener used at
+the start of Sanskrit manuscripts.
+
+**Work items**:
+1. **EX-1** — Create `examples/language/{english,sanskrit,hindi,
+   marathi}/` directories.
+2. **EX-2** — Move every current `examples/*.vani` into the right
+   subdirectory (most are English; the three Devanagari ones move
+   to their language folder).
+3. **EX-3** — Prepend `// श्री।` to every Devanagari example as
+   the first non-blank line.
+4. **EX-4** — Update `tests/run_end_to_end.rs` parity sweep to
+   recursively walk `examples/language/**/*.vani`.
+5. **EX-5** — Update `examples/README.md` (if any) with the new
+   layout.
+6. **EX-6** — Update every reference in `README.md` / `STATUS.md`
+   / `TODO.md` to the new example paths.
+
+**Effort estimate**: ~2-4h. Mostly file moves + test-runner glob
+update + small doc fixes.
+
+---
+
+## 🔄 Cross-language `.vani` translator tool (user direction 2026-06-06)
+
+> "I want a translator (could be python or other code) for any
+> user to take a .vani source file in any human-speaking language
+> and translate it to any other vāṇी-supported natural language
+> and compile successfully. E.g. English to Sanskrit and vice
+> versa, Sanskrit to Marathi and vice versa, etc."
+
+**Goal**: a `.vani` source file's keywords get rewritten between
+target languages while preserving:
+  - All identifier names (user code stays in whatever script the
+    author used).
+  - All comments (comments don't get translated automatically —
+    the user controls them).
+  - All operators / punctuation / strings.
+  - Semantic equivalence: the translated file compiles to the
+    same AST + same LLVM IR / C as the original.
+
+**Tool name**: `vani-translate` (or `vanic translate <args>` if
+the CLI rename lands first).
+
+**Design sketch**:
+1. Reuse vāṇī's existing token-alias map (the same table the lexer
+   consults) — invert it to get a `(target_lang) → (token_kind) →
+   (preferred_alias)` lookup. Token alias data lives in
+   [src/lexer.rs:222–365](src/lexer.rs#L222-L365).
+2. Tokenize input file. For each `Keyword` token, look up the
+   preferred alias in the target language and substitute. For SOV
+   constructs, optionally reorder (or keep the original word order
+   — this is a user-facing flag).
+3. Re-emit. Preserve whitespace + comments + literal contents.
+
+**Work items**:
+1. **XL-1** — Pick implementation language. Python is fine for
+   v1 (script + JSON-export of vāṇī's token table). For a "real"
+   tool, expose it as a Rust subcommand of the main CLI
+   (`intentc translate --from english --to sanskrit foo.vani`).
+2. **XL-2** — Export the lexer's alias table to a JSON / TOML file
+   the translator reads. Keep the table in sync with `src/lexer.rs`
+   via a build script or test that fails if they diverge.
+3. **XL-3** — Implement keyword translation (token-level
+   substitution; preserves whitespace + comments + identifiers).
+4. **XL-4** — Add round-trip parity tests:
+   `english → sanskrit → english` should produce the same AST
+   (modulo whitespace / chosen aliases) as the original. Same for
+   any pair of supported languages.
+5. **XL-5** — Optional: SOV reshape flag. `--reshape sov` rewrites
+   the source to verb-at-end syntax in the target language (where
+   applicable). `--reshape keyword-first` keeps the v1 shape.
+6. **XL-6** — Docs in `README.md` + `docs/translator.md`.
+
+**Effort estimate**: ~12-20h. Python prototype is the fast path
+to a working v1; native Rust subcommand is the long-term home.
+
+**Acceptance test**: take `examples/language/english/tcp_echo.vani`,
+run `vani-translate --to sanskrit`, get a Sanskrit version with
+`// श्री।` header that compiles + runs identically.
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
 examples; 1883 lib + 72 parity green; clean warning-free build).
