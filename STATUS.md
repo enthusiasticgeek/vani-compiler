@@ -77,25 +77,35 @@ A "code as you speak" experience in pure Sanskrit / Hindi / Marathi
 is the next language-surface milestone, not a shipped one. See
 [TODO.md](TODO.md) §*Sanskrit-derived SOV completion*.
 
-## 📋 Remaining work (post-2026-06-06)
+## 📋 Remaining work — dependency-ordered (refreshed 2026-06-06 evening)
 
-  1. **macOS empirical verification** — run the 5 Arc 8 examples +
-     Phase 4c-broad smoke + atomicrmw tests on a Darwin host (both
-     backends).
-  2. **Windows empirical verification** — same suite on a Win host.
-     Plus: write the Windows LLVM TCP IR (i64-SOCKET + winsock2
-     declares).
-  3. **Sanskrit-derived SOV completion** — extend SOV to `let` /
-     `fn` / `struct` / `if` / `while` / `match` / top-level decls;
-     add Devanagari aliases for `extern` / `type` / `intent` /
-     `invariant`; finer purity gates.
-  4. **Cross-language `.vani` translator tool** — rewrite a source
-     file's keywords between English / Sanskrit / Hindi / Marathi.
-  5. **Examples reorganization** — move to
-     `examples/language/{english,sanskrit,hindi,marathi}/` with
-     `श्री।` invocation comment on every Devanagari example.
-  6. **CLI rename** — `intentc` → `vanic` (or similar). Legacy
-     name carried over from the `future_compiler` / `intent` era.
+The full dependency graph + pick-up order lives in
+[TODO.md §*Open work — DEPENDENCY-ORDERED*](TODO.md). Headline
+sequence:
+
+  - **Tier A — ergonomics** (do first so subsequent edits inherit
+    the new names/paths):
+    - **A.1** CLI rename: `intentc` → `vanic`
+    - **A.2** Examples reorganization
+      (`examples/language/{en,sa,hi,mr}/`) + `// श्री।` Devanagari
+      header
+  - **Tier B — cross-language tooling** (depends on Tier A's paths):
+    - **B.1** Cross-language `.vani` translator tool (Python v1)
+  - **Tier C — Sanskrit-derived SOV completion** (PRIMARY language
+    target; parallel-safe with B):
+    - **C.1–C.10**: verb-at-end shapes for `let` / `fn` / `if` /
+      `while` / `match` / `struct` / `enum` / top-level decls;
+      4 missing Devanagari aliases; finer purity gate; grammar
+      consultant pass; Devanagari example coverage
+  - **Tier D — independent code work**:
+    - **D.1** Windows LLVM TCP IR
+  - **Tier E — depends on Tier C** (same surface patterns):
+    - **E.1** Global-language surface (Spanish, Mandarin, Arabic, …)
+  - **Tier F — external dependencies** (verification + CI + registry):
+    - **F.1** macOS empirical verification (Darwin host needed)
+    - **F.2** Windows empirical verification (Win host needed)
+    - **F.3** Arc 9 a/b/e/f Kosh package manager (registry choice)
+    - **F.4** Arc 7 Win64 / AArch64 (CI wiring)
 
 **Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
 Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +

@@ -25,20 +25,61 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 >   - ✅ Pre-existing baselines fixed (commit `d139691`):
 >     async_showcase fmt-roundtrip + atomicrmw LLVM stack-overflow.
 >
-> **Open work** (no Linux-blocker items):
->   1. **macOS empirical verification** — run 5 Arc 8 examples +
->      Phase 4c-broad smoke + atomicrmw tests on a Darwin host
->      (both backends).
->   2. **Windows empirical verification** — same suite on a Win host.
->      Plus: write the Windows LLVM TCP IR (deferred — i64-SOCKET +
->      winsock2 declare surface; Windows TCP users compile via C
->      backend in the meantime).
->   3. **Sanskrit-derived SOV completion** (see new section below).
->   4. **CLI rename**: `intentc` → `vanic` (see new section).
->   5. **Examples reorganization**: `examples/language/{lang}/`
->      subfolder layout + `श्री।` invocation header on every
->      Devanagari example (see new section).
->   6. **Cross-language `.vani` translator tool** (see new section).
+> **Open work — DEPENDENCY-ORDERED (refreshed 2026-06-06 evening, user direction)**:
+>
+> Each tier ships before the next; items within a tier can be
+> parallel-safe unless noted. Tier letters group by dependency,
+> not by importance.
+>
+> ```
+> Tier A (ergonomics — do first; later edits inherit new names/paths)
+>   A.1 ▸ CLI rename: intentc → vanic  ─────────┐
+>   A.2 ▸ Examples reorganization               │
+>          (examples/language/{en,sa,hi,mr}/)   │ A.2 depends on A.1
+>          + `// श्री।` header on Devanagari    │ for path-strings
+>          examples                              │
+>                                                ▼
+> Tier B (cross-language tooling — depends on Tier A's paths/names)
+>   B.1 ▸ Cross-language `.vani` translator tool ──┐
+>          (Python v1; reads the lexer alias       │
+>          table; preserves identifiers + comments)│
+>                                                   ▼
+> Tier C (Sanskrit-derived SOV completion — PRIMARY language target;
+>         parallel-safe with B but B's translator helps generate
+>         Devanagari examples once SOV constructs ship)
+>   C.1 ▸ SOV-S1: let verb-at-end           ┐
+>   C.2 ▸ SOV-S2: fn decl verb-at-end       │
+>   C.3 ▸ SOV-S3: if/else cond-at-end       │ each parallel-safe
+>   C.4 ▸ SOV-S4: while cond-at-end         │ within the tier
+>   C.5 ▸ SOV-S5: match scrutinee-at-front  │
+>   C.6 ▸ SOV-S6: struct/enum decl SOV-shape│
+>   C.7 ▸ SOV-S7: 4 missing Devanagari      │
+>          aliases (extern/type/intent/      │
+>          invariant)                        │
+>   C.8 ▸ SOV-S8: finer Sanskrit-vs-Hindi-  │
+>          vs-Marathi purity gate            │
+>   C.9 ▸ SOV-S9: grammar-consultant pass    │ external dep
+>   C.10▸ SOV-S10: Devanagari example       ▼
+>          coverage (uses B.1 to generate)
+>
+> Tier D (independent code work — parallel-safe with everything)
+>   D.1 ▸ Windows LLVM TCP IR (i64-SOCKET +
+>          winsock2 declares)
+>
+> Tier E (depends on Tier C — same surface patterns)
+>   E.1 ▸ Global-language surface (Spanish,
+>          Mandarin, Arabic, Japanese, ...)
+>
+> Tier F (external — host access / external choices needed)
+>   F.1 ▸ macOS empirical verification (Darwin host required)
+>   F.2 ▸ Windows empirical verification (Win host required)
+>   F.3 ▸ Arc 9 a/b/e/f Kosh package manager (registry choice)
+>   F.4 ▸ Arc 7 Win64 / AArch64 (CI wiring)
+> ```
+>
+> **Pick-up order**: A.1 → A.2 → B.1 → C.1..C.10 (parallel) → E.1.
+> Tier D and Tier F items can drop in anywhere they fit; they
+> don't block the language-surface arc.
 
 ---
 

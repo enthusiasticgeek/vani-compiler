@@ -17,32 +17,43 @@
 > CLIs all on `main`. See [STATUS.md](STATUS.md) for per-commit
 > ledger.
 >
-> **Open queue (refreshed 2026-06-06 end-of-day):**
-> 1. **macOS empirical verification** — Arc 8 examples +
->    Phase 4c-broad smoke + atomicrmw tests on a Darwin host
->    (both backends). VERIFICATION DEFERRED.
-> 2. **Windows empirical verification** — same suite on a Win
->    host. Plus: write the Windows LLVM TCP IR (deferred
->    surface). VERIFICATION DEFERRED.
-> 3. **Arc 10 — Sanskrit-derived SOV completion** (PRIMARY
->    language-target completion). Extend SOV to `let` / `fn` /
->    `struct` / `if` / `while` / `match` / top-level decls;
->    add Devanagari aliases for `extern` / `type` / `intent` /
->    `invariant`; finer purity gates. Pursued in parallel with
->    grammar consultant. See TODO §*Sanskrit-derived SOV
->    completion*.
-> 4. **CLI rename** — `intentc` → `vanic` (or similar). See
->    TODO §*CLI rename*.
-> 5. **Examples reorganization** — `examples/language/{english,
->    sanskrit,hindi,marathi}/` subfolder layout + `श्री।`
->    invocation header on Devanagari examples. See TODO
->    §*Examples reorganization*.
-> 6. **Cross-language `.vani` translator tool** — rewrite a
->    source's keywords between English / Sanskrit / Hindi /
->    Marathi. See TODO §*Cross-language `.vani` translator*.
-> 7. **Arc 9 a/b/e/f** Kosh package manager — deferred pending
->    registry choice.
-> 8. **Arc 7 Win64/AArch64** — gated on CI.
+> **Open queue — DEPENDENCY-ORDERED (refreshed 2026-06-06 evening):**
+> Full dependency graph in [TODO.md](TODO.md). Headline sequence:
+>
+> **Tier A** (ergonomics; do first):
+> 1. **A.1 CLI rename** — `intentc` → `vanic`.
+> 2. **A.2 Examples reorganization** —
+>    `examples/language/{english,sanskrit,hindi,marathi}/` +
+>    `// श्री।` Devanagari header.
+>
+> **Tier B** (cross-language tooling; depends on Tier A):
+> 3. **B.1 Cross-language `.vani` translator tool** —
+>    rewrite a source's keywords between English / Sanskrit /
+>    Hindi / Marathi (Python v1; round-trip parity required).
+>
+> **Tier C — Arc 10 Sanskrit-derived SOV completion**
+> (PRIMARY language-target completion; parallel-safe with B):
+> 4. **C.1–C.10** — verb-at-end shapes for `let` / `fn` /
+>    `if` / `while` / `match` / `struct` / `enum` / top-
+>    level decls; 4 missing Devanagari aliases (`extern`,
+>    `type`, `intent`, `invariant`); finer Sanskrit-vs-Hindi-
+>    vs-Marathi purity gate; grammar consultant pass;
+>    Devanagari example coverage.
+>
+> **Tier D** (independent):
+> 5. **D.1 Windows LLVM TCP IR** — i64-SOCKET + winsock2
+>    declare surface (deferred from Phase 6).
+>
+> **Tier E** (depends on Tier C — same pattern):
+> 6. **E.1 Global-language surface** — Spanish, Mandarin,
+>    Arabic, Japanese, etc.
+>
+> **Tier F** (external dependencies):
+> 7. **F.1 macOS empirical verification** — Darwin host needed.
+> 8. **F.2 Windows empirical verification** — Win host needed.
+> 9. **F.3 Arc 9 a/b/e/f** — Kosh package manager, registry
+>    choice pending.
+> 10. **F.4 Arc 7** Win64 / AArch64 — CI wiring.
 
 ## Arcs 5–10 — granular sub-step plan
 
