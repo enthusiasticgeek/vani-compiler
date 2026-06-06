@@ -7,6 +7,32 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 
 ## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06)
 
+> **Session-end status (2026-06-06)**:
+>   - ✅ Bootstrap Vec<Struct>-in-struct-field C codegen (commits
+>     `4feb5fc` + `ab6bc10`).
+>   - ✅ Tier 1 — Phase 4c-broad **blockers 1+2** (commit `4620e98`).
+>     **Blocker 3 (infer_concrete_type_for_call structural
+>     unwrapping) parked with documented fix sketch.**
+>   - ✅ Tier 2 — Phase 5 macOS **C backend** (commit `c4823b9`).
+>     LLVM-IR port deferred. VERIFICATION DEFERRED — no macOS access.
+>   - ✅ Tier 3 — Phase 6 Windows **C backend** (commit `c4823b9`,
+>     same as Phase 5). LLVM-IR port deferred. VERIFICATION DEFERRED
+>     — no Windows access.
+>   - ✅ Tier 4 — Linux re-verification: 1884 lib + 53 parity tests
+>     green; 4 Arc 8 examples (C backend) + 1 (LLVM backend) ran
+>     end-to-end on Linux.
+>
+> **Open work for the next session**:
+>   - LLVM-IR macOS port (kqueue + EVFILT_TIMER + `__error()` thunk
+>     at the IR level).
+>   - LLVM-IR Windows port (IOCP + winsock2 + WSAGetLastError at the
+>     IR level).
+>   - Phase 4c-broad blocker 3 — infer_concrete_type_for_call
+>     structural unwrapping for `mut ref Task__X<T>` patterns.
+>   - macOS empirical verification (whenever a Darwin host is
+>     available).
+>   - Windows empirical verification (whenever a Win host is available).
+
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
 examples; 1883 lib + 72 parity green; clean warning-free build).
 Remaining work, in execution order (USER DIRECTION 2026-06-06):
