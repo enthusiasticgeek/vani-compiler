@@ -169,7 +169,7 @@ Session 2026-06-04 shipped (six commits, ~+1100 lines):
   - 4 new lib tests (3 acceptance + 1 Variant-rejection).
 
 - **LLVM backend fix — match-arm phi tracks div_ok / shift_ok
-  blocks** (commit pending). Pre-existing bug surfaced during
+  blocks** (commit `314fe2e`). Pre-existing bug surfaced during
   Phase 3-params smoke testing: an `enum-match` whose arm
   contained a safety-checked div/rem (or shl/shr) emitted IR
   that failed LLVM module verification with "Bad module". The
