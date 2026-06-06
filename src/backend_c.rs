@@ -285,12 +285,37 @@ pub fn emit_c(program: &TypedProgram) -> String {
             }
         }
     }
+    // Vec-bundle emit is now SPLIT into two phases (2026-06-06):
+    //   1. Vec<primitive> bundles (no user-struct deps) emit HERE,
+    //      same position as before. Enums + structs further below
+    //      may reference them via their payload / field types.
+    //   2. Vec<UserStruct> bundles are deferred into the UNIFIED
+    //      topological walk further down, alongside struct typedefs.
+    //      Pre-existing bug fix: `struct Holder { items: Vec<Point> }`
+    //      used to fail on C because intent_vec_Struct_Point's
+    //      typedef (referencing Struct_Point* + sizeof(Struct_Point))
+    //      emitted BEFORE Struct_Point's typedef. The unified
+    //      interleaving fixes this without breaking enums-with-
+    //      Vec<primitive>-payload (closure #118).
+    fn vec_element_has_user_struct(ty: &Type) -> bool {
+        match ty {
+            Type::Struct(_) => true,
+            Type::Vec(inner)
+            | Type::Array { element: inner, .. } => vec_element_has_user_struct(inner),
+            _ => false,
+        }
+    }
     let mut emitted_vec_bundles: BTreeSet<String> = BTreeSet::new();
     for element in &struct_field_vec_elements {
+        if vec_element_has_user_struct(element) {
+            continue; // Deferred to the unified topo loop below.
+        }
         emit_vec_bundle(element, &mut body);
         emitted_vec_bundles.insert(element_tag(element));
     }
     if !struct_field_vec_elements.is_empty() {
+        // Newline trigger preserved for the case where ALL Vec
+        // bundles are primitive (everything emitted in this pass).
         body.push('\n');
     }
     // Vtables Phase 4: forward-declare the per-Iface vtable
@@ -355,61 +380,108 @@ pub fn emit_c(program: &TypedProgram) -> String {
             body.push('\n');
         }
     }
-    // Emit user-declared struct typedefs. Topologically sort
-    // first so a struct that references another by value
-    // (direct field of `Struct(S)` or `[S; N]`) is emitted
-    // AFTER that other struct's typedef. C requires the full
-    // type to be visible before use; LLVM forward-declares
-    // named types so it doesn't need this. Source order
-    // would otherwise emit `struct Outer { Struct_Inner inner; }`
-    // before `Struct_Inner` is declared. Vec/Ref/RefMut
-    // /Atomic/Mutex/Guard/Channel/Tuple all introduce
-    // pointer-shaped indirection through their own typedef
-    // bundles, so they don't drive struct dependencies.
+    // UNIFIED TOPOLOGICAL EMIT for user structs + Vec bundles.
+    // Pre-existing Vec<Struct>-in-struct-field bug fix
+    // (2026-06-06): the previous emit order (Vec bundles first,
+    // then struct typedefs) failed for `struct Holder { items:
+    // Vec<Point> }` because intent_vec_Struct_Point references
+    // Struct_Point + sizeof(Struct_Point) before Struct_Point's
+    // typedef lands. Iterate-to-fixpoint emits each node only
+    // when all its dependencies are already emitted:
+    //   - Struct S depends on: each Struct in its field types
+    //     (direct or via [T; N] / Vec<T>), AND intent_vec_T for
+    //     each Vec<T> field (the field's spelling references
+    //     the bundle typedef).
+    //   - intent_vec_T bundle depends on: any user struct
+    //     referenced by T (recursively through Vec<Vec<X>> /
+    //     [Vec<X>; N] / etc.).
     // Closure #164.
-    fn struct_deps(ty: &Type, out: &mut Vec<String>) {
+    fn struct_deps_in_ty(ty: &Type, out: &mut Vec<String>) {
         match ty {
             Type::Struct(name) => out.push(name.clone()),
-            Type::Array { element, .. } => struct_deps(element, out),
+            Type::Array { element, .. } => struct_deps_in_ty(element, out),
+            Type::Vec(element) => struct_deps_in_ty(element, out),
             _ => {}
         }
     }
-    fn visit(
-        name: &str,
-        by_name: &std::collections::HashMap<&str, &crate::ir::TypedStructDecl>,
-        emitted: &mut std::collections::HashSet<String>,
-        on_stack: &mut std::collections::HashSet<String>,
-        body: &mut String,
-    ) {
-        if emitted.contains(name) || on_stack.contains(name) {
-            return;
+    // Vec bundle tags that this struct's fields reference. Each
+    // such Vec<T> bundle's typedef must be emitted before the
+    // struct can spell `intent_vec_<T> fieldname;`.
+    fn vec_bundle_deps_in_ty(ty: &Type, out: &mut Vec<String>) {
+        match ty {
+            Type::Vec(element) => {
+                out.push(element_tag(element));
+                vec_bundle_deps_in_ty(element, out);
+            }
+            Type::Array { element, .. } => vec_bundle_deps_in_ty(element, out),
+            _ => {}
         }
-        let Some(decl) = by_name.get(name) else {
-            return;
-        };
-        on_stack.insert(name.to_string());
-        let mut deps: Vec<String> = Vec::new();
-        for (_, fty) in &decl.fields {
-            struct_deps(fty, &mut deps);
+    }
+    let by_name: std::collections::HashMap<&str, &crate::ir::TypedStructDecl> = program
+        .structs
+        .iter()
+        .map(|d| (d.name.as_str(), d))
+        .collect();
+    let mut emitted_structs: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    // Map from element_tag → element Type so the unified loop
+    // can re-emit. Stable iteration order for deterministic output.
+    let mut vec_elements_by_tag: std::collections::BTreeMap<String, Type> =
+        std::collections::BTreeMap::new();
+    for element in &struct_field_vec_elements {
+        vec_elements_by_tag
+            .entry(element_tag(element))
+            .or_insert_with(|| element.clone());
+    }
+    let struct_decls: Vec<&crate::ir::TypedStructDecl> = program.structs.iter().collect();
+    loop {
+        let mut progress = false;
+        // Try emit any pending Vec bundle whose struct deps are all
+        // satisfied. (Primitive Vec bundles have no struct deps.)
+        let pending_tags: Vec<String> = vec_elements_by_tag
+            .keys()
+            .filter(|t| !emitted_vec_bundles.contains(*t))
+            .cloned()
+            .collect();
+        for tag in pending_tags {
+            let element = vec_elements_by_tag.get(&tag).unwrap().clone();
+            let mut deps: Vec<String> = Vec::new();
+            struct_deps_in_ty(&element, &mut deps);
+            if deps.iter().all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str())) {
+                emit_vec_bundle(&element, &mut body);
+                emitted_vec_bundles.insert(tag);
+                progress = true;
+            }
         }
-        for dep in deps {
-            visit(&dep, by_name, emitted, on_stack, body);
+        // Try emit any pending struct whose struct + vec-bundle deps
+        // are all satisfied.
+        for decl in &struct_decls {
+            if emitted_structs.contains(&decl.name) {
+                continue;
+            }
+            let mut sdeps: Vec<String> = Vec::new();
+            let mut vdeps: Vec<String> = Vec::new();
+            for (_, fty) in &decl.fields {
+                struct_deps_in_ty(fty, &mut sdeps);
+                vec_bundle_deps_in_ty(fty, &mut vdeps);
+            }
+            let sok = sdeps
+                .iter()
+                .all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str()));
+            let vok = vdeps
+                .iter()
+                .all(|t| emitted_vec_bundles.contains(t) || !vec_elements_by_tag.contains_key(t));
+            if sok && vok {
+                emit_struct_bundle(decl, &mut body);
+                emitted_structs.insert(decl.name.clone());
+                progress = true;
+            }
         }
-        emit_struct_bundle(decl, body);
-        emitted.insert(name.to_string());
-        on_stack.remove(name);
+        if !progress {
+            break;
+        }
     }
-    let mut by_name: std::collections::HashMap<&str, &crate::ir::TypedStructDecl> =
-        std::collections::HashMap::new();
-    for d in &program.structs {
-        by_name.insert(d.name.as_str(), d);
-    }
-    let mut emitted: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut on_stack: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for d in &program.structs {
-        visit(&d.name, &by_name, &mut emitted, &mut on_stack, &mut body);
-    }
-    if !program.structs.is_empty() {
+    if !program.structs.is_empty() || !struct_field_vec_elements.is_empty() {
         body.push('\n');
     }
     // Arc 5c: emit per-(args, ret) Closure fat-pointer struct

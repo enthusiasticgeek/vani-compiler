@@ -21942,6 +21942,38 @@ fn main() -> i64 {
         );
     }
 
+    /// C backend regression: Vec<UserStruct> as a struct field
+    /// (e.g. `struct Holder { items: Vec<Point> }`). Pre-existing
+    /// bug fix 2026-06-06 — Vec bundle for Struct_Point referenced
+    /// Struct_Point* + sizeof(Struct_Point) before Struct_Point's
+    /// typedef. Unified topological emit (Vec<primitive> → struct
+    /// deps → Vec<UserStruct> → structs that use Vec<UserStruct>)
+    /// resolves it. LLVM backend handles this via forward-declared
+    /// named types so it didn't break there; only C needed the fix.
+    #[test]
+    fn c_backend_vec_of_user_struct_in_struct_field() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            struct Holder { ps: Vec<Point> }
+
+            fn main() -> i64 {
+              let h: Holder = Holder {
+                ps: vec(Point { x: 1, y: 10 }, Point { x: 2, y: 20 })
+              };
+              print "ok:", h.ps[1].x;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<Struct> in struct field must compile on C");
+        let ll = compile_to_llvm(source).expect("Vec<Struct> in struct field must compile on LLVM");
+        // The C output must contain the Vec<Point> bundle typedef
+        // AFTER the Struct_Point typedef. Verify both are present;
+        // ordering is enforced by the topo sort but the parity
+        // sweep catches actual runtime correctness.
+        assert!(c.contains("Struct_Point") && c.contains("intent_vec_Struct_Point"));
+        assert!(ll.contains("Struct_Point"));
+    }
+
     /// LLVM backend: divide-by-zero check + match-arm phi
     /// interaction (the `div_ok` block must be tracked as the
     /// predecessor in surrounding phi merges, not the

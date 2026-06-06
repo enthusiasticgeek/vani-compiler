@@ -853,6 +853,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_p4b_await_sub.vani",
         "echo_p4b_multitask.vani",
         "llvm_match_arm_div.vani",
+        "vec_struct_field.vani",
         "echo_with_timeout.vani",
         "timer_async.vani",
         "array_proofs.vani",
