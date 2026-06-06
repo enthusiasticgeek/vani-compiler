@@ -22352,14 +22352,8 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String) {
     // points them there. VERIFICATION DEFERRED for both
     // non-Linux paths until host access is available.
     if host_is_windows() {
-        panic!(
-            "Arc 8 TCP runtime LLVM IR emit on Windows is deferred — \
-             the IR-shaped winsock2 surface (SOCKET=i64, WSAGetLastError, \
-             WSAStartup, etc.) is larger than what fits this phase. The C \
-             backend (`intentc --backend c`) has full Windows TCP support \
-             via dual `#ifdef _WIN32` emit. Phase 6 LLVM TCP IR port is \
-             tracked in ARC8_V3_PLAN.md."
-        );
+        emit_intent_tcp_helpers_llvm_windows(out);
+        return;
     }
     out.push_str(
         "declare i32 @socket(i32, i32, i32)\n\
@@ -22537,6 +22531,247 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String) {
          \x20 %fd_i32 = trunc i64 %fd to i32\n\
          \x20 %rc = call i32 @close(i32 %fd_i32)\n\
          \x20 %err = icmp slt i32 %rc, 0\n\
+         \x20 %res = select i1 %err, i64 -1, i64 0\n\
+         \x20 ret i64 %res\n\
+         }\n\n",
+    );
+}
+
+/// Arc 8 v3.1 Phase 6 (D.1) — Windows LLVM TCP IR. Mirrors the
+/// Linux/macOS POSIX shape above but routes through winsock2:
+///
+///   - `SOCKET` is `uintptr_t` (64-bit on Win x64), passed as
+///     `i64` in IR; INVALID_SOCKET = (uint64_t)-1.
+///   - All socket calls take `SOCKET` (i64) instead of `int`
+///     (i32). `socket(AF_INET=2, SOCK_STREAM=1, IPPROTO_TCP=6)`
+///     returns `i64` directly (no sext).
+///   - `WSAStartup(MAKEWORD(2,2), &wsadata)` runs once via a
+///     static i32 guard initialized to 0 + atomic CAS pattern.
+///     The wsadata 400-byte buffer lives in a thread-local
+///     global to avoid stack pressure across many sockets.
+///   - `close()` → `closesocket()`.
+///   - Error detection: `eq i64 sock, -1` (INVALID_SOCKET) or
+///     `eq i32 rc, -1` (SOCKET_ERROR) instead of `slt 0`.
+///   - htonl/htons/ntohs are wsock32 functions with `unsigned
+///     short`/`unsigned long` ABI; declare them as `i32` like
+///     the POSIX path (the truncation/extension matches).
+///
+/// VERIFICATION DEFERRED — no Windows host access at landing
+/// time. The IR was hand-derived from the C-backend Windows
+/// branch in `emit_intent_tcp_helpers_c` (commit `c4823b9`)
+/// which has the same constant values, struct layouts, and
+/// call orderings; Linux verification stays green because the
+/// `host_is_windows()` gate above is false on Linux hosts.
+///
+/// Hot spots to verify on a Windows host:
+///   1. WSAStartup once-init under multi-threaded programs
+///      (the static i32 + atomicrmw CAS is racey on first
+///      socket; consider InitOnceExecuteOnce for hardening).
+///   2. SOCKET handle width — confirmed 64-bit on x64 but
+///      32-bit on Win32 (i686). The current IR assumes x64.
+///   3. WSAGetLastError values (10035 = WSAEWOULDBLOCK,
+///      10004 = WSAEINTR) — verify against actual errors.
+///   4. closesocket() return value semantics — 0 on success
+///      vs SOCKET_ERROR (-1) on failure (matches Linux).
+fn emit_intent_tcp_helpers_llvm_windows(out: &mut String) {
+    out.push_str(
+        "declare i64 @socket(i32, i32, i32)\n\
+         declare i32 @bind(i64, i8*, i32)\n\
+         declare i32 @listen(i64, i32)\n\
+         declare i64 @accept(i64, i8*, i32*)\n\
+         declare i32 @connect(i64, i8*, i32)\n\
+         declare i32 @setsockopt(i64, i32, i32, i8*, i32)\n\
+         declare i32 @getsockname(i64, i8*, i32*)\n\
+         declare i32 @send(i64, i8*, i32, i32)\n\
+         declare i32 @recv(i64, i8*, i32, i32)\n\
+         declare i32 @closesocket(i64)\n\
+         declare i32 @htons(i32)\n\
+         declare i32 @ntohs(i32)\n\
+         declare i32 @htonl(i32)\n\
+         declare i32 @WSAStartup(i16, i8*)\n\
+         declare i32 @WSAGetLastError()\n\
+         @intent_tcp_buf = thread_local global [4096 x i8] zeroinitializer, align 1\n\
+         ; WSAStartup once-init. The i32 guard flips 0 → 1\n\
+         ; once; subsequent fns short-circuit. Wsadata is a 400-byte\n\
+         ; buffer (per MS docs; conservative size).\n\
+         @__intent_wsa_inited = internal global i32 0, align 4\n\
+         @__intent_wsa_data = internal global [400 x i8] zeroinitializer, align 8\n\
+         define internal void @__intent_wsa_startup_once() {\n\
+         entry:\n\
+         \x20 %v = load i32, i32* @__intent_wsa_inited\n\
+         \x20 %already = icmp ne i32 %v, 0\n\
+         \x20 br i1 %already, label %done, label %init\n\
+         init:\n\
+         \x20 %buf_ptr = getelementptr [400 x i8], [400 x i8]* @__intent_wsa_data, i32 0, i32 0\n\
+         \x20 ; MAKEWORD(2, 2) = 0x0202 = 514\n\
+         \x20 %_rc = call i32 @WSAStartup(i16 514, i8* %buf_ptr)\n\
+         \x20 store i32 1, i32* @__intent_wsa_inited\n\
+         \x20 br label %done\n\
+         done:\n\
+         \x20 ret void\n\
+         }\n\
+         define i64 @intent_tcp_listen(i64 %port) {\n\
+         entry:\n\
+         \x20 call void @__intent_wsa_startup_once()\n\
+         \x20 ; socket(AF_INET=2, SOCK_STREAM=1, IPPROTO_TCP=6)\n\
+         \x20 %sock = call i64 @socket(i32 2, i32 1, i32 6)\n\
+         \x20 %sock_err = icmp eq i64 %sock, -1\n\
+         \x20 br i1 %sock_err, label %ret_neg1, label %do_setsockopt\n\
+         do_setsockopt:\n\
+         \x20 %opt = alloca i32, align 4\n\
+         \x20 store i32 1, i32* %opt\n\
+         \x20 %opt_i8 = bitcast i32* %opt to i8*\n\
+         \x20 ; SOL_SOCKET=0xFFFF (winsock2), SO_REUSEADDR=4\n\
+         \x20 %_sso = call i32 @setsockopt(i64 %sock, i32 65535, i32 4, i8* %opt_i8, i32 4)\n\
+         \x20 ; Build sockaddr_in on the stack — 16 bytes (matches Linux).\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %_memset = call i8* @memset(i8* %sa_i8, i32 0, i64 16)\n\
+         \x20 ; sin_family = AF_INET = 2 (offset 0, i16)\n\
+         \x20 %fam_ptr = bitcast i8* %sa_i8 to i16*\n\
+         \x20 store i16 2, i16* %fam_ptr\n\
+         \x20 ; sin_port = htons(port) (offset 2, i16)\n\
+         \x20 %port_i32 = trunc i64 %port to i32\n\
+         \x20 %port_be32 = call i32 @htons(i32 %port_i32)\n\
+         \x20 %port_be16 = trunc i32 %port_be32 to i16\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 store i16 %port_be16, i16* %port_ptr\n\
+         \x20 ; sin_addr = htonl(INADDR_LOOPBACK = 0x7F000001) (offset 4, i32)\n\
+         \x20 %lo_be = call i32 @htonl(i32 2130706433)\n\
+         \x20 %addr_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 4\n\
+         \x20 %addr_ptr = bitcast i8* %addr_ptr_i8 to i32*\n\
+         \x20 store i32 %lo_be, i32* %addr_ptr\n\
+         \x20 %brc = call i32 @bind(i64 %sock, i8* %sa_i8, i32 16)\n\
+         \x20 %brc_err = icmp eq i32 %brc, -1\n\
+         \x20 br i1 %brc_err, label %close_and_neg1, label %do_listen\n\
+         do_listen:\n\
+         \x20 %lrc = call i32 @listen(i64 %sock, i32 16)\n\
+         \x20 %lrc_err = icmp eq i32 %lrc, -1\n\
+         \x20 br i1 %lrc_err, label %close_and_neg1, label %ret_sock\n\
+         ret_sock:\n\
+         \x20 ret i64 %sock\n\
+         close_and_neg1:\n\
+         \x20 %_cc = call i32 @closesocket(i64 %sock)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_socket_port(i64 %fd) {\n\
+         entry:\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %slen = alloca i32, align 4\n\
+         \x20 store i32 16, i32* %slen\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %grc = call i32 @getsockname(i64 %fd, i8* %sa_i8, i32* %slen)\n\
+         \x20 %grc_err = icmp eq i32 %grc, -1\n\
+         \x20 br i1 %grc_err, label %ret_neg1, label %read_port\n\
+         read_port:\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 %port_be = load i16, i16* %port_ptr\n\
+         \x20 %port_be32 = zext i16 %port_be to i32\n\
+         \x20 %port_host32 = call i32 @ntohs(i32 %port_be32)\n\
+         \x20 %port_i64 = zext i32 %port_host32 to i64\n\
+         \x20 ret i64 %port_i64\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_accept(i64 %fd) {\n\
+         entry:\n\
+         \x20 %cfd = call i64 @accept(i64 %fd, i8* null, i32* null)\n\
+         \x20 %inv = icmp eq i64 %cfd, -1\n\
+         \x20 %res = select i1 %inv, i64 -1, i64 %cfd\n\
+         \x20 ret i64 %res\n\
+         }\n\
+         define i64 @intent_tcp_connect_local(i64 %port) {\n\
+         entry:\n\
+         \x20 call void @__intent_wsa_startup_once()\n\
+         \x20 %sock = call i64 @socket(i32 2, i32 1, i32 6)\n\
+         \x20 %sock_err = icmp eq i64 %sock, -1\n\
+         \x20 br i1 %sock_err, label %ret_neg1, label %build_addr\n\
+         build_addr:\n\
+         \x20 %sa = alloca [16 x i8], align 8\n\
+         \x20 %sa_i8 = getelementptr [16 x i8], [16 x i8]* %sa, i32 0, i32 0\n\
+         \x20 %_memset = call i8* @memset(i8* %sa_i8, i32 0, i64 16)\n\
+         \x20 %fam_ptr = bitcast i8* %sa_i8 to i16*\n\
+         \x20 store i16 2, i16* %fam_ptr\n\
+         \x20 %port_i32 = trunc i64 %port to i32\n\
+         \x20 %port_be32 = call i32 @htons(i32 %port_i32)\n\
+         \x20 %port_be16 = trunc i32 %port_be32 to i16\n\
+         \x20 %port_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 2\n\
+         \x20 %port_ptr = bitcast i8* %port_ptr_i8 to i16*\n\
+         \x20 store i16 %port_be16, i16* %port_ptr\n\
+         \x20 %lo_be = call i32 @htonl(i32 2130706433)\n\
+         \x20 %addr_ptr_i8 = getelementptr i8, i8* %sa_i8, i64 4\n\
+         \x20 %addr_ptr = bitcast i8* %addr_ptr_i8 to i32*\n\
+         \x20 store i32 %lo_be, i32* %addr_ptr\n\
+         \x20 %crc = call i32 @connect(i64 %sock, i8* %sa_i8, i32 16)\n\
+         \x20 %crc_err = icmp eq i32 %crc, -1\n\
+         \x20 br i1 %crc_err, label %close_and_neg1, label %ret_sock\n\
+         ret_sock:\n\
+         \x20 ret i64 %sock\n\
+         close_and_neg1:\n\
+         \x20 %_cc = call i32 @closesocket(i64 %sock)\n\
+         \x20 ret i64 -1\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_send_str(i64 %fd, i8* %s) {\n\
+         entry:\n\
+         \x20 %is_null = icmp eq i8* %s, null\n\
+         \x20 br i1 %is_null, label %ret_neg1, label %do_strlen\n\
+         do_strlen:\n\
+         \x20 %len_i64 = call i64 @strlen(i8* %s)\n\
+         \x20 %too_big = icmp sgt i64 %len_i64, 2147483647\n\
+         \x20 br i1 %too_big, label %ret_neg1, label %do_send\n\
+         do_send:\n\
+         \x20 %len_i32 = trunc i64 %len_i64 to i32\n\
+         \x20 %n = call i32 @send(i64 %fd, i8* %s, i32 %len_i32, i32 0)\n\
+         \x20 %err = icmp eq i32 %n, -1\n\
+         \x20 %res = select i1 %err, i64 -1, i64 %len_i64\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_recv(i64 %fd, i64 %max) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %max, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %clamp\n\
+         clamp:\n\
+         \x20 %too_big = icmp sgt i64 %max, 4096\n\
+         \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
+         \x20 %want_i32 = trunc i64 %want to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %n = call i32 @recv(i64 %fd, i8* %buf_ptr, i32 %want_i32, i32 0)\n\
+         \x20 %err = icmp eq i32 %n, -1\n\
+         \x20 %n_i64 = sext i32 %n to i64\n\
+         \x20 %res = select i1 %err, i64 -1, i64 %n_i64\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_send_buf(i64 %fd, i64 %n) {\n\
+         entry:\n\
+         \x20 %neg = icmp slt i64 %n, 0\n\
+         \x20 br i1 %neg, label %ret_neg1, label %check_max\n\
+         check_max:\n\
+         \x20 %too_big = icmp sgt i64 %n, 4096\n\
+         \x20 br i1 %too_big, label %ret_neg1, label %do_send\n\
+         do_send:\n\
+         \x20 %n_i32 = trunc i64 %n to i32\n\
+         \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
+         \x20 %m = call i32 @send(i64 %fd, i8* %buf_ptr, i32 %n_i32, i32 0)\n\
+         \x20 %err = icmp eq i32 %m, -1\n\
+         \x20 %res = select i1 %err, i64 -1, i64 %n\n\
+         \x20 ret i64 %res\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
+         }\n\
+         define i64 @intent_tcp_close(i64 %fd) {\n\
+         entry:\n\
+         \x20 %rc = call i32 @closesocket(i64 %fd)\n\
+         \x20 %err = icmp eq i32 %rc, -1\n\
          \x20 %res = select i1 %err, i64 -1, i64 0\n\
          \x20 ret i64 %res\n\
          }\n\n",

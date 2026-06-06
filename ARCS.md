@@ -41,7 +41,7 @@
 >    Devanagari example coverage.
 >
 > **Tier D** (independent):
-> 5. **D.1 Windows LLVM TCP IR** — i64-SOCKET + winsock2
+> 5. **D.1 Windows LLVM TCP IR** ✅ SHIPPED 2026-06-06. i64-SOCKET + winsock2
 >    declare surface (deferred from Phase 6).
 >
 > **Tier E** (depends on Tier C — same pattern):

@@ -17,7 +17,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 >     + LLVM IR (commit `8281cda`). **VERIFICATION DEFERRED** — no
 >     macOS access at landing time.
 >   - ✅ Tier 3: Phase 6 — Windows port. C backend (commit `c4823b9`)
->     + LLVM IR (commit `8281cda`, except Windows LLVM TCP IR).
+>     + LLVM IR (commits `8281cda` + D.1 Windows TCP IR ✅).
 >     **VERIFICATION DEFERRED** — no Windows access at landing time.
 >   - ✅ Tier 4: Linux re-verification. 1884 lib + 54 parity tests
 >     green out-of-the-box; 4 Arc 8 examples (C) + 1 (LLVM) +
@@ -64,7 +64,10 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 >
 > Tier D (independent code work — parallel-safe with everything)
 >   D.1 ▸ Windows LLVM TCP IR (i64-SOCKET +
->          winsock2 declares)
+>          winsock2 declares) ✅ SHIPPED 2026-06-06 — see
+>          `emit_intent_tcp_helpers_llvm_windows` in
+>          [backend_llvm.rs](src/backend_llvm.rs). Verification
+>          deferred (no Windows host access).
 >
 > Tier E (depends on Tier C — same surface patterns)
 >   E.1 ▸ Global-language surface (Spanish,

@@ -1092,11 +1092,15 @@ with v3.1 phases.
 >     `CreateThread` IR with the userspace timer thread.
 >     `@WSAGetLastError` checks WSAEWOULDBLOCK=10035; FIONBIO ioctl
 >     value (0x8004667E sign-extended) baked into intent_tcp_set_nonblocking.
->   - **LLVM TCP IR — NOT IMPLEMENTED**. The i64-SOCKET surface +
->     full winsock2 declares (`@socket(i32,i32,i32) -> i64` instead
->     of `-> i32`, etc.) is a larger lift. Windows users compiling
->     TCP programs via LLVM get a panic-with-pointer:
->     `intentc --backend c` covers full Windows TCP.
+>   - **LLVM TCP IR — ✅ SHIPPED 2026-06-06 (D.1)** in
+>     `emit_intent_tcp_helpers_llvm_windows`. All 8 TCP helpers
+>     emit the winsock2-shaped surface: i64 SOCKET return values
+>     (`@socket(i32, i32, i32) -> i64`, etc.), INVALID_SOCKET=-1
+>     detection, `@WSAStartup` once-init guard, `@closesocket`
+>     instead of `@close`, htons/htonl/ntohs declares unchanged
+>     from the Linux IR. Hand-derived from the C backend's
+>     Windows branch (commit `c4823b9`) for constant + struct
+>     layout fidelity. The panic redirect is gone.
 >
 > **Linux verification remains green**: 1884 lib + 54 parity tests
 > + 5 Arc 8 examples + Phase 4c-broad smoke all pass.
@@ -1125,10 +1129,14 @@ with v3.1 phases.
 >      key (allocated pointer cast to i64) that the user passes
 >      to `epoll_add_read`. Verify the key uniqueness assumption
 >      holds under repeated timer creation.
->   5. **Windows LLVM TCP IR** — write the full winsock2-shaped
->      IR with i64-SOCKET return values + WSAGetLastError errno
->      checks. Until then, LLVM Windows users with TCP programs
->      hit the redirect-to-C-backend panic.
+>   5. **Windows LLVM TCP IR hot spots (now shipped 2026-06-06,
+>      verification still deferred)**: WSAStartup once-init under
+>      multi-threaded programs (the static i32 guard is racy on
+>      first socket — consider InitOnceExecuteOnce for hardening);
+>      SOCKET width assumption (x64 only); WSAGetLastError values
+>      against real socket errors; closesocket() return value
+>      semantics. See
+>      [backend_llvm.rs:emit_intent_tcp_helpers_llvm_windows](src/backend_llvm.rs).
 
 **Goal.** Lift the Linux-only restriction for Windows users.
 This is the biggest single port because the IOCP programming

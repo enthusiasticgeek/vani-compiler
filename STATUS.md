@@ -37,10 +37,17 @@ landed in this session (commits 4feb5fc → d139691):
    FIONBIO ioctl (0x8004667E), `Sleep + PostQueuedCompletionStatus`
    timer shim. Code in
    [backend_llvm.rs:emit_intent_epoll_helpers_llvm_windows](src/backend_llvm.rs).
-3. **Windows LLVM TCP IR — NOT IMPLEMENTED**. The i64-SOCKET +
-   winsock2 declare surface is larger than fit this phase. Windows
-   users with TCP programs route through the C backend
-   (`intentc --backend c`), which has full winsock2 coverage.
+3. **Windows LLVM TCP IR — ✅ SHIPPED 2026-06-06 (D.1)**.
+   `emit_intent_tcp_helpers_llvm_windows` now emits the 8 TCP
+   helpers with the winsock2-shaped surface: i64 SOCKET return
+   values, INVALID_SOCKET=-1 detection, WSAStartup once-init
+   guard, closesocket() instead of close(), htons/htonl/ntohs
+   declares. VERIFICATION DEFERRED — no Windows host access at
+   landing time. Hot spots to verify on a Windows host: WSAStartup
+   once-init under multi-threaded code, SOCKET width assumption
+   (x64 only), WSAGetLastError values, and closesocket() return
+   semantics. See
+   [backend_llvm.rs:emit_intent_tcp_helpers_llvm_windows](src/backend_llvm.rs).
 4. **macOS + Windows C backends** — `#ifdef` branches present in
    `emit_intent_epoll_helpers_c` / `emit_intent_tcp_helpers_c` /
    `emit_intent_sleep_ms_helper_c`. The Linux branch is byte-
