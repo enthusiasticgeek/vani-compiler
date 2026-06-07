@@ -74,7 +74,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 4 — ML MCP server (~8-12h)                            │
 │ (depends on ML-1 from PHASE 1)                              │
-│   4.1 ▸ ML-2: expose ML-1's context bundle as an MCP server │
+│   4.1 ▸ ML-2: expose ML-1's context bundle as an MCP server   ✅ SHIPPED 2026-06-07
 │         AI agents become first-class vāṇी users; can use    │
 │         SMT proofs to verify their own generated code at    │
 │         generation time. Unique selling point.              │
@@ -658,7 +658,15 @@ training**.
     documented in [`tools/llm_context/README.md`](tools/llm_context/README.md).
     Bundle is ~13K tokens full, ~7K with `--no-examples`. No
     model integration yet — by design (next phase).
-  - **Phase ML-2** (~8-12h): expose the bundle as an MCP server
+  - **Phase ML-2** ✅ SHIPPED 2026-06-07: MCP server at
+    `tools/llm_context/mcp_server.py` exposes the same bundle
+    sections as 8 addressable resources (`vani://aliases`,
+    `vani://patterns`, …) plus 5 tools (`vani_check`,
+    `vani_run`, `vani_emit_c`, `list_patterns`, `get_pattern`).
+    Requires `pip install mcp` + a built `vanic` binary. Setup
+    documented in `tools/llm_context/README.md` with Claude
+    Desktop config example.
+  - **Phase ML-2 (original spec)** — expose the bundle as an MCP server
     that AI agents can pull on demand. The agent gets the
     context AS NEEDED rather than burning context window on
     every prompt.

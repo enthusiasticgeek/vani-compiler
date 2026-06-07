@@ -9,7 +9,12 @@ Currently:
   Hindi / Marathi `.vani` source files (Phase B.1).
 - [`llm_context/`](llm_context/README.md) — assembles a
   prompt-engineering bundle for off-the-shelf LLMs to use as
-  vāṇी programmers (Phase ML-1, shipped 2026-06-07).
+  vāṇी programmers (Phase ML-1, shipped 2026-06-07) **plus** an
+  MCP server (`mcp_server.py`) that exposes each section as an
+  addressable resource and adds `vani_check` / `vani_run` /
+  `vani_emit_c` / `list_patterns` / `get_pattern` tools for AI
+  agents to verify their own generated code (Phase ML-2, shipped
+  2026-06-07).
 
 ## `vani_translate.py` — cross-language `.vani` source translator
 

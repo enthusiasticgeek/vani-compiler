@@ -10,6 +10,19 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 4.1 (ML-2 MCP server) shipped
+
+`tools/llm_context/mcp_server.py` exposes the ML-1 bundle as an
+MCP server: 8 addressable resources (one per bundle section
+plus a full-bundle convenience) and 5 tools that let AI agents
+shell out to `vanic check` / `vanic run` / `vanic emit-c` plus
+browse/fetch the 22 GoF design patterns. End-to-end smoke test
+verified: `vani_check` correctly surfaces SMT counterexamples
+(e.g. `prove 1 == 2` → `exit=1, "proof failed: expression is
+always false"`) so an agent can self-correct. Setup documented
+with a Claude Desktop config example in
+`tools/llm_context/README.md`. Requires `pip install mcp`.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 3.1 (TUT-2 Beginner track) shipped
 
 The 12-lesson Beginner track is now fully written and live in

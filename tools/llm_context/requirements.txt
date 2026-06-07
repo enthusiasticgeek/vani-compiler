@@ -1,0 +1,7 @@
+# Phase ML-2: MCP server dependencies.
+#
+# bundle.py has no Python dependencies — only the standard
+# library. Run `python3 bundle.py` directly.
+#
+# mcp_server.py needs the official MCP Python SDK:
+mcp>=1.0

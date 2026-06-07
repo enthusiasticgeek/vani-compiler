@@ -1,10 +1,16 @@
-# LLM context bundle (Phase ML-1)
+# LLM context bundle (Phase ML-1 + ML-2)
 
-`bundle.py` assembles a self-contained Markdown context bundle
-that orients an off-the-shelf LLM (Claude, GPT-4-class,
-Llama-3-class) as a vāṇी programmer. The bundle is regenerated
-from repo sources of truth on every run — no stale copy to keep
-in sync.
+Two scripts live here:
+
+- **`bundle.py`** (Phase ML-1) — assembles a Markdown context
+  bundle to stdout for one-shot pasting into Claude / GPT / a
+  local LLM. **Static**; the model carries the whole bundle in
+  its prompt.
+- **`mcp_server.py`** (Phase ML-2) — exposes the same content as
+  an [MCP](https://modelcontextprotocol.io/) server so an agent
+  can pull just the section it needs **and** call
+  `vanic check` / `vanic run` / `vanic emit-c` on its own
+  generated source — closing the write-verify loop end-to-end.
 
 This is the cheapest layer on the ML roadmap (see
 [TODO.md §*"ML model — value assessment"*](../../TODO.md)):
@@ -76,15 +82,116 @@ Approximate token cost (using Claude tokenization):
    limitations catalog give the model the feedback it needs to
    fix v1-incompatible suggestions.
 
-## Why a static bundle (Phase ML-1) before an MCP server (Phase ML-2)?
+## `mcp_server.py` — MCP server (Phase ML-2)
 
-- The bundle ships **today** — no protocol work, no agent
-  integration, no hosted service.
-- The MCP path (ML-2) is the natural follow-on: same bundle
+Exposes the same bundle content as an MCP server. Each section
+of `bundle.py` becomes an addressable resource; agents pull only
+what they need. The server also adds **tools** that let the
+agent shell out to `vanic check` / `vanic run` / `vanic emit-c`
+on its own generated source — so a code-gen agent can verify
+each iteration against the SMT verifier and runtime *before*
+suggesting code to the user.
+
+### Resources
+
+| URI | What's behind it |
+|---|---|
+| `vani://system-prompt` | Orienting system prompt |
+| `vani://aliases`       | TokenKind ↔ dialect spelling table |
+| `vani://sov`           | SOV verb-at-end shape table |
+| `vani://patterns`      | 22-pattern GoF catalog |
+| `vani://examples`      | Signatures of all 155 English examples |
+| `vani://errors`        | Dialect-aware error prefix table |
+| `vani://limits`        | v1 limitations catalog |
+| `vani://full-bundle`   | All of the above concatenated |
+
+### Tools
+
+| Name | What it does |
+|---|---|
+| `vani_check`    | Type-check inline `.vani` source (runs lexer + parser + checker + SMT). Returns the compiler's diagnostics. |
+| `vani_run`      | Compile + run inline source via LLVM or C backend. Returns stdout, stderr, exit code. |
+| `vani_emit_c`   | Emit the lowered C source for debugging codegen layouts. |
+| `list_patterns` | Enumerate the 22 GoF design pattern examples. |
+| `get_pattern`   | Fetch the full source of a named pattern (e.g. `observer`). |
+
+### Setup
+
+Requires the official Python MCP SDK:
+
+```bash
+pip install mcp
+```
+
+…and the `vanic` binary somewhere reachable:
+
+```bash
+cd /path/to/vani && cargo build --release
+# either add target/release/ to $PATH, or point the env var at it:
+export VANI_BIN=/path/to/vani/target/release/vanic
+```
+
+#### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`
+(macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "vani-context": {
+      "command": "python3",
+      "args": ["/abs/path/to/vani/tools/llm_context/mcp_server.py"],
+      "env": {
+        "VANI_BIN": "/abs/path/to/vani/target/release/vanic"
+      }
+    }
+  }
+}
+```
+
+#### Cursor / any MCP host
+
+Same shape — most MCP hosts read a JSON config block keyed by
+server name. Point `command` at `python3` and `args[0]` at
+`mcp_server.py`.
+
+### Why MCP after the static bundle?
+
+- **Resources** save the agent's context window. Instead of
+  pasting all 13K tokens up front, the agent pulls just the
+  `vani://aliases` table when it needs to write a Devanagari
+  file.
+- **Tools** close the write-verify loop. Without them, an
+  agent that writes vāṇी source has to ask the user to run the
+  compiler and paste back diagnostics. With them, the agent
+  iterates inside the same conversation: write → check → fix →
+  check → done. SMT-backed compile-time proofs at every step
+  are vāṇी's unique selling point for AI-assisted code.
+
+### What's *not* in the MCP server
+
+- **No HTTP transport.** stdio JSON-RPC only. Use an MCP
+  bridge (e.g. `mcp-bridge`) if you need HTTP.
+- **No streaming output.** Compile/run results return when the
+  process exits. Long-running programs eventually time out (60s
+  for `vani_check`, 120s for `vani_run`).
+- **No persistent state.** Each tool invocation runs the
+  compiler from a fresh temp file. There's no incremental
+  build cache reused across calls.
+
+## Why a static bundle (Phase ML-1) AND an MCP server (Phase ML-2)?
+
+- The **static bundle** ships **today** — no protocol work, no
+  agent integration, no hosted service. Paste it into any
+  conversation that accepts a system prompt.
+- The **MCP server** is for hosts that speak MCP. Same bundle
   content, but the agent pulls it on demand instead of carrying
-  it in every prompt's context.
+  it in every prompt's context — and gains compile/verify tools
+  that close the iteration loop.
 - Both layers gate on the same data prep — getting the bundle
-  shape right here de-risks the MCP work later.
+  shape right in `bundle.py` was the hard part; `mcp_server.py`
+  just wraps it.
 
 ## Maintaining the bundle
 
