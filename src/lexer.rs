@@ -292,7 +292,15 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         // the natural "write" verb across all three
         // Devanagari-script languages.
         "लिख" => TokenKind::Print,         // likh (Sanskrit root: "write")
-        "लिखो" => TokenKind::Print,        // likho (Hindi/Marathi imperative: "write!")
+        "लिखो" => TokenKind::Print,        // likho (Hindi imperative: "write!")
+        // Marathi conjugates the "write" verb from a different
+        // root — लिह्- (lih-), not लिख्- (likh-). The natural
+        // imperatives in Marathi are लिहा (lihā) / लिही (lihī)
+        // / लिहिया (lihiyā). Native-speaker correction
+        // 2026-06-07.
+        "लिहा" => TokenKind::Print,        // lihā (Marathi formal imperative)
+        "लिही" => TokenKind::Print,        // lihī (Marathi informal singular)
+        "लिहिया" => TokenKind::Print,      // lihiyā (Marathi imperative variant)
         // pure — `शुद्ध` is tatsama, shared across all three.
         "शुद्ध" => TokenKind::Pure,        // śuddha (Sanskrit/Hindi/Marathi: "pure")
         // struct / enum — closure #267 fills gaps. `संरचना`
@@ -1658,7 +1666,10 @@ fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
         "असत्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "अशुद्ध" => &[Hindi, Marathi],
         "लिख" => &[Sanskrit],
-        "लिखो" => &[Hindi, Marathi],
+        "लिखो" => &[Hindi],  // Marathi uses लिह- root forms below
+        "लिहा" => &[Marathi],
+        "लिही" => &[Marathi],
+        "लिहिया" => &[Marathi],
         // === PURITY / PARALLELISM ===
         "शुद्ध" => &[Sanskrit, Hindi, Marathi],  // tatsama
         "समानांतर" => &[Sanskrit, Hindi, Marathi],  // tatsama

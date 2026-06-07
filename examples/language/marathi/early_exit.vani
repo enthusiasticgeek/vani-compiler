@@ -41,7 +41,7 @@
   मान positives: i64 = count_positive(पहा xs);
   खात्री first_neg == 0 - 3;
   खात्री positives == 3;
-  लिखो first_neg;
-  लिखो positives;
+  लिहा first_neg;
+  लिहा positives;
   परत 0;
 }

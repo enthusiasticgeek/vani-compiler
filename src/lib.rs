@@ -27751,6 +27751,42 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn marathi_print_uses_liha_not_likho() {
+        // 2026-06-07: native-speaker correction — Marathi
+        // conjugates "write" from the root `लिह्-` (lih-),
+        // not the Hindi `लिख्-` (likh-) root. The natural
+        // Marathi imperative is लिहा (lihā) / लिही (lihī) /
+        // लिहिया (lihiyā). `लिखो` (likho) is Hindi-only.
+        for form in ["लिहा", "लिही", "लिहिया"] {
+            let source = format!(
+                "// vani-lang: marathi\n\
+                 उद्देश्य \"t\";\n\
+                 कार्य main() -> i64 {{\n  \
+                   x: i64 = 5 मान;\n  \
+                   x {form};\n  \
+                   0 परत;\n\
+                 }}\n"
+            );
+            crate::compile(&source).unwrap_or_else(|e| {
+                panic!("Marathi-pragma file with `{}` failed: {:?}", form, e)
+            });
+        }
+        // Rejects: `लिखो` (Hindi-only) in a Marathi-pragma file.
+        let bad = "// vani-lang: marathi\n\
+                   उद्देश्य \"t\";\n\
+                   कार्य main() -> i64 {\n  \
+                     x: i64 = 5 मान;\n  \
+                     x लिखो;\n  \
+                     0 परत;\n\
+                   }\n";
+        let res = crate::compile(bad);
+        assert!(
+            res.is_err(),
+            "Marathi-pragma file must reject Hindi-only लिखो; got OK"
+        );
+    }
+
+    #[test]
     fn unknown_pragma_returns_none_and_falls_back_to_script_level_purity() {
         // Phase 2 (2026-06-07): an unrecognized tag (e.g.
         // `// vani-lang: pali`) is silently ignored, falling

@@ -24,6 +24,6 @@
   मान answer = bounded_score(20);
   सिद्ध करा 2 + 2 == 4;
   खात्री answer >= 0;
-  लिखो answer;
+  लिहा answer;
   परत 0;
 }

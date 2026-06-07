@@ -62,9 +62,9 @@
   }
   खात्री owned_total == 6;
 
-  लिखो total;
-  लिखो m;
-  लिखो p;
-  लिखो owned_total;
+  लिहा total;
+  लिहा m;
+  लिहा p;
+  लिहा owned_total;
   परत 0;
 }

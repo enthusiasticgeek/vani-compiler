@@ -10,6 +10,35 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Native-speaker correction: Marathi `print` keyword
+
+Native-speaker fix from the project owner: in Marathi, the
+"write" verb conjugates from the root **लिह्-** (lih-), not
+the Hindi **लिख्-** (likh-). The proper Marathi keyword for
+`print` is **लिहा** (lihā, formal imperative). The previous
+`लिखो` (likho) mapping was Hindi-only.
+
+Surface of the fix:
+- `src/lexer.rs::devanagari_keyword` — added `लिहा`, `लिही`,
+  `लिहिया` as Marathi-flavored Print aliases; `लिखो` is now
+  Hindi-only in `spelling_supports_dialect`.
+- `tools/vani_translate.py::ALIASES` — Marathi entry changed
+  from `लिखो` to `लिहा`.
+- All 9 existing Marathi example files (`basics`,
+  `control_flow`, `early_exit`, `for_loops`, `iterate`,
+  `keywords`, `option_types`, `vec_invariants`, `verified`)
+  updated to use the correct form.
+- New lib test `marathi_print_uses_liha_not_likho` accepts all
+  three lih-root forms and rejects the Hindi-only form in a
+  Marathi-pragma file.
+- Memory saved at
+  `~/.claude/projects/-home-ptambe-shortcut-mcp-server/memory/
+  project_marathi_print_keyword.md` so future sessions don't
+  revert.
+
+Lib ledger: **1928 lib + 54 parity** green (1927→1928 = 1 new
+Marathi regression).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.4/12.5: Persian + Pashto (second Perso-Arabic numeral block)
 
 Two more Perso-Arabic dialects land — **Persian (Farsi)** and
@@ -60,7 +89,7 @@ Surface of the additions:
   translation table. `DiagLang::Pashto` routes through
   Persian.
 
-Lib ledger: **1927 lib + 54 parity** green (1925→1927 = 2 new
+Lib ledger: **1928 lib + 54 parity** green (1925→1927 = 2 new
 tests pinning the Persian/Pashto helper paths + the magic
 0xDB lead byte).
 
@@ -91,7 +120,7 @@ language required only:
 Roster after this turn: **19 dialects across 11 scripts**
 (Latin + 9 Brahmi + Perso-Arabic).
 
-Test ledger: **1927 lib + 54 parity** green (1923→1925 = 2
+Test ledger: **1928 lib + 54 parity** green (1923→1925 = 2
 new helper-reuse regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.1: Urdu (first Perso-Arabic / RTL dialect)
@@ -158,7 +187,7 @@ the lexer reads UTF-8 in logical (byte) order. The compiler
 sees the same byte stream regardless of which direction the
 editor displays the text. No bidi handling needed.
 
-Lib ledger: **1927 lib + 54 parity** green (1921→1923 = 2 new
+Lib ledger: **1928 lib + 54 parity** green (1921→1923 = 2 new
 Urdu regressions: print helper + cross-script gate).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 third installment: L7 for-iter-over-self.field
@@ -208,7 +237,7 @@ Closes [docs/v1_limitations.md L7](docs/v1_limitations.md).
 Phase 11's three tractable open limitations (L1, L3, L7) are
 now all shipped this session.
 
-Lib ledger: **1927 lib + 54 parity** green (1919→1921 = 2 new
+Lib ledger: **1928 lib + 54 parity** green (1919→1921 = 2 new
 L7 regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
@@ -244,7 +273,7 @@ Surface of the lift:
 
 Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
 
-Lib ledger: **1927 lib + 54 parity** green (1916→1919 = 3 new
+Lib ledger: **1928 lib + 54 parity** green (1916→1919 = 3 new
 L1 regressions; 1 prior rejection test inverted to match the
 lift).
 

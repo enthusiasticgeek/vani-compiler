@@ -2554,8 +2554,8 @@ impl Parser {
     /// The same pattern applies to vāṇी's verb-like
     /// statements: `पुनरागम X;` (return X) reads more
     /// naturally as `X पुनरागम;`. Similarly for `print` →
-    /// `लिखो`, `assert` → `सुनिश्चित` / `खात्री`, `prove` →
-    /// `सिद्ध` / `प्रमाण`.
+    /// `लिखो` (Hindi) / `लिहा` (Marathi), `assert` →
+    /// `सुनिश्चित` / `खात्री`, `prove` → `सिद्ध` / `प्रमाण`.
     ///
     /// Scans from `self.pos` to the next `;` at depth 0
     /// (tracking parens / brackets / braces). If the token

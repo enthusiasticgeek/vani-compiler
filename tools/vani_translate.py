@@ -92,7 +92,7 @@ ALIASES: Dict[str, Dict[str, str]] = {
     # Bool / print
     "True":       {"english": "true",     "sanskrit": "सत्य",        "hindi": "सत्य",        "marathi": "सत्य"},
     "False":      {"english": "false",    "sanskrit": "असत्य",       "hindi": "असत्य",      "marathi": "असत्य"},
-    "Print":      {"english": "print",    "sanskrit": "लिख",         "hindi": "लिखो",        "marathi": "लिखो"},
+    "Print":      {"english": "print",    "sanskrit": "लिख",         "hindi": "लिखो",        "marathi": "लिहा"},
 
     # Purity / parallelism
     "Pure":       {"english": "pure",     "sanskrit": "शुद्ध",       "hindi": "शुद्ध",       "marathi": "शुद्ध"},

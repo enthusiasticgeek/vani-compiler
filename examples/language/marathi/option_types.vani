@@ -49,7 +49,7 @@
   खात्री is_some(a) == 1;
   खात्री is_some(b) == 0;
 
-  लिखो "Some(42) unwrapped =", x;
-  लिखो "None unwrapped with default 100 =", y;
+  लिहा "Some(42) unwrapped =", x;
+  लिहा "None unwrapped with default 100 =", y;
   परत 0;
 }
