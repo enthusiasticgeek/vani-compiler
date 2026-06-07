@@ -3109,8 +3109,21 @@ impl Parser {
                     "'parallel' is only valid on a range-form for loop",
                 ));
             }
+            // Phase 11 (2026-06-07): accept a dotted path
+            // (`obj.field`, `obj.f1.f2`) as the collection, not
+            // just a bare identifier. The path is stored as a
+            // single dot-separated string; the checker resolves
+            // the head + walks the field chain to land on the
+            // iterable type, and `emit_for_iter` recognizes the
+            // dot to emit struct-field access. Lifts L7 from
+            // docs/v1_limitations.md.
             let collection_tok = self.expect_ident()?;
-            let collection = ident_text(collection_tok);
+            let mut collection = ident_text(collection_tok);
+            while self.match_token(|k| matches!(k, TokenKind::Dot)).is_some() {
+                let field_tok = self.expect_ident()?;
+                collection.push('.');
+                collection.push_str(&ident_text(field_tok));
+            }
             let body = self.parse_block()?;
             let end_span = body
                 .last()

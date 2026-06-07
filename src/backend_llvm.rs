@@ -3512,12 +3512,70 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // reads collection[i] into `var` and runs. If we consume
             // the Vec, free its buffer at exit.
             let underlying = collection_ty.deref().clone();
-            let coll_addr = match ctx.locals.get(collection) {
-                Some((_, a)) => a.clone(),
-                None => unreachable!(
-                    "checker: for-iter over undeclared binding '{}'",
-                    collection
-                ),
+            // Phase 11 (2026-06-07): if the collection name is a
+            // dotted path (`obj.field`, `obj.f1.f2`), walk the
+            // field chain to compute the effective address.
+            // `ctx.locals` stores `(Type, addr)` for the head; we
+            // use the Type to look up the struct's field indices
+            // in LLVM_STRUCT_FIELDS_REGISTRY and emit a GEP per
+            // step. Lifts L7 from docs/v1_limitations.md.
+            let coll_addr = if collection.contains('.') {
+                let mut parts = collection.split('.');
+                let head = parts.next().unwrap();
+                let (head_ty, head_addr) = ctx
+                    .locals
+                    .get(head)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        unreachable!(
+                            "checker: for-iter head '{}' (from '{}') not in scope",
+                            head, collection
+                        )
+                    });
+                let mut cur_addr = head_addr;
+                let mut cur_ty = head_ty.deref().clone();
+                for field_name in parts {
+                    let struct_name = match &cur_ty {
+                        Type::Struct(n) => n.clone(),
+                        other => unreachable!(
+                            "checker: dotted for-iter step expects Struct, got {}",
+                            other
+                        ),
+                    };
+                    let (field_idx, field_ty) =
+                        LLVM_STRUCT_FIELDS_REGISTRY.with(|r| {
+                            let r = r.borrow();
+                            let fields = r.get(&struct_name).cloned().unwrap_or_default();
+                            fields
+                                .iter()
+                                .enumerate()
+                                .find(|(_, (n, _))| n == field_name)
+                                .map(|(i, (_, t))| (i, t.clone()))
+                                .unwrap_or_else(|| {
+                                    unreachable!(
+                                        "checker: field '{}' not in struct '{}'",
+                                        field_name, struct_name
+                                    )
+                                })
+                        });
+                    let struct_ll = llvm_type_string(&Type::Struct(struct_name));
+                    let next_addr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                        next_addr, struct_ll, struct_ll, cur_addr, field_idx
+                    ));
+                    cur_addr = next_addr;
+                    cur_ty = field_ty;
+                }
+                cur_addr
+            } else {
+                match ctx.locals.get(collection) {
+                    Some((_, a)) => a.clone(),
+                    None => unreachable!(
+                        "checker: for-iter over undeclared binding '{}'",
+                        collection
+                    ),
+                }
             };
             // `llvm_type_string` so element types that are
             // themselves aggregates (`Vec<U>`) resolve to

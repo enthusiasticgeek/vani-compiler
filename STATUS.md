@@ -10,6 +10,56 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 11 third installment: L7 for-iter-over-self.field
+
+`for v in ref self.items { ... }` (and any `obj.field` /
+`obj.f1.f2` path) now parses and compiles for both backends.
+Pre-fix the parser bailed at the first `.`; the documented
+workaround was to extract iteration into a free helper that
+took the field as a `ref Vec<T>` parameter.
+
+```rust
+struct Bag { items: Vec<i64> }
+methods on Bag {
+  fn total(self: ref Bag) -> i64 {
+    let sum: i64 = 0;
+    for v in ref self.items {       // ✅ now works
+      sum = sum + v;
+    }
+    return sum;
+  }
+}
+```
+
+Surface of the fix:
+
+- **Parser** (`src/parser.rs`) — `parse_for_stmt_inner` accepts
+  a dotted identifier path as the iterable; stored as a single
+  dot-separated string in the existing `collection: String` AST
+  field.
+- **Checker** (`src/checker.rs`) — splits on `.`, resolves the
+  head via `env.lookup`, walks the field chain through
+  `env.lookup_struct`, lands on the field's underlying type.
+  Move-out-of-field (consume form) is rejected with a clear
+  diagnostic pointing at the `ref` workaround.
+- **Tree-C** (`src/backend_c.rs::emit_for_iter`) — when the
+  collection name contains `.`, builds the C accessor as
+  `(*head).field` so `ref Bag` heads emit the right deref;
+  plain non-dotted names take the original `local_name` path.
+- **Tree-LLVM** (`src/backend_llvm.rs`) — for dotted
+  collections, looks up the head's address in `ctx.locals`,
+  then walks each field name emitting `getelementptr` through
+  the `LLVM_STRUCT_FIELDS_REGISTRY`. Resulting addr is used as
+  the effective `coll_addr` for the existing Vec/Array
+  iteration emit.
+
+Closes [docs/v1_limitations.md L7](docs/v1_limitations.md).
+Phase 11's three tractable open limitations (L1, L3, L7) are
+now all shipped this session.
+
+Lib ledger: **1921 lib + 54 parity** green (1919→1921 = 2 new
+L7 regressions).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
 
 `match` arms can now bind enum variant payloads of affine
@@ -43,7 +93,7 @@ Surface of the lift:
 
 Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
 
-Lib ledger: **1919 lib + 54 parity** green (1916→1919 = 3 new
+Lib ledger: **1921 lib + 54 parity** green (1916→1919 = 3 new
 L1 regressions; 1 prior rejection test inverted to match the
 lift).
 

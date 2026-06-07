@@ -10009,13 +10009,90 @@ fn check_one_stmt(
             body: body_stmts,
             span,
         } => {
-            let Some(info) = env.lookup(collection).cloned() else {
+            // Phase 11 (2026-06-07): `collection` may be a dotted
+            // path (`obj.field`, `obj.f1.f2`) when the for-loop's
+            // iterable was a field access. Resolve the head + walk
+            // the field chain to land on the iterable's type.
+            // Lifts L7 from docs/v1_limitations.md.
+            let (head_name, field_path): (&str, Vec<&str>) =
+                match collection.find('.') {
+                    None => (collection.as_str(), Vec::new()),
+                    Some(_) => {
+                        let mut parts = collection.split('.');
+                        let head = parts.next().unwrap();
+                        let rest: Vec<&str> = parts.collect();
+                        (head, rest)
+                    }
+                };
+            let Some(head_info) = env.lookup(head_name).cloned() else {
                 diagnostics.push(Diagnostic::new(
                     *span,
-                    format!("unknown variable '{}'", collection),
+                    format!("unknown variable '{}'", head_name),
                 ));
                 return false;
             };
+            // Walk field accesses. Each step: the current type
+            // must be a Struct (or a ref to one); look up the
+            // field by name in StructInfo; produce the field's
+            // type, preserving the head's reference-ness so
+            // `self: ref Bag` makes `self.items` a ref-view too.
+            // Track whether the original head is a ref so the
+            // emit_for_iter site emits `(*head).field` access.
+            let head_is_ref = head_info.ty.is_any_ref();
+            let mut info = head_info.clone();
+            for field_name in &field_path {
+                let struct_name = match info.ty.deref() {
+                    Type::Struct(name) => name.clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            *span,
+                            format!(
+                                "cannot iterate over field '{}' of '{}': not on a struct (got {})",
+                                field_name, head_name, other
+                            ),
+                        ));
+                        return false;
+                    }
+                };
+                let Some(decl) = env.lookup_struct(&struct_name) else {
+                    diagnostics.push(Diagnostic::new(
+                        *span,
+                        format!("unknown struct '{}'", struct_name),
+                    ));
+                    return false;
+                };
+                let Some((_, fty)) =
+                    decl.fields.iter().find(|(n, _)| n == field_name)
+                else {
+                    diagnostics.push(Diagnostic::new(
+                        *span,
+                        format!(
+                            "no field '{}' on struct '{}'",
+                            field_name, struct_name
+                        ),
+                    ));
+                    return false;
+                };
+                // Use the field's plain type at the checker
+                // level; the access path takes care of the
+                // through-ref deref at codegen time. Don't wrap
+                // in Ref/RefMut here — that would confuse the
+                // is_ref logic in emit_for_iter.
+                info = VarInfo {
+                    ty: fty.clone(),
+                    constant: None,
+                    moved: None,
+                    decl_span: head_info.decl_span,
+                    vec_literal_elements: None,
+                    array_version: 0,
+                    guarded_mutex: None,
+                    no_drop: true, // borrowed view of the field
+                    is_const: false,
+                    struct_literal_fields: None,
+                    moved_fields: std::collections::BTreeMap::new(),
+                };
+            }
+            let _ = head_is_ref;  // kept for future codegen refinement
             if info.moved.is_some() {
                 diagnostics.push(Diagnostic::new(
                     *span,
@@ -10055,9 +10132,24 @@ fn check_one_stmt(
                 ));
             }
 
+            // Phase 11 (2026-06-07): consuming a dotted-path
+            // field (`for x in self.items` without `ref`) would
+            // move out of a struct field; reject explicitly.
+            if *consumes && !field_path.is_empty() {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "cannot move field '{}' out of '{}' for iteration; \
+                         use `for x in ref {}` to borrow",
+                        field_path.join("."),
+                        head_name,
+                        collection,
+                    ),
+                ));
+            }
             // If consuming, mark the source as moved up-front so the body
             // can't reference it; if borrowing, leave it live.
-            if *consumes && !collection_ty.is_any_ref() {
+            if *consumes && !collection_ty.is_any_ref() && field_path.is_empty() {
                 if let Some(slot) = env.lookup_mut(collection) {
                     if slot.moved.is_none() {
                         slot.moved = Some(*span);

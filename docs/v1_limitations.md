@@ -183,29 +183,55 @@ the borrow explicit at the loop head.
 keep using `xs` after the loop. The compiler error message
 already nudges toward this fix.
 
-### L7 — `for VAR in ref self.field` parses as `ref self` then chokes
+### L7 — `for VAR in ref obj.field` ✅ SHIPPED 2026-06-07
 
-Inside a method body, you can't iterate over `self.field`
-directly with a `ref` borrow at the for-loop head.
+**Status**: Resolved in Phase 11 (third installment).
+
+Iteration over a struct field through the for-loop head is now
+supported on both backends.
 
 ```vani
 methods on Subject {
   fn publish(self: ref Subject, value: i64) -> i64 {
-    for o in ref self.observers { ... }   // ❌ — parse error
+    for o in ref self.observers {
+      // ...
+    }
+    return 0;
   }
 }
 ```
 
-**Why**: the `for VAR in EXPR` parser only accepts simple var-
-or `ref var` expressions as the iterable. A field access through
-`self` isn't a recognized iterable expression at the parser
-level.
+Consuming a field (`for v in self.field` without `ref`) is
+still rejected because it would move out of a field; the
+diagnostic now points at the `ref` workaround.
 
-**Workaround**: extract the iteration into a free function that
-takes the field as a `ref Vec<T>` parameter. See the
-[Observer](../examples/language/english/design_patterns/behavioral/observer.vani)
-and [Mediator](../examples/language/english/design_patterns/behavioral/mediator.vani)
-pattern examples.
+**Fix surface**:
+- `src/parser.rs` — `parse_for_stmt_inner` accepts a dotted
+  identifier path (`IDENT . IDENT (. IDENT)*`) as the iterable.
+  Stored as a single dot-separated string in the existing
+  `Stmt::ForIter::collection` field.
+- `src/checker.rs` — main type-check arm: split the collection
+  on `.`, resolve the head via `env.lookup`, walk the field
+  chain through `env.lookup_struct`, land on the field's
+  underlying type. Move-out-of-field rejected with workaround
+  pointer.
+- `src/backend_c.rs::emit_for_iter` — when the collection name
+  contains `.`, build the C accessor as `(*head).field` (so
+  `ref Bag` heads get the right deref). Plain non-dotted
+  collections take the original `local_name` path unchanged.
+- `src/backend_llvm.rs` — `TypedStmt::ForIter` handler: when
+  the collection name contains `.`, look up the head's
+  address in `ctx.locals`, then walk each field name in the
+  path emitting a `getelementptr` through the
+  `LLVM_STRUCT_FIELDS_REGISTRY`. The resulting addr is used
+  as the effective `coll_addr` for the existing Vec/Array
+  iteration emit.
+
+**Regression coverage**:
+- `lib.rs::for_iter_field_through_ref_self_compiles_l7` —
+  the worked Bag-iteration example.
+- `lib.rs::for_iter_field_consume_form_is_rejected_l7` —
+  pins the move-out-of-field rejection.
 
 ---
 

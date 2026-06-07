@@ -27508,6 +27508,62 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn for_iter_field_through_ref_self_compiles_l7() {
+        // Phase 11 (2026-06-07): L7 lift. `for v in ref
+        // self.field { … }` parses and compiles for both
+        // backends. The parser accepts a dotted path as the
+        // collection; the checker resolves the path through
+        // the struct registry to land on the field type; the
+        // C + LLVM emitters chain a deref + field access into
+        // the iteration loop.
+        let source = r#"
+            intent "L7 lift: iterate over a struct field";
+            struct Bag { items: Vec<i64> }
+            methods on Bag {
+              fn total(self: ref Bag) -> i64 {
+                let sum: i64 = 0;
+                for v in ref self.items {
+                  sum = sum + v;
+                }
+                return sum;
+              }
+            }
+            fn main() -> i64 {
+              let b: Bag = Bag { items: vec(1, 2, 3, 4, 5) };
+              assert b.total() == 15;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("L7 lift: for v in ref self.field compiles");
+    }
+
+    #[test]
+    fn for_iter_field_consume_form_is_rejected_l7() {
+        // Phase 11 (2026-06-07): consuming `self.items` (without
+        // `ref`) would move out of a struct field — rejected at
+        // type-check time with a workaround pointer.
+        let source = r#"
+            intent "L7 consume-from-field rejection";
+            struct Bag { items: Vec<i64> }
+            methods on Bag {
+              fn total(self: Bag) -> i64 {
+                let sum: i64 = 0;
+                for v in self.items {        // ❌ move-out of field
+                  sum = sum + v;
+                }
+                return sum;
+              }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let res = crate::compile(source);
+        assert!(
+            res.is_err(),
+            "expected move-out-of-field rejection, got OK"
+        );
+    }
+
+    #[test]
     fn match_through_ref_with_affine_payload_still_rejected_l1() {
         // Phase 11 (2026-06-07): the L1 lift admits the binding
         // only when the scrutinee is by-value. Through a `ref`

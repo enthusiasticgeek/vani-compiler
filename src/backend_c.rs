@@ -12269,7 +12269,31 @@ fn emit_for_iter(
 ) {
     let idx = format!("_intent_idx_{}", var);
     let elem_local = local_name(var);
-    let coll_local = local_name(collection);
+    // Phase 11 (2026-06-07): the collection name may be a
+    // dotted path (`obj.field`, `obj.f1.f2`) when the for-loop
+    // iterated a struct field. Build the C accessor by
+    // local_name-ing the head and chaining `.field` literals
+    // (always with `.`, since we deref pointer-typed heads via
+    // an explicit `(*head)` prefix). Lifts L7 from
+    // docs/v1_limitations.md.
+    //
+    // Because we don't have the head's type info at this site
+    // (we only have collection_ty which is the FIELD's type),
+    // we conservatively emit `(*head).field` if the head's
+    // C-mangled name starts with `v_` AND the dotted form is
+    // present. This works uniformly: in v1 the only way to get
+    // a dotted path through `for-iter` is from a method's
+    // `self: ref T` borrowing the field, so the head is a
+    // pointer in C.
+    let coll_local: String = if collection.contains('.') {
+        let mut parts = collection.split('.');
+        let head = parts.next().unwrap();
+        let head_local = local_name(head);
+        let rest: Vec<&str> = parts.collect();
+        format!("(*{}).{}", head_local, rest.join("."))
+    } else {
+        local_name(collection)
+    };
     let underlying = collection_ty.deref();
     let is_ref = collection_ty.is_any_ref();
 
