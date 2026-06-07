@@ -77,20 +77,34 @@ cargo test --test run_end_to_end llvm_backend_run_produces_same_output_as_c
 ## vāṇी-specific deviations from textbook GoF
 
 A few patterns adapt to vāṇी's affine ownership + composition-over-
-inheritance model:
+inheritance model. The full catalog of v1 deviations (not just
+design-pattern ones — also includes parser shortcuts, codegen
+quirks, by-design choices) lives in
+[`docs/v1_limitations.md`](../../../../docs/v1_limitations.md);
+each deviation below cross-references its L-number there.
 
 - **Composite** uses a tagged struct (`kind: i64` discriminator)
   instead of an enum with a `Vec` payload — vāṇी's v1 doesn't
-  destructure-bind non-Copy enum payloads.
+  destructure-bind non-Copy enum payloads. See
+  [v1_limitations.md L1](../../../../docs/v1_limitations.md).
 - **Bridge** uses an integer discriminator for the renderer family
   instead of `Box<dyn Renderer>` — vāṇी's v1 has no `Box`-like
-  owning-interface-object yet.
+  owning-interface-object yet. See
+  [v1_limitations.md L2](../../../../docs/v1_limitations.md).
 - **Decorator** composes via a flag-bag struct (`email`/`sms`/
   `slack` bools) instead of nested decorators wrapping each other —
   same composable additive semantics, different representation.
 - **Observer** keeps observers in a `Vec<dyn Observer>` parameter
   rather than a struct field — v1 C-codegen has a known issue with
-  `Vec<dyn Iface>` as a struct field.
+  `Vec<dyn Iface>` as a struct field. See
+  [v1_limitations.md L8](../../../../docs/v1_limitations.md).
+- **Mediator** + **Observer** extract for-loops over `self.field`
+  into free functions; the parser can't take `ref self.field` at
+  a for-loop head. See
+  [v1_limitations.md L7](../../../../docs/v1_limitations.md).
+- **Proxy** declares state via `let p: CachingProxy = ...;` with no
+  `let mut`; mutation goes through `mut ref self` on methods. See
+  [v1_limitations.md L5](../../../../docs/v1_limitations.md).
 - **Singleton** lives in `main()`'s scope and is borrowed by
   callers — vāṇी has no globally-mutable storage by default
   (affine ownership). The `Atomic<i64>` counter pattern shown is

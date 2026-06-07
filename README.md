@@ -3717,6 +3717,14 @@ example programs are all welcome.
   layout, and an end-to-end "add a feature" walkthrough.
 - [STATUS.md](STATUS.md) — single-page snapshot of the current feature
   set, the priority-ordered TODO queue, and known issues.
+- [docs/v1_limitations.md](docs/v1_limitations.md) — single
+  catalog of every known v1 deviation from textbook behavior
+  (codegen quirks, parser shortcuts, by-design choices) with
+  per-entry workarounds + fix-queue pointers.
+- [examples/language/english/design_patterns/](examples/language/english/design_patterns/) —
+  all 22 Gang-of-Four design patterns implemented in vāṇी
+  ([readme](examples/language/english/design_patterns/README.md)
+  lists the per-pattern vāṇी deviations from textbook GoF).
 
 ## Language targeting (Indian-subcontinent-first, then global)
 

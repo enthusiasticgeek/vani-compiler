@@ -24,7 +24,9 @@ landed in this session (commits 4feb5fc → d139691):
 | 4 | Linux re-verification | ✅ green | — | 1884 lib + 54 parity + 5 Arc 8 smokes |
 | 5 | Pre-existing baselines: fmt-roundtrip + LLVM stack-overflow | ✅ fixed | `d139691` | Linux clean out-of-the-box |
 
-**Known limitations / caveats (must be empirically verified later):**
+**Known limitations** — full catalog with workarounds in
+[docs/v1_limitations.md](docs/v1_limitations.md). Empirical-
+verification gaps below:
 
 1. **macOS LLVM IR — VERIFICATION DEFERRED**. Hot spots: kevent
    struct alignment (32-byte i8 GEP layout), `EV_CLEAR` semantics,

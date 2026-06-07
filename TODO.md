@@ -5,6 +5,13 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 
 ---
 
+> **v1 limitations index**: see
+> [`docs/v1_limitations.md`](docs/v1_limitations.md) for the
+> canonical catalog (14 entries) of every known v1 deviation
+> from textbook behavior — codegen quirks, parser shortcuts,
+> by-design choices — each with the current workaround and
+> the fix-queue pointer.
+
 ## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06 end-of-day)
 
 > **Session-end status (2026-06-06)** — ALL FIVE TIERS SHIPPED:
