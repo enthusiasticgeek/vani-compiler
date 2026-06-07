@@ -508,17 +508,23 @@ pub(crate) fn brahmi_suffix() -> Option<&'static str> {
         PrintLangMode::Malayalam => Some("mal"),
         PrintLangMode::Odia => Some("odi"),
         PrintLangMode::Sinhala => Some("sin"),
+        PrintLangMode::Urdu => Some("urd"),
         PrintLangMode::Ascii => None,
     }
 }
 
-/// Phase 6 (2026-06-07): emit the per-Brahmi-script numeral
+/// Phase 6 + 12 (2026-06-07): emit the per-script numeral
 /// print helper into the LLVM module preamble — but only if
 /// the source file's pragma matches this script. `suffix` lands
-/// in the IR function name (`intent_print_int_<suffix>`); the
-/// dispatch sites in the print emitters call the matching name
-/// based on the active `PrintLangMode`.
-fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
+/// in the IR function name (`intent_print_int_<suffix>`);
+/// `prefix_bytes` are emitted via `putchar` before the digit
+/// byte; the final byte is `base_byte + d`.
+fn emit_brahmi_print_helper_ll(
+    out: &mut String,
+    suffix: &str,
+    prefix_bytes: &[u32],
+    base_byte: u32,
+) {
     use crate::lexer::PrintLangMode;
     let active = matches!(
         (crate::lexer::current_print_lang_mode(), suffix),
@@ -532,9 +538,18 @@ fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
             | (PrintLangMode::Malayalam, "mal")
             | (PrintLangMode::Odia, "odi")
             | (PrintLangMode::Sinhala, "sin")
+            | (PrintLangMode::Urdu, "urd")
     );
     if !active {
         return;
+    }
+    let mut prefix_emit = String::new();
+    for (i, &b) in prefix_bytes.iter().enumerate() {
+        prefix_emit.push_str(&format!(
+            "        \x20 %rpfx{i} = call i32 @putchar(i32 {b})\n",
+            i = i,
+            b = b,
+        ));
     }
     out.push_str(&format!(
         "define void @intent_print_int_{suffix}(i64 %n) {{\n\
@@ -561,10 +576,9 @@ fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
          emit_digit:\n\
         \x20 %c_i32 = zext i8 %c to i32\n\
         \x20 %d = sub i32 %c_i32, 48\n\
-        \x20 %r2 = call i32 @putchar(i32 224)\n\
-        \x20 %r3 = call i32 @putchar(i32 {lead})\n\
-        \x20 %b3 = add i32 166, %d\n\
-        \x20 %r4 = call i32 @putchar(i32 %b3)\n\
+{prefix_emit}\
+        \x20 %b_last = add i32 {base_byte}, %d\n\
+        \x20 %r4 = call i32 @putchar(i32 %b_last)\n\
         \x20 br label %loop_end\n\
          loop_end:\n\
         \x20 %i_next = add i32 %i, 1\n\
@@ -573,7 +587,8 @@ fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
         \x20 ret void\n\
          }}\n\n",
         suffix = suffix,
-        lead = lead_byte,
+        prefix_emit = prefix_emit,
+        base_byte = base_byte,
     ));
 }
 
@@ -1030,17 +1045,19 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // one middle-byte constant in the digit-emit path. snprintf
     // is already declared above; putchar-only emit avoids
     // platform-dependent stdout globals.
-    emit_brahmi_print_helper_ll(&mut out, "dev", 165);  // Devanagari U+0966 → E0 A5 A6+d
-    emit_brahmi_print_helper_ll(&mut out, "ben", 167);  // Bengali    U+09E6 → E0 A7 A6+d
-    emit_brahmi_print_helper_ll(&mut out, "tam", 175);  // Tamil      U+0BE6 → E0 AF A6+d
-    emit_brahmi_print_helper_ll(&mut out, "tel", 177);  // Telugu     U+0C66 → E0 B1 A6+d
-    emit_brahmi_print_helper_ll(&mut out, "guj", 171);  // Gujarati   U+0AE6 → E0 AB A6+d
-    emit_brahmi_print_helper_ll(&mut out, "pan", 169);  // Gurmukhi   U+0A66 → E0 A9 A6+d
-    // Phase 6 second half (2026-06-07).
-    emit_brahmi_print_helper_ll(&mut out, "kan", 179);  // Kannada    U+0CE6 → E0 B3 A6+d
-    emit_brahmi_print_helper_ll(&mut out, "mal", 181);  // Malayalam  U+0D66 → E0 B5 A6+d
-    emit_brahmi_print_helper_ll(&mut out, "odi", 173);  // Odia       U+0B66 → E0 AD A6+d
-    emit_brahmi_print_helper_ll(&mut out, "sin", 183);  // Sinhala    U+0DE6 → E0 B7 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "dev", &[224, 165], 166);  // E0 A5 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "ben", &[224, 167], 166);  // E0 A7 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "tam", &[224, 175], 166);  // E0 AF A6+d
+    emit_brahmi_print_helper_ll(&mut out, "tel", &[224, 177], 166);  // E0 B1 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "guj", &[224, 171], 166);  // E0 AB A6+d
+    emit_brahmi_print_helper_ll(&mut out, "pan", &[224, 169], 166);  // E0 A9 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "kan", &[224, 179], 166);  // E0 B3 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "mal", &[224, 181], 166);  // E0 B5 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "odi", &[224, 173], 166);  // E0 AD A6+d
+    emit_brahmi_print_helper_ll(&mut out, "sin", &[224, 183], 166);  // E0 B7 A6+d
+    // Phase 12 (2026-06-07): Urdu — 2-byte UTF-8 sequence
+    // (Arabic-Indic '٠..٩' at U+0660..0669 → D9 A0+d).
+    emit_brahmi_print_helper_ll(&mut out, "urd", &[217], 160);       // D9 A0+d
 
     // Walk the program for unique `assert "msg"` and `print
     // "literal";` strings. Each unique text gets one private

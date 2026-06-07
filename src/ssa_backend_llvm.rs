@@ -72,12 +72,19 @@ thread_local! {
 /// rarely use them, but emitting the declarations keeps the
 /// output compatible with mixed-feature programs we'll add as
 /// coverage grows.
-/// Phase 6 (2026-06-07): SSA-LLVM analog of
+/// Phase 6 + 12 (2026-06-07): SSA-LLVM analog of
 /// `backend_llvm::emit_brahmi_print_helper_ll`. Same body shape;
 /// uses a per-helper format-string global so each call has its
 /// own `%lld` constant (avoids the tree-LLVM global which the
-/// SSA path doesn't share).
-fn emit_brahmi_print_helper_ssa_ll(out: &mut String, suffix: &str, lead_byte: u32) {
+/// SSA path doesn't share). Takes `prefix_bytes` + `base_byte`
+/// to support both 2-byte (Arabic-Indic) and 3-byte (Brahmi)
+/// UTF-8 digit codepoints.
+fn emit_brahmi_print_helper_ssa_ll(
+    out: &mut String,
+    suffix: &str,
+    prefix_bytes: &[u32],
+    base_byte: u32,
+) {
     use crate::lexer::PrintLangMode;
     let active = matches!(
         (crate::lexer::current_print_lang_mode(), suffix),
@@ -91,9 +98,18 @@ fn emit_brahmi_print_helper_ssa_ll(out: &mut String, suffix: &str, lead_byte: u3
             | (PrintLangMode::Malayalam, "mal")
             | (PrintLangMode::Odia, "odi")
             | (PrintLangMode::Sinhala, "sin")
+            | (PrintLangMode::Urdu, "urd")
     );
     if !active {
         return;
+    }
+    let mut prefix_emit = String::new();
+    for (i, &b) in prefix_bytes.iter().enumerate() {
+        prefix_emit.push_str(&format!(
+            "        \x20 %rpfx{i} = call i32 @putchar(i32 {b})\n",
+            i = i,
+            b = b,
+        ));
     }
     out.push_str(&format!(
         "@.fmt.lld.{suffix}p = private constant [5 x i8] c\"%lld\\00\"\n\
@@ -121,10 +137,9 @@ fn emit_brahmi_print_helper_ssa_ll(out: &mut String, suffix: &str, lead_byte: u3
          emit_digit:\n\
         \x20 %c_i32 = zext i8 %c to i32\n\
         \x20 %d = sub i32 %c_i32, 48\n\
-        \x20 %r2 = call i32 @putchar(i32 224)\n\
-        \x20 %r3 = call i32 @putchar(i32 {lead})\n\
-        \x20 %b3 = add i32 166, %d\n\
-        \x20 %r4 = call i32 @putchar(i32 %b3)\n\
+{prefix_emit}\
+        \x20 %b_last = add i32 {base_byte}, %d\n\
+        \x20 %r4 = call i32 @putchar(i32 %b_last)\n\
         \x20 br label %loop_end\n\
          loop_end:\n\
         \x20 %i_next = add i32 %i, 1\n\
@@ -133,7 +148,8 @@ fn emit_brahmi_print_helper_ssa_ll(out: &mut String, suffix: &str, lead_byte: u3
         \x20 ret void\n\
          }}\n\n",
         suffix = suffix,
-        lead = lead_byte,
+        prefix_emit = prefix_emit,
+        base_byte = base_byte,
     ));
 }
 
@@ -250,17 +266,18 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // helpers. Each `emit_brahmi_print_helper_ssa_ll` is a no-op
     // unless the active `PrintLangMode` matches; thus at most
     // one of these emits a function body into the module.
-    emit_brahmi_print_helper_ssa_ll(&mut out, "dev", 165);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "ben", 167);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "tam", 175);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "tel", 177);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "guj", 171);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "pan", 169);
-    // Phase 6 second half (2026-06-07).
-    emit_brahmi_print_helper_ssa_ll(&mut out, "kan", 179);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "mal", 181);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "odi", 173);
-    emit_brahmi_print_helper_ssa_ll(&mut out, "sin", 183);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "dev", &[224, 165], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "ben", &[224, 167], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "tam", &[224, 175], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "tel", &[224, 177], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "guj", &[224, 171], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "pan", &[224, 169], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "kan", &[224, 179], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "mal", &[224, 181], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "odi", &[224, 173], 166);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "sin", &[224, 183], 166);
+    // Phase 12 (2026-06-07): Urdu — 2-byte Arabic-Indic digits.
+    emit_brahmi_print_helper_ssa_ll(&mut out, "urd", &[217], 160);
     // Parallel-for runtime. Linux/macOS use libgomp;
     // Windows open-codes a `@CreateThread` fan-out (the
     // outlined fn reads tid/nt from a per-thread arg struct

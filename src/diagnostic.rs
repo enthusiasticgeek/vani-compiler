@@ -50,6 +50,8 @@ enum DiagLang {
     Odia,
     Assamese,    // Bengali-script Indo-Aryan; routes through Bengali labels.
     Sinhala,
+    // Phase 12 (2026-06-07): Perso-Arabic.
+    Urdu,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -89,6 +91,7 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "odia" | "oṛiā" | "oriya" | "or" => Some(DiagLang::Odia),
             "assamese" | "ɔxɔmia" | "as" => Some(DiagLang::Assamese),
             "sinhala" | "siṁhala" | "si" => Some(DiagLang::Sinhala),
+            "urdu" | "urdū" | "ur" => Some(DiagLang::Urdu),
             _ => None,
         };
     }
@@ -118,6 +121,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Malayalam)) => "പിശക് (error)".to_string(),
         ("error", Some(DiagLang::Odia)) => "ତ୍ରୁଟି (error)".to_string(),
         ("error", Some(DiagLang::Sinhala)) => "දෝෂය (error)".to_string(),
+        ("error", Some(DiagLang::Urdu)) => "غلطی (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -130,6 +134,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Malayalam)) => "കുറിപ്പ് (note)".to_string(),
         ("note", Some(DiagLang::Odia)) => "ଟିପ୍ପଣୀ (note)".to_string(),
         ("note", Some(DiagLang::Sinhala)) => "සටහන (note)".to_string(),
+        ("note", Some(DiagLang::Urdu)) => "نوٹ (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -293,6 +298,15 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("cannot prove", "ඔප්පු කළ නොහැක (cannot prove)"),
             ("language mismatch", "භාෂා නොගැලපීම (language mismatch)"),
             ("script mismatch", "අකුරු නොගැලපීම (script mismatch)"),
+        ][..],
+        DiagLang::Urdu => &[
+            ("expected ", "متوقع "),
+            ("unknown variable", "نامعلوم متغیر (unknown variable)"),
+            ("unknown function", "نامعلوم فنکشن (unknown function)"),
+            ("type mismatch", "قسم میں اختلاف (type mismatch)"),
+            ("cannot prove", "ثابت نہیں کیا جا سکتا (cannot prove)"),
+            ("language mismatch", "زبان میں اختلاف (language mismatch)"),
+            ("script mismatch", "رسم الخط میں اختلاف (script mismatch)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali; rustc
         // requires the arms to be syntactically exhaustive.

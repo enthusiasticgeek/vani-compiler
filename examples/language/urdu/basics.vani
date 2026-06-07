@@ -1,0 +1,38 @@
+// vani-lang: urdu
+//
+// Phase 12 (2026-06-07): first Perso-Arabic / RTL dialect.
+// Urdu (اردو) is Indo-Aryan; spoken Urdu is mutually
+// intelligible with Hindi at the conversational register but
+// the written surface uses Perso-Arabic (RTL) script with
+// Persian/Arabic loanwords in the formal/technical register.
+//
+// The lexer reads UTF-8 in logical order, so RTL is purely a
+// rendering concern — your editor displays the source right-
+// to-left, but the byte stream the compiler sees is the same
+// logical order as any other dialect.
+//
+// build & run:
+//   vanic run examples/language/urdu/basics.vani              # LLVM backend
+//   vanic run examples/language/urdu/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Eastern Arabic-Indic numerals
+// (٠..٩ at U+0660..0669) — 2-byte UTF-8 `D9 A0+d`, distinct
+// from the 3-byte Brahmi-derived numeral helpers.
+
+مقصد "Urdu-pragma intro — sum two numbers with a contract";
+
+کام add(a: i64, b: i64) -> i64
+درکار a >= 0;
+درکار b >= 0;
+{
+  واپس a + b;
+}
+
+کام main() -> i64 {
+  مانیں x: i64 = 5;
+  مانیں y: i64 = 7;
+  مانیں sum: i64 = add(x, y);
+  یقینی sum == 12;
+  لکھو sum;
+  واپس 0;
+}

@@ -846,6 +846,68 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 12 (2026-06-07): Urdu (اردو) keyword resolution.
+/// Indo-Aryan with Hindustani vocabulary at the spoken level;
+/// the surface forks into Hindi (Devanagari) vs Urdu (Perso-
+/// Arabic) at the script + register layer. Many Urdu terms
+/// have Persian/Arabic roots in the technical register while
+/// the conversational register tracks Hindi closely.
+fn urdu_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "فنکشن" => TokenKind::Fn,             // function (loanword)
+        "کام" => TokenKind::Fn,                // kaam (work)
+        "مانیں" => TokenKind::Let,             // maanen (assume — formal)
+        "فرض" => TokenKind::Let,               // farz (suppose)
+        "ساخت" => TokenKind::Struct,           // saakht (structure)
+        "شمار" => TokenKind::Enum,             // shumaar (enumeration)
+        "ثابت" => TokenKind::Const,            // saabit (constant)
+        // === VISIBILITY / MODULES ===
+        "عوامی" => TokenKind::Pub,             // awaami (public)
+        "ماڈیول" => TokenKind::Module,         // module (loanword)
+        "حصہ" => TokenKind::Module,            // hissa (part — alt)
+        "استعمال" => TokenKind::Use,           // istemaal (use)
+        "بطور" => TokenKind::As,               // bataur (as)
+        // === CONTROL FLOW ===
+        "واپس" => TokenKind::Return,           // vapas (back)
+        "لوٹاؤ" => TokenKind::Return,          // lautao (return — Hindi-shared)
+        "اگر" => TokenKind::If,                // agar (if)
+        "ورنہ" => TokenKind::Else,             // varna (otherwise)
+        "ہر" => TokenKind::For,                // har (every/for)
+        "میں" => TokenKind::In,                // mein (in)
+        "سے" => TokenKind::From,               // se (from)
+        "تک" => TokenKind::To,                 // tak (to)
+        "بند" => TokenKind::Break,             // band (closed/stop)
+        "جاری" => TokenKind::Continue,         // jaari (continue)
+        "تب" => TokenKind::Then,               // tab (then)
+        // === REFERENCES + MUT ===
+        "دیکھیں" => TokenKind::Ref,            // dekhen (see)
+        "بدلنا" => TokenKind::Mut,             // badalna (changing/mutable)
+        // === MATCHING ===
+        "ملان" => TokenKind::Match,            // milaan (match)
+        "مماثلت" => TokenKind::Match,          // mumasilat (matching — alt)
+        // === VERIFICATION ===
+        "یقینی" => TokenKind::Assert,          // yaqeeni (assured)
+        "ثبوت" => TokenKind::Prove,            // saboot (proof)
+        "درکار" => TokenKind::Requires,        // darkaar (required)
+        "ضمانت" => TokenKind::Ensures,         // zamaanat (guarantee)
+        // === BOOL / PRINT ===
+        "سچ" => TokenKind::True,               // sach (truth)
+        "جھوٹ" => TokenKind::False,            // jhoot (lie)
+        "لکھو" => TokenKind::Print,            // likho (write)
+        "چھاپو" => TokenKind::Print,           // chhaapo (print)
+        // === INTERFACES ===
+        "رابطہ" => TokenKind::Interface,       // raabta (interface)
+        "نافذ" => TokenKind::Implement,        // naafiz (implementing)
+        // === SOV-S7 PARITY ===
+        "مقصد" => TokenKind::Intent,           // maqsad (intent)
+        "قسم" => TokenKind::Type,              // kism (type)
+        "بیرونی" => TokenKind::Extern,         // bairooni (external)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -881,6 +943,8 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         // codepoints are identical (U+09E6..09EF).
         Some(DialectLang::Assamese) => PrintLangMode::Bengali,
         Some(DialectLang::Sinhala) => PrintLangMode::Sinhala,
+        // Phase 12 (2026-06-07).
+        Some(DialectLang::Urdu) => PrintLangMode::Urdu,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -912,6 +976,10 @@ pub enum PrintLangMode {
     Malayalam,  // U+0D66..0D6F '൦..൯'
     Odia,       // U+0B66..0B6F '୦..୯'
     Sinhala,    // U+0DE6..0DEF '෦..෯'  (Lith Illakkam — modern set)
+    // Phase 12 (2026-06-07): first non-Brahmi, Perso-Arabic
+    // (RTL). Eastern Arabic-Indic digits '٠..٩' at
+    // U+0660..0669 → 2-byte UTF-8 `D9 A0+d`.
+    Urdu,
 }
 
 thread_local! {
@@ -958,6 +1026,7 @@ fn script_label(script: Script) -> &'static str {
         Script::Malayalam => "Malayalam",
         Script::Odia => "Odia",
         Script::Sinhala => "Sinhala",
+        Script::Arabic => "Perso-Arabic",
     }
 }
 
@@ -1117,6 +1186,13 @@ enum DialectLang {
     Odia,
     Assamese,   // Bengali-script Indo-Aryan; aliases pulled from the Bengali table.
     Sinhala,
+    // Phase 12 (2026-06-07): first Perso-Arabic dialect. Urdu
+    // (اردو) is Indo-Aryan with Hindustani vocabulary shared
+    // with Hindi; the script (and surface conventions) are
+    // Perso-Arabic. RTL text-direction is a rendering concern
+    // — the lexer reads UTF-8 in logical order, so no special
+    // bidi handling is needed at the parse level.
+    Urdu,
 }
 
 impl DialectLang {
@@ -1139,6 +1215,7 @@ impl DialectLang {
             DialectLang::Odia => "odia",
             DialectLang::Assamese => "assamese",
             DialectLang::Sinhala => "sinhala",
+            DialectLang::Urdu => "urdu",
         }
     }
 
@@ -1173,6 +1250,7 @@ impl DialectLang {
             // table already covers Assamese.
             DialectLang::Assamese => Script::Bengali,
             DialectLang::Sinhala => Script::Sinhala,
+            DialectLang::Urdu => Script::Arabic,
         }
     }
 }
@@ -1197,6 +1275,11 @@ enum Script {
     Malayalam,
     Odia,
     Sinhala,
+    // Phase 12 (2026-06-07): Perso-Arabic — first non-Brahmi
+    // script. U+0600..U+06FF + Arabic Supplement + Arabic
+    // Extended ranges. RTL text-direction is a rendering
+    // detail; the lexer reads UTF-8 in logical (byte) order.
+    Arabic,
 }
 
 impl Script {
@@ -1238,6 +1321,15 @@ impl Script {
             }
             if ('\u{0D80}'..='\u{0DFF}').contains(&c) {
                 return Script::Sinhala;
+            }
+            // Phase 12 (2026-06-07): Arabic block + supplements.
+            if ('\u{0600}'..='\u{06FF}').contains(&c)
+                || ('\u{0750}'..='\u{077F}').contains(&c)
+                || ('\u{08A0}'..='\u{08FF}').contains(&c)
+                || ('\u{FB50}'..='\u{FDFF}').contains(&c)
+                || ('\u{FE70}'..='\u{FEFF}').contains(&c)
+            {
+                return Script::Arabic;
             }
         }
         Script::Latin
@@ -1290,6 +1382,8 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "odia" | "oṛiā" | "oriya" | "or" => Some(DialectLang::Odia),
             "assamese" | "ɔxɔmia" | "as" => Some(DialectLang::Assamese),
             "sinhala" | "siṁhala" | "si" => Some(DialectLang::Sinhala),
+            // Phase 12 (2026-06-07): Perso-Arabic dialect.
+            "urdu" | "urdū" | "ur" => Some(DialectLang::Urdu),
             _ => None,
         };
     }
@@ -2042,6 +2136,7 @@ impl<'a> Lexer<'a> {
             .or_else(|| malayalam_keyword(text))
             .or_else(|| odia_keyword(text))
             .or_else(|| sinhala_keyword(text))
+            .or_else(|| urdu_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,

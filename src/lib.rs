@@ -27413,6 +27413,50 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn urdu_pragma_compiles_and_emits_arabic_indic_print() {
+        // Phase 12 (2026-06-07): Urdu — first Perso-Arabic
+        // dialect. Eastern Arabic-Indic digits at U+0660..0669
+        // encode to 2-byte UTF-8 (`D9 A0+d`) instead of the
+        // 3-byte Brahmi shape — the print helper template
+        // parameterizes on prefix-byte length to cover both.
+        let source = "// vani-lang: urdu\n\
+                      مقصد \"t\";\n\
+                      کام main() -> i64 {\n  \
+                        مانیں x: i64 = 5;\n  \
+                        لکھو x;\n  \
+                        واپس 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Urdu program compiles");
+        assert!(c.contains("intent_print_int_urd"),
+            "Urdu must route through urd helper, got:\n{}", c);
+        // The Arabic-Indic helper emits the 2-byte sequence
+        // `D9 A0+d` — pin the magic bytes so a future refactor
+        // can't silently regress to a 3-byte Brahmi-shaped
+        // helper.
+        assert!(
+            c.contains("0xd9") || c.contains("0xD9"),
+            "expected D9 lead byte in Urdu numeral helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn urdu_keyword_in_hindi_pragma_file_is_rejected() {
+        // Phase 12 (2026-06-07): cross-script gate. Urdu's
+        // Perso-Arabic script is distinct from Devanagari, so
+        // a Hindi-pragma file with a Urdu keyword fails the
+        // script-purity check.
+        let source = "// vani-lang: hindi\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> i64 {\n  \
+                        کام x: i64 = 5;\n  \
+                        ० लौटाओ;\n\
+                      }\n";
+        let res = compile(source);
+        assert!(res.is_err(), "expected Arabic-in-Devanagari rejection");
+    }
+
+    #[test]
     fn match_through_ref_scrutinee_compiles_and_dispatches() {
         // Phase 11 (2026-06-07): L3 lift. `match` now accepts
         // a scrutinee of type `ref T` / `mut ref T` — the

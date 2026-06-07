@@ -989,6 +989,12 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../odia/basics.vani",
         "../assamese/basics.vani",
         "../sinhala/basics.vani",
+        // Phase 12 (2026-06-07): first Perso-Arabic / RTL
+        // dialect. Eastern Arabic-Indic digits ٠..٩ at
+        // U+0660..0669 (2-byte UTF-8) — the print helper
+        // template parameterizes on prefix-byte length to
+        // cover both Arabic-Indic and the Brahmi 3-byte form.
+        "../urdu/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

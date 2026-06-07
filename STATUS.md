@@ -10,6 +10,73 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 12.1: Urdu (first Perso-Arabic / RTL dialect)
+
+vāṇी's first non-Brahmi-derived script lands: **Urdu** (اردو)
+joins the dialect roster, taking the total to **18 dialects
+across 11 scripts**.
+
+Urdu is Indo-Aryan with Hindustani vocabulary shared with
+Hindi at the conversational register; the surface forks at
+the *script* (Perso-Arabic, RTL) and the *technical register*
+(Persian/Arabic-loanword vocabulary).
+
+```rust
+// vani-lang: urdu
+مقصد "Urdu intro";
+
+کام add(a: i64, b: i64) -> i64
+درکار a >= 0;
+درکار b >= 0;
+{
+  واپس a + b;
+}
+
+کام main() -> i64 {
+  مانیں x: i64 = 5;
+  مانیں sum: i64 = add(x, 7);
+  یقینی sum == 12;
+  لکھو sum;     // emits ١٢ (Eastern Arabic-Indic ١٢)
+  واپس 0;
+}
+```
+
+Architectural change — the numeral-print helpers (C + LLVM,
+tree + SSA paths) refactored to take `prefix_bytes` + `base_byte`,
+covering both 2-byte UTF-8 (Arabic-Indic ١٠٠..٩) and the
+existing 3-byte Brahmi forms. Future RTL dialects (Sindhi-
+Arabic, Punjabi-Shahmukhi, Pashto, Persian/Farsi, Kurdish-
+Sorani) plug in as one-line additions.
+
+Surface of the fix:
+
+- **Numeral helpers** (`backend_c.rs`, `backend_llvm.rs`,
+  `ssa_backend_llvm.rs`) — `emit_intent_print_int_helper_c` /
+  `emit_brahmi_print_helper_ll` /
+  `emit_brahmi_print_helper_ssa_ll` now take
+  `(prefix_bytes: &[u8/u32], base_byte)` instead of just one
+  middle byte. Existing 10 Brahmi callers pass `&[0xE0, lead]`
+  + `0xA6`; the new Urdu caller passes `&[0xD9]` + `0xA0`.
+- **Lexer** (`src/lexer.rs`) — `DialectLang::Urdu`,
+  `Script::Arabic`, `PrintLangMode::Urdu`, `urdu_keyword`
+  function (~35 starter aliases), pragma alias
+  `urdu | urdū | ur`, Arabic Unicode block check in
+  `Script::classify` (covers main block + supplements +
+  presentation forms).
+- **Diagnostic** (`src/diagnostic.rs`) — `DiagLang::Urdu` with
+  native labels (`غلطی` / `نوٹ`) and a starter prefix-
+  translation table.
+- **Example** (`examples/language/urdu/basics.vani`) — verified
+  to compile + run on both backends, prints `١٢`.
+
+RTL is genuinely just a rendering concern at the source level:
+the lexer reads UTF-8 in logical (byte) order. The compiler
+sees the same byte stream regardless of which direction the
+editor displays the text. No bidi handling needed.
+
+Lib ledger: **1923 lib + 54 parity** green (1921→1923 = 2 new
+Urdu regressions: print helper + cross-script gate).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 third installment: L7 for-iter-over-self.field
 
 `for v in ref self.items { ... }` (and any `obj.field` /
@@ -57,7 +124,7 @@ Closes [docs/v1_limitations.md L7](docs/v1_limitations.md).
 Phase 11's three tractable open limitations (L1, L3, L7) are
 now all shipped this session.
 
-Lib ledger: **1921 lib + 54 parity** green (1919→1921 = 2 new
+Lib ledger: **1923 lib + 54 parity** green (1919→1921 = 2 new
 L7 regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
@@ -93,7 +160,7 @@ Surface of the lift:
 
 Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
 
-Lib ledger: **1921 lib + 54 parity** green (1916→1919 = 3 new
+Lib ledger: **1923 lib + 54 parity** green (1916→1919 = 3 new
 L1 regressions; 1 prior rejection test inverted to match the
 lift).
 
