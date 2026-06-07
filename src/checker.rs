@@ -13214,23 +13214,30 @@ fn check_expr(
                     }
                     _ => None,
                 };
-                // Closure #128 / D3: the binding's exposed type
-                // was already remapped to Str for OwnedStr
-                // payloads above (borrow-view), so it's
-                // always Copy here. Other non-Copy payload
-                // types (Vec<T>, structs with owning fields,
-                // …) still need their own borrow-view design
-                // and remain rejected.
+                // Phase 11 (2026-06-07): L1 lift. Affine payload
+                // destructure-bindings (Vec<T>, structs with
+                // owning fields, …) are now allowed when the
+                // scrutinee is consumed by-value — ownership of
+                // the payload transfers into the binding, and
+                // the binding's scope-exit drop frees it like a
+                // regular let-binding.
+                //
+                // Ref scrutinees (`match r` where `r: ref Node`,
+                // Phase 11 L3) still need a borrow-view design
+                // for affine bindings — that case is rejected
+                // here for now so the lift doesn't introduce
+                // double-frees through the reference.
                 if let Some((_, bty)) = &arm_binding {
-                    if !bty.is_copy() {
+                    if !bty.is_copy() && raw_scrut_ty.is_any_ref() {
                         diagnostics.push(Diagnostic::new(
                             arm.pattern_span,
                             format!(
                                 "destructure binding for non-Copy payload type {} \
-                                 is not supported in v1 — only OwnedStr payloads \
-                                 admit a binding (exposed as Str view); other \
-                                 affine payload types need explicit borrow-view \
-                                 wiring",
+                                 through a `ref` scrutinee is not supported in v1 \
+                                 — the binding would need an affine-borrow view \
+                                 to avoid aliasing through the reference. Move \
+                                 the scrutinee by value, OR use a wildcard \
+                                 binding (`Variant(_)`) to ignore the payload.",
                                 bty,
                             ),
                         ));
@@ -13238,6 +13245,16 @@ fn check_expr(
                 }
                 let body_checked = if let Some((bname, bty)) = &arm_binding {
                     env.push_scope();
+                    // Phase 11 (2026-06-07): for affine-payload
+                    // bindings (Vec<T>, structs with owning fields,
+                    // …) the binding is a non-owning view over the
+                    // scrutinee's heap — the scrutinee's own
+                    // scope-exit drop handles freeing the buffer.
+                    // The binding's scope-exit must NOT drop too,
+                    // or we'd double-free. Copy payloads (i64,
+                    // bool, …) drop trivially so the flag has no
+                    // observable effect on them.
+                    let binding_is_affine = !bty.is_copy();
                     env.insert_current(bname.clone(), VarInfo {
                         ty: bty.clone(),
                         constant: None,
@@ -13246,7 +13263,7 @@ fn check_expr(
                         vec_literal_elements: None,
                         array_version: 0,
                         guarded_mutex: None,
-                        no_drop: false,
+                        no_drop: binding_is_affine,
                         is_const: false,
                         struct_literal_fields: None,
                         moved_fields: std::collections::BTreeMap::new(),

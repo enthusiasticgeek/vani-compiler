@@ -14,28 +14,60 @@ Cross-referenced from:
 
 ## Type-system limitations
 
-### L1 — Enum destructure-bindings limited to Copy + OwnedStr payloads
+### L1 — Enum destructure-bindings of affine payloads ✅ SHIPPED 2026-06-07
 
-Pattern-match arms can only bind enum variant payloads when the
-payload is `Copy` (scalar) or `OwnedStr` (heap-string, exposed as
-a `Str` view).
+**Status**: Resolved in Phase 11 (second installment) for
+by-value scrutinees. The `ref` scrutinee case is still
+documented (see "remaining" below).
+
+Pattern-match arms can now bind enum variant payloads of any
+type — `Copy` (scalar), `OwnedStr` (heap-string, exposed as a
+`Str` view), AND **affine** types like `Vec<T>` or
+owning-field structs.
 
 ```vani
 enum Node {
-  Leaf(i64),         // ✅ binding works:  Node.Leaf(v) then ...
-  Branch(Vec<i64>),  // ❌ Vec is affine; binding rejected
+  Leaf(i64),
+  Branch(Vec<i64>),
+}
+
+fn first(n: Node) -> i64 {
+  return match n {
+    Node.Leaf(v) then v,
+    Node.Branch(xs) then xs[0],     // ✅ now works
+  };
 }
 ```
 
-**Why**: lifetime tracking through enum-variant destructure
-needs more work in the checker; v1 takes the conservative path.
+**Design**: the affine binding is a **non-owning view** over
+the scrutinee's heap. The scrutinee's own scope-exit
+variant-drop keeps the single ownership of the buffer; the
+binding's scope-exit is suppressed (`no_drop: true` flag in
+the checker). Arm bodies can **read** the binding freely; they
+should **not** consume it (passing by value to a fn that takes
+by value would double-free with the scrutinee's drop).
 
-**Workaround**: use a tagged struct (`kind: i64`) with parallel
-fields, accessed via field-not-binding. See the
-[Composite pattern example](../examples/language/english/design_patterns/structural/composite.vani).
+**Fix surface**:
+- `src/checker.rs` — match-arm binding check: drop the
+  "non-Copy payload type" rejection for by-value scrutinees;
+  set `no_drop: true` on the binding's `VarInfo` when the
+  binding type is non-Copy.
 
-**Fix queued in**: `TODO.md` (deferred — needs lifetime work
-in `desugar_enum_match`).
+**Remaining limitation**: through a `ref T` / `mut ref T`
+scrutinee (Phase 11 L3), affine-payload bindings are still
+rejected — a proper borrow-view binding type is needed there.
+The diagnostic now points at the documented workaround
+(move-by-value).
+
+**Regression coverage**:
+- `lib.rs::affine_enum_payload_destructure_compiles_l1` —
+  by-value scrutinee, simple `xs[0]` read.
+- `lib.rs::affine_enum_payload_borrow_into_helper_l1` —
+  arm body passes the binding by `ref` to a helper.
+- `lib.rs::match_through_ref_with_affine_payload_still_rejected_l1`
+  — pins the ref-scrutinee-still-rejected boundary.
+- `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
+  — updated from the previous rejection test.
 
 ### L2 — No `Box<T>` / owning-interface-object pointer
 

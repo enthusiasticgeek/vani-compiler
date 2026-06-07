@@ -10,6 +10,43 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
+
+`match` arms can now bind enum variant payloads of affine
+types (`Vec<T>`, structs with owning fields, …) — not just
+`Copy` scalars and `OwnedStr`. The binding is a non-owning
+view over the scrutinee's heap; the scrutinee's own variant-
+drop remains the single owner of the buffer.
+
+```vani
+enum Node { Leaf(i64), Branch(Vec<i64>) }
+
+fn first(n: Node) -> i64 {
+  return match n {
+    Node.Leaf(v) then v,
+    Node.Branch(xs) then xs[0],     // ✅ now works
+  };
+}
+```
+
+Surface of the lift:
+
+- **Checker** (`src/checker.rs`) — drops the "non-Copy payload
+  type" rejection for by-value scrutinees; sets
+  `no_drop: true` on the binding's `VarInfo` when the binding
+  type is non-Copy, so the binding's scope-exit doesn't free
+  the buffer (only the scrutinee's existing variant-drop
+  does).
+- Through `ref` / `mut ref` scrutinees, affine-payload bindings
+  remain rejected with a clearer diagnostic — that case needs
+  a borrow-view binding type which is queued.
+
+Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
+
+Lib ledger: **1919 lib + 54 parity** green (1916→1919 = 3 new
+L1 regressions; 1 prior rejection test inverted to match the
+lift).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 first installment: L3 match-on-ref lift
 
 `match r` where `r: ref T` (and `mut ref T`) now compiles and

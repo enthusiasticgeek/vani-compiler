@@ -3443,10 +3443,12 @@ mod tests {
     }
 
     #[test]
-    fn enum_non_copy_non_str_payload_binding_rejected() {
-        // Closure #128 / D3: payload types other than
-        // OwnedStr (e.g. Vec<T>) don't yet have a borrow-
-        // view; binding patterns on them stay rejected.
+    fn enum_non_copy_payload_binding_now_compiles_via_value_l1() {
+        // Closure #128 / D3 was historically a rejection; Phase
+        // 11 (2026-06-07) lifted L1 for by-value scrutinees so
+        // the binding is now a non-owning view (no_drop). Same
+        // source as the original rejection test; now it
+        // compiles.
         let source = r#"
             enum Wrap { V(Vec<i64>), Empty }
             fn main() -> i64 {
@@ -3457,13 +3459,8 @@ mod tests {
               };
             }
         "#;
-        let errors = compile(source).expect_err(
-            "Vec<T> payload binding without borrow-view should be rejected",
-        );
-        assert!(
-            errors.iter().any(|e| e.message.contains("non-Copy payload type")),
-            "expected non-Copy-binding diagnostic, got: {:?}",
-            errors
+        compile(source).expect(
+            "Phase 11 L1 lift: Vec<T> payload binding now compiles for by-value scrutinees",
         );
     }
 
@@ -27447,6 +27444,94 @@ fn main() -> i64 {
             c.contains("const Enum_Result* v_r"),
             "expected ref-to-payloaded-enum param to lower to Enum_Result*, got:\n{}",
             c
+        );
+    }
+
+    #[test]
+    fn affine_enum_payload_destructure_compiles_l1() {
+        // Phase 11 (2026-06-07): L1 lift. An enum variant with
+        // an affine payload type (Vec<T>, struct with owning
+        // fields) can now be destructured in a match arm. The
+        // binding is a non-owning view over the scrutinee's
+        // heap — its scope-exit doesn't drop, so the scrutinee's
+        // own variant-drop remains the single owner of the
+        // buffer.
+        let source = r#"
+            intent "L1 lift: Vec payload destructure";
+            enum Node {
+              Leaf(i64),
+              Branch(Vec<i64>),
+            }
+            fn first(n: Node) -> i64 {
+              return match n {
+                Node.Leaf(v) then v,
+                Node.Branch(xs) then xs[0],
+              };
+            }
+            fn main() -> i64 {
+              let n: Node = Node.Branch(vec(10, 20, 30));
+              assert first(n) == 10;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("L1 lift: affine payload destructure");
+    }
+
+    #[test]
+    fn affine_enum_payload_borrow_into_helper_l1() {
+        // Phase 11: arm body passes the binding by `ref` to a
+        // helper. The helper reads through the borrow; no
+        // ownership transfer = no double-free with the
+        // scrutinee's drop.
+        let source = r#"
+            intent "L1 lift: borrow binding into helper";
+            enum Node { Leaf(i64), Branch(Vec<i64>) }
+            fn sum_borrow(xs: ref Vec<i64>) -> i64 {
+              let s: i64 = 0;
+              let i: u64 = 0;
+              while i < len(xs) { s = s + xs[i]; i = i + 1; }
+              return s;
+            }
+            fn total(n: Node) -> i64 {
+              return match n {
+                Node.Leaf(v) then v,
+                Node.Branch(xs) then sum_borrow(ref xs),
+              };
+            }
+            fn main() -> i64 {
+              let n: Node = Node.Branch(vec(1, 2, 3, 4, 5));
+              assert total(n) == 15;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("L1 lift: borrow into helper");
+    }
+
+    #[test]
+    fn match_through_ref_with_affine_payload_still_rejected_l1() {
+        // Phase 11 (2026-06-07): the L1 lift admits the binding
+        // only when the scrutinee is by-value. Through a `ref`
+        // scrutinee an affine binding would need a borrow-view
+        // design; we keep the rejection there to avoid
+        // double-frees aliased through the reference.
+        let source = r#"
+            intent "L1 + L3 boundary — ref + affine binding still rejected";
+            enum Node { Leaf(i64), Branch(Vec<i64>) }
+            fn first_ref(n: ref Node) -> i64 {
+              return match n {
+                Node.Leaf(v) then v,
+                Node.Branch(xs) then xs[0],
+              };
+            }
+            fn main() -> i64 {
+              let n: Node = Node.Branch(vec(7));
+              return first_ref(ref n);
+            }
+        "#;
+        let res = crate::compile(source);
+        assert!(
+            res.is_err(),
+            "expected affine binding through ref scrutinee to be rejected"
         );
     }
 
