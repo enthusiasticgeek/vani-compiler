@@ -10,7 +10,7 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 🟢 Session 2026-06-07 — Phase 1.1 + 1.2 shipped
+## 🟢 Session 2026-06-07 — Phase 1.1 + 1.2 + 1.3 + 1.4 shipped (full Phase 1 closed)
 
 **Phase 1.1 — Devanagari runtime PRINT (`०..९`)**: `print x`
 (integer width) now emits Devanagari digits when the file
@@ -27,6 +27,20 @@ also emit the bundle BEFORE the dyn fat-pointer typedef. Now:
 per-Iface naming (`intent_vec_dyn_<Iface>`) plus deferred emit
 through the unified topo loop. Closes
 [docs/v1_limitations.md L8](docs/v1_limitations.md).
+
+**Phase 1.3 (ML-1) — prompt-engineering context bundle**:
+`tools/llm_context/bundle.py` assembles a Markdown context
+bundle (~13K tokens full / ~7K with `--no-examples`) from repo
+sources of truth so an off-the-shelf LLM can be prompt-engineered
+into a vāṇी programmer with zero training. Workflow documented
+in `tools/llm_context/README.md`.
+
+**Phase 1.4 (TUT-1) — mdBook scaffolding**: `tutorials/` houses
+the mdBook source for the upcoming Beginner / Intermediate /
+Advanced tutorial site. SUMMARY indexes 34 lessons across the
+three tracks; the first lesson (*Hello, World*) is fully written
+as a template for TUT-2. `mdbook build` runs clean. TUT-2 → TUT-5
+will fill in the remaining lessons + GH-Pages deploy.
 
 Test ledger after these changes: **1897 lib + 54 parity**, all
 green on Linux.

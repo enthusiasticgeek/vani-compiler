@@ -45,7 +45,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 │   1.1 ▸ Devanagari runtime PRINT output (०-९ vs 0-9)   ✅ SHIPPED 2026-06-07
 │   1.2 ▸ C-backend Vec<dyn Iface> struct-field fix (L8) ✅ SHIPPED 2026-06-07
 │   1.3 ▸ ML-1: prompt-engineering context bundle       ✅ SHIPPED 2026-06-07
-│   1.4 ▸ TUT-1: mdBook scaffolding for HTML tutorials        │ 3h
+│   1.4 ▸ TUT-1: mdBook scaffolding for HTML tutorials   ✅ SHIPPED 2026-06-07
 │   Each item is INDEPENDENT — pick in any order.             │
 └─────────────────────────────────────────────────────────────┘
                                  │
@@ -762,8 +762,11 @@ structs / enums → generics → SMT proofs → async → embedded.
 
 ### Work items
 
-  - **TUT-1** (~3h): pick the static-site stack and scaffold
-    the directory structure.
+  - **TUT-1** ✅ SHIPPED 2026-06-07: mdBook scaffolding under
+    `tutorials/` (book.toml + SUMMARY + introduction +
+    contributing guide + 34 stub lessons + the first Beginner
+    lesson `Hello, World` as a working template). Builds clean
+    with `mdbook build` from the `tutorials/` directory.
   - **TUT-2** (~12-15h): write the **Beginner** track (12
     lessons × ~30 min each).
   - **TUT-3** (~15-20h): write the **Intermediate** track.

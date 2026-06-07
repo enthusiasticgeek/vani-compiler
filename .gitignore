@@ -30,3 +30,6 @@ a.out
 # Python bytecode (tools/)
 __pycache__/
 *.pyc
+
+# mdBook build output (tutorials/)
+tutorials/book/

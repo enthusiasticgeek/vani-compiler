@@ -1,0 +1,38 @@
+# mdBook configuration for the vāṇी (वाणी) tutorials site.
+# Build with `mdbook build` from this directory; serve locally
+# with `mdbook serve --open`. See `tutorials/README.md` for the
+# full development loop.
+
+[book]
+title = "vāṇी (वाणी) — Tutorials"
+authors = ["vāṇी contributors"]
+description = "Beginner → intermediate → advanced tutorials for the vāṇी language. Code as you speak."
+language = "en"
+multilingual = false
+src = "src"
+
+[rust]
+edition = "2024"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/anthropics/claude-code"
+edit-url-template = "https://github.com/anthropics/claude-code/edit/main/tutorials/{path}"
+no-section-label = false
+# Search is built-in for mdBook; surface it prominently.
+[output.html.search]
+enable = true
+limit-results = 30
+use-boolean-and = true
+boost-title = 2
+boost-hierarchy = 1
+boost-paragraph = 1
+
+# Custom syntax-highlighting hook for `vani` code fences. mdBook
+# uses highlight.js under the hood; v1 falls back to Rust
+# highlighting (close enough for the keyword-first dialect) until
+# a dedicated grammar lands.
+[output.html.fold]
+enable = true
+level = 2
