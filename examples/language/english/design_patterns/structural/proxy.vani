@@ -1,0 +1,66 @@
+// Proxy — refactoring.guru/design-patterns/proxy
+//
+// Intent: provide a surrogate or placeholder for another object to
+// control access to it. Common variants: virtual proxy
+// (lazy-loading), protection proxy (access control), remote proxy
+// (network), caching proxy (memoization).
+//
+// vāṇी translation: a `RealService` does expensive work (computes
+// fibonacci recursively here, standing in for an expensive
+// I/O call). A `CachingProxy` stores the last computed result;
+// repeated calls return the cached value. The proxy implements
+// the same logical surface as the real service.
+
+intent "Proxy pattern — caching proxy in front of an expensive service";
+
+fn fib(n: i64) -> i64 {
+  if n < 2 {
+    return n;
+  }
+  return fib(n - 1) + fib(n - 2);
+}
+
+struct RealService {}
+
+methods on RealService {
+  fn compute(self: RealService, n: i64) -> i64 {
+    return fib(n);  // expensive
+  }
+}
+
+struct CachingProxy {
+  last_input: i64,
+  last_output: i64,
+  has_cache: bool,
+}
+
+methods on CachingProxy {
+  // The proxy takes mut ref so it can update its cache.
+  fn compute(self: mut ref CachingProxy, n: i64) -> i64 {
+    if self.has_cache {
+      if self.last_input == n {
+        print "  [proxy] cache hit for n =", n;
+        return self.last_output;
+      }
+    }
+    print "  [proxy] cache miss for n =", n, "— delegating to RealService";
+    let real: RealService = RealService {};
+    let v: i64 = real.compute(n);
+    self.last_input = n;
+    self.last_output = v;
+    self.has_cache = true;
+    return v;
+  }
+}
+
+fn main() -> i64 {
+  let p: CachingProxy = CachingProxy {
+    last_input: 0, last_output: 0, has_cache: false,
+  };
+  let a: i64 = p.compute(20);   // miss
+  let b: i64 = p.compute(20);   // hit
+  let c: i64 = p.compute(21);   // miss
+  let d: i64 = p.compute(21);   // hit
+  print "fib(20):", a, "fib(20):", b, "fib(21):", c, "fib(21):", d;
+  return 0;
+}

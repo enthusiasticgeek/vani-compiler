@@ -1,0 +1,51 @@
+// Template Method — refactoring.guru/design-patterns/template-method
+//
+// Intent: define the skeleton of an algorithm in an operation,
+// deferring some steps to subclasses. Template Method lets
+// subclasses redefine certain steps of an algorithm without
+// changing the algorithm's structure.
+//
+// vāṇी translation: vāṇी has no inheritance (composition over
+// inheritance), so the "skeleton" is a free function that takes
+// the dyn-Iface hook as a parameter. The skeleton orchestrates
+// the steps; the hook supplies the variable step.
+
+intent "Template Method pattern — skeleton orchestrating a customizable step";
+
+struct PdfReport {}
+struct CsvReport {}
+
+interface Renderer {
+  fn render_row(self: PdfReport, row: i64) -> Str;
+}
+
+implement Renderer for PdfReport {
+  fn render_row(self: PdfReport, row: i64) -> Str {
+    return "[pdf]";
+  }
+}
+
+implement Renderer for CsvReport {
+  fn render_row(self: CsvReport, row: i64) -> Str {
+    return "[csv]";
+  }
+}
+
+// THE SKELETON. Fixed: build header, iterate rows, build footer.
+// The variable step (`render_row`) comes from the dyn-Iface
+// caller — that's the "hook".
+fn generate_report(r: dyn Renderer, n_rows: i64) -> i64 {
+  print "=== HEADER ===";
+  for i from 0 to n_rows {
+    print "  row", i, "::", r.render_row(i);
+  }
+  print "=== FOOTER ===";
+  return n_rows;
+}
+
+fn main() -> i64 {
+  let _ = generate_report(PdfReport {}, 3);
+  print "---";
+  let _ = generate_report(CsvReport {}, 2);
+  return 0;
+}

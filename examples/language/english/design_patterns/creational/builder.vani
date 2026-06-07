@@ -1,0 +1,109 @@
+// Builder — refactoring.guru/design-patterns/builder
+//
+// Intent: separate the construction of a complex object from its
+// representation so that the same construction process can create
+// different representations.
+//
+// vāṇी translation: a `CarBuilder` mutable struct accumulates parts
+// step by step. Each `set_*` method consumes the builder and
+// returns it (Rust-style fluent builder). The terminal `build()`
+// freezes the accumulated state into a final `Car` struct.
+
+intent "Builder pattern — staged construction of a Car";
+
+struct Car {
+  seats: i64,
+  engine: i64,    // 0 = none, 1 = gas, 2 = electric
+  gps: bool,
+  trip_computer: bool,
+}
+
+struct CarBuilder {
+  seats: i64,
+  engine: i64,
+  gps: bool,
+  trip_computer: bool,
+}
+
+methods on CarBuilder {
+  fn set_seats(self: CarBuilder, n: i64) -> CarBuilder {
+    return CarBuilder {
+      seats: n,
+      engine: self.engine,
+      gps: self.gps,
+      trip_computer: self.trip_computer,
+    };
+  }
+  fn set_engine(self: CarBuilder, kind: i64) -> CarBuilder {
+    return CarBuilder {
+      seats: self.seats,
+      engine: kind,
+      gps: self.gps,
+      trip_computer: self.trip_computer,
+    };
+  }
+  fn set_gps(self: CarBuilder, on: bool) -> CarBuilder {
+    return CarBuilder {
+      seats: self.seats,
+      engine: self.engine,
+      gps: on,
+      trip_computer: self.trip_computer,
+    };
+  }
+  fn set_trip_computer(self: CarBuilder, on: bool) -> CarBuilder {
+    return CarBuilder {
+      seats: self.seats,
+      engine: self.engine,
+      gps: self.gps,
+      trip_computer: on,
+    };
+  }
+  fn build(self: CarBuilder) -> Car {
+    return Car {
+      seats: self.seats,
+      engine: self.engine,
+      gps: self.gps,
+      trip_computer: self.trip_computer,
+    };
+  }
+}
+
+fn new_builder() -> CarBuilder {
+  return CarBuilder {
+    seats: 0,
+    engine: 0,
+    gps: false,
+    trip_computer: false,
+  };
+}
+
+fn main() -> i64 {
+  // Each set_* returns a new builder; chain them via let
+  // bindings (vāṇी doesn't allow .chain().chain() at expression
+  // level, but per-statement let-binding is the same shape).
+  let b0: CarBuilder = new_builder();
+  let b1: CarBuilder = b0.set_seats(2);
+  let b2: CarBuilder = b1.set_engine(2);  // electric
+  let b3: CarBuilder = b2.set_gps(true);
+  let sports_car: Car = b3.build();
+
+  print "sports car — seats:", sports_car.seats,
+        "engine:", sports_car.engine,
+        "gps:", sports_car.gps,
+        "trip_computer:", sports_car.trip_computer;
+
+  // Same builder type produces a different representation: a
+  // family sedan with no electric engine but a trip computer.
+  let s0: CarBuilder = new_builder();
+  let s1: CarBuilder = s0.set_seats(5);
+  let s2: CarBuilder = s1.set_engine(1);  // gas
+  let s3: CarBuilder = s2.set_trip_computer(true);
+  let sedan: Car = s3.build();
+
+  print "sedan — seats:", sedan.seats,
+        "engine:", sedan.engine,
+        "gps:", sedan.gps,
+        "trip_computer:", sedan.trip_computer;
+
+  return 0;
+}

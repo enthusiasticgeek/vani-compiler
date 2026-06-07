@@ -1,0 +1,58 @@
+// Prototype — refactoring.guru/design-patterns/prototype
+//
+// Intent: specify the kinds of objects to create using a prototypal
+// instance, and create new objects by copying the prototype.
+//
+// vāṇी translation: for `Copy` types (scalars + structs of scalars),
+// "cloning the prototype" is just a let-binding — vāṇī's affine
+// rules let the original be reused as the prototype seed. Each
+// derived object then receives its own state via mutation through
+// a builder-like method.
+
+intent "Prototype pattern — clone-and-modify from a seed prototype";
+
+struct Shape {
+  x: i64,
+  y: i64,
+  color: i64,   // 0=red, 1=green, 2=blue
+  radius: i64,  // 0 means non-circle; positive means circle
+}
+
+methods on Shape {
+  fn moved_to(self: Shape, nx: i64, ny: i64) -> Shape {
+    return Shape {
+      x: nx, y: ny, color: self.color, radius: self.radius,
+    };
+  }
+  fn recolored(self: Shape, c: i64) -> Shape {
+    return Shape {
+      x: self.x, y: self.y, color: c, radius: self.radius,
+    };
+  }
+  fn describe(self: Shape) -> Str {
+    if self.radius > 0 {
+      return "circle";
+    }
+    return "rect";
+  }
+}
+
+fn main() -> i64 {
+  // Define a "prototype" shape once. Copies inherit its full
+  // state; per-instance variation comes from method-chaining.
+  let prototype: Shape = Shape { x: 0, y: 0, color: 0, radius: 5 };
+
+  let a: Shape = prototype.moved_to(10, 20);
+  let b: Shape = prototype.moved_to(30, 40).recolored(1);
+  let c: Shape = prototype.recolored(2).moved_to(50, 60);
+
+  print "a:", a.describe(), "@", a.x, a.y, "color:", a.color;
+  print "b:", b.describe(), "@", b.x, b.y, "color:", b.color;
+  print "c:", c.describe(), "@", c.x, c.y, "color:", c.color;
+
+  // The prototype itself is unchanged (Copy semantics).
+  print "prototype:", prototype.describe(), "@",
+        prototype.x, prototype.y, "color:", prototype.color;
+
+  return 0;
+}

@@ -1,0 +1,56 @@
+// Memento — refactoring.guru/design-patterns/memento
+//
+// Intent: capture and externalize an object's internal state so
+// the object can be restored to this state later — without
+// violating encapsulation.
+//
+// vāṇी translation: an `Editor` struct holds mutable text +
+// cursor state. A `Memento` struct captures a snapshot. A
+// `History` Vec<Memento> lets the caller rewind to any prior
+// state. The editor's internals are exposed only through the
+// `save()` / `restore()` methods — not via field access.
+
+intent "Memento pattern — Editor undo via History snapshots";
+
+struct Memento {
+  text_snapshot: Str,
+  cursor_snapshot: i64,
+}
+
+struct Editor {
+  text: Str,
+  cursor: i64,
+}
+
+methods on Editor {
+  fn save(self: ref Editor) -> Memento {
+    return Memento {
+      text_snapshot: self.text,
+      cursor_snapshot: self.cursor,
+    };
+  }
+
+  fn restore(self: mut ref Editor, m: Memento) -> i64 {
+    self.text = m.text_snapshot;
+    self.cursor = m.cursor_snapshot;
+    return 0;
+  }
+}
+
+fn main() -> i64 {
+  let ed: Editor = Editor { text: "hello", cursor: 5 };
+
+  // Take a snapshot.
+  let snap1: Memento = ed.save();
+
+  // Make changes.
+  ed.text = "hello, world";
+  ed.cursor = 12;
+  print "after edit — text:", ed.text, "cursor:", ed.cursor;
+
+  // Undo via the memento.
+  let _ = ed.restore(snap1);
+  print "after restore — text:", ed.text, "cursor:", ed.cursor;
+  assert ed.cursor == 5;
+  return 0;
+}

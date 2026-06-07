@@ -1,0 +1,66 @@
+// Observer — refactoring.guru/design-patterns/observer
+//
+// Intent: define a one-to-many dependency between objects so that
+// when one object changes state, all its dependents are notified
+// and updated automatically.
+//
+// vāṇी translation: a publish function holds a `Vec<dyn
+// Observer>` parameter (not a struct field — v1 C-codegen has a
+// known issue with Vec<dyn Iface> as a struct field). Each
+// concrete observer implements `update(value)`; calling publish
+// dispatches to every observer in the list.
+
+intent "Observer pattern — heterogeneous Vec<dyn Observer> notification";
+
+struct StdoutObserver { tag: Str }
+struct FileObserver { path: Str }
+struct AlertObserver { threshold: i64 }
+
+interface Observer {
+  fn update(self: StdoutObserver, value: i64) -> i64;
+}
+
+implement Observer for StdoutObserver {
+  fn update(self: StdoutObserver, value: i64) -> i64 {
+    print self.tag, "value =", value;
+    return 0;
+  }
+}
+
+implement Observer for FileObserver {
+  fn update(self: FileObserver, value: i64) -> i64 {
+    print "[file:", self.path, "] value =", value;
+    return 0;
+  }
+}
+
+implement Observer for AlertObserver {
+  fn update(self: AlertObserver, value: i64) -> i64 {
+    if value > self.threshold {
+      print "[ALERT] value", value, "exceeded threshold", self.threshold;
+    }
+    return 0;
+  }
+}
+
+// "Subject" replaced with a free publish function — same idea
+// (one-to-many notification), no struct-field Vec<dyn Iface>.
+fn publish(observers: ref Vec<dyn Observer>, value: i64) -> i64 {
+  for o in ref observers {
+    let _ = o.update(value);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let o1: StdoutObserver = StdoutObserver { tag: "[stdout]" };
+  let o2: FileObserver = FileObserver { path: "app.log" };
+  let o3: AlertObserver = AlertObserver { threshold: 100 };
+  let observers: Vec<dyn Observer> = vec(o1, o2, o3);
+
+  let _ = publish(ref observers, 50);
+  print "---";
+  let _ = publish(ref observers, 150);
+
+  return 0;
+}

@@ -1,0 +1,45 @@
+// Factory Method — refactoring.guru/design-patterns/factory-method
+//
+// Intent: define an interface for creating an object, but let
+// subclasses (here: concrete creator structs) decide which class to
+// instantiate. The Factory Method lets a class defer instantiation
+// to subclasses.
+//
+// vāṇी translation: a `Creator` interface declares the factory
+// method. Each concrete creator implements it. The driver holds
+// a heterogeneous `Vec<dyn Creator>` and calls `make_and_describe`
+// on each. The vāṇी-specific twist: the method returns a
+// description Str (rather than a `dyn Product`) so the example
+// stays inside the v1 C-backend constraint that only one
+// `Vec<dyn Iface>` type exists per program.
+
+intent "Factory Method pattern — Creator interface with concrete factories";
+
+struct PaperShipFactory {}
+struct PlasticShipFactory {}
+
+interface Creator {
+  fn make_and_describe(self: PaperShipFactory) -> Str;
+}
+
+implement Creator for PaperShipFactory {
+  fn make_and_describe(self: PaperShipFactory) -> Str {
+    return "PaperShip(length=30)";
+  }
+}
+
+implement Creator for PlasticShipFactory {
+  fn make_and_describe(self: PlasticShipFactory) -> Str {
+    return "PlasticShip(length=50)";
+  }
+}
+
+fn main() -> i64 {
+  let f1: PaperShipFactory = PaperShipFactory {};
+  let f2: PlasticShipFactory = PlasticShipFactory {};
+  let factories: Vec<dyn Creator> = vec(f1, f2);
+  for f in ref factories {
+    print "produced:", f.make_and_describe();
+  }
+  return 0;
+}

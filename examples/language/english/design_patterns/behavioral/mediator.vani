@@ -1,0 +1,62 @@
+// Mediator — refactoring.guru/design-patterns/mediator
+//
+// Intent: define an object that encapsulates how a set of objects
+// interact. Mediator promotes loose coupling by keeping objects
+// from referring to each other explicitly.
+//
+// vāṇी translation: an `AirTrafficControl` struct (the mediator)
+// owns a list of `Plane` states. Each plane reports a status
+// change to the mediator instead of broadcasting directly to
+// other planes. The mediator decides who else needs to know.
+
+intent "Mediator pattern — ATC mediating Plane→Plane communication";
+
+struct Plane {
+  id: i64,
+  altitude: i64,
+}
+
+struct AirTrafficControl {
+  planes: Vec<Plane>,
+}
+
+methods on AirTrafficControl {
+  // The mediator centralizes the policy: when one plane changes
+  // altitude, planes within 1000 ft of the new altitude get a
+  // collision-warning broadcast.
+  fn report_altitude_change(self: mut ref AirTrafficControl, plane_id: i64, new_alt: i64) -> i64 {
+    return warn_others(ref self.planes, plane_id, new_alt);
+  }
+}
+
+fn warn_others(planes: ref Vec<Plane>, plane_id: i64, new_alt: i64) -> i64 {
+  let warned: i64 = 0;
+  for p in ref planes {
+    if p.id != plane_id {
+      let diff: i64 = p.altitude - new_alt;
+      if diff < 0 { diff = 0 - diff; }
+      if diff < 1000 {
+        print "  ATC: warn plane", p.id, "of plane", plane_id, "at altitude", new_alt;
+        warned = warned + 1;
+      }
+    }
+  }
+  return warned;
+}
+
+fn main() -> i64 {
+  let atc: AirTrafficControl = AirTrafficControl {
+    planes: vec(
+      Plane { id: 1, altitude: 5000 },
+      Plane { id: 2, altitude: 5500 },
+      Plane { id: 3, altitude: 8000 },
+    ),
+  };
+
+  // Plane 4 climbs to 5200 — ATC will warn planes 1 and 2
+  // (both within 1000 ft); plane 3 is too high to care.
+  let warnings: i64 = atc.report_altitude_change(4, 5200);
+  print "total warnings:", warnings;
+  assert warnings == 2;
+  return 0;
+}

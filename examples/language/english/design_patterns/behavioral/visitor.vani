@@ -1,0 +1,65 @@
+// Visitor — refactoring.guru/design-patterns/visitor
+//
+// Intent: represent an operation to be performed on the elements
+// of an object structure. Visitor lets you define a new operation
+// without changing the classes of the elements on which it
+// operates.
+//
+// vāṇी translation: a `Shape` struct uses a `kind` discriminator
+// (0=circle, 1=square). A `Visitor` interface declares one method
+// per shape-kind. Concrete visitors (`AreaVisitor`,
+// `PerimeterVisitor`) implement both. The shape dispatches to the
+// right visitor method based on its `kind`. Adding a new visitor
+// is a new struct + impl; adding a new shape needs touching every
+// visitor (the classic visitor trade-off).
+
+intent "Visitor pattern — Area / Perimeter visitors over circle/square shapes";
+
+struct Shape {
+  kind: i64,    // 0 = circle, 1 = square
+  size: i64,    // radius (circle) or side (square)
+}
+
+struct AreaVisitor {}
+struct PerimeterVisitor {}
+
+interface ShapeVisitor {
+  fn visit_circle(self: AreaVisitor, radius: i64) -> i64;
+  fn visit_square(self: AreaVisitor, side: i64) -> i64;
+}
+
+implement ShapeVisitor for AreaVisitor {
+  fn visit_circle(self: AreaVisitor, radius: i64) -> i64 {
+    return 3 * radius * radius;  // π ≈ 3 (integer approx)
+  }
+  fn visit_square(self: AreaVisitor, side: i64) -> i64 {
+    return side * side;
+  }
+}
+
+implement ShapeVisitor for PerimeterVisitor {
+  fn visit_circle(self: PerimeterVisitor, radius: i64) -> i64 {
+    return 6 * radius;  // 2πr ≈ 6r
+  }
+  fn visit_square(self: PerimeterVisitor, side: i64) -> i64 {
+    return 4 * side;
+  }
+}
+
+fn accept(s: ref Shape, v: dyn ShapeVisitor) -> i64 {
+  if s.kind == 0 {
+    return v.visit_circle(s.size);
+  }
+  return v.visit_square(s.size);
+}
+
+fn main() -> i64 {
+  let circle: Shape = Shape { kind: 0, size: 5 };
+  let square: Shape = Shape { kind: 1, size: 4 };
+
+  print "circle area:",      accept(ref circle, AreaVisitor {});       // 75
+  print "circle perimeter:", accept(ref circle, PerimeterVisitor {});  // 30
+  print "square area:",      accept(ref square, AreaVisitor {});       // 16
+  print "square perimeter:", accept(ref square, PerimeterVisitor {});  // 16
+  return 0;
+}

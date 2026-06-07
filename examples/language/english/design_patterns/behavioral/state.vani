@@ -1,0 +1,49 @@
+// State — refactoring.guru/design-patterns/state
+//
+// Intent: allow an object to alter its behavior when its internal
+// state changes. The object will appear to change its class.
+//
+// vāṇी translation: a `TrafficLight` struct holds a `state: i64`
+// (0=red, 1=yellow, 2=green). The `tick` method transitions
+// state and the behavior — what the light does on `tick` — differs
+// per state. vāṇी enums + match would also work, but the
+// integer-tag version composes more cleanly with the rest of
+// these examples.
+
+intent "State pattern — TrafficLight transitioning Red → Green → Yellow → Red";
+
+struct TrafficLight {
+  state: i64,  // 0 = red, 1 = green, 2 = yellow
+}
+
+methods on TrafficLight {
+  fn tick(self: mut ref TrafficLight) -> i64 {
+    if self.state == 0 {
+      print "  red → green (cars go)";
+      self.state = 1;
+    } else if self.state == 1 {
+      print "  green → yellow (slow down)";
+      self.state = 2;
+    } else {
+      print "  yellow → red (stop)";
+      self.state = 0;
+    }
+    return self.state;
+  }
+
+  fn label(self: ref TrafficLight) -> Str {
+    if self.state == 0 { return "red"; }
+    if self.state == 1 { return "green"; }
+    return "yellow";
+  }
+}
+
+fn main() -> i64 {
+  let tl: TrafficLight = TrafficLight { state: 0 };
+  print "start:", tl.label();
+  for i from 0 to 6 {
+    let _ = tl.tick();
+  }
+  print "end:", tl.label();
+  return 0;
+}

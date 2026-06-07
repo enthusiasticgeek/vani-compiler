@@ -1,0 +1,55 @@
+// Command — refactoring.guru/design-patterns/command
+//
+// Intent: encapsulate a request as an object, thereby letting you
+// parameterize clients with different requests, queue or log
+// requests, and support undoable operations.
+//
+// vāṇी translation: a `Command` interface with `execute(state)`.
+// Concrete commands (`IncrementCmd`, `DoubleCmd`, `ResetCmd`) each
+// know how to mutate a shared `i64` state. The driver collects
+// commands into a `Vec<dyn Command>` queue and executes them in
+// order. Adding a new command type doesn't touch the executor.
+
+intent "Command pattern — queueable commands operating on a shared counter";
+
+struct IncrementCmd { by: i64 }
+struct DoubleCmd {}
+struct ResetCmd {}
+
+interface Command {
+  fn execute(self: IncrementCmd, state: i64) -> i64;
+}
+
+implement Command for IncrementCmd {
+  fn execute(self: IncrementCmd, state: i64) -> i64 {
+    return state + self.by;
+  }
+}
+
+implement Command for DoubleCmd {
+  fn execute(self: DoubleCmd, state: i64) -> i64 {
+    return state * 2;
+  }
+}
+
+implement Command for ResetCmd {
+  fn execute(self: ResetCmd, state: i64) -> i64 {
+    return 0;
+  }
+}
+
+fn main() -> i64 {
+  // Build a command queue. Each command transforms the state.
+  let inc1: IncrementCmd = IncrementCmd { by: 1 };
+  let inc5: IncrementCmd = IncrementCmd { by: 5 };
+  let dbl: DoubleCmd = DoubleCmd {};
+  let queue: Vec<dyn Command> = vec(inc1, inc5, dbl, ResetCmd {}, IncrementCmd { by: 7 });
+
+  let state: i64 = 0;
+  for cmd in ref queue {
+    state = cmd.execute(state);
+    print "  state after cmd:", state;
+  }
+  print "final state:", state;
+  return 0;
+}

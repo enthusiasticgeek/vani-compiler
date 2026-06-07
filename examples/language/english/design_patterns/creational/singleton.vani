@@ -1,0 +1,42 @@
+// Singleton — refactoring.guru/design-patterns/singleton
+//
+// Intent: ensure a class has only one instance and provide a global
+// point of access to it.
+//
+// vāṇी translation: vāṇी has no globally-mutable storage by default
+// (affine ownership means a value has a single owner). The
+// canonical thread-safe singleton uses an `Atomic<T>` global
+// counter / state OR a `Mutex<T>` guarded record. This example
+// shows the simplest shape: an atomic counter used as a process-
+// wide "issued ID" service.
+//
+// The Singleton is a pattern many modern style guides discourage
+// (global mutable state is hard to test). vāṇी provides the
+// building blocks but encourages explicit dependency injection
+// instead — this example exists to map the pattern, not endorse
+// it.
+
+intent "Singleton pattern — process-wide atomic counter";
+
+// Singleton state: an Atomic<i64> that lives in main() and is
+// borrowed by all callers. vāṇी has no static-mutable globals;
+// the canonical "singleton" lives in main()'s scope and is
+// borrowed by reference.
+fn issue_id(counter: ref Atomic<i64>) -> i64 {
+  return atomic_fetch_add(counter, 1);
+}
+
+fn main() -> i64 {
+  let id_counter: Atomic<i64> = atomic_new(0);
+
+  let id1: i64 = issue_id(ref id_counter);
+  let id2: i64 = issue_id(ref id_counter);
+  let id3: i64 = issue_id(ref id_counter);
+
+  print "ids issued:", id1, id2, id3;
+  assert id1 == 0;
+  assert id2 == 1;
+  assert id3 == 2;
+
+  return 0;
+}

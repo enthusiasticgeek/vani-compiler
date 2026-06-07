@@ -1,0 +1,68 @@
+// Composite — refactoring.guru/design-patterns/composite
+//
+// Intent: compose objects into tree structures to represent
+// part-whole hierarchies. Composite lets clients treat individual
+// objects and compositions of objects uniformly.
+//
+// vāṇी translation: a `Node` struct uses a `kind` tag (0=leaf,
+// 1=branch) and one of two payload fields. The branch holds its
+// children as a fixed `[i64; 4]` array — vāṇी's v1 doesn't allow
+// enum destructure-bindings on Vec payloads, and arrays-as-
+// struct-field are Copy so the same node can be inspected
+// multiple times.
+
+intent "Composite pattern — uniform Leaf/Branch tree traversal";
+
+struct Node {
+  kind: i64,            // 0 = leaf, 1 = branch
+  leaf_value: i64,      // valid when kind == 0
+  branch_count: i64,    // number of children when kind == 1
+  branch_values: [i64; 4],  // up to 4 children when kind == 1
+}
+
+methods on Node {
+  fn sum(self: Node) -> i64 {
+    if self.kind == 0 {
+      return self.leaf_value;
+    }
+    let acc: i64 = 0;
+    let i: i64 = 0;
+    while i < self.branch_count {
+      acc = acc + self.branch_values[i];
+      i = i + 1;
+    }
+    return acc;
+  }
+}
+
+fn new_leaf(v: i64) -> Node {
+  return Node {
+    kind: 0,
+    leaf_value: v,
+    branch_count: 0,
+    branch_values: [0, 0, 0, 0],
+  };
+}
+
+fn new_branch_4(a: i64, b: i64, c: i64, d: i64) -> Node {
+  return Node {
+    kind: 1,
+    leaf_value: 0,
+    branch_count: 4,
+    branch_values: [a, b, c, d],
+  };
+}
+
+fn main() -> i64 {
+  let leaf: Node = new_leaf(5);
+  let branch: Node = new_branch_4(1, 2, 3, 4);
+
+  let leaf_sum: i64 = leaf.sum();
+  let branch_sum: i64 = branch.sum();
+
+  print "leaf sum:", leaf_sum;       // 5
+  print "branch sum:", branch_sum;   // 10
+  assert leaf_sum == 5;
+  assert branch_sum == 10;
+  return 0;
+}

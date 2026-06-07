@@ -10,118 +10,15 @@ Pronounced **vaa-NEE** (Sanskrit *vāṇī* — long-a, retroflex-n, long-i;
 stress on the second syllable). वाणी is the Sanskrit word for *speech*,
 *voice*, or *language itself*.
 
-## Language targeting (priority order)
-
-vāṇी treats human-spoken languages as a first-class concern. The
-adoption order is **Indian subcontinent languages first**, then
-global. The reasoning: SOV (Subject–Object–Verb) word order +
-Devanagari-script-or-relative writing systems are widely shared
-across the Indian subcontinent, so a single parser + lexer
-abstraction extends naturally across all of them. After that, the
-global rollout adds languages with significantly different grammar
-(SVO, head-final, RTL, logographic, etc.) one at a time.
-
-### Tier I — Indian subcontinent (priority)
-
-> Major languages of the Indian subcontinent, ordered by speaker
-> count + typological proximity to the already-shipped Sanskrit-
-> derived three. Devanagari-script languages are easiest to wire
-> up (they share the existing lexer pipeline); Brahmi-derived
-> non-Devanagari scripts (Tamil / Telugu / Kannada / Malayalam /
-> Gujarati / Punjabi-Gurmukhi / Bengali / Odia / Assamese / Sinhala)
-> require a per-script Unicode-block extension in
-> `enforce_language_purity` but share the SOV grammar pattern.
-
-| # | Language | Script | Status |
-|---|---|---|---|
-| 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ **SHIPPED** — 91 keyword aliases, 8 SOV statement shapes, per-dialect purity pragma, 9 example programs |
-| 2 | Hindi (*hindī*) | Devanagari | ✅ **SHIPPED** — same surface as Sanskrit; 9 example programs |
-| 3 | Marathi (*marāṭhī*) | Devanagari | ✅ **SHIPPED** — same surface; 9 example programs |
-| 4 | Bengali (*baṅlā*) | Bengali (Brahmi-derived) | Queued — most speakers in the subcontinent after Hindi; SOV grammar shared |
-| 5 | Gujarati (*gujarātī*) | Gujarati (Brahmi-derived) | Queued — close to Marathi grammatically |
-| 6 | Punjabi (*pañjābī*) | Gurmukhi (Brahmi-derived) + Shahmukhi (Perso-Arabic, RTL) | Queued — bi-script: Gurmukhi for Indian Punjabi, Shahmukhi for Pakistani Punjabi |
-| 7 | Tamil (*tamiḻ*) | Tamil (Brahmi-derived, distinct family — Dravidian, not Indo-Aryan) | Queued — agglutinative, postpositional; SOV; different keyword roots (no tatsama from Sanskrit by default) |
-| 8 | Telugu (*telugu*) | Telugu | Queued — Dravidian SOV |
-| 9 | Kannada (*kannaḍa*) | Kannada | Queued — Dravidian SOV |
-| 10 | Malayalam (*malayāḷam*) | Malayalam | Queued — Dravidian SOV |
-| 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | Queued — Hindi-Urdu shared vocabulary at the spoken level; surface forks at script + register |
-| 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | Queued — Indo-Aryan SOV |
-| 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | Queued — Indo-Aryan SOV |
-| 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) + Devanagari (rare) | Queued — bi-script; Indo-Aryan SOV |
-| 15 | Nepali (*nepālī*) | Devanagari | Queued — direct Indo-Aryan SOV; trivial extension since Devanagari pipeline shipped |
-| 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | Queued — Indo-Aryan SOV; Goan and Karnataka variants |
-| 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | Queued — Indo-Aryan SOV |
-| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | Queued — Indo-Aryan SOV; Sri Lankan |
-| ... | (smaller subcontinent languages) | various | Queued |
-
-### Tier II — Global (after Tier I)
-
-> Major world languages ordered by the user's stated rollout
-> priority. Each requires a new keyword table; grammar adaptations
-> (SVO order for most, head-final for Japanese, RTL for Arabic
-> already covered in Tier I) drop in as separate parser hooks.
-
-| # | Language | Script | Word order | Status |
-|---|---|---|---|---|
-| 1 | Spanish (*español*) | Latin | SVO | Queued — Tier II priority 1 |
-| 2 | Mandarin Chinese (*zhōngwén*) | Han logograms | SVO + topic-prominent | Queued — Tier II priority 2; tokenizer needs CJK word boundaries |
-| 3 | Japanese (*nihongo*) | Kanji + Hiragana + Katakana | **SOV** | Queued — Tier II priority 3; vāṇी's SOV plumbing transfers directly |
-| 4 | Russian (*russkiy*) | Cyrillic | SVO + free order (case-marked) | Queued — Tier II priority 4 |
-| 5 | German (*deutsch*) | Latin | V2 + SOV in subordinate clauses | Queued — Tier II priority 5; partial SOV reuse |
-| 6 | French (*français*) | Latin | SVO | Queued — Tier II priority 6 |
-| ... | Arabic, Portuguese, Korean, Vietnamese, Indonesian, Swahili, Turkish, ... | various | various | Queued — Tier II tail |
-
-### Why Indian-subcontinent-first
-
-1. **Underserved by mainstream programming languages.** The
-   subcontinent's 1.4B speakers + ~600M secondary speakers have
-   essentially zero programming-language support in their mother
-   tongues. Every mainstream language assumes English keywords.
-2. **Typological cohesion**. SOV + postpositions + Brahmi-or-
-   relative scripts mean the parser/lexer abstraction generalizes
-   cleanly across the family. Tier I rolls out fast once the first
-   three languages ship (which they have).
-3. **Cultural alignment.** vāṇी's name (वाणी = "speech"), Sanskrit
-   provenance, and the अ → ज्ञ pronunciation conventions all root
-   the project in the subcontinent. Honoring that with
-   first-class support is the design promise.
-
-After the subcontinent family is comprehensive (~18 languages in
-Tier I), Tier II opens with Spanish — the simplest non-SOV
-addition — and works through the global priority list.
-
-> **Status (2026-06-06 evening)**: SOV + natural-speech coding for
-> Sanskrit / Hindi / Marathi is **substantially shipped**:
->
-> - **91 Devanagari aliases** cover **46 of 46** structure keywords
->   ([lexer.rs:222–372](src/lexer.rs#L222-L372)) — full coverage.
-> - **SOV word order** wired for **6 statement shapes**: range `for`
->   loops + **`let` binding verb-at-end** (`x: i64 = 5 माना;`) +
->   four verb-at-end stmts (`return` / `print` / `assert` /
->   `prove`)
->   ([parser.rs:2277–2328](src/parser.rs#L2277-L2328) +
->   [parser.rs:3404–3434](src/parser.rs#L3404-L3434)).
-> - Other constructs (`if`, `while`, `match`, `fn`, `struct`,
->   `enum`) **stay keyword-first by design** — Sanskrit
->   `यदि...तर्हि` / Hindi `अगर...तो` are naturally keyword-first
->   in Indo-Aryan grammar; forcing verb-at-end here would feel
->   unnatural. See [TODO.md](TODO.md) §*Why some constructs stay
->   keyword-first* for the per-construct rationale.
-> - **Per-file purity** is at the script level (English vs
->   Devanagari, [lexer.rs:393–441](src/lexer.rs#L393-L441)). Finer-
->   grained Sanskrit-vs-Hindi-vs-Marathi enforcement is deferred
->   pending grammar-consultant review (SOV-S8).
-> - **Cross-language translator** ships at
->   [`tools/vani_translate.py`](tools/vani_translate.py) — rewrite
->   any `.vani` source between English / Sanskrit / Hindi /
->   Marathi, round-trip parity verified on 8 representative
->   examples.
-> - **Global languages** (Spanish, Mandarin, etc.) — **not started**.
->   The lexer table is the right shape to receive them; the work is
->   curating the keyword sets.
->
-> See [TODO.md](TODO.md) §*Open work — DEPENDENCY-ORDERED* for the
-> dependency-ordered remaining queue.
+vāṇī is a working systems language. The default surface is
+English-keyword + ASCII identifiers and reads like a tightened
+Rust / C++. The compiler also natively understands Devanagari
+keywords + identifiers + numerals, with optional Sanskrit / Hindi
+/ Marathi SOV (verb-final) statement shapes — that's covered at
+the bottom of this file in *Language targeting*. The two surfaces
+share an identical AST and runtime model; nothing about the
+Devanagari support changes how the English-default experience
+works.
 
 ## Philosophy
 
@@ -3820,6 +3717,131 @@ example programs are all welcome.
   layout, and an end-to-end "add a feature" walkthrough.
 - [STATUS.md](STATUS.md) — single-page snapshot of the current feature
   set, the priority-ordered TODO queue, and known issues.
+
+## Language targeting (Indian-subcontinent-first, then global)
+
+> The English-keyword default is the day-one path for most users
+> and won't change. This section covers the natural-language
+> rollout queued on top of it. Skip if you only care about the
+> English surface.
+
+vāṇी treats human-spoken languages as a first-class concern in
+addition to its English default. The adoption order is **Indian
+subcontinent languages first**, then global. The reasoning: SOV
+(Subject–Object–Verb) word order + Devanagari-script-or-relative
+writing systems are widely shared across the Indian subcontinent,
+so a single parser + lexer abstraction extends naturally across
+all of them. After that, the global rollout adds languages with
+significantly different grammar (SVO, head-final, RTL,
+logographic, etc.) one at a time.
+
+### Tier I — Indian subcontinent (priority)
+
+> Major languages of the Indian subcontinent, ordered by speaker
+> count + typological proximity to the already-shipped Sanskrit-
+> derived three. Devanagari-script languages are easiest to wire
+> up (they share the existing lexer pipeline); Brahmi-derived
+> non-Devanagari scripts (Tamil / Telugu / Kannada / Malayalam /
+> Gujarati / Punjabi-Gurmukhi / Bengali / Odia / Assamese / Sinhala)
+> require a per-script Unicode-block extension in
+> `enforce_language_purity` but share the SOV grammar pattern.
+
+| # | Language | Script | Status |
+|---|---|---|---|
+| 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ **SHIPPED** — 91 keyword aliases, 8 SOV statement shapes, per-dialect purity pragma, 9 example programs |
+| 2 | Hindi (*hindī*) | Devanagari | ✅ **SHIPPED** — same surface as Sanskrit; 9 example programs |
+| 3 | Marathi (*marāṭhī*) | Devanagari | ✅ **SHIPPED** — same surface; 9 example programs |
+| 4 | Bengali (*baṅlā*) | Bengali (Brahmi-derived) | Queued — most speakers in the subcontinent after Hindi; SOV grammar shared |
+| 5 | Gujarati (*gujarātī*) | Gujarati (Brahmi-derived) | Queued — close to Marathi grammatically |
+| 6 | Punjabi (*pañjābī*) | Gurmukhi (Brahmi-derived) + Shahmukhi (Perso-Arabic, RTL) | Queued — bi-script: Gurmukhi for Indian Punjabi, Shahmukhi for Pakistani Punjabi |
+| 7 | Tamil (*tamiḻ*) | Tamil (Brahmi-derived, distinct family — Dravidian, not Indo-Aryan) | Queued — agglutinative, postpositional; SOV; different keyword roots (no tatsama from Sanskrit by default) |
+| 8 | Telugu (*telugu*) | Telugu | Queued — Dravidian SOV |
+| 9 | Kannada (*kannaḍa*) | Kannada | Queued — Dravidian SOV |
+| 10 | Malayalam (*malayāḷam*) | Malayalam | Queued — Dravidian SOV |
+| 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | Queued — Hindi-Urdu shared vocabulary at the spoken level; surface forks at script + register |
+| 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | Queued — Indo-Aryan SOV |
+| 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | Queued — Indo-Aryan SOV |
+| 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) + Devanagari (rare) | Queued — bi-script; Indo-Aryan SOV |
+| 15 | Nepali (*nepālī*) | Devanagari | Queued — direct Indo-Aryan SOV; trivial extension since Devanagari pipeline shipped |
+| 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | Queued — Indo-Aryan SOV; Goan and Karnataka variants |
+| 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | Queued — Indo-Aryan SOV |
+| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | Queued — Indo-Aryan SOV; Sri Lankan |
+| ... | (smaller subcontinent languages) | various | Queued |
+
+### Tier II — Global (after Tier I)
+
+> Major world languages ordered by the user's stated rollout
+> priority. Each requires a new keyword table; grammar adaptations
+> (SVO order for most, head-final for Japanese, RTL for Arabic
+> already covered in Tier I) drop in as separate parser hooks.
+
+| # | Language | Script | Word order | Status |
+|---|---|---|---|---|
+| 1 | Spanish (*español*) | Latin | SVO | Queued — Tier II priority 1 |
+| 2 | Mandarin Chinese (*zhōngwén*) | Han logograms | SVO + topic-prominent | Queued — Tier II priority 2; tokenizer needs CJK word boundaries |
+| 3 | Japanese (*nihongo*) | Kanji + Hiragana + Katakana | **SOV** | Queued — Tier II priority 3; vāṇी's SOV plumbing transfers directly |
+| 4 | Russian (*russkiy*) | Cyrillic | SVO + free order (case-marked) | Queued — Tier II priority 4 |
+| 5 | German (*deutsch*) | Latin | V2 + SOV in subordinate clauses | Queued — Tier II priority 5; partial SOV reuse |
+| 6 | French (*français*) | Latin | SVO | Queued — Tier II priority 6 |
+| ... | Arabic, Portuguese, Korean, Vietnamese, Indonesian, Swahili, Turkish, ... | various | various | Queued — Tier II tail |
+
+### Why Indian-subcontinent-first
+
+1. **Underserved by mainstream programming languages.** The
+   subcontinent's 1.4B speakers + ~600M secondary speakers have
+   essentially zero programming-language support in their mother
+   tongues. Every mainstream language assumes English keywords.
+2. **Typological cohesion**. SOV + postpositions + Brahmi-or-
+   relative scripts mean the parser/lexer abstraction generalizes
+   cleanly across the family. Tier I rolls out fast once the first
+   three languages ship (which they have).
+3. **Cultural alignment.** vāṇी's name (वाणी = "speech"), Sanskrit
+   provenance, and the अ → ज्ञ pronunciation conventions all root
+   the project in the subcontinent. Honoring that with
+   first-class support is the design promise.
+
+After the subcontinent family is comprehensive (~18 languages in
+Tier I), Tier II opens with Spanish — the simplest non-SOV
+addition — and works through the global priority list.
+
+> **Status (2026-06-06 evening)**: SOV + natural-speech coding for
+> Sanskrit / Hindi / Marathi is **substantially shipped**:
+>
+> - **91 Devanagari aliases** cover **46 of 46** structure keywords
+>   ([lexer.rs:222–372](src/lexer.rs#L222-L372)) — full coverage.
+> - **SOV word order** wired for **8 statement shapes**: range `for`
+>   loops + **`let` binding verb-at-end** (`x: i64 = 5 माना;`) +
+>   `if`/`else` block-form + `while` block-form + four verb-at-end
+>   stmts (`return` / `print` / `assert` / `prove`)
+>   ([parser.rs:2277–2328](src/parser.rs#L2277-L2328) +
+>   [parser.rs:3404–3434](src/parser.rs#L3404-L3434)).
+> - Other constructs (`fn`, `struct`, `enum` declarations,
+>   `match`-as-stmt) **stay keyword-first by design** — Sanskrit
+>   `यदि...तर्हि` / Hindi `अगर...तो` are naturally keyword-first
+>   in Indo-Aryan grammar; forcing verb-at-end here would feel
+>   unnatural. See [TODO.md](TODO.md) §*Why some constructs stay
+>   keyword-first* for the per-construct rationale.
+> - **Per-file purity** is at the script level (English vs
+>   Devanagari, [lexer.rs:393–441](src/lexer.rs#L393-L441)). Finer-
+>   grained Sanskrit-vs-Hindi-vs-Marathi enforcement opt-in via
+>   `// vani-lang: <dialect>` pragma (SOV-S8).
+> - **Dialect-aware error rendering**: pragma-tagged files render
+>   diagnostics with Sanskrit / Hindi / Marathi labels +
+>   message-prefix translations.
+> - **Devanagari numerals + type names + identifiers** all
+>   first-class. Pure-Devanagari programs run on both backends —
+>   see [`examples/language/sanskrit/pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani).
+> - **Cross-language translator** ships at
+>   [`tools/vani_translate.py`](tools/vani_translate.py) — rewrite
+>   any `.vani` source between English / Sanskrit / Hindi /
+>   Marathi, round-trip parity verified on 8 representative
+>   examples.
+> - **Global languages** (Spanish, Mandarin, etc.) — **not started**.
+>   The lexer table is the right shape to receive them; the work is
+>   curating the keyword sets.
+>
+> See [TODO.md](TODO.md) §*Open work — DEPENDENCY-ORDERED* for the
+> dependency-ordered remaining queue.
 
 ## License
 

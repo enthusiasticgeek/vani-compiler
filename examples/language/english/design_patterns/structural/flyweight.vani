@@ -1,0 +1,50 @@
+// Flyweight — refactoring.guru/design-patterns/flyweight
+//
+// Intent: use sharing to support large numbers of fine-grained
+// objects efficiently. Separate intrinsic (shared) state from
+// extrinsic (per-instance) state.
+//
+// vāṇी translation: a forest with millions of trees would be
+// wasteful if each tree owned its own (texture, color, mesh)
+// triple. The Flyweight: store one `TreeType` per unique
+// (texture, color, mesh) — that's the intrinsic shared state —
+// and each Tree instance just holds (x, y, type_index). The type
+// table is a small `Vec<TreeType>`.
+
+intent "Flyweight pattern — TreeType shared across many Tree instances";
+
+struct TreeType {
+  name: Str,
+  color: i64,  // pretend this is a 24-bit RGB
+}
+
+struct Tree {
+  x: i64,
+  y: i64,
+  type_index: i64,  // index into the TreeType table
+}
+
+fn main() -> i64 {
+  // The flyweight table: only TWO distinct TreeTypes shared
+  // across many Trees.
+  let types: Vec<TreeType> = vec(
+    TreeType { name: "pine",   color: 0x224422 },
+    TreeType { name: "oak",    color: 0x664433 },
+  );
+
+  // Many trees, but only 2 unique TreeType allocations.
+  let trees: Vec<Tree> = vec(
+    Tree { x: 10, y: 10, type_index: 0 },  // pine
+    Tree { x: 20, y: 15, type_index: 1 },  // oak
+    Tree { x: 30, y: 20, type_index: 0 },  // pine (shares)
+    Tree { x: 40, y: 25, type_index: 0 },  // pine (shares)
+    Tree { x: 50, y: 30, type_index: 1 },  // oak (shares)
+  );
+
+  for t in ref trees {
+    // Reference into the flyweight table — no annotation needed.
+    let ty_name: Str = types[t.type_index].name;
+    print "tree at", t.x, t.y, "is a", ty_name;
+  }
+  return 0;
+}

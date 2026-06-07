@@ -1,0 +1,63 @@
+// Decorator — refactoring.guru/design-patterns/decorator
+//
+// Intent: attach additional responsibilities to an object
+// dynamically. Decorators provide a flexible alternative to
+// subclassing for extending functionality.
+//
+// vāṇी translation: a `Notifier` interface with `send(msg) -> i64`
+// (count of channels notified). A base `EmailNotifier` returns 1.
+// Decorators wrap a base and add their own count: `SmsDecorator`
+// adds 1 for SMS, `SlackDecorator` adds 1 for Slack. Wrapping
+// composes the counts.
+//
+// vāṇी note: `dyn` field-typed wrapping (a decorator holding
+// `dyn Notifier`) requires Box-like ownership. v1 uses an
+// enum-of-base + integer-channel-flag composition that achieves
+// the same per-instance configurable behavior.
+
+intent "Decorator pattern — composed Notifier with SMS / Slack extensions";
+
+struct Notifier {
+  email: bool,
+  sms: bool,
+  slack: bool,
+}
+
+methods on Notifier {
+  fn with_sms(self: Notifier) -> Notifier {
+    return Notifier { email: self.email, sms: true, slack: self.slack };
+  }
+  fn with_slack(self: Notifier) -> Notifier {
+    return Notifier { email: self.email, sms: self.sms, slack: true };
+  }
+  fn send(self: Notifier, msg: Str) -> i64 {
+    let count: i64 = 0;
+    if self.email { count = count + 1; print "email →", msg; }
+    if self.sms   { count = count + 1; print "  sms →", msg; }
+    if self.slack { count = count + 1; print "slack →", msg; }
+    return count;
+  }
+}
+
+fn new_email_notifier() -> Notifier {
+  return Notifier { email: true, sms: false, slack: false };
+}
+
+fn main() -> i64 {
+  // Base behavior — email only.
+  let base: Notifier = new_email_notifier();
+  let n1: i64 = base.send("server down");
+  assert n1 == 1;
+
+  // Decorate with SMS.
+  let with_sms: Notifier = new_email_notifier().with_sms();
+  let n2: i64 = with_sms.send("server up");
+  assert n2 == 2;
+
+  // Decorate with SMS + Slack — composition is additive.
+  let full: Notifier = new_email_notifier().with_sms().with_slack();
+  let n3: i64 = full.send("deploy complete");
+  assert n3 == 3;
+
+  return 0;
+}

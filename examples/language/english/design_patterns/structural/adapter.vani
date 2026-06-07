@@ -1,0 +1,47 @@
+// Adapter — refactoring.guru/design-patterns/adapter
+//
+// Intent: convert the interface of a class into another interface
+// clients expect. Adapter lets classes work together that couldn't
+// otherwise because of incompatible interfaces.
+//
+// vāṇी translation: an existing `XmlData` struct exposes only a
+// `read_xml()` method. The driver wants the `JsonReader`
+// interface. The `XmlToJsonAdapter` struct wraps an `XmlData`
+// and implements `JsonReader` by translating each call.
+
+intent "Adapter pattern — XmlData adapted to a JsonReader interface";
+
+struct XmlData { payload: Str }
+
+methods on XmlData {
+  fn read_xml(self: XmlData) -> Str {
+    return "<note>hello</note>";
+  }
+}
+
+interface JsonReader {
+  fn read_json(self: XmlToJsonAdapter) -> Str;
+}
+
+struct XmlToJsonAdapter { source: XmlData }
+
+implement JsonReader for XmlToJsonAdapter {
+  fn read_json(self: XmlToJsonAdapter) -> Str {
+    // In real code we'd parse the XML and re-emit as JSON;
+    // here we just witness that the adapter translated.
+    let _xml: Str = self.source.read_xml();
+    return "{\"note\":\"hello\"}";
+  }
+}
+
+fn consume_json(r: dyn JsonReader) -> i64 {
+  print "json:", r.read_json();
+  return 0;
+}
+
+fn main() -> i64 {
+  let raw: XmlData = XmlData { payload: "..." };
+  let adapter: XmlToJsonAdapter = XmlToJsonAdapter { source: raw };
+  let _ = consume_json(adapter);
+  return 0;
+}

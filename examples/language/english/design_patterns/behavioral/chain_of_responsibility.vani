@@ -1,0 +1,45 @@
+// Chain of Responsibility — refactoring.guru/design-patterns/chain-of-responsibility
+//
+// Intent: avoid coupling the sender of a request to its receiver
+// by giving more than one object a chance to handle the request.
+// Chain the receiving objects and pass the request along the
+// chain until an object handles it.
+//
+// vāṇी translation: a chain of `Handler` structs each holds a
+// minimum-severity threshold. The driver loops through the
+// `Vec<Handler>` and the FIRST handler whose threshold matches
+// the incoming severity handles the message; subsequent handlers
+// are skipped.
+
+intent "Chain of Responsibility — log severity dispatched along a handler chain";
+
+struct Handler {
+  name: Str,
+  min_severity: i64,
+}
+
+fn dispatch(handlers: ref Vec<Handler>, message: Str, severity: i64) -> Str {
+  for h in ref handlers {
+    if severity >= h.min_severity {
+      return h.name;  // first handler that accepts wins
+    }
+  }
+  return "unhandled";
+}
+
+fn main() -> i64 {
+  // Severity scale: 0=debug, 1=info, 2=warn, 3=error.
+  let chain: Vec<Handler> = vec(
+    Handler { name: "ErrorPager",      min_severity: 3 },
+    Handler { name: "WarnSlack",       min_severity: 2 },
+    Handler { name: "InfoFile",        min_severity: 1 },
+    Handler { name: "DebugStdout",     min_severity: 0 },
+  );
+
+  print "severity 3 ->", dispatch(ref chain, "db down", 3);
+  print "severity 2 ->", dispatch(ref chain, "slow query", 2);
+  print "severity 1 ->", dispatch(ref chain, "deploy ok", 1);
+  print "severity 0 ->", dispatch(ref chain, "trace", 0);
+
+  return 0;
+}

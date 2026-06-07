@@ -1,0 +1,58 @@
+// Iterator — refactoring.guru/design-patterns/iterator
+//
+// Intent: provide a way to access the elements of an aggregate
+// object sequentially without exposing its underlying
+// representation.
+//
+// vāṇी translation: vāṇी's `for x in xs` syntax IS the iterator
+// pattern at the language level — the `Vec<T>` aggregate exposes
+// element-by-element access without revealing storage details.
+// This example shows a manual iterator struct alongside the
+// built-in form, demonstrating both the pattern and how it
+// composes with `.map` / `.filter` / `.fold` combinators.
+
+intent "Iterator pattern — manual + idiomatic for-in / combinator forms";
+
+// Manual iterator: a struct that holds the data + a cursor.
+struct ManualIter {
+  data: [i64; 5],
+  cursor: i64,
+}
+
+methods on ManualIter {
+  fn has_next(self: ref ManualIter) -> bool {
+    return self.cursor < 5;
+  }
+  fn next(self: mut ref ManualIter) -> i64 {
+    let v: i64 = self.data[self.cursor];
+    self.cursor = self.cursor + 1;
+    return v;
+  }
+}
+
+fn main() -> i64 {
+  // Manual iterator: explicit has_next + next loop.
+  let it: ManualIter = ManualIter { data: [10, 20, 30, 40, 50], cursor: 0 };
+  let total_manual: i64 = 0;
+  while it.has_next() {
+    total_manual = total_manual + it.next();
+  }
+  print "manual iterator total:", total_manual;  // 150
+
+  // Idiomatic for-in (Iterator protocol baked into the language).
+  let xs: Vec<i64> = vec(10, 20, 30, 40, 50);
+  let total_for: i64 = 0;
+  for x in ref xs {
+    total_for = total_for + x;
+  }
+  print "for-in total:", total_for;  // 150
+
+  // Iterator combinator form via vāṇी's Vec.fold.
+  let total_fold: i64 = xs.fold(0, |acc, x| acc + x);
+  print "fold total:", total_fold;  // 150
+
+  assert total_manual == 150;
+  assert total_for == 150;
+  assert total_fold == 150;
+  return 0;
+}

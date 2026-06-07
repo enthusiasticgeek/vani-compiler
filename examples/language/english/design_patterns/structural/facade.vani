@@ -1,0 +1,44 @@
+// Facade — refactoring.guru/design-patterns/facade
+//
+// Intent: provide a unified interface to a set of interfaces in a
+// subsystem. Facade defines a higher-level interface that makes
+// the subsystem easier to use.
+//
+// vāṇी translation: three "subsystem" functions handle low-level
+// video conversion steps (probe / decode / encode). A `convert`
+// facade function wires them together so callers don't need to
+// know about each step.
+
+intent "Facade pattern — convert(input) wrapping probe + decode + encode";
+
+fn subsys_probe(path: Str) -> i64 {
+  // Returns the codec id discovered in `path`. Stub: pretend it's 42.
+  return 42;
+}
+
+fn subsys_decode(codec_id: i64, path: Str) -> i64 {
+  // Returns the number of frames decoded. Stub: codec id * 10.
+  return codec_id * 10;
+}
+
+fn subsys_encode(frames: i64, target: i64) -> i64 {
+  // Returns size in bytes of the re-encoded output. Stub.
+  return frames * target;
+}
+
+// THE FACADE: callers see exactly one function. The subsystem
+// stays available for advanced users who need direct access.
+fn convert(input: Str, target_quality: i64) -> i64 {
+  let codec: i64 = subsys_probe(input);
+  let frames: i64 = subsys_decode(codec, input);
+  let bytes: i64 = subsys_encode(frames, target_quality);
+  return bytes;
+}
+
+fn main() -> i64 {
+  let result: i64 = convert("movie.mkv", 5);
+  print "encoded size:", result;
+  // 42 * 10 * 5 = 2100
+  assert result == 2100;
+  return 0;
+}

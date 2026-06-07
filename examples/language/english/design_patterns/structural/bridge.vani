@@ -1,0 +1,62 @@
+// Bridge — refactoring.guru/design-patterns/bridge
+//
+// Intent: decouple an abstraction from its implementation so that
+// the two can vary independently. Composition over inheritance.
+//
+// vāṇी translation: an abstraction `Shape` (Circle/Square here)
+// holds a reference to a `Renderer` (Vector/Raster). Adding a new
+// shape doesn't touch renderers; adding a new renderer doesn't
+// touch shapes. The bridge is the `renderer_kind: i64` field on
+// the shape that selects rendering style at call time.
+//
+// vāṇी note: a full bridge with `Box<dyn Renderer>` field would
+// need `Box`-like ownership of an interface object. v1 uses an
+// integer discriminator (0 = vector, 1 = raster) and a free
+// function that dispatches — same shape, simpler types.
+
+intent "Bridge pattern — Shape × Renderer composition without inheritance";
+
+fn render_vector(name: Str, size: i64) -> Str {
+  return "[vector]";
+}
+
+fn render_raster(name: Str, size: i64) -> Str {
+  return "[raster]";
+}
+
+struct Circle { radius: i64, renderer_kind: i64 }
+struct Square { side: i64, renderer_kind: i64 }
+
+methods on Circle {
+  fn draw(self: Circle) -> Str {
+    if self.renderer_kind == 0 {
+      return render_vector("circle", self.radius);
+    } else {
+      return render_raster("circle", self.radius);
+    }
+  }
+}
+
+methods on Square {
+  fn draw(self: Square) -> Str {
+    if self.renderer_kind == 0 {
+      return render_vector("square", self.side);
+    } else {
+      return render_raster("square", self.side);
+    }
+  }
+}
+
+fn main() -> i64 {
+  let c_vec: Circle = Circle { radius: 5, renderer_kind: 0 };
+  let c_ras: Circle = Circle { radius: 5, renderer_kind: 1 };
+  let s_vec: Square = Square { side: 7, renderer_kind: 0 };
+  let s_ras: Square = Square { side: 7, renderer_kind: 1 };
+
+  print "circle vector:", c_vec.draw();
+  print "circle raster:", c_ras.draw();
+  print "square vector:", s_vec.draw();
+  print "square raster:", s_ras.draw();
+
+  return 0;
+}

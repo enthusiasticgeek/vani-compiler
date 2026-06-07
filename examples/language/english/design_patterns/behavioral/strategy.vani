@@ -1,0 +1,49 @@
+// Strategy — refactoring.guru/design-patterns/strategy
+//
+// Intent: define a family of algorithms, encapsulate each one,
+// and make them interchangeable. Strategy lets the algorithm
+// vary independently from clients that use it.
+//
+// vāṇी translation: a `SortStrategy` interface declares
+// `name() -> Str`. Concrete strategies (`Ascending`, `Descending`,
+// `ByEven`) implement it. A `Sorter` struct holds the strategy
+// as a `dyn SortStrategy`-typed field and dispatches at call
+// time. Swapping strategies needs no recompile of `Sorter`.
+
+intent "Strategy pattern — pluggable sort strategies via dyn dispatch";
+
+struct Ascending {}
+struct Descending {}
+struct ByEven {}
+
+interface SortStrategy {
+  fn name(self: Ascending) -> Str;
+}
+
+implement SortStrategy for Ascending {
+  fn name(self: Ascending) -> Str { return "ascending"; }
+}
+
+implement SortStrategy for Descending {
+  fn name(self: Descending) -> Str { return "descending"; }
+}
+
+implement SortStrategy for ByEven {
+  fn name(self: ByEven) -> Str { return "by-even-first"; }
+}
+
+fn run_with(s: dyn SortStrategy, xs: ref Vec<i64>) -> i64 {
+  // Stub: in real code each strategy would do its sort. Here
+  // we just witness which strategy was selected.
+  print "using strategy:", s.name(), "on", len(xs), "items";
+  return 0;
+}
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(5, 3, 9, 1, 7);
+
+  let _ = run_with(Ascending {}, ref xs);
+  let _ = run_with(Descending {}, ref xs);
+  let _ = run_with(ByEven {}, ref xs);
+  return 0;
+}

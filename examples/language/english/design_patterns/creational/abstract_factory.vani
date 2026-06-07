@@ -1,0 +1,49 @@
+// Abstract Factory — refactoring.guru/design-patterns/abstract-factory
+//
+// Intent: provide an interface for creating families of related or
+// dependent objects without specifying their concrete classes.
+//
+// vāṇी translation: a `GUIFactory` interface declares two factory
+// methods — `make_button_label` and `make_checkbox_label`. Each
+// concrete factory (WinFactory, MacFactory) implements both,
+// returning Strs that name the matching platform-specific widget.
+// The driver picks a factory at startup and uses it to build a
+// consistent set of widgets.
+
+intent "Abstract Factory pattern — families of related products";
+
+struct WinFactory {}
+struct MacFactory {}
+
+interface GUIFactory {
+  fn make_button_label(self: WinFactory) -> Str;
+  fn make_checkbox_label(self: WinFactory) -> Str;
+}
+
+implement GUIFactory for WinFactory {
+  fn make_button_label(self: WinFactory) -> Str { return "Win/Button"; }
+  fn make_checkbox_label(self: WinFactory) -> Str { return "Win/Checkbox"; }
+}
+
+implement GUIFactory for MacFactory {
+  fn make_button_label(self: MacFactory) -> Str { return "Mac/Button"; }
+  fn make_checkbox_label(self: MacFactory) -> Str { return "Mac/Checkbox"; }
+}
+
+// The driver doesn't care WHICH platform's factory it holds; the
+// family of products it gets back is consistent within that
+// factory's platform.
+fn render_ui(f: dyn GUIFactory) -> i64 {
+  print "rendering:", f.make_button_label(), "+", f.make_checkbox_label();
+  return 0;
+}
+
+fn main() -> i64 {
+  let win: WinFactory = WinFactory {};
+  let _ = render_ui(win);
+
+  let mac: MacFactory = MacFactory {};
+  let _ = render_ui(mac);
+
+  return 0;
+}
