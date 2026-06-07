@@ -10,6 +10,27 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 5b (Bengali) shipped
+
+First **non-Devanagari Brahmi-derived script** lands.
+`// vani-lang: bengali` (or `bn`) is a recognized pragma; ~50
+Bengali keyword aliases cover the structure-keyword surface
+(fn → ফাংশন / কাজ, let → মান, return → ফেরত, if → যদি,
+while → যতক্ষণ, intent → উদ্দেশ্য, …). The per-script purity
+gate generalized from English-vs-Devanagari binary to the
+N-script `Script::{Latin, Devanagari, Bengali}` enum — a
+clean foundation for Tamil / Telugu / Kannada / Malayalam /
+Odia / Assamese / Sinhala / Gujarati / Punjabi-Gurmukhi in
+Phase 6. Bengali-numeral PRINT helper (`০..৯` at U+09E6..09EF,
+3-byte UTF-8 `E0 A7 (A6+d)` — differs from Devanagari by one
+middle byte) emitted in all four backends. Diagnostic labels
+have their own Bengali prefix table (not collapsed to
+Hindi/Marathi since they're a different script). 3 lib
+regression tests cover the Bengali helper emit + the cross-
+script purity rejections. `examples/language/bengali/basics.vani`
+is in the dual-backend parity sweep and prints `১২` = 12 on
+both backends.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 4.1 (ML-2 MCP server) shipped
 
 `tools/llm_context/mcp_server.py` exposes the ML-1 bundle as an

@@ -238,6 +238,10 @@ fn preamble(out: &mut String) {
     // the call is a no-op so non-Devanagari programs stay byte-
     // identical with prior C output.
     crate::backend_c::emit_intent_print_int_dev_c(out);
+    // Phase 5b (2026-06-07): Bengali-numeral print helper.
+    // Emits only when the pragma selected `bengali`. Same shape
+    // as the Devanagari helper above, different codepoints.
+    crate::backend_c::emit_intent_print_int_ben_c(out);
     // Shared `intent_str_concat` runtime helper used by Str
     // `+` lowering. Always emitted; small and may be unused.
     crate::backend_c::emit_intent_str_concat_c(out);
@@ -1646,16 +1650,29 @@ fn emit_instr(
                 if matches!(aty,
                     Type::I8 | Type::I16 | Type::I32 | Type::I64
                   | Type::U8 | Type::U16 | Type::U32 | Type::U64)
-                    && matches!(crate::lexer::current_print_lang_mode(),
-                                crate::lexer::PrintLangMode::Devanagari)
                 {
-                    writeln!(
-                        out,
-                        "  intent_print_int_dev((long long)({}));",
-                        c_operand(arg)
-                    )
-                    .unwrap();
-                    return Ok(());
+                    match crate::lexer::current_print_lang_mode() {
+                        crate::lexer::PrintLangMode::Devanagari => {
+                            writeln!(
+                                out,
+                                "  intent_print_int_dev((long long)({}));",
+                                c_operand(arg)
+                            )
+                            .unwrap();
+                            return Ok(());
+                        }
+                        // Phase 5b (2026-06-07): Bengali numerals.
+                        crate::lexer::PrintLangMode::Bengali => {
+                            writeln!(
+                                out,
+                                "  intent_print_int_ben((long long)({}));",
+                                c_operand(arg)
+                            )
+                            .unwrap();
+                            return Ok(());
+                        }
+                        crate::lexer::PrintLangMode::Ascii => {}
+                    }
                 }
                 let fmt = match aty {
                     Type::F32 | Type::F64 => "%g",

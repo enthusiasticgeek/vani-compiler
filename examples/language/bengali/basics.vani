@@ -1,0 +1,34 @@
+// vani-lang: bengali
+//
+// Phase 5b (2026-06-07): first Bengali-pragma example. Bengali
+// (বাংলা) is the first non-Devanagari Brahmi-derived script
+// vāṇी supports. The Unicode block is U+0980..U+09FF — disjoint
+// from Devanagari's U+0900..U+097F — so the lexer's per-script
+// purity gate enforces "no Devanagari aliases in a Bengali-
+// pragma file" and vice versa.
+//
+// build & run:
+//   vanic run examples/language/bengali/basics.vani              # LLVM backend
+//   vanic run examples/language/bengali/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Bengali numerals (০..৯) inside this
+// pragma — a separate runtime helper from the Devanagari version
+// (codepoints differ by one UTF-8 byte: 0xA7 vs 0xA5).
+
+উদ্দেশ্য "Bengali-pragma intro — sum two numbers with a contract";
+
+কাজ add(a: i64, b: i64) -> i64
+প্রয়োজনীয় a >= 0;
+প্রয়োজনীয় b >= 0;
+{
+  ফেরত a + b;
+}
+
+কাজ main() -> i64 {
+  মান x: i64 = 5;
+  মান y: i64 = 7;
+  মান sum: i64 = add(x, y);
+  নিশ্চিত sum == 12;
+  লেখ sum;
+  ফেরত 0;
+}

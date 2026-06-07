@@ -968,6 +968,11 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../nepali/basics.vani",
         "../maithili/basics.vani",
         "../konkani/basics.vani",
+        // Phase 5b (2026-06-07): first Brahmi-derived non-
+        // Devanagari script — Bengali (U+0980..U+09FF). Sets up
+        // the per-script abstraction for Tamil / Telugu / Kannada
+        // / Malayalam / Odia / Assamese in Phase 6.
+        "../bengali/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

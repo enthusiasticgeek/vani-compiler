@@ -32,6 +32,11 @@ enum DiagLang {
     Nepali,
     Maithili,
     Konkani,
+    // Phase 5b (2026-06-07): Bengali — first non-Devanagari
+    // Brahmi script. Its own label table since collapsing to
+    // Hindi/Marathi would render Devanagari script in a Bengali-
+    // pragma file, which defeats the dialect-aware UX.
+    Bengali,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -60,6 +65,7 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "nepali" | "nepālī" | "ne" => Some(DiagLang::Nepali),
             "maithili" | "maithilī" | "mai" => Some(DiagLang::Maithili),
             "konkani" | "koṅkaṇī" | "kok" => Some(DiagLang::Konkani),
+            "bengali" | "bangla" | "bāṅlā" | "bn" => Some(DiagLang::Bengali),
             _ => None,
         };
     }
@@ -67,9 +73,10 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
 }
 
 fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
-    // Phase 2: route Tier-I-dialect labels through their nearest
-    // existing dialect (Nepali/Maithili → Hindi labels; Konkani →
-    // Marathi labels). Same prefix shape, no duplication.
+    // Phase 2 + 5b: route Tier-I-dialect labels through their
+    // nearest existing dialect (Nepali/Maithili → Hindi labels;
+    // Konkani → Marathi labels). Bengali gets its own labels
+    // since it's the first non-Devanagari script.
     let lang = lang.map(|l| match l {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
@@ -79,9 +86,11 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Sanskrit)) => "त्रुटिः (error)".to_string(),
         ("error", Some(DiagLang::Hindi)) => "त्रुटि (error)".to_string(),
         ("error", Some(DiagLang::Marathi)) => "चूक (error)".to_string(),
+        ("error", Some(DiagLang::Bengali)) => "ত্রুটি (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
+        ("note", Some(DiagLang::Bengali)) => "টীকা (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -97,9 +106,9 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
     if lang == DiagLang::English {
         return message.to_string();
     }
-    // Phase 2: Nepali/Maithili share Hindi's prefix table; Konkani
-    // shares Marathi's. Collapse before the match so we don't
-    // duplicate the table bodies.
+    // Phase 2 + 5b: Nepali/Maithili share Hindi's prefix table;
+    // Konkani shares Marathi's. Bengali has its own table since
+    // it's a different script. Collapse before the match.
     let lang = match lang {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
@@ -146,10 +155,28 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("float literal", "दशांश मूल्य (float literal)"),
         ][..],
         DiagLang::English => return message.to_string(),
+        // Phase 5b (2026-06-07): Bengali prefix table — same
+        // shape as the Devanagari ones but with Bengali-script
+        // wording. v1 ships a starter set; expand as user
+        // requests come in.
+        DiagLang::Bengali => &[
+            ("expected ", "প্রত্যাশিত "),
+            ("unknown variable", "অজানা চলক (unknown variable)"),
+            ("unknown function", "অজানা ফাংশন (unknown function)"),
+            ("unknown struct", "অজানা গঠন (unknown struct)"),
+            ("type mismatch", "প্রকার অমিল (type mismatch)"),
+            ("cannot prove", "প্রমাণ করা যায় না (cannot prove)"),
+            ("function ", "ফাংশন "),
+            ("language mismatch", "ভাষা অমিল (language mismatch)"),
+            ("script mismatch", "লিপি অমিল (script mismatch)"),
+            ("invalid", "অবৈধ (invalid)"),
+            ("integer literal", "পূর্ণসংখ্যা মান (integer literal)"),
+            ("float literal", "দশমিক মান (float literal)"),
+        ][..],
         // Collapsed above to Hindi/Marathi; rustc requires the
         // arms to be syntactically exhaustive.
         DiagLang::Nepali | DiagLang::Maithili | DiagLang::Konkani => unreachable!(
-            "Tier-I dialects collapse to Hindi/Marathi before this match"
+            "Tier-I Devanagari dialects collapse to Hindi/Marathi before this match"
         ),
     };
     for (en_prefix, dev_prefix) in table {

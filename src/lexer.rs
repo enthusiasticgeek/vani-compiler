@@ -393,6 +393,83 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 5b (2026-06-07): Bengali keyword resolution. Bengali
+/// (বাংলা) is an Indo-Aryan language written in the Bengali
+/// Brahmi-derived script (U+0980..U+09FF) — distinct from
+/// Devanagari. Tatsama (Sanskrit-derived) vocabulary dominates
+/// the technical-keyword set so most spellings here are
+/// transliterations of the same Sanskrit roots used by
+/// Devanagari aliases above. v1 ships a starter set; native
+/// alternatives can be layered as user requests come in.
+fn bengali_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "ফাংশন" => TokenKind::Fn,             // phangshon (function — loanword)
+        "কাজ" => TokenKind::Fn,                // kāj (work; idiomatic alt)
+        "মান" => TokenKind::Let,               // mān (Sanskrit root: assume/let)
+        "ধরো" => TokenKind::Let,               // dhoro (Bengali colloquial: let)
+        "গঠন" => TokenKind::Struct,            // gathan (structure)
+        "গণনা" => TokenKind::Enum,             // ganana (enumeration)
+        "স্থির" => TokenKind::Const,           // sthir (constant — same Sanskrit root)
+        // === VISIBILITY / MODULES ===
+        "সর্বজনীন" => TokenKind::Pub,         // sarbajanin (public)
+        "খণ্ড" => TokenKind::Module,           // khanda (module — same Sanskrit root)
+        "ব্যবহার" => TokenKind::Use,           // byabahar (use)
+        "হিসাবে" => TokenKind::As,             // hisabe (as)
+        // === CONTROL FLOW ===
+        "ফেরত" => TokenKind::Return,           // pherat (back)
+        "প্রত্যাবর্তন" => TokenKind::Return,   // pratyabartan (formal return)
+        "যদি" => TokenKind::If,                // jadi (if)
+        "নাহলে" => TokenKind::Else,            // nahole (otherwise)
+        "অন্যথা" => TokenKind::Else,           // anyatha (else; same Sanskrit root)
+        "যতক্ষণ" => TokenKind::While,          // jatakshan (as long as)
+        "প্রতি" => TokenKind::For,             // prati (for each)
+        "মধ্যে" => TokenKind::In,              // madhye (in)
+        "থেকে" => TokenKind::From,             // theke (from)
+        "পর্যন্ত" => TokenKind::To,            // paryanta (to/until)
+        "বিরাম" => TokenKind::Break,           // biram (pause; break)
+        "এগিয়ে" => TokenKind::Continue,       // egiye (forward; continue)
+        "তবে" => TokenKind::Then,              // tobe (then)
+        // === REFERENCES + MUT ===
+        "দেখ" => TokenKind::Ref,               // dekh (see; reference)
+        "পরিবর্তনীয়" => TokenKind::Mut,       // paribartaniya (mutable)
+        // === MATCHING ===
+        "মেলে" => TokenKind::Match,            // mele (matches)
+        "মিলান" => TokenKind::Match,           // milan (matching)
+        // === VERIFICATION ===
+        "নিশ্চিত" => TokenKind::Assert,        // nishchit (assured; assert)
+        "প্রমাণ" => TokenKind::Prove,          // praman (proof; same Sanskrit root)
+        "প্রয়োজনীয়" => TokenKind::Requires,  // proyojaniya (required)
+        "সুনিশ্চিত" => TokenKind::Ensures,     // sunishchit (assured outcome)
+        // === BOOL / PRINT ===
+        "সত্য" => TokenKind::True,             // satya (truth)
+        "অসত্য" => TokenKind::False,           // asatya (untruth)
+        "লেখ" => TokenKind::Print,             // lekh (write — same Sanskrit root)
+        "লিখো" => TokenKind::Print,            // likho (write; alt)
+        // === PURITY / PARALLEL ===
+        "শুদ্ধ" => TokenKind::Pure,            // shuddha (pure)
+        "সমান্তরাল" => TokenKind::Parallel,    // samantaral (parallel)
+        // === INTERFACES / METHODS ===
+        "সংকেত" => TokenKind::Interface,       // sanket (signal; interface)
+        "কার্যান্বিত" => TokenKind::Implement, // karyanvit (implementing)
+        "বিধি" => TokenKind::Methods,          // bidhi (method/rule)
+        // === BOUNDS ===
+        "যেখানে" => TokenKind::Where,          // jekhane (where)
+        "হয়" => TokenKind::Is,                 // hay (is)
+        // === CONCURRENCY ===
+        "চেষ্টা" => TokenKind::Try,            // cheshta (try)
+        "নিয়োগ" => TokenKind::Task,            // niyog (task — same Sanskrit root)
+        "যোগ" => TokenKind::Join,              // jog (join)
+        // === SOV-S7 PARITY ===
+        "উদ্দেশ্য" => TokenKind::Intent,       // uddeshya (intent — same Sanskrit root)
+        "প্রকার" => TokenKind::Type,           // prakar (type — same Sanskrit root)
+        "বাহ্যিক" => TokenKind::Extern,        // bahyik (external)
+        "অপরিবর্তনীয়" => TokenKind::Invariant,// aparibartaniya (invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -409,6 +486,10 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         | Some(DialectLang::Nepali)
         | Some(DialectLang::Maithili)
         | Some(DialectLang::KonkaniDev) => PrintLangMode::Devanagari,
+        // Phase 5b (2026-06-07): Bengali numerals (০..৯) live in
+        // their own UTF-8 codepoint range. Separate helper in
+        // each backend keeps the Devanagari path byte-identical.
+        Some(DialectLang::Bengali) => PrintLangMode::Bengali,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -423,6 +504,10 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
 pub enum PrintLangMode {
     Ascii,
     Devanagari,
+    // Phase 5b (2026-06-07): Bengali numerals — distinct
+    // codepoints (U+09E6..U+09EF) from Devanagari (U+0966..U+096F).
+    // Each backend dispatches to its own helper based on this.
+    Bengali,
 }
 
 thread_local! {
@@ -457,27 +542,25 @@ pub fn set_current_print_lang_mode(mode: PrintLangMode) {
 /// `फलन add(a: i64, b: i64) -> i64`. The gate looks only at
 /// structure keywords.
 fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnostic> {
-    // SOV-S8 (2026-06-06): optional per-dialect purity. If the
-    // source begins with a `// vani-lang: <sanskrit|hindi|marathi
-    // |english>` pragma (first ~5 lines, scanned via raw text),
-    // enforce that every Devanagari structure keyword's spelling
-    // is supported by the declared dialect. Without the pragma,
-    // the existing script-level English-vs-Devanagari purity
-    // gate runs unchanged (back-compat).
+    // SOV-S8 (2026-06-06) + Phase 5b (2026-06-07): per-file
+    // script purity. Tracks the first non-Latin script observed
+    // (Devanagari or Bengali) and rejects any subsequent
+    // keyword from a different script. The pragma's declared
+    // dialect, when present, narrows further: a Bengali pragma
+    // forbids Devanagari keywords AND vice versa AND English
+    // keywords. Without a pragma, the script-level gate is
+    // still enforced (back-compat).
     let declared = detect_language_pragma(source);
     let mut english_keyword: Option<Span> = None;
     let mut devanagari_keyword: Option<Span> = None;
+    let mut bengali_keyword: Option<Span> = None;
     for tok in tokens {
         if !is_structure_keyword_kind(&tok.kind) {
             continue;
         }
         let text = &source[tok.span.start..tok.span.end];
-        let is_devanagari = text.chars().any(|c| {
-            // Devanagari Unicode range plus its extension.
-            ('\u{0900}'..='\u{097F}').contains(&c)
-                || ('\u{A8E0}'..='\u{A8FF}').contains(&c)
-        });
-        if is_devanagari {
+        let script = Script::classify(text);
+        if script == Script::Devanagari {
             if devanagari_keyword.is_none() {
                 devanagari_keyword = Some(tok.span);
             }
@@ -490,6 +573,18 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                          to a Devanagari alias mid-file. Pick one language \
                          per file.",
                         eng_span.start, eng_span.end
+                    ),
+                ));
+            }
+            if let Some(ben_span) = bengali_keyword {
+                return Err(Diagnostic::new(
+                    tok.span,
+                    format!(
+                        "script mismatch: file already used a Bengali \
+                         structure keyword (see span {}..{}), can't switch \
+                         to a Devanagari alias mid-file. Pick one script \
+                         per file.",
+                        ben_span.start, ben_span.end
                     ),
                 ));
             }
@@ -508,6 +603,17 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                         ),
                     ));
                 }
+                if lang.script() == Script::Bengali {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `{}` (Bengali script) \
+                             but the file uses Devanagari keyword `{}` — pick \
+                             one script per file.",
+                            lang.name(), text
+                        ),
+                    ));
+                }
                 if !spelling_supports_dialect(text, lang) {
                     return Err(Diagnostic::new(
                         tok.span,
@@ -517,6 +623,62 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                              set. Use an alias supported by your declared \
                              dialect, or drop the pragma to allow any \
                              Devanagari alias.",
+                            lang.name(), text
+                        ),
+                    ));
+                }
+            }
+        } else if script == Script::Bengali {
+            // Phase 5b (2026-06-07): Bengali script — disjoint
+            // Unicode block from Devanagari. Same mismatch
+            // rules as Devanagari above, plus Bengali-pragma
+            // narrowing.
+            if bengali_keyword.is_none() {
+                bengali_keyword = Some(tok.span);
+            }
+            if let Some(eng_span) = english_keyword {
+                return Err(Diagnostic::new(
+                    tok.span,
+                    format!(
+                        "language mismatch: file already used an English \
+                         structure keyword (see span {}..{}), can't switch \
+                         to a Bengali alias mid-file. Pick one language \
+                         per file.",
+                        eng_span.start, eng_span.end
+                    ),
+                ));
+            }
+            if let Some(dev_span) = devanagari_keyword {
+                return Err(Diagnostic::new(
+                    tok.span,
+                    format!(
+                        "script mismatch: file already used a Devanagari \
+                         structure keyword (see span {}..{}), can't switch \
+                         to a Bengali alias mid-file. Pick one script \
+                         per file.",
+                        dev_span.start, dev_span.end
+                    ),
+                ));
+            }
+            if let Some(lang) = declared {
+                if lang == DialectLang::English {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `english` but the file \
+                             uses a Bengali structure keyword `{}` — pick one \
+                             dialect per file or drop the pragma.",
+                            text
+                        ),
+                    ));
+                }
+                if lang.script() == Script::Devanagari {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `{}` (Devanagari script) \
+                             but the file uses Bengali keyword `{}` — pick one \
+                             script per file.",
                             lang.name(), text
                         ),
                     ));
@@ -535,6 +697,18 @@ fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnos
                          to an English keyword mid-file. Pick one language \
                          per file.",
                         dev_span.start, dev_span.end
+                    ),
+                ));
+            }
+            if let Some(ben_span) = bengali_keyword {
+                return Err(Diagnostic::new(
+                    tok.span,
+                    format!(
+                        "language mismatch: file already used a Bengali \
+                         structure keyword (see span {}..{}), can't switch \
+                         to an English keyword mid-file. Pick one language \
+                         per file.",
+                        ben_span.start, ben_span.end
                     ),
                 ));
             }
@@ -574,6 +748,14 @@ enum DialectLang {
     Nepali,
     Maithili,
     KonkaniDev,
+    // Phase 5b (2026-06-07): first non-Devanagari Brahmi-derived
+    // script. Indo-Aryan SOV grammar shared with the Devanagari
+    // group; the Unicode block (U+0980..U+09FF) is disjoint so
+    // the script-purity gate must generalize from "Devanagari vs
+    // English" to N-script. Future Tamil / Telugu / Kannada /
+    // Malayalam / Odia / Assamese / Sinhala / Gujarati / Punjabi-
+    // Gurmukhi reuse this per-script abstraction.
+    Bengali,
 }
 
 impl DialectLang {
@@ -586,7 +768,60 @@ impl DialectLang {
             DialectLang::Nepali => "nepali",
             DialectLang::Maithili => "maithili",
             DialectLang::KonkaniDev => "konkani",
+            DialectLang::Bengali => "bengali",
         }
+    }
+
+    /// Phase 5b (2026-06-07): which Brahmi-derived script does
+    /// this dialect use? Drives both the lexer's per-script
+    /// purity gate AND the per-script numeral PRINT helper
+    /// selection. English maps to Latin; the original three
+    /// Devanagari dialects + their Tier-I extensions all map
+    /// to Devanagari; Bengali (the first non-Devanagari Brahmi
+    /// script) maps to its own script.
+    fn script(self) -> Script {
+        match self {
+            DialectLang::English => Script::Latin,
+            DialectLang::Sanskrit
+            | DialectLang::Hindi
+            | DialectLang::Marathi
+            | DialectLang::Nepali
+            | DialectLang::Maithili
+            | DialectLang::KonkaniDev => Script::Devanagari,
+            DialectLang::Bengali => Script::Bengali,
+        }
+    }
+}
+
+/// Phase 5b (2026-06-07): script abstraction underlying the
+/// language-purity gate. `Latin` covers ASCII keywords (English);
+/// `Devanagari` covers Sanskrit / Hindi / Marathi and the Tier-I
+/// extensions Nepali / Maithili / Konkani. `Bengali` is the first
+/// non-Devanagari Brahmi script.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Script {
+    Latin,
+    Devanagari,
+    Bengali,
+}
+
+impl Script {
+    /// Classify a keyword token's first non-ASCII character.
+    /// Returns `Latin` for pure-ASCII text and for text whose
+    /// first non-ASCII codepoint sits in neither known Brahmi
+    /// block (the future-script-forward-compat fallback).
+    fn classify(text: &str) -> Script {
+        for c in text.chars() {
+            if ('\u{0900}'..='\u{097F}').contains(&c)
+                || ('\u{A8E0}'..='\u{A8FF}').contains(&c)
+            {
+                return Script::Devanagari;
+            }
+            if ('\u{0980}'..='\u{09FF}').contains(&c) {
+                return Script::Bengali;
+            }
+        }
+        Script::Latin
     }
 }
 
@@ -623,6 +858,8 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "nepali" | "nepālī" | "ne" => Some(DialectLang::Nepali),
             "maithili" | "maithilī" | "mai" => Some(DialectLang::Maithili),
             "konkani" | "koṅkaṇī" | "kok" => Some(DialectLang::KonkaniDev),
+            // Phase 5b (2026-06-07): Bengali (বাংলা).
+            "bengali" | "bangla" | "bāṅlā" | "bn" => Some(DialectLang::Bengali),
             _ => None,
         };
     }
@@ -1359,7 +1596,13 @@ impl<'a> Lexer<'a> {
             }
         }
         let text = &self.source[start..self.pos];
+        // Phase 5b (2026-06-07): try Devanagari first, then
+        // Bengali. The two scripts live in disjoint Unicode
+        // blocks so a single spelling can only match one table;
+        // order is purely a hot-path optimization (Devanagari
+        // shipped earlier, has more aliases).
         let kind = devanagari_keyword(text)
+            .or_else(|| bengali_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,

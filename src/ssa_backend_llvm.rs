@@ -227,6 +227,51 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
              }\n\n",
         );
     }
+    // Phase 5b (2026-06-07): Bengali-numeral helper for SSA-LLVM.
+    // Same loop shape; the middle UTF-8 byte is 167 (0xA7) so
+    // the codepoints land in U+09E6..09EF (Bengali numerals
+    // ০..৯) instead of U+0966..96F (Devanagari ०..९).
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Bengali) {
+        out.push_str(
+            "@.fmt.lld.benp = private constant [5 x i8] c\"%lld\\00\"\n\
+             define void @intent_print_int_ben(i64 %n) {\n\
+             entry:\n\
+            \x20 %ascii = alloca [24 x i8], align 1\n\
+            \x20 %ascii_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 0\n\
+            \x20 %fmt = getelementptr [5 x i8], [5 x i8]* @.fmt.lld.benp, i64 0, i64 0\n\
+            \x20 %len = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %ascii_p, i64 24, i8* %fmt, i64 %n)\n\
+            \x20 %nonempty = icmp sgt i32 %len, 0\n\
+            \x20 br i1 %nonempty, label %loop_cond, label %done\n\
+             loop_cond:\n\
+            \x20 %i = phi i32 [ 0, %entry ], [ %i_next, %loop_end ]\n\
+            \x20 %lt = icmp slt i32 %i, %len\n\
+            \x20 br i1 %lt, label %loop_body, label %done\n\
+             loop_body:\n\
+            \x20 %i64 = sext i32 %i to i64\n\
+            \x20 %char_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 %i64\n\
+            \x20 %c = load i8, i8* %char_p\n\
+            \x20 %is_neg = icmp eq i8 %c, 45\n\
+            \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
+             emit_minus:\n\
+            \x20 %r1 = call i32 @putchar(i32 45)\n\
+            \x20 br label %loop_end\n\
+             emit_digit:\n\
+            \x20 %c_i32 = zext i8 %c to i32\n\
+            \x20 %d = sub i32 %c_i32, 48\n\
+            \x20 %r2 = call i32 @putchar(i32 224)\n\
+            \x20 %r3 = call i32 @putchar(i32 167)\n\
+            \x20 %b3 = add i32 166, %d\n\
+            \x20 %r4 = call i32 @putchar(i32 %b3)\n\
+            \x20 br label %loop_end\n\
+             loop_end:\n\
+            \x20 %i_next = add i32 %i, 1\n\
+            \x20 br label %loop_cond\n\
+             done:\n\
+            \x20 ret void\n\
+             }\n\n",
+        );
+    }
     // Parallel-for runtime. Linux/macOS use libgomp;
     // Windows open-codes a `@CreateThread` fan-out (the
     // outlined fn reads tid/nt from a per-thread arg struct
@@ -3064,20 +3109,29 @@ fn emit_instr(
                             ));
                             w
                         };
-                        // Phase 1.1: Devanagari-numeral print
-                        // for the integer width fallback. The
-                        // helper takes i64 (same widening), so
-                        // the call site is identical-shape to
-                        // the printf path. Returns early so we
-                        // skip the format-string allocation
-                        // below.
-                        if matches!(crate::lexer::current_print_lang_mode(),
-                                    crate::lexer::PrintLangMode::Devanagari) {
-                            out.push_str(&format!(
-                                "  call void @intent_print_int_dev(i64 {})\n",
-                                widened
-                            ));
-                            return Ok(());
+                        // Phase 1.1 + 5b: Devanagari / Bengali
+                        // numeral print for the integer-width
+                        // fallback. The helper takes i64 (same
+                        // widening), so the call site is
+                        // identical-shape to the printf path.
+                        // Returns early so we skip the format-
+                        // string allocation below.
+                        match crate::lexer::current_print_lang_mode() {
+                            crate::lexer::PrintLangMode::Devanagari => {
+                                out.push_str(&format!(
+                                    "  call void @intent_print_int_dev(i64 {})\n",
+                                    widened
+                                ));
+                                return Ok(());
+                            }
+                            crate::lexer::PrintLangMode::Bengali => {
+                                out.push_str(&format!(
+                                    "  call void @intent_print_int_ben(i64 {})\n",
+                                    widened
+                                ));
+                                return Ok(());
+                            }
+                            crate::lexer::PrintLangMode::Ascii => {}
                         }
                         ("%lld", "i64".to_string(), widened)
                     }

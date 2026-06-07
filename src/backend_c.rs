@@ -1136,6 +1136,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     out.push_str("#define INTENT_UNUSED\n");
     out.push_str("#endif\n\n");
     emit_intent_print_int_dev_c(&mut out);
+    emit_intent_print_int_ben_c(&mut out);
     emit_intent_thread_wrappers_c(&mut out);
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
@@ -7580,6 +7581,37 @@ pub(crate) fn emit_intent_print_int_dev_c(out: &mut String) {
     );
 }
 
+/// Phase 5b (2026-06-07): Bengali-numeral print helper. Same
+/// shape as the Devanagari version above but emits Bengali
+/// codepoints (U+09E6..U+09EF = '০'..'৯') via the 3-byte UTF-8
+/// sequence E0 A7 (A6..AF). The middle byte 0xA7 is the only
+/// thing that differs from Devanagari's 0xA5.
+pub(crate) fn emit_intent_print_int_ben_c(out: &mut String) {
+    if !matches!(crate::lexer::current_print_lang_mode(),
+                 crate::lexer::PrintLangMode::Bengali) {
+        return;
+    }
+    out.push_str(
+        "static INTENT_UNUSED void intent_print_int_ben(long long n) {\n\
+         \x20 char ascii[24];\n\
+         \x20 int len = snprintf(ascii, sizeof(ascii), \"%lld\", n);\n\
+         \x20 if (len <= 0) return;\n\
+         \x20 char buf[80];\n\
+         \x20 int o = 0;\n\
+         \x20 for (int i = 0; i < len; i++) {\n\
+         \x20   char c = ascii[i];\n\
+         \x20   if (c == '-') { buf[o++] = '-'; continue; }\n\
+         \x20   int d = c - '0';\n\
+         \x20   buf[o++] = (char)0xE0;\n\
+         \x20   buf[o++] = (char)0xA7;\n\
+         \x20   buf[o++] = (char)(0xA6 + d);\n\
+         \x20 }\n\
+         \x20 buf[o] = '\\0';\n\
+         \x20 fputs(buf, stdout);\n\
+         }\n\n",
+    );
+}
+
 pub(crate) fn emit_intent_str_concat_c(out: &mut String) {
     out.push_str(
         "static char* intent_str_concat(const char* l, int l_owned, const char* r, int r_owned) INTENT_UNUSED;\n\
@@ -12565,15 +12597,25 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
             // route integer prints through the
             // `intent_print_int_dev` helper which emits
             // Devanagari digit codepoints (०..९ at U+0966..96F).
-            if matches!(crate::lexer::current_print_lang_mode(),
-                        crate::lexer::PrintLangMode::Devanagari) {
-                out.push_str("  intent_print_int_dev((long long)(");
-                out.push_str(&emit_expr(expr));
-                out.push_str("));\n");
-            } else {
-                out.push_str("  printf(\"%lld\", (long long)(");
-                out.push_str(&emit_expr(expr));
-                out.push_str("));\n");
+            // Phase 5b (2026-06-07): Bengali dialect routes
+            // through `intent_print_int_ben` (০..৯ at
+            // U+09E6..9EF) — same shape, different codepoints.
+            match crate::lexer::current_print_lang_mode() {
+                crate::lexer::PrintLangMode::Devanagari => {
+                    out.push_str("  intent_print_int_dev((long long)(");
+                    out.push_str(&emit_expr(expr));
+                    out.push_str("));\n");
+                }
+                crate::lexer::PrintLangMode::Bengali => {
+                    out.push_str("  intent_print_int_ben((long long)(");
+                    out.push_str(&emit_expr(expr));
+                    out.push_str("));\n");
+                }
+                crate::lexer::PrintLangMode::Ascii => {
+                    out.push_str("  printf(\"%lld\", (long long)(");
+                    out.push_str(&emit_expr(expr));
+                    out.push_str("));\n");
+                }
             }
         }
     }

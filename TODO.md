@@ -84,14 +84,14 @@ refresh landed. Order is rough priority (size + payoff), not strict.
               ▼                                     ▼
 ┌──────────────────────────────────────┐ ┌────────────────────┐
 │ PHASE 5a — Tutorials Intermediate    │ │ PHASE 5b — Bengali │
-│ (~15-20h)                            │ │ (~15h)             │
+│ (~15-20h)                            │ │ ✅ SHIPPED 2026-06-07
 │ (parallel-safe with 5b)              │ │ First Brahmi-      │
 │   5a.1 ▸ TUT-3: 12 intermediate      │ │ derived script —   │
 │         lessons: structs / enums /   │ │ sets up the per-   │
 │         affine / generics / dyn /    │ │ script abstraction │
 │         closures / FFI / Result+try  │ │ for items 6.x      │
 │         / 22 GoF patterns / SMT      │ │ below.             │
-│         deep-dive                    │ │   5b.1 ▸ Bengali   │
+│         deep-dive                    │ │   5b.1 ▸ Bengali ✅ │
 └──────────────────────────────────────┘ │       Unicode block│
               │                          │       extension +  │
               │                          │       keyword table│
@@ -810,7 +810,7 @@ structs / enums → generics → SMT proofs → async → embedded.
 ---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
-examples; **1901 lib + 54 parity green as of 2026-06-06 evening**;
+examples; **1904 lib + 54 parity green as of 2026-06-06 evening**;
 clean warning-free build). Remaining work, in execution order
 (USER DIRECTION 2026-06-06):
 
@@ -936,7 +936,7 @@ verification deferred (Windows access pending).
 
 After Phase 5 + Phase 6 code lands (verification deferred for
 platforms), re-run the full Linux suite to confirm:
-  - No regressions in the existing 1901 lib tests.
+  - No regressions in the existing 1904 lib tests.
   - No regressions in the existing 54 parity-sweep examples.
   - The per-host conditional emit (host_is_linux / host_is_darwin /
     host_uses_win32_threading) still routes Linux correctly.

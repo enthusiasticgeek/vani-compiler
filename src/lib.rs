@@ -27223,6 +27223,63 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn bengali_pragma_compiles_and_emits_bengali_print() {
+        // Phase 5b (2026-06-07): Bengali is the first non-
+        // Devanagari Brahmi script. Different Unicode block,
+        // different print helper (`intent_print_int_ben`
+        // emits `০..৯` via UTF-8 `E0 A7 (A6..AF)`, distinct
+        // from Devanagari's `E0 A5 (A6..AF)`).
+        let source = "// vani-lang: bengali\n\
+                      উদ্দেশ্য \"t\";\n\
+                      কাজ main() -> i64 {\n  \
+                        মান x: i64 = 5;\n  \
+                        লেখ x;\n  \
+                        ফেরত 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Bengali program compiles to C");
+        assert!(
+            c.contains("intent_print_int_ben"),
+            "Bengali pragma must route int print through the Bengali helper, got:\n{}",
+            c
+        );
+        // Devanagari helper must NOT be emitted for a Bengali file
+        // (each file should pull only the helper it needs).
+        assert!(
+            !c.contains("intent_print_int_dev"),
+            "Devanagari helper must not be emitted in a Bengali-pragma program, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn bengali_keyword_in_devanagari_pragma_file_is_rejected() {
+        // Phase 5b (2026-06-07): per-script purity gate. A
+        // Sanskrit-pragma file using a Bengali keyword should
+        // be rejected at compile time.
+        let source = "// vani-lang: sanskrit\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> i64 {\n  \
+                        কাজ x: i64 = 5;\n  \
+                        ० पुनरागम;\n\
+                      }\n";
+        let res = compile(source);
+        assert!(res.is_err(), "expected script-mismatch rejection");
+    }
+
+    #[test]
+    fn devanagari_keyword_in_bengali_pragma_file_is_rejected() {
+        // Phase 5b (2026-06-07): inverse of the test above.
+        let source = "// vani-lang: bengali\n\
+                      উদ্দেশ্য \"t\";\n\
+                      কাজ main() -> i64 {\n  \
+                        कार्य x: i64 = 5;\n  \
+                        ফেরত 0;\n\
+                      }\n";
+        let res = compile(source);
+        assert!(res.is_err(), "expected script-mismatch rejection");
+    }
+
+    #[test]
     fn unknown_pragma_returns_none_and_falls_back_to_script_level_purity() {
         // Phase 2 (2026-06-07): an unrecognized tag (e.g.
         // `// vani-lang: pali`) is silently ignored, falling
