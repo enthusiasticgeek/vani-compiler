@@ -44,6 +44,12 @@ enum DiagLang {
     Telugu,
     Gujarati,
     Punjabi,
+    // Phase 6 second half (2026-06-07).
+    Kannada,
+    Malayalam,
+    Odia,
+    Assamese,    // Bengali-script Indo-Aryan; routes through Bengali labels.
+    Sinhala,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -77,6 +83,12 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "telugu" | "telugū" | "te" => Some(DiagLang::Telugu),
             "gujarati" | "gujarātī" | "gu" => Some(DiagLang::Gujarati),
             "punjabi" | "pañjābī" | "pa" => Some(DiagLang::Punjabi),
+            // Phase 6 second half (2026-06-07).
+            "kannada" | "kannaḍa" | "kn" => Some(DiagLang::Kannada),
+            "malayalam" | "malayāḷam" | "ml" => Some(DiagLang::Malayalam),
+            "odia" | "oṛiā" | "oriya" | "or" => Some(DiagLang::Odia),
+            "assamese" | "ɔxɔmia" | "as" => Some(DiagLang::Assamese),
+            "sinhala" | "siṁhala" | "si" => Some(DiagLang::Sinhala),
             _ => None,
         };
     }
@@ -84,13 +96,13 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
 }
 
 fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
-    // Phase 2 + 5b: route Tier-I-dialect labels through their
-    // nearest existing dialect (Nepali/Maithili → Hindi labels;
-    // Konkani → Marathi labels). Bengali gets its own labels
-    // since it's the first non-Devanagari script.
+    // Phase 2 + 5b + 6: route Tier-I-dialect labels through
+    // their nearest existing dialect. Assamese rides Bengali's
+    // labels since it shares the script.
     let lang = lang.map(|l| match l {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
+        DiagLang::Assamese => DiagLang::Bengali,
         other => other,
     });
     match (level, lang) {
@@ -102,6 +114,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Telugu)) => "లోపం (error)".to_string(),
         ("error", Some(DiagLang::Gujarati)) => "ભૂલ (error)".to_string(),
         ("error", Some(DiagLang::Punjabi)) => "ਗਲਤੀ (error)".to_string(),
+        ("error", Some(DiagLang::Kannada)) => "ದೋಷ (error)".to_string(),
+        ("error", Some(DiagLang::Malayalam)) => "പിശക് (error)".to_string(),
+        ("error", Some(DiagLang::Odia)) => "ତ୍ରୁଟି (error)".to_string(),
+        ("error", Some(DiagLang::Sinhala)) => "දෝෂය (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -110,6 +126,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Telugu)) => "గమనిక (note)".to_string(),
         ("note", Some(DiagLang::Gujarati)) => "નોંધ (note)".to_string(),
         ("note", Some(DiagLang::Punjabi)) => "ਨੋਟ (note)".to_string(),
+        ("note", Some(DiagLang::Kannada)) => "ಟಿಪ್ಪಣಿ (note)".to_string(),
+        ("note", Some(DiagLang::Malayalam)) => "കുറിപ്പ് (note)".to_string(),
+        ("note", Some(DiagLang::Odia)) => "ଟିପ୍ପଣୀ (note)".to_string(),
+        ("note", Some(DiagLang::Sinhala)) => "සටහන (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -125,12 +145,15 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
     if lang == DiagLang::English {
         return message.to_string();
     }
-    // Phase 2 + 5b: Nepali/Maithili share Hindi's prefix table;
-    // Konkani shares Marathi's. Bengali has its own table since
-    // it's a different script. Collapse before the match.
+    // Phase 2 + 5b + 6: Nepali/Maithili share Hindi's prefix
+    // table; Konkani shares Marathi's; Assamese shares Bengali's
+    // (same script). Bengali / Tamil / Telugu / Gujarati /
+    // Punjabi / Kannada / Malayalam / Odia / Sinhala have their
+    // own. Collapse first so the match is one arm per script.
     let lang = match lang {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
+        DiagLang::Assamese => DiagLang::Bengali,
         other => other,
     };
     let table = match lang {
@@ -235,11 +258,47 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("language mismatch", "ਭਾਸ਼ਾ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ (language mismatch)"),
             ("script mismatch", "ਲਿਪੀ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ (script mismatch)"),
         ][..],
-        // Collapsed above to Hindi/Marathi; rustc requires the
-        // arms to be syntactically exhaustive.
-        DiagLang::Nepali | DiagLang::Maithili | DiagLang::Konkani => unreachable!(
-            "Tier-I Devanagari dialects collapse to Hindi/Marathi before this match"
-        ),
+        DiagLang::Kannada => &[
+            ("expected ", "ನಿರೀಕ್ಷಿತ "),
+            ("unknown variable", "ಅಪರಿಚಿತ ಚರ (unknown variable)"),
+            ("unknown function", "ಅಪರಿಚಿತ ಕಾರ್ಯ (unknown function)"),
+            ("type mismatch", "ಪ್ರಕಾರ ಹೊಂದಿಕೆಯಿಲ್ಲ (type mismatch)"),
+            ("cannot prove", "ಸಾಬೀತುಪಡಿಸಲಾಗದು (cannot prove)"),
+            ("language mismatch", "ಭಾಷೆ ಹೊಂದಿಕೆಯಿಲ್ಲ (language mismatch)"),
+            ("script mismatch", "ಲಿಪಿ ಹೊಂದಿಕೆಯಿಲ್ಲ (script mismatch)"),
+        ][..],
+        DiagLang::Malayalam => &[
+            ("expected ", "പ്രതീക്ഷിച്ച "),
+            ("unknown variable", "അജ്ഞാത ചരം (unknown variable)"),
+            ("unknown function", "അജ്ഞാത കാര്യം (unknown function)"),
+            ("type mismatch", "തരം പൊരുത്തപ്പെടുന്നില്ല (type mismatch)"),
+            ("cannot prove", "തെളിയിക്കാൻ കഴിയില്ല (cannot prove)"),
+            ("language mismatch", "ഭാഷ പൊരുത്തപ്പെടുന്നില്ല (language mismatch)"),
+            ("script mismatch", "ലിപി പൊരുത്തപ്പെടുന്നില്ല (script mismatch)"),
+        ][..],
+        DiagLang::Odia => &[
+            ("expected ", "ଆଶା କରାଯାଇଥିଲା "),
+            ("unknown variable", "ଅଜଣା ଚଳ (unknown variable)"),
+            ("unknown function", "ଅଜଣା କାର୍ଯ୍ୟ (unknown function)"),
+            ("type mismatch", "ପ୍ରକାର ମେଳ ନୁହେଁ (type mismatch)"),
+            ("cannot prove", "ପ୍ରମାଣ କରିପାରିବ ନାହିଁ (cannot prove)"),
+            ("language mismatch", "ଭାଷା ମେଳ ନୁହେଁ (language mismatch)"),
+            ("script mismatch", "ଲିପି ମେଳ ନୁହେଁ (script mismatch)"),
+        ][..],
+        DiagLang::Sinhala => &[
+            ("expected ", "අපේක්ෂිත "),
+            ("unknown variable", "නොදන්නා විචල්‍ය (unknown variable)"),
+            ("unknown function", "නොදන්නා කාර්යය (unknown function)"),
+            ("type mismatch", "වර්ග නොගැලපීම (type mismatch)"),
+            ("cannot prove", "ඔප්පු කළ නොහැක (cannot prove)"),
+            ("language mismatch", "භාෂා නොගැලපීම (language mismatch)"),
+            ("script mismatch", "අකුරු නොගැලපීම (script mismatch)"),
+        ][..],
+        // Collapsed above to Hindi/Marathi/Bengali; rustc
+        // requires the arms to be syntactically exhaustive.
+        DiagLang::Nepali | DiagLang::Maithili | DiagLang::Konkani | DiagLang::Assamese => {
+            unreachable!("collapsed dialects shouldn't reach this match")
+        }
     };
     for (en_prefix, dev_prefix) in table {
         if let Some(rest) = message.strip_prefix(en_prefix) {

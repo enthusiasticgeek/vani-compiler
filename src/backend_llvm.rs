@@ -503,6 +503,11 @@ pub(crate) fn brahmi_suffix() -> Option<&'static str> {
         PrintLangMode::Telugu => Some("tel"),
         PrintLangMode::Gujarati => Some("guj"),
         PrintLangMode::Gurmukhi => Some("pan"),
+        // Phase 6 second half (2026-06-07).
+        PrintLangMode::Kannada => Some("kan"),
+        PrintLangMode::Malayalam => Some("mal"),
+        PrintLangMode::Odia => Some("odi"),
+        PrintLangMode::Sinhala => Some("sin"),
         PrintLangMode::Ascii => None,
     }
 }
@@ -523,6 +528,10 @@ fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
             | (PrintLangMode::Telugu, "tel")
             | (PrintLangMode::Gujarati, "guj")
             | (PrintLangMode::Gurmukhi, "pan")
+            | (PrintLangMode::Kannada, "kan")
+            | (PrintLangMode::Malayalam, "mal")
+            | (PrintLangMode::Odia, "odi")
+            | (PrintLangMode::Sinhala, "sin")
     );
     if !active {
         return;
@@ -1027,6 +1036,11 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     emit_brahmi_print_helper_ll(&mut out, "tel", 177);  // Telugu     U+0C66 → E0 B1 A6+d
     emit_brahmi_print_helper_ll(&mut out, "guj", 171);  // Gujarati   U+0AE6 → E0 AB A6+d
     emit_brahmi_print_helper_ll(&mut out, "pan", 169);  // Gurmukhi   U+0A66 → E0 A9 A6+d
+    // Phase 6 second half (2026-06-07).
+    emit_brahmi_print_helper_ll(&mut out, "kan", 179);  // Kannada    U+0CE6 → E0 B3 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "mal", 181);  // Malayalam  U+0D66 → E0 B5 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "odi", 173);  // Odia       U+0B66 → E0 AD A6+d
+    emit_brahmi_print_helper_ll(&mut out, "sin", 183);  // Sinhala    U+0DE6 → E0 B7 A6+d
 
     // Walk the program for unique `assert "msg"` and `print
     // "literal";` strings. Each unique text gets one private

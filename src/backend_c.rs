@@ -1141,6 +1141,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_print_int_tel_c(&mut out);
     emit_intent_print_int_guj_c(&mut out);
     emit_intent_print_int_pan_c(&mut out);
+    emit_intent_print_int_kan_c(&mut out);
+    emit_intent_print_int_mal_c(&mut out);
+    emit_intent_print_int_odi_c(&mut out);
+    emit_intent_print_int_sin_c(&mut out);
     emit_intent_thread_wrappers_c(&mut out);
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
@@ -7639,6 +7643,42 @@ pub(crate) fn emit_intent_print_int_pan_c(out: &mut String) {
     }
 }
 
+/// Phase 6 second half (2026-06-07): remaining Brahmi-derived
+/// scripts. Each follows the identical pattern — gate on
+/// PrintLangMode, emit the helper with the matching middle
+/// UTF-8 byte for that script's numeral block.
+pub(crate) fn emit_intent_print_int_kan_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Kannada) {
+        // Kannada '೦..೯' at U+0CE6..0CEF → middle byte 0xB3.
+        emit_intent_print_int_helper_c(out, "kan", 0xB3);
+    }
+}
+
+pub(crate) fn emit_intent_print_int_mal_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Malayalam) {
+        // Malayalam '൦..൯' at U+0D66..0D6F → middle byte 0xB5.
+        emit_intent_print_int_helper_c(out, "mal", 0xB5);
+    }
+}
+
+pub(crate) fn emit_intent_print_int_odi_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Odia) {
+        // Odia '୦..୯' at U+0B66..0B6F → middle byte 0xAD.
+        emit_intent_print_int_helper_c(out, "odi", 0xAD);
+    }
+}
+
+pub(crate) fn emit_intent_print_int_sin_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Sinhala) {
+        // Sinhala Lith Illakkam '෦..෯' at U+0DE6..0DEF → middle byte 0xB7.
+        emit_intent_print_int_helper_c(out, "sin", 0xB7);
+    }
+}
+
 pub(crate) fn emit_intent_str_concat_c(out: &mut String) {
     out.push_str(
         "static char* intent_str_concat(const char* l, int l_owned, const char* r, int r_owned) INTENT_UNUSED;\n\
@@ -12637,6 +12677,10 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
                 crate::lexer::PrintLangMode::Telugu => Some("tel"),
                 crate::lexer::PrintLangMode::Gujarati => Some("guj"),
                 crate::lexer::PrintLangMode::Gurmukhi => Some("pan"),
+                crate::lexer::PrintLangMode::Kannada => Some("kan"),
+                crate::lexer::PrintLangMode::Malayalam => Some("mal"),
+                crate::lexer::PrintLangMode::Odia => Some("odi"),
+                crate::lexer::PrintLangMode::Sinhala => Some("sin"),
                 crate::lexer::PrintLangMode::Ascii => None,
             };
             if let Some(s) = suffix {

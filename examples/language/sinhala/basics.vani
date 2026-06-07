@@ -1,0 +1,23 @@
+// vani-lang: sinhala
+//
+// Phase 6 (2026-06-07): Sinhala (සිංහල) — Indo-Aryan, Sri Lanka.
+// Brahmi-derived script at U+0D80..U+0DFF; modern Lith Illakkam
+// numerals ෦..෯ at U+0DE6..0DEF.
+
+අරමුණ "Sinhala-pragma intro — sum two numbers with a contract";
+
+කාර්යය add(a: i64, b: i64) -> i64
+අවශ්‍ය a >= 0;
+අවශ්‍ය b >= 0;
+{
+  ආපසු a + b;
+}
+
+කාර්යය main() -> i64 {
+  අනුමානය x: i64 = 5;
+  අනුමානය y: i64 = 7;
+  අනුමානය sum: i64 = add(x, y);
+  තහවුරු sum == 12;
+  ලියන්න sum;
+  ආපසු 0;
+}

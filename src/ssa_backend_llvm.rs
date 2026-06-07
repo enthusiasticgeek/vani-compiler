@@ -87,6 +87,10 @@ fn emit_brahmi_print_helper_ssa_ll(out: &mut String, suffix: &str, lead_byte: u3
             | (PrintLangMode::Telugu, "tel")
             | (PrintLangMode::Gujarati, "guj")
             | (PrintLangMode::Gurmukhi, "pan")
+            | (PrintLangMode::Kannada, "kan")
+            | (PrintLangMode::Malayalam, "mal")
+            | (PrintLangMode::Odia, "odi")
+            | (PrintLangMode::Sinhala, "sin")
     );
     if !active {
         return;
@@ -252,6 +256,11 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     emit_brahmi_print_helper_ssa_ll(&mut out, "tel", 177);
     emit_brahmi_print_helper_ssa_ll(&mut out, "guj", 171);
     emit_brahmi_print_helper_ssa_ll(&mut out, "pan", 169);
+    // Phase 6 second half (2026-06-07).
+    emit_brahmi_print_helper_ssa_ll(&mut out, "kan", 179);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "mal", 181);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "odi", 173);
+    emit_brahmi_print_helper_ssa_ll(&mut out, "sin", 183);
     // Parallel-for runtime. Linux/macOS use libgomp;
     // Windows open-codes a `@CreateThread` fan-out (the
     // outlined fn reads tid/nt from a per-thread arg struct

@@ -10,6 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 6 COMPLETE (full Brahmi batch)
+
+Phase 6 second half lands: Kannada, Malayalam, Odia, Assamese,
+Sinhala — completing the 9-language Brahmi-derived rollout
+(plus Bengali from Phase 5b). Each Dravidian + Indo-Aryan
+script except Assamese gets its own Unicode block check,
+keyword table, numeral-print helper, and native error labels;
+Assamese reuses the Bengali pipeline since the scripts share
+the U+0980..09FF block (differing only by `ৰ` / `ৱ`).
+
+Combined with Phase 6 first half, vāṇी now natively supports
+**16 dialects across 8 distinct Brahmi scripts** (Devanagari,
+Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam,
+Odia, Sinhala — plus English Latin).
+
+Lib ledger: 1914 (was 1909) = 5 new dialect tests including
+Assamese-reuses-Bengali helper assertion. Parity sweep covers
+67 examples internally (was 62).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 6 (Brahmi batch) shipped
 
 Phase 6's first half: Tamil + Telugu + Gujarati + Punjabi-

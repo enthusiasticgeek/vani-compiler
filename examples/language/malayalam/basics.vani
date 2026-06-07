@@ -1,0 +1,23 @@
+// vani-lang: malayalam
+//
+// Phase 6 (2026-06-07): Malayalam (മലയാളം) — Dravidian, Kerala.
+// Brahmi-derived script at U+0D00..U+0D7F; numerals ൦..൯ at
+// U+0D66..0D6F.
+
+ഉദ്ദേശ്യം "Malayalam-pragma intro — sum two numbers with a contract";
+
+കാര്യം add(a: i64, b: i64) -> i64
+ആവശ്യം a >= 0;
+ആവശ്യം b >= 0;
+{
+  തിരികെ a + b;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക x: i64 = 5;
+  കരുതുക y: i64 = 7;
+  കരുതുക sum: i64 = add(x, y);
+  ഉറപ്പിക്കുക sum == 12;
+  എഴുതുക sum;
+  തിരികെ 0;
+}

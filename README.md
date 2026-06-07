@@ -279,7 +279,7 @@ below.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-07: 1909 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog + Phase 1.1 Devanagari runtime PRINT + Phase 1.2 C-backend Vec<dyn Iface> fix + Phase 2 Tier-I dialect extensions (Nepali/Maithili/Konkani) + Phase 5b Bengali (first non-Devanagari Brahmi script) + Phase 6 Brahmi batch (Tamil/Telugu/Gujarati/Punjabi-Gurmukhi) — full feature surface across all backends; clean warning-free build).
+**Test ledger at 2026-06-07: 1914 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog + Phase 1.1 Devanagari runtime PRINT + Phase 1.2 C-backend Vec<dyn Iface> fix + Phase 2 Tier-I dialect extensions (Nepali/Maithili/Konkani) + Phase 5b Bengali + Phase 6 full Brahmi batch (Tamil/Telugu/Gujarati/Punjabi/Kannada/Malayalam/Odia/Assamese/Sinhala) — full feature surface across all backends; clean warning-free build).
 
 ## Memory safety & concurrency model
 
@@ -3768,16 +3768,16 @@ logographic, etc.) one at a time.
 | 6 | Punjabi (*pañjābī*) | Gurmukhi (Brahmi-derived) + Shahmukhi (Perso-Arabic, RTL) | ✅ **SHIPPED — Gurmukhi only** (Phase 6, 2026-06-07) — `// vani-lang: punjabi`; Indian-side Gurmukhi at U+0A00..0A7F; Shahmukhi (Pakistani, RTL) deferred to Phase 12; [`examples/language/punjabi/basics.vani`](examples/language/punjabi/basics.vani) |
 | 7 | Tamil (*tamiḻ*) | Tamil (Brahmi-derived, distinct family — Dravidian, not Indo-Aryan) | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: tamil`; ~35 starter aliases drawn from native Tamil verbs/nouns (not tatsama); Tamil numerals ௦..௯ at U+0BE6..0BEF; [`examples/language/tamil/basics.vani`](examples/language/tamil/basics.vani) |
 | 8 | Telugu (*telugu*) | Telugu | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: telugu`; ~32 starter aliases (mix of native Telugu + tatsama); Telugu numerals ౦..౯ at U+0C66..0C6F; [`examples/language/telugu/basics.vani`](examples/language/telugu/basics.vani) |
-| 9 | Kannada (*kannaḍa*) | Kannada | Queued — Dravidian SOV |
-| 10 | Malayalam (*malayāḷam*) | Malayalam | Queued — Dravidian SOV |
+| 9 | Kannada (*kannaḍa*) | Kannada | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: kannada`; ~35 starter aliases (tatsama + native); Kannada numerals ೦..೯ at U+0CE6..0CEF; [`examples/language/kannada/basics.vani`](examples/language/kannada/basics.vani) |
+| 10 | Malayalam (*malayāḷam*) | Malayalam | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: malayalam`; ~33 starter aliases; Malayalam numerals ൦..൯ at U+0D66..0D6F; [`examples/language/malayalam/basics.vani`](examples/language/malayalam/basics.vani) |
 | 11 | Urdu (*urdū*) | Perso-Arabic (RTL) | Queued — Hindi-Urdu shared vocabulary at the spoken level; surface forks at script + register |
-| 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | Queued — Indo-Aryan SOV |
-| 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | Queued — Indo-Aryan SOV |
+| 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: odia` (alias `oriya`); ~33 starter aliases (tatsama-friendly); Odia numerals ୦..୯ at U+0B66..0B6F; [`examples/language/odia/basics.vani`](examples/language/odia/basics.vani) |
+| 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: assamese`; reuses the Bengali keyword table + numerals (the two scripts differ by only `ৰ` / `ৱ`); [`examples/language/assamese/basics.vani`](examples/language/assamese/basics.vani) |
 | 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) + Devanagari (rare) | Queued — bi-script; Indo-Aryan SOV |
 | 15 | Nepali (*nepālī*) | Devanagari | ✅ **SHIPPED** (Phase 2.1, 2026-06-07) — dialect tag `// vani-lang: nepali`; accepts the Sanskrit/Hindi/Marathi keyword union; [`examples/language/nepali/basics.vani`](examples/language/nepali/basics.vani) |
 | 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | ✅ **SHIPPED — Devanagari only** (Phase 2.3, 2026-06-07) — dialect tag `// vani-lang: konkani`; non-Devanagari scripts (Kannada / Roman) deferred; [`examples/language/konkani/basics.vani`](examples/language/konkani/basics.vani) |
 | 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | ✅ **SHIPPED — Devanagari only** (Phase 2.2, 2026-06-07) — dialect tag `// vani-lang: maithili`; Mithilakshar/Tirhuta script deferred; [`examples/language/maithili/basics.vani`](examples/language/maithili/basics.vani) |
-| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | Queued — Indo-Aryan SOV; Sri Lankan |
+| 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | ✅ **SHIPPED** (Phase 6, 2026-06-07) — `// vani-lang: sinhala`; ~33 starter aliases (tatsama + native); Sinhala Lith Illakkam numerals ෦..෯ at U+0DE6..0DEF; [`examples/language/sinhala/basics.vani`](examples/language/sinhala/basics.vani) |
 | ... | (smaller subcontinent languages) | various | Queued |
 
 ### Tier II — Global (after Tier I)

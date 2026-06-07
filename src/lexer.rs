@@ -668,6 +668,184 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 6 (2026-06-07): Kannada (ಕನ್ನಡ) keyword resolution.
+/// Dravidian language with heavy tatsama (Sanskrit-rooted)
+/// loanwords in technical vocabulary. v1 starter set.
+fn kannada_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ಕಾರ್ಯ" => TokenKind::Fn,                  // kaarya (work/function — tatsama)
+        "ಫಂಕ್ಷನ್" => TokenKind::Fn,                  // function loanword
+        "ಊಹಿಸಿ" => TokenKind::Let,                  // oohisi (assume)
+        "ಮಾನ್ಯ" => TokenKind::Let,                  // maanya (let it be)
+        "ರಚನೆ" => TokenKind::Struct,                // rachane (structure)
+        "ಎಣಿಕೆ" => TokenKind::Enum,                  // enike (enumeration)
+        "ಸ್ಥಿರ" => TokenKind::Const,                 // sthira (constant — tatsama)
+        "ಸಾರ್ವಜನಿಕ" => TokenKind::Pub,             // saarvajanika (public — tatsama)
+        "ಖಂಡ" => TokenKind::Module,                  // khanda (module — tatsama)
+        "ಬಳಸಿ" => TokenKind::Use,                    // balasi (use)
+        "ಆಗಿ" => TokenKind::As,                      // aagi (as)
+        "ಹಿಂದಿರುಗಿ" => TokenKind::Return,           // hindirugi (return)
+        "ಮರಳಿ" => TokenKind::Return,                  // marali (return back)
+        "ಆದರೆ" => TokenKind::If,                     // aadare (if)
+        "ಇಲ್ಲದಿದ್ದರೆ" => TokenKind::Else,           // illadiddare (else)
+        "ತನಕ" => TokenKind::While,                   // tanaka (until/while)
+        "ಪ್ರತಿ" => TokenKind::For,                   // prati (for each — tatsama)
+        "ರಲ್ಲಿ" => TokenKind::In,                    // ralli (in)
+        "ಇಂದ" => TokenKind::From,                    // inda (from)
+        "ಗೆ" => TokenKind::To,                       // ge (to)
+        "ನಿಲ್ಲಿ" => TokenKind::Break,                // nilli (stop)
+        "ಮುಂದುವರಿಸಿ" => TokenKind::Continue,        // munduvarisi (continue)
+        "ನಂತರ" => TokenKind::Then,                   // nantara (then)
+        "ನೋಡಿ" => TokenKind::Ref,                    // nodi (see)
+        "ಪರಿವರ್ತನೀಯ" => TokenKind::Mut,             // parivartaneeya (mutable — tatsama)
+        "ಹೊಂದಾಣಿಕೆ" => TokenKind::Match,            // hondaanike (matching)
+        "ಖಚಿತಪಡಿಸಿ" => TokenKind::Assert,           // khachitapadisi (assert)
+        "ಸಾಬೀತುಪಡಿಸಿ" => TokenKind::Prove,          // saabeetupadisi (prove)
+        "ಅಗತ್ಯ" => TokenKind::Requires,              // agatya (required)
+        "ಖಚಿತ" => TokenKind::Ensures,                // khachita (assured)
+        "ಸತ್ಯ" => TokenKind::True,                   // satya (true — tatsama)
+        "ಸುಳ್ಳು" => TokenKind::False,                // sullu (false)
+        "ಬರೆ" => TokenKind::Print,                   // bare (write)
+        "ಮುದ್ರಿಸಿ" => TokenKind::Print,             // mudrisi (print — tatsama)
+        "ಉದ್ದೇಶ" => TokenKind::Intent,               // uddesha (intent — tatsama)
+        "ಪ್ರಕಾರ" => TokenKind::Type,                 // prakaara (type — tatsama)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Malayalam (മലയാളം) keyword resolution.
+/// Dravidian language; heavy Sanskrit borrowings in formal
+/// register. v1 starter set.
+fn malayalam_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "കാര്യം" => TokenKind::Fn,                  // kaaryam (work/function — tatsama)
+        "ഫംഗ്ഷൻ" => TokenKind::Fn,                   // function loanword
+        "കരുതുക" => TokenKind::Let,                  // karuthuka (assume)
+        "ഘടന" => TokenKind::Struct,                  // ghadana (structure)
+        "എണ്ണൽ" => TokenKind::Enum,                  // ennal (enumeration)
+        "സ്ഥിരം" => TokenKind::Const,                // sthiram (constant — tatsama)
+        "പൊതു" => TokenKind::Pub,                    // pothu (public)
+        "ഖണ്ഡം" => TokenKind::Module,                // khandam (module — tatsama)
+        "ഉപയോഗിക്കുക" => TokenKind::Use,            // upayogikkuka (use)
+        "ആയി" => TokenKind::As,                      // aayi (as)
+        "തിരികെ" => TokenKind::Return,                // thirike (return)
+        "എങ്കിൽ" => TokenKind::If,                   // enkil (if)
+        "അല്ലെങ്കിൽ" => TokenKind::Else,            // allenkil (else)
+        "വരെ" => TokenKind::While,                   // vare (until/while)
+        "ഓരോ" => TokenKind::For,                     // oro (each/for)
+        "ഇൽ" => TokenKind::In,                       // il (in)
+        "നിന്ന്" => TokenKind::From,                  // ninnu (from)
+        "വരെക്കും" => TokenKind::To,                // varekkum (to)
+        "നിർത്തുക" => TokenKind::Break,             // nirthuka (stop)
+        "തുടരുക" => TokenKind::Continue,            // thudaruka (continue)
+        "പിന്നെ" => TokenKind::Then,                  // pinne (then)
+        "നോക്കുക" => TokenKind::Ref,                 // nookkuka (see)
+        "മാറ്റാവുന്ന" => TokenKind::Mut,            // maattaavunna (mutable)
+        "പൊരുത്തപ്പെടുത്തുക" => TokenKind::Match,   // poruthappeduthuka (match)
+        "ഉറപ്പിക്കുക" => TokenKind::Assert,         // urappikkuka (assure)
+        "തെളിയിക്കുക" => TokenKind::Prove,          // theliyikkuka (prove)
+        "ആവശ്യം" => TokenKind::Requires,             // aavasyam (required — tatsama)
+        "ഉറപ്പ്" => TokenKind::Ensures,              // urappu (assurance)
+        "സത്യം" => TokenKind::True,                  // sathyam (true — tatsama)
+        "അസത്യം" => TokenKind::False,                // asathyam (false — tatsama)
+        "എഴുതുക" => TokenKind::Print,                // ezhuthuka (write)
+        "അച്ചടിക്കുക" => TokenKind::Print,          // achchadikuka (print)
+        "ഉദ്ദേശ്യം" => TokenKind::Intent,            // uddeshyam (intent — tatsama)
+        "തരം" => TokenKind::Type,                    // tharam (type)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Odia (ଓଡ଼ିଆ) keyword resolution.
+/// Indo-Aryan SOV; tatsama-friendly so most technical
+/// vocabulary transliterates from Sanskrit roots.
+fn odia_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "କାର୍ଯ୍ୟ" => TokenKind::Fn,                 // kaarya (work — tatsama)
+        "ଫଙ୍କସନ୍" => TokenKind::Fn,                  // function loanword
+        "ମନେକର" => TokenKind::Let,                   // manekara (assume)
+        "ଗଠନ" => TokenKind::Struct,                   // gathana (structure)
+        "ଗଣନା" => TokenKind::Enum,                    // gananaa (enumeration)
+        "ସ୍ଥିର" => TokenKind::Const,                 // sthira (constant — tatsama)
+        "ସର୍ବସାଧାରଣ" => TokenKind::Pub,             // sarbasaadhaarana (public)
+        "ଖଣ୍ଡ" => TokenKind::Module,                  // khanda (module — tatsama)
+        "ବ୍ୟବହାର" => TokenKind::Use,                 // byabahaara (use)
+        "ଭାବେ" => TokenKind::As,                      // bhabe (as)
+        "ଫେରନ୍ତୁ" => TokenKind::Return,              // pherantu (return)
+        "ଯଦି" => TokenKind::If,                      // jadi (if)
+        "ନ ହେଲେ" => TokenKind::Else,                 // na hele (else — multi-word; queued)
+        "ଯେତେବେଳେ" => TokenKind::While,             // jetebele (while)
+        "ପ୍ରତି" => TokenKind::For,                   // prati (for each — tatsama)
+        "ରେ" => TokenKind::In,                       // re (in)
+        "ରୁ" => TokenKind::From,                     // ru (from)
+        "ପର୍ଯ୍ୟନ୍ତ" => TokenKind::To,                // paryanta (until)
+        "ବନ୍ଦ" => TokenKind::Break,                  // banda (stop)
+        "ଜାରି" => TokenKind::Continue,               // jaari (continue)
+        "ତାହେଲେ" => TokenKind::Then,                  // tahele (then)
+        "ଦେଖନ୍ତୁ" => TokenKind::Ref,                  // dekhantu (see)
+        "ପରିବର୍ତ୍ତନୀୟ" => TokenKind::Mut,           // paribartaniya (mutable — tatsama)
+        "ମେଳ" => TokenKind::Match,                    // mela (match)
+        "ନିଶ୍ଚିତ" => TokenKind::Assert,              // nishchita (assured — tatsama)
+        "ପ୍ରମାଣ" => TokenKind::Prove,                // pramaana (proof — tatsama)
+        "ଆବଶ୍ୟକ" => TokenKind::Requires,             // aabashyaka (required)
+        "ସୁନିଶ୍ଚିତ" => TokenKind::Ensures,           // sunischita (assured)
+        "ସତ୍ୟ" => TokenKind::True,                    // satya (true — tatsama)
+        "ମିଥ୍ୟା" => TokenKind::False,                 // mithya (false — tatsama)
+        "ଲେଖ" => TokenKind::Print,                    // lekha (write)
+        "ଛାପନ୍ତୁ" => TokenKind::Print,                // chhapantu (print)
+        "ଉଦ୍ଦେଶ୍ୟ" => TokenKind::Intent,              // uddeshya (intent — tatsama)
+        "ପ୍ରକାର" => TokenKind::Type,                  // prakaara (type — tatsama)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Sinhala (සිංහල) keyword resolution.
+/// Indo-Aryan, Sri Lankan. Heavy Sanskrit influence in formal
+/// register; native Sinhala for everyday verbs. v1 starter set.
+fn sinhala_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "කාර්යය" => TokenKind::Fn,                  // kaaryaya (work — tatsama)
+        "ශ්‍රිතය" => TokenKind::Fn,                  // shritaya (function)
+        "අනුමානය" => TokenKind::Let,                 // anumaanaya (assume)
+        "ව්‍යුහය" => TokenKind::Struct,              // vyuhaya (structure)
+        "ගණනය" => TokenKind::Enum,                   // ganannaya (enumeration)
+        "ස්ථිර" => TokenKind::Const,                 // sthira (constant — tatsama)
+        "පොදු" => TokenKind::Pub,                    // podu (public/common)
+        "මොඩියුලය" => TokenKind::Module,             // module loanword
+        "භාවිතා" => TokenKind::Use,                  // bhaavithaa (use)
+        "ලෙස" => TokenKind::As,                      // lesa (as)
+        "ආපසු" => TokenKind::Return,                  // aapasu (return back)
+        "නම්" => TokenKind::If,                       // nam (if)
+        "නොඑසේ නම්" => TokenKind::Else,              // no-ese nam (else — multi-word; queued)
+        "තෙක්" => TokenKind::While,                  // thek (while/until)
+        "සෑම" => TokenKind::For,                     // saema (every/for)
+        "තුළ" => TokenKind::In,                      // thula (in)
+        "සිට" => TokenKind::From,                     // sita (from)
+        "දක්වා" => TokenKind::To,                     // dakvaa (to)
+        "නවත්වන්න" => TokenKind::Break,              // nawathwanna (stop)
+        "ඉදිරියට" => TokenKind::Continue,             // idiriyata (forward)
+        "පසු" => TokenKind::Then,                     // pasu (then)
+        "බලන්න" => TokenKind::Ref,                   // balanna (see/look)
+        "පරිවර්තනීය" => TokenKind::Mut,              // parivarthaneeya (mutable — tatsama)
+        "ගැලපීම" => TokenKind::Match,                // gaalapeema (matching)
+        "තහවුරු" => TokenKind::Assert,                // thahawuru (assert)
+        "ඔප්පු" => TokenKind::Prove,                 // oppu (prove)
+        "අවශ්‍ය" => TokenKind::Requires,             // avashya (required — tatsama)
+        "සහතික" => TokenKind::Ensures,                // sahathika (assured)
+        "සත්‍ය" => TokenKind::True,                   // sathya (true — tatsama)
+        "අසත්‍ය" => TokenKind::False,                 // asathya (false — tatsama)
+        "ලියන්න" => TokenKind::Print,                 // liyanna (write)
+        "මුද්‍රණය" => TokenKind::Print,               // mudranaya (print — tatsama)
+        "අරමුණ" => TokenKind::Intent,                 // aramuna (intent/purpose)
+        "වර්ගය" => TokenKind::Type,                   // vargaya (type)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -695,6 +873,14 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         Some(DialectLang::Telugu) => PrintLangMode::Telugu,
         Some(DialectLang::Gujarati) => PrintLangMode::Gujarati,
         Some(DialectLang::Punjabi) => PrintLangMode::Gurmukhi,
+        // Phase 6 second half (2026-06-07).
+        Some(DialectLang::Kannada) => PrintLangMode::Kannada,
+        Some(DialectLang::Malayalam) => PrintLangMode::Malayalam,
+        Some(DialectLang::Odia) => PrintLangMode::Odia,
+        // Assamese shares the Bengali Unicode block; numeral
+        // codepoints are identical (U+09E6..09EF).
+        Some(DialectLang::Assamese) => PrintLangMode::Bengali,
+        Some(DialectLang::Sinhala) => PrintLangMode::Sinhala,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -721,6 +907,11 @@ pub enum PrintLangMode {
     Telugu,     // U+0C66..0C6F '౦..౯'
     Gujarati,   // U+0AE6..0AEF '૦..૯'
     Gurmukhi,   // U+0A66..0A6F '੦..੯' (Punjabi-Gurmukhi)
+    // Phase 6 second half (2026-06-07).
+    Kannada,    // U+0CE6..0CEF '೦..೯'
+    Malayalam,  // U+0D66..0D6F '൦..൯'
+    Odia,       // U+0B66..0B6F '୦..୯'
+    Sinhala,    // U+0DE6..0DEF '෦..෯'  (Lith Illakkam — modern set)
 }
 
 thread_local! {
@@ -763,6 +954,10 @@ fn script_label(script: Script) -> &'static str {
         Script::Telugu => "Telugu",
         Script::Gujarati => "Gujarati",
         Script::Gurmukhi => "Gurmukhi (Punjabi)",
+        Script::Kannada => "Kannada",
+        Script::Malayalam => "Malayalam",
+        Script::Odia => "Odia",
+        Script::Sinhala => "Sinhala",
     }
 }
 
@@ -910,6 +1105,18 @@ enum DialectLang {
     Gujarati,
     Punjabi,    // Gurmukhi-script Punjabi (Indian). Shahmukhi (Pakistani,
                 // Perso-Arabic, RTL) deferred — different bidirectionality.
+    // Phase 6 second half (2026-06-07): remaining Brahmi-derived
+    // scripts. Kannada + Malayalam are Dravidian; Odia + Assamese
+    // + Sinhala are Indo-Aryan. Assamese is the architectural
+    // odd-one-out — it shares the Bengali Unicode block with
+    // only a couple of Assamese-specific characters, so the
+    // dialect maps to `Script::Bengali` rather than getting its
+    // own script enum variant.
+    Kannada,
+    Malayalam,
+    Odia,
+    Assamese,   // Bengali-script Indo-Aryan; aliases pulled from the Bengali table.
+    Sinhala,
 }
 
 impl DialectLang {
@@ -927,6 +1134,11 @@ impl DialectLang {
             DialectLang::Telugu => "telugu",
             DialectLang::Gujarati => "gujarati",
             DialectLang::Punjabi => "punjabi",
+            DialectLang::Kannada => "kannada",
+            DialectLang::Malayalam => "malayalam",
+            DialectLang::Odia => "odia",
+            DialectLang::Assamese => "assamese",
+            DialectLang::Sinhala => "sinhala",
         }
     }
 
@@ -951,6 +1163,16 @@ impl DialectLang {
             DialectLang::Telugu => Script::Telugu,
             DialectLang::Gujarati => Script::Gujarati,
             DialectLang::Punjabi => Script::Gurmukhi,
+            DialectLang::Kannada => Script::Kannada,
+            DialectLang::Malayalam => Script::Malayalam,
+            DialectLang::Odia => Script::Odia,
+            // Phase 6 (2026-06-07): Assamese is written in
+            // the Bengali script with two Assamese-specific
+            // characters (`ৰ`, `ৱ`) layered on top. v1 routes
+            // it through Script::Bengali — the Bengali keyword
+            // table already covers Assamese.
+            DialectLang::Assamese => Script::Bengali,
+            DialectLang::Sinhala => Script::Sinhala,
         }
     }
 }
@@ -970,6 +1192,11 @@ enum Script {
     Telugu,
     Gujarati,
     Gurmukhi,   // Punjabi-Gurmukhi
+    // Phase 6 second half (2026-06-07).
+    Kannada,
+    Malayalam,
+    Odia,
+    Sinhala,
 }
 
 impl Script {
@@ -994,11 +1221,23 @@ impl Script {
             if ('\u{0A80}'..='\u{0AFF}').contains(&c) {
                 return Script::Gujarati;
             }
+            if ('\u{0B00}'..='\u{0B7F}').contains(&c) {
+                return Script::Odia;
+            }
             if ('\u{0B80}'..='\u{0BFF}').contains(&c) {
                 return Script::Tamil;
             }
             if ('\u{0C00}'..='\u{0C7F}').contains(&c) {
                 return Script::Telugu;
+            }
+            if ('\u{0C80}'..='\u{0CFF}').contains(&c) {
+                return Script::Kannada;
+            }
+            if ('\u{0D00}'..='\u{0D7F}').contains(&c) {
+                return Script::Malayalam;
+            }
+            if ('\u{0D80}'..='\u{0DFF}').contains(&c) {
+                return Script::Sinhala;
             }
         }
         Script::Latin
@@ -1045,6 +1284,12 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "telugu" | "telugū" | "te" => Some(DialectLang::Telugu),
             "gujarati" | "gujarātī" | "gu" => Some(DialectLang::Gujarati),
             "punjabi" | "pañjābī" | "pa" => Some(DialectLang::Punjabi),
+            // Phase 6 second half (2026-06-07).
+            "kannada" | "kannaḍa" | "kn" => Some(DialectLang::Kannada),
+            "malayalam" | "malayāḷam" | "ml" => Some(DialectLang::Malayalam),
+            "odia" | "oṛiā" | "oriya" | "or" => Some(DialectLang::Odia),
+            "assamese" | "ɔxɔmia" | "as" => Some(DialectLang::Assamese),
+            "sinhala" | "siṁhala" | "si" => Some(DialectLang::Sinhala),
             _ => None,
         };
     }
@@ -1793,6 +2038,10 @@ impl<'a> Lexer<'a> {
             .or_else(|| telugu_keyword(text))
             .or_else(|| gujarati_keyword(text))
             .or_else(|| punjabi_keyword(text))
+            .or_else(|| kannada_keyword(text))
+            .or_else(|| malayalam_keyword(text))
+            .or_else(|| odia_keyword(text))
+            .or_else(|| sinhala_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,

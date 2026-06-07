@@ -248,6 +248,10 @@ fn preamble(out: &mut String) {
     crate::backend_c::emit_intent_print_int_tel_c(out);
     crate::backend_c::emit_intent_print_int_guj_c(out);
     crate::backend_c::emit_intent_print_int_pan_c(out);
+    crate::backend_c::emit_intent_print_int_kan_c(out);
+    crate::backend_c::emit_intent_print_int_mal_c(out);
+    crate::backend_c::emit_intent_print_int_odi_c(out);
+    crate::backend_c::emit_intent_print_int_sin_c(out);
     // Shared `intent_str_concat` runtime helper used by Str
     // `+` lowering. Always emitted; small and may be unused.
     crate::backend_c::emit_intent_str_concat_c(out);
@@ -1665,6 +1669,10 @@ fn emit_instr(
                         crate::lexer::PrintLangMode::Telugu => Some("tel"),
                         crate::lexer::PrintLangMode::Gujarati => Some("guj"),
                         crate::lexer::PrintLangMode::Gurmukhi => Some("pan"),
+                        crate::lexer::PrintLangMode::Kannada => Some("kan"),
+                        crate::lexer::PrintLangMode::Malayalam => Some("mal"),
+                        crate::lexer::PrintLangMode::Odia => Some("odi"),
+                        crate::lexer::PrintLangMode::Sinhala => Some("sin"),
                         crate::lexer::PrintLangMode::Ascii => None,
                     };
                     if let Some(s) = suffix {

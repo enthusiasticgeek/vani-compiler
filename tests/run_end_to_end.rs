@@ -981,6 +981,14 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../telugu/basics.vani",
         "../gujarati/basics.vani",
         "../punjabi/basics.vani",
+        // Phase 6 second half (2026-06-07): Kannada, Malayalam,
+        // Odia, Assamese, Sinhala. Each emits its native digits
+        // — except Assamese which reuses Bengali (১২).
+        "../kannada/basics.vani",
+        "../malayalam/basics.vani",
+        "../odia/basics.vani",
+        "../assamese/basics.vani",
+        "../sinhala/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

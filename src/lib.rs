@@ -27342,6 +27342,80 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn kannada_pragma_compiles_and_emits_kannada_print() {
+        // Phase 6 second half (2026-06-07).
+        let source = "// vani-lang: kannada\n\
+                      ಉದ್ದೇಶ \"t\";\n\
+                      ಕಾರ್ಯ main() -> i64 {\n  \
+                        ಊಹಿಸಿ x: i64 = 5;\n  \
+                        ಬರೆ x;\n  \
+                        ಮರಳಿ 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Kannada program compiles");
+        assert!(c.contains("intent_print_int_kan"),
+            "Kannada must route through kan helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn malayalam_pragma_compiles_and_emits_malayalam_print() {
+        let source = "// vani-lang: malayalam\n\
+                      ഉദ്ദേശ്യം \"t\";\n\
+                      കാര്യം main() -> i64 {\n  \
+                        കരുതുക x: i64 = 5;\n  \
+                        എഴുതുക x;\n  \
+                        തിരികെ 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Malayalam program compiles");
+        assert!(c.contains("intent_print_int_mal"),
+            "Malayalam must route through mal helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn odia_pragma_compiles_and_emits_odia_print() {
+        let source = "// vani-lang: odia\n\
+                      ଉଦ୍ଦେଶ୍ୟ \"t\";\n\
+                      କାର୍ଯ୍ୟ main() -> i64 {\n  \
+                        ମନେକର x: i64 = 5;\n  \
+                        ଲେଖ x;\n  \
+                        ଫେରନ୍ତୁ 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Odia program compiles");
+        assert!(c.contains("intent_print_int_odi"),
+            "Odia must route through odi helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn assamese_pragma_compiles_and_reuses_bengali_print() {
+        // Phase 6 (2026-06-07): Assamese rides Bengali's script
+        // and Bengali's numerals — it should emit the BENGALI
+        // helper, not get its own.
+        let source = "// vani-lang: assamese\n\
+                      উদ্দেশ্য \"t\";\n\
+                      কাজ main() -> i64 {\n  \
+                        মান x: i64 = 5;\n  \
+                        লেখ x;\n  \
+                        ফেরত 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Assamese program compiles");
+        assert!(c.contains("intent_print_int_ben"),
+            "Assamese must reuse Bengali helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn sinhala_pragma_compiles_and_emits_sinhala_print() {
+        let source = "// vani-lang: sinhala\n\
+                      අරමුණ \"t\";\n\
+                      කාර්යය main() -> i64 {\n  \
+                        අනුමානය x: i64 = 5;\n  \
+                        ලියන්න x;\n  \
+                        ආපසු 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Sinhala program compiles");
+        assert!(c.contains("intent_print_int_sin"),
+            "Sinhala must route through sin helper, got:\n{}", c);
+    }
+
+    #[test]
     fn tamil_keyword_in_telugu_pragma_file_is_rejected() {
         // Phase 6 (2026-06-07): cross-script purity gate. The
         // generalized gate from Phase 5b should reject ANY pair

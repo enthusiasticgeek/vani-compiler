@@ -1,0 +1,23 @@
+// vani-lang: kannada
+//
+// Phase 6 (2026-06-07): Kannada (ಕನ್ನಡ) — Dravidian, Karnataka.
+// Brahmi-derived script at U+0C80..U+0CFF; numerals ೦..೯ at
+// U+0CE6..0CEF.
+
+ಉದ್ದೇಶ "Kannada-pragma intro — sum two numbers with a contract";
+
+ಕಾರ್ಯ add(a: i64, b: i64) -> i64
+ಅಗತ್ಯ a >= 0;
+ಅಗತ್ಯ b >= 0;
+{
+  ಮರಳಿ a + b;
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ x: i64 = 5;
+  ಊಹಿಸಿ y: i64 = 7;
+  ಊಹಿಸಿ sum: i64 = add(x, y);
+  ಖಚಿತಪಡಿಸಿ sum == 12;
+  ಬರೆ sum;
+  ಮರಳಿ 0;
+}

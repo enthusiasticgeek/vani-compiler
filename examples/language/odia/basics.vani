@@ -1,0 +1,24 @@
+// vani-lang: odia
+//
+// Phase 6 (2026-06-07): Odia (ଓଡ଼ିଆ) — Indo-Aryan, Odisha.
+// Brahmi-derived script at U+0B00..U+0B7F; numerals ୦..୯ at
+// U+0B66..0B6F. Tatsama-friendly so most keywords transliterate
+// Sanskrit roots straight into Odia script.
+
+ଉଦ୍ଦେଶ୍ୟ "Odia-pragma intro — sum two numbers with a contract";
+
+କାର୍ଯ୍ୟ add(a: i64, b: i64) -> i64
+ଆବଶ୍ୟକ a >= 0;
+ଆବଶ୍ୟକ b >= 0;
+{
+  ଫେରନ୍ତୁ a + b;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର x: i64 = 5;
+  ମନେକର y: i64 = 7;
+  ମନେକର sum: i64 = add(x, y);
+  ନିଶ୍ଚିତ sum == 12;
+  ଲେଖ sum;
+  ଫେରନ୍ତୁ 0;
+}

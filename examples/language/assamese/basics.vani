@@ -1,0 +1,28 @@
+// vani-lang: assamese
+//
+// Phase 6 (2026-06-07): Assamese (অসমীয়া) — Indo-Aryan, Assam.
+// Shares the Bengali Unicode block (U+0980..U+09FF) with two
+// Assamese-specific characters (ৰ, ৱ) used in everyday text.
+// Numerals are the same as Bengali (০..৯).
+//
+// In v1 the dialect tag accepts the full Bengali keyword set
+// — Assamese-specific structural verbs can be added as user
+// requests come in.
+
+উদ্দেশ্য "Assamese-pragma intro — sum two numbers with a contract";
+
+কাজ add(a: i64, b: i64) -> i64
+প্রয়োজনীয় a >= 0;
+প্রয়োজনীয় b >= 0;
+{
+  ফেরত a + b;
+}
+
+কাজ main() -> i64 {
+  মান x: i64 = 5;
+  মান y: i64 = 7;
+  মান sum: i64 = add(x, y);
+  নিশ্চিত sum == 12;
+  লেখ sum;
+  ফেরত 0;
+}
