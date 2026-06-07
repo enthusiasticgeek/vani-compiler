@@ -165,24 +165,34 @@ pattern examples.
 
 ## Backend-specific limitations
 
-### L8 — C-codegen: `Vec<dyn Iface>` as a struct field with multiple dyn types
+### L8 — C-codegen: `Vec<dyn Iface>` as a struct field with multiple dyn types ✅ SHIPPED 2026-06-07
 
-A program that has TWO or more distinct `dyn Iface` types AND
-stores a `Vec<dyn IfaceA>` as a struct field hits a C-codegen
-type-collision: the emitted `intent_vec_intent_dyn` typedef gets
-re-used across both Iface types.
+**Status**: Resolved in Phase 1.2.
 
-**Why**: the C backend's `Vec<dyn Iface>` bundle naming doesn't
-include the Iface name in its struct typedef.
+`Vec<dyn Iface>` bundles now include the Iface name in the C
+typedef (`intent_vec_dyn_<Iface>`) so two struct fields holding
+`Vec<dyn A>` and `Vec<dyn B>` get distinct bundles. Vec bundles
+for `dyn Iface` elements are also deferred to the unified topo
+loop so they're emitted after `emit_dyn_iface_typedefs` lands
+the per-Iface fat-pointer typedefs — no more
+"unknown type name `intent_dyn_Drawable`" at cc time.
 
-**Workaround**: pass `Vec<dyn Iface>` through a function
-parameter instead of storing it as a struct field, OR limit the
-program to one dyn-Iface type. See the
-[Observer pattern example](../examples/language/english/design_patterns/behavioral/observer.vani).
+**Fix surface**:
+- `backend_c.rs::element_tag` — added the `Type::Object(iface)`
+  arm returning `dyn_<iface>` so `Vec<dyn Drawable>` lands at
+  `intent_vec_dyn_Drawable`, distinct from `intent_vec_dyn_Loggable`.
+- `backend_c.rs::vec_element_has_user_struct` — extended to
+  also return true for `Type::Object`, deferring its Vec bundle
+  to the unified topo loop (which runs after the dyn typedef
+  pass).
 
-**Fix queued in**: C-backend bundle-naming pass — include the
-Iface name in the typedef. Tracked in `TODO.md` as
-*"C codegen: Vec<dyn Iface> struct-field collision"*.
+**Regression coverage**: `lib.rs::two_dyn_iface_vecs_in_struct_field_emit_distinct_c_bundles`
+pins both bundle names + their relative ordering vs the dyn
+typedef.
+
+**Note**: the SSA-C path was already correct (it builds its Vec
+bundle around the per-Iface element type at lowering time); the
+collision only happened on tree-C. The fix is C-only.
 
 ### L9 — LLVM backend: identifiers with non-ASCII chars require mangling
 

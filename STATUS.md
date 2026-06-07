@@ -10,17 +10,25 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 🟢 Session 2026-06-07 — Phase 1.1 Devanagari runtime PRINT shipped
+## 🟢 Session 2026-06-07 — Phase 1.1 + 1.2 shipped
 
-`print x` (integer) now emits `०..९` digits when the file
+**Phase 1.1 — Devanagari runtime PRINT (`०..९`)**: `print x`
+(integer width) now emits Devanagari digits when the file
 declares `// vani-lang: sanskrit | hindi | marathi`. Covers all
 four backends (tree-C, SSA-C, tree-LLVM, SSA-LLVM) via a shared
 `intent_print_int_dev` helper. ASCII-mode programs stay byte-
 identical (gated on the per-file `PrintLangMode` thread-local).
-Regression tests pin the emit shape on both sides. Closes
-[docs/v1_limitations.md L11](docs/v1_limitations.md#l11--runtime-print-output-uses-ascii-numerals-).
+Closes [docs/v1_limitations.md L11](docs/v1_limitations.md).
 
-Test ledger after this change: **1896 lib + 54 parity**, all
+**Phase 1.2 — C-backend `Vec<dyn Iface>` struct-field fix**:
+A struct with two distinct `Vec<dyn …>` fields used to collapse
+both bundles to the same C typedef (`intent_vec_intent_dyn`) and
+also emit the bundle BEFORE the dyn fat-pointer typedef. Now:
+per-Iface naming (`intent_vec_dyn_<Iface>`) plus deferred emit
+through the unified topo loop. Closes
+[docs/v1_limitations.md L8](docs/v1_limitations.md).
+
+Test ledger after these changes: **1897 lib + 54 parity**, all
 green on Linux.
 
 ## 🟢 Session 2026-06-06 — Tiers 1–4 all shipped
@@ -156,7 +164,7 @@ sequence:
     - **F.4** Arc 7 Win64 / AArch64 (CI wiring)
 
 **Last updated:** 2026-06-06 evening. Tip-of-tree summary:
-  - **Tests**: 1896 lib + 54 parity green on Linux.
+  - **Tests**: 1897 lib + 54 parity green on Linux.
   - **Arc 8 + v3.1**: FULLY complete through Phase 4c-broad
     (full generic async fns). 28 v3.1 acceptance examples plus
     the generic-async smoke all parity-green.

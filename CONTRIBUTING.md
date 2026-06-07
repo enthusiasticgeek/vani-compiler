@@ -7,7 +7,7 @@ checklist.
 
 ## Before you open a PR
 
-1. **`cargo test`** (full suite — 1896 lib + 54 e2e + 11 vtables-phase3 +
+1. **`cargo test`** (full suite — 1897 lib + 54 e2e + 11 vtables-phase3 +
    2 user-drop-by-ref + 1 ssa-examples in ~90s. `.cargo/config.toml`
    sets `RUST_MIN_STACK=32MB` so parallel-for + reduction tests have
    stack headroom.).

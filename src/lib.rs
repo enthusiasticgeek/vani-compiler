@@ -25407,6 +25407,79 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn two_dyn_iface_vecs_in_struct_field_emit_distinct_c_bundles() {
+        // Phase 1.2 (2026-06-07): docs/v1_limitations.md L8. A
+        // struct that holds `Vec<dyn A>` AND `Vec<dyn B>` used to
+        // collapse BOTH bundles to one C typedef
+        // `intent_vec_intent_dyn` because `element_tag` returned
+        // the placeholder leaf `"intent_dyn"` for any Object
+        // type. Per-Iface naming gives each its own bundle.
+        let source = r#"
+            struct Circle { r: i64 }
+            struct LogLine { count: i64 }
+
+            interface Drawable {
+              fn area(self: Circle) -> i64;
+            }
+            interface Loggable {
+              fn emit(self: LogLine) -> i64;
+            }
+
+            implement Drawable for Circle {
+              fn area(self: Circle) -> i64 { return self.r * self.r; }
+            }
+            implement Loggable for LogLine {
+              fn emit(self: LogLine) -> i64 { return self.count; }
+            }
+
+            struct Scene {
+              shapes: Vec<dyn Drawable>,
+              logs: Vec<dyn Loggable>,
+            }
+
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 4 };
+              let l: LogLine = LogLine { count: 7 };
+              let shapes: Vec<dyn Drawable> = vec(c);
+              let logs: Vec<dyn Loggable> = vec(l);
+              let _s: Scene = Scene { shapes: shapes, logs: logs };
+              return 0;
+            }
+        "#;
+        let c = crate::compile_to_c(source).expect("two-dyn-vec struct compiles to C");
+        // Both per-Iface bundle typedefs must be present and
+        // distinct so cc doesn't see a redefinition / unknown-
+        // type. The old collapsed name MUST NOT appear.
+        assert!(
+            c.contains("intent_vec_dyn_Drawable"),
+            "expected per-Iface Vec bundle for Drawable, got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("intent_vec_dyn_Loggable"),
+            "expected per-Iface Vec bundle for Loggable, got:\n{}",
+            c
+        );
+        assert!(
+            !c.contains("intent_vec_intent_dyn"),
+            "old collapsed Vec-bundle name must not appear, got:\n{}",
+            c
+        );
+        // The dyn fat-pointer typedefs are the bundle's element
+        // type and MUST be declared before the bundle's typedef.
+        let dyn_drawable_at = c.find("typedef struct intent_dyn_Drawable").expect(
+            "expected dyn fat-pointer typedef for Drawable",
+        );
+        let vec_drawable_at = c.find("intent_vec_dyn_Drawable").expect(
+            "expected Vec bundle typedef for Drawable",
+        );
+        assert!(
+            dyn_drawable_at < vec_drawable_at,
+            "dyn typedef must come before its Vec bundle (Drawable)"
+        );
+    }
+
+    #[test]
     fn dyn_iface_coercion_accepts_when_impl_exists() {
         // Closure #221 / vtables Phase 2a: `T → dyn Iface`
         // coercion is accepted at the type-checker when an

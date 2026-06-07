@@ -300,6 +300,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     fn vec_element_has_user_struct(ty: &Type) -> bool {
         match ty {
             Type::Struct(_) => true,
+            // Phase 1.2 (2026-06-07): `dyn Iface` fat-pointer
+            // typedef is emitted by `emit_dyn_iface_typedefs`
+            // BELOW the early Vec-bundle pass, so any
+            // Vec<dyn Iface> bundle must also be deferred to
+            // the unified topo loop (which runs after the dyn
+            // typedefs land). Closes L8.
+            Type::Object(_) => true,
             Type::Vec(inner)
             | Type::Array { element: inner, .. } => vec_element_has_user_struct(inner),
             _ => false,
@@ -9516,6 +9523,17 @@ pub(crate) fn element_tag(element: &Type) -> String {
         // calls), so a single per-element-tag typedef is
         // correct regardless of parameter/return types.
         Type::FnPtr(_, _) => "fnptr".to_string(),
+        // Phase 1.2 (2026-06-07): `dyn Iface` must include the
+        // Iface name so two struct fields holding `Vec<dyn A>`
+        // and `Vec<dyn B>` get DISTINCT bundle typedefs.
+        // c_leaf_type can only return &'static str so it
+        // returned the generic "intent_dyn" for every Iface;
+        // every Vec<dyn …> then collapsed to one bundle name
+        // `intent_vec_intent_dyn` that referenced an undefined
+        // type. Per-Iface naming aligns Vec<dyn …> with the
+        // per-Iface fat-pointer typedef `intent_dyn_<Iface>`
+        // emitted by `emit_dyn_iface_typedefs`. Closes L8.
+        Type::Object(iface_name) => format!("dyn_{}", iface_name),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
