@@ -10,6 +10,33 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 7 (TUT-4 Advanced track) shipped — full tutorial set done
+
+The 10-lesson Advanced track lands in
+`tutorials/src/advanced/01..10*.md`. Topics:
+
+1. Async/await + Task transform (Arc 8 v3.1 desugar shape).
+2. parallel for + reduction (OpenMP / atomicrmw lowering).
+3. task/join + Atomic / Mutex / Channel / Condvar primitives.
+4. Embedded targets + unsafe blocks + Pool/Handle region
+   typing (no-malloc arena allocation).
+5. The dyn vtable layout + safety boundary
+   (intent_vtbl_Iface struct, dispatch site, per-(T, Iface)
+   vtable shape).
+6. SMT trace debugging — VANIC_SMT_DEBUG=1, counterexample
+   reading, common failure shapes.
+7. Devanagari purity arc — pragma + script gate + SOV shapes
+   + 16-dialect roster.
+8. Translator extension — ALIASES table, round-trip parity.
+9. Adding a new dialect — full work for a new script vs the
+   lighter Assamese-shares-Bengali pattern.
+10. Compiler internals tour — module-by-module pointers, the
+    pipeline at 30K ft, how to contribute a fix.
+
+mdBook builds clean over the full set — **34 lessons, 3
+tracks, ready to deploy**. TUT-5 (GitHub Pages auto-deploy)
+remains queued.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 5a (TUT-3 Intermediate track) shipped
 
 The 12-lesson Intermediate track is now fully written and live

@@ -18,7 +18,10 @@ is the artifact that gets deployed (eventually — see TUT-5 in
   (structs/methods → enums-with-payloads → affine ownership →
   generics → dyn → closures → tuples → multi-file → FFI →
   Result+try → GoF patterns → SMT deep-dive).
-- **TUT-4** queued — write the 10 Advanced lessons.
+- **TUT-4** ✅ SHIPPED 2026-06-07 — 10 Advanced lessons
+  (async → parallel → concurrency → embedded → vtable layout →
+  SMT debug → Devanagari purity → translator → new-dialect
+  walkthrough → compiler internals tour).
 - **TUT-5** queued — GitHub Actions deploy to `gh-pages`.
 
 ## Build it locally

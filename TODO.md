@@ -113,7 +113,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 7 — Tutorials Advanced + deploy (~14-20h)             │
 │ (parallel-safe with PHASE 8)                                │
-│   7.1 ▸ TUT-4: 10 advanced lessons                          │ 10-15h
+│   7.1 ▸ TUT-4: 10 advanced lessons               ✅ SHIPPED 2026-06-07
 │         async / parallel / task / embedded / vtable /       │
 │         SMT trace / Devanagari arc / translator ext /       │
 │         new-dialect walkthrough / compiler tour             │
@@ -791,7 +791,15 @@ structs / enums → generics → SMT proofs → async → embedded.
     22 GoF patterns reference, SMT deep-dive with ensures +
     bounds-thinking.
   - **TUT-3 (original spec)** — write the **Intermediate** track.
-  - **TUT-4** (~10-15h): write the **Advanced** track.
+  - **TUT-4** ✅ SHIPPED 2026-06-07: 10 Advanced lessons
+    (`tutorials/src/advanced/01..10*.md`). Topics: async/await
+    + Task transform, parallel for + race-freedom, task/join +
+    atomics/mutex/channel/condvar, embedded + unsafe + Pool/
+    Handle region typing, dyn vtable layout + safety boundary,
+    SMT trace debugging (VANIC_SMT_DEBUG=1), Devanagari purity
+    arc, translator extension, adding a new dialect, compiler
+    internals tour.
+  - **TUT-4 (original spec)** — write the **Advanced** track.
   - **TUT-5** (~4-6h): build + auto-deploy via GitHub Actions
     to the `gh-pages` branch.
   - **TUT-6** (deferred): browser playground (Option C).

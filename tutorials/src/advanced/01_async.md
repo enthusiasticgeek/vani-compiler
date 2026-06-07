@@ -1,5 +1,123 @@
-# Async / await and the `Task` transform
+# Advanced 1 — Async / await and the `Task` transform
 
-> *This lesson is a stub.* It will be written as part of TUT-2 / TUT-3 / TUT-4 — see [TODO.md](https://github.com/anthropics/claude-code/blob/main/TODO.md) for the schedule.
+> **Learning goal**: declare `async fn`, call it with `await`,
+> thread a `CancelToken` through long operations, and
+> understand the v1 desugar from `async fn` to `Future<R>`.
 
-The lesson title and outline live in [SUMMARY.md](../SUMMARY.md). Until the body is written, the related Async / await and the `Task` transform example(s) under [`examples/language/english/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english) are the best reference.
+## The program
+
+```rust
+intent "Advanced 1 — async fn + await + CancelToken.";
+
+async fn fetch(n: i64) -> i64 {
+  return n * 7;
+}
+
+async fn cancellable(n: i64, token: ref CancelToken) -> i64 {
+  if token.cancelled {
+    return 0 - 1;
+  }
+  return n + 100;
+}
+
+fn main() -> i64 {
+  // Plain async fn + await round-trip.
+  let r1: i64 = await(fetch(6));
+  print "await fetch(6) =", r1;
+
+  // CancelToken not cancelled — produces value.
+  let tok: CancelToken = CancelToken { cancelled: false };
+  let r2: i64 = await(cancellable(7, ref tok));
+  print "await cancellable(7, !tok) =", r2;
+
+  // CancelToken cancelled — produces sentinel.
+  let tok2: CancelToken = CancelToken { cancelled: true };
+  let r3: i64 = await(cancellable(7, ref tok2));
+  print "await cancellable(7, tok)  =", r3;
+
+  return 0;
+}
+```
+
+## Compile + run
+
+```bash
+vanic run ~/adv1.vani
+```
+
+Output:
+
+```
+await fetch(6) = 42
+await cancellable(7, !tok) = 107
+await cancellable(7, tok)  = -1
+```
+
+## Why it works that way
+
+- **`async fn foo() -> R { ... }`** desugars to
+  `fn foo() -> Future<R> { ...; return Future.Ready(v); ... }`.
+  In v1 the body runs to completion synchronously on call;
+  the suspend-point state machine ships under Arc 8 step 8c.
+- **`await(expr)`** desugars to a `match` that extracts
+  `Future.Ready`'s payload. The `Pending` arm body is the
+  literal `0` because v1 async fns never produce `Pending`.
+  This shape lets you write code that *looks* asynchronous
+  while the compiler treats it as straight-line.
+- **`CancelToken`** is a prelude-defined struct:
+  ```rust
+  struct CancelToken { cancelled: bool }
+  ```
+  Thread it through async functions and check `.cancelled` at
+  natural breakpoints. Real suspend-point cancellation lands
+  when the state-machine codegen ships.
+- **The `try` keyword sugar** ([Intermediate §10](../intermediate/10_result_try.md))
+  is enabled *inside async fn bodies* in v1 (Arc 8 v3.1 Phase
+  2.4). For Result-returning async fns, you can write `let v:
+  i64 = try maybe_fetch();` and the compiler inserts the
+  short-circuit on `Err`.
+
+## What's coming and what's queued
+
+| Today | Queued |
+|---|---|
+| `async fn` + `await` synchronous desugar | Real suspend-point state machine (Arc 8 step 8c) |
+| `CancelToken` cooperative cancellation | Auto-injected cancel checks at await points |
+| `try EXPR` sugar in async bodies | `try EXPR` sugar in sync bodies |
+| `Future<R>` for scalar R | `Future<T>` for aggregate R |
+
+## Common patterns
+
+**Sequential awaits**: write them as you would Rust. The
+desugar lowers each to a `match`.
+
+```rust
+async fn pipeline(n: i64) -> i64 {
+  let a: i64 = await(fetch(n));
+  let b: i64 = await(fetch(a));
+  return b;
+}
+```
+
+**Conditional await**: standard `if` works inside async
+bodies.
+
+```rust
+async fn maybe_fetch(use_cache: bool, key: i64) -> i64 {
+  if use_cache {
+    return key;
+  }
+  return await(fetch(key));
+}
+```
+
+## Challenge
+
+Write an `async fn batch(xs: ref Vec<i64>) -> i64` that calls
+`fetch` on each element, sums the results, and returns the
+total. Add a `CancelToken` parameter; return `0 - 1` immediately
+if `cancelled`.
+
+---
+
+**Next**: [§2 — `parallel for` + race-freedom →](02_parallel.md)
