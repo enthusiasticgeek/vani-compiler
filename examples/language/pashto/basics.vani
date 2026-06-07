@@ -1,0 +1,25 @@
+// vani-lang: pashto
+//
+// Phase 12.5 (2026-06-07): Pashto (پښتو) — Iranian language
+// family, ~60M speakers across Afghanistan and Pakistan. Uses
+// extended Arabic alphabet with Pashto-specific letters (ښ ګ ړ
+// ټ ډ ڼ). Shares Persian's numeral helper (Persian Arabic-
+// Indic ۰..۹).
+
+موخه "Pashto intro";
+
+کار multiply(a: i64, b: i64) -> i64
+اړتیا a >= 0;
+اړتیا b >= 0;
+{
+  بېرته a * b;
+}
+
+کار main() -> i64 {
+  ووایه x: i64 = 4;
+  ووایه y: i64 = 3;
+  ووایه prod: i64 = multiply(x, y);
+  تایید prod == 12;
+  ولیکه prod;
+  بېرته 0;
+}

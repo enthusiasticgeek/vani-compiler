@@ -10,6 +10,60 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 12.4/12.5: Persian + Pashto (second Perso-Arabic numeral block)
+
+Two more Perso-Arabic dialects land — **Persian (Farsi)** and
+**Pashto** — bringing the roster to **21 dialects across 11
+scripts**.
+
+Persian introduces a *second* non-Brahmi numeral codepoint
+block (Persian Arabic-Indic `۰..۹` at U+06F0..06F9 → UTF-8
+`DB B0+d`), distinct from Urdu's Eastern Arabic-Indic
+(`٠..٩` at U+0660..0669 → `D9 A0+d`). This validates that
+the variable-prefix helper from Phase 12.1 scales to multiple
+numeral blocks within the same script family. Pashto rides
+Persian's helper.
+
+```rust
+// vani-lang: persian
+هدف "Persian intro";
+تابع add(a: i64, b: i64) -> i64
+نیاز a >= 0;
+نیاز b >= 0;
+{
+  بازگشت a + b;
+}
+تابع main() -> i64 {
+  فرض x: i64 = 5;
+  فرض sum: i64 = add(x, 7);
+  ادعا sum == 12;
+  چاپ sum;     // emits ۱۲ (Persian-Indic 12)
+  بازگشت 0;
+}
+```
+
+Surface of the additions:
+
+- **Lexer** (`src/lexer.rs`) — two new `DialectLang`
+  variants (`Persian`, `Pashto`), pragma aliases
+  (`persian|farsi|fa`, `pashto|paṣ́tō|ps`), both map to
+  `Script::Arabic`; `PrintLangMode::Persian` (new variant)
+  for both. Two new keyword tables — Persian uses Iranian
+  vocabulary, Pashto uses its native vocabulary with
+  extended Arabic letters (ښ ګ ړ).
+- **Backends** — `emit_intent_print_int_per_c` /
+  `intent_print_int_per` in LLVM IR for the new numeral
+  block. Existing `intent_print_int_urd` unchanged. Suffix
+  mapping extended with `Persian => "per"`.
+- **Diagnostic** — `DiagLang::Persian` with native labels
+  (`خطا` for error, `یادداشت` for note) and a 7-prefix
+  translation table. `DiagLang::Pashto` routes through
+  Persian.
+
+Lib ledger: **1927 lib + 54 parity** green (1925→1927 = 2 new
+tests pinning the Persian/Pashto helper paths + the magic
+0xDB lead byte).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.2/12.3: Sindhi + Punjabi-Shahmukhi
 
 Two more Perso-Arabic dialects ride the helper-byte refactor
@@ -37,7 +91,7 @@ language required only:
 Roster after this turn: **19 dialects across 11 scripts**
 (Latin + 9 Brahmi + Perso-Arabic).
 
-Test ledger: **1925 lib + 54 parity** green (1923→1925 = 2
+Test ledger: **1927 lib + 54 parity** green (1923→1925 = 2
 new helper-reuse regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.1: Urdu (first Perso-Arabic / RTL dialect)
@@ -104,7 +158,7 @@ the lexer reads UTF-8 in logical (byte) order. The compiler
 sees the same byte stream regardless of which direction the
 editor displays the text. No bidi handling needed.
 
-Lib ledger: **1925 lib + 54 parity** green (1921→1923 = 2 new
+Lib ledger: **1927 lib + 54 parity** green (1921→1923 = 2 new
 Urdu regressions: print helper + cross-script gate).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 third installment: L7 for-iter-over-self.field
@@ -154,7 +208,7 @@ Closes [docs/v1_limitations.md L7](docs/v1_limitations.md).
 Phase 11's three tractable open limitations (L1, L3, L7) are
 now all shipped this session.
 
-Lib ledger: **1925 lib + 54 parity** green (1919→1921 = 2 new
+Lib ledger: **1927 lib + 54 parity** green (1919→1921 = 2 new
 L7 regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
@@ -190,7 +244,7 @@ Surface of the lift:
 
 Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
 
-Lib ledger: **1925 lib + 54 parity** green (1916→1919 = 3 new
+Lib ledger: **1927 lib + 54 parity** green (1916→1919 = 3 new
 L1 regressions; 1 prior rejection test inverted to match the
 lift).
 

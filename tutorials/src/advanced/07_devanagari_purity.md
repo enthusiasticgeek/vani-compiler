@@ -78,9 +78,12 @@ These work without you doing anything special:
 | Malayalam | Malayalam |
 | Odia | Odia |
 | Sinhala | Sinhala |
-| Perso-Arabic (RTL) | Urdu, Sindhi, Punjabi-Shahmukhi (Phase 12.x) |
+| Perso-Arabic (RTL) | Urdu, Sindhi, Punjabi-Shahmukhi, Persian, Pashto (Phase 12.x) |
 
-**19 dialects across 11 scripts** as of Phase 12.3 (2026-06-07).
+**21 dialects across 11 scripts** as of Phase 12.5 (2026-06-07).
+Within Perso-Arabic, two distinct numeral blocks are wired —
+Eastern Arabic-Indic ٠..٩ (Urdu/Sindhi/Shahmukhi) and Persian
+۰..۹ (Persian/Pashto).
 
 ## A worked Sanskrit example
 

@@ -1001,6 +1001,11 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // only thing that varies.
         "../sindhi/basics.vani",
         "../punjabi_shahmukhi/basics.vani",
+        // Phase 12.4/12.5 (2026-06-07): Persian + Pashto.
+        // Persian's distinct numeral helper (DB B0+d) +
+        // Pashto reuses it.
+        "../persian/basics.vani",
+        "../pashto/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

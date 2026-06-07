@@ -56,6 +56,10 @@ enum DiagLang {
     // through Urdu's labels in localize_label / localize_message.
     Sindhi,
     PunjabiShahmukhi,
+    // Phase 12.4/12.5 (2026-06-07): Persian + Pashto. Persian
+    // has its own label table; Pashto routes through Persian.
+    Persian,
+    Pashto,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -99,6 +103,8 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "sindhi" | "sindhī" | "sd" => Some(DiagLang::Sindhi),
             "punjabi-shahmukhi" | "shahmukhi" | "pnb"
                 => Some(DiagLang::PunjabiShahmukhi),
+            "persian" | "farsi" | "fārsī" | "fa" => Some(DiagLang::Persian),
+            "pashto" | "paṣ́tō" | "ps" => Some(DiagLang::Pashto),
             _ => None,
         };
     }
@@ -116,6 +122,8 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         // Phase 12.2/12.3: Sindhi + Shahmukhi route through
         // Urdu labels (same Perso-Arabic script).
         DiagLang::Sindhi | DiagLang::PunjabiShahmukhi => DiagLang::Urdu,
+        // Phase 12.5: Pashto routes through Persian labels.
+        DiagLang::Pashto => DiagLang::Persian,
         other => other,
     });
     match (level, lang) {
@@ -132,6 +140,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Odia)) => "ତ୍ରୁଟି (error)".to_string(),
         ("error", Some(DiagLang::Sinhala)) => "දෝෂය (error)".to_string(),
         ("error", Some(DiagLang::Urdu)) => "غلطی (error)".to_string(),
+        ("error", Some(DiagLang::Persian)) => "خطا (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -145,6 +154,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Odia)) => "ଟିପ୍ପଣୀ (note)".to_string(),
         ("note", Some(DiagLang::Sinhala)) => "සටහන (note)".to_string(),
         ("note", Some(DiagLang::Urdu)) => "نوٹ (note)".to_string(),
+        ("note", Some(DiagLang::Persian)) => "یادداشت (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -172,6 +182,8 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
         // Phase 12.2/12.3 (2026-06-07): Perso-Arabic siblings
         // share Urdu's prefix table.
         DiagLang::Sindhi | DiagLang::PunjabiShahmukhi => DiagLang::Urdu,
+        // Phase 12.5: Pashto routes through Persian.
+        DiagLang::Pashto => DiagLang::Persian,
         other => other,
     };
     let table = match lang {
@@ -321,6 +333,15 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("language mismatch", "زبان میں اختلاف (language mismatch)"),
             ("script mismatch", "رسم الخط میں اختلاف (script mismatch)"),
         ][..],
+        DiagLang::Persian => &[
+            ("expected ", "مورد انتظار "),
+            ("unknown variable", "متغیر ناشناخته (unknown variable)"),
+            ("unknown function", "تابع ناشناخته (unknown function)"),
+            ("type mismatch", "عدم تطابق نوع (type mismatch)"),
+            ("cannot prove", "قابل اثبات نیست (cannot prove)"),
+            ("language mismatch", "عدم تطابق زبان (language mismatch)"),
+            ("script mismatch", "عدم تطابق خط (script mismatch)"),
+        ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.
         DiagLang::Nepali
@@ -328,7 +349,8 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
         | DiagLang::Konkani
         | DiagLang::Assamese
         | DiagLang::Sindhi
-        | DiagLang::PunjabiShahmukhi => {
+        | DiagLang::PunjabiShahmukhi
+        | DiagLang::Pashto => {
             unreachable!("collapsed dialects shouldn't reach this match")
         }
     };

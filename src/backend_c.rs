@@ -1146,6 +1146,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_print_int_odi_c(&mut out);
     emit_intent_print_int_sin_c(&mut out);
     emit_intent_print_int_urd_c(&mut out);
+    emit_intent_print_int_per_c(&mut out);
     emit_intent_thread_wrappers_c(&mut out);
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
@@ -7700,6 +7701,16 @@ pub(crate) fn emit_intent_print_int_urd_c(out: &mut String) {
     }
 }
 
+/// Phase 12.4 (2026-06-07): Persian (Extended) Arabic-Indic
+/// digits '۰..۹' at U+06F0..06F9 → UTF-8 `DB B0+d`. A second
+/// non-Brahmi numeral block, distinct from Urdu's.
+pub(crate) fn emit_intent_print_int_per_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Persian) {
+        emit_intent_print_int_helper_c(out, "per", &[0xDB], 0xB0);
+    }
+}
+
 pub(crate) fn emit_intent_str_concat_c(out: &mut String) {
     out.push_str(
         "static char* intent_str_concat(const char* l, int l_owned, const char* r, int r_owned) INTENT_UNUSED;\n\
@@ -12727,6 +12738,7 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
                 crate::lexer::PrintLangMode::Odia => Some("odi"),
                 crate::lexer::PrintLangMode::Sinhala => Some("sin"),
                 crate::lexer::PrintLangMode::Urdu => Some("urd"),
+                crate::lexer::PrintLangMode::Persian => Some("per"),
                 crate::lexer::PrintLangMode::Ascii => None,
             };
             if let Some(s) = suffix {

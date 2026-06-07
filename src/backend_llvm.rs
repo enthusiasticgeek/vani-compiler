@@ -509,6 +509,7 @@ pub(crate) fn brahmi_suffix() -> Option<&'static str> {
         PrintLangMode::Odia => Some("odi"),
         PrintLangMode::Sinhala => Some("sin"),
         PrintLangMode::Urdu => Some("urd"),
+        PrintLangMode::Persian => Some("per"),
         PrintLangMode::Ascii => None,
     }
 }
@@ -539,6 +540,7 @@ fn emit_brahmi_print_helper_ll(
             | (PrintLangMode::Odia, "odi")
             | (PrintLangMode::Sinhala, "sin")
             | (PrintLangMode::Urdu, "urd")
+            | (PrintLangMode::Persian, "per")
     );
     if !active {
         return;
@@ -1058,6 +1060,9 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // Phase 12 (2026-06-07): Urdu — 2-byte UTF-8 sequence
     // (Arabic-Indic '٠..٩' at U+0660..0669 → D9 A0+d).
     emit_brahmi_print_helper_ll(&mut out, "urd", &[217], 160);       // D9 A0+d
+    // Phase 12.4 (2026-06-07): Persian — second non-Brahmi
+    // numeral block ('۰..۹' at U+06F0..06F9 → DB B0+d).
+    emit_brahmi_print_helper_ll(&mut out, "per", &[219], 176);       // DB B0+d
 
     // Walk the program for unique `assert "msg"` and `print
     // "literal";` strings. Each unique text gets one private

@@ -99,6 +99,7 @@ fn emit_brahmi_print_helper_ssa_ll(
             | (PrintLangMode::Odia, "odi")
             | (PrintLangMode::Sinhala, "sin")
             | (PrintLangMode::Urdu, "urd")
+            | (PrintLangMode::Persian, "per")
     );
     if !active {
         return;
@@ -278,6 +279,9 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     emit_brahmi_print_helper_ssa_ll(&mut out, "sin", &[224, 183], 166);
     // Phase 12 (2026-06-07): Urdu — 2-byte Arabic-Indic digits.
     emit_brahmi_print_helper_ssa_ll(&mut out, "urd", &[217], 160);
+    // Phase 12.4 (2026-06-07): Persian / Pashto — 2-byte
+    // Persian Arabic-Indic digits at U+06F0..06F9 (DB B0+d).
+    emit_brahmi_print_helper_ssa_ll(&mut out, "per", &[219], 176);
     // Parallel-for runtime. Linux/macOS use libgomp;
     // Windows open-codes a `@CreateThread` fan-out (the
     // outlined fn reads tid/nt from a per-thread arg struct

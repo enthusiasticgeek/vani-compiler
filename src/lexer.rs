@@ -908,6 +908,113 @@ fn urdu_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 12.4 (2026-06-07): Persian / Farsi (فارسی) keyword
+/// resolution. Iranian language; shares Perso-Arabic script
+/// with Urdu but uses distinct everyday vocabulary. Technical
+/// register heavy on classical Persian roots; we ship a v1
+/// starter set covering the highest-frequency structure
+/// keywords.
+fn persian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "تابع" => TokenKind::Fn,               // tābe' (function)
+        "فانکشن" => TokenKind::Fn,             // fankshen (loanword)
+        "فرض" => TokenKind::Let,               // farz (suppose)
+        "بگذار" => TokenKind::Let,             // begozār (let it be)
+        "ساختار" => TokenKind::Struct,         // sākhtār (structure)
+        "شمارش" => TokenKind::Enum,            // shomāresh (enumeration)
+        "ثابت" => TokenKind::Const,            // sābet (constant)
+        // === VISIBILITY ===
+        "عمومی" => TokenKind::Pub,             // omumī (public)
+        "بخش" => TokenKind::Module,            // bakhsh (section)
+        "استفاده" => TokenKind::Use,           // estefādeh (use)
+        "بعنوان" => TokenKind::As,             // be-onvān (as)
+        // === CONTROL FLOW ===
+        "بازگشت" => TokenKind::Return,         // bāzgasht (return)
+        "اگر" => TokenKind::If,                // agar (if)
+        "وگرنه" => TokenKind::Else,            // vagarna (otherwise)
+        "تا" => TokenKind::While,              // tā (until/while)
+        "هر" => TokenKind::For,                // har (each/for)
+        "در" => TokenKind::In,                 // dar (in)
+        "از" => TokenKind::From,               // az (from)
+        "بشکن" => TokenKind::Break,            // beshkan (break)
+        "ادامه" => TokenKind::Continue,        // edāmeh (continue)
+        "سپس" => TokenKind::Then,              // sepas (then)
+        // === REFERENCES + MUT ===
+        "ببین" => TokenKind::Ref,              // bebin (see/look)
+        "تغییرپذیر" => TokenKind::Mut,         // taghyīr-pazīr (mutable)
+        // === MATCH ===
+        "تطبیق" => TokenKind::Match,           // tatbīq (matching)
+        // === VERIFICATION ===
+        "ادعا" => TokenKind::Assert,           // ed'ā (claim/assert)
+        "اثبات" => TokenKind::Prove,           // esbāt (proof)
+        "نیاز" => TokenKind::Requires,         // niāz (need)
+        "تضمین" => TokenKind::Ensures,         // tazmīn (guarantee)
+        // === BOOL / PRINT ===
+        "درست" => TokenKind::True,             // dorost (correct/true)
+        "نادرست" => TokenKind::False,          // nādorost (false)
+        "چاپ" => TokenKind::Print,             // chāp (print)
+        "بنویس" => TokenKind::Print,           // benevis (write)
+        // === SOV-S7 PARITY ===
+        "هدف" => TokenKind::Intent,            // hadaf (intent)
+        "نوع" => TokenKind::Type,              // nō' (type)
+        "خارجی" => TokenKind::Extern,          // khārejī (external)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 12.5 (2026-06-07): Pashto (پښتو) keyword resolution.
+/// Iranian language family with its own vocabulary distinct
+/// from Persian and Urdu. Pashto uses extended Arabic letters
+/// for unique sounds (ښ ګ ړ ټ ډ ڼ etc).
+fn pashto_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // Function / declarations
+        "فنکشن" => TokenKind::Fn,              // fankshan (loanword)
+        "کار" => TokenKind::Fn,                // kār (work — shared Persian root)
+        "ووایه" => TokenKind::Let,             // wowāya (assume)
+        "جوړښت" => TokenKind::Struct,          // jorrxṣ̌t (structure)
+        "شمېرل" => TokenKind::Enum,            // shmerel (counting)
+        "ثابت" => TokenKind::Const,            // sābet (constant)
+        // Visibility
+        "عمومي" => TokenKind::Pub,             // omumī (public)
+        "برخه" => TokenKind::Module,           // barkha (part)
+        "وکاروه" => TokenKind::Use,            // wakaraweh (use)
+        "په توګه" => TokenKind::As,            // pe toga (as) — multi-word; not folded yet
+        // Control flow
+        "بېرته" => TokenKind::Return,          // berta (back)
+        "که" => TokenKind::If,                 // ka (if)
+        "که نه" => TokenKind::Else,            // ka na (else — multi-word)
+        "تر څو" => TokenKind::While,           // tar tso (until)
+        "هر یو" => TokenKind::For,             // har yew (each one — multi-word)
+        "په" => TokenKind::In,                 // pe (in)
+        "له" => TokenKind::From,               // le (from)
+        "ودروه" => TokenKind::Break,           // wadrawa (stop)
+        "دوام" => TokenKind::Continue,         // dawām (continuation)
+        "بیا" => TokenKind::Then,              // bya (then)
+        // References / mut
+        "وګوره" => TokenKind::Ref,             // waguwra (see)
+        "د بدلون وړ" => TokenKind::Mut,        // dalbedlun war (changeable — multi-word)
+        // Match
+        "سمون" => TokenKind::Match,            // samun (alignment)
+        // Verification
+        "تایید" => TokenKind::Assert,          // tāyid (confirm)
+        "ثبوت" => TokenKind::Prove,            // sboot (proof)
+        "اړتیا" => TokenKind::Requires,        // arrtya (need)
+        "ډاډ" => TokenKind::Ensures,           // ḍāḍ (assurance)
+        // Bool / print
+        "سم" => TokenKind::True,               // sam (correct)
+        "ناسم" => TokenKind::False,            // nāsam (incorrect)
+        "ولیکه" => TokenKind::Print,           // wlika (write)
+        // SOV-S7 parity
+        "موخه" => TokenKind::Intent,           // mokha (purpose)
+        "ډول" => TokenKind::Type,              // ḍol (type)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -950,6 +1057,12 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         | Some(DialectLang::Sindhi)
         | Some(DialectLang::PunjabiShahmukhi)
             => PrintLangMode::Urdu,
+        // Phase 12.4/12.5: Persian + Pashto use Persian-Indic
+        // numerals ('۰..۹') — distinct UTF-8 byte sequence
+        // from Urdu's Eastern Arabic-Indic.
+        Some(DialectLang::Persian)
+        | Some(DialectLang::Pashto)
+            => PrintLangMode::Persian,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -985,6 +1098,10 @@ pub enum PrintLangMode {
     // (RTL). Eastern Arabic-Indic digits '٠..٩' at
     // U+0660..0669 → 2-byte UTF-8 `D9 A0+d`.
     Urdu,
+    // Phase 12.4 (2026-06-07): Persian (Extended) Arabic-Indic
+    // digits '۰..۹' at U+06F0..06F9 → 2-byte UTF-8 `DB B0+d`.
+    // Used by Persian/Farsi and Pashto.
+    Persian,
 }
 
 thread_local! {
@@ -1207,6 +1324,17 @@ enum DialectLang {
     // Punjabi), the Perso-Arabic counterpart to Punjabi-
     // Gurmukhi already shipped in Phase 6.
     PunjabiShahmukhi,
+    // Phase 12.4 (2026-06-07): Persian / Farsi (فارسی),
+    // Iranian. Same script family but its OWN numeral block:
+    // U+06F0..06F9 '۰..۹' encode to UTF-8 `DB B0+d` instead
+    // of Urdu's `D9 A0+d`. Validates the variable-prefix
+    // helper across a second non-Brahmi numeral block.
+    Persian,
+    // Phase 12.5 (2026-06-07): Pashto (پښتو), Iranian /
+    // Pakistan + Afghanistan. Extended Arabic alphabet with
+    // Pashto-specific letters (ښ ګ ړ etc). Uses Persian-Indic
+    // numerals in modern publishing.
+    Pashto,
 }
 
 impl DialectLang {
@@ -1232,6 +1360,8 @@ impl DialectLang {
             DialectLang::Urdu => "urdu",
             DialectLang::Sindhi => "sindhi",
             DialectLang::PunjabiShahmukhi => "punjabi-shahmukhi",
+            DialectLang::Persian => "persian",
+            DialectLang::Pashto => "pashto",
         }
     }
 
@@ -1269,6 +1399,8 @@ impl DialectLang {
             DialectLang::Urdu => Script::Arabic,
             DialectLang::Sindhi => Script::Arabic,
             DialectLang::PunjabiShahmukhi => Script::Arabic,
+            DialectLang::Persian => Script::Arabic,
+            DialectLang::Pashto => Script::Arabic,
         }
     }
 }
@@ -1406,6 +1538,11 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "sindhi" | "sindhī" | "sd" => Some(DialectLang::Sindhi),
             "punjabi-shahmukhi" | "shahmukhi" | "pnb"
                 => Some(DialectLang::PunjabiShahmukhi),
+            // Phase 12.4 / 12.5 (2026-06-07).
+            "persian" | "farsi" | "fārsī" | "fa"
+                => Some(DialectLang::Persian),
+            "pashto" | "paṣ́tō" | "ps"
+                => Some(DialectLang::Pashto),
             _ => None,
         };
     }
@@ -2159,6 +2296,8 @@ impl<'a> Lexer<'a> {
             .or_else(|| odia_keyword(text))
             .or_else(|| sinhala_keyword(text))
             .or_else(|| urdu_keyword(text))
+            .or_else(|| persian_keyword(text))
+            .or_else(|| pashto_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,

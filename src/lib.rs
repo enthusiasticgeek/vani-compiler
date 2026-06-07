@@ -27475,6 +27475,50 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn persian_pragma_compiles_and_emits_persian_indic_print() {
+        // Phase 12.4 (2026-06-07): Persian — second non-Brahmi
+        // numeral block. Persian Arabic-Indic digits at
+        // U+06F0..06F9 encode to UTF-8 `DB B0+d` — distinct
+        // from Urdu's `D9 A0+d`. Validates that the prefix-
+        // byte refactor scales to a second new numeral block.
+        let source = "// vani-lang: persian\n\
+                      هدف \"t\";\n\
+                      تابع main() -> i64 {\n  \
+                        فرض x: i64 = 5;\n  \
+                        چاپ x;\n  \
+                        بازگشت 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Persian program compiles");
+        assert!(c.contains("intent_print_int_per"),
+            "Persian must route through per helper, got:\n{}", c);
+        // Pin the magic byte 0xDB so a future refactor can't
+        // silently regress Persian to Urdu's D9 lead.
+        assert!(
+            c.contains("0xdb") || c.contains("0xDB"),
+            "expected DB lead byte in Persian numeral helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn pashto_pragma_reuses_persian_helper() {
+        // Phase 12.5 (2026-06-07): Pashto rides the Persian
+        // numeral helper (same Persian Arabic-Indic digits in
+        // modern publishing). Validates the shared-helper
+        // pattern across a second numeral block.
+        let source = "// vani-lang: pashto\n\
+                      موخه \"t\";\n\
+                      کار main() -> i64 {\n  \
+                        ووایه x: i64 = 5;\n  \
+                        ولیکه x;\n  \
+                        بېرته 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Pashto program compiles");
+        assert!(c.contains("intent_print_int_per"),
+            "Pashto must reuse Persian helper, got:\n{}", c);
+    }
+
+    #[test]
     fn urdu_keyword_in_hindi_pragma_file_is_rejected() {
         // Phase 12 (2026-06-07): cross-script gate. Urdu's
         // Perso-Arabic script is distinct from Devanagari, so
