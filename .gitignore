@@ -26,3 +26,7 @@ a.out
 # Logs / debug dumps
 *.log
 *.dump
+
+# Python bytecode (tools/)
+__pycache__/
+*.pyc

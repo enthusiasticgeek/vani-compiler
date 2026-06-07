@@ -2,6 +2,15 @@
 
 Out-of-tree utilities that don't ship with the compiler binary.
 
+Currently:
+
+- [`vani_translate.py`](#vani_translatepy--cross-language-vani-source-translator)
+  — keyword-level translation between English / Sanskrit /
+  Hindi / Marathi `.vani` source files (Phase B.1).
+- [`llm_context/`](llm_context/README.md) — assembles a
+  prompt-engineering bundle for off-the-shelf LLMs to use as
+  vāṇी programmers (Phase ML-1, shipped 2026-06-07).
+
 ## `vani_translate.py` — cross-language `.vani` source translator
 
 **Status**: B.1 v1 — shipped 2026-06-06 (commit pending).

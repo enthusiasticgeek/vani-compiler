@@ -44,7 +44,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 │ PHASE 1 — Quick wins, no dependencies (≤ 15h total)         │
 │   1.1 ▸ Devanagari runtime PRINT output (०-९ vs 0-9)   ✅ SHIPPED 2026-06-07
 │   1.2 ▸ C-backend Vec<dyn Iface> struct-field fix (L8) ✅ SHIPPED 2026-06-07
-│   1.3 ▸ ML-1: prompt-engineering context bundle             │ 2-4h
+│   1.3 ▸ ML-1: prompt-engineering context bundle       ✅ SHIPPED 2026-06-07
 │   1.4 ▸ TUT-1: mdBook scaffolding for HTML tutorials        │ 3h
 │   Each item is INDEPENDENT — pick in any order.             │
 └─────────────────────────────────────────────────────────────┘
@@ -649,11 +649,15 @@ training**.
 
 ### Recommended phasing
 
-  - **Phase ML-1** (~2-4h): pack the context bundle described
-    above into a `tools/llm_context/` directory + a Python or
-    Rust script that emits it to stdout for piping into a
-    Claude / GPT prompt. Document a sample workflow in
-    `tools/README.md`. No model integration yet.
+  - **Phase ML-1** ✅ SHIPPED 2026-06-07: `tools/llm_context/`
+    directory + `bundle.py` script that reads repo sources of
+    truth (`vani_translate.py` aliases, design-pattern README,
+    English example signatures, `docs/v1_limitations.md`,
+    `diagnostic.rs` error prefixes) and emits a single
+    Markdown context bundle to stdout. Sample workflow
+    documented in [`tools/llm_context/README.md`](tools/llm_context/README.md).
+    Bundle is ~13K tokens full, ~7K with `--no-examples`. No
+    model integration yet — by design (next phase).
   - **Phase ML-2** (~8-12h): expose the bundle as an MCP server
     that AI agents can pull on demand. The agent gets the
     context AS NEEDED rather than burning context window on
