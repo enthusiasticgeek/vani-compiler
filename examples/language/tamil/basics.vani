@@ -1,0 +1,34 @@
+// vani-lang: tamil
+//
+// Phase 6 (2026-06-07): first Tamil-pragma example. Tamil
+// (தமிழ்) is a Dravidian language — distinct linguistic family
+// from Indo-Aryan — written in the Tamil Brahmi-derived script
+// (U+0B80..U+0BFF). v1 ships ~30 starter keyword aliases; the
+// linguistic surface picks up native Tamil verbs/nouns rather
+// than transliterating Sanskrit tatsama vocabulary (which
+// doesn't fit Dravidian morphology naturally).
+//
+// build & run:
+//   vanic run examples/language/tamil/basics.vani              # LLVM backend
+//   vanic run examples/language/tamil/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Tamil numerals (௦..௯) inside this
+// pragma — UTF-8 `E0 AF (A6+d)`.
+
+நோக்கம் "Tamil-pragma intro — sum two numbers with a contract";
+
+செயல்பாடு add(a: i64, b: i64) -> i64
+தேவை a >= 0;
+தேவை b >= 0;
+{
+  திருப்பு a + b;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் x: i64 = 5;
+  கொள் y: i64 = 7;
+  கொள் sum: i64 = add(x, y);
+  உறுதி sum == 12;
+  எழுது sum;
+  திருப்பு 0;
+}

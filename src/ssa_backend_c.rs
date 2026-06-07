@@ -242,6 +242,12 @@ fn preamble(out: &mut String) {
     // Emits only when the pragma selected `bengali`. Same shape
     // as the Devanagari helper above, different codepoints.
     crate::backend_c::emit_intent_print_int_ben_c(out);
+    // Phase 6 (2026-06-07): Brahmi-derived batch. Each emit-gate
+    // checks the active PrintLangMode and is a no-op otherwise.
+    crate::backend_c::emit_intent_print_int_tam_c(out);
+    crate::backend_c::emit_intent_print_int_tel_c(out);
+    crate::backend_c::emit_intent_print_int_guj_c(out);
+    crate::backend_c::emit_intent_print_int_pan_c(out);
     // Shared `intent_str_concat` runtime helper used by Str
     // `+` lowering. Always emitted; small and may be unused.
     crate::backend_c::emit_intent_str_concat_c(out);
@@ -1651,27 +1657,24 @@ fn emit_instr(
                     Type::I8 | Type::I16 | Type::I32 | Type::I64
                   | Type::U8 | Type::U16 | Type::U32 | Type::U64)
                 {
-                    match crate::lexer::current_print_lang_mode() {
-                        crate::lexer::PrintLangMode::Devanagari => {
-                            writeln!(
-                                out,
-                                "  intent_print_int_dev((long long)({}));",
-                                c_operand(arg)
-                            )
-                            .unwrap();
-                            return Ok(());
-                        }
-                        // Phase 5b (2026-06-07): Bengali numerals.
-                        crate::lexer::PrintLangMode::Bengali => {
-                            writeln!(
-                                out,
-                                "  intent_print_int_ben((long long)({}));",
-                                c_operand(arg)
-                            )
-                            .unwrap();
-                            return Ok(());
-                        }
-                        crate::lexer::PrintLangMode::Ascii => {}
+                    // Phase 6 (2026-06-07): one suffix per script.
+                    let suffix = match crate::lexer::current_print_lang_mode() {
+                        crate::lexer::PrintLangMode::Devanagari => Some("dev"),
+                        crate::lexer::PrintLangMode::Bengali => Some("ben"),
+                        crate::lexer::PrintLangMode::Tamil => Some("tam"),
+                        crate::lexer::PrintLangMode::Telugu => Some("tel"),
+                        crate::lexer::PrintLangMode::Gujarati => Some("guj"),
+                        crate::lexer::PrintLangMode::Gurmukhi => Some("pan"),
+                        crate::lexer::PrintLangMode::Ascii => None,
+                    };
+                    if let Some(s) = suffix {
+                        writeln!(
+                            out,
+                            "  intent_print_int_{}((long long)({}));",
+                            s, c_operand(arg)
+                        )
+                        .unwrap();
+                        return Ok(());
                     }
                 }
                 let fmt = match aty {

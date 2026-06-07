@@ -37,6 +37,13 @@ enum DiagLang {
     // Hindi/Marathi would render Devanagari script in a Bengali-
     // pragma file, which defeats the dialect-aware UX.
     Bengali,
+    // Phase 6 (2026-06-07): Brahmi-derived batch. Each has its
+    // own native-script label table so users see error labels
+    // in the same script they're writing code in.
+    Tamil,
+    Telugu,
+    Gujarati,
+    Punjabi,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -66,6 +73,10 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "maithili" | "maithilī" | "mai" => Some(DiagLang::Maithili),
             "konkani" | "koṅkaṇī" | "kok" => Some(DiagLang::Konkani),
             "bengali" | "bangla" | "bāṅlā" | "bn" => Some(DiagLang::Bengali),
+            "tamil" | "tamiḻ" | "ta" => Some(DiagLang::Tamil),
+            "telugu" | "telugū" | "te" => Some(DiagLang::Telugu),
+            "gujarati" | "gujarātī" | "gu" => Some(DiagLang::Gujarati),
+            "punjabi" | "pañjābī" | "pa" => Some(DiagLang::Punjabi),
             _ => None,
         };
     }
@@ -87,10 +98,18 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Hindi)) => "त्रुटि (error)".to_string(),
         ("error", Some(DiagLang::Marathi)) => "चूक (error)".to_string(),
         ("error", Some(DiagLang::Bengali)) => "ত্রুটি (error)".to_string(),
+        ("error", Some(DiagLang::Tamil)) => "பிழை (error)".to_string(),
+        ("error", Some(DiagLang::Telugu)) => "లోపం (error)".to_string(),
+        ("error", Some(DiagLang::Gujarati)) => "ભૂલ (error)".to_string(),
+        ("error", Some(DiagLang::Punjabi)) => "ਗਲਤੀ (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
         ("note", Some(DiagLang::Bengali)) => "টীকা (note)".to_string(),
+        ("note", Some(DiagLang::Tamil)) => "குறிப்பு (note)".to_string(),
+        ("note", Some(DiagLang::Telugu)) => "గమనిక (note)".to_string(),
+        ("note", Some(DiagLang::Gujarati)) => "નોંધ (note)".to_string(),
+        ("note", Some(DiagLang::Punjabi)) => "ਨੋਟ (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -172,6 +191,49 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("invalid", "অবৈধ (invalid)"),
             ("integer literal", "পূর্ণসংখ্যা মান (integer literal)"),
             ("float literal", "দশমিক মান (float literal)"),
+        ][..],
+        // Phase 6 (2026-06-07): Tamil / Telugu / Gujarati /
+        // Punjabi v1 starter tables. Shorter than Sanskrit/
+        // Hindi/Marathi/Bengali because the prefix-translation
+        // surface is still being calibrated for these scripts;
+        // unknown prefixes pass through with no translation
+        // (still useful — the error labels above already
+        // localized "error" / "note").
+        DiagLang::Tamil => &[
+            ("expected ", "எதிர்பார்க்கப்பட்டது "),
+            ("unknown variable", "தெரியாத மாறி (unknown variable)"),
+            ("unknown function", "தெரியாத செயல்பாடு (unknown function)"),
+            ("type mismatch", "வகை பொருந்தவில்லை (type mismatch)"),
+            ("cannot prove", "நிரூபிக்க இயலவில்லை (cannot prove)"),
+            ("language mismatch", "மொழி பொருந்தவில்லை (language mismatch)"),
+            ("script mismatch", "எழுத்துப் பொருந்தவில்லை (script mismatch)"),
+        ][..],
+        DiagLang::Telugu => &[
+            ("expected ", "ఆశించినది "),
+            ("unknown variable", "తెలియని చరం (unknown variable)"),
+            ("unknown function", "తెలియని ఫంక్షన్ (unknown function)"),
+            ("type mismatch", "రకం సరిపోలడం లేదు (type mismatch)"),
+            ("cannot prove", "నిరూపించలేము (cannot prove)"),
+            ("language mismatch", "భాష సరిపోలడం లేదు (language mismatch)"),
+            ("script mismatch", "లిపి సరిపోలడం లేదు (script mismatch)"),
+        ][..],
+        DiagLang::Gujarati => &[
+            ("expected ", "અપેક્ષિત "),
+            ("unknown variable", "અજાણ્યું ચલ (unknown variable)"),
+            ("unknown function", "અજાણ્યું કાર્ય (unknown function)"),
+            ("type mismatch", "પ્રકાર મેળ ખાતો નથી (type mismatch)"),
+            ("cannot prove", "સાબિત કરી શકાતું નથી (cannot prove)"),
+            ("language mismatch", "ભાષા મેળ ખાતી નથી (language mismatch)"),
+            ("script mismatch", "લિપિ મેળ ખાતી નથી (script mismatch)"),
+        ][..],
+        DiagLang::Punjabi => &[
+            ("expected ", "ਉਮੀਦ ਕੀਤੀ ਗਈ "),
+            ("unknown variable", "ਅਣਜਾਣ ਚਲ (unknown variable)"),
+            ("unknown function", "ਅਣਜਾਣ ਕਾਰਜ (unknown function)"),
+            ("type mismatch", "ਕਿਸਮ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ (type mismatch)"),
+            ("cannot prove", "ਸਾਬਤ ਨਹੀਂ ਹੋ ਸਕਦਾ (cannot prove)"),
+            ("language mismatch", "ਭਾਸ਼ਾ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ (language mismatch)"),
+            ("script mismatch", "ਲਿਪੀ ਮੇਲ ਨਹੀਂ ਖਾਂਦੀ (script mismatch)"),
         ][..],
         // Collapsed above to Hindi/Marathi; rustc requires the
         // arms to be syntactically exhaustive.

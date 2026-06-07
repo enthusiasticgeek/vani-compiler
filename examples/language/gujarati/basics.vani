@@ -1,0 +1,31 @@
+// vani-lang: gujarati
+//
+// Phase 6 (2026-06-07): first Gujarati-pragma example. Gujarati
+// (ગુજરાતી) is Indo-Aryan (closer to Marathi), written in the
+// Gujarati Brahmi-derived script (U+0A80..U+0AFF). Tatsama-
+// friendly vocabulary so many keywords transliterate Sanskrit
+// roots straight into Gujarati script.
+//
+// build & run:
+//   vanic run examples/language/gujarati/basics.vani              # LLVM
+//   vanic run examples/language/gujarati/basics.vani --backend=c  # C
+//
+// PRINT digits emit as Gujarati numerals (૦..૯) — UTF-8 `E0 AB (A6+d)`.
+
+ઉદ્દેશ "Gujarati-pragma intro — sum two numbers with a contract";
+
+કાર્ય add(a: i64, b: i64) -> i64
+જરૂરી a >= 0;
+જરૂરી b >= 0;
+{
+  પાછા a + b;
+}
+
+કાર્ય main() -> i64 {
+  માનો x: i64 = 5;
+  માનો y: i64 = 7;
+  માનો sum: i64 = add(x, y);
+  નિશ્ચિત sum == 12;
+  લખો sum;
+  પાછા 0;
+}

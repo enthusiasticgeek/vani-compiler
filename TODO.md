@@ -810,7 +810,7 @@ structs / enums → generics → SMT proofs → async → embedded.
 ---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
-examples; **1904 lib + 54 parity green as of 2026-06-06 evening**;
+examples; **1909 lib + 54 parity green as of 2026-06-06 evening**;
 clean warning-free build). Remaining work, in execution order
 (USER DIRECTION 2026-06-06):
 
@@ -936,7 +936,7 @@ verification deferred (Windows access pending).
 
 After Phase 5 + Phase 6 code lands (verification deferred for
 platforms), re-run the full Linux suite to confirm:
-  - No regressions in the existing 1904 lib tests.
+  - No regressions in the existing 1909 lib tests.
   - No regressions in the existing 54 parity-sweep examples.
   - The per-host conditional emit (host_is_linux / host_is_darwin /
     host_uses_win32_threading) still routes Linux correctly.

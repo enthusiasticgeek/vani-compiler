@@ -490,6 +490,84 @@ fn llvm_enum_has_mixed_payloads(decl: &crate::ir::TypedEnumDecl) -> bool {
     payloaded[1..].iter().any(|t| *t != first)
 }
 
+/// Phase 6 (2026-06-07): map the active PrintLangMode to the
+/// suffix used in `intent_print_int_<suffix>`. `None` means the
+/// file is in ASCII mode and should keep the printf path. The
+/// SSA-LLVM dispatch shares this mapping.
+pub(crate) fn brahmi_suffix() -> Option<&'static str> {
+    use crate::lexer::PrintLangMode;
+    match crate::lexer::current_print_lang_mode() {
+        PrintLangMode::Devanagari => Some("dev"),
+        PrintLangMode::Bengali => Some("ben"),
+        PrintLangMode::Tamil => Some("tam"),
+        PrintLangMode::Telugu => Some("tel"),
+        PrintLangMode::Gujarati => Some("guj"),
+        PrintLangMode::Gurmukhi => Some("pan"),
+        PrintLangMode::Ascii => None,
+    }
+}
+
+/// Phase 6 (2026-06-07): emit the per-Brahmi-script numeral
+/// print helper into the LLVM module preamble — but only if
+/// the source file's pragma matches this script. `suffix` lands
+/// in the IR function name (`intent_print_int_<suffix>`); the
+/// dispatch sites in the print emitters call the matching name
+/// based on the active `PrintLangMode`.
+fn emit_brahmi_print_helper_ll(out: &mut String, suffix: &str, lead_byte: u32) {
+    use crate::lexer::PrintLangMode;
+    let active = matches!(
+        (crate::lexer::current_print_lang_mode(), suffix),
+        (PrintLangMode::Devanagari, "dev")
+            | (PrintLangMode::Bengali, "ben")
+            | (PrintLangMode::Tamil, "tam")
+            | (PrintLangMode::Telugu, "tel")
+            | (PrintLangMode::Gujarati, "guj")
+            | (PrintLangMode::Gurmukhi, "pan")
+    );
+    if !active {
+        return;
+    }
+    out.push_str(&format!(
+        "define void @intent_print_int_{suffix}(i64 %n) {{\n\
+         entry:\n\
+        \x20 %ascii = alloca [24 x i8], align 1\n\
+        \x20 %ascii_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 0\n\
+        \x20 %fmt = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n\
+        \x20 %len = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %ascii_p, i64 24, i8* %fmt, i64 %n)\n\
+        \x20 %nonempty = icmp sgt i32 %len, 0\n\
+        \x20 br i1 %nonempty, label %loop_cond, label %done\n\
+         loop_cond:\n\
+        \x20 %i = phi i32 [ 0, %entry ], [ %i_next, %loop_end ]\n\
+        \x20 %lt = icmp slt i32 %i, %len\n\
+        \x20 br i1 %lt, label %loop_body, label %done\n\
+         loop_body:\n\
+        \x20 %i64 = sext i32 %i to i64\n\
+        \x20 %char_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 %i64\n\
+        \x20 %c = load i8, i8* %char_p\n\
+        \x20 %is_neg = icmp eq i8 %c, 45\n\
+        \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
+         emit_minus:\n\
+        \x20 %r1 = call i32 @putchar(i32 45)\n\
+        \x20 br label %loop_end\n\
+         emit_digit:\n\
+        \x20 %c_i32 = zext i8 %c to i32\n\
+        \x20 %d = sub i32 %c_i32, 48\n\
+        \x20 %r2 = call i32 @putchar(i32 224)\n\
+        \x20 %r3 = call i32 @putchar(i32 {lead})\n\
+        \x20 %b3 = add i32 166, %d\n\
+        \x20 %r4 = call i32 @putchar(i32 %b3)\n\
+        \x20 br label %loop_end\n\
+         loop_end:\n\
+        \x20 %i_next = add i32 %i, 1\n\
+        \x20 br label %loop_cond\n\
+         done:\n\
+        \x20 ret void\n\
+         }}\n\n",
+        suffix = suffix,
+        lead = lead_byte,
+    ));
+}
+
 pub fn emit_llvm(program: &TypedProgram) -> String {
     let mut out = String::new();
     out.push_str("; ModuleID = 'intent'\n");
@@ -937,96 +1015,18 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     );
 
     // Phase 1.1 (2026-06-07): Devanagari-numeral print helper.
-    // Emitted only when the source's `// vani-lang:` pragma
-    // selected Sanskrit / Hindi / Marathi. Converts each
-    // base-10 digit of the integer to its Devanagari codepoint
-    // (U+0966..U+096F = '०'..'९') via a 3-byte UTF-8 sequence
-    // E0 A5 (A6..AF). Negative numbers keep the ASCII '-'.
-    // putchar-only (no fputs/stdout) so we don't need platform
-    // dependent stdout globals. snprintf is already declared.
-    if matches!(crate::lexer::current_print_lang_mode(),
-                crate::lexer::PrintLangMode::Devanagari) {
-        out.push_str(
-            "define void @intent_print_int_dev(i64 %n) {\n\
-             entry:\n\
-            \x20 %ascii = alloca [24 x i8], align 1\n\
-            \x20 %ascii_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 0\n\
-            \x20 %fmt = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n\
-            \x20 %len = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %ascii_p, i64 24, i8* %fmt, i64 %n)\n\
-            \x20 %nonempty = icmp sgt i32 %len, 0\n\
-            \x20 br i1 %nonempty, label %loop_cond, label %done\n\
-             loop_cond:\n\
-            \x20 %i = phi i32 [ 0, %entry ], [ %i_next, %loop_end ]\n\
-            \x20 %lt = icmp slt i32 %i, %len\n\
-            \x20 br i1 %lt, label %loop_body, label %done\n\
-             loop_body:\n\
-            \x20 %i64 = sext i32 %i to i64\n\
-            \x20 %char_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 %i64\n\
-            \x20 %c = load i8, i8* %char_p\n\
-            \x20 %is_neg = icmp eq i8 %c, 45\n\
-            \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
-             emit_minus:\n\
-            \x20 %r1 = call i32 @putchar(i32 45)\n\
-            \x20 br label %loop_end\n\
-             emit_digit:\n\
-            \x20 %c_i32 = zext i8 %c to i32\n\
-            \x20 %d = sub i32 %c_i32, 48\n\
-            \x20 %r2 = call i32 @putchar(i32 224)\n\
-            \x20 %r3 = call i32 @putchar(i32 165)\n\
-            \x20 %b3 = add i32 166, %d\n\
-            \x20 %r4 = call i32 @putchar(i32 %b3)\n\
-            \x20 br label %loop_end\n\
-             loop_end:\n\
-            \x20 %i_next = add i32 %i, 1\n\
-            \x20 br label %loop_cond\n\
-             done:\n\
-            \x20 ret void\n\
-             }\n\n",
-        );
-    }
-    // Phase 5b (2026-06-07): Bengali-numeral helper. Same loop
-    // shape; the middle UTF-8 byte is 167 (0xA7) instead of 165
-    // (0xA5). U+09E6..09EF = '০'..'৯' in Bengali.
-    if matches!(crate::lexer::current_print_lang_mode(),
-                crate::lexer::PrintLangMode::Bengali) {
-        out.push_str(
-            "define void @intent_print_int_ben(i64 %n) {\n\
-             entry:\n\
-            \x20 %ascii = alloca [24 x i8], align 1\n\
-            \x20 %ascii_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 0\n\
-            \x20 %fmt = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n\
-            \x20 %len = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %ascii_p, i64 24, i8* %fmt, i64 %n)\n\
-            \x20 %nonempty = icmp sgt i32 %len, 0\n\
-            \x20 br i1 %nonempty, label %loop_cond, label %done\n\
-             loop_cond:\n\
-            \x20 %i = phi i32 [ 0, %entry ], [ %i_next, %loop_end ]\n\
-            \x20 %lt = icmp slt i32 %i, %len\n\
-            \x20 br i1 %lt, label %loop_body, label %done\n\
-             loop_body:\n\
-            \x20 %i64 = sext i32 %i to i64\n\
-            \x20 %char_p = getelementptr [24 x i8], [24 x i8]* %ascii, i64 0, i64 %i64\n\
-            \x20 %c = load i8, i8* %char_p\n\
-            \x20 %is_neg = icmp eq i8 %c, 45\n\
-            \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
-             emit_minus:\n\
-            \x20 %r1 = call i32 @putchar(i32 45)\n\
-            \x20 br label %loop_end\n\
-             emit_digit:\n\
-            \x20 %c_i32 = zext i8 %c to i32\n\
-            \x20 %d = sub i32 %c_i32, 48\n\
-            \x20 %r2 = call i32 @putchar(i32 224)\n\
-            \x20 %r3 = call i32 @putchar(i32 167)\n\
-            \x20 %b3 = add i32 166, %d\n\
-            \x20 %r4 = call i32 @putchar(i32 %b3)\n\
-            \x20 br label %loop_end\n\
-             loop_end:\n\
-            \x20 %i_next = add i32 %i, 1\n\
-            \x20 br label %loop_cond\n\
-             done:\n\
-            \x20 ret void\n\
-             }\n\n",
-        );
-    }
+    // Phase 6 (2026-06-07): one parameterized helper-emitter
+    // per Brahmi script that the file's pragma selects. The
+    // body is identical except for the function name suffix and
+    // one middle-byte constant in the digit-emit path. snprintf
+    // is already declared above; putchar-only emit avoids
+    // platform-dependent stdout globals.
+    emit_brahmi_print_helper_ll(&mut out, "dev", 165);  // Devanagari U+0966 → E0 A5 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "ben", 167);  // Bengali    U+09E6 → E0 A7 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "tam", 175);  // Tamil      U+0BE6 → E0 AF A6+d
+    emit_brahmi_print_helper_ll(&mut out, "tel", 177);  // Telugu     U+0C66 → E0 B1 A6+d
+    emit_brahmi_print_helper_ll(&mut out, "guj", 171);  // Gujarati   U+0AE6 → E0 AB A6+d
+    emit_brahmi_print_helper_ll(&mut out, "pan", 169);  // Gurmukhi   U+0A66 → E0 A9 A6+d
 
     // Walk the program for unique `assert "msg"` and `print
     // "literal";` strings. Each unique text gets one private
@@ -14531,63 +14531,46 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut Strin
         }
         ty if ty.is_unsigned_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, false);
-            // Phase 1.1 + 5b: Devanagari / Bengali int print
-            // routes through the digit-by-digit UTF-8 helper
-            // emitted in the module prelude. Same widened i64
-            // ABI so the call site is identical to the printf
-            // path.
-            match crate::lexer::current_print_lang_mode() {
-                crate::lexer::PrintLangMode::Devanagari => {
-                    out.push_str(&format!(
-                        "  call void @intent_print_int_dev(i64 {})\n",
-                        widened
-                    ));
-                }
-                crate::lexer::PrintLangMode::Bengali => {
-                    out.push_str(&format!(
-                        "  call void @intent_print_int_ben(i64 {})\n",
-                        widened
-                    ));
-                }
-                crate::lexer::PrintLangMode::Ascii => {
-                    let fmt = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
-                        fmt
-                    ));
-                    out.push_str(&format!(
-                        "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
-                        fmt, widened
-                    ));
-                }
+            // Phase 1.1 + 5b + 6: dispatch to one of N Brahmi
+            // helpers by suffix. The matching helper is the only
+            // one emitted into the module preamble; the others
+            // are absent so a wrong-script call would not link.
+            let suffix = brahmi_suffix();
+            if let Some(s) = suffix {
+                out.push_str(&format!(
+                    "  call void @intent_print_int_{}(i64 {})\n",
+                    s, widened
+                ));
+            } else {
+                let fmt = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
+                    fmt
+                ));
+                out.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
+                    fmt, widened
+                ));
             }
         }
         ty if ty.is_signed_integer() => {
             let widened = widen_int_to_64(&value, ty, ctx, out, true);
-            match crate::lexer::current_print_lang_mode() {
-                crate::lexer::PrintLangMode::Devanagari => {
-                    out.push_str(&format!(
-                        "  call void @intent_print_int_dev(i64 {})\n",
-                        widened
-                    ));
-                }
-                crate::lexer::PrintLangMode::Bengali => {
-                    out.push_str(&format!(
-                        "  call void @intent_print_int_ben(i64 {})\n",
-                        widened
-                    ));
-                }
-                crate::lexer::PrintLangMode::Ascii => {
-                    let fmt = ctx.fresh_tmp();
-                    out.push_str(&format!(
-                        "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n",
-                        fmt
-                    ));
-                    out.push_str(&format!(
-                        "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
-                        fmt, widened
-                    ));
-                }
+            let suffix = brahmi_suffix();
+            if let Some(s) = suffix {
+                out.push_str(&format!(
+                    "  call void @intent_print_int_{}(i64 {})\n",
+                    s, widened
+                ));
+            } else {
+                let fmt = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n",
+                    fmt
+                ));
+                out.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* {}, i64 {})\n",
+                    fmt, widened
+                ));
             }
         }
         Type::F64 => {

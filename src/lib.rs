@@ -27280,6 +27280,84 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn tamil_pragma_compiles_and_emits_tamil_print() {
+        // Phase 6 (2026-06-07): Tamil — first Dravidian dialect.
+        // Non-Indo-Aryan so tatsama vocabulary doesn't apply;
+        // keywords are native Tamil verbs/nouns.
+        let source = "// vani-lang: tamil\n\
+                      நோக்கம் \"t\";\n\
+                      செயல்பாடு main() -> i64 {\n  \
+                        கொள் x: i64 = 5;\n  \
+                        எழுது x;\n  \
+                        திருப்பு 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Tamil program compiles to C");
+        assert!(
+            c.contains("intent_print_int_tam"),
+            "Tamil pragma must route int print through the Tamil helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn telugu_pragma_compiles_and_emits_telugu_print() {
+        let source = "// vani-lang: telugu\n\
+                      ఉద్దేశం \"t\";\n\
+                      పని main() -> i64 {\n  \
+                        అనుకో x: i64 = 5;\n  \
+                        రాయి x;\n  \
+                        తిరిగి 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Telugu program compiles to C");
+        assert!(c.contains("intent_print_int_tel"),
+            "Telugu must route through tel helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn gujarati_pragma_compiles_and_emits_gujarati_print() {
+        let source = "// vani-lang: gujarati\n\
+                      ઉદ્દેશ \"t\";\n\
+                      કાર્ય main() -> i64 {\n  \
+                        માનો x: i64 = 5;\n  \
+                        લખો x;\n  \
+                        પાછા 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Gujarati program compiles to C");
+        assert!(c.contains("intent_print_int_guj"),
+            "Gujarati must route through guj helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn punjabi_pragma_compiles_and_emits_punjabi_print() {
+        let source = "// vani-lang: punjabi\n\
+                      ਉਦੇਸ਼ \"t\";\n\
+                      ਕਾਰਜ main() -> i64 {\n  \
+                        ਮੰਨੋ x: i64 = 5;\n  \
+                        ਲਿਖੋ x;\n  \
+                        ਮੁੜੋ 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Punjabi program compiles to C");
+        assert!(c.contains("intent_print_int_pan"),
+            "Punjabi must route through pan helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn tamil_keyword_in_telugu_pragma_file_is_rejected() {
+        // Phase 6 (2026-06-07): cross-script purity gate. The
+        // generalized gate from Phase 5b should reject ANY pair
+        // of distinct scripts mixed in one file, without needing
+        // per-pair code in `enforce_language_purity`.
+        let source = "// vani-lang: telugu\n\
+                      ఉద్దేశం \"t\";\n\
+                      పని main() -> i64 {\n  \
+                        செயல்பாடு x: i64 = 5;\n  \
+                        తిరిగి 0;\n\
+                      }\n";
+        let res = compile(source);
+        assert!(res.is_err(), "expected script-mismatch rejection");
+    }
+
+    #[test]
     fn unknown_pragma_returns_none_and_falls_back_to_script_level_purity() {
         // Phase 2 (2026-06-07): an unrecognized tag (e.g.
         // `// vani-lang: pali`) is silently ignored, falling

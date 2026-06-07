@@ -1,0 +1,31 @@
+// vani-lang: telugu
+//
+// Phase 6 (2026-06-07): first Telugu-pragma example. Telugu
+// (తెలుగు) is the second-largest Dravidian language, written
+// in the Telugu Brahmi-derived script (U+0C00..U+0C7F). v1
+// ships ~30 starter keyword aliases; tatsama (Sanskrit-derived)
+// words coexist with native Telugu vocabulary.
+//
+// build & run:
+//   vanic run examples/language/telugu/basics.vani              # LLVM backend
+//   vanic run examples/language/telugu/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Telugu numerals (౦..౯) — UTF-8 `E0 B1 (A6+d)`.
+
+ఉద్దేశం "Telugu-pragma intro — sum two numbers with a contract";
+
+పని add(a: i64, b: i64) -> i64
+అవసరం a >= 0;
+అవసరం b >= 0;
+{
+  తిరిగి a + b;
+}
+
+పని main() -> i64 {
+  అనుకో x: i64 = 5;
+  అనుకో y: i64 = 7;
+  అనుకో sum: i64 = add(x, y);
+  నిర్ధారించు sum == 12;
+  రాయి sum;
+  తిరిగి 0;
+}

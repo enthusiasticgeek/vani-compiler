@@ -973,6 +973,14 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // the per-script abstraction for Tamil / Telugu / Kannada
         // / Malayalam / Odia / Assamese in Phase 6.
         "../bengali/basics.vani",
+        // Phase 6 (2026-06-07): Brahmi-derived batch — 4 more
+        // scripts riding the abstraction. Each emits its native
+        // numerals (Tamil ௦..௯, Telugu ౦..౯, Gujarati ૦..૯,
+        // Gurmukhi ੦..੯) via the parameterized helper.
+        "../tamil/basics.vani",
+        "../telugu/basics.vani",
+        "../gujarati/basics.vani",
+        "../punjabi/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

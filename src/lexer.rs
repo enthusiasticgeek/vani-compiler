@@ -470,6 +470,204 @@ fn bengali_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 6 (2026-06-07): Tamil keyword resolution. Tamil (தமிழ்)
+/// is the largest Dravidian language — distinct linguistic
+/// family from Indo-Aryan, so tatsama (Sanskrit-derived)
+/// keywords aren't a natural fit. v1 ships a starter set drawn
+/// from existing Tamil CS pedagogy and standard transliterations
+/// of programming-language concepts. Native-speaker review +
+/// alias additions welcome via PR.
+fn tamil_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "செயல்பாடு" => TokenKind::Fn,           // seyalpaadu (function)
+        "சார்பு" => TokenKind::Fn,                // saarbu (alt function)
+        "கொள்" => TokenKind::Let,                  // kol (let/assume)
+        "இருக்க" => TokenKind::Let,               // irukka (let it be)
+        "கட்டமைப்பு" => TokenKind::Struct,        // kattamaippu (structure)
+        "எண்ணுப்பெயர்" => TokenKind::Enum,        // ennuppeyar (enum)
+        "மாறா" => TokenKind::Const,                // maaraa (unchanging)
+        // === VISIBILITY ===
+        "பொது" => TokenKind::Pub,                  // pothu (public)
+        "தொகுதி" => TokenKind::Module,            // thoguthi (module)
+        "பயன்படுத்து" => TokenKind::Use,          // payanpaduthu (use)
+        "ஆக" => TokenKind::As,                     // aaga (as)
+        // === CONTROL FLOW ===
+        "திருப்பு" => TokenKind::Return,          // thiruppu (return)
+        "என்றால்" => TokenKind::If,               // endraal (if)
+        "எனில்" => TokenKind::If,                  // enil (if — alt)
+        "இல்லாவிட்டால்" => TokenKind::Else,      // illaavittaal (else)
+        "வரை" => TokenKind::While,                 // varai (while/until)
+        "ஒவ்வொரு" => TokenKind::For,               // ovvoru (each/for)
+        "உள்" => TokenKind::In,                    // ul (in)
+        "இருந்து" => TokenKind::From,             // irundhu (from)
+        "வரைக்கும்" => TokenKind::To,             // varaikkum (to)
+        "நிறுத்து" => TokenKind::Break,           // niruthu (stop)
+        "தொடர்" => TokenKind::Continue,           // thodar (continue)
+        "அப்போது" => TokenKind::Then,              // appothu (then)
+        // === REFERENCES + MUT ===
+        "பார்" => TokenKind::Ref,                  // paar (see; reference)
+        "மாறக்கூடிய" => TokenKind::Mut,           // maarakkooodiya (mutable)
+        // === MATCH ===
+        "பொருந்து" => TokenKind::Match,           // poruthu (match)
+        // === VERIFICATION ===
+        "உறுதி" => TokenKind::Assert,              // uruthi (assert)
+        "நிரூபி" => TokenKind::Prove,              // niroopi (prove)
+        "தேவை" => TokenKind::Requires,             // thaevai (requires)
+        "உறுதிப்படுத்து" => TokenKind::Ensures,   // uruthippadutthu (ensures)
+        // === BOOL / PRINT ===
+        "மெய்" => TokenKind::True,                 // mey (true)
+        "பொய்" => TokenKind::False,                // poy (false)
+        "எழுது" => TokenKind::Print,               // ezhuthu (write)
+        "அச்சிடு" => TokenKind::Print,             // achchidu (print)
+        // === INTERFACES ===
+        "இடைமுகம்" => TokenKind::Interface,       // idaimukham (interface)
+        "செயல்படுத்து" => TokenKind::Implement,   // seyalpaduthuhu (implement)
+        // === SOV-S7 parity ===
+        "நோக்கம்" => TokenKind::Intent,            // nokkam (intent)
+        "வகை" => TokenKind::Type,                  // vagai (type/kind)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Telugu keyword resolution. Telugu
+/// (తెలుగు) is the second-largest Dravidian language. Heavier
+/// Sanskrit influence than Tamil so a few keywords keep
+/// transliterated tatsama roots; mostly native Telugu vocabulary.
+fn telugu_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ఫంక్షన్" => TokenKind::Fn,                // function (loanword)
+        "పని" => TokenKind::Fn,                    // pani (work)
+        "అనుకో" => TokenKind::Let,                 // anuko (let/assume)
+        "నిర్మాణం" => TokenKind::Struct,           // nirmaanam (structure)
+        "గణన" => TokenKind::Enum,                  // ganana (enumeration)
+        "స్థిరం" => TokenKind::Const,              // sthiram (constant — tatsama)
+        "ప్రజా" => TokenKind::Pub,                 // prajaa (public)
+        "మాడ్యూల్" => TokenKind::Module,           // module (loanword)
+        "ఉపయోగించు" => TokenKind::Use,             // upayoginchu (use)
+        "గా" => TokenKind::As,                     // gaa (as)
+        "తిరిగి" => TokenKind::Return,             // thirigi (return)
+        "అయితే" => TokenKind::If,                  // ayithe (if)
+        "లేకపోతే" => TokenKind::Else,              // lekapote (else)
+        "వరకు" => TokenKind::While,                // varaku (while/until)
+        "ప్రతి" => TokenKind::For,                 // prathi (for each — tatsama)
+        "లో" => TokenKind::In,                     // lo (in)
+        "నుండి" => TokenKind::From,                // nundi (from)
+        "వరకూ" => TokenKind::To,                   // varakuu (to)
+        "ఆపు" => TokenKind::Break,                 // aapu (stop)
+        "కొనసాగించు" => TokenKind::Continue,       // konasaaginchu (continue)
+        "అప్పుడు" => TokenKind::Then,              // appudu (then)
+        "చూడు" => TokenKind::Ref,                  // chudu (see)
+        "మార్చదగిన" => TokenKind::Mut,            // maarchadagina (mutable)
+        "సరిపోలు" => TokenKind::Match,            // saripolu (match)
+        "నిర్ధారించు" => TokenKind::Assert,        // nirdhaarinchu (assert)
+        "నిరూపించు" => TokenKind::Prove,           // niroopinchu (prove)
+        "అవసరం" => TokenKind::Requires,            // avasaram (requires)
+        "నిశ్చయం" => TokenKind::Ensures,           // nishchayam (ensures)
+        "నిజం" => TokenKind::True,                 // nijam (true)
+        "అబద్ధం" => TokenKind::False,              // abaddham (false)
+        "రాయి" => TokenKind::Print,                // raayi (write)
+        "ముద్రించు" => TokenKind::Print,           // mudrinchu (print)
+        "ఉద్దేశం" => TokenKind::Intent,            // uddesam (intent — tatsama)
+        "రకం" => TokenKind::Type,                  // rakam (type/kind)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Gujarati keyword resolution. Gujarati
+/// (ગુજરાતી) is Indo-Aryan, geographically near Marathi, so the
+/// tatsama set largely transliterates — but the script is
+/// Gujarati's own (U+0A80..U+0AFF), distinct from Devanagari.
+fn gujarati_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "કાર્ય" => TokenKind::Fn,                  // kaarya (work/function — tatsama)
+        "ફંકશન" => TokenKind::Fn,                  // function (loanword)
+        "માનો" => TokenKind::Let,                  // maano (assume)
+        "ધારો" => TokenKind::Let,                  // dhaaro (suppose)
+        "રચના" => TokenKind::Struct,               // rachana (structure)
+        "ગણના" => TokenKind::Enum,                 // ganana (enumeration)
+        "સ્થિર" => TokenKind::Const,               // sthir (constant — tatsama)
+        "જાહેર" => TokenKind::Pub,                 // jaahaer (public)
+        "ખંડ" => TokenKind::Module,                // khand (module — tatsama)
+        "વાપરો" => TokenKind::Use,                 // vaapro (use)
+        "તરીકે" => TokenKind::As,                  // tareeke (as)
+        "પાછા" => TokenKind::Return,               // paachhaa (back)
+        "જો" => TokenKind::If,                     // jo (if)
+        "નહીંતર" => TokenKind::Else,               // naheentar (else)
+        "જ્યાં સુધી" => TokenKind::While,         // jyaan sudhi (while/until — TBD multi-word)
+        "પ્રતિ" => TokenKind::For,                 // prati (for each — tatsama)
+        "માં" => TokenKind::In,                    // maan (in)
+        "થી" => TokenKind::From,                   // thee (from)
+        "સુધી" => TokenKind::To,                   // sudhee (to)
+        "વિરામ" => TokenKind::Break,               // viraam (pause/break — tatsama)
+        "ચાલુ" => TokenKind::Continue,             // chaaloo (continue)
+        "પછી" => TokenKind::Then,                  // pachhee (then)
+        "જુઓ" => TokenKind::Ref,                   // juo (see)
+        "પરિવર્તનીય" => TokenKind::Mut,            // parivartaneeya (mutable — tatsama)
+        "મેળવો" => TokenKind::Match,               // melavo (match)
+        "નિશ્ચિત" => TokenKind::Assert,            // nishchit (assert — tatsama)
+        "પ્રમાણ" => TokenKind::Prove,              // pramaan (proof — tatsama)
+        "જરૂરી" => TokenKind::Requires,            // jaruri (required)
+        "ખાતરી" => TokenKind::Ensures,             // khaatari (ensures)
+        "સાચું" => TokenKind::True,                // saachun (true)
+        "ખોટું" => TokenKind::False,               // khotun (false)
+        "લખો" => TokenKind::Print,                 // lakho (write)
+        "છાપો" => TokenKind::Print,                // chhaapo (print)
+        "ઉદ્દેશ" => TokenKind::Intent,             // uddhesh (intent — tatsama)
+        "પ્રકાર" => TokenKind::Type,               // prakaar (type — tatsama)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 6 (2026-06-07): Punjabi-Gurmukhi keyword resolution.
+/// Indian Punjabi is written in Gurmukhi (U+0A00..U+0A7F); the
+/// language is Indo-Aryan, so tatsama vocabulary transliterates
+/// well. Pakistani Punjabi uses Shahmukhi (Perso-Arabic, RTL)
+/// which is queued separately for the RTL pass.
+fn punjabi_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ਕਾਰਜ" => TokenKind::Fn,                  // kaaraj (function/task — tatsama)
+        "ਫੰਕਸ਼ਨ" => TokenKind::Fn,                  // function (loanword)
+        "ਮੰਨੋ" => TokenKind::Let,                  // manno (assume)
+        "ਰਚਨਾ" => TokenKind::Struct,               // rachnaa (structure)
+        "ਗਣਨਾ" => TokenKind::Enum,                 // gannaa (enumeration)
+        "ਸਥਿਰ" => TokenKind::Const,                // sthir (constant — tatsama)
+        "ਜਨਤਕ" => TokenKind::Pub,                  // jantak (public)
+        "ਖੰਡ" => TokenKind::Module,                // khand (module — tatsama)
+        "ਵਰਤੋ" => TokenKind::Use,                  // varto (use)
+        "ਵਜੋਂ" => TokenKind::As,                   // vajon (as)
+        "ਮੁੜੋ" => TokenKind::Return,               // mudho (return)
+        "ਜੇ" => TokenKind::If,                     // je (if)
+        "ਨਹੀਂ ਤਾਂ" => TokenKind::Else,             // nahin taan (else — multi-word; TBD)
+        "ਜਦੋਂ ਤੱਕ" => TokenKind::While,            // jadon takk (while/until)
+        "ਹਰ" => TokenKind::For,                    // har (every/for)
+        "ਵਿੱਚ" => TokenKind::In,                   // vich (in)
+        "ਤੋਂ" => TokenKind::From,                  // ton (from)
+        "ਤੱਕ" => TokenKind::To,                    // takk (to)
+        "ਵਿਰਾਮ" => TokenKind::Break,               // viraam (pause — tatsama)
+        "ਜਾਰੀ" => TokenKind::Continue,             // jaari (continue)
+        "ਤਦ" => TokenKind::Then,                   // tad (then — tatsama)
+        "ਵੇਖੋ" => TokenKind::Ref,                  // vekho (see)
+        "ਬਦਲਣਯੋਗ" => TokenKind::Mut,              // badlanyogh (mutable)
+        "ਮੇਲ" => TokenKind::Match,                 // mel (match)
+        "ਨਿਸ਼ਚਿਤ" => TokenKind::Assert,            // nishchit (assert — tatsama)
+        "ਪ੍ਰਮਾਣ" => TokenKind::Prove,              // pramaan (proof — tatsama)
+        "ਲੋੜੀਂਦਾ" => TokenKind::Requires,         // lorindaa (required)
+        "ਯਕੀਨੀ" => TokenKind::Ensures,             // yakeeni (ensures)
+        "ਸੱਚ" => TokenKind::True,                  // sach (true)
+        "ਝੂਠ" => TokenKind::False,                 // jhuth (false)
+        "ਲਿਖੋ" => TokenKind::Print,                // likho (write)
+        "ਛਾਪੋ" => TokenKind::Print,                // chhapo (print)
+        "ਉਦੇਸ਼" => TokenKind::Intent,              // udesh (intent — tatsama)
+        "ਕਿਸਮ" => TokenKind::Type,                 // kism (type)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -490,6 +688,13 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         // their own UTF-8 codepoint range. Separate helper in
         // each backend keeps the Devanagari path byte-identical.
         Some(DialectLang::Bengali) => PrintLangMode::Bengali,
+        // Phase 6 (2026-06-07): one PrintLangMode per Brahmi
+        // script so each backend can dispatch to the right
+        // numeral helper without runtime conditionals.
+        Some(DialectLang::Tamil) => PrintLangMode::Tamil,
+        Some(DialectLang::Telugu) => PrintLangMode::Telugu,
+        Some(DialectLang::Gujarati) => PrintLangMode::Gujarati,
+        Some(DialectLang::Punjabi) => PrintLangMode::Gurmukhi,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -508,6 +713,14 @@ pub enum PrintLangMode {
     // codepoints (U+09E6..U+09EF) from Devanagari (U+0966..U+096F).
     // Each backend dispatches to its own helper based on this.
     Bengali,
+    // Phase 6 (2026-06-07): Brahmi-derived language batch.
+    // Each script has its own numeral block at U+xxE6..xxEF
+    // (or equivalent offset). One PrintLangMode variant per
+    // script lets each backend dispatch to the right helper.
+    Tamil,      // U+0BE6..0BEF '௦..௯'
+    Telugu,     // U+0C66..0C6F '౦..౯'
+    Gujarati,   // U+0AE6..0AEF '૦..૯'
+    Gurmukhi,   // U+0A66..0A6F '੦..੯' (Punjabi-Gurmukhi)
 }
 
 thread_local! {
@@ -541,189 +754,118 @@ pub fn set_current_print_lang_mode(mode: PrintLangMode) {
 /// (`true`/`false`) stay neutral so a Hindi file can still write
 /// `फलन add(a: i64, b: i64) -> i64`. The gate looks only at
 /// structure keywords.
+fn script_label(script: Script) -> &'static str {
+    match script {
+        Script::Latin => "English",
+        Script::Devanagari => "Devanagari",
+        Script::Bengali => "Bengali",
+        Script::Tamil => "Tamil",
+        Script::Telugu => "Telugu",
+        Script::Gujarati => "Gujarati",
+        Script::Gurmukhi => "Gurmukhi (Punjabi)",
+    }
+}
+
 fn enforce_language_purity(tokens: &[Token], source: &str) -> Result<(), Diagnostic> {
-    // SOV-S8 (2026-06-06) + Phase 5b (2026-06-07): per-file
-    // script purity. Tracks the first non-Latin script observed
-    // (Devanagari or Bengali) and rejects any subsequent
-    // keyword from a different script. The pragma's declared
-    // dialect, when present, narrows further: a Bengali pragma
-    // forbids Devanagari keywords AND vice versa AND English
-    // keywords. Without a pragma, the script-level gate is
-    // still enforced (back-compat).
+    // SOV-S8 (2026-06-06) + Phase 5b/6 (2026-06-07): per-file
+    // script purity. Track the first observed script's span;
+    // any later keyword from a different script is rejected.
+    // The `// vani-lang:` pragma, when present, narrows further
+    // by requiring the observed script == the dialect's script.
+    //
+    // The N² explicit per-pair checks the older code had are
+    // collapsed into one comparison against the first script.
+    // Adding a new Brahmi-derived script (Phase 6 cont'd: Kannada,
+    // Malayalam, Odia, Sinhala, …) is now a no-op here.
     let declared = detect_language_pragma(source);
-    let mut english_keyword: Option<Span> = None;
-    let mut devanagari_keyword: Option<Span> = None;
-    let mut bengali_keyword: Option<Span> = None;
+    let mut first_seen: Option<(Script, Span)> = None;
     for tok in tokens {
         if !is_structure_keyword_kind(&tok.kind) {
             continue;
         }
         let text = &source[tok.span.start..tok.span.end];
         let script = Script::classify(text);
-        if script == Script::Devanagari {
-            if devanagari_keyword.is_none() {
-                devanagari_keyword = Some(tok.span);
-            }
-            if let Some(eng_span) = english_keyword {
+        // Cross-script mixing check.
+        if let Some((prior_script, prior_span)) = first_seen {
+            if script != prior_script {
+                let level = if prior_script == Script::Latin || script == Script::Latin {
+                    "language"
+                } else {
+                    "script"
+                };
                 return Err(Diagnostic::new(
                     tok.span,
                     format!(
-                        "language mismatch: file already used an English \
-                         structure keyword (see span {}..{}), can't switch \
-                         to a Devanagari alias mid-file. Pick one language \
-                         per file.",
-                        eng_span.start, eng_span.end
+                        "{} mismatch: file already used a {} structure keyword \
+                         (see span {}..{}), can't switch to a {} alias mid-file. \
+                         Pick one script per file.",
+                        level,
+                        script_label(prior_script),
+                        prior_span.start, prior_span.end,
+                        script_label(script),
                     ),
                 ));
-            }
-            if let Some(ben_span) = bengali_keyword {
-                return Err(Diagnostic::new(
-                    tok.span,
-                    format!(
-                        "script mismatch: file already used a Bengali \
-                         structure keyword (see span {}..{}), can't switch \
-                         to a Devanagari alias mid-file. Pick one script \
-                         per file.",
-                        ben_span.start, ben_span.end
-                    ),
-                ));
-            }
-            // SOV-S8: per-dialect check. Only fires when the user
-            // opted in via `// vani-lang: sanskrit|hindi|marathi`.
-            if let Some(lang) = declared {
-                if lang == DialectLang::English {
-                    return Err(Diagnostic::new(
-                        tok.span,
-                        format!(
-                            "vani-lang pragma declared `english` but the file \
-                             uses a Devanagari structure keyword `{}` — pick \
-                             one dialect per file or drop the pragma to fall \
-                             back to script-level purity.",
-                            text
-                        ),
-                    ));
-                }
-                if lang.script() == Script::Bengali {
-                    return Err(Diagnostic::new(
-                        tok.span,
-                        format!(
-                            "vani-lang pragma declared `{}` (Bengali script) \
-                             but the file uses Devanagari keyword `{}` — pick \
-                             one script per file.",
-                            lang.name(), text
-                        ),
-                    ));
-                }
-                if !spelling_supports_dialect(text, lang) {
-                    return Err(Diagnostic::new(
-                        tok.span,
-                        format!(
-                            "vani-lang pragma declared `{}` but Devanagari \
-                             keyword `{}` is not in that dialect's keyword \
-                             set. Use an alias supported by your declared \
-                             dialect, or drop the pragma to allow any \
-                             Devanagari alias.",
-                            lang.name(), text
-                        ),
-                    ));
-                }
-            }
-        } else if script == Script::Bengali {
-            // Phase 5b (2026-06-07): Bengali script — disjoint
-            // Unicode block from Devanagari. Same mismatch
-            // rules as Devanagari above, plus Bengali-pragma
-            // narrowing.
-            if bengali_keyword.is_none() {
-                bengali_keyword = Some(tok.span);
-            }
-            if let Some(eng_span) = english_keyword {
-                return Err(Diagnostic::new(
-                    tok.span,
-                    format!(
-                        "language mismatch: file already used an English \
-                         structure keyword (see span {}..{}), can't switch \
-                         to a Bengali alias mid-file. Pick one language \
-                         per file.",
-                        eng_span.start, eng_span.end
-                    ),
-                ));
-            }
-            if let Some(dev_span) = devanagari_keyword {
-                return Err(Diagnostic::new(
-                    tok.span,
-                    format!(
-                        "script mismatch: file already used a Devanagari \
-                         structure keyword (see span {}..{}), can't switch \
-                         to a Bengali alias mid-file. Pick one script \
-                         per file.",
-                        dev_span.start, dev_span.end
-                    ),
-                ));
-            }
-            if let Some(lang) = declared {
-                if lang == DialectLang::English {
-                    return Err(Diagnostic::new(
-                        tok.span,
-                        format!(
-                            "vani-lang pragma declared `english` but the file \
-                             uses a Bengali structure keyword `{}` — pick one \
-                             dialect per file or drop the pragma.",
-                            text
-                        ),
-                    ));
-                }
-                if lang.script() == Script::Devanagari {
-                    return Err(Diagnostic::new(
-                        tok.span,
-                        format!(
-                            "vani-lang pragma declared `{}` (Devanagari script) \
-                             but the file uses Bengali keyword `{}` — pick one \
-                             script per file.",
-                            lang.name(), text
-                        ),
-                    ));
-                }
             }
         } else {
-            if english_keyword.is_none() {
-                english_keyword = Some(tok.span);
+            first_seen = Some((script, tok.span));
+        }
+        // Pragma narrowing.
+        if let Some(lang) = declared {
+            let declared_script = lang.script();
+            if declared_script != script {
+                // English-pragma + non-Latin keyword OR non-English-pragma
+                // + Latin keyword are both real bugs. (We do NOT
+                // reject Latin keywords in a Devanagari-pragma file
+                // with no Devanagari structure keywords — that's the
+                // back-compat case where `vanic fmt` canonicalized
+                // a Devanagari file to English keywords while
+                // keeping the pragma; the cross-script check above
+                // already accepts this scenario since first_seen
+                // becomes Latin.)
+                if lang == DialectLang::English && script != Script::Latin {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `english` but the file \
+                             uses a {} structure keyword `{}` — pick one \
+                             dialect per file or drop the pragma to fall back \
+                             to script-level purity.",
+                            script_label(script), text
+                        ),
+                    ));
+                }
+                if script != Script::Latin && declared_script != Script::Latin {
+                    return Err(Diagnostic::new(
+                        tok.span,
+                        format!(
+                            "vani-lang pragma declared `{}` ({} script) but the \
+                             file uses {} keyword `{}` — pick one script per file.",
+                            lang.name(),
+                            script_label(declared_script),
+                            script_label(script),
+                            text,
+                        ),
+                    ));
+                }
             }
-            if let Some(dev_span) = devanagari_keyword {
+            // Devanagari sub-dialect narrowing (Sanskrit vs Hindi vs Marathi).
+            // Only applies when both the pragma and the keyword are
+            // Devanagari-script.
+            if script == Script::Devanagari
+                && declared_script == Script::Devanagari
+                && !spelling_supports_dialect(text, lang)
+            {
                 return Err(Diagnostic::new(
                     tok.span,
                     format!(
-                        "language mismatch: file already used a Devanagari \
-                         structure keyword (see span {}..{}), can't switch \
-                         to an English keyword mid-file. Pick one language \
-                         per file.",
-                        dev_span.start, dev_span.end
+                        "vani-lang pragma declared `{}` but Devanagari \
+                         keyword `{}` is not in that dialect's keyword set. \
+                         Use an alias supported by your declared dialect, or \
+                         drop the pragma to allow any Devanagari alias.",
+                        lang.name(), text
                     ),
                 ));
             }
-            if let Some(ben_span) = bengali_keyword {
-                return Err(Diagnostic::new(
-                    tok.span,
-                    format!(
-                        "language mismatch: file already used a Bengali \
-                         structure keyword (see span {}..{}), can't switch \
-                         to an English keyword mid-file. Pick one language \
-                         per file.",
-                        ben_span.start, ben_span.end
-                    ),
-                ));
-            }
-            // SOV-S8: an `english`-declared pragma + Devanagari
-            // keyword would already be caught by the Devanagari
-            // arm above. We DELIBERATELY do NOT reject English
-            // keywords in a Devanagari-pragma file when no
-            // Devanagari keyword appears — that scenario happens
-            // when `vanic fmt` canonicalizes a Devanagari source
-            // to English while preserving the pragma comment.
-            // The output is a pure-English file; the pragma is
-            // a no-op there (the script-level gate catches real
-            // mismatches). Sanity-check the inverse — `english`
-            // pragma + Devanagari keyword — that's the only
-            // direction worth gating here.
         }
     }
     Ok(())
@@ -756,6 +898,18 @@ enum DialectLang {
     // Malayalam / Odia / Assamese / Sinhala / Gujarati / Punjabi-
     // Gurmukhi reuse this per-script abstraction.
     Bengali,
+    // Phase 6 (2026-06-07): Brahmi-derived batch — first four
+    // languages riding the per-script abstraction set up in
+    // Phase 5b. Tamil + Telugu are Dravidian (non-Indo-Aryan,
+    // so the tatsama vocabulary assumption breaks); Gujarati +
+    // Punjabi-Gurmukhi are Indo-Aryan with tatsama-friendly
+    // technical vocabulary. Each gets its own Unicode block,
+    // keyword table, numeral codepoints, and pragma.
+    Tamil,
+    Telugu,
+    Gujarati,
+    Punjabi,    // Gurmukhi-script Punjabi (Indian). Shahmukhi (Pakistani,
+                // Perso-Arabic, RTL) deferred — different bidirectionality.
 }
 
 impl DialectLang {
@@ -769,6 +923,10 @@ impl DialectLang {
             DialectLang::Maithili => "maithili",
             DialectLang::KonkaniDev => "konkani",
             DialectLang::Bengali => "bengali",
+            DialectLang::Tamil => "tamil",
+            DialectLang::Telugu => "telugu",
+            DialectLang::Gujarati => "gujarati",
+            DialectLang::Punjabi => "punjabi",
         }
     }
 
@@ -789,20 +947,29 @@ impl DialectLang {
             | DialectLang::Maithili
             | DialectLang::KonkaniDev => Script::Devanagari,
             DialectLang::Bengali => Script::Bengali,
+            DialectLang::Tamil => Script::Tamil,
+            DialectLang::Telugu => Script::Telugu,
+            DialectLang::Gujarati => Script::Gujarati,
+            DialectLang::Punjabi => Script::Gurmukhi,
         }
     }
 }
 
-/// Phase 5b (2026-06-07): script abstraction underlying the
+/// Phase 5b/6 (2026-06-07): script abstraction underlying the
 /// language-purity gate. `Latin` covers ASCII keywords (English);
 /// `Devanagari` covers Sanskrit / Hindi / Marathi and the Tier-I
-/// extensions Nepali / Maithili / Konkani. `Bengali` is the first
-/// non-Devanagari Brahmi script.
+/// extensions Nepali / Maithili / Konkani. Each Brahmi-derived
+/// script ships as its own variant — disjoint Unicode blocks
+/// mean a single keyword can only belong to one script.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Script {
     Latin,
     Devanagari,
     Bengali,
+    Tamil,
+    Telugu,
+    Gujarati,
+    Gurmukhi,   // Punjabi-Gurmukhi
 }
 
 impl Script {
@@ -819,6 +986,19 @@ impl Script {
             }
             if ('\u{0980}'..='\u{09FF}').contains(&c) {
                 return Script::Bengali;
+            }
+            // Phase 6 (2026-06-07): Brahmi-derived batch.
+            if ('\u{0A00}'..='\u{0A7F}').contains(&c) {
+                return Script::Gurmukhi;
+            }
+            if ('\u{0A80}'..='\u{0AFF}').contains(&c) {
+                return Script::Gujarati;
+            }
+            if ('\u{0B80}'..='\u{0BFF}').contains(&c) {
+                return Script::Tamil;
+            }
+            if ('\u{0C00}'..='\u{0C7F}').contains(&c) {
+                return Script::Telugu;
             }
         }
         Script::Latin
@@ -860,6 +1040,11 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "konkani" | "koṅkaṇī" | "kok" => Some(DialectLang::KonkaniDev),
             // Phase 5b (2026-06-07): Bengali (বাংলা).
             "bengali" | "bangla" | "bāṅlā" | "bn" => Some(DialectLang::Bengali),
+            // Phase 6 (2026-06-07): Brahmi-derived batch.
+            "tamil" | "tamiḻ" | "ta" => Some(DialectLang::Tamil),
+            "telugu" | "telugū" | "te" => Some(DialectLang::Telugu),
+            "gujarati" | "gujarātī" | "gu" => Some(DialectLang::Gujarati),
+            "punjabi" | "pañjābī" | "pa" => Some(DialectLang::Punjabi),
             _ => None,
         };
     }
@@ -1596,13 +1781,18 @@ impl<'a> Lexer<'a> {
             }
         }
         let text = &self.source[start..self.pos];
-        // Phase 5b (2026-06-07): try Devanagari first, then
-        // Bengali. The two scripts live in disjoint Unicode
-        // blocks so a single spelling can only match one table;
-        // order is purely a hot-path optimization (Devanagari
-        // shipped earlier, has more aliases).
+        // Phase 5b + 6 (2026-06-07): every Brahmi script lives
+        // in its own disjoint Unicode block so a given spelling
+        // can match at most one table — order is purely a hot-
+        // path heuristic (Devanagari shipped earliest, has the
+        // most aliases). Each `.or_else` adds <50ns when the
+        // chosen language is later in the chain.
         let kind = devanagari_keyword(text)
             .or_else(|| bengali_keyword(text))
+            .or_else(|| tamil_keyword(text))
+            .or_else(|| telugu_keyword(text))
+            .or_else(|| gujarati_keyword(text))
+            .or_else(|| punjabi_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,

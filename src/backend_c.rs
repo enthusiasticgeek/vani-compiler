@@ -1137,6 +1137,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
     out.push_str("#endif\n\n");
     emit_intent_print_int_dev_c(&mut out);
     emit_intent_print_int_ben_c(&mut out);
+    emit_intent_print_int_tam_c(&mut out);
+    emit_intent_print_int_tel_c(&mut out);
+    emit_intent_print_int_guj_c(&mut out);
+    emit_intent_print_int_pan_c(&mut out);
     emit_intent_thread_wrappers_c(&mut out);
     emit_runtime_helpers(&mut out, &body);
     emit_intent_str_concat_c(&mut out);
@@ -7555,61 +7559,84 @@ pub(crate) fn emit_intent_thread_wrappers_c(out: &mut String) {
     out.push_str("#endif\n\n");
 }
 
-pub(crate) fn emit_intent_print_int_dev_c(out: &mut String) {
-    if !matches!(crate::lexer::current_print_lang_mode(),
-                 crate::lexer::PrintLangMode::Devanagari) {
-        return;
-    }
-    out.push_str(
-        "static INTENT_UNUSED void intent_print_int_dev(long long n) {\n\
+/// Phase 6 (2026-06-07): parameterized Brahmi-numeral print
+/// helper. Every Brahmi-derived script numbers its digits at
+/// `<script>BASE + d` where BASE is at the same offset within
+/// the script's Unicode block. In UTF-8 that means each digit
+/// always encodes as 3 bytes `E0 <lead> (A6 + d)` — only the
+/// middle byte changes per script. The suffix becomes part of
+/// the emitted function name so dispatch sites can pick the
+/// right helper without conditionals at runtime.
+fn emit_intent_print_int_helper_c(out: &mut String, suffix: &str, lead_byte: u8) {
+    out.push_str(&format!(
+        "static INTENT_UNUSED void intent_print_int_{suffix}(long long n) {{\n\
          \x20 char ascii[24];\n\
          \x20 int len = snprintf(ascii, sizeof(ascii), \"%lld\", n);\n\
          \x20 if (len <= 0) return;\n\
          \x20 char buf[80];\n\
          \x20 int o = 0;\n\
-         \x20 for (int i = 0; i < len; i++) {\n\
+         \x20 for (int i = 0; i < len; i++) {{\n\
          \x20   char c = ascii[i];\n\
-         \x20   if (c == '-') { buf[o++] = '-'; continue; }\n\
+         \x20   if (c == '-') {{ buf[o++] = '-'; continue; }}\n\
          \x20   int d = c - '0';\n\
          \x20   buf[o++] = (char)0xE0;\n\
-         \x20   buf[o++] = (char)0xA5;\n\
+         \x20   buf[o++] = (char){lead_byte:#04x};\n\
          \x20   buf[o++] = (char)(0xA6 + d);\n\
-         \x20 }\n\
+         \x20 }}\n\
          \x20 buf[o] = '\\0';\n\
          \x20 fputs(buf, stdout);\n\
-         }\n\n",
-    );
+         }}\n\n",
+        suffix = suffix,
+        lead_byte = lead_byte,
+    ));
 }
 
-/// Phase 5b (2026-06-07): Bengali-numeral print helper. Same
-/// shape as the Devanagari version above but emits Bengali
-/// codepoints (U+09E6..U+09EF = '০'..'৯') via the 3-byte UTF-8
-/// sequence E0 A7 (A6..AF). The middle byte 0xA7 is the only
-/// thing that differs from Devanagari's 0xA5.
-pub(crate) fn emit_intent_print_int_ben_c(out: &mut String) {
-    if !matches!(crate::lexer::current_print_lang_mode(),
-                 crate::lexer::PrintLangMode::Bengali) {
-        return;
+pub(crate) fn emit_intent_print_int_dev_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Devanagari) {
+        // Devanagari '०..९' at U+0966..96F → middle byte 0xA5.
+        emit_intent_print_int_helper_c(out, "dev", 0xA5);
     }
-    out.push_str(
-        "static INTENT_UNUSED void intent_print_int_ben(long long n) {\n\
-         \x20 char ascii[24];\n\
-         \x20 int len = snprintf(ascii, sizeof(ascii), \"%lld\", n);\n\
-         \x20 if (len <= 0) return;\n\
-         \x20 char buf[80];\n\
-         \x20 int o = 0;\n\
-         \x20 for (int i = 0; i < len; i++) {\n\
-         \x20   char c = ascii[i];\n\
-         \x20   if (c == '-') { buf[o++] = '-'; continue; }\n\
-         \x20   int d = c - '0';\n\
-         \x20   buf[o++] = (char)0xE0;\n\
-         \x20   buf[o++] = (char)0xA7;\n\
-         \x20   buf[o++] = (char)(0xA6 + d);\n\
-         \x20 }\n\
-         \x20 buf[o] = '\\0';\n\
-         \x20 fputs(buf, stdout);\n\
-         }\n\n",
-    );
+}
+
+pub(crate) fn emit_intent_print_int_ben_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Bengali) {
+        // Bengali '০..৯' at U+09E6..9EF → middle byte 0xA7.
+        emit_intent_print_int_helper_c(out, "ben", 0xA7);
+    }
+}
+
+/// Phase 6 (2026-06-07): Tamil '௦..௯' at U+0BE6..0BEF.
+pub(crate) fn emit_intent_print_int_tam_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Tamil) {
+        emit_intent_print_int_helper_c(out, "tam", 0xAF);
+    }
+}
+
+/// Phase 6 (2026-06-07): Telugu '౦..౯' at U+0C66..0C6F.
+pub(crate) fn emit_intent_print_int_tel_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Telugu) {
+        emit_intent_print_int_helper_c(out, "tel", 0xB1);
+    }
+}
+
+/// Phase 6 (2026-06-07): Gujarati '૦..૯' at U+0AE6..0AEF.
+pub(crate) fn emit_intent_print_int_guj_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Gujarati) {
+        emit_intent_print_int_helper_c(out, "guj", 0xAB);
+    }
+}
+
+/// Phase 6 (2026-06-07): Gurmukhi (Punjabi) '੦..੯' at U+0A66..0A6F.
+pub(crate) fn emit_intent_print_int_pan_c(out: &mut String) {
+    if matches!(crate::lexer::current_print_lang_mode(),
+                crate::lexer::PrintLangMode::Gurmukhi) {
+        emit_intent_print_int_helper_c(out, "pan", 0xA9);
+    }
 }
 
 pub(crate) fn emit_intent_str_concat_c(out: &mut String) {
@@ -12600,22 +12627,26 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
             // Phase 5b (2026-06-07): Bengali dialect routes
             // through `intent_print_int_ben` (০..৯ at
             // U+09E6..9EF) — same shape, different codepoints.
-            match crate::lexer::current_print_lang_mode() {
-                crate::lexer::PrintLangMode::Devanagari => {
-                    out.push_str("  intent_print_int_dev((long long)(");
-                    out.push_str(&emit_expr(expr));
-                    out.push_str("));\n");
-                }
-                crate::lexer::PrintLangMode::Bengali => {
-                    out.push_str("  intent_print_int_ben((long long)(");
-                    out.push_str(&emit_expr(expr));
-                    out.push_str("));\n");
-                }
-                crate::lexer::PrintLangMode::Ascii => {
-                    out.push_str("  printf(\"%lld\", (long long)(");
-                    out.push_str(&emit_expr(expr));
-                    out.push_str("));\n");
-                }
+            // Phase 6 (2026-06-07): one suffix per Brahmi script.
+            // The helper-emit gate above ensures only the selected
+            // script's helper is present in the module.
+            let suffix = match crate::lexer::current_print_lang_mode() {
+                crate::lexer::PrintLangMode::Devanagari => Some("dev"),
+                crate::lexer::PrintLangMode::Bengali => Some("ben"),
+                crate::lexer::PrintLangMode::Tamil => Some("tam"),
+                crate::lexer::PrintLangMode::Telugu => Some("tel"),
+                crate::lexer::PrintLangMode::Gujarati => Some("guj"),
+                crate::lexer::PrintLangMode::Gurmukhi => Some("pan"),
+                crate::lexer::PrintLangMode::Ascii => None,
+            };
+            if let Some(s) = suffix {
+                out.push_str(&format!("  intent_print_int_{}((long long)(", s));
+                out.push_str(&emit_expr(expr));
+                out.push_str("));\n");
+            } else {
+                out.push_str("  printf(\"%lld\", (long long)(");
+                out.push_str(&emit_expr(expr));
+                out.push_str("));\n");
             }
         }
     }

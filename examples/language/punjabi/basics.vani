@@ -1,0 +1,31 @@
+// vani-lang: punjabi
+//
+// Phase 6 (2026-06-07): first Punjabi-Gurmukhi-pragma example.
+// Punjabi (ਪੰਜਾਬੀ) is Indo-Aryan. The Indian-side writes it in
+// Gurmukhi (U+0A00..U+0A7F); the Pakistani-side uses Shahmukhi
+// (Perso-Arabic, RTL — queued for the RTL pass). Tatsama-
+// friendly so Sanskrit-rooted technical vocabulary works.
+//
+// build & run:
+//   vanic run examples/language/punjabi/basics.vani              # LLVM
+//   vanic run examples/language/punjabi/basics.vani --backend=c  # C
+//
+// PRINT digits emit as Gurmukhi numerals (੦..੯) — UTF-8 `E0 A9 (A6+d)`.
+
+ਉਦੇਸ਼ "Punjabi-pragma intro — sum two numbers with a contract";
+
+ਕਾਰਜ add(a: i64, b: i64) -> i64
+ਲੋੜੀਂਦਾ a >= 0;
+ਲੋੜੀਂਦਾ b >= 0;
+{
+  ਮੁੜੋ a + b;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ x: i64 = 5;
+  ਮੰਨੋ y: i64 = 7;
+  ਮੰਨੋ sum: i64 = add(x, y);
+  ਨਿਸ਼ਚਿਤ sum == 12;
+  ਲਿਖੋ sum;
+  ਮੁੜੋ 0;
+}
