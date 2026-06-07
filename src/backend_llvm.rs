@@ -13935,14 +13935,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 Some(i) => arm_lbls[i].clone(),
                 None => unreach_lbl.clone(),
             };
+            // Phase 11 (2026-06-07): if the scrutinee is a
+            // `ref T` / `mut ref T`, the LLVM value carries a
+            // pointer to T. Load through the pointer to get a
+            // T value, then take the normal dispatch path on the
+            // unwrapped type. Lifts L3 from docs/v1_limitations.md.
+            let (effective_scrut_ty, scr_v) = match &scrutinee.ty {
+                Type::Ref(inner) | Type::RefMut(inner) => {
+                    let inner_ty_ll = llvm_type_string(inner);
+                    let loaded = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        loaded, inner_ty_ll, inner_ty_ll, scr_v
+                    ));
+                    ((**inner).clone(), loaded)
+                }
+                _ => (scrutinee.ty.clone(), scr_v),
+            };
             // Detect payloaded-enum scrutinee.
-            let scrut_payloaded = match &scrutinee.ty {
+            let scrut_payloaded = match &effective_scrut_ty {
                 Type::Enum(n) => LLVM_ENUM_PAYLOAD_REGISTRY
                     .with(|r| r.borrow().contains_key(n)),
                 _ => false,
             };
             let (dispatch_v, dispatch_ty) = if scrut_payloaded {
-                let struct_ty = llvm_type_string(&scrutinee.ty);
+                let struct_ty = llvm_type_string(&effective_scrut_ty);
                 let tag = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = extractvalue {} {}, 0\n",
@@ -13950,7 +13967,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 (tag, "i32".to_string())
             } else {
-                (scr_v.clone(), llvm_type_string(&scrutinee.ty))
+                (scr_v.clone(), llvm_type_string(&effective_scrut_ty))
             };
             let case_lines: Vec<String> = arms
                 .iter()
@@ -13977,7 +13994,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 // resolve. Restore after the arm body.
                 let restore_binding: Option<(String, Option<(Type, String)>)> =
                     if let Some((bname, bty)) = &arm.binding {
-                        let struct_ty = llvm_type_string(&scrutinee.ty);
+                        // Phase 11 (2026-06-07): payload
+                        // extraction uses the loaded value type,
+                        // not the original ref type.
+                        let struct_ty = llvm_type_string(&effective_scrut_ty);
                         let bty_ll = llvm_type_string(bty);
                         // Closure #283 LLVM half: for mixed-
                         // payload enums, extractvalue at index
@@ -13985,7 +14005,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         // Bitcast through an alloca to the
                         // variant's actual payload type and
                         // load.
-                        let scr_enum_name = match &scrutinee.ty {
+                        let scr_enum_name = match &effective_scrut_ty {
                             Type::Enum(n) => Some(n.clone()),
                             _ => None,
                         };

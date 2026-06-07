@@ -13013,20 +13013,38 @@ fn emit_expr(expr: &TypedExpr) -> String {
             // T1.3 phase 2b: detect whether scrutinee is a
             // payloaded enum so dispatch can use `.tag` and
             // payload bindings can be extracted via `.payload`.
-            let scrutinee_payloaded = match &scrutinee.ty {
+            //
+            // Phase 11 (2026-06-07): if the scrutinee is a
+            // `ref T` / `mut ref T`, the C value is a pointer.
+            // Dereference once before reading .tag / .payload.
+            // Lifts L3 from docs/v1_limitations.md.
+            let effective_scrut_ty = match &scrutinee.ty {
+                Type::Ref(inner) | Type::RefMut(inner) => (**inner).clone(),
+                _ => scrutinee.ty.clone(),
+            };
+            let scrut_is_ref = matches!(
+                &scrutinee.ty,
+                Type::Ref(_) | Type::RefMut(_),
+            );
+            let scrutinee_payloaded = match &effective_scrut_ty {
                 Type::Enum(name) => {
                     ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(name))
                 }
                 _ => false,
             };
-            let scr_full = emit_expr(scrutinee);
+            let scr_full_raw = emit_expr(scrutinee);
+            let scr_full = if scrut_is_ref {
+                format!("(*({}))", scr_full_raw)
+            } else {
+                scr_full_raw
+            };
             let mut body = String::new();
             // For payloaded enums, materialize the scrutinee
             // into a fresh local so we can read both .tag (for
             // dispatch) and .payload (for binding) without
             // re-evaluating the source expression.
             let dispatch = if scrutinee_payloaded {
-                let enum_name = match &scrutinee.ty {
+                let enum_name = match &effective_scrut_ty {
                     Type::Enum(n) => n,
                     _ => unreachable!(),
                 };
@@ -13036,7 +13054,7 @@ fn emit_expr(expr: &TypedExpr) -> String {
                     scr_full
                 ));
                 "__scr.tag".to_string()
-            } else if matches!(&scrutinee.ty, Type::Bool) {
+            } else if matches!(&effective_scrut_ty, Type::Bool) {
                 // Closure #205: gcc warns
                 // `switch condition has boolean value` (-Wswitch-bool)
                 // when the dispatch expression is bool-typed. Cast
@@ -13063,7 +13081,9 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 // for mixed-payload — closure #283).
                 let arm_block = if let Some((bname, bty)) = &arm.binding {
                     let body_v = emit_expr(&arm.body);
-                    let scrutinee_enum_name = match &scrutinee.ty {
+                    // Phase 11 (2026-06-07): use the dereffed
+                    // scrutinee type if the original was a ref.
+                    let scrutinee_enum_name = match &effective_scrut_ty {
                         Type::Enum(n) => Some(n.clone()),
                         _ => None,
                     };
@@ -17549,6 +17569,17 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             // Vtables Phase 4c: `ref dyn Iface` lowers to a
             // pointer to the per-Iface fat pointer typedef.
             Type::Object(iface) => format!("const intent_dyn_{}* {}", iface, name),
+            // Phase 11 (2026-06-07): `ref T` where T is a
+            // payloaded enum lowers to a pointer to the
+            // `Enum_<Name>` tagged-union struct, NOT to the
+            // `int32_t` tag-only form. The match-on-ref path
+            // (lifting L3) reads .tag / .payload through this
+            // pointer.
+            Type::Enum(ename)
+                if ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(ename)) =>
+            {
+                format!("const {}* {}", enum_c_name(ename), name)
+            }
             other => format!("const {}* {}", c_leaf_type(other), name),
         },
         Type::RefMut(inner) => match &**inner {
@@ -17563,6 +17594,14 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             // Vtables Phase 4c: `mut ref dyn Iface` lowers
             // to a (mutable) pointer to the fat pointer.
             Type::Object(iface) => format!("intent_dyn_{}* {}", iface, name),
+            // Phase 11 (2026-06-07): `mut ref T` where T is a
+            // payloaded enum lowers to a pointer to the
+            // `Enum_<Name>` tagged-union struct.
+            Type::Enum(ename)
+                if ENUM_PAYLOAD_REGISTRY.with(|r| r.borrow().contains_key(ename)) =>
+            {
+                format!("{}* {}", enum_c_name(ename), name)
+            }
             other => format!("{}* {}", c_leaf_type(other), name),
         },
         Type::Atomic(element) => format!("{} {}", c_atomic_storage(element), name),

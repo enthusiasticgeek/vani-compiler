@@ -27416,6 +27416,62 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn match_through_ref_scrutinee_compiles_and_dispatches() {
+        // Phase 11 (2026-06-07): L3 lift. `match` now accepts
+        // a scrutinee of type `ref T` / `mut ref T` — the
+        // checker unwraps the reference for dispatch shape,
+        // and the codegen inserts a load (LLVM) or `*` deref
+        // (C) before reading the tag / payload.
+        let source = r#"
+            intent "L3 lift test";
+            enum Result { Ok(i64), Err(i64) }
+            fn unwrap_or(r: ref Result, def: i64) -> i64 {
+              return match r {
+                Result.Ok(v) then v,
+                Result.Err(_) then def,
+              };
+            }
+            fn main() -> i64 {
+              let r1: Result = Result.Ok(42);
+              let r2: Result = Result.Err(0 - 1);
+              assert unwrap_or(ref r1, 0) == 42;
+              assert unwrap_or(ref r2, 99) == 99;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("match on ref scrutinee compiles");
+        // Pin the C codegen shape: function signature takes
+        // `const Enum_Result* v_r`, not `const int32_t*`.
+        let c = compile_to_c(source).expect("emit C");
+        assert!(
+            c.contains("const Enum_Result* v_r"),
+            "expected ref-to-payloaded-enum param to lower to Enum_Result*, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn match_through_mut_ref_scrutinee_compiles() {
+        // Phase 11 (2026-06-07): same lift for mut ref.
+        let source = r#"
+            intent "L3 lift test (mut ref)";
+            enum Result { Ok(i64), Err(i64) }
+            fn tag_of(r: mut ref Result) -> i64 {
+              return match r {
+                Result.Ok(_) then 0,
+                Result.Err(_) then 1,
+              };
+            }
+            fn main() -> i64 {
+              let r: Result = Result.Ok(7);
+              assert tag_of(mut ref r) == 0;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("match on mut ref scrutinee compiles");
+    }
+
+    #[test]
     fn tamil_keyword_in_telugu_pragma_file_is_rejected() {
         // Phase 6 (2026-06-07): cross-script purity gate. The
         // generalized gate from Phase 5b should reject ANY pair

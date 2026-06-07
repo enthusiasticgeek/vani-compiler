@@ -12878,7 +12878,15 @@ fn check_expr(
             // arm-pattern loop below validates each arm's
             // pattern against the scrutinee's kind.
             // T1.3 + integer-literal pattern.
-            let scrut_ty = scrutinee_checked.ty().clone();
+            // Phase 11 (2026-06-07): if the scrutinee has a
+            // reference type, unwrap to its target for the dispatch
+            // check. The codegen will insert the deref before
+            // tag-load. Lifts L3 from docs/v1_limitations.md.
+            let raw_scrut_ty = scrutinee_checked.ty().clone();
+            let scrut_ty = match &raw_scrut_ty {
+                Type::Ref(inner) | Type::RefMut(inner) => (**inner).clone(),
+                _ => raw_scrut_ty.clone(),
+            };
             let enum_decl_opt: Option<EnumInfo> = match &scrut_ty {
                 Type::Enum(name) => {
                     let Some(d) = env.lookup_enum(name).cloned() else {

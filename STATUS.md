@@ -10,6 +10,37 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 11 first installment: L3 match-on-ref lift
+
+`match r` where `r: ref T` (and `mut ref T`) now compiles and
+dispatches correctly. Previously the checker rejected it with
+"match scrutinee must be an enum, integer, or bool type, got
+ref T"; users had to extract the value out first via an
+explicit pattern-matching helper function. The lift:
+
+- **Checker** (`src/checker.rs`) — unwraps `Type::Ref` /
+  `Type::RefMut` from the scrutinee before classifying its
+  dispatch shape, so the existing enum / int / bool paths run
+  on the inner type.
+- **Tree-LLVM** (`src/backend_llvm.rs`) — emits a `load` through
+  the pointer when the scrutinee is a ref-typed value, then
+  takes the normal payloaded-enum dispatch path on the loaded
+  scalar.
+- **Tree-C** (`src/backend_c.rs`) — emits `(*scrut)` deref + the
+  existing `__scr.tag` / `__scr.payload` reads. Also fixed
+  `format_declarator` to emit `const Enum_<Name>*` (not
+  `const int32_t*`) for `ref T` parameters where T is a
+  payloaded enum — the param-type emission had a latent bug.
+
+Closes [docs/v1_limitations.md L3](docs/v1_limitations.md).
+
+Test ledger after this change: **1916 lib + 54 parity**, all
+green on Linux (1914→1916 = 2 new L3 regressions).
+
+Phase 11 has more queued: L1 (enum destructure of affine
+payloads), L7 (`for v in ref self.field`). Each is ~5-10h of
+focused work; track them per the v1_limitations doc.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 7 (TUT-4 Advanced track) shipped — full tutorial set done
 
 The 10-lesson Advanced track lands in

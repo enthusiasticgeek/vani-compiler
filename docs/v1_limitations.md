@@ -56,28 +56,42 @@ or pass the dyn value through a function parameter instead of a
 struct field. See the
 [Bridge pattern example](../examples/language/english/design_patterns/structural/bridge.vani).
 
-### L3 — Pattern-match scrutinee must be by value
+### L3 — Pattern-match scrutinee must be by value ✅ SHIPPED 2026-06-07
 
-`match` expressions require the scrutinee to be an enum / integer
-/ bool value, not a reference.
+**Status**: Resolved in Phase 11 (first installment).
+
+`match` now accepts a scrutinee of type `ref T` / `mut ref T`
+where T is an enum, integer, or bool. The checker unwraps the
+reference for the dispatch-shape check; codegen inserts a
+`load` (LLVM IR) or `*` deref (C) before reading the tag / payload.
 
 ```vani
-fn sum_node(n: Node) -> i64 {       // ✅
-  return match n { ... };
-}
-
-fn sum_node(n: ref Node) -> i64 {   // ❌ — error: match scrutinee
-  return match n { ... };           //    must be an enum/int/bool
+fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
+  return match r {
+    Result.Ok(v) then v,
+    Result.Err(_) then def,
+  };
 }
 ```
 
-**Why**: v1 lowering emits a direct tag-load on the scrutinee
-operand; the through-reference path is a separate codegen lane
-that hasn't been built.
+**Fix surface**:
+- `src/checker.rs` — `match`-expression dispatch: unwrap
+  `Type::Ref` / `Type::RefMut` before classifying the
+  scrutinee shape.
+- `src/backend_llvm.rs` — `TypedExprKind::Match` arm: emit a
+  `load` through the pointer when `scrutinee.ty` is a reference,
+  then take the existing payloaded-enum dispatch path on the
+  loaded value.
+- `src/backend_c.rs` — same shape via a `(*expr)` deref before
+  the existing `__scr.tag` / `__scr.payload` reads. Also fixed
+  `format_declarator` to emit `const Enum_<Name>*` (not
+  `const int32_t*`) for `ref T` where T is a payloaded enum.
 
-**Workaround**: take the value by value when the type is `Copy`,
-or pass the payload fields explicitly when the enum has affine
-variants.
+**Regression coverage**:
+- `lib.rs::match_through_ref_scrutinee_compiles_and_dispatches`
+  pins the lift + the C-emit param-type shape.
+- `lib.rs::match_through_mut_ref_scrutinee_compiles`
+  pins the `mut ref` variant.
 
 ---
 
