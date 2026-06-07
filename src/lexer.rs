@@ -405,7 +405,10 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mode = match detect_language_pragma(source) {
         Some(DialectLang::Sanskrit)
         | Some(DialectLang::Hindi)
-        | Some(DialectLang::Marathi) => PrintLangMode::Devanagari,
+        | Some(DialectLang::Marathi)
+        | Some(DialectLang::Nepali)
+        | Some(DialectLang::Maithili)
+        | Some(DialectLang::KonkaniDev) => PrintLangMode::Devanagari,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -562,6 +565,15 @@ enum DialectLang {
     Hindi,
     Marathi,
     English,
+    // Phase 2 (2026-06-07): Tier I Indo-Aryan dialects sharing
+    // the Devanagari script + heavy tatsama (Sanskrit-rooted)
+    // vocabulary with the original three. v1 accepts the
+    // union of the Sanskrit/Hindi/Marathi keyword set for these
+    // dialects; native-vernacular spellings can be layered on
+    // as user requests come in.
+    Nepali,
+    Maithili,
+    KonkaniDev,
 }
 
 impl DialectLang {
@@ -571,6 +583,9 @@ impl DialectLang {
             DialectLang::Hindi => "hindi",
             DialectLang::Marathi => "marathi",
             DialectLang::English => "english",
+            DialectLang::Nepali => "nepali",
+            DialectLang::Maithili => "maithili",
+            DialectLang::KonkaniDev => "konkani",
         }
     }
 }
@@ -603,6 +618,11 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "hindi" | "hindī" | "hi" => Some(DialectLang::Hindi),
             "marathi" | "marāṭhī" | "mr" => Some(DialectLang::Marathi),
             "english" | "en" => Some(DialectLang::English),
+            // Phase 2 (2026-06-07): Tier I dialect extensions.
+            // Pragma tags + ISO 639 codes per dialect.
+            "nepali" | "nepālī" | "ne" => Some(DialectLang::Nepali),
+            "maithili" | "maithilī" | "mai" => Some(DialectLang::Maithili),
+            "konkani" | "koṅkaṇī" | "kok" => Some(DialectLang::KonkaniDev),
             _ => None,
         };
     }
@@ -615,6 +635,21 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
 /// + `multi_word_devanagari_keyword` above. Tatsama (Sanskrit-
 /// root loanwords used in Hindi/Marathi) tag all three dialects.
 fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
+    // Phase 2 (2026-06-07): Tier I dialect extensions. Nepali /
+    // Maithili / Konkani-Devanagari are Indo-Aryan languages
+    // that share heavy tatsama (Sanskrit-rooted) vocabulary
+    // with the original three. v1 admits any spelling already
+    // supported by Sanskrit, Hindi, or Marathi — this is the
+    // permissive starting point. Native-vernacular spellings
+    // (e.g. Nepali-specific verb forms) can be layered on as
+    // user requests come in; tighten the gate then. Closure
+    // path mirrors what Sanskrit already does: list spellings
+    // explicitly only when the dialect set is a strict subset.
+    if matches!(lang, DialectLang::Nepali | DialectLang::Maithili | DialectLang::KonkaniDev) {
+        return spelling_supports_dialect(spelling, DialectLang::Sanskrit)
+            || spelling_supports_dialect(spelling, DialectLang::Hindi)
+            || spelling_supports_dialect(spelling, DialectLang::Marathi);
+    }
     // Order matters: list each spelling once with all dialects
     // that support it. Fallthrough returns true for unknown
     // spellings (forward-compat: a future alias addition shouldn't

@@ -1,0 +1,39 @@
+// श्री।
+// vani-lang: konkani
+//
+// Phase 2.3 (2026-06-07): first Konkani-Devanagari-pragma example.
+// Konkani (कोंकणी) is an Indo-Aryan language with multiple
+// scripts; the Devanagari orthography is the constitutionally-
+// recognized form in India. v1 accepts the union of Sanskrit/
+// Hindi/Marathi keyword spellings (geographically nearest is
+// Marathi); native-vernacular Konkani spellings can be layered
+// later as user requests come in.
+//
+// build & run:
+//   vanic run examples/language/konkani/basics.vani              # LLVM backend
+//   vanic run examples/language/konkani/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Devanagari numerals (०..९) inside this
+// pragma, same as Sanskrit/Hindi/Marathi (Phase 1.1).
+
+उद्देश्य "Konkani-pragma intro — count down from 5 with a loop";
+
+कार्य countdown_sum(n: i64) -> i64
+अपेक्षित n >= 0;
+अपेक्षित n <= 100;
+{
+  माना i: i64 = n;
+  माना total: i64 = 0;
+  जबतक i > 0 {
+    total = total + i;
+    i = i - 1;
+  }
+  पुनरागम total;
+}
+
+कार्य main() -> i64 {
+  माना s5: i64 = countdown_sum(5);
+  सिद्धम् s5 == 15;
+  लिख s5;
+  पुनरागम 0;
+}

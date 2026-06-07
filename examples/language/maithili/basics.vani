@@ -1,0 +1,39 @@
+// श्री।
+// vani-lang: maithili
+//
+// Phase 2.2 (2026-06-07): first Maithili-pragma example.
+// Maithili (मैथिली) is an Indo-Aryan language primarily written
+// in Devanagari (also Mithilakshar), with extensive Sanskrit-
+// derived (tatsama) vocabulary. v1 accepts the union of
+// Sanskrit/Hindi/Marathi keyword spellings; native-vernacular
+// spellings can be layered later as user requests come in.
+//
+// build & run:
+//   vanic run examples/language/maithili/basics.vani              # LLVM backend
+//   vanic run examples/language/maithili/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Devanagari numerals (०..९) inside this
+// pragma, same as Sanskrit/Hindi/Marathi (Phase 1.1).
+
+उद्देश्य "Maithili-pragma intro — compute factorial under a recursion bound";
+
+कार्य factorial(n: i64) -> i64
+अपेक्षित n >= 0;
+अपेक्षित n <= 10;
+{
+  यदि n <= 1 {
+    पुनरागम 1;
+  } अन्यथा {
+    पुनरागम n * factorial(n - 1);
+  }
+}
+
+कार्य main() -> i64 {
+  माना a: i64 = factorial(5);
+  माना b: i64 = factorial(6);
+  सिद्धम् a == 120;
+  सिद्धम् b == 720;
+  लिख a;
+  लिख b;
+  पुनरागम 0;
+}

@@ -53,9 +53,9 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 2 — Tier I quick subcontinent wins (~5-10h)           │
 │ (depends on nothing — Devanagari pipeline already shipped)  │
-│   2.1 ▸ Nepali (Devanagari script extension)                │ 1-2h
-│   2.2 ▸ Maithili (Devanagari)                                │ 1-2h
-│   2.3 ▸ Konkani-Devanagari variant                          │ 1-2h
+│   2.1 ▸ Nepali (Devanagari script extension)         ✅ SHIPPED 2026-06-07
+│   2.2 ▸ Maithili (Devanagari)                         ✅ SHIPPED 2026-06-07
+│   2.3 ▸ Konkani-Devanagari variant                    ✅ SHIPPED 2026-06-07
 │   Each: keyword table + dialect tag + 1 example.            │
 └─────────────────────────────────────────────────────────────┘
                                  │
@@ -797,7 +797,7 @@ structs / enums → generics → SMT proofs → async → embedded.
 ---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
-examples; **1897 lib + 54 parity green as of 2026-06-06 evening**;
+examples; **1901 lib + 54 parity green as of 2026-06-06 evening**;
 clean warning-free build). Remaining work, in execution order
 (USER DIRECTION 2026-06-06):
 
@@ -923,7 +923,7 @@ verification deferred (Windows access pending).
 
 After Phase 5 + Phase 6 code lands (verification deferred for
 platforms), re-run the full Linux suite to confirm:
-  - No regressions in the existing 1897 lib tests.
+  - No regressions in the existing 1901 lib tests.
   - No regressions in the existing 54 parity-sweep examples.
   - The per-host conditional emit (host_is_linux / host_is_darwin /
     host_uses_win32_threading) still routes Linux correctly.

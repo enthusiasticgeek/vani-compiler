@@ -1,0 +1,34 @@
+// श्री।
+// vani-lang: nepali
+//
+// Phase 2.1 (2026-06-07): first Nepali-pragma example.
+// Nepali (नेपाली) is an Indo-Aryan language written in
+// Devanagari, with heavy Sanskrit-rooted (tatsama) vocabulary.
+// v1 accepts the union of Sanskrit/Hindi/Marathi keyword
+// spellings; native-vernacular Nepali spellings can be layered
+// later as user requests come in.
+//
+// build & run:
+//   vanic run examples/language/nepali/basics.vani              # LLVM backend
+//   vanic run examples/language/nepali/basics.vani --backend=c  # C backend
+//
+// PRINT digits emit as Devanagari numerals (०..९) inside this
+// pragma, same as Sanskrit/Hindi/Marathi (Phase 1.1).
+
+उद्देश्य "Nepali-pragma intro — sum two numbers with a contract";
+
+कार्य add(a: i64, b: i64) -> i64
+अपेक्षित a >= 0;
+अपेक्षित b >= 0;
+{
+  पुनरागम a + b;
+}
+
+कार्य main() -> i64 {
+  माना x: i64 = 5;
+  माना y: i64 = 7;
+  माना sum: i64 = add(x, y);
+  सिद्धम् sum == 12;
+  लिख sum;
+  पुनरागम 0;
+}

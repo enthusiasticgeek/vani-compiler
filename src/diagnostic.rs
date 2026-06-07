@@ -24,6 +24,14 @@ enum DiagLang {
     Hindi,
     Marathi,
     English,
+    // Phase 2 (2026-06-07): Tier I Indo-Aryan dialect extensions.
+    // v1 routes their localized labels + prefix tables through
+    // the closest existing dialect (Nepali/Maithili → Hindi,
+    // Konkani → Marathi); native-language tables can be added as
+    // user requests come in.
+    Nepali,
+    Maithili,
+    Konkani,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -48,6 +56,10 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "hindi" | "hindī" | "hi" => Some(DiagLang::Hindi),
             "marathi" | "marāṭhī" | "mr" => Some(DiagLang::Marathi),
             "english" | "en" => Some(DiagLang::English),
+            // Phase 2 (2026-06-07): Tier I dialect extensions.
+            "nepali" | "nepālī" | "ne" => Some(DiagLang::Nepali),
+            "maithili" | "maithilī" | "mai" => Some(DiagLang::Maithili),
+            "konkani" | "koṅkaṇī" | "kok" => Some(DiagLang::Konkani),
             _ => None,
         };
     }
@@ -55,6 +67,14 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
 }
 
 fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
+    // Phase 2: route Tier-I-dialect labels through their nearest
+    // existing dialect (Nepali/Maithili → Hindi labels; Konkani →
+    // Marathi labels). Same prefix shape, no duplication.
+    let lang = lang.map(|l| match l {
+        DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
+        DiagLang::Konkani => DiagLang::Marathi,
+        other => other,
+    });
     match (level, lang) {
         ("error", Some(DiagLang::Sanskrit)) => "त्रुटिः (error)".to_string(),
         ("error", Some(DiagLang::Hindi)) => "त्रुटि (error)".to_string(),
@@ -77,6 +97,14 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
     if lang == DiagLang::English {
         return message.to_string();
     }
+    // Phase 2: Nepali/Maithili share Hindi's prefix table; Konkani
+    // shares Marathi's. Collapse before the match so we don't
+    // duplicate the table bodies.
+    let lang = match lang {
+        DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
+        DiagLang::Konkani => DiagLang::Marathi,
+        other => other,
+    };
     let table = match lang {
         DiagLang::Sanskrit => &[
             ("expected ", "अपेक्षितम् "),
@@ -118,6 +146,11 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("float literal", "दशांश मूल्य (float literal)"),
         ][..],
         DiagLang::English => return message.to_string(),
+        // Collapsed above to Hindi/Marathi; rustc requires the
+        // arms to be syntactically exhaustive.
+        DiagLang::Nepali | DiagLang::Maithili | DiagLang::Konkani => unreachable!(
+            "Tier-I dialects collapse to Hindi/Marathi before this match"
+        ),
     };
     for (en_prefix, dev_prefix) in table {
         if let Some(rest) = message.strip_prefix(en_prefix) {

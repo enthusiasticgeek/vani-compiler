@@ -27166,6 +27166,76 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn nepali_pragma_compiles_and_emits_devanagari_print() {
+        // Phase 2.1 (2026-06-07): `// vani-lang: nepali` is a
+        // recognized dialect tag; it accepts the union of the
+        // Sanskrit/Hindi/Marathi keyword sets and routes print
+        // output through the Devanagari-numeral helper.
+        let source = "// vani-lang: nepali\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> पूर्णांक {\n  \
+                        x: पूर्णांक = ५ माना;\n  \
+                        x लिख;\n  \
+                        ० पुनरागम;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Nepali program compiles to C");
+        assert!(
+            c.contains("intent_print_int_dev"),
+            "Nepali pragma must route int print through the Devanagari helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn maithili_pragma_compiles_and_emits_devanagari_print() {
+        // Phase 2.2 (2026-06-07): Maithili dialect tag.
+        let source = "// vani-lang: maithili\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> पूर्णांक {\n  \
+                        x: पूर्णांक = ७ माना;\n  \
+                        x लिख;\n  \
+                        ० पुनरागम;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Maithili program compiles to C");
+        assert!(
+            c.contains("intent_print_int_dev"),
+            "Maithili pragma must route int print through the Devanagari helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn konkani_pragma_compiles_and_emits_devanagari_print() {
+        // Phase 2.3 (2026-06-07): Konkani-Devanagari dialect tag.
+        let source = "// vani-lang: konkani\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> पूर्णांक {\n  \
+                        x: पूर्णांक = ९ माना;\n  \
+                        x लिख;\n  \
+                        ० पुनरागम;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Konkani program compiles to C");
+        assert!(
+            c.contains("intent_print_int_dev"),
+            "Konkani pragma must route int print through the Devanagari helper, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn unknown_pragma_returns_none_and_falls_back_to_script_level_purity() {
+        // Phase 2 (2026-06-07): an unrecognized tag (e.g.
+        // `// vani-lang: pali`) is silently ignored, falling
+        // back to script-level purity. The compile must still
+        // succeed so users don't get hard-failed by a typo.
+        let source = "// vani-lang: pali\n\
+                      fn main() -> i64 {\n  \
+                        return 0;\n\
+                      }\n";
+        compile(source).expect("unknown pragma falls through to script-level purity");
+    }
+
+    #[test]
     fn sov_s3_if_else_block_form_compiles() {
         // SOV-S3 (2026-06-06): `<cond> यदि { ... } अन्यथा { ... }`
         // block-form verb-at-end shape. Parsed via the SOV-block

@@ -279,7 +279,7 @@ below.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-07: 1897 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog + Phase 1.1 Devanagari runtime PRINT + Phase 1.2 C-backend Vec<dyn Iface> fix — full feature surface across all backends; clean warning-free build).
+**Test ledger at 2026-06-07: 1901 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog + Phase 1.1 Devanagari runtime PRINT + Phase 1.2 C-backend Vec<dyn Iface> fix + Phase 2 Tier-I dialect extensions (Nepali/Maithili/Konkani) — full feature surface across all backends; clean warning-free build).
 
 ## Memory safety & concurrency model
 
@@ -3774,9 +3774,9 @@ logographic, etc.) one at a time.
 | 12 | Odia (*oṛiā*) | Odia (Brahmi-derived) | Queued — Indo-Aryan SOV |
 | 13 | Assamese (*ɔxɔmia*) | Assamese (Brahmi-derived; close to Bengali script) | Queued — Indo-Aryan SOV |
 | 14 | Sindhi (*sindhī*) | Perso-Arabic (RTL) + Devanagari (rare) | Queued — bi-script; Indo-Aryan SOV |
-| 15 | Nepali (*nepālī*) | Devanagari | Queued — direct Indo-Aryan SOV; trivial extension since Devanagari pipeline shipped |
-| 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | Queued — Indo-Aryan SOV; Goan and Karnataka variants |
-| 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | Queued — Indo-Aryan SOV |
+| 15 | Nepali (*nepālī*) | Devanagari | ✅ **SHIPPED** (Phase 2.1, 2026-06-07) — dialect tag `// vani-lang: nepali`; accepts the Sanskrit/Hindi/Marathi keyword union; [`examples/language/nepali/basics.vani`](examples/language/nepali/basics.vani) |
+| 16 | Konkani (*kõkaṇī*) | Devanagari + Kannada + Roman + Malayalam (multi-script) | ✅ **SHIPPED — Devanagari only** (Phase 2.3, 2026-06-07) — dialect tag `// vani-lang: konkani`; non-Devanagari scripts (Kannada / Roman) deferred; [`examples/language/konkani/basics.vani`](examples/language/konkani/basics.vani) |
+| 17 | Maithili (*maithilī*) | Devanagari + Tirhuta (historic) | ✅ **SHIPPED — Devanagari only** (Phase 2.2, 2026-06-07) — dialect tag `// vani-lang: maithili`; Mithilakshar/Tirhuta script deferred; [`examples/language/maithili/basics.vani`](examples/language/maithili/basics.vani) |
 | 18 | Sinhala (*siṁhala*) | Sinhala (Brahmi-derived) | Queued — Indo-Aryan SOV; Sri Lankan |
 | ... | (smaller subcontinent languages) | various | Queued |
 

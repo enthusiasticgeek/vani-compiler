@@ -960,6 +960,14 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../sanskrit/iterate.vani",
         "../hindi/iterate.vani",
         "../marathi/iterate.vani",
+        // Phase 2 (2026-06-07): Tier I dialect extensions —
+        // Nepali / Maithili / Konkani-Devanagari. Each has a
+        // single `basics.vani` exercising the dialect tag +
+        // Devanagari numeral PRINT. They accept the union of
+        // the Sanskrit/Hindi/Marathi keyword set in v1.
+        "../nepali/basics.vani",
+        "../maithili/basics.vani",
+        "../konkani/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",

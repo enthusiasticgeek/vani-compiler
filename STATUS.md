@@ -10,6 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 2.1 + 2.2 + 2.3 shipped (full Phase 2 closed)
+
+**Phase 2.1/2.2/2.3 — Tier I Indo-Aryan dialect extensions**:
+`// vani-lang: nepali | maithili | konkani` are now recognized
+dialect tags alongside the original Sanskrit/Hindi/Marathi. In
+v1 they accept the union of the existing keyword spellings
+(heavy tatsama overlap); native-vernacular spellings can be
+layered on as user requests come in. Diagnostic labels route
+through the closest neighbor (Nepali/Maithili → Hindi prefixes;
+Konkani → Marathi prefixes). One example per dialect lands in
+`examples/language/{nepali,maithili,konkani}/basics.vani` —
+all three pass the dual-backend parity sweep.
+
+Test ledger after Phase 2: **1901 lib + 54 parity**, all green
+on Linux. 1897→1901 lib = 4 new dialect tests (Nepali / Maithili
+/ Konkani pragmas + an unknown-pragma fallback check); the
+3 new dialect example files join the parity sweep's internal
+iteration list (test function count unchanged, examples-per-
+test grows from 54 to 57).
+
 ## 🟢 Session 2026-06-07 — Phase 1.1 + 1.2 + 1.3 + 1.4 shipped (full Phase 1 closed)
 
 **Phase 1.1 — Devanagari runtime PRINT (`०..९`)**: `print x`
