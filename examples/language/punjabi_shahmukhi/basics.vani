@@ -1,0 +1,28 @@
+// vani-lang: punjabi-shahmukhi
+//
+// Phase 12.3 (2026-06-07): Punjabi-Shahmukhi — the Pakistani
+// (Perso-Arabic, RTL) form of Punjabi. Same spoken language as
+// Punjabi-Gurmukhi (shipped in Phase 6) but written in a
+// completely different script.
+//
+// In v1 the dialect tag accepts the Urdu keyword union; native
+// Shahmukhi-specific vocabulary can be layered as users
+// contribute it.
+
+مقصد "Punjabi-Shahmukhi intro";
+
+کام multiply(a: i64, b: i64) -> i64
+درکار a >= 0;
+درکار b >= 0;
+{
+  واپس a * b;
+}
+
+کام main() -> i64 {
+  مانیں x: i64 = 4;
+  مانیں y: i64 = 3;
+  مانیں prod: i64 = multiply(x, y);
+  یقینی prod == 12;
+  لکھو prod;
+  واپس 0;
+}

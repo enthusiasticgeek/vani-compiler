@@ -78,8 +78,9 @@ These work without you doing anything special:
 | Malayalam | Malayalam |
 | Odia | Odia |
 | Sinhala | Sinhala |
+| Perso-Arabic (RTL) | Urdu, Sindhi, Punjabi-Shahmukhi (Phase 12.x) |
 
-**16 dialects across 10 scripts** as of Phase 6 (2026-06-07).
+**19 dialects across 11 scripts** as of Phase 12.3 (2026-06-07).
 
 ## A worked Sanskrit example
 

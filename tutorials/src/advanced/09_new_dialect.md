@@ -142,16 +142,19 @@ Thanks to Phase 6's parameterized print helpers:
 
 ## What's not handled
 
-- **RTL scripts** (Arabic, Hebrew, Sindhi-Arabic) need
-  additional work in the lexer's whitespace + comment handling
-  to deal with bidirectionality. Phase 12 has the design.
+- **Visual bidi shaping**. The Perso-Arabic Urdu dialect
+  shipped in Phase 12 *does* work, because the lexer reads
+  UTF-8 in logical (byte) order — RTL is a rendering concern
+  of the editor, not a compiler concern. But cursor
+  navigation + selection in RTL source files is the editor's
+  job, not vāṇी's.
 - **Logographic scripts** (Mandarin, Japanese kanji) need a
   tokenizer that knows about CJK word boundaries. Phase 10
   queued.
 - **Multi-script bidialects** (Punjabi-Gurmukhi vs Punjabi-
   Shahmukhi) need two parallel pragma tags pointing at two
-  different `Script` variants. The Punjabi case in v1 ships
-  Gurmukhi only.
+  different `Script` variants. v1 ships Punjabi-Gurmukhi
+  (Phase 6) and queues Punjabi-Shahmukhi (Phase 12.x).
 
 ## Source-of-truth pointers
 

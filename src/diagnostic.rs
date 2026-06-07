@@ -52,6 +52,10 @@ enum DiagLang {
     Sinhala,
     // Phase 12 (2026-06-07): Perso-Arabic.
     Urdu,
+    // Phase 12.2/12.3 (2026-06-07): also Perso-Arabic; routed
+    // through Urdu's labels in localize_label / localize_message.
+    Sindhi,
+    PunjabiShahmukhi,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -92,6 +96,9 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "assamese" | "ɔxɔmia" | "as" => Some(DiagLang::Assamese),
             "sinhala" | "siṁhala" | "si" => Some(DiagLang::Sinhala),
             "urdu" | "urdū" | "ur" => Some(DiagLang::Urdu),
+            "sindhi" | "sindhī" | "sd" => Some(DiagLang::Sindhi),
+            "punjabi-shahmukhi" | "shahmukhi" | "pnb"
+                => Some(DiagLang::PunjabiShahmukhi),
             _ => None,
         };
     }
@@ -106,6 +113,9 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
         DiagLang::Assamese => DiagLang::Bengali,
+        // Phase 12.2/12.3: Sindhi + Shahmukhi route through
+        // Urdu labels (same Perso-Arabic script).
+        DiagLang::Sindhi | DiagLang::PunjabiShahmukhi => DiagLang::Urdu,
         other => other,
     });
     match (level, lang) {
@@ -159,6 +169,9 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
         DiagLang::Nepali | DiagLang::Maithili => DiagLang::Hindi,
         DiagLang::Konkani => DiagLang::Marathi,
         DiagLang::Assamese => DiagLang::Bengali,
+        // Phase 12.2/12.3 (2026-06-07): Perso-Arabic siblings
+        // share Urdu's prefix table.
+        DiagLang::Sindhi | DiagLang::PunjabiShahmukhi => DiagLang::Urdu,
         other => other,
     };
     let table = match lang {
@@ -308,9 +321,14 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("language mismatch", "زبان میں اختلاف (language mismatch)"),
             ("script mismatch", "رسم الخط میں اختلاف (script mismatch)"),
         ][..],
-        // Collapsed above to Hindi/Marathi/Bengali; rustc
+        // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.
-        DiagLang::Nepali | DiagLang::Maithili | DiagLang::Konkani | DiagLang::Assamese => {
+        DiagLang::Nepali
+        | DiagLang::Maithili
+        | DiagLang::Konkani
+        | DiagLang::Assamese
+        | DiagLang::Sindhi
+        | DiagLang::PunjabiShahmukhi => {
             unreachable!("collapsed dialects shouldn't reach this match")
         }
     };

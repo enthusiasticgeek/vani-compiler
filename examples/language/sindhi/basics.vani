@@ -1,0 +1,27 @@
+// vani-lang: sindhi
+//
+// Phase 12.2 (2026-06-07): Sindhi (سنڌي) — Indo-Aryan,
+// Pakistan + India. Same Perso-Arabic script as Urdu; in v1
+// the dialect tag accepts the Urdu keyword union (heavy
+// Hindustani + Persian/Arabic overlap). Native Sindhi-
+// specific spellings can be layered as user requests come in.
+//
+// Eastern Arabic-Indic numerals (٠..٩) — same helper as Urdu.
+
+مقصد "Sindhi-pragma intro — same keyword surface as Urdu in v1";
+
+کام add(a: i64, b: i64) -> i64
+درکار a >= 0;
+درکار b >= 0;
+{
+  واپس a + b;
+}
+
+کام main() -> i64 {
+  مانیں x: i64 = 5;
+  مانیں y: i64 = 7;
+  مانیں sum: i64 = add(x, y);
+  یقینی sum == 12;
+  لکھو sum;
+  واپس 0;
+}

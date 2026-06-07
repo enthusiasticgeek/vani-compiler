@@ -10,6 +10,36 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 12.2/12.3: Sindhi + Punjabi-Shahmukhi
+
+Two more Perso-Arabic dialects ride the helper-byte refactor
+landed in Phase 12.1:
+
+- **Sindhi (سنڌي)** — Indo-Aryan, Pakistan + India. v1 dialect
+  tag `// vani-lang: sindhi | sindhī | sd`. Reuses Urdu's
+  keyword union + Eastern Arabic-Indic numeral helper.
+- **Punjabi-Shahmukhi** — the Pakistani Perso-Arabic counterpart
+  to the Gurmukhi-Punjabi already shipped in Phase 6. v1 dialect
+  tag `// vani-lang: punjabi-shahmukhi | shahmukhi | pnb`.
+  Same script-reuse pattern: same keyword union as Urdu, same
+  print helper.
+
+This validates the Phase 12.1 architectural claim — *"future
+RTL dialects plug in as ~12-line additions"*. Adding each
+language required only:
+- A new `DialectLang` variant + pragma alias.
+- Mapping the dialect's script to `Script::Arabic` and
+  `PrintLangMode::Urdu`.
+- A `DiagLang` variant routed through Urdu's prefix table.
+- A worked example file.
+- A lib regression pinning the helper-reuse.
+
+Roster after this turn: **19 dialects across 11 scripts**
+(Latin + 9 Brahmi + Perso-Arabic).
+
+Test ledger: **1925 lib + 54 parity** green (1923→1925 = 2
+new helper-reuse regressions).
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 12.1: Urdu (first Perso-Arabic / RTL dialect)
 
 vāṇी's first non-Brahmi-derived script lands: **Urdu** (اردو)
@@ -74,7 +104,7 @@ the lexer reads UTF-8 in logical (byte) order. The compiler
 sees the same byte stream regardless of which direction the
 editor displays the text. No bidi handling needed.
 
-Lib ledger: **1923 lib + 54 parity** green (1921→1923 = 2 new
+Lib ledger: **1925 lib + 54 parity** green (1921→1923 = 2 new
 Urdu regressions: print helper + cross-script gate).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 third installment: L7 for-iter-over-self.field
@@ -124,7 +154,7 @@ Closes [docs/v1_limitations.md L7](docs/v1_limitations.md).
 Phase 11's three tractable open limitations (L1, L3, L7) are
 now all shipped this session.
 
-Lib ledger: **1923 lib + 54 parity** green (1919→1921 = 2 new
+Lib ledger: **1925 lib + 54 parity** green (1919→1921 = 2 new
 L7 regressions).
 
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 second installment: L1 affine enum-payload destructure
@@ -160,7 +190,7 @@ Surface of the lift:
 
 Closes [docs/v1_limitations.md L1](docs/v1_limitations.md).
 
-Lib ledger: **1923 lib + 54 parity** green (1916→1919 = 3 new
+Lib ledger: **1925 lib + 54 parity** green (1916→1919 = 3 new
 L1 regressions; 1 prior rejection test inverted to match the
 lift).
 

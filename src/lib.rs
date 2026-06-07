@@ -27441,6 +27441,40 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn sindhi_pragma_reuses_urdu_helper() {
+        // Phase 12.2 (2026-06-07): Sindhi shares the Perso-
+        // Arabic script + Eastern Arabic-Indic numerals with
+        // Urdu; the dialect tag maps to PrintLangMode::Urdu so
+        // the existing intent_print_int_urd helper handles it.
+        let source = "// vani-lang: sindhi\n\
+                      مقصد \"t\";\n\
+                      کام main() -> i64 {\n  \
+                        مانیں x: i64 = 5;\n  \
+                        لکھو x;\n  \
+                        واپس 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Sindhi program compiles");
+        assert!(c.contains("intent_print_int_urd"),
+            "Sindhi must reuse the Urdu helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn punjabi_shahmukhi_pragma_reuses_urdu_helper() {
+        // Phase 12.3 (2026-06-07): Pakistani Punjabi (Shahmukhi
+        // script) — same script-reuse pattern as Sindhi.
+        let source = "// vani-lang: punjabi-shahmukhi\n\
+                      مقصد \"t\";\n\
+                      کام main() -> i64 {\n  \
+                        مانیں x: i64 = 7;\n  \
+                        لکھو x;\n  \
+                        واپس 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Punjabi-Shahmukhi program compiles");
+        assert!(c.contains("intent_print_int_urd"),
+            "Shahmukhi must reuse the Urdu helper, got:\n{}", c);
+    }
+
+    #[test]
     fn urdu_keyword_in_hindi_pragma_file_is_rejected() {
         // Phase 12 (2026-06-07): cross-script gate. Urdu's
         // Perso-Arabic script is distinct from Devanagari, so

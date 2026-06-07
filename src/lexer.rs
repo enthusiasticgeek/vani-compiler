@@ -943,8 +943,13 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
         // codepoints are identical (U+09E6..09EF).
         Some(DialectLang::Assamese) => PrintLangMode::Bengali,
         Some(DialectLang::Sinhala) => PrintLangMode::Sinhala,
-        // Phase 12 (2026-06-07).
-        Some(DialectLang::Urdu) => PrintLangMode::Urdu,
+        // Phase 12 (2026-06-07). Sindhi + Shahmukhi reuse the
+        // Urdu print helper since they all use Eastern Arabic-
+        // Indic numerals ٠..٩.
+        Some(DialectLang::Urdu)
+        | Some(DialectLang::Sindhi)
+        | Some(DialectLang::PunjabiShahmukhi)
+            => PrintLangMode::Urdu,
         _ => PrintLangMode::Ascii,
     };
     PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
@@ -1193,6 +1198,15 @@ enum DialectLang {
     // — the lexer reads UTF-8 in logical order, so no special
     // bidi handling is needed at the parse level.
     Urdu,
+    // Phase 12.2 (2026-06-07): Sindhi (سنڌي), Indo-Aryan,
+    // Pakistani/Indian. Perso-Arabic script, same Eastern
+    // Arabic-Indic numerals as Urdu. v1 accepts the Urdu
+    // keyword union; native Sindhi vocabulary layered later.
+    Sindhi,
+    // Phase 12.3 (2026-06-07): Punjabi-Shahmukhi (Pakistani
+    // Punjabi), the Perso-Arabic counterpart to Punjabi-
+    // Gurmukhi already shipped in Phase 6.
+    PunjabiShahmukhi,
 }
 
 impl DialectLang {
@@ -1216,6 +1230,8 @@ impl DialectLang {
             DialectLang::Assamese => "assamese",
             DialectLang::Sinhala => "sinhala",
             DialectLang::Urdu => "urdu",
+            DialectLang::Sindhi => "sindhi",
+            DialectLang::PunjabiShahmukhi => "punjabi-shahmukhi",
         }
     }
 
@@ -1251,6 +1267,8 @@ impl DialectLang {
             DialectLang::Assamese => Script::Bengali,
             DialectLang::Sinhala => Script::Sinhala,
             DialectLang::Urdu => Script::Arabic,
+            DialectLang::Sindhi => Script::Arabic,
+            DialectLang::PunjabiShahmukhi => Script::Arabic,
         }
     }
 }
@@ -1384,6 +1402,10 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "sinhala" | "siṁhala" | "si" => Some(DialectLang::Sinhala),
             // Phase 12 (2026-06-07): Perso-Arabic dialect.
             "urdu" | "urdū" | "ur" => Some(DialectLang::Urdu),
+            // Phase 12.2/12.3 (2026-06-07): more Perso-Arabic.
+            "sindhi" | "sindhī" | "sd" => Some(DialectLang::Sindhi),
+            "punjabi-shahmukhi" | "shahmukhi" | "pnb"
+                => Some(DialectLang::PunjabiShahmukhi),
             _ => None,
         };
     }

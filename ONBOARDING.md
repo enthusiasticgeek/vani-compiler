@@ -36,7 +36,7 @@ non-proof code changes. Don't set it in CI.
 
 ```bash
 cargo build                         # Quick build
-cargo test                          # Full suite (1923 lib + 54 e2e + 14 other, ~90s)
+cargo test                          # Full suite (1925 lib + 54 e2e + 14 other, ~90s)
                                     # (`.cargo/config.toml` sets RUST_MIN_STACK=32MB
                                     # so parallel-for + reduction tests have room to run.)
 cargo test smt_                     # Subset matching a prefix

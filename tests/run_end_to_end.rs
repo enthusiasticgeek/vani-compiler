@@ -995,6 +995,12 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // template parameterizes on prefix-byte length to
         // cover both Arabic-Indic and the Brahmi 3-byte form.
         "../urdu/basics.vani",
+        // Phase 12.2/12.3 (2026-06-07): more Perso-Arabic
+        // dialects — Sindhi and Punjabi-Shahmukhi. Same script
+        // + numeral helper as Urdu; the dialect tag is the
+        // only thing that varies.
+        "../sindhi/basics.vani",
+        "../punjabi_shahmukhi/basics.vani",
         // GoF design patterns (refactoring.guru) — 22 patterns:
         // 5 creational + 7 structural + 10 behavioral.
         "design_patterns/creational/factory_method.vani",
