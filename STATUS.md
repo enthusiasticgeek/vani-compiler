@@ -10,6 +10,31 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 5a (TUT-3 Intermediate track) shipped
+
+The 12-lesson Intermediate track is now fully written and live
+in `tutorials/src/intermediate/01..12*.md`. Same template as
+the Beginner track. Topics:
+
+1. Structs and methods
+2. Enums with payloads + match arms
+3. Affine ownership (ref / mut ref)
+4. Generics and interfaces (static dispatch + `where T is …`)
+5. Dynamic dispatch (dyn Iface + Vec<dyn Iface>)
+6. Closures (anon fn literals + higher-order helpers)
+7. Tuples + tuple destructure
+8. Multi-file projects + `vani.toml` manifest
+9. FFI: `extern "C"` + `pure extern` + `--link-with`
+10. Error handling: Result-pattern + the `try` keyword
+11. Reference tour of the 22 GoF design patterns
+12. SMT verification deep-dive (`ensures`, `_return`,
+    bounds-thinking, debugging proofs with VANIC_SMT_DEBUG=1)
+
+Every worked example was compile-verified before being
+committed. `mdbook build` runs warning-free over Beginner +
+Intermediate (24 lessons total). TUT-4 (Advanced, 10 lessons)
+and TUT-5 (GH-Pages deploy) remain queued.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 6 COMPLETE (full Brahmi batch)
 
 Phase 6 second half lands: Kannada, Malayalam, Odia, Assamese,

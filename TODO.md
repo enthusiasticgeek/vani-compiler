@@ -84,9 +84,9 @@ refresh landed. Order is rough priority (size + payoff), not strict.
               ▼                                     ▼
 ┌──────────────────────────────────────┐ ┌────────────────────┐
 │ PHASE 5a — Tutorials Intermediate    │ │ PHASE 5b — Bengali │
-│ (~15-20h)                            │ │ ✅ SHIPPED 2026-06-07
+│ ✅ SHIPPED 2026-06-07                 │ │ ✅ SHIPPED 2026-06-07
 │ (parallel-safe with 5b)              │ │ First Brahmi-      │
-│   5a.1 ▸ TUT-3: 12 intermediate      │ │ derived script —   │
+│   5a.1 ▸ TUT-3: 12 intermediate ✅   │ │ derived script —   │
 │         lessons: structs / enums /   │ │ sets up the per-   │
 │         affine / generics / dyn /    │ │ script abstraction │
 │         closures / FFI / Result+try  │ │ for items 6.x      │
@@ -782,7 +782,15 @@ structs / enums → generics → SMT proofs → async → embedded.
     clean. `tutorials/src/beginner/01..12*.md`.
   - **TUT-2 (original spec)** — write the **Beginner** track (12
     lessons × ~30 min each).
-  - **TUT-3** (~15-20h): write the **Intermediate** track.
+  - **TUT-3** ✅ SHIPPED 2026-06-07: 12 Intermediate lessons
+    written (`tutorials/src/intermediate/01..12*.md`). Each
+    has a compile-verified worked example. Topics: struct
+    methods, enums-with-payloads, affine ownership (ref/mut
+    ref), generics+interfaces, dyn dispatch, closures,
+    tuples, multi-file projects, FFI, Result-pattern + try,
+    22 GoF patterns reference, SMT deep-dive with ensures +
+    bounds-thinking.
+  - **TUT-3 (original spec)** — write the **Intermediate** track.
   - **TUT-4** (~10-15h): write the **Advanced** track.
   - **TUT-5** (~4-6h): build + auto-deploy via GitHub Actions
     to the `gh-pages` branch.

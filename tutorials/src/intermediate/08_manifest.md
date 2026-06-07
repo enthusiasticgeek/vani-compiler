@@ -1,5 +1,119 @@
-# Multi-file projects + `vani.toml`
+# Intermediate 8 — Multi-file projects + `vani.toml`
 
-> *This lesson is a stub.* It will be written as part of TUT-2 / TUT-3 / TUT-4 — see [TODO.md](https://github.com/anthropics/claude-code/blob/main/TODO.md) for the schedule.
+> **Learning goal**: split a program across multiple `.vani`
+> files, wire them together with a `vani.toml` manifest, and
+> import items between files with `use "path";` declarations.
 
-The lesson title and outline live in [SUMMARY.md](../SUMMARY.md). Until the body is written, the related Multi-file projects + `vani.toml` example(s) under [`examples/language/english/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english) are the best reference.
+## The project layout
+
+```
+int8_proj/
+├── vani.toml
+└── src/
+    ├── main.vani
+    └── math.vani
+```
+
+`vani.toml`:
+
+```toml
+[package]
+name = "int8_demo"
+entry = "src/main.vani"
+```
+
+`src/math.vani`:
+
+```rust
+intent "Math helpers module.";
+
+module math {
+  pub fn square(n: i64) -> i64 {
+    return n * n;
+  }
+
+  pub fn cube(n: i64) -> i64 {
+    return n * n * n;
+  }
+}
+```
+
+`src/main.vani`:
+
+```rust
+use "math.vani";
+use math::{square, cube};
+
+intent "Multi-file demo — uses the math helpers next door.";
+
+fn main() -> i64 {
+  print "square(5) =", square(5);
+  print "cube(3)   =", cube(3);
+  return 0;
+}
+```
+
+## Compile + run
+
+From the project root:
+
+```bash
+cd int8_proj
+vanic run
+```
+
+(No file argument — the driver walks up looking for `vani.toml`
+and uses its `[package].entry` as the source file.)
+
+Output:
+
+```
+square(5) = 25
+cube(3)   = 27
+```
+
+## Why it works that way
+
+- **`vani.toml`** is the project manifest. Minimal v1 shape:
+  one `[package]` table with a `name` and an `entry`. The
+  `entry` path is relative to the manifest's directory.
+- **`use "path";`** at the top of a `.vani` file is the
+  file-include directive. The path is relative to the current
+  file's directory. The included file's contents are spliced
+  into the same translation unit before compilation.
+- **`use module::item;`** (no quotes) is the namespace import.
+  After splicing, both files share a global module namespace;
+  this brings the specific item into bare-name scope. Multi-
+  item form: `use module::{a, b, c};`.
+- **`pub` requires a module**. Top-level `pub fn` outside a
+  `module { ... }` block doesn't parse — wrap your helpers
+  in a `module name { ... }` (per Beginner §10) before
+  marking them `pub`.
+- **No transitive includes**: a `use "a.vani";` in
+  `b.vani` doesn't propagate `a`'s items to whichever file
+  uses `b`. Re-export them with `pub use foo::bar;` if you
+  need that.
+
+## Caveats in v1
+
+- **One file per `use`** in v1 — globbing (`use "*.vani";`) is
+  deferred.
+- **Cyclic includes** are silently dropped: each file is
+  included at most once across the dependency tree. Don't
+  rely on order-of-inclusion semantics; design with one-way
+  dependencies.
+- **Diagnostic line numbers** refer to the concatenated buffer,
+  not the per-file source. Real per-file mapping is a follow-up.
+  Until then, when reading errors, grep for the column of the
+  surrounding `fn` to find your file.
+
+## Challenge
+
+Add a third file `src/util.vani` defining a `module util` with
+a `pub fn clamp(x: i64, lo: i64, hi: i64) -> i64` that returns
+`x` clamped between `lo` and `hi`. Wire it into `main.vani` with
+another `use` and call it.
+
+---
+
+**Next**: [§9 — FFI: `extern "C"` + `--link-with` →](09_ffi.md)

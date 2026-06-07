@@ -14,7 +14,10 @@ is the artifact that gets deployed (eventually — see TUT-5 in
   World → variables → functions → if/else → loops → strings →
   Vec → match → SMT contracts → modules → challenges →
   Devanagari intro). Every worked example is compile-verified.
-- **TUT-3** queued — write the 12 Intermediate lessons.
+- **TUT-3** ✅ SHIPPED 2026-06-07 — 12 Intermediate lessons
+  (structs/methods → enums-with-payloads → affine ownership →
+  generics → dyn → closures → tuples → multi-file → FFI →
+  Result+try → GoF patterns → SMT deep-dive).
 - **TUT-4** queued — write the 10 Advanced lessons.
 - **TUT-5** queued — GitHub Actions deploy to `gh-pages`.
 
