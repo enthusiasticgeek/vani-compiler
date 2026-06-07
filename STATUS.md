@@ -142,26 +142,43 @@ sequence:
     - **F.3** Arc 9 a/b/e/f Kosh package manager (registry choice)
     - **F.4** Arc 7 Win64 / AArch64 (CI wiring)
 
-**Last updated:** 2026-06-04 (**Arc 8 FULLY COMPLETE + v3.1
-Phases 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow +
-2.3a + 2.3b + 2.3c + 2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b +
-3c + 3d + 3e + 3f + 3-returns + 3-params + 4a-narrow +
-4a-broad + 4b + 4c-narrow shipped — compiler-driven
-`async fn → Task` transform handles linear bodies +
-non-suspending control flow + suspend-in-branch state-
-splitting + fall-through merge state + nested ifs + ANF
-lifting + match in async fn + match arms WITH suspends
-(Int + Bool + Str + Float + Variant + VariantWithBinding
-+ Wildcard) + loops with suspend inside + break/continue
-inside loops + **`try EXPR` keyword for Result propagation**
-+ non-i64 LOCALS (bool / f64 / Str / OwnedStr / Enum /
-Vec / Struct / Array) + non-i64 RETURN TYPES (via
-`__result: T` field + status-only poll ABI).
-28 v3.1 acceptance examples parity-green. **v3.1 affine
-+ Result types across the entire async-fn boundary
-(locals + returns + PARAMS + try-propagation) + nested
-async + multi-task.** macOS
-port (Phase 5) for later**).
+**Last updated:** 2026-06-06 evening. Tip-of-tree summary:
+  - **Tests**: 1894 lib + 54 parity green on Linux.
+  - **Arc 8 + v3.1**: FULLY complete through Phase 4c-broad
+    (full generic async fns). 28 v3.1 acceptance examples plus
+    the generic-async smoke all parity-green.
+  - **Cross-platform**: Phase 5 (macOS) + Phase 6 (Windows)
+    shipped on both C and LLVM backends — verification deferred
+    for the non-Linux paths (no host access at landing).
+  - **Devanagari purity arc**: 91 keyword aliases / 8 SOV
+    statement shapes / pure-Devanagari pipeline (numerals + type
+    names + identifiers + dialect-aware errors / 29 Devanagari
+    examples). See README §*Language targeting* (now at the
+    bottom).
+  - **22 GoF design patterns** (refactoring.guru) in
+    `examples/language/english/design_patterns/`, dual-backend
+    parity-verified.
+  - **v1 deviations from textbook** consolidated in
+    [`docs/v1_limitations.md`](docs/v1_limitations.md) (14
+    entries with workarounds + fix-queue pointers).
+
+**Prior** (2026-06-04): Arc 8 FULLY COMPLETE + v3.1 Phases 0 +
+1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a + 2.3b + 2.3c +
+2.3d + 2.4 + 2.5 + 2.5b + 3a + 3b + 3c + 3d + 3e + 3f +
+3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow
+shipped — compiler-driven `async fn → Task` transform handles
+linear bodies + non-suspending control flow + suspend-in-branch
+state-splitting + fall-through merge state + nested ifs + ANF
+lifting + match in async fn + match arms WITH suspends (Int +
+Bool + Str + Float + Variant + VariantWithBinding + Wildcard) +
+loops with suspend inside + break/continue inside loops +
+**`try EXPR` keyword for Result propagation** + non-i64 LOCALS
+(bool / f64 / Str / OwnedStr / Enum / Vec / Struct / Array) +
+non-i64 RETURN TYPES (via `__result: T` field + status-only
+poll ABI). 28 v3.1 acceptance examples parity-green. **v3.1
+affine + Result types across the entire async-fn boundary
+(locals + returns + PARAMS + try-propagation) + nested async +
+multi-task.** macOS port (Phase 5) was for later (now shipped).
 
 Session 2026-06-04 shipped (six commits, ~+1100 lines):
 - **Step 8e v1.5** (commit `d344828`) — `sleep_ms(ms: i64) -> i64`

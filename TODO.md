@@ -140,10 +140,11 @@ about this priority order.
     [parser.rs:3404–3434](src/parser.rs#L3404-L3434)).
   - Per-file script purity (English vs Devanagari, auto-detected)
     ([lexer.rs:393–441](src/lexer.rs#L393-L441)).
-  - 4 Devanagari example programs: `sanskrit/keywords.vani`,
-    `hindi/keywords.vani`, `marathi/keywords.vani`, and
-    **`sanskrit/sov_demo.vani` (NEW — full SOV showcase)**, all
-    in `examples/language/<lang>/` per the A.2 reorg.
+  - 29 Devanagari example programs: 11 Sanskrit (including
+    SOV showcase + pure-Devanagari Pascal's-triangle), 9 Hindi,
+    9 Marathi. All in `examples/language/<lang>/` per the A.2
+    reorg; the translator-generated ones cover the same English
+    feature surface (basics, control_flow, for_loops, etc.).
   - **Cross-language `.vani` translator tool** (Python v1) at
     `tools/vani_translate.py` — round-trip parity verified on 8
     representative examples.
@@ -473,8 +474,9 @@ Grammar-consultant gating per language tracked in
 ---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
-examples; 1883 lib + 72 parity green; clean warning-free build).
-Remaining work, in execution order (USER DIRECTION 2026-06-06):
+examples; **1894 lib + 54 parity green as of 2026-06-06 evening**;
+clean warning-free build). Remaining work, in execution order
+(USER DIRECTION 2026-06-06):
 
   **Backlog item first** → **Tier 1** → **Tier 2 + Tier 3 code-only
   (verification deferred — no macOS/Windows access available)** →
@@ -598,8 +600,8 @@ verification deferred (Windows access pending).
 
 After Phase 5 + Phase 6 code lands (verification deferred for
 platforms), re-run the full Linux suite to confirm:
-  - No regressions in the existing 1883 lib tests.
-  - No regressions in the existing 72 parity-sweep examples.
+  - No regressions in the existing 1894 lib tests.
+  - No regressions in the existing 54 parity-sweep examples.
   - The per-host conditional emit (host_is_linux / host_is_darwin /
     host_uses_win32_threading) still routes Linux correctly.
   - Any newly-added cross-platform abstractions compile cleanly

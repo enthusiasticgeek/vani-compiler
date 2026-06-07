@@ -279,7 +279,7 @@ below.
   - **Platform support — Linux only today**. Every Arc 8 v1.5/v1.6/v2/v3 runtime helper assumes Linux: `epoll`, `nanosleep`, `__errno_location()`, `fcntl(O_NONBLOCK)`, `<sys/socket.h>`. macOS port (~8-12h) needs a kqueue shim matching the `epoll_*` signatures + `__error()` errno thunk. Windows port (~25-35h) is a full IOCP rewrite — fundamentally different programming model — plus WSAStartup + winsock2.h + `_errno()`. Threading IS already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)), only I/O isn't. See [STATUS.md](STATUS.md) *🪟 Platform support*.
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-04: 1883 lib + 72 parity green** (post Arc 8 v3.1 Phase 4c-narrow + LLVM phi-block fix — v3.1 single+multi-task arc feature-complete; clean warning-free build).
+**Test ledger at 2026-06-06: 1894 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog — full feature surface across all backends; clean warning-free build).
 
 ## Memory safety & concurrency model
 
@@ -3756,7 +3756,7 @@ logographic, etc.) one at a time.
 
 | # | Language | Script | Status |
 |---|---|---|---|
-| 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ **SHIPPED** — 91 keyword aliases, 8 SOV statement shapes, per-dialect purity pragma, 9 example programs |
+| 1 | Sanskrit (*saṁskṛta*) | Devanagari | ✅ **SHIPPED** — 91 keyword aliases, 8 SOV statement shapes, per-dialect purity pragma, 11 example programs (including a pure-Devanagari Pascal's-triangle showcase) |
 | 2 | Hindi (*hindī*) | Devanagari | ✅ **SHIPPED** — same surface as Sanskrit; 9 example programs |
 | 3 | Marathi (*marāṭhī*) | Devanagari | ✅ **SHIPPED** — same surface; 9 example programs |
 | 4 | Bengali (*baṅlā*) | Bengali (Brahmi-derived) | Queued — most speakers in the subcontinent after Hindi; SOV grammar shared |
