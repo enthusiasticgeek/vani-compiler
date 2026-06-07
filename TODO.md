@@ -63,7 +63,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 3 — Tutorials Beginner track (~12-15h)                │
 │ (depends on TUT-1 from PHASE 1)                             │
-│   3.1 ▸ TUT-2: 12 beginner lessons                          │
+│   3.1 ▸ TUT-2: 12 beginner lessons              ✅ SHIPPED 2026-06-07
 │         Hello World, types, ops, fn, if/else, loops,        │
 │         strings, Vec, match, SMT contracts, modules,        │
 │         optional Devanagari intro                            │
@@ -767,7 +767,12 @@ structs / enums → generics → SMT proofs → async → embedded.
     contributing guide + 34 stub lessons + the first Beginner
     lesson `Hello, World` as a working template). Builds clean
     with `mdbook build` from the `tutorials/` directory.
-  - **TUT-2** (~12-15h): write the **Beginner** track (12
+  - **TUT-2** ✅ SHIPPED 2026-06-07: 12 Beginner lessons, each
+    with a learning goal, worked example (compile-verified on
+    both backends), command-line instructions, design notes,
+    and a challenge with collapsed solution. mdBook builds
+    clean. `tutorials/src/beginner/01..12*.md`.
+  - **TUT-2 (original spec)** — write the **Beginner** track (12
     lessons × ~30 min each).
   - **TUT-3** (~15-20h): write the **Intermediate** track.
   - **TUT-4** (~10-15h): write the **Advanced** track.

@@ -1,5 +1,120 @@
-# `while` and `for` loops
+# Beginner 5 — `while` and `for` loops
 
-> *This lesson is a stub.* It will be written as part of TUT-2 / TUT-3 / TUT-4 — see [TODO.md](https://github.com/anthropics/claude-code/blob/main/TODO.md) for the schedule.
+> **Learning goal**: write a `while` loop with an explicit
+> condition, a `for ... from ... to ...` range loop, and use
+> `break` / `return` to exit early.
 
-The lesson title and outline live in [SUMMARY.md](../SUMMARY.md). Until the body is written, the related `while` and `for` loops example(s) under [`examples/language/english/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english) are the best reference.
+## The program
+
+Save this in `~/lesson5.vani`:
+
+```rust
+intent "Lesson 5 worked example — while and for loops.";
+
+fn sum_to_n(n: i64) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 1;
+  while i <= n {
+    total = total + i;
+    i = i + 1;
+  }
+  return total;
+}
+
+fn product_of_range(lo: i64, hi: i64) -> i64 {
+  let prod: i64 = 1;
+  for k from lo to hi {
+    prod = prod * k;
+  }
+  return prod;
+}
+
+fn first_multiple_of_seven(start: i64) -> i64 {
+  let n: i64 = start;
+  while true {
+    if n % 7 == 0 {
+      return n;
+    }
+    n = n + 1;
+  }
+  return 0 - 1;
+}
+
+fn main() -> i64 {
+  print "sum_to_n(10) =", sum_to_n(10);
+  print "product_of_range(1, 5) =", product_of_range(1, 5);
+  print "first_multiple_of_seven(20) =", first_multiple_of_seven(20);
+  return 0;
+}
+```
+
+## Compile + run
+
+```bash
+vanic run ~/lesson5.vani
+```
+
+Expected output:
+
+```
+sum_to_n(10) = 55
+product_of_range(1, 5) = 24
+first_multiple_of_seven(20) = 21
+```
+
+## Why it works that way
+
+- **`while <bool> { … }`** runs the body until the condition is
+  false. Don't forget to advance the loop variable (`i = i + 1`)
+  or the loop is infinite. There's no postfix `i++` — the
+  language prefers spelled-out arithmetic.
+- **`for k from lo to hi { … }`** is a half-open range:
+  `k` takes values `lo, lo+1, …, hi-1`. The upper bound is
+  *exclusive*, which is why `product_of_range(1, 5)` computes
+  `1 * 2 * 3 * 4 = 24`, not `1 * 2 * 3 * 4 * 5 = 120`.
+- **`while true { … }`** loops indefinitely. Combine with
+  `return` (or `break`) to exit. The compiler proves
+  reachability: the final `return 0 - 1;` after a
+  `while true` is reachable for the type-checker but unreachable
+  at runtime, and that's fine.
+- **`break;`** exits the nearest enclosing loop;
+  **`continue;`** skips to the next iteration.
+- **There's no `let mut`** — `let i: i64 = 0;` declares a
+  variable that's already mutable via `i = i + 1`. v1 treats
+  every `let` binding as mutable for primitives; the `mut`
+  keyword is reserved for `mut ref` parameters in §3 of the
+  Intermediate track. This is a documented v1 deviation —
+  see [`docs/v1_limitations.md`](https://github.com/anthropics/claude-code/blob/main/docs/v1_limitations.md).
+
+## Challenge
+
+Write a `count_digits(n: i64) -> i64` that returns how many
+decimal digits `n` has. Use a `while` loop dividing by 10. Test
+it on 7, 42, and 12345.
+
+<details>
+<summary>Solution</summary>
+
+```rust
+fn count_digits(n: i64) -> i64 {
+  if n == 0 {
+    return 1;
+  }
+  let count: i64 = 0;
+  let m: i64 = n;
+  while m > 0 {
+    count = count + 1;
+    m = m / 10;
+  }
+  return count;
+}
+```
+
+For negatives, you'd flip the sign first; the language has no
+`abs` keyword but `if n < 0 { m = 0 - n }` is enough.
+
+</details>
+
+---
+
+**Next**: [§6 — Strings (`Str` vs `OwnedStr`) →](06_strings.md)

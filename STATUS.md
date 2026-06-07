@@ -10,6 +10,23 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 3.1 (TUT-2 Beginner track) shipped
+
+The 12-lesson Beginner track is now fully written and live in
+`tutorials/src/beginner/01..12*.md`. Each lesson has a
+learning goal, a worked example (compile-verified on both C
+and LLVM backends), exact `vanic` invocations, a 3-7 bullet
+design-notes section, and a challenge with a collapsed
+solution. Topics: Hello World, types/operators, functions,
+if/else, while+for, strings, arrays+Vec, match, contracts
+(assert/prove/requires), modules+pub, three exercise
+challenges (FizzBuzz, vec statistics, modular grading rubric),
+and an optional Devanagari surface intro that prints `१२` to
+demonstrate the integer-numeral-localization Phase 1.1 ships.
+
+`mdbook build` runs warning-free. TUT-3 (Intermediate) and
+TUT-4 (Advanced) tracks remain stubbed and queued.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 2.1 + 2.2 + 2.3 shipped (full Phase 2 closed)
 
 **Phase 2.1/2.2/2.3 — Tier I Indo-Aryan dialect extensions**:

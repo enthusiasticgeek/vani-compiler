@@ -10,7 +10,10 @@ is the artifact that gets deployed (eventually — see TUT-5 in
 - **TUT-1** ✅ SHIPPED 2026-06-07 — scaffolding (this dir
   layout + `book.toml` + SUMMARY + introduction + stub lessons +
   the first Beginner lesson as a template).
-- **TUT-2** queued — write the 12 Beginner lessons.
+- **TUT-2** ✅ SHIPPED 2026-06-07 — 12 Beginner lessons (Hello
+  World → variables → functions → if/else → loops → strings →
+  Vec → match → SMT contracts → modules → challenges →
+  Devanagari intro). Every worked example is compile-verified.
 - **TUT-3** queued — write the 12 Intermediate lessons.
 - **TUT-4** queued — write the 10 Advanced lessons.
 - **TUT-5** queued — GitHub Actions deploy to `gh-pages`.
