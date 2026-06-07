@@ -42,7 +42,7 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 1 — Quick wins, no dependencies (≤ 15h total)         │
-│   1.1 ▸ Devanagari runtime PRINT output (०-९ vs 0-9)        │ 3-4h
+│   1.1 ▸ Devanagari runtime PRINT output (०-९ vs 0-9)   ✅ SHIPPED 2026-06-07
 │   1.2 ▸ C-backend Vec<dyn Iface> struct-field fix (L8)      │ 5-8h
 │   1.3 ▸ ML-1: prompt-engineering context bundle             │ 2-4h
 │   1.4 ▸ TUT-1: mdBook scaffolding for HTML tutorials        │ 3h
@@ -202,8 +202,9 @@ The shortest path to **HIGH user-visible value** is:
 - mdBook scaffold + 12 beginner tutorial lessons (massive
   onboarding leverage)
 
-Plus PHASE 1.1 / 1.2 (Devanagari runtime output + Vec<dyn> fix)
-ship in another ~8h for surface polish.
+PHASE 1.1 SHIPPED 2026-06-07 (Devanagari runtime PRINT — see
+[docs/v1_limitations.md L11](docs/v1_limitations.md)); PHASE 1.2
+(Vec<dyn> fix) is next and ships in ~5-8h for surface polish.
 
 ### Effort summary
 
@@ -788,7 +789,7 @@ structs / enums → generics → SMT proofs → async → embedded.
 ---
 
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
-examples; **1894 lib + 54 parity green as of 2026-06-06 evening**;
+examples; **1896 lib + 54 parity green as of 2026-06-06 evening**;
 clean warning-free build). Remaining work, in execution order
 (USER DIRECTION 2026-06-06):
 
@@ -914,7 +915,7 @@ verification deferred (Windows access pending).
 
 After Phase 5 + Phase 6 code lands (verification deferred for
 platforms), re-run the full Linux suite to confirm:
-  - No regressions in the existing 1894 lib tests.
+  - No regressions in the existing 1896 lib tests.
   - No regressions in the existing 54 parity-sweep examples.
   - The per-host conditional emit (host_is_linux / host_is_darwin /
     host_uses_win32_threading) still routes Linux correctly.

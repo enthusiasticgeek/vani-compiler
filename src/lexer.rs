@@ -398,7 +398,41 @@ pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     merge_multi_word_devanagari_aliases(&mut tokens, source);
     merge_give_back_ascii_alias(&mut tokens, source);
     enforce_language_purity(&tokens, source)?;
+    // Phase 1.1 (2026-06-07): record the file's pragma so the
+    // backends can switch numeric print output to Devanagari
+    // digits when the source declared a Devanagari dialect.
+    // Reset every lex() so per-test isolation holds.
+    let mode = match detect_language_pragma(source) {
+        Some(DialectLang::Sanskrit)
+        | Some(DialectLang::Hindi)
+        | Some(DialectLang::Marathi) => PrintLangMode::Devanagari,
+        _ => PrintLangMode::Ascii,
+    };
+    PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
     Ok(tokens)
+}
+
+/// Phase 1.1 (2026-06-07): per-program print-output language
+/// mode. Set by `lex()` from the `// vani-lang:` pragma; read by
+/// the C + LLVM backends at print-emit time to choose between
+/// ASCII `%lld` and a Devanagari-digit helper.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum PrintLangMode {
+    Ascii,
+    Devanagari,
+}
+
+thread_local! {
+    static PROGRAM_PRINT_LANG_MODE: std::cell::Cell<PrintLangMode> =
+        const { std::cell::Cell::new(PrintLangMode::Ascii) };
+}
+
+pub fn current_print_lang_mode() -> PrintLangMode {
+    PROGRAM_PRINT_LANG_MODE.with(|c| c.get())
+}
+
+pub fn set_current_print_lang_mode(mode: PrintLangMode) {
+    PROGRAM_PRINT_LANG_MODE.with(|c| c.set(mode));
 }
 
 /// Per-file language purity gate (closure #236). vāṇī supports

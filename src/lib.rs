@@ -62,8 +62,14 @@ fn inject_prelude(program: &mut ast::Program) {
 
 pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let tokens = lexer::lex(source).map_err(|diagnostic| vec![diagnostic])?;
+    // Phase 1.1 (2026-06-07): `inject_prelude` will lex the
+    // pragma-free PRELUDE source next, which would overwrite
+    // the user file's `// vani-lang:` pragma decision. Capture
+    // the user file's mode now and restore it after.
+    let saved_mode = lexer::current_print_lang_mode();
     let (mut program, parse_errors) = parser::parse(tokens);
     inject_prelude(&mut program);
+    lexer::set_current_print_lang_mode(saved_mode);
     match checker::check(program) {
         Ok(checked) if parse_errors.is_empty() => Ok(checked),
         Ok(_) => Err(parse_errors),
@@ -27031,6 +27037,58 @@ fn main() -> i64 {
             !rendered.contains("त्रुटि"),
             "non-pragma file should NOT have Devanagari labels, got: {}",
             rendered
+        );
+    }
+
+    #[test]
+    fn devanagari_pragma_emits_devanagari_print_digits_c() {
+        // Phase 1.1 (2026-06-07): `// vani-lang: sanskrit` (or
+        // hindi/marathi) routes integer `print` through the
+        // `intent_print_int_dev` C helper. Pin the helper's
+        // presence + a call-site in the emitted C so a future
+        // refactor can't silently regress to printf("%lld") for
+        // Devanagari programs.
+        let source = "// vani-lang: sanskrit\n\
+                      उद्देश्य \"t\";\n\
+                      कार्य main() -> पूर्णांक {\n  \
+                        x: पूर्णांक = ३५ माना;\n  \
+                        x लिख;\n  \
+                        ० पुनरागम;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("Devanagari program compiles to C");
+        assert!(
+            c.contains("intent_print_int_dev"),
+            "expected Devanagari print helper in tree-C output, got:\n{}",
+            c
+        );
+        assert!(
+            !c.contains("printf(\"%lld\""),
+            "tree-C should not fall through to printf for int print under Devanagari pragma, got:\n{}",
+            c
+        );
+    }
+
+    #[test]
+    fn ascii_pragma_keeps_printf_for_int_print_c() {
+        // Phase 1.1 (2026-06-07): an English (or no-pragma) file
+        // MUST stay on the printf path. The Devanagari helper
+        // should not even appear in the emitted prelude so non-
+        // dialect users see byte-identical C output.
+        let source = "fn main() -> i64 {\n  \
+                        let x: i64 = 35;\n  \
+                        print x;\n  \
+                        return 0;\n\
+                      }\n";
+        let c = compile_to_c(source).expect("English program compiles to C");
+        assert!(
+            !c.contains("intent_print_int_dev"),
+            "ASCII-only programs must NOT emit the Devanagari helper, got:\n{}",
+            c
+        );
+        assert!(
+            c.contains("printf(\"%lld\""),
+            "ASCII int print must stay on printf, got:\n{}",
+            c
         );
     }
 

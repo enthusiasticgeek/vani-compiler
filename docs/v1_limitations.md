@@ -216,18 +216,51 @@ users get full Arc 8 I/O via the C backend on first try; report
 any kqueue / IOCP / winsock issues so the hot-spots in
 [ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md) Phase 5/6 get tuned.
 
-### L11 — Runtime PRINT output uses ASCII numerals
+### L11 — Runtime PRINT output uses ASCII numerals ✅ SHIPPED 2026-06-07
 
-`print x` where `x: i64` emits the decimal in ASCII digits even
-in a `// vani-lang: sanskrit`-pragma'd file.
+**Status**: Resolved in Phase 1.1.
 
-**Why**: the C-runtime helper `intent_print_int` calls libc
-`printf("%lld", ...)` which outputs ASCII. A Devanagari-numeral
-output mode would need a separate runtime helper.
+`print x` where `x: i64` (or i8/i16/i32/u8/u16/u32/u64) now emits
+the decimal in Devanagari digits (`०..९`) when the file declares
+`// vani-lang: sanskrit | hindi | marathi`. The conversion is a
+digit-by-digit UTF-8 codepoint replacement (U+0966..U+096F via
+the 3-byte sequence `E0 A5 (A6..AF)`); a leading ASCII `-` for
+negative numbers is preserved verbatim.
 
-**Workaround**: none; the program runs correctly. Devanagari
-output is a future runtime-side change tracked as a stretch
-goal.
+**Coverage**:
+- Tree-C backend (`backend_c.rs`) — emits `intent_print_int_dev`
+  helper into the runtime prelude; the printf-fallback arm in
+  `emit_print_expr_no_newline` dispatches to it.
+- SSA-C backend (`ssa_backend_c.rs`) — same helper (shared via
+  `emit_intent_print_int_dev_c`); the `intent_print_item`
+  handler routes integer width arms through it.
+- Tree-LLVM (`backend_llvm.rs`) — defines
+  `@intent_print_int_dev(i64)` in pure LLVM IR (snprintf +
+  putchar loop, no platform-dependent stdout globals); the
+  signed + unsigned int arms dispatch to it.
+- SSA-LLVM (`ssa_backend_llvm.rs`) — same IR helper, dispatched
+  from the integer fallback in the `intent_print_item` handler.
+
+**Mechanism**:
+1. The lexer's `detect_language_pragma` populates a thread-local
+   `PrintLangMode` (`Ascii` | `Devanagari`) when the
+   `// vani-lang:` line resolves to a Devanagari dialect.
+2. `lib.rs::compile` saves the mode after lexing the user
+   source, restores it after `inject_prelude` lexes the pragma-
+   free PRELUDE (which would otherwise reset to Ascii).
+3. Each backend reads the mode at emit time and gates both the
+   helper definition and the print-site dispatch on
+   `PrintLangMode::Devanagari`.
+
+**F64 / Str / Bool**: unchanged — they keep the printf path. The
+helper is integer-only in v1; floats would need a separate
+fraction-digit pass and bool/string don't need numeral
+translation.
+
+**Regression coverage**: `lib.rs::devanagari_pragma_emits_devanagari_print_digits_c`
+and `lib.rs::ascii_pragma_keeps_printf_for_int_print_c` pin the
+emit shape so a future refactor can't silently regress either
+side.
 
 ---
 
