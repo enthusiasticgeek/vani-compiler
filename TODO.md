@@ -12,111 +12,219 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 > by-design choices — each with the current workaround and
 > the fix-queue pointer.
 
-## 📋 NEXT SESSION HANDOFF — dependency-ordered plan (refreshed 2026-06-06 end-of-day)
+## 📋 EXECUTION PLAN — dependency + effort-ordered (refreshed 2026-06-06)
 
-> **Session-end status (2026-06-06)** — ALL FIVE TIERS SHIPPED:
->   - ✅ Bootstrap: Vec<Struct>-in-struct-field C codegen
->     (commits `4feb5fc` + `ab6bc10`).
->   - ✅ Tier 1: Phase 4c-broad — full generic async fns
->     (commits `4620e98` + `afbc7b5`). Generic `identity<T>(fd, x: T)
->     -> T` compiles + runs end-to-end on Linux via both backends.
->   - ✅ Tier 2: Phase 5 — macOS port. C backend (commit `c4823b9`)
->     + LLVM IR (commit `8281cda`). **VERIFICATION DEFERRED** — no
->     macOS access at landing time.
->   - ✅ Tier 3: Phase 6 — Windows port. C backend (commit `c4823b9`)
->     + LLVM IR (commits `8281cda` + D.1 Windows TCP IR ✅).
->     **VERIFICATION DEFERRED** — no Windows access at landing time.
->   - ✅ Tier 4: Linux re-verification. 1884 lib + 54 parity tests
->     green out-of-the-box; 4 Arc 8 examples (C) + 1 (LLVM) +
->     Phase 4c-broad generic smoke all run end-to-end.
->   - ✅ Pre-existing baselines fixed (commit `d139691`):
->     async_showcase fmt-roundtrip + atomicrmw LLVM stack-overflow.
->
-> **Open work — DEPENDENCY-ORDERED (refreshed 2026-06-06 evening, user direction)**:
->
-> Each tier ships before the next; items within a tier can be
-> parallel-safe unless noted. Tier letters group by dependency,
-> not by importance.
->
-> ```
-> Tier A (ergonomics — do first; later edits inherit new names/paths)
->   A.1 ▸ CLI rename: intentc → vanic  ─────────┐
->   A.2 ▸ Examples reorganization               │
->          (examples/language/{en,sa,hi,mr}/)   │ A.2 depends on A.1
->          + `// श्री।` header on Devanagari    │ for path-strings
->          examples                              │
->                                                ▼
-> Tier B (cross-language tooling — depends on Tier A's paths/names)
->   B.1 ▸ Cross-language `.vani` translator tool ──┐
->          (Python v1; reads the lexer alias       │
->          table; preserves identifiers + comments)│
->                                                   ▼
-> Tier C (Sanskrit-derived SOV completion — PRIMARY language target;
->         parallel-safe with B but B's translator helps generate
->         Devanagari examples once SOV constructs ship)
->   C.1 ▸ SOV-S1: let verb-at-end           ┐
->   C.2 ▸ SOV-S2: fn decl verb-at-end       │
->   C.3 ▸ SOV-S3: if/else cond-at-end       │ each parallel-safe
->   C.4 ▸ SOV-S4: while cond-at-end         │ within the tier
->   C.5 ▸ SOV-S5: match scrutinee-at-front  │
->   C.6 ▸ SOV-S6: struct/enum decl SOV-shape│
->   C.7 ▸ SOV-S7: 4 missing Devanagari      │
->          aliases (extern/type/intent/      │
->          invariant)                        │
->   C.8 ▸ SOV-S8: finer Sanskrit-vs-Hindi-  │
->          vs-Marathi purity gate            │
->   C.9 ▸ SOV-S9: grammar-consultant pass    │ external dep
->   C.10▸ SOV-S10: Devanagari example       ▼
->          coverage (uses B.1 to generate)
->
-> Tier D (independent code work — parallel-safe with everything)
->   D.1 ▸ Windows LLVM TCP IR (i64-SOCKET +
->          winsock2 declares) ✅ SHIPPED 2026-06-06 — see
->          `emit_intent_tcp_helpers_llvm_windows` in
->          [backend_llvm.rs](src/backend_llvm.rs). Verification
->          deferred (no Windows host access).
->
-> Tier E — Indian-subcontinent-first then global language rollout
->          (depends on Tier C; same surface patterns)
->
->   E.I  ▸ INDIAN SUBCONTINENT FAMILY (priority — extend the
->          shipped Sanskrit/Hindi/Marathi pipeline). Order:
->          Bengali → Gujarati → Punjabi → Tamil → Telugu →
->          Kannada → Malayalam → Urdu → Odia → Assamese →
->          Sindhi → Nepali → Konkani → Maithili → Sinhala →
->          ... (smaller subcontinent languages tail).
->          Devanagari-script languages (Nepali / Konkani /
->          Maithili) are trivial extensions of the shipped
->          pipeline; Brahmi-derived non-Devanagari scripts
->          (Bengali / Gujarati / Punjabi-Gurmukhi / Tamil /
->          Telugu / Kannada / Malayalam / Odia / Assamese /
->          Sinhala) need a per-script Unicode-block extension
->          in `enforce_language_purity`. Perso-Arabic scripts
->          (Urdu / Punjabi-Shahmukhi / Sindhi) need RTL parser
->          support.
->
->   E.II ▸ GLOBAL ROLLOUT (after Tier I is comprehensive).
->          User-specified priority order:
->            1. Spanish (SVO Latin)
->            2. Mandarin Chinese (SVO Han logograms; needs CJK
->               tokenizer)
->            3. Japanese (SOV — vāṇी's SOV plumbing transfers)
->            4. Russian (SVO Cyrillic + free order)
->            5. German (V2 + SOV subordinate)
->            6. French (SVO Latin)
->          Then: Arabic, Portuguese, Korean, Vietnamese, Indonesian,
->          Swahili, Turkish, and the global tail.
->
-> Tier F (external — host access / external choices needed)
->   F.1 ▸ macOS empirical verification (Darwin host required)
->   F.2 ▸ Windows empirical verification (Win host required)
->   F.3 ▸ Arc 9 a/b/e/f Kosh package manager (registry choice)
->   F.4 ▸ Arc 7 Win64 / AArch64 (CI wiring)
-> ```
->
-> **Pick-up order**: A.1 → A.2 → B.1 → C.1..C.10 (parallel) → E.1.
-> Tier D and Tier F items can drop in anywhere they fit; they
-> don't block the language-surface arc.
+> **Reading this plan**: each phase is a self-contained chunk
+> of work with all dependencies inside or before it. Items
+> within a phase are parallel-safe unless noted. The plan is
+> ordered for shortest-time-to-first-shipped-value first, then
+> the bigger lifts.
+
+### Closed arcs (recap; do not re-do)
+
+| Closed work | Shipped in | Notes |
+|---|---|---|
+| Bootstrap Vec<Struct> C codegen | `4feb5fc` + `ab6bc10` | Pre-existing bug fix |
+| Phase 4c-broad — full generic async fns | `4620e98` + `afbc7b5` | All 3 blockers closed |
+| Phase 5/6 — macOS + Windows ports (C + LLVM) | `c4823b9` + `8281cda` + `cedf20d` | VERIFICATION DEFERRED |
+| Pre-existing baselines (fmt-roundtrip + atomicrmw stack-overflow) | `d139691` | |
+| A.1 CLI rename (intentc → vanic) | `605cd69` + `be1b772` | Legacy alias for 1 release |
+| A.2 Examples reorg (examples/language/{lang}/) | `739cb4f` | + `// श्री।` header |
+| B.1 Cross-language translator (Python v1) | `7e3c061` | Round-trip parity tested |
+| SOV-S1..S10 — Devanagari SOV completion | multiple | 100% keyword coverage; 8 SOV shapes |
+| Devanagari purity arc (numerals + types + idents + errors) | `a911474` + `aa1fbee` | Pure-Devanagari Pascal's-triangle example runs |
+| 22 GoF design patterns (refactoring.guru) | `1dfb483` | Dual-backend parity |
+| docs/v1_limitations.md (14 entries) | `e35c837` | Cross-linked from all docs |
+| INSTALL.md + ML/HTML TODO items | `538812a` | Per-platform install instructions |
+
+### Remaining work — phase-ordered
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 1 — Quick wins, no dependencies (≤ 15h total)         │
+│   1.1 ▸ Devanagari runtime PRINT output (०-९ vs 0-9)        │ 3-4h
+│   1.2 ▸ C-backend Vec<dyn Iface> struct-field fix (L8)      │ 5-8h
+│   1.3 ▸ ML-1: prompt-engineering context bundle             │ 2-4h
+│   1.4 ▸ TUT-1: mdBook scaffolding for HTML tutorials        │ 3h
+│   Each item is INDEPENDENT — pick in any order.             │
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 2 — Tier I quick subcontinent wins (~5-10h)           │
+│ (depends on nothing — Devanagari pipeline already shipped)  │
+│   2.1 ▸ Nepali (Devanagari script extension)                │ 1-2h
+│   2.2 ▸ Maithili (Devanagari)                                │ 1-2h
+│   2.3 ▸ Konkani-Devanagari variant                          │ 1-2h
+│   Each: keyword table + dialect tag + 1 example.            │
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 3 — Tutorials Beginner track (~12-15h)                │
+│ (depends on TUT-1 from PHASE 1)                             │
+│   3.1 ▸ TUT-2: 12 beginner lessons                          │
+│         Hello World, types, ops, fn, if/else, loops,        │
+│         strings, Vec, match, SMT contracts, modules,        │
+│         optional Devanagari intro                            │
+│   Highest-leverage user-onboarding work.                    │
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 4 — ML MCP server (~8-12h)                            │
+│ (depends on ML-1 from PHASE 1)                              │
+│   4.1 ▸ ML-2: expose ML-1's context bundle as an MCP server │
+│         AI agents become first-class vāṇी users; can use    │
+│         SMT proofs to verify their own generated code at    │
+│         generation time. Unique selling point.              │
+└─────────────────────────────────────────────────────────────┘
+                                 │
+              ┌──────────────────┴──────────────────┐
+              ▼                                     ▼
+┌──────────────────────────────────────┐ ┌────────────────────┐
+│ PHASE 5a — Tutorials Intermediate    │ │ PHASE 5b — Bengali │
+│ (~15-20h)                            │ │ (~15h)             │
+│ (parallel-safe with 5b)              │ │ First Brahmi-      │
+│   5a.1 ▸ TUT-3: 12 intermediate      │ │ derived script —   │
+│         lessons: structs / enums /   │ │ sets up the per-   │
+│         affine / generics / dyn /    │ │ script abstraction │
+│         closures / FFI / Result+try  │ │ for items 6.x      │
+│         / 22 GoF patterns / SMT      │ │ below.             │
+│         deep-dive                    │ │   5b.1 ▸ Bengali   │
+└──────────────────────────────────────┘ │       Unicode block│
+              │                          │       extension +  │
+              │                          │       keyword table│
+              │                          │       + 1 example. │
+              │                          └────────────────────┘
+              │                                     │
+              └─────────────┬───────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 6 — Brahmi-derived non-Devanagari batch (~30h)        │
+│ (depends on PHASE 5b's per-script abstraction)              │
+│   6.1 ▸ Gujarati (close to Marathi grammar)                 │ 6-8h
+│   6.2 ▸ Punjabi-Gurmukhi (Sikh/Indian)                      │ 8-10h
+│   6.3 ▸ Odia                                                │ 6-8h
+│   6.4 ▸ Assamese (Bengali-script-adjacent)                  │ 5-8h
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 7 — Tutorials Advanced + deploy (~14-20h)             │
+│ (parallel-safe with PHASE 8)                                │
+│   7.1 ▸ TUT-4: 10 advanced lessons                          │ 10-15h
+│         async / parallel / task / embedded / vtable /       │
+│         SMT trace / Devanagari arc / translator ext /       │
+│         new-dialect walkthrough / compiler tour             │
+│   7.2 ▸ TUT-5: GitHub Pages deploy via Actions              │ 4-6h
+└─────────────────────────────────────────────────────────────┘
+                                 │
+              ┌──────────────────┴──────────────────┐
+              ▼                                     ▼
+┌────────────────────────────────┐ ┌────────────────────────┐
+│ PHASE 8a — Dravidian batch     │ │ PHASE 8b — Tier II     │
+│ (~50h)                         │ │ openers (~13h)         │
+│   8a.1 ▸ Tamil                 │ │   8b.1 ▸ Spanish       │ 5h
+│         (Dravidian, no tatsama │ │         (Latin SVO     │
+│         shortcut; ~12-15h)     │ │         easy entry)    │
+│   8a.2 ▸ Telugu (~12-15h)      │ │   8b.2 ▸ Russian       │ 5h
+│   8a.3 ▸ Kannada (~10-12h)     │ │         (Cyrillic SVO) │
+│   8a.4 ▸ Malayalam (~10-12h)   │ │   8b.3 ▸ French        │ 3h
+│   Each needs grammar consultant│ │         (Latin SVO,    │
+│   gating for accuracy.          │ │         trivial after  │
+└────────────────────────────────┘ │         Spanish)       │
+                                   └────────────────────────┘
+              ┌──────────────────┴──────────────────┐
+              ▼                                     ▼
+┌────────────────────────────────┐ ┌────────────────────────┐
+│ PHASE 9a — ML fine-tune        │ │ PHASE 9b — Japanese    │
+│ (~25h + ~$200 GPU)             │ │ (~12h)                 │
+│   9a.1 ▸ ML-3: LoRA fine-tune  │ │   9b.1 ▸ SOV plumbing   │
+│         on en↔sa↔hi↔mr corpus  │ │         transfers; 3-  │
+│         from the translator;   │ │         script lexer    │
+│         small Llama-3 8B or    │ │         (Kanji+Hiragana │
+│         Qwen-2.5 7B.           │ │         +Katakana)      │
+└────────────────────────────────┘ └────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 10 — German + Mandarin (~55h)                         │
+│   10.1 ▸ German (V2 parser hook + SOV subordinate reuse)    │ 10h
+│   10.2 ▸ Mandarin (CJK tokenizer overhaul — no native       │
+│          whitespace word boundaries)                        │ 30-50h
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 11 — Type-system limitation cleanup (parallel)        │
+│ (independent of language work; bigger lifts)                │
+│   11.1 ▸ L3: match-by-ref scrutinee                         │ 10h
+│   11.2 ▸ L1: enum destructure on affine payloads            │ 15-20h
+│   11.3 ▸ L2: Box<T> / owning interface object               │ 20-30h
+│   11.4 ▸ L12: SMT prove across function calls               │ 25-30h
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 12 — Perso-Arabic RTL (~100h)                         │
+│   12.1 ▸ Bidi parser support (the expensive piece)          │ 25-40h
+│   12.2 ▸ Urdu                                               │ 25h
+│   12.3 ▸ Punjabi-Shahmukhi                                  │ 20h
+│   12.4 ▸ Sindhi                                             │ 25h
+└─────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────┐
+│ PHASE 13 — Long tail (deferred to user demand)              │
+│   13.1 ▸ Arabic, Portuguese, Korean, Vietnamese,            │
+│          Indonesian, Swahili, Turkish, …                    │
+│   13.2 ▸ ML-4: hosted inference service                     │ external
+│   13.3 ▸ Browser playground (WASM-compiled vāṇी)            │ 50h+
+└─────────────────────────────────────────────────────────────┘
+```
+
+### External-blocked items (drop in anywhere when unblocked)
+
+| Item | Blocker | Effort once unblocked |
+|---|---|---|
+| **macOS empirical verification** | Darwin host access | 2-4h test runs + bug fixes |
+| **Windows empirical verification** | Windows host access | 2-4h test runs + bug fixes |
+| **Arc 9 a/b/e/f Kosh package manager** | Registry-hosting choice | 25-35h |
+| **Arc 7 Win64 / AArch64** | Cross-platform CI wiring | 8-12h |
+| **Grammar consultant pass** | Native-speaker linguist | external; ongoing |
+
+### Critical path
+
+The shortest path to **HIGH user-visible value** is:
+**PHASE 1.3 + 1.4 → PHASE 3** → ~16-19h of focused work delivers:
+- ML-1 context bundle (enables AI-agent + MCP use cases)
+- mdBook scaffold + 12 beginner tutorial lessons (massive
+  onboarding leverage)
+
+Plus PHASE 1.1 / 1.2 (Devanagari runtime output + Vec<dyn> fix)
+ship in another ~8h for surface polish.
+
+### Effort summary
+
+| Phase | Cumulative effort | Cumulative shipped capability |
+|---|---|---|
+| 1 | 13-19h | Polish + ML+tutorials infrastructure |
+| 2 | 18-25h | 6 supported Indo-Aryan dialects |
+| 3 | 30-40h | Beginner tutorial track |
+| 4 | 38-52h | AI-agent integration via MCP |
+| 5 | 53-72h | Intermediate tutorials + Bengali |
+| 6 | 83-102h | 10 supported subcontinent languages |
+| 7 | 97-122h | Full tutorial track + GH Pages |
+| 8 | 147-180h | Dravidian batch + 3 global openers |
+| 9 | 184-217h | ML fine-tune + Japanese |
+| 10 | 239-272h | German + Mandarin |
+| 11 | 309-352h | v1 type-system limitations closed |
+| 12 | 409-452h | Perso-Arabic RTL |
+| 13 | open-ended | Long tail + playground |
+
+Total to PHASE 10 (full Tier I subcontinent + 6 Tier II
+globals + ML + tutorials): **~240-270h focused work**.
 
 ---
 
