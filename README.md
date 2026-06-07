@@ -3711,6 +3711,10 @@ biggest ergonomic gaps:
 VANI is an open-source research compiler. Patches, bug reports, and
 example programs are all welcome.
 
+- [INSTALL.md](INSTALL.md) — per-platform install instructions
+  (Linux / macOS / Windows) with the package commands for
+  `z3`, LLVM tools, and the Rust toolchain plus a verify-
+  your-install checklist.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — pre-PR checklist, code
   conventions, commit-message style, and how to file issues.
 - [ONBOARDING.md](ONBOARDING.md) — toolchain prerequisites, project

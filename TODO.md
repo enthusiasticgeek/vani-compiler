@@ -473,6 +473,212 @@ Grammar-consultant gating per language tracked in
 
 ---
 
+## 🤖 ML model that learns vāṇी (user direction 2026-06-06)
+
+> "ML model that learns the language. May be used for MCP server
+> or other ML things or user to generate boiler plate code. Let
+> me know your assessment on value for adding this."
+
+### Value assessment
+
+**Verdict**: MEDIUM-HIGH value, but **start cheap before training
+anything custom**.
+
+The right first step is *prompt-engineering* an off-the-shelf
+model (Claude, GPT-4-class, Llama-3-class) with a curated context
+bundle:
+  - The 91 Devanagari keyword aliases + the SOV statement-shape
+    table from README
+  - The 22 GoF design-pattern examples (one of each pattern,
+    minimal-line versions for context-window efficiency)
+  - The full English-keyword example corpus
+    (`examples/language/english/`) summarized to ~5-10 lines
+    each (signature + intent comment)
+  - The dialect-aware-errors prefix table from
+    `src/diagnostic.rs:localize_message` (so the model can emit
+    proper Devanagari errors)
+  - The v1 limitations catalog ([docs/v1_limitations.md](docs/v1_limitations.md))
+    so the model knows which textbook constructs are unsupported
+
+That bundle plus a short system prompt ("you are a vāṇी
+programmer; emit only the .vani source unless asked otherwise;
+use English keywords by default; honor `// vani-lang:` pragmas")
+gets ~80% of the way to useful code generation **with no
+training**.
+
+### Where this lands on the value curve
+
+  **HIGH value applications** (justify the full project):
+    - **MCP server integration** — AI agents become first-class
+      vāṇी users via the existing MCP protocol. An agent
+      writing vāṇī can use SMT proofs to verify its own code at
+      generation time, which is a unique selling point.
+    - **Boilerplate generation** — "generate a Vec-of-Point
+      with a method to compute centroid" type prompts, where
+      the user iterates on the generated code rather than
+      starting from a blank file.
+    - **Devanagari onboarding** — newcomers describe what they
+      want in English; the model emits Sanskrit / Hindi /
+      Marathi code matching the file's `vani-lang:` pragma.
+      Significantly lowers the barrier for non-English speakers.
+
+  **MEDIUM value** (nice but not transformational):
+    - **LSP autocomplete** — vāṇी already has an LSP server
+      (`intent-lsp`); adding a model-driven completion mode is
+      a multiplier but the basic LSP already works.
+    - **Doc generation** — could be more efficiently done with
+      doc-comment + template rules, no model needed.
+
+  **LOW value / negative**:
+    - Custom-trained-from-scratch transformer. Cost would be
+      $50K+ in compute alone with no commensurate quality
+      uplift over fine-tuning. Skip this.
+    - Embedding the model INTO the compiler binary. Keep them
+      separate — the compiler stays deterministic, the model is
+      an out-of-band assistant.
+
+### Recommended phasing
+
+  - **Phase ML-1** (~2-4h): pack the context bundle described
+    above into a `tools/llm_context/` directory + a Python or
+    Rust script that emits it to stdout for piping into a
+    Claude / GPT prompt. Document a sample workflow in
+    `tools/README.md`. No model integration yet.
+  - **Phase ML-2** (~8-12h): expose the bundle as an MCP server
+    that AI agents can pull on demand. The agent gets the
+    context AS NEEDED rather than burning context window on
+    every prompt.
+  - **Phase ML-3** (~20-30h): fine-tune a small open-weights
+    model (Llama-3 8B / Qwen-2.5 7B) on the (English ↔
+    Sanskrit ↔ Hindi ↔ Marathi) translation corpus produced
+    by the existing translator. Cheap LoRA fine-tune; tiny
+    model; ship as a downloadable artifact.
+  - **Phase ML-4** (deferred / external): hosted inference
+    service if there's demand. Out of scope for the
+    compiler-side roadmap.
+
+### Effort estimate
+
+  - **Phase ML-1** alone: 2-4h focused.
+  - **Phase ML-2** adds 8-12h on top.
+  - **Phase ML-3** adds 20-30h focused + GPU time (~$100-300
+    in cloud GPU credits for a LoRA fine-tune).
+  - **Phase ML-4** is open-ended (hosting + ops).
+
+The big asks (Phase ML-3 / ML-4) gate on user demand. Phase
+ML-1 / ML-2 are cheap enough to ship speculatively.
+
+---
+
+## 📚 HTML tutorials with examples — beginner / intermediate / advanced (user direction 2026-06-06)
+
+> "html tutorials on vāṇी with examples for featureset — divide
+> into beginner, intermediate and advance."
+
+### Value assessment
+
+**Verdict**: HIGH value for adoption. The 133+ English examples
++ 22 design patterns + 29 Devanagari examples are great
+*reference* but they don't teach progressively. A newcomer hits
+`echo_p3d_vec_struct.vani` and bounces. A tutorial site funnels
+them through Hello World → simple types → control flow →
+structs / enums → generics → SMT proofs → async → embedded.
+
+### Tutorial layout
+
+  **Beginner** (~10-12 lessons):
+    1. Hello, World — printing + i64 return
+    2. Variables, types, operators
+    3. Functions + the four `return` aliases
+    4. `if` / `else`
+    5. `while` + `for` loops
+    6. Strings (`Str` / `OwnedStr`)
+    7. Arrays + `Vec<T>` basics
+    8. Pattern match on integers + booleans
+    9. First contract: `assert` / `prove` / `requires`
+    10. Modules + `pub`
+    11. Reading + writing simple programs (challenges)
+    12. Devanagari surface intro (optional)
+
+  **Intermediate** (~10-12 lessons):
+    1. Structs with methods (`methods on T { ... }`)
+    2. Enums with payloads + match arms
+    3. Affine ownership + `mut ref` / `ref`
+    4. Generics + interfaces (`interface` + `implement`)
+    5. Dynamic dispatch (`dyn Iface` + `Vec<dyn Iface>`)
+    6. Closures + iterator combinators (`.map` / `.fold` / `.filter`)
+    7. Tuples + tuple destructure
+    8. Multi-file projects + `vani.toml` manifest
+    9. FFI: `extern "C" fn` + `--link-with`
+    10. Error handling: `Result<T, E>` + `try` keyword
+    11. The 22 GoF design patterns (each as a 1-page tutorial)
+    12. SMT verification deep-dive (`requires` / `ensures` /
+        `invariant`)
+
+  **Advanced** (~8-10 lessons):
+    1. Async / await + the `async fn → Task` transform
+    2. `parallel for` + reductions + race-freedom proofs
+    3. `task` / `join` + `Atomic<T>` / `Mutex<T>` / `Channel<T>`
+    4. Embedded targets + `unsafe` blocks + region typing
+    5. The `dyn` vtable layout + safety boundary
+    6. SMT trace debugging (`VANIC_SMT_DEBUG=1`)
+    7. Devanagari purity arc: pragma + dialect-aware errors
+    8. Writing a cross-language translator extension
+    9. Adding a new dialect (Tier I rollout walkthrough)
+    10. Compiler internals tour (lexer → parser → checker →
+        codegen)
+
+### Implementation options
+
+  **Option A** (lowest effort): Markdown lessons rendered as
+  HTML via [mdBook](https://rust-lang.github.io/mdBook/). Each
+  lesson is one `.md` file with embedded vāṇी examples. mdBook
+  builds + serves locally; a single `mdbook build` produces a
+  static site deployable to GitHub Pages.
+
+  **Option B** (more polish): Docusaurus / VitePress / a custom
+  static-site generator. More setup; nicer interactive code
+  blocks (vāṇी syntax highlighting, "Try in playground" button
+  if/when the playground exists).
+
+  **Option C** (most ambitious): browser-based playground that
+  runs `vanic check` + `vanic emit-c` in-browser via WASM. This
+  is a follow-up project of its own — not in scope for the
+  initial tutorial set.
+
+### Work items
+
+  - **TUT-1** (~3h): pick the static-site stack and scaffold
+    the directory structure.
+  - **TUT-2** (~12-15h): write the **Beginner** track (12
+    lessons × ~30 min each).
+  - **TUT-3** (~15-20h): write the **Intermediate** track.
+  - **TUT-4** (~10-15h): write the **Advanced** track.
+  - **TUT-5** (~4-6h): build + auto-deploy via GitHub Actions
+    to the `gh-pages` branch.
+  - **TUT-6** (deferred): browser playground (Option C).
+
+### Effort estimate
+
+  - **Phase TUT-1..TUT-2** (Beginner-only MVP): ~15-18h focused.
+  - **Phase TUT-3** (Intermediate): +15-20h.
+  - **Phase TUT-4** (Advanced): +10-15h.
+  - **Phase TUT-5** (CI deploy): +4-6h.
+  - **Total**: ~45-60h focused for the full beginner →
+    intermediate → advanced track with deploy automation.
+
+### Dependencies
+
+  - The existing 184 example files (133 English + 22 design
+    patterns + 29 Devanagari) provide the example corpus — each
+    tutorial lesson reuses or excerpts an existing example
+    rather than writing from scratch.
+  - Some tutorials reference features not-yet-documented in a
+    tutorial-friendly way (e.g., SOV statement shapes). The
+    tutorial lesson is the right place to fix that.
+
+---
+
 The v3.1 single+multi-task arc is feature-complete (28 acceptance
 examples; **1894 lib + 54 parity green as of 2026-06-06 evening**;
 clean warning-free build). Remaining work, in execution order
