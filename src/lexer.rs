@@ -1056,6 +1056,286 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.16 (2026-06-08): Hungarian (magyar) keyword
+/// resolution. Uralic family with distinctive double-acute
+/// ő/ű in addition to standard á/é/í/ó/ö/ú/ü.
+fn hungarian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "függvény" => TokenKind::Fn,           // function
+        "visszatér" => TokenKind::Return,      // return
+        "különben" => TokenKind::Else,         // otherwise
+        "amíg" => TokenKind::While,            // while
+        "törj" => TokenKind::Break,            // break!
+        "nézd" => TokenKind::Ref,              // look!
+        "változó" => TokenKind::Mut,           // variable / mutable
+        "állítsd" => TokenKind::Assert,        // assert!
+        "bizonyítsd" => TokenKind::Prove,      // prove!
+        "igényel" => TokenKind::Requires,      // requires
+        "garantál" => TokenKind::Ensures,      // guarantees
+        "párhuzamos" => TokenKind::Parallel,   // parallel
+        "felület" => TokenKind::Interface,     // interface
+        "metódusok" => TokenKind::Methods,     // methods
+        "próbáld" => TokenKind::Try,           // try!
+        "egyesít" => TokenKind::Join,          // join
+        "veszélyes" => TokenKind::Unsafe,      // dangerous
+        "tartomány" => TokenKind::RegionKw,    // region
+        "cél" => TokenKind::Intent,            // goal
+        "típus" => TokenKind::Type,            // type
+        "külső" => TokenKind::Extern,          // external
+        "állandó" => TokenKind::Const,         // constant
+        "felsorolás" => TokenKind::Enum,       // enumeration
+        "nyilvános" => TokenKind::Pub,         // public
+        "használd" => TokenKind::Use,          // use!
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.16 (2026-06-08): pure-ASCII Hungarian. Pragma-gated.
+fn hungarian_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "legyen" => TokenKind::Let,            // "let it be"
+        "szerkezet" => TokenKind::Struct,      // structure
+        "modul" => TokenKind::Module,          // module
+        "mint" => TokenKind::As,               // as
+        "ha" => TokenKind::If,                 // if
+        "minden" => TokenKind::For,            // every / for each
+        "folytasd" => TokenKind::Continue,     // continue!
+        "akkor" => TokenKind::Then,            // then
+        "egyezzen" => TokenKind::Match,        // match
+        "igaz" => TokenKind::True,             // true
+        "hamis" => TokenKind::False,           // false
+        "nyomtass" => TokenKind::Print,        // print!
+        "tiszta" => TokenKind::Pure,           // pure
+        "ahol" => TokenKind::Where,            // where
+        "van" => TokenKind::Is,                // is / exists
+        "feladat" => TokenKind::Task,          // task
+        // ASCII no-diacritic alts where applicable:
+        "fuggveny" => TokenKind::Fn,           // function (no diacritic)
+        "valtozo" => TokenKind::Mut,           // mutable (no diacritic)
+        "valositsd_meg" => TokenKind::Implement, // implement
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.17 (2026-06-08): Czech (čeština) keyword resolution.
+/// Slavic Latin with distinctive ř + extensive háček diacritics.
+fn czech_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "nechť" => TokenKind::Let,             // (subjunctive "let")
+        "vrať" => TokenKind::Return,           // return!
+        "přeruš" => TokenKind::Break,          // interrupt!
+        "pokračuj" => TokenKind::Continue,     // continue!
+        "tvrď" => TokenKind::Assert,           // assert!
+        "dokaž" => TokenKind::Prove,           // prove!
+        "vyžaduje" => TokenKind::Requires,     // requires
+        "zajišťuje" => TokenKind::Ensures,     // ensures
+        "vypiš" => TokenKind::Print,           // write out
+        "čistý" => TokenKind::Pure,            // pure
+        "paralelní" => TokenKind::Parallel,    // parallel
+        "rozhraní" => TokenKind::Interface,    // interface
+        "úloha" => TokenKind::Task,            // task
+        "nebezpečný" => TokenKind::Unsafe,     // unsafe / dangerous
+        "záměr" => TokenKind::Intent,          // intent
+        "vnější" => TokenKind::Extern,         // external
+        "neměnný" => TokenKind::Invariant,     // invariant
+        "výčet" => TokenKind::Enum,            // enumeration
+        "veřejný" => TokenKind::Pub,           // public
+        "použij" => TokenKind::Use,            // use!
+        "proměnný" => TokenKind::Mut,          // variable / mutable
+        "odpovídej" => TokenKind::Match,       // correspond! / match
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.17 (2026-06-08): pure-ASCII Czech. Pragma-gated.
+fn czech_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funkce" => TokenKind::Fn,             // function
+        "struktura" => TokenKind::Struct,      // structure
+        "konstanta" => TokenKind::Const,       // constant
+        "modul" => TokenKind::Module,          // module
+        "jako" => TokenKind::As,               // as
+        "pokud" => TokenKind::If,              // if
+        "jestli" => TokenKind::If,             // if (alt)
+        "jinak" => TokenKind::Else,            // else / otherwise
+        "dokud" => TokenKind::While,           // while
+        "pro" => TokenKind::For,               // for
+        "od" => TokenKind::From,               // from
+        "do" => TokenKind::To,                 // to
+        "pak" => TokenKind::Then,              // then
+        "viz" => TokenKind::Ref,               // see
+        "pravda" => TokenKind::True,           // true
+        "nepravda" => TokenKind::False,        // false
+        "tiskni" => TokenKind::Print,          // print!
+        "metody" => TokenKind::Methods,        // methods
+        "implementuj" => TokenKind::Implement, // implement!
+        "kde" => TokenKind::Where,             // where
+        "je" => TokenKind::Is,                 // is
+        "zkus" => TokenKind::Try,              // try!
+        "spoj" => TokenKind::Join,             // join
+        "oblast" => TokenKind::RegionKw,       // area / region
+        "typ" => TokenKind::Type,              // type
+        // No-diacritic alts:
+        "nechtt" => TokenKind::Let,            // (rare alt)
+        "vrat" => TokenKind::Return,           // return (no diacritic)
+        "prerus" => TokenKind::Break,          // interrupt (no diacritic)
+        "pokracuj" => TokenKind::Continue,     // (no diacritic)
+        "tvrd" => TokenKind::Assert,           // (no diacritic)
+        "dokaz" => TokenKind::Prove,           // (no diacritic)
+        "vyzaduje" => TokenKind::Requires,     // (no diacritic)
+        "zajistuje" => TokenKind::Ensures,     // (no diacritic)
+        "vypis" => TokenKind::Print,           // (no diacritic alt)
+        "cisty" => TokenKind::Pure,            // (no diacritic)
+        "paralelni" => TokenKind::Parallel,    // (no diacritic)
+        "rozhrani" => TokenKind::Interface,    // (no diacritic)
+        "uloha" => TokenKind::Task,            // (no diacritic)
+        "nebezpecny" => TokenKind::Unsafe,     // (no diacritic)
+        "zamer" => TokenKind::Intent,          // (no diacritic)
+        "vnejsi" => TokenKind::Extern,         // (no diacritic)
+        "nemenny" => TokenKind::Invariant,     // (no diacritic)
+        "vycet" => TokenKind::Enum,            // (no diacritic)
+        "verejny" => TokenKind::Pub,           // (no diacritic)
+        "pouzij" => TokenKind::Use,            // (no diacritic)
+        "promenny" => TokenKind::Mut,          // (no diacritic)
+        "odpovidej" => TokenKind::Match,       // (no diacritic)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.18 (2026-06-08): Swedish (svenska) keyword
+/// resolution. First Nordic dialect; uses å/ä/ö.
+fn swedish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "låt" => TokenKind::Let,               // let
+        "återvänd" => TokenKind::Return,       // return!
+        "för" => TokenKind::For,               // for
+        "från" => TokenKind::From,             // from
+        "fortsätt" => TokenKind::Continue,     // continue!
+        "så" => TokenKind::Then,               // then / so
+        "föränderlig" => TokenKind::Mut,       // changeable
+        "påstå" => TokenKind::Assert,          // claim / assert
+        "kräver" => TokenKind::Requires,       // requires
+        "säkerställer" => TokenKind::Ensures,  // ensures
+        "gränssnitt" => TokenKind::Interface,  // interface
+        "där" => TokenKind::Where,             // where
+        "är" => TokenKind::Is,                 // is
+        "försök" => TokenKind::Try,            // try!
+        "förena" => TokenKind::Join,           // join
+        "osäker" => TokenKind::Unsafe,         // unsafe
+        "oföränderlig" => TokenKind::Invariant, // unchanging
+        "uppräkning" => TokenKind::Enum,       // enumeration
+        "använd" => TokenKind::Use,            // use!
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.18 (2026-06-08): pure-ASCII Swedish. Pragma-gated.
+fn swedish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funktion" => TokenKind::Fn,           // function
+        "vara" => TokenKind::Let,              // be
+        "struktur" => TokenKind::Struct,       // structure
+        "konstant" => TokenKind::Const,        // constant
+        "offentlig" => TokenKind::Pub,         // public
+        "modul" => TokenKind::Module,          // module
+        "som" => TokenKind::As,                // as
+        "om" => TokenKind::If,                 // if
+        "annars" => TokenKind::Else,           // otherwise
+        "medan" => TokenKind::While,           // while
+        "till" => TokenKind::To,               // to
+        "bryt" => TokenKind::Break,            // break
+        "se" => TokenKind::Ref,                // see
+        "matcha" => TokenKind::Match,          // match
+        "bevisa" => TokenKind::Prove,          // prove
+        "sant" => TokenKind::True,             // true
+        "falskt" => TokenKind::False,          // false
+        "skriv" => TokenKind::Print,           // write
+        "ren" => TokenKind::Pure,              // pure
+        "parallell" => TokenKind::Parallel,    // parallel
+        "implementera" => TokenKind::Implement, // implement
+        "metoder" => TokenKind::Methods,       // methods
+        "uppgift" => TokenKind::Task,          // task
+        "syfte" => TokenKind::Intent,          // purpose
+        "typ" => TokenKind::Type,              // type
+        "extern" => TokenKind::Extern,         // external
+        // No-diacritic alts:
+        "lat" => TokenKind::Let,               // let (no å)
+        "atervand" => TokenKind::Return,       // return (no å/ä)
+        "fortsatt" => TokenKind::Continue,     // continue (no ä)
+        "sa" => TokenKind::Then,               // then (no å)
+        "foranderlig" => TokenKind::Mut,       // (no ö/ä)
+        "krever" => TokenKind::Requires,       // (no ä) — non-standard but plausible
+        "der" => TokenKind::Where,             // where (no ä)
+        "ar" => TokenKind::Is,                 // is (no ä) — single-ish
+        "forsok" => TokenKind::Try,            // (no ö)
+        "forena" => TokenKind::Join,           // (no ö)
+        "osaker" => TokenKind::Unsafe,         // (no ä)
+        "uppraekning" => TokenKind::Enum,      // (no ä — ae replacement)
+        "anvand" => TokenKind::Use,            // (no ä)
+        "for" => TokenKind::For,               // (no ö — could conflict; pragma-gated safe)
+        "fran" => TokenKind::From,             // (no å)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.19 (2026-06-08): Filipino / Tagalog keyword
+/// resolution. Austronesian basic-Latin dialect. Pure-ASCII so
+/// fully pragma-gated.
+fn filipino_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "gawain" => TokenKind::Fn,             // work / function
+        "hayaan" => TokenKind::Let,            // let
+        "istraktura" => TokenKind::Struct,     // structure
+        "pagbilang" => TokenKind::Enum,        // enumeration
+        "pirme" => TokenKind::Const,           // constant
+        "pampubliko" => TokenKind::Pub,        // public
+        "modyul" => TokenKind::Module,         // module
+        "gamitin" => TokenKind::Use,           // use!
+        "bilang" => TokenKind::As,             // as
+        "ibalik" => TokenKind::Return,         // return!
+        "kung" => TokenKind::If,               // if
+        "kundi" => TokenKind::Else,            // else
+        "habang" => TokenKind::While,          // while
+        "sa" => TokenKind::In,                 // in
+        "mula" => TokenKind::From,             // from
+        "hanggang" => TokenKind::To,           // until
+        "tumigil" => TokenKind::Break,         // stop
+        "magpatuloy" => TokenKind::Continue,   // continue!
+        "tingnan" => TokenKind::Ref,           // look at
+        "nababago" => TokenKind::Mut,          // changeable
+        "tugmain" => TokenKind::Match,         // match!
+        "patunayan" => TokenKind::Assert,      // verify!
+        "ipakita" => TokenKind::Prove,         // show / prove
+        "kailangan" => TokenKind::Requires,    // needs
+        "tiyakin" => TokenKind::Ensures,       // ensure
+        "totoo" => TokenKind::True,            // true
+        "mali" => TokenKind::False,            // wrong / false
+        "isulat" => TokenKind::Print,          // write
+        "dalisay" => TokenKind::Pure,          // pure
+        "magkatulad" => TokenKind::Parallel,   // parallel / similar
+        "ipatupad" => TokenKind::Implement,    // implement!
+        "pamamaraan" => TokenKind::Methods,    // methods
+        "saan" => TokenKind::Where,            // where
+        "ay" => TokenKind::Is,                 // is
+        "subukan" => TokenKind::Try,           // try!
+        "tungkulin" => TokenKind::Task,        // task / duty
+        "pagsama" => TokenKind::Join,          // join
+        "mapanganib" => TokenKind::Unsafe,     // dangerous
+        "rehiyon" => TokenKind::RegionKw,      // region
+        "layunin" => TokenKind::Intent,        // purpose
+        "uri" => TokenKind::Type,              // type / kind
+        "panlabas" => TokenKind::Extern,       // outside
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.12 (2026-06-08): Vietnamese (Tiếng Việt) keyword
 /// resolution. First Southeast Asian Latin-script dialect.
 /// Distinctive diacritic + tone-mark combinations
@@ -3205,6 +3485,25 @@ enum DialectLang {
     // individually tokenized with surrounding whitespace as
     // separators (same convention modern Thai code uses).
     Thai,
+    // Phase 13.16 (2026-06-08): Hungarian (magyar) — Uralic
+    // family, first non-Indo-European Latin-script dialect.
+    // Distinctive double-acute ő/ű diacritics in addition to
+    // standard á/é/í/ó/ö/ú/ü.
+    Hungarian,
+    // Phase 13.17 (2026-06-08): Czech (čeština) — second Slavic
+    // Latin variant (after Polish). Distinctive ř (the only
+    // language to use it) + many háček diacritics (č/ď/ě/ň/š/ť/ž
+    // + standard á/é/í/ó/ú/ý) plus ů.
+    Czech,
+    // Phase 13.18 (2026-06-08): Swedish (svenska) — first
+    // Nordic dialect. Uses å/ä/ö (the Nordic core diacritic
+    // set; Norwegian/Danish use å/æ/ø; Finnish uses ä/ö only).
+    Swedish,
+    // Phase 13.19 (2026-06-08): Filipino (Tagalog-based) —
+    // first Austronesian basic-Latin dialect (alongside the
+    // Indonesian/Malay sibling pair already shipped). ~45M
+    // speakers in the Philippines.
+    Filipino,
 }
 
 impl DialectLang {
@@ -3252,6 +3551,10 @@ impl DialectLang {
             DialectLang::Romanian => "romanian",
             DialectLang::Dutch => "dutch",
             DialectLang::Thai => "thai",
+            DialectLang::Hungarian => "hungarian",
+            DialectLang::Czech => "czech",
+            DialectLang::Swedish => "swedish",
+            DialectLang::Filipino => "filipino",
         }
     }
 
@@ -3311,6 +3614,10 @@ impl DialectLang {
             DialectLang::Romanian => Script::Latin,
             DialectLang::Dutch => Script::Latin,
             DialectLang::Thai => Script::Thai,
+            DialectLang::Hungarian => Script::Latin,
+            DialectLang::Czech => Script::Latin,
+            DialectLang::Swedish => Script::Latin,
+            DialectLang::Filipino => Script::Latin,
         }
     }
 }
@@ -3615,6 +3922,18 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.15 (2026-06-08): first Thai-script dialect.
             "thai" | "ไทย" | "th"
                 => Some(DialectLang::Thai),
+            // Phase 13.16 (2026-06-08): Uralic.
+            "hungarian" | "magyar" | "hu"
+                => Some(DialectLang::Hungarian),
+            // Phase 13.17 (2026-06-08): Slavic Latin.
+            "czech" | "čeština" | "cestina" | "cs"
+                => Some(DialectLang::Czech),
+            // Phase 13.18 (2026-06-08): Nordic.
+            "swedish" | "svenska" | "sv"
+                => Some(DialectLang::Swedish),
+            // Phase 13.19 (2026-06-08): Austronesian basic Latin.
+            "filipino" | "tagalog" | "fil" | "tl"
+                => Some(DialectLang::Filipino),
             _ => None,
         };
     }
@@ -4442,6 +4761,11 @@ impl<'a> Lexer<'a> {
             .or_else(|| romanian_keyword(text))
             // Phase 13.15 (2026-06-08): Thai script keywords.
             .or_else(|| thai_keyword(text))
+            // Phase 13.16/13.17/13.18: Hungarian + Czech + Swedish
+            // non-ASCII forms (when starting with a diacritic).
+            .or_else(|| hungarian_keyword(text))
+            .or_else(|| czech_keyword(text))
+            .or_else(|| swedish_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -4602,6 +4926,9 @@ impl<'a> Lexer<'a> {
                 .or_else(|| turkish_keyword(text))
                 .or_else(|| vietnamese_keyword(text))
                 .or_else(|| romanian_keyword(text))
+                .or_else(|| hungarian_keyword(text))
+                .or_else(|| czech_keyword(text))
+                .or_else(|| swedish_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -4626,6 +4953,10 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Romanian) => romanian_ascii_keyword(text),
                     Some(DialectLang::Dutch) => dutch_ascii_keyword(text),
                     Some(DialectLang::Vietnamese) => vietnamese_ascii_keyword(text),
+                    Some(DialectLang::Hungarian) => hungarian_ascii_keyword(text),
+                    Some(DialectLang::Czech) => czech_ascii_keyword(text),
+                    Some(DialectLang::Swedish) => swedish_ascii_keyword(text),
+                    Some(DialectLang::Filipino) => filipino_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

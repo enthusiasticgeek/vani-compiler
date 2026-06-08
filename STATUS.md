@@ -10,6 +10,88 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.16 + 13.17 + 13.18 + 13.19: Hungarian + Czech + Swedish + Filipino
+
+Four more Latin-script dialects, four different language
+families. Roster grows **41 → 45 dialects across 17 scripts**.
+
+### Phase 13.16 — Hungarian (magyar)
+**First Uralic-family dialect.** Distinctive double-acute
+ő/ű alongside standard á/é/í/ó/ö/ú/ü. ~13M speakers.
+
+```rust
+// vani-lang: hungarian
+függvény main() -> i64 {
+  legyen x: i64 = 20 + 22;
+  állítsd x == 42;
+  nyomtass x;
+  visszatér 0;
+}
+```
+
+### Phase 13.17 — Czech (čeština)
+**Second Slavic Latin variant** (after Polish). Czech-only
+letter ř plus extensive háček diacritics (č/ď/ě/ň/š/ť/ž) +
+standard á/é/í/ó/ú/ý + ů.
+
+```rust
+// vani-lang: czech
+funkce main() -> i64 {
+  nechť x: i64 = 20 + 22;
+  tvrď x == 42;
+  vypiš x;
+  vrať 0;
+}
+```
+
+### Phase 13.18 — Swedish (svenska)
+**First Nordic dialect.** Swedish uses å/ä/ö.
+
+```rust
+// vani-lang: swedish
+funktion main() -> i64 {
+  låt x: i64 = 20 + 22;
+  påstå x == 42;
+  skriv x;
+  återvänd 0;
+}
+```
+
+### Phase 13.19 — Filipino (Tagalog-based)
+**First Austronesian basic-Latin dialect** alongside the
+Indonesian/Malay sibling pair already shipped. ~45M speakers.
+
+```rust
+// vani-lang: filipino
+gawain main() -> i64 {
+  hayaan x: i64 = 20 + 22;
+  patunayan x == 42;
+  isulat x;
+  ibalik 0;
+}
+```
+
+All four print `42` on both backends.
+
+### Per-dialect summary
+
+| Dialect | Family | Diacritics | DiagLang labels |
+|---|---|---|---|
+| Hungarian | Uralic | á/é/í/ó/ö/ő/ú/ü/ű | `hiba` / `megjegyzés` |
+| Czech | Slavic | á/č/ď/é/ě/í/ň/ó/ř/š/ť/ú/ů/ý/ž | `chyba` / `poznámka` |
+| Swedish | Nordic Germanic | å/ä/ö | `fel` / `anteckning` |
+| Filipino | Austronesian | none | `pagkakamali` / `tala` |
+
+### 4 new regression tests
+
+- `hungarian_uralic_latin_compiles`
+- `czech_slavic_latin_compiles`
+- `swedish_nordic_compiles`
+- `filipino_austronesian_basic_latin_compiles`
+
+Lib ledger: **1980 lib + 54 parity** green (1976→1980 = 4 new
+regression tests). All 204 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.12 + 13.13 + 13.14 + 13.15: Vietnamese + Romanian + Dutch + Thai
 
 Four more dialects, three patterns. Roster grows **37 → 41

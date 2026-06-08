@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: filipino
+//
+// Phase 13.19: first Austronesian basic-Latin Tagalog-based
+// dialect. ~45M speakers in the Philippines. Rides pragma
+// threading (no diacritics).
+
+layunin "Compute a small score with checked constraints";
+
+gawain add(a: i64, b: i64) -> i64 {
+  ibalik a + b;
+}
+
+gawain bounded_score(base: i64) -> i64
+kailangan base >= 0;
+{
+  hayaan doubled: i64 = base * 2;
+  patunayan doubled >= base;
+  ibalik add(doubled, 2);
+}
+
+gawain main() -> i64 {
+  hayaan answer = bounded_score(20);
+  ipakita 2 + 2 == 4;
+  patunayan answer >= 0;
+  isulat answer;
+  ibalik 0;
+}

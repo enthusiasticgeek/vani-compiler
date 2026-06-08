@@ -27953,6 +27953,82 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn hungarian_uralic_latin_compiles() {
+        // Phase 13.16: Uralic family, first non-Indo-European
+        // Latin-script dialect. Double-acute ő/ű + standard
+        // á/é/í/ó/ö/ú/ü.
+        let source = "// vani-lang: hungarian\n\
+                      cél \"basic Hungarian demo\";\n\
+                      függvény add(a: i64, b: i64) -> i64 {\n  \
+                        visszatér a + b;\n\
+                      }\n\
+                      függvény main() -> i64 {\n  \
+                        legyen x: i64 = add(20, 22);\n  \
+                        állítsd x == 42;\n  \
+                        bizonyítsd 2 + 2 == 4;\n  \
+                        nyomtass x;\n  \
+                        visszatér 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hungarian basics compile");
+    }
+
+    #[test]
+    fn czech_slavic_latin_compiles() {
+        // Phase 13.17: second Slavic Latin (after Polish).
+        // Czech-distinctive ř + extensive háček marks.
+        let source = "// vani-lang: czech\n\
+                      záměr \"basic Czech demo\";\n\
+                      funkce add(a: i64, b: i64) -> i64 {\n  \
+                        vrať a + b;\n\
+                      }\n\
+                      funkce main() -> i64 {\n  \
+                        nechť x: i64 = add(20, 22);\n  \
+                        tvrď x == 42;\n  \
+                        dokaž 2 + 2 == 4;\n  \
+                        vypiš x;\n  \
+                        vrať 0;\n\
+                      }\n";
+        crate::compile(source).expect("Czech basics compile");
+    }
+
+    #[test]
+    fn swedish_nordic_compiles() {
+        // Phase 13.18: first Nordic dialect (uses å/ä/ö).
+        let source = "// vani-lang: swedish\n\
+                      syfte \"basic Swedish demo\";\n\
+                      funktion add(a: i64, b: i64) -> i64 {\n  \
+                        återvänd a + b;\n\
+                      }\n\
+                      funktion main() -> i64 {\n  \
+                        låt x: i64 = add(20, 22);\n  \
+                        påstå x == 42;\n  \
+                        bevisa 2 + 2 == 4;\n  \
+                        skriv x;\n  \
+                        återvänd 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swedish basics compile");
+    }
+
+    #[test]
+    fn filipino_austronesian_basic_latin_compiles() {
+        // Phase 13.19: first Austronesian Tagalog-based dialect.
+        // ~45M speakers; rides pragma threading (no diacritics).
+        let source = "// vani-lang: filipino\n\
+                      layunin \"basic Filipino demo\";\n\
+                      gawain add(a: i64, b: i64) -> i64 {\n  \
+                        ibalik a + b;\n\
+                      }\n\
+                      gawain main() -> i64 {\n  \
+                        hayaan x: i64 = add(20, 22);\n  \
+                        patunayan x == 42;\n  \
+                        ipakita 2 + 2 == 4;\n  \
+                        isulat x;\n  \
+                        ibalik 0;\n\
+                      }\n";
+        crate::compile(source).expect("Filipino basics compile");
+    }
+
+    #[test]
     fn vietnamese_latin_with_tone_marks_compiles() {
         // Phase 13.12: first Southeast Asian Latin-script
         // dialect. Vietnamese uses extensive tone marks +

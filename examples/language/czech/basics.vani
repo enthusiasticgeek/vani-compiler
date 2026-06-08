@@ -1,0 +1,29 @@
+// श्री।
+// vani-lang: czech
+//
+// Phase 13.17: second Slavic Latin variant (after Polish).
+// Czech uses ř (the only language with this letter) plus
+// extensive háček diacritics č/ď/ě/ň/š/ť/ž + standard
+// á/é/í/ó/ú/ý + ů.
+
+záměr "Compute a small score with checked constraints";
+
+funkce add(a: i64, b: i64) -> i64 {
+  vrať a + b;
+}
+
+funkce bounded_score(base: i64) -> i64
+vyžaduje base >= 0;
+{
+  nechť doubled: i64 = base * 2;
+  tvrď doubled >= base;
+  vrať add(doubled, 2);
+}
+
+funkce main() -> i64 {
+  nechť answer = bounded_score(20);
+  dokaž 2 + 2 == 4;
+  tvrď answer >= 0;
+  vypiš answer;
+  vrať 0;
+}

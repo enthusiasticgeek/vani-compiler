@@ -114,6 +114,14 @@ enum DiagLang {
     Dutch,
     // Phase 13.15 (2026-06-08): Thai — first Thai-script dialect.
     Thai,
+    // Phase 13.16 (2026-06-08): Hungarian — Uralic family.
+    Hungarian,
+    // Phase 13.17 (2026-06-08): Czech — second Slavic Latin.
+    Czech,
+    // Phase 13.18 (2026-06-08): Swedish — first Nordic.
+    Swedish,
+    // Phase 13.19 (2026-06-08): Filipino — Austronesian.
+    Filipino,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -216,6 +224,18 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.15 (2026-06-08): Thai.
             "thai" | "ไทย" | "th"
                 => Some(DiagLang::Thai),
+            // Phase 13.16 (2026-06-08): Hungarian.
+            "hungarian" | "magyar" | "hu"
+                => Some(DiagLang::Hungarian),
+            // Phase 13.17 (2026-06-08): Czech.
+            "czech" | "čeština" | "cestina" | "cs"
+                => Some(DiagLang::Czech),
+            // Phase 13.18 (2026-06-08): Swedish.
+            "swedish" | "svenska" | "sv"
+                => Some(DiagLang::Swedish),
+            // Phase 13.19 (2026-06-08): Filipino.
+            "filipino" | "tagalog" | "fil" | "tl"
+                => Some(DiagLang::Filipino),
             _ => None,
         };
     }
@@ -272,6 +292,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Romanian)) => "eroare (error)".to_string(),
         ("error", Some(DiagLang::Dutch)) => "fout (error)".to_string(),
         ("error", Some(DiagLang::Thai)) => "ข้อผิดพลาด (error)".to_string(),
+        ("error", Some(DiagLang::Hungarian)) => "hiba (error)".to_string(),
+        ("error", Some(DiagLang::Czech)) => "chyba (error)".to_string(),
+        ("error", Some(DiagLang::Swedish)) => "fel (error)".to_string(),
+        ("error", Some(DiagLang::Filipino)) => "pagkakamali (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -306,6 +330,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Romanian)) => "notă (note)".to_string(),
         ("note", Some(DiagLang::Dutch)) => "opmerking (note)".to_string(),
         ("note", Some(DiagLang::Thai)) => "หมายเหตุ (note)".to_string(),
+        ("note", Some(DiagLang::Hungarian)) => "megjegyzés (note)".to_string(),
+        ("note", Some(DiagLang::Czech)) => "poznámka (note)".to_string(),
+        ("note", Some(DiagLang::Swedish)) => "anteckning (note)".to_string(),
+        ("note", Some(DiagLang::Filipino)) => "tala (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -729,6 +757,42 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("function ", "ฟังก์ชัน "),
             ("script mismatch", "ระบบการเขียนไม่ตรงกัน (script mismatch)"),
             ("invalid", "ไม่ถูกต้อง (invalid)"),
+        ][..],
+        DiagLang::Hungarian => &[
+            ("expected ", "várt "),
+            ("unknown variable", "ismeretlen változó (unknown variable)"),
+            ("unknown function", "ismeretlen függvény (unknown function)"),
+            ("type mismatch", "típusok nem egyeznek (type mismatch)"),
+            ("cannot prove", "nem bizonyítható (cannot prove)"),
+            ("function ", "függvény "),
+            ("invalid", "érvénytelen (invalid)"),
+        ][..],
+        DiagLang::Czech => &[
+            ("expected ", "očekáváno "),
+            ("unknown variable", "neznámá proměnná (unknown variable)"),
+            ("unknown function", "neznámá funkce (unknown function)"),
+            ("type mismatch", "neshoda typů (type mismatch)"),
+            ("cannot prove", "nelze dokázat (cannot prove)"),
+            ("function ", "funkce "),
+            ("invalid", "neplatný (invalid)"),
+        ][..],
+        DiagLang::Swedish => &[
+            ("expected ", "förväntat "),
+            ("unknown variable", "okänd variabel (unknown variable)"),
+            ("unknown function", "okänd funktion (unknown function)"),
+            ("type mismatch", "typkonflikt (type mismatch)"),
+            ("cannot prove", "kan inte bevisa (cannot prove)"),
+            ("function ", "funktion "),
+            ("invalid", "ogiltig (invalid)"),
+        ][..],
+        DiagLang::Filipino => &[
+            ("expected ", "inaasahan "),
+            ("unknown variable", "hindi kilalang variable (unknown variable)"),
+            ("unknown function", "hindi kilalang gawain (unknown function)"),
+            ("type mismatch", "hindi tumutugma ang uri (type mismatch)"),
+            ("cannot prove", "hindi mapapatunayan (cannot prove)"),
+            ("function ", "gawain "),
+            ("invalid", "hindi balido (invalid)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

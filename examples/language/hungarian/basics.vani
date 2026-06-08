@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: hungarian
+//
+// Phase 13.16: Uralic family — first non-Indo-European Latin
+// script dialect. Distinctive double-acute ő/ű in addition to
+// standard á/é/í/ó/ö/ú/ü.
+
+cél "Compute a small score with checked constraints";
+
+függvény add(a: i64, b: i64) -> i64 {
+  visszatér a + b;
+}
+
+függvény bounded_score(base: i64) -> i64
+igényel base >= 0;
+{
+  legyen doubled: i64 = base * 2;
+  állítsd doubled >= base;
+  visszatér add(doubled, 2);
+}
+
+függvény main() -> i64 {
+  legyen answer = bounded_score(20);
+  bizonyítsd 2 + 2 == 4;
+  állítsd answer >= 0;
+  nyomtass answer;
+  visszatér 0;
+}

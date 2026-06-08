@@ -1,0 +1,27 @@
+// श्री।
+// vani-lang: swedish
+//
+// Phase 13.18: first Nordic dialect. Swedish uses å/ä/ö.
+// Norwegian and Danish (queued) use å/æ/ø; Finnish uses ä/ö.
+
+syfte "Compute a small score with checked constraints";
+
+funktion add(a: i64, b: i64) -> i64 {
+  återvänd a + b;
+}
+
+funktion bounded_score(base: i64) -> i64
+kräver base >= 0;
+{
+  låt doubled: i64 = base * 2;
+  påstå doubled >= base;
+  återvänd add(doubled, 2);
+}
+
+funktion main() -> i64 {
+  låt answer = bounded_score(20);
+  bevisa 2 + 2 == 4;
+  påstå answer >= 0;
+  skriv answer;
+  återvänd 0;
+}
