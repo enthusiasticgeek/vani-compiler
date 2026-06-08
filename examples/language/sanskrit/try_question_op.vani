@@ -1,0 +1,43 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/sanskrit/try_question_op.vani                  # LLVM
+//   vanic run examples/language/sanskrit/try_question_op.vani --backend=c      # C
+
+उद्देश्य "Arc 8 v3.1 sugar — Sanskrit counterpart of postfix `?`";
+
+// The postfix `?` operator works identically across all
+// dialects — it's a parse-time sugar that builds the same
+// `ExprKind::Try` AST node as the `try` (प्रयास) keyword form.
+// Sanskrit text:
+//   माना v: i64 = प्रयास o;      // keyword form
+//   माना v: i64 = o?;            // postfix sugar
+// Both desugar identically through the existing try-let
+// machinery (T2.6 phase 2).
+
+विकल्प Opt { Some(i64), None }
+
+कार्य doubled_q(o: Opt) -> Opt {
+  माना v: i64 = o?;
+  पुनरागम Opt.Some(v * 2);
+}
+
+कार्य unwrap_or(o: Opt, def: i64) -> i64 {
+  पुनरागम मेल o {
+    Opt.Some(v) तदा v,
+    Opt.None तदा def,
+  };
+}
+
+कार्य main() -> i64 {
+  माना a: Opt = doubled_q(Opt.Some(5));
+  सिद्धम् unwrap_or(a, 0) == 10;
+
+  माना b: Opt = doubled_q(Opt.None);
+  सिद्धम् unwrap_or(b, 99) == 99;
+
+  लिख "Some(5)? doubled =", unwrap_or(a, 0);
+  लिख "None? defaulted to", unwrap_or(b, 99);
+  पुनरागम 0;
+}

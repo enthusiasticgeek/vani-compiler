@@ -963,6 +963,22 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../sanskrit/iterate.vani",
         "../hindi/iterate.vani",
         "../marathi/iterate.vani",
+        // Polish queue (2026-06-08): Devanagari counterparts of
+        // the post-Phase-13 English examples. Demonstrates that
+        // the postfix `?` operator + L2 follow-up Box surface
+        // work identically under the Sanskrit pragma. Async-
+        // related examples (echo_pool, async_cancel_auto) are
+        // queued for a later polish item — the `async` keyword
+        // is contextual-English today and `Task__` mangled
+        // names appear in user code, so mixed-dialect content
+        // wouldn't read cleanly.
+        "../sanskrit/try_question_op.vani",
+        "../sanskrit/box_recursive_drop.vani",
+        // Phase 10.2 (2026-06-08): Mandarin Chinese basics —
+        // 62nd dialect. Shares Script::Japanese for the purity
+        // gate; pure-Han keyword table disambiguates from
+        // Japanese via the pragma.
+        "../mandarin/basics.vani",
         // Phase 2 (2026-06-07): Tier I dialect extensions —
         // Nepali / Maithili / Konkani-Devanagari. Each has a
         // single `basics.vani` exercising the dialect tag +

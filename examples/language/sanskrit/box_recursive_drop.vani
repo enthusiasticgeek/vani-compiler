@@ -1,0 +1,35 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/sanskrit/box_recursive_drop.vani                # LLVM
+//   vanic run examples/language/sanskrit/box_recursive_drop.vani --backend=c    # C
+
+उद्देश्य "L2 follow-up — Box<Vec<T>> + Box<OwnedStr> recursive drop";
+
+// Sanskrit counterpart of examples/language/english/box_recursive_drop.vani.
+// Demonstrates that the L2 follow-up (Box accepting Vec<T> and
+// OwnedStr inner types, with scope-exit Drop chained into the
+// inner destructor) works under the Devanagari pragma. The
+// new surface compiles identically — the dialect only changes
+// the keywords, not the AST.
+
+संरचना Bag {
+  contents: Box<Vec<i64>>,
+}
+
+कार्य main() -> i64 {
+  माना v: Vec<i64> = vec(10, 20, 30);
+  माना b: Box<Vec<i64>> = box(v);
+  लिख "constructed Box<Vec<i64>>";
+
+  माना v2: Vec<i64> = vec(7, 8, 9);
+  माना bag: Bag = Bag { contents: box(v2) };
+  लिख "constructed Bag";
+
+  माना s: OwnedStr = "hi" + "!";
+  माना bs: Box<OwnedStr> = box(s);
+  लिख "constructed Box<OwnedStr>";
+
+  पुनरागम 0;
+}
