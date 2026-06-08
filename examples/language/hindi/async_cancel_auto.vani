@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: hindi
+//
+// build & run:
+//   vanic run examples/language/hindi/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/hindi/async_cancel_auto.vani --backend=c    # C
+//
+// Hindi smoke of the async/await dialect lift (2026-06-08).
+// `async` spells as `अतुल्यकालिक` (atulyakālika) and `await(…)`
+// as `प्रतीक्षा(…)` (pratīkṣā). Full A4.4 CancelToken auto-
+// plumbing surface is documented in the English counterpart.
+
+उद्देश्य "Hindi async/await dialect lift smoke";
+
+अतुल्यकालिक फलन delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  लौटाओ v;
+}
+
+फलन main() -> i64 {
+  माना a: i64 = प्रतीक्षा(delay(5, 42));
+  माना b: i64 = प्रतीक्षा(delay(10, 7));
+
+  सुनिश्चित a == 42;
+  सुनिश्चित b == 7;
+  लिखो "delays:", a, b;
+  लौटाओ 0;
+}

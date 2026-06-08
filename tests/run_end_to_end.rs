@@ -981,6 +981,18 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // simplified smoke; Mandarin ships the full A4.4 surface.
         "../sanskrit/async_cancel_auto.vani",
         "../mandarin/async_cancel_auto.vani",
+        // Polish (2026-06-08, late session): Hindi + Marathi
+        // counterparts of the same three examples Sanskrit
+        // already ships. Each dialect picks its preferred
+        // spelling for enum / match / then (Sanskrit:
+        // विकल्प / मेल / तदा; Hindi: गणन / मिलान / तो;
+        // Marathi: गणन / जुळवा / तर).
+        "../hindi/try_question_op.vani",
+        "../marathi/try_question_op.vani",
+        "../hindi/box_recursive_drop.vani",
+        "../marathi/box_recursive_drop.vani",
+        "../hindi/async_cancel_auto.vani",
+        "../marathi/async_cancel_auto.vani",
         // Phase 10.2 (2026-06-08): Mandarin Chinese basics —
         // 62nd dialect. Shares Script::Japanese for the purity
         // gate; pure-Han keyword table disambiguates from

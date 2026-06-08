@@ -1,0 +1,34 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/marathi/try_question_op.vani                  # LLVM
+//   vanic run examples/language/marathi/try_question_op.vani --backend=c      # C
+
+उद्देश्य "Arc 8 v3.1 sugar — Marathi counterpart of postfix `?`";
+
+गणन Opt { Some(i64), None }
+
+कार्य doubled_q(o: Opt) -> Opt {
+  मान v: i64 = o?;
+  परत Opt.Some(v * 2);
+}
+
+कार्य unwrap_or(o: Opt, def: i64) -> i64 {
+  परत जुळवा o {
+    Opt.Some(v) तर v,
+    Opt.None तर def,
+  };
+}
+
+कार्य main() -> i64 {
+  मान a: Opt = doubled_q(Opt.Some(5));
+  खात्री unwrap_or(a, 0) == 10;
+
+  मान b: Opt = doubled_q(Opt.None);
+  खात्री unwrap_or(b, 99) == 99;
+
+  लिहा "Some(5)? doubled =", unwrap_or(a, 0);
+  लिहा "None? defaulted to", unwrap_or(b, 99);
+  परत 0;
+}

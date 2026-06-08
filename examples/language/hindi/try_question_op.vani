@@ -1,0 +1,34 @@
+// श्री।
+// vani-lang: hindi
+//
+// build & run:
+//   vanic run examples/language/hindi/try_question_op.vani                  # LLVM
+//   vanic run examples/language/hindi/try_question_op.vani --backend=c      # C
+
+उद्देश्य "Arc 8 v3.1 sugar — Hindi counterpart of postfix `?`";
+
+गणन Opt { Some(i64), None }
+
+फलन doubled_q(o: Opt) -> Opt {
+  माना v: i64 = o?;
+  लौटाओ Opt.Some(v * 2);
+}
+
+फलन unwrap_or(o: Opt, def: i64) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None तो def,
+  };
+}
+
+फलन main() -> i64 {
+  माना a: Opt = doubled_q(Opt.Some(5));
+  सुनिश्चित unwrap_or(a, 0) == 10;
+
+  माना b: Opt = doubled_q(Opt.None);
+  सुनिश्चित unwrap_or(b, 99) == 99;
+
+  लिखो "Some(5)? doubled =", unwrap_or(a, 0);
+  लिखो "None? defaulted to", unwrap_or(b, 99);
+  लौटाओ 0;
+}

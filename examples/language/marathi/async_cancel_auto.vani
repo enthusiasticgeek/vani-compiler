@@ -1,0 +1,27 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/marathi/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/marathi/async_cancel_auto.vani --backend=c    # C
+//
+// Marathi smoke of the async/await dialect lift (2026-06-08).
+// `async` spells as `अतुल्यकालिक` (atulyakālika) and `await(…)`
+// as `प्रतीक्षा` (pratīkṣā).
+
+उद्देश्य "Marathi async/await dialect lift smoke";
+
+अतुल्यकालिक कार्य delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  परत v;
+}
+
+कार्य main() -> i64 {
+  मान a: i64 = प्रतीक्षा(delay(5, 42));
+  मान b: i64 = प्रतीक्षा(delay(10, 7));
+
+  खात्री a == 42;
+  खात्री b == 7;
+  लिहा "delays:", a, b;
+  परत 0;
+}

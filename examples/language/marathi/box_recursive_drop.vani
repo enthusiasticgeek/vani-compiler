@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: marathi
+//
+// build & run:
+//   vanic run examples/language/marathi/box_recursive_drop.vani                # LLVM
+//   vanic run examples/language/marathi/box_recursive_drop.vani --backend=c    # C
+
+उद्देश्य "L2 follow-up — Box<Vec<T>> + Box<OwnedStr> recursive drop (Marathi)";
+
+संरचना Bag {
+  contents: Box<Vec<i64>>,
+}
+
+कार्य main() -> i64 {
+  मान v: Vec<i64> = vec(10, 20, 30);
+  मान b: Box<Vec<i64>> = box(v);
+  लिहा "constructed Box<Vec<i64>>";
+
+  मान v2: Vec<i64> = vec(7, 8, 9);
+  मान bag: Bag = Bag { contents: box(v2) };
+  लिहा "constructed Bag";
+
+  मान s: OwnedStr = "hi" + "!";
+  मान bs: Box<OwnedStr> = box(s);
+  लिहा "constructed Box<OwnedStr>";
+
+  परत 0;
+}
