@@ -10,6 +10,107 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.24–13.28: Slovak + Finnish + Catalan + Yoruba + Hausa
+
+Five Latin-script dialects shipped together, spanning five
+different language families. Roster grows **49 → 54 dialects
+across 19 scripts**.
+
+### Phase 13.24 — Slovak (slovenčina)
+**Third Slavic Latin** (after Polish + Czech). Distinctive
+ľ/ŕ/ô + standard Slavic diacritics. ~5M speakers.
+
+### Phase 13.25 — Finnish (suomi)
+**Second Uralic** (after Hungarian). Finnish and Hungarian
+split ~9000 years ago; distinct keyword set. Uses ä/ö only.
+~5M speakers.
+
+### Phase 13.26 — Catalan (català)
+**Sixth Romance variant** in vāṇी (Spanish + French + Italian
++ Portuguese + Romanian + Catalan). Uses à/è/é/í/ï/ò/ó/ú/ü.
+~10M speakers.
+
+### Phase 13.27 — Yoruba (Èdè Yorùbá)
+**Niger-Congo family** — ~50M speakers in West Africa. Latin
+with sub-dot marks (ẹ/ọ/ṣ) + tone marks (à/á/è/é/ì/í/ò/ó/ù/ú).
+
+### Phase 13.28 — Hausa
+**Afroasiatic family** — ~80M speakers in Nigeria + Niger.
+Latin Boko script; mostly pure-ASCII keyword surface.
+
+```rust
+// vani-lang: slovak
+funkcia main() -> i64 {
+  nech x: i64 = 20 + 22;
+  potvrď x == 42;
+  vytlač x;
+  vráť 0;
+}
+```
+
+```rust
+// vani-lang: finnish
+funktio main() -> i64 {
+  olkoon x: i64 = 20 + 22;
+  vahvista x == 42;
+  tulosta x;
+  palaa 0;
+}
+```
+
+```rust
+// vani-lang: catalan
+funció main() -> i64 {
+  sigui x: i64 = 20 + 22;
+  afirma x == 42;
+  imprimeix x;
+  retorna 0;
+}
+```
+
+```rust
+// vani-lang: yoruba
+iṣẹ́ main() -> i64 {
+  jẹ́ x: i64 = 20 + 22;
+  jẹ́risí x == 42;
+  tẹ̀ x;
+  padà 0;
+}
+```
+
+```rust
+// vani-lang: hausa
+aiki main() -> i64 {
+  bari x: i64 = 20 + 22;
+  tabbatar x == 42;
+  rubuta x;
+  koma 0;
+}
+```
+
+All five print `42` on both backends.
+
+### Per-dialect summary
+
+| Dialect | Family | DiagLang labels |
+|---|---|---|
+| Slovak | Slavic Latin | `chyba` / `poznámka` |
+| Finnish | Uralic | `virhe` / `huomautus` |
+| Catalan | Romance | `error` / `nota` |
+| Yoruba | Niger-Congo | `àṣìṣe` / `àkíyèsí` |
+| Hausa | Afroasiatic | `kuskure` / `lura` |
+
+### 5 new regression tests
+
+- `slovak_slavic_latin_compiles`
+- `finnish_uralic_latin_compiles`
+- `catalan_romance_compiles`
+- `yoruba_niger_congo_compiles`
+- `hausa_afroasiatic_compiles`
+
+Lib ledger: **1990 lib + 54 parity** green (1985→1990 = 5 new
+regression tests). All 213 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.20 + 13.21 + 13.22 + 13.23: Norwegian + Danish + Armenian + Georgian
 
 Four more dialects: two siblings (Norwegian + Danish — both

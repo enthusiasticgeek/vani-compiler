@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: finnish
+//
+// Phase 13.25: second Uralic dialect (after Hungarian).
+// Finnish and Hungarian split ~9000 years ago — distinct
+// keyword sets. Finnish uses ä/ö only.
+
+tarkoitus "Compute a small score with checked constraints";
+
+funktio add(a: i64, b: i64) -> i64 {
+  palaa a + b;
+}
+
+funktio bounded_score(base: i64) -> i64
+vaatii base >= 0;
+{
+  olkoon doubled: i64 = base * 2;
+  vahvista doubled >= base;
+  palaa add(doubled, 2);
+}
+
+funktio main() -> i64 {
+  olkoon answer = bounded_score(20);
+  todista 2 + 2 == 4;
+  vahvista answer >= 0;
+  tulosta answer;
+  palaa 0;
+}

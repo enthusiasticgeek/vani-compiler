@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: yoruba
+//
+// Phase 13.27: Niger-Congo family — ~50M speakers in West
+// Africa. Latin script with sub-dot marks (ẹ/ọ/ṣ) + tone marks
+// (à/á/è/é/ì/í/ò/ó/ù/ú).
+
+ìpinnu "Compute a small score with checked constraints";
+
+iṣẹ́ add(a: i64, b: i64) -> i64 {
+  padà a + b;
+}
+
+iṣẹ́ bounded_score(base: i64) -> i64
+nílò base >= 0;
+{
+  jẹ́ doubled: i64 = base * 2;
+  jẹ́risí doubled >= base;
+  padà add(doubled, 2);
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ answer = bounded_score(20);
+  fihàn 2 + 2 == 4;
+  jẹ́risí answer >= 0;
+  tẹ̀ answer;
+  padà 0;
+}

@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: slovak
+//
+// Phase 13.24: third Slavic Latin variant (after Polish + Czech).
+// Slovak shares some structure with Czech but has distinct
+// vocabulary and the unique ľ/ŕ/ô diacritics.
+
+účel "Compute a small score with checked constraints";
+
+funkcia add(a: i64, b: i64) -> i64 {
+  vráť a + b;
+}
+
+funkcia bounded_score(base: i64) -> i64
+vyžaduje base >= 0;
+{
+  nech doubled: i64 = base * 2;
+  potvrď doubled >= base;
+  vráť add(doubled, 2);
+}
+
+funkcia main() -> i64 {
+  nech answer = bounded_score(20);
+  dokáž 2 + 2 == 4;
+  potvrď answer >= 0;
+  vytlač answer;
+  vráť 0;
+}

@@ -1,0 +1,29 @@
+// श्री।
+// vani-lang: hausa
+//
+// Phase 13.28: Afroasiatic family — ~80M speakers in West
+// Africa (Nigeria + Niger). Latin Boko script with implosive
+// consonants ɓ/ɗ/ƙ/ƴ. Mostly pure-ASCII keyword surface so
+// rides pragma threading.
+
+nufin "Compute a small score with checked constraints";
+
+aiki add(a: i64, b: i64) -> i64 {
+  koma a + b;
+}
+
+aiki bounded_score(base: i64) -> i64
+bukata base >= 0;
+{
+  bari doubled: i64 = base * 2;
+  tabbatar doubled >= base;
+  koma add(doubled, 2);
+}
+
+aiki main() -> i64 {
+  bari answer = bounded_score(20);
+  nuna 2 + 2 == 4;
+  tabbatar answer >= 0;
+  rubuta answer;
+  koma 0;
+}

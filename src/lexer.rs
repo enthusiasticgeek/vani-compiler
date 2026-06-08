@@ -1056,6 +1056,369 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.24 (2026-06-08): Slovak (slovenčina). Third Slavic
+/// Latin variant. Shares ASCII fallbacks with Czech but uses
+/// distinct keyword choices.
+fn slovak_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "vráť" => TokenKind::Return,           // return!
+        "preruš" => TokenKind::Break,          // break!
+        "pokračuj" => TokenKind::Continue,     // continue!
+        "potvrď" => TokenKind::Assert,         // confirm
+        "dokáž" => TokenKind::Prove,           // prove!
+        "vyžaduje" => TokenKind::Requires,     // requires
+        "zaručuje" => TokenKind::Ensures,      // guarantees
+        "vytlač" => TokenKind::Print,          // print
+        "píš" => TokenKind::Print,             // write (alt)
+        "čistý" => TokenKind::Pure,            // pure
+        "paralelný" => TokenKind::Parallel,    // parallel
+        "rozhranie" => TokenKind::Interface,   // interface
+        "úloha" => TokenKind::Task,            // task
+        "nebezpečný" => TokenKind::Unsafe,     // unsafe
+        "oblasť" => TokenKind::RegionKw,       // region
+        "účel" => TokenKind::Intent,           // purpose
+        "vonkajší" => TokenKind::Extern,       // external
+        "nemenný" => TokenKind::Invariant,     // unchanging
+        "štruktúra" => TokenKind::Struct,      // structure
+        "verejný" => TokenKind::Pub,           // public
+        "použi" => TokenKind::Use,             // use!
+        "meniteľný" => TokenKind::Mut,         // changeable
+        "pokiaľ" => TokenKind::While,          // as long as
+        "kým" => TokenKind::While,             // until (while alt)
+        "porovnaj" => TokenKind::Match,        // compare!
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.24 pure-ASCII Slovak. Pragma-gated.
+fn slovak_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funkcia" => TokenKind::Fn,            // function
+        "nech" => TokenKind::Let,              // let
+        "konstanta" => TokenKind::Const,       // constant
+        "modul" => TokenKind::Module,          // module
+        "ako" => TokenKind::As,                // as
+        "ak" => TokenKind::If,                 // if
+        "kedy" => TokenKind::If,               // when (alt)
+        "inak" => TokenKind::Else,             // otherwise
+        "pre" => TokenKind::For,               // for
+        "od" => TokenKind::From,               // from
+        "do" => TokenKind::To,                 // to
+        "potom" => TokenKind::Then,            // then
+        "pozri" => TokenKind::Ref,             // see
+        "pravda" => TokenKind::True,           // true
+        "nepravda" => TokenKind::False,        // false
+        "metody" => TokenKind::Methods,        // methods (ASCII alt)
+        "kde" => TokenKind::Where,             // where
+        "je" => TokenKind::Is,                 // is
+        "skus" => TokenKind::Try,              // try (no diacritic alt)
+        "skús" => TokenKind::Try,              // (with diacritic — but routed via non-ASCII path; harmless duplicate)
+        "spoj" => TokenKind::Join,             // join
+        "typ" => TokenKind::Type,              // type
+        "vypocet" => TokenKind::Enum,          // enum (no diacritic)
+        // No-diacritic alts:
+        "vrat" => TokenKind::Return,           // return
+        "perus" => TokenKind::Break,           // (no ř)
+        "pokracuj" => TokenKind::Continue,     // (no č)
+        "potvrd" => TokenKind::Assert,         // (no ď)
+        "dokaz" => TokenKind::Prove,           // (no ž)
+        "vyzaduje" => TokenKind::Requires,     // (no ž)
+        "zarucuje" => TokenKind::Ensures,      // (no č)
+        "vytlac" => TokenKind::Print,          // (no č)
+        "pis" => TokenKind::Print,             // (no š)
+        "cisty" => TokenKind::Pure,            // (no č)
+        "paralelny" => TokenKind::Parallel,    // (no ý)
+        "rozhranie" => TokenKind::Interface,   // (already ASCII)
+        "uloha" => TokenKind::Task,            // (no ú)
+        "nebezpecny" => TokenKind::Unsafe,     // (no č)
+        "oblast" => TokenKind::RegionKw,       // (no ť)
+        "ucel" => TokenKind::Intent,           // (no ú)
+        "vonkajsi" => TokenKind::Extern,       // (no š)
+        "nemenny" => TokenKind::Invariant,     // (no ý)
+        "struktura" => TokenKind::Struct,      // (no š)
+        "verejny" => TokenKind::Pub,           // (no ý)
+        "pouzi" => TokenKind::Use,             // (no ž)
+        "menitelny" => TokenKind::Mut,         // (no ľ, ý)
+        "pokial" => TokenKind::While,          // (no ľ)
+        "porovnaj" => TokenKind::Match,        // (already ASCII)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.25 (2026-06-08): Finnish (suomi). Second Uralic
+/// after Hungarian — distinct keyword set (Finnish and
+/// Hungarian split ~9000 years ago).
+fn finnish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "tehtävä" => TokenKind::Task,          // task
+        "rajapintä" => TokenKind::Interface,   // interface (variant)
+        "vahvistä" => TokenKind::Assert,       // (rare variant)
+        "muuttumatön" => TokenKind::Invariant, // unchanging (variant)
+        "käytä" => TokenKind::Use,             // use!
+        "missä" => TokenKind::Where,           // where
+        "lähtien" => TokenKind::From,          // from
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.25 (2026-06-08): pure-ASCII Finnish. Pragma-gated.
+/// Most Finnish keywords are pure-ASCII since Finnish uses only
+/// ä/ö as native non-ASCII letters (and many keywords avoid
+/// them).
+fn finnish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funktio" => TokenKind::Fn,            // function
+        "olkoon" => TokenKind::Let,            // "let it be"
+        "rakenne" => TokenKind::Struct,        // structure
+        "luettelointi" => TokenKind::Enum,     // enumeration
+        "vakio" => TokenKind::Const,           // constant
+        "julkinen" => TokenKind::Pub,          // public
+        "moduuli" => TokenKind::Module,        // module
+        "kuten" => TokenKind::As,              // as / like
+        "palaa" => TokenKind::Return,          // return / come back
+        "jos" => TokenKind::If,                // if
+        "muuten" => TokenKind::Else,           // otherwise
+        "kun" => TokenKind::While,             // when / while
+        "jokaiselle" => TokenKind::For,        // for each
+        "sisalla" => TokenKind::In,            // inside (no ä alt)
+        "asti" => TokenKind::To,               // until
+        "katkaise" => TokenKind::Break,        // break!
+        "jatka" => TokenKind::Continue,        // continue!
+        "sitten" => TokenKind::Then,           // then
+        "katso" => TokenKind::Ref,             // see
+        "muuttuva" => TokenKind::Mut,          // changing
+        "vastaa" => TokenKind::Match,          // correspond
+        "vahvista" => TokenKind::Assert,       // confirm
+        "todista" => TokenKind::Prove,         // prove
+        "vaatii" => TokenKind::Requires,       // requires
+        "takaa" => TokenKind::Ensures,         // guarantees
+        "tosi" => TokenKind::True,             // true
+        "epatosi" => TokenKind::False,         // false (no ä)
+        "tulosta" => TokenKind::Print,         // print
+        "puhdas" => TokenKind::Pure,           // pure
+        "rinnakkainen" => TokenKind::Parallel, // parallel
+        "rajapinta" => TokenKind::Interface,   // interface
+        "toteuta" => TokenKind::Implement,     // implement
+        "menetelmat" => TokenKind::Methods,    // methods (no ä)
+        "on" => TokenKind::Is,                 // is
+        "kokeile" => TokenKind::Try,           // try
+        "tehtava" => TokenKind::Task,          // task (no ä)
+        "yhdista" => TokenKind::Join,          // join (no ä)
+        "vaarallinen" => TokenKind::Unsafe,    // dangerous
+        "alue" => TokenKind::RegionKw,         // area
+        "tarkoitus" => TokenKind::Intent,      // purpose
+        "tyyppi" => TokenKind::Type,           // type
+        "ulkoinen" => TokenKind::Extern,       // external
+        "muuttumaton" => TokenKind::Invariant, // unchanging (no ö)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.26 (2026-06-08): Catalan (català). Sixth Romance
+/// Latin variant. Distinctive interpunct (l·l) but most
+/// keywords just use à/è/é/í/ï/ò/ó/ú/ü.
+fn catalan_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funció" => TokenKind::Fn,             // function
+        "enumeració" => TokenKind::Enum,       // enumeration
+        "públic" => TokenKind::Pub,            // public
+        "mòdul" => TokenKind::Module,          // module
+        "està" => TokenKind::Is,               // is (Catalan "is")
+        "és" => TokenKind::Is,                 // is (alt)
+        "aleshores" => TokenKind::Then,        // then (ASCII actually)
+        "coincideix" => TokenKind::Match,      // matches (ASCII)
+        "demostra" => TokenKind::Prove,        // (ASCII)
+        "mètodes" => TokenKind::Methods,       // methods
+        "regió" => TokenKind::RegionKw,        // region
+        "propòsit" => TokenKind::Intent,       // purpose
+        "imprimeix" => TokenKind::Print,       // (ASCII)
+        "interfície" => TokenKind::Interface,  // interface
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.26 (2026-06-08): pure-ASCII Catalan. Pragma-gated.
+fn catalan_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funcio" => TokenKind::Fn,             // function (no accent)
+        "sigui" => TokenKind::Let,             // let it be
+        "estructura" => TokenKind::Struct,     // structure
+        "enumeracio" => TokenKind::Enum,       // enumeration (no accent)
+        "constant" => TokenKind::Const,        // constant
+        "public" => TokenKind::Pub,            // public (no accent)
+        "modul" => TokenKind::Module,          // module (no accent)
+        "usa" => TokenKind::Use,               // use
+        "com" => TokenKind::As,                // as / like
+        "retorna" => TokenKind::Return,        // return
+        "si" => TokenKind::If,                 // if
+        "altrament" => TokenKind::Else,        // otherwise
+        "sino" => TokenKind::Else,             // else (alt)
+        "mentre" => TokenKind::While,          // while
+        "per" => TokenKind::For,               // for
+        "en" => TokenKind::In,                 // in
+        "des" => TokenKind::From,              // from
+        "fins" => TokenKind::To,               // to / until
+        "trenca" => TokenKind::Break,          // break
+        "continua" => TokenKind::Continue,     // continue
+        "aleshores" => TokenKind::Then,        // then
+        "veure" => TokenKind::Ref,             // see
+        "mutable" => TokenKind::Mut,           // mutable
+        "canviable" => TokenKind::Mut,         // changeable (alt)
+        "coincideix" => TokenKind::Match,      // matches
+        "afirma" => TokenKind::Assert,         // assert
+        "demostra" => TokenKind::Prove,        // prove
+        "requereix" => TokenKind::Requires,    // requires
+        "garanteix" => TokenKind::Ensures,     // guarantees
+        "cert" => TokenKind::True,             // true / certain
+        "veritable" => TokenKind::True,        // true (alt)
+        "fals" => TokenKind::False,            // false
+        "imprimeix" => TokenKind::Print,       // print
+        "pur" => TokenKind::Pure,              // pure
+        "interface" => TokenKind::Interface,   // interface (loanword)
+        "implementa" => TokenKind::Implement,  // implement
+        "metodes" => TokenKind::Methods,       // methods (no accent)
+        "on" => TokenKind::Where,              // where
+        "prova" => TokenKind::Try,             // try / test
+        "tasca" => TokenKind::Task,            // task
+        "uneix" => TokenKind::Join,            // join
+        "insegur" => TokenKind::Unsafe,        // unsafe
+        "regio" => TokenKind::RegionKw,        // region (no accent)
+        "proposit" => TokenKind::Intent,       // purpose (no accent)
+        "objectiu" => TokenKind::Intent,       // objective (alt)
+        "tipus" => TokenKind::Type,            // type
+        "extern" => TokenKind::Extern,         // external (same as English)
+        "invariant" => TokenKind::Invariant,   // invariant (same)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.27 (2026-06-08): Yoruba (Èdè Yorùbá) — Niger-Congo,
+/// ~50M speakers. Latin script with sub-dot marks (ẹ/ọ/ṣ) plus
+/// extensive tone marks. The keyword table holds the natural
+/// diacritic forms; pragma-gated ASCII fallbacks for code
+/// editors that struggle with the marks.
+fn yoruba_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "iṣẹ́" => TokenKind::Fn,                // work / function
+        "jẹ́" => TokenKind::Let,                // let
+        "padà" => TokenKind::Return,           // return / come back
+        "bí" => TokenKind::If,                 // if
+        "nígbà" => TokenKind::While,           // while
+        "fún" => TokenKind::For,               // for
+        "nínú" => TokenKind::In,               // inside
+        "láti" => TokenKind::From,             // from
+        "dé" => TokenKind::To,                 // to
+        "tẹ̀síwájú" => TokenKind::Continue,    // continue
+        "nígbànáà" => TokenKind::Then,         // then
+        "wò" => TokenKind::Ref,                // look at
+        "àyípadà" => TokenKind::Mut,           // change / mutable
+        "bámu" => TokenKind::Match,            // match
+        "jẹ́risí" => TokenKind::Assert,        // confirm
+        "fihàn" => TokenKind::Prove,           // show
+        "nílò" => TokenKind::Requires,         // need
+        "òótọ́" => TokenKind::True,            // truth
+        "irọ́" => TokenKind::False,            // lie
+        "tẹ̀" => TokenKind::Print,             // print / press
+        "mímọ́" => TokenKind::Pure,            // pure
+        "ìpinnu" => TokenKind::Intent,         // decision / purpose
+        "irú" => TokenKind::Type,              // kind / type
+        "ìta" => TokenKind::Extern,            // outside
+        "ìṣù" => TokenKind::Module,            // module
+        "lò" => TokenKind::Use,                // use
+        "bí_ti" => TokenKind::As,              // as
+        "iṣẹ" => TokenKind::Task,              // task
+        "ọ̀nà" => TokenKind::Struct,           // way / structure
+        "ibo" => TokenKind::Where,             // where (ASCII actually)
+        "gbangba" => TokenKind::Pub,           // public (ASCII)
+        "ni" => TokenKind::Is,                 // is (ASCII)
+        "gbiyanju" => TokenKind::Try,          // try (ASCII)
+        "darapọ" => TokenKind::Join,           // join (has ọ)
+        "àìláàbò" => TokenKind::Unsafe,        // unsafe
+        "agbègbè" => TokenKind::RegionKw,      // area
+        "akáṣe" => TokenKind::Parallel,        // parallel
+        "ifaramọ" => TokenKind::Interface,     // commitment / interface
+        "ipa" => TokenKind::Methods,           // methods
+        "àìyípadà" => TokenKind::Invariant,    // not changing
+        "àkọsílẹ̀" => TokenKind::Enum,         // record
+        "dáwọ́dúró" => TokenKind::Break,       // stop / break
+        "àlàfo" => TokenKind::Const,           // constant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.28 (2026-06-08): Hausa — Afroasiatic, ~80M
+/// speakers. Latin Boko script with implosive consonants
+/// ɓ/ɗ/ƙ/ƴ.
+fn hausa_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ɗaya" => TokenKind::Parallel,         // parallel (uses ɗ)
+        "ƙarya" => TokenKind::False,           // lie (uses ƙ)
+        "nau'i" => TokenKind::Type,            // kind (apostrophe)
+        // (Most Hausa keywords are pure ASCII; only a few use
+        // the implosive consonants.)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.28 (2026-06-08): pure-ASCII Hausa. Pragma-gated.
+fn hausa_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "aiki" => TokenKind::Fn,               // work / function
+        "bari" => TokenKind::Let,              // let
+        "tsari" => TokenKind::Struct,          // structure
+        "lissafi" => TokenKind::Enum,          // enumeration
+        "tabbas" => TokenKind::Const,          // constant / surely
+        "gama_gari" => TokenKind::Pub,         // general / public
+        "sashe" => TokenKind::Module,          // section / module
+        "amfani" => TokenKind::Use,            // use / benefit
+        "kamar" => TokenKind::As,              // like / as
+        "koma" => TokenKind::Return,           // go back / return
+        "idan" => TokenKind::If,               // if
+        "ko_kuwa" => TokenKind::Else,          // or otherwise
+        "yayin" => TokenKind::While,           // while / during
+        "ga" => TokenKind::For,                // for / to
+        "cikin" => TokenKind::In,              // inside
+        "daga" => TokenKind::From,             // from
+        "zuwa" => TokenKind::To,               // to / toward
+        "dakatar" => TokenKind::Break,         // halt
+        "ci_gaba" => TokenKind::Continue,      // go on
+        "sannan" => TokenKind::Then,           // then / next
+        "duba" => TokenKind::Ref,              // look at
+        "canzawa" => TokenKind::Mut,           // changing
+        "dace" => TokenKind::Match,            // match / fit
+        "tabbatar" => TokenKind::Assert,       // confirm
+        "nuna" => TokenKind::Prove,            // show
+        "bukata" => TokenKind::Requires,       // need
+        "tabbace" => TokenKind::Ensures,       // ensured
+        "gaskiya" => TokenKind::True,          // truth
+        "rubuta" => TokenKind::Print,          // write
+        "tsabta" => TokenKind::Pure,           // cleanliness
+        "madaidaici" => TokenKind::Parallel,   // parallel (ASCII alt)
+        "hannu" => TokenKind::Interface,       // hand / interface
+        "aiwatar" => TokenKind::Implement,     // implement
+        "hanyoyi" => TokenKind::Methods,       // ways / methods
+        "ina" => TokenKind::Where,             // where
+        "ne" => TokenKind::Is,                 // is (masc.)
+        "gwadawa" => TokenKind::Try,           // try
+        "hadawa" => TokenKind::Join,           // join
+        "kasada" => TokenKind::Unsafe,         // danger
+        "yanki" => TokenKind::RegionKw,        // region
+        "nufin" => TokenKind::Intent,          // purpose
+        "waje" => TokenKind::Extern,           // outside
+        "a_canzawa" => TokenKind::Invariant,   // not changing
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.20 (2026-06-08): Norwegian (norsk bokmål) keyword
 /// resolution. Second Nordic dialect after Swedish; uses å/æ/ø.
 fn norwegian_keyword(text: &str) -> Option<TokenKind> {
@@ -3776,6 +4139,26 @@ enum DialectLang {
     // Mkhedruli main script) + U+2D00..2D2F (Nuskhuri). ~4M
     // speakers. Mkhedruli is the standard modern form.
     Georgian,
+    // Phase 13.24 (2026-06-08): Slovak (slovenčina) — third
+    // Slavic Latin variant (after Polish, Czech). Similar to
+    // Czech with ľ/ŕ/ô plus standard Slavic diacritics.
+    Slovak,
+    // Phase 13.25 (2026-06-08): Finnish (suomi) — second Uralic
+    // (after Hungarian). Distinct from Hungarian — different
+    // branch of Uralic. Uses ä/ö only.
+    Finnish,
+    // Phase 13.26 (2026-06-08): Catalan (català) — sixth
+    // Romance Latin variant (after Spanish + French + Italian +
+    // Portuguese + Romanian). Distinctive interpunct (l·l).
+    Catalan,
+    // Phase 13.27 (2026-06-08): Yoruba (Èdè Yorùbá) — Niger-
+    // Congo family, ~50M speakers in West Africa. Latin script
+    // with extensive sub-dot marks (ẹ/ọ/ṣ) + tone marks.
+    Yoruba,
+    // Phase 13.28 (2026-06-08): Hausa — Afroasiatic family,
+    // ~80M speakers (largely in Nigeria + Niger). Latin Boko
+    // script with implosive consonants ɓ/ɗ/ƙ/ƴ.
+    Hausa,
 }
 
 impl DialectLang {
@@ -3831,6 +4214,11 @@ impl DialectLang {
             DialectLang::Danish => "danish",
             DialectLang::Armenian => "armenian",
             DialectLang::Georgian => "georgian",
+            DialectLang::Slovak => "slovak",
+            DialectLang::Finnish => "finnish",
+            DialectLang::Catalan => "catalan",
+            DialectLang::Yoruba => "yoruba",
+            DialectLang::Hausa => "hausa",
         }
     }
 
@@ -3898,6 +4286,11 @@ impl DialectLang {
             DialectLang::Danish => Script::Latin,
             DialectLang::Armenian => Script::Armenian,
             DialectLang::Georgian => Script::Georgian,
+            DialectLang::Slovak => Script::Latin,
+            DialectLang::Finnish => Script::Latin,
+            DialectLang::Catalan => Script::Latin,
+            DialectLang::Yoruba => Script::Latin,
+            DialectLang::Hausa => Script::Latin,
         }
     }
 }
@@ -4247,6 +4640,21 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.23 (2026-06-08): second Caucasus script.
             "georgian" | "ქართული" | "kartuli" | "ka"
                 => Some(DialectLang::Georgian),
+            // Phase 13.24 (2026-06-08): third Slavic.
+            "slovak" | "slovenčina" | "slovencina" | "sk"
+                => Some(DialectLang::Slovak),
+            // Phase 13.25 (2026-06-08): second Uralic.
+            "finnish" | "suomi" | "fi"
+                => Some(DialectLang::Finnish),
+            // Phase 13.26 (2026-06-08): sixth Romance.
+            "catalan" | "català" | "catala" | "ca"
+                => Some(DialectLang::Catalan),
+            // Phase 13.27 (2026-06-08): Niger-Congo W. Africa.
+            "yoruba" | "yorùbá" | "yo"
+                => Some(DialectLang::Yoruba),
+            // Phase 13.28 (2026-06-08): Afroasiatic W. Africa.
+            "hausa" | "hawsa" | "ha"
+                => Some(DialectLang::Hausa),
             _ => None,
         };
     }
@@ -5085,6 +5493,12 @@ impl<'a> Lexer<'a> {
             // Phase 13.22/13.23: Armenian + Georgian scripts.
             .or_else(|| armenian_keyword(text))
             .or_else(|| georgian_keyword(text))
+            // Phase 13.24/25/26/27/28: more Latin variants.
+            .or_else(|| slovak_keyword(text))
+            .or_else(|| finnish_keyword(text))
+            .or_else(|| catalan_keyword(text))
+            .or_else(|| yoruba_keyword(text))
+            .or_else(|| hausa_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -5250,6 +5664,11 @@ impl<'a> Lexer<'a> {
                 .or_else(|| swedish_keyword(text))
                 .or_else(|| norwegian_keyword(text))
                 .or_else(|| danish_keyword(text))
+                .or_else(|| slovak_keyword(text))
+                .or_else(|| finnish_keyword(text))
+                .or_else(|| catalan_keyword(text))
+                .or_else(|| yoruba_keyword(text))
+                .or_else(|| hausa_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -5280,6 +5699,10 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Filipino) => filipino_ascii_keyword(text),
                     Some(DialectLang::Norwegian) => norwegian_ascii_keyword(text),
                     Some(DialectLang::Danish) => danish_ascii_keyword(text),
+                    Some(DialectLang::Slovak) => slovak_ascii_keyword(text),
+                    Some(DialectLang::Finnish) => finnish_ascii_keyword(text),
+                    Some(DialectLang::Catalan) => catalan_ascii_keyword(text),
+                    Some(DialectLang::Hausa) => hausa_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

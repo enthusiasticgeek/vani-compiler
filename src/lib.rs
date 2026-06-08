@@ -27953,6 +27953,91 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn slovak_slavic_latin_compiles() {
+        let source = "// vani-lang: slovak\n\
+                      účel \"basic Slovak demo\";\n\
+                      funkcia add(a: i64, b: i64) -> i64 {\n  \
+                        vráť a + b;\n\
+                      }\n\
+                      funkcia main() -> i64 {\n  \
+                        nech x: i64 = add(20, 22);\n  \
+                        potvrď x == 42;\n  \
+                        dokáž 2 + 2 == 4;\n  \
+                        vytlač x;\n  \
+                        vráť 0;\n\
+                      }\n";
+        crate::compile(source).expect("Slovak basics compile");
+    }
+
+    #[test]
+    fn finnish_uralic_latin_compiles() {
+        let source = "// vani-lang: finnish\n\
+                      tarkoitus \"basic Finnish demo\";\n\
+                      funktio add(a: i64, b: i64) -> i64 {\n  \
+                        palaa a + b;\n\
+                      }\n\
+                      funktio main() -> i64 {\n  \
+                        olkoon x: i64 = add(20, 22);\n  \
+                        vahvista x == 42;\n  \
+                        todista 2 + 2 == 4;\n  \
+                        tulosta x;\n  \
+                        palaa 0;\n\
+                      }\n";
+        crate::compile(source).expect("Finnish basics compile");
+    }
+
+    #[test]
+    fn catalan_romance_compiles() {
+        let source = "// vani-lang: catalan\n\
+                      propòsit \"basic Catalan demo\";\n\
+                      funció add(a: i64, b: i64) -> i64 {\n  \
+                        retorna a + b;\n\
+                      }\n\
+                      funció main() -> i64 {\n  \
+                        sigui x: i64 = add(20, 22);\n  \
+                        afirma x == 42;\n  \
+                        demostra 2 + 2 == 4;\n  \
+                        imprimeix x;\n  \
+                        retorna 0;\n\
+                      }\n";
+        crate::compile(source).expect("Catalan basics compile");
+    }
+
+    #[test]
+    fn yoruba_niger_congo_compiles() {
+        let source = "// vani-lang: yoruba\n\
+                      ìpinnu \"basic Yoruba demo\";\n\
+                      iṣẹ́ add(a: i64, b: i64) -> i64 {\n  \
+                        padà a + b;\n\
+                      }\n\
+                      iṣẹ́ main() -> i64 {\n  \
+                        jẹ́ x: i64 = add(20, 22);\n  \
+                        jẹ́risí x == 42;\n  \
+                        fihàn 2 + 2 == 4;\n  \
+                        tẹ̀ x;\n  \
+                        padà 0;\n\
+                      }\n";
+        crate::compile(source).expect("Yoruba basics compile");
+    }
+
+    #[test]
+    fn hausa_afroasiatic_compiles() {
+        let source = "// vani-lang: hausa\n\
+                      nufin \"basic Hausa demo\";\n\
+                      aiki add(a: i64, b: i64) -> i64 {\n  \
+                        koma a + b;\n\
+                      }\n\
+                      aiki main() -> i64 {\n  \
+                        bari x: i64 = add(20, 22);\n  \
+                        tabbatar x == 42;\n  \
+                        nuna 2 + 2 == 4;\n  \
+                        rubuta x;\n  \
+                        koma 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hausa basics compile");
+    }
+
+    #[test]
     fn norwegian_nordic_compiles() {
         // Phase 13.20: second Nordic. Uses å/æ/ø.
         let source = "// vani-lang: norwegian\n\

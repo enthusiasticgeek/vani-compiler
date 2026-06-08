@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: catalan
+//
+// Phase 13.26: sixth Romance variant in vāṇी (Spanish + French +
+// Italian + Portuguese + Romanian + Catalan). Catalan uses
+// à/è/é/í/ï/ò/ó/ú/ü.
+
+propòsit "Compute a small score with checked constraints";
+
+funció add(a: i64, b: i64) -> i64 {
+  retorna a + b;
+}
+
+funció bounded_score(base: i64) -> i64
+requereix base >= 0;
+{
+  sigui doubled: i64 = base * 2;
+  afirma doubled >= base;
+  retorna add(doubled, 2);
+}
+
+funció main() -> i64 {
+  sigui answer = bounded_score(20);
+  demostra 2 + 2 == 4;
+  afirma answer >= 0;
+  imprimeix answer;
+  retorna 0;
+}
