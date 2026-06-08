@@ -21170,6 +21170,110 @@ fn main() -> i64 {
         compile_to_llvm(source).expect("sync async fn must use v1 desugar on LLVM");
     }
 
+    /// v3.1 caveat #15 polish (2026-06-08) — structural snapshot
+    /// tests on the typed IR. These pin the synthesized Task
+    /// struct + poll fn SHAPE (field names, types, count), not
+    /// the emitted C/LLVM strings. Catches changes that would
+    /// shift the ABI (param storage order, return-via-field
+    /// presence, state_tag width) even when the emitted text
+    /// happens to still match the old substring assertions.
+    ///
+    /// Each test compiles a representative v3.1 shape and walks
+    /// `checked.ir.structs` / `checked.ir.functions` for the
+    /// expected `Task__<fn>` / `__poll_<fn>` pair.
+    #[test]
+    fn v31_snapshot_linear_i64_async_fn_synthesizes_canonical_task_shape() {
+        let source = r#"
+            async fn fetch(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("v3.1 linear async compiles");
+
+        // Task struct: exactly the expected fields in order.
+        // state_tag (i64) + param `fd` (i64) + local `n` (i64).
+        // i64 returns route through the legacy ABI (no __result).
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__fetch")
+            .expect("Task__fetch struct must be synthesized");
+        let field_names: Vec<&str> = task.fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(field_names, vec!["state_tag", "fd", "n"],
+            "Task__fetch fields mismatch: {:?}", field_names);
+        for (name, ty) in &task.fields {
+            assert!(matches!(ty, crate::ast::Type::I64),
+                "Task__fetch.{} must be I64, got {:?}", name, ty);
+        }
+
+        // Poll fn: __poll_fetch with signature
+        //   (mut ref Task__fetch) -> i64.
+        let poll = checked.ir.functions.iter().find(|f| f.name == "__poll_fetch")
+            .expect("__poll_fetch must be synthesized");
+        assert_eq!(poll.params.len(), 1, "__poll_fetch should take 1 param");
+        match &poll.params[0].ty {
+            crate::ast::Type::RefMut(inner) => match &**inner {
+                crate::ast::Type::Struct(n) if n == "Task__fetch" => {}
+                other => panic!("__poll_fetch param inner must be Struct(Task__fetch), got {:?}", other),
+            },
+            other => panic!("__poll_fetch param must be RefMut, got {:?}", other),
+        }
+        assert!(matches!(poll.return_type, crate::ast::Type::I64),
+            "i64-return async fn → poll returns i64; got {:?}", poll.return_type);
+    }
+
+    #[test]
+    fn v31_snapshot_non_i64_return_uses_result_field_aba() {
+        // Phase 3-returns ABI: non-i64 return types route through
+        // a synthesized `__result: T` Task field; poll returns
+        // status (0 / -1 / -2) instead of the value.
+        let source = r#"
+            enum FetchResult { Ok(i64), Err(i64) }
+            async fn fetch(fd: i64) -> FetchResult {
+              let n: i64 = io_recv_async(fd, 64);
+              return FetchResult.Ok(n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("v3.1 enum-return compiles");
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__fetch")
+            .expect("Task__fetch must exist");
+        let field_names: Vec<&str> = task.fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(field_names.contains(&"__result"),
+            "non-i64 return must add `__result` field; got fields {:?}", field_names);
+        let poll = checked.ir.functions.iter().find(|f| f.name == "__poll_fetch")
+            .expect("__poll_fetch must exist");
+        assert!(matches!(poll.return_type, crate::ast::Type::I64),
+            "non-i64 async return still uses i64 status in poll fn; got {:?}", poll.return_type);
+    }
+
+    #[test]
+    fn v31_snapshot_a44_canceltoken_ref_param_field_is_refmut_struct() {
+        // L4 partial lift + A4.4 (2026-06-08): `ref CancelToken`
+        // params now flow through v3.1; the synthesized Task
+        // struct field for the param keeps the user's ref type
+        // (Type::Ref(Box<Struct(CancelToken)>)).
+        let source = r#"
+            async fn fetcher(fd: i64, token: ref CancelToken) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("ref CancelToken async compiles");
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__fetcher")
+            .expect("Task__fetcher must exist");
+        let (_, token_ty) = task.fields.iter().find(|(n, _)| n == "token")
+            .expect("token field must exist on Task__fetcher");
+        match token_ty {
+            crate::ast::Type::Ref(inner) => match &**inner {
+                crate::ast::Type::Struct(n) if n == "CancelToken" => {}
+                other => panic!("token field's inner must be Struct(CancelToken), got {:?}", other),
+            },
+            other => panic!("token field must be Ref(_), got {:?}", other),
+        }
+    }
+
+
     /// Arc 8 v3.1 Phase 2 narrow — if/while/Assign/Print +
     /// mid-body return allowed inside async fn body when no
     /// suspend appears in the branches.
