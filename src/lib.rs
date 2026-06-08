@@ -21247,6 +21247,68 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn v31_caveat2_owned_str_concat_default_init_compiles() {
+        // v3.1 caveat #2 polish (2026-06-08): the v3.1 synth's
+        // default-init for an OwnedStr Task field used to be
+        // `ExprKind::Str("")` which types as Str, failing the
+        // `can_assign(Str → OwnedStr)` struct-lit field check.
+        // Fix: synthesize `"" + ""` instead — Binary-Add over
+        // two Str literals routes through `check_str_concat`
+        // and types as OwnedStr.
+        //
+        // Regression scope: any v3.1 async fn that declares an
+        // OwnedStr local crossing a suspend.
+        let source = r#"
+            async fn probe(fd: i64) -> i64 {
+              let s: OwnedStr = "before" + " suspend";
+              let n: i64 = io_recv_async(fd, 64);
+              return n + 1;
+            }
+            fn main() -> i64 { let _ = probe; return 0; }
+        "#;
+        crate::compile(source).expect("OwnedStr-across-suspend compiles");
+        crate::compile_to_c(source).expect("C backend accepts OwnedStr local");
+        crate::compile_to_llvm(source).expect("LLVM backend accepts OwnedStr local");
+    }
+
+    #[test]
+    fn v31_caveat2_vec_across_suspend_compiles() {
+        // Vec<i64> across a suspend: Task struct field carries
+        // the Vec value (a 3-word struct), Drop chains to the
+        // inner buffer at task scope-exit.
+        let source = r#"
+            async fn probe(fd: i64) -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let n: i64 = io_recv_async(fd, 64);
+              return n + xs[0];
+            }
+            fn main() -> i64 { let _ = probe; return 0; }
+        "#;
+        crate::compile(source).expect("Vec-across-suspend compiles");
+        crate::compile_to_c(source).expect("C backend OK");
+        crate::compile_to_llvm(source).expect("LLVM backend OK");
+    }
+
+    #[test]
+    fn v31_caveat2_multi_suspend_with_affine_local_drops_correctly() {
+        // Two suspend points with an OwnedStr declared between:
+        //   recv → owned_str = ... → send → return
+        // The OwnedStr's Drop must fire exactly once at return,
+        // not at the second suspend. Verifies the state-machine
+        // splitter preserves affine-Drop placement.
+        let source = r#"
+            async fn probe(fd: i64) -> i64 {
+              let n1: i64 = io_recv_async(fd, 16);
+              let s: OwnedStr = "tag" + ":";
+              let n2: i64 = io_recv_async(fd, 16);
+              return n1 + n2;
+            }
+            fn main() -> i64 { let _ = probe; return 0; }
+        "#;
+        crate::compile(source).expect("OwnedStr between two suspends compiles");
+    }
+
+    #[test]
     fn v31_snapshot_a44_canceltoken_ref_param_field_is_refmut_struct() {
         // L4 partial lift + A4.4 (2026-06-08): `ref CancelToken`
         // params now flow through v3.1; the synthesized Task

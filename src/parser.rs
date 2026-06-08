@@ -5900,7 +5900,30 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         Type::I64 => ExprKind::Int(0),
         Type::Bool => ExprKind::Bool(false),
         Type::F64 => ExprKind::Float(0.0),
-        Type::Str | Type::OwnedStr => ExprKind::Str(String::new()),
+        Type::Str => ExprKind::Str(String::new()),
+        // v3.1 caveat #2 polish (2026-06-08): OwnedStr can't be
+        // default-init'd as `ExprKind::Str("")` because that
+        // types as Str (not OwnedStr), and `can_assign` doesn't
+        // accept Str → OwnedStr in struct-lit field position.
+        // Synthesize `"" + ""` instead — the Binary-Add over two
+        // Str literals dispatches through `check_str_concat`
+        // which returns Type::OwnedStr (heap-allocating
+        // `intent_str_concat` of two empty literals; the cost
+        // is a single malloc(1) at task construction). Task
+        // bodies overwrite this default before any read so the
+        // throwaway allocation is harmless under the existing
+        // affine-Drop discipline.
+        Type::OwnedStr => ExprKind::Binary {
+            op: crate::ast::BinaryOp::Add,
+            left: Box::new(Expr {
+                kind: ExprKind::Str(String::new()),
+                span,
+            }),
+            right: Box::new(Expr {
+                kind: ExprKind::Str(String::new()),
+                span,
+            }),
+        },
         // Phase 3d — Vec<T>: 1-element vec containing the
         // element's recursive default. An empty `vec()` would
         // typecheck-fail in StructLit field position (the checker
