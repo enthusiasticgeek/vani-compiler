@@ -1,0 +1,32 @@
+// श्री।
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/basics.vani                          # LLVM
+//   vanic run examples/language/swahili/basics.vani --backend=c              # C
+//
+// Phase 13.11 v1: first African Tier II dialect. Swahili
+// (Kiswahili) — lingua franca of East Africa, ~200M speakers.
+// Basic Latin alphabet, SVO grammar. Rides pragma threading.
+
+lengo "Compute a small score with checked constraints";
+
+kazi add(a: i64, b: i64) -> i64 {
+  rudi a + b;
+}
+
+kazi bounded_score(base: i64) -> i64
+hitaji base >= 0;
+{
+  acha doubled: i64 = base * 2;
+  thibitisha doubled >= base;
+  rudi add(doubled, 2);
+}
+
+kazi main() -> i64 {
+  acha answer = bounded_score(20);
+  thibitisha_kabisa 2 + 2 == 4;
+  thibitisha answer >= 0;
+  chapisha answer;
+  rudi 0;
+}

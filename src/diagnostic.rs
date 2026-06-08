@@ -96,6 +96,15 @@ enum DiagLang {
     // Phase 13.7 (2026-06-08): Modern Standard Arabic on the
     // existing Script::Arabic infrastructure.
     Arabic,
+    // Phase 13.8 (2026-06-08): Polish — first Slavic Latin
+    // dialect.
+    Polish,
+    // Phase 13.9 (2026-06-08): Turkish — Turkic family.
+    Turkish,
+    // Phase 13.10 (2026-06-08): Malay — sibling of Indonesian.
+    Malay,
+    // Phase 13.11 (2026-06-08): Swahili — first African dialect.
+    Swahili,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -175,6 +184,17 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.7 (2026-06-08): Modern Standard Arabic.
             "arabic" | "العربية" | "arabi" | "ar"
                 => Some(DiagLang::Arabic),
+            // Phase 13.8 (2026-06-08): Polish.
+            "polish" | "polski" | "pl" => Some(DiagLang::Polish),
+            // Phase 13.9 (2026-06-08): Turkish.
+            "turkish" | "türkçe" | "turkce" | "tr"
+                => Some(DiagLang::Turkish),
+            // Phase 13.10 (2026-06-08): Malay.
+            "malay" | "melayu" | "bahasa-melayu" | "ms"
+                => Some(DiagLang::Malay),
+            // Phase 13.11 (2026-06-08): Swahili.
+            "swahili" | "kiswahili" | "sw"
+                => Some(DiagLang::Swahili),
             _ => None,
         };
     }
@@ -223,6 +243,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Hebrew)) => "שגיאה (error)".to_string(),
         ("error", Some(DiagLang::Italian)) => "errore (error)".to_string(),
         ("error", Some(DiagLang::Arabic)) => "خطأ (error)".to_string(),
+        ("error", Some(DiagLang::Polish)) => "błąd (error)".to_string(),
+        ("error", Some(DiagLang::Turkish)) => "hata (error)".to_string(),
+        ("error", Some(DiagLang::Malay)) => "ralat (error)".to_string(),
+        ("error", Some(DiagLang::Swahili)) => "kosa (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -249,6 +273,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Hebrew)) => "הערה (note)".to_string(),
         ("note", Some(DiagLang::Italian)) => "nota (note)".to_string(),
         ("note", Some(DiagLang::Arabic)) => "ملاحظة (note)".to_string(),
+        ("note", Some(DiagLang::Polish)) => "uwaga (note)".to_string(),
+        ("note", Some(DiagLang::Turkish)) => "not (note)".to_string(),
+        ("note", Some(DiagLang::Malay)) => "nota (note)".to_string(),
+        ("note", Some(DiagLang::Swahili)) => "kumbuka (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -595,6 +623,46 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("invalid", "غير صالح (invalid)"),
             ("integer literal", "عدد صحيح (integer literal)"),
             ("float literal", "عدد عشري (float literal)"),
+        ][..],
+        DiagLang::Polish => &[
+            ("expected ", "oczekiwano "),
+            ("unknown variable", "nieznana zmienna (unknown variable)"),
+            ("unknown function", "nieznana funkcja (unknown function)"),
+            ("type mismatch", "niezgodność typów (type mismatch)"),
+            ("cannot prove", "nie można udowodnić (cannot prove)"),
+            ("function ", "funkcja "),
+            ("invalid", "nieprawidłowy (invalid)"),
+            ("integer literal", "literał całkowity (integer literal)"),
+            ("float literal", "literał dziesiętny (float literal)"),
+        ][..],
+        DiagLang::Turkish => &[
+            ("expected ", "beklenen "),
+            ("unknown variable", "bilinmeyen değişken (unknown variable)"),
+            ("unknown function", "bilinmeyen işlev (unknown function)"),
+            ("type mismatch", "tür uyuşmazlığı (type mismatch)"),
+            ("cannot prove", "kanıtlanamadı (cannot prove)"),
+            ("function ", "işlev "),
+            ("invalid", "geçersiz (invalid)"),
+            ("integer literal", "tam sayı sabiti (integer literal)"),
+            ("float literal", "ondalık sabit (float literal)"),
+        ][..],
+        DiagLang::Malay => &[
+            ("expected ", "dijangka "),
+            ("unknown variable", "pemboleh ubah tidak diketahui (unknown variable)"),
+            ("unknown function", "fungsi tidak diketahui (unknown function)"),
+            ("type mismatch", "jenis tidak sepadan (type mismatch)"),
+            ("cannot prove", "tidak dapat membuktikan (cannot prove)"),
+            ("function ", "fungsi "),
+            ("invalid", "tidak sah (invalid)"),
+        ][..],
+        DiagLang::Swahili => &[
+            ("expected ", "ilitarajiwa "),
+            ("unknown variable", "kibadala kisichojulikana (unknown variable)"),
+            ("unknown function", "kazi isiyojulikana (unknown function)"),
+            ("type mismatch", "kutolingana kwa aina (type mismatch)"),
+            ("cannot prove", "haiwezi kuthibitishwa (cannot prove)"),
+            ("function ", "kazi "),
+            ("invalid", "batili (invalid)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

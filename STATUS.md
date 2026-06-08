@@ -10,6 +10,96 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.8 + 13.9 + 13.10 + 13.11: Polish + Turkish + Malay + Swahili
+
+Four dialects in one commit spanning two patterns. Roster grows
+**33 → 37 dialects across 16 scripts** (all four ride existing
+`Script::Latin`).
+
+### Phase 13.8 — Polish (polski)
+**First Slavic Latin variant.** Uses extensive Slavic
+diacritics (ą/ć/ę/ł/ń/ó/ś/ź/ż). Both accented (`zwróć`,
+`jeśli`, `dopóki`, `potwierdź`, `fałsz`, `użyj`) and
+pragma-gated pure-ASCII (`funkcja`, `niech`, `prawda`,
+`udowodnij`, `drukuj`) forms work.
+
+```rust
+// vani-lang: polish
+funkcja main() -> i64 {
+  niech x: i64 = 20 + 22;
+  potwierdź x == 42;
+  drukuj x;
+  zwróć 0;
+}
+```
+
+### Phase 13.9 — Turkish (Türkçe)
+**Turkic family.** Distinctive dotless ı / dotted İ + ç/ğ/ö/ş/ü.
+`işlev`, `eğer`, `için`, `doğrula`, `kanıtla`, `doğru`/`yanlış`
+mix with ASCII fallbacks `fonksiyon`, `sabit`, `genel`.
+
+```rust
+// vani-lang: turkish
+işlev main() -> i64 {
+  olsun x: i64 = 20 + 22;
+  doğrula x == 42;
+  yazdır x;
+  dön 0;
+}
+```
+
+### Phase 13.10 — Malay (Bahasa Melayu)
+**Sibling of Indonesian.** Linguistically related but with
+distinct standardized keyword choices: `palsu` (false) vs
+Indonesian's `salah`, `awam` (pub) vs `umum`, `pemalar` vs
+`tetap`, `selari` vs `paralel`, `kaedah` vs `metode`,
+`teruskan` vs `lanjutkan`, etc.
+
+```rust
+// vani-lang: malay
+fungsi main() -> i64 {
+  biarkan x: i64 = 20 + 22;
+  pastikan x == 42;
+  cetak x;
+  kembali 0;
+}
+```
+
+### Phase 13.11 — Swahili (Kiswahili)
+**First African Tier II dialect.** Lingua franca of East
+Africa (~200M speakers). Basic Latin alphabet, SVO grammar.
+
+```rust
+// vani-lang: swahili
+kazi main() -> i64 {
+  acha x: i64 = 20 + 22;
+  thibitisha x == 42;
+  chapisha x;
+  rudi 0;
+}
+```
+
+All four print `42` on both C and LLVM backends.
+
+### Per-dialect summary
+
+| Dialect | Pattern | Diacritics | DiagLang labels |
+|---|---|---|---|
+| Polish | Latin+accents + pragma | ą/ć/ę/ł/ń/ó/ś/ź/ż | `błąd` / `uwaga` |
+| Turkish | Latin+accents + pragma | ç/ğ/ı/İ/ö/ş/ü | `hata` / `not` |
+| Malay | basic Latin (pragma only) | none | `ralat` / `nota` |
+| Swahili | basic Latin (pragma only) | none | `kosa` / `kumbuka` |
+
+### 4 new regression tests
+
+- `polish_latin_with_accents_compiles`
+- `turkish_latin_with_accents_compiles`
+- `malay_basic_latin_pragma_compiles`
+- `swahili_basic_latin_pragma_compiles`
+
+Lib ledger: **1971 lib + 54 parity** green (1967→1971 = 4 new
+regression tests). All 196 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.6 + 13.7: Italian + Modern Standard Arabic
 
 Two more dialects round out two important groupings:

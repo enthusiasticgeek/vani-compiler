@@ -27953,6 +27953,84 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn polish_latin_with_accents_compiles() {
+        // Phase 13.8 (2026-06-08): first Slavic Latin variant.
+        // Polish uses ą/ć/ę/ł/ń/ó/ś/ź/ż — natural accented forms
+        // mixed with pragma-gated pure-ASCII alternates.
+        let source = "// vani-lang: polish\n\
+                      cel \"basic Polish demo\";\n\
+                      funkcja add(a: i64, b: i64) -> i64 {\n  \
+                        zwróć a + b;\n\
+                      }\n\
+                      funkcja main() -> i64 {\n  \
+                        niech x: i64 = add(20, 22);\n  \
+                        potwierdź x == 42;\n  \
+                        udowodnij 2 + 2 == 4;\n  \
+                        drukuj x;\n  \
+                        zwróć 0;\n\
+                      }\n";
+        crate::compile(source).expect("Polish basics compile");
+    }
+
+    #[test]
+    fn turkish_latin_with_accents_compiles() {
+        // Phase 13.9 (2026-06-08): Turkic family with dotless
+        // ı / dotted İ + ç/ğ/ö/ş/ü.
+        let source = "// vani-lang: turkish\n\
+                      amaç \"basic Turkish demo\";\n\
+                      işlev add(a: i64, b: i64) -> i64 {\n  \
+                        dön a + b;\n\
+                      }\n\
+                      işlev main() -> i64 {\n  \
+                        olsun x: i64 = add(20, 22);\n  \
+                        doğrula x == 42;\n  \
+                        kanıtla 2 + 2 == 4;\n  \
+                        yazdır x;\n  \
+                        dön 0;\n\
+                      }\n";
+        crate::compile(source).expect("Turkish basics compile");
+    }
+
+    #[test]
+    fn malay_basic_latin_pragma_compiles() {
+        // Phase 13.10 (2026-06-08): sibling of Indonesian.
+        // Distinct keyword choices: palsu (false) vs salah,
+        // awam (pub) vs umum, kaedah (methods) vs metode.
+        let source = "// vani-lang: malay\n\
+                      tujuan \"basic Malay demo\";\n\
+                      fungsi add(a: i64, b: i64) -> i64 {\n  \
+                        kembali a + b;\n\
+                      }\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan x: i64 = add(20, 22);\n  \
+                        pastikan x == 42;\n  \
+                        buktikan 2 + 2 == 4;\n  \
+                        cetak x;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Malay basics compile");
+    }
+
+    #[test]
+    fn swahili_basic_latin_pragma_compiles() {
+        // Phase 13.11 (2026-06-08): first African Tier II
+        // dialect. Lingua franca of East Africa.
+        let source = "// vani-lang: swahili\n\
+                      lengo \"basic Swahili demo\";\n\
+                      kazi add(a: i64, b: i64) -> i64 {\n  \
+                        rudi a + b;\n\
+                      }\n\
+                      kazi main() -> i64 {\n  \
+                        acha x: i64 = add(20, 22);\n  \
+                        thibitisha x == 42;\n  \
+                        thibitisha_kabisa 2 + 2 == 4;\n  \
+                        chapisha x;\n  \
+                        rudi 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swahili basics compile");
+    }
+
+    #[test]
     fn italian_basic_latin_pragma_compiles() {
         // Phase 13.6 (2026-06-08): fifth Latin-with-accents
         // dialect (Romance family complete: Spanish + French +

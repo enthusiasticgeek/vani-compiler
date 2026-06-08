@@ -1056,6 +1056,344 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.8 (2026-06-08): Polish (polski) keyword resolution.
+/// Sixth Latin-with-accents Tier II dialect, first Slavic Latin
+/// variant. This table holds the natural non-ASCII keyword
+/// forms (uses ą/ć/ę/ł/ń/ó/ś/ź/ż); pure-ASCII forms live in
+/// `polish_ascii_keyword` and are pragma-gated.
+fn polish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "wróć" => TokenKind::Return,          // wruć (return)
+        "zwróć" => TokenKind::Return,         // zwruć (return)
+        "jeśli" => TokenKind::If,             // jeshli (if)
+        "dopóki" => TokenKind::While,         // dopuki (while / as long as)
+        "potwierdź" => TokenKind::Assert,     // potvyerdż (confirm)
+        "fałsz" => TokenKind::False,          // fawsh (false)
+        "równoległy" => TokenKind::Parallel,  // ruvnowegwy (parallel)
+        "spróbuj" => TokenKind::Try,          // spruboy (try!)
+        "połącz" => TokenKind::Join,          // powunch (join!)
+        "zewnętrzny" => TokenKind::Extern,    // zevnentshny (external)
+        "stała" => TokenKind::Const,          // stawa (constant)
+        "moduł" => TokenKind::Module,         // moduw (module)
+        "użyj" => TokenKind::Use,             // uzhyy (use!)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.8 (2026-06-08): pure-ASCII Polish keyword table.
+/// Pragma-gated.
+fn polish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "funkcja" => TokenKind::Fn,           // function
+        "niech" => TokenKind::Let,            // let
+        "struktura" => TokenKind::Struct,     // structure
+        "wyliczenie" => TokenKind::Enum,      // enumeration
+        "stala" => TokenKind::Const,          // constant (no diacritic alt)
+        // === VISIBILITY / MODULES ===
+        "publiczny" => TokenKind::Pub,        // public
+        "modul" => TokenKind::Module,         // module (no diacritic alt)
+        "uzyj" => TokenKind::Use,             // use (no diacritic alt)
+        "jako" => TokenKind::As,              // as
+        // === CONTROL FLOW ===
+        "zwroc" => TokenKind::Return,         // return (no diacritic alt)
+        "wroc" => TokenKind::Return,          // return (no diacritic alt)
+        "jesli" => TokenKind::If,             // if (no diacritic alt)
+        "inaczej" => TokenKind::Else,         // else / otherwise
+        "dopoki" => TokenKind::While,         // while (no diacritic alt)
+        "dla" => TokenKind::For,              // for
+        "w" => TokenKind::In,                 // in (single char — pragma-gated safe)
+        "od" => TokenKind::From,              // from
+        "przerwij" => TokenKind::Break,       // break
+        "kontynuuj" => TokenKind::Continue,   // continue
+        "wtedy" => TokenKind::Then,           // then
+        // === REFS / MUT ===
+        "zobacz" => TokenKind::Ref,           // see
+        "zmienny" => TokenKind::Mut,          // variable / mutable
+        // === MATCH ===
+        "dopasuj" => TokenKind::Match,        // match!
+        // === VERIFICATION ===
+        "potwierdz" => TokenKind::Assert,     // confirm (no diacritic alt)
+        "udowodnij" => TokenKind::Prove,      // prove!
+        "wymaga" => TokenKind::Requires,      // requires
+        "gwarantuje" => TokenKind::Ensures,   // guarantees
+        // === BOOL / PRINT ===
+        "prawda" => TokenKind::True,          // true / truth
+        "falsz" => TokenKind::False,          // false (no diacritic alt)
+        "drukuj" => TokenKind::Print,         // print!
+        "wypisz" => TokenKind::Print,         // write out (alt)
+        // === PURITY / PARALLEL ===
+        "czysty" => TokenKind::Pure,          // pure
+        "rownolegly" => TokenKind::Parallel,  // parallel (no diacritic alt)
+        // === INTERFACES / METHODS ===
+        "interfejs" => TokenKind::Interface,  // interface
+        "zaimplementuj" => TokenKind::Implement, // implement!
+        "metody" => TokenKind::Methods,       // methods
+        // === BOUNDS ===
+        "gdzie" => TokenKind::Where,          // where
+        "jest" => TokenKind::Is,              // is
+        // === CONCURRENCY ===
+        "sprobuj" => TokenKind::Try,          // try (no diacritic alt)
+        "zadanie" => TokenKind::Task,         // task
+        "polacz" => TokenKind::Join,          // join (no diacritic alt)
+        // === EMBEDDED ===
+        "niebezpieczny" => TokenKind::Unsafe, // unsafe
+        // === SOV-S7 PARITY ===
+        "cel" => TokenKind::Intent,           // goal
+        "intencja" => TokenKind::Intent,      // intent (alt)
+        "typ" => TokenKind::Type,             // type
+        "zewnetrzny" => TokenKind::Extern,    // external (no diacritic alt)
+        "niezmienny" => TokenKind::Invariant, // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.9 (2026-06-08): Turkish (Türkçe) keyword resolution.
+/// Seventh Latin-with-accents Tier II dialect, Turkic family.
+/// Distinctive dotless ı / dotted İ + ç/ğ/ö/ş/ü diacritics.
+fn turkish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "işlev" => TokenKind::Fn,             // ishlev (function)
+        "dön" => TokenKind::Return,           // don (return!)
+        "döndür" => TokenKind::Return,        // dondur (return - causative)
+        "eğer" => TokenKind::If,              // eyer (if)
+        "için" => TokenKind::For,             // ichin (for)
+        "içinde" => TokenKind::In,            // ichinde (inside)
+        "kır" => TokenKind::Break,            // kir (break!)
+        "gör" => TokenKind::Ref,              // gor (see)
+        "değişken" => TokenKind::Mut,         // deyishken (variable)
+        "eşle" => TokenKind::Match,           // eshle (match!)
+        "doğrula" => TokenKind::Assert,       // dogrula (verify!)
+        "kanıtla" => TokenKind::Prove,        // kanitla (prove!)
+        "doğru" => TokenKind::True,           // dogru (true / correct)
+        "yanlış" => TokenKind::False,         // yanlish (false / wrong)
+        "yazdır" => TokenKind::Print,         // yazdir (write out!)
+        "arayüz" => TokenKind::Interface,     // arayuz (interface)
+        "görev" => TokenKind::Task,           // gorev (task)
+        "birleştir" => TokenKind::Join,       // birleshtir (join!)
+        "güvensiz" => TokenKind::Unsafe,      // guvensiz (unsafe)
+        "bölge" => TokenKind::RegionKw,       // bolge (region)
+        "amaç" => TokenKind::Intent,          // amach (goal)
+        "dış" => TokenKind::Extern,           // dish (external)
+        "değişmez" => TokenKind::Invariant,   // deyishmez (unchanging)
+        "yapı" => TokenKind::Struct,          // yapi (structure)
+        "sıralama" => TokenKind::Enum,        // siralama (enumeration)
+        "modül" => TokenKind::Module,         // modul (module)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.9 (2026-06-08): pure-ASCII Turkish keyword table.
+/// Pragma-gated.
+fn turkish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "fonksiyon" => TokenKind::Fn,         // function (loanword alt)
+        "olsun" => TokenKind::Let,            // "let it be"
+        "yapi" => TokenKind::Struct,          // structure (no diacritic)
+        "siralama" => TokenKind::Enum,        // enumeration (no diacritic)
+        "sabit" => TokenKind::Const,          // constant / fixed
+        // === VISIBILITY / MODULES ===
+        "genel" => TokenKind::Pub,            // general / public
+        "modul" => TokenKind::Module,         // module (no diacritic)
+        "kullan" => TokenKind::Use,           // use
+        "olarak" => TokenKind::As,            // as
+        // === CONTROL FLOW ===
+        "geri" => TokenKind::Return,          // back (alt simplification)
+        "don" => TokenKind::Return,           // return (no diacritic)
+        "yoksa" => TokenKind::Else,           // else / otherwise
+        "iken" => TokenKind::While,           // while
+        "icin" => TokenKind::For,             // for (no diacritic)
+        "den" => TokenKind::From,             // from
+        "kadar" => TokenKind::To,             // until
+        "kir" => TokenKind::Break,            // break (no diacritic)
+        "devam" => TokenKind::Continue,       // continue
+        // === REFS / MUT ===
+        "degisken" => TokenKind::Mut,         // mutable (no diacritic)
+        // === MATCH ===
+        "esle" => TokenKind::Match,           // match (no diacritic)
+        // === VERIFICATION ===
+        "dogrula" => TokenKind::Assert,       // assert (no diacritic)
+        "kanitla" => TokenKind::Prove,        // prove (no diacritic)
+        "gerek" => TokenKind::Requires,       // requires
+        "garanti" => TokenKind::Ensures,      // guarantee (loanword)
+        // === BOOL / PRINT ===
+        "dogru" => TokenKind::True,           // true (no diacritic)
+        "yanlis" => TokenKind::False,         // false (no diacritic)
+        "yazdir" => TokenKind::Print,         // print (no diacritic)
+        // === PURITY / PARALLEL ===
+        "saf" => TokenKind::Pure,             // pure
+        "paralel" => TokenKind::Parallel,     // parallel
+        // === INTERFACES / METHODS ===
+        "arayuz" => TokenKind::Interface,     // interface (no diacritic)
+        "uygula" => TokenKind::Implement,     // implement
+        "metotlar" => TokenKind::Methods,     // methods
+        // === BOUNDS ===
+        "nerede" => TokenKind::Where,         // where
+        "olur" => TokenKind::Is,              // is / becomes
+        // === CONCURRENCY ===
+        "dene" => TokenKind::Try,             // try
+        "gorev" => TokenKind::Task,           // task (no diacritic)
+        // === EMBEDDED ===
+        "guvensiz" => TokenKind::Unsafe,      // unsafe (no diacritic)
+        "bolge" => TokenKind::RegionKw,       // region (no diacritic)
+        // === SOV-S7 PARITY ===
+        "amac" => TokenKind::Intent,          // goal (no diacritic)
+        "tip" => TokenKind::Type,             // type
+        "dis" => TokenKind::Extern,           // external (no diacritic)
+        "degismez" => TokenKind::Invariant,   // invariant (no diacritic)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.10 (2026-06-08): Malay (Bahasa Melayu) keyword
+/// resolution. Second basic-Latin Tier II dialect after
+/// Indonesian. Linguistically closely related to Indonesian
+/// (mutually intelligible at the spoken level) but has its
+/// own keyword preferences and a distinct standardized form.
+fn malay_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "fungsi" => TokenKind::Fn,            // function (shared with Indonesian)
+        "biarkan" => TokenKind::Let,          // let it be
+        "struktur" => TokenKind::Struct,      // structure
+        "penghitungan" => TokenKind::Enum,    // enumeration
+        "pemalar" => TokenKind::Const,        // constant (Malay distinct from Indo)
+        // === VISIBILITY / MODULES ===
+        "awam" => TokenKind::Pub,             // public (Malay)
+        "modul" => TokenKind::Module,         // module
+        "guna" => TokenKind::Use,             // use
+        "sebagai" => TokenKind::As,           // as
+        // === CONTROL FLOW ===
+        "kembali" => TokenKind::Return,       // return
+        "jika" => TokenKind::If,              // if
+        "selainnya" => TokenKind::Else,       // else
+        "selama" => TokenKind::While,         // while
+        "untuk" => TokenKind::For,            // for
+        "dalam" => TokenKind::In,             // in
+        "dari" => TokenKind::From,            // from
+        "hingga" => TokenKind::To,            // until
+        "berhenti" => TokenKind::Break,       // stop
+        "teruskan" => TokenKind::Continue,    // continue (Malay)
+        "maka" => TokenKind::Then,            // then
+        // === REFS / MUT ===
+        "lihat" => TokenKind::Ref,            // see
+        "berubah" => TokenKind::Mut,          // changing
+        // === MATCH ===
+        "padan" => TokenKind::Match,          // match (Malay)
+        // === VERIFICATION ===
+        "pastikan" => TokenKind::Assert,      // make sure
+        "buktikan" => TokenKind::Prove,       // prove
+        "memerlukan" => TokenKind::Requires,  // requires (Malay)
+        "menjamin" => TokenKind::Ensures,     // guarantees (Malay)
+        // === BOOL / PRINT ===
+        "benar" => TokenKind::True,           // true
+        "palsu" => TokenKind::False,          // false (Malay; Indo uses `salah`)
+        "cetak" => TokenKind::Print,          // print
+        "tulis" => TokenKind::Print,          // write
+        // === PURITY / PARALLEL ===
+        "tulen" => TokenKind::Pure,           // pure (Malay)
+        "selari" => TokenKind::Parallel,      // parallel (Malay)
+        // === INTERFACES / METHODS ===
+        "antaramuka" => TokenKind::Interface, // interface (Malay)
+        "laksanakan" => TokenKind::Implement, // implement (Malay)
+        "kaedah" => TokenKind::Methods,       // methods (Malay)
+        // === BOUNDS ===
+        "tempat" => TokenKind::Where,         // place / where (Malay)
+        "adalah" => TokenKind::Is,            // is
+        // === CONCURRENCY ===
+        "cuba" => TokenKind::Try,             // try (Malay)
+        "tugasan" => TokenKind::Task,         // task (Malay)
+        "gabung" => TokenKind::Join,          // join
+        // === EMBEDDED ===
+        "tidakselamat" => TokenKind::Unsafe,  // unsafe (compound)
+        "kawasan" => TokenKind::RegionKw,     // region (Malay)
+        // === SOV-S7 PARITY ===
+        "tujuan" => TokenKind::Intent,        // purpose / intent
+        "jenis" => TokenKind::Type,           // type / kind
+        "luaran" => TokenKind::Extern,        // external (Malay)
+        "tetap" => TokenKind::Invariant,      // fixed
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.11 (2026-06-08): Swahili (Kiswahili) keyword
+/// resolution. First African Tier II dialect, lingua franca of
+/// East Africa. Basic Latin alphabet, SVO grammar.
+fn swahili_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "kazi" => TokenKind::Fn,              // work / function
+        "acha" => TokenKind::Let,             // let
+        "muundo" => TokenKind::Struct,        // structure
+        "orodha" => TokenKind::Enum,          // list / enumeration
+        "thabiti" => TokenKind::Const,        // constant / fixed
+        // === VISIBILITY / MODULES ===
+        "umma" => TokenKind::Pub,             // public / community
+        "moduli" => TokenKind::Module,        // module (loanword)
+        "tumia" => TokenKind::Use,            // use!
+        "kama" => TokenKind::As,              // as / like
+        // === CONTROL FLOW ===
+        "rudi" => TokenKind::Return,          // return!
+        "kama_ni" => TokenKind::If,           // if it is — compound
+        "ikiwa" => TokenKind::If,             // if (alt)
+        "vinginevyo" => TokenKind::Else,      // otherwise
+        "wakati" => TokenKind::While,         // while / during
+        "kwa" => TokenKind::For,              // for
+        "ndani" => TokenKind::In,             // inside
+        "kutoka" => TokenKind::From,          // from
+        "hadi" => TokenKind::To,              // to / until
+        "vunja" => TokenKind::Break,          // break!
+        "endelea" => TokenKind::Continue,     // continue!
+        "kisha" => TokenKind::Then,           // then
+        // === REFS / MUT ===
+        "tazama" => TokenKind::Ref,           // look at!
+        "badilika" => TokenKind::Mut,         // changeable
+        // === MATCH ===
+        "linganisha" => TokenKind::Match,     // match / compare
+        // === VERIFICATION ===
+        "thibitisha" => TokenKind::Assert,    // verify!
+        "thibitisha_kuwa" => TokenKind::Prove, // prove that — compound; use single
+        "thibitisha_kabisa" => TokenKind::Prove, // prove completely (alt)
+        "hitaji" => TokenKind::Requires,      // need
+        "hakikisha" => TokenKind::Ensures,    // ensure
+        // === BOOL / PRINT ===
+        "kweli" => TokenKind::True,           // true
+        "uongo" => TokenKind::False,          // false / lie
+        "chapisha" => TokenKind::Print,       // print!
+        "andika" => TokenKind::Print,         // write!
+        // === PURITY / PARALLEL ===
+        "safi" => TokenKind::Pure,            // pure / clean
+        "sambamba" => TokenKind::Parallel,    // parallel
+        // === INTERFACES / METHODS ===
+        "kiolesura" => TokenKind::Interface,  // interface
+        "tekeleza" => TokenKind::Implement,   // implement / execute
+        "njia" => TokenKind::Methods,         // ways / methods
+        // === BOUNDS ===
+        "wapi" => TokenKind::Where,           // where
+        "ni" => TokenKind::Is,                // is
+        // === CONCURRENCY ===
+        "jaribu" => TokenKind::Try,           // try!
+        "jukumu" => TokenKind::Task,          // task / responsibility
+        "unganisha" => TokenKind::Join,       // join / connect
+        // === EMBEDDED ===
+        "hatari" => TokenKind::Unsafe,        // danger / unsafe
+        "eneo" => TokenKind::RegionKw,        // region / area
+        // === SOV-S7 PARITY ===
+        "lengo" => TokenKind::Intent,         // goal
+        "aina" => TokenKind::Type,            // type / kind
+        "nje" => TokenKind::Extern,           // outside / external
+        "isiyobadilika" => TokenKind::Invariant, // unchanging
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.6 (2026-06-08): Italian (italiano) keyword
 /// resolution. Italian keyword surface is mostly pure ASCII —
 /// the only natural non-ASCII keyword would be `è` (single-char
@@ -2528,6 +2866,26 @@ enum DialectLang {
     // Native Arabic vocabulary on the existing Script::Arabic
     // infrastructure. SVO/VSO grammar; v1 ships keyword-first.
     Arabic,
+    // Phase 13.8 (2026-06-08): Polish (polski) — sixth
+    // Latin-with-accents Tier II dialect. First Slavic Latin
+    // variant. Polish uses extensive diacritics: ą/ć/ę/ł/ń/ó/ś/ź/ż
+    // — natural non-ASCII keyword forms exist for many words.
+    Polish,
+    // Phase 13.9 (2026-06-08): Turkish (Türkçe) — seventh
+    // Latin-with-accents dialect, Turkic family. Distinctive
+    // dotless ı / dotted İ + ç/ğ/ö/ş/ü diacritics. Agglutinative
+    // but v1 keyword set is small enough that the SVO-ish
+    // surface works keyword-first.
+    Turkish,
+    // Phase 13.10 (2026-06-08): Malay (Bahasa Melayu) — second
+    // basic-Latin Tier II dialect after Indonesian. Closely
+    // related to Indonesian linguistically; sibling pragma-
+    // gated keyword set.
+    Malay,
+    // Phase 13.11 (2026-06-08): Swahili (Kiswahili) — first
+    // African Tier II dialect. Basic Latin alphabet, SVO
+    // grammar, lingua franca of East Africa.
+    Swahili,
 }
 
 impl DialectLang {
@@ -2567,6 +2925,10 @@ impl DialectLang {
             DialectLang::Hebrew => "hebrew",
             DialectLang::Italian => "italian",
             DialectLang::Arabic => "arabic",
+            DialectLang::Polish => "polish",
+            DialectLang::Turkish => "turkish",
+            DialectLang::Malay => "malay",
+            DialectLang::Swahili => "swahili",
         }
     }
 
@@ -2618,6 +2980,10 @@ impl DialectLang {
             DialectLang::Hebrew => Script::Hebrew,
             DialectLang::Italian => Script::Latin,
             DialectLang::Arabic => Script::Arabic,
+            DialectLang::Polish => Script::Latin,
+            DialectLang::Turkish => Script::Latin,
+            DialectLang::Malay => Script::Latin,
+            DialectLang::Swahili => Script::Latin,
         }
     }
 }
@@ -2886,6 +3252,20 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // distinct from the shipped Perso-Arabic dialects.
             "arabic" | "العربية" | "arabi" | "ar"
                 => Some(DialectLang::Arabic),
+            // Phase 13.8 (2026-06-08): sixth Latin-with-accents
+            // — first Slavic Latin dialect.
+            "polish" | "polski" | "pl" => Some(DialectLang::Polish),
+            // Phase 13.9 (2026-06-08): seventh Latin-with-accents
+            // — Turkic family.
+            "turkish" | "türkçe" | "turkce" | "tr"
+                => Some(DialectLang::Turkish),
+            // Phase 13.10 (2026-06-08): second basic-Latin
+            // (after Indonesian).
+            "malay" | "melayu" | "bahasa-melayu" | "ms"
+                => Some(DialectLang::Malay),
+            // Phase 13.11 (2026-06-08): first African dialect.
+            "swahili" | "kiswahili" | "sw"
+                => Some(DialectLang::Swahili),
             _ => None,
         };
     }
@@ -3701,6 +4081,11 @@ impl<'a> Lexer<'a> {
             // dialects; native Arabic vocabulary on the same
             // Script::Arabic infrastructure.
             .or_else(|| arabic_keyword(text))
+            // Phase 13.8/13.9 (2026-06-08): Polish + Turkish
+            // non-ASCII forms via the lex_unicode_ident entry
+            // when keywords start with a diacritic letter.
+            .or_else(|| polish_keyword(text))
+            .or_else(|| turkish_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -3857,6 +4242,8 @@ impl<'a> Lexer<'a> {
                 .or_else(|| french_keyword(text))
                 .or_else(|| german_keyword(text))
                 .or_else(|| portuguese_keyword(text))
+                .or_else(|| polish_keyword(text))
+                .or_else(|| turkish_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -3874,6 +4261,10 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Portuguese) => portuguese_ascii_keyword(text),
                     Some(DialectLang::Indonesian) => indonesian_ascii_keyword(text),
                     Some(DialectLang::Italian) => italian_ascii_keyword(text),
+                    Some(DialectLang::Polish) => polish_ascii_keyword(text),
+                    Some(DialectLang::Turkish) => turkish_ascii_keyword(text),
+                    Some(DialectLang::Malay) => malay_ascii_keyword(text),
+                    Some(DialectLang::Swahili) => swahili_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

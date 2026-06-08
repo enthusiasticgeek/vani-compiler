@@ -1,0 +1,31 @@
+// श्री।
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/basics.vani                          # LLVM
+//   vanic run examples/language/turkish/basics.vani --backend=c              # C
+//
+// Phase 13.9 v1: seventh Latin-with-accents Tier II dialect —
+// Turkic family. Distinctive dotless ı / dotted İ + ç/ğ/ö/ş/ü.
+
+amaç "Compute a small score with checked constraints";
+
+işlev add(a: i64, b: i64) -> i64 {
+  dön a + b;
+}
+
+işlev bounded_score(base: i64) -> i64
+gerek base >= 0;
+{
+  olsun doubled: i64 = base * 2;
+  doğrula doubled >= base;
+  dön add(doubled, 2);
+}
+
+işlev main() -> i64 {
+  olsun answer = bounded_score(20);
+  kanıtla 2 + 2 == 4;
+  doğrula answer >= 0;
+  yazdır answer;
+  dön 0;
+}

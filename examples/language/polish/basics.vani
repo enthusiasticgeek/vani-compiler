@@ -1,0 +1,33 @@
+// श्री।
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/basics.vani                          # LLVM
+//   vanic run examples/language/polish/basics.vani --backend=c              # C
+//
+// Phase 13.8 v1: sixth Latin-with-accents Tier II dialect — first
+// Slavic Latin variant. Polish uses extensive diacritics
+// (ą/ć/ę/ł/ń/ó/ś/ź/ż) so natural keywords mix accented forms
+// with pragma-gated pure-ASCII alternates.
+
+cel "Compute a small score with checked constraints";
+
+funkcja add(a: i64, b: i64) -> i64 {
+  zwróć a + b;
+}
+
+funkcja bounded_score(base: i64) -> i64
+wymaga base >= 0;
+{
+  niech doubled: i64 = base * 2;
+  potwierdź doubled >= base;
+  zwróć add(doubled, 2);
+}
+
+funkcja main() -> i64 {
+  niech answer = bounded_score(20);
+  udowodnij 2 + 2 == 4;
+  potwierdź answer >= 0;
+  drukuj answer;
+  zwróć 0;
+}
