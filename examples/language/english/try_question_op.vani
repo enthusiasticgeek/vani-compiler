@@ -1,0 +1,66 @@
+// build & run:
+//   vanic run examples/language/english/try_question_op.vani                  # LLVM
+//   vanic run examples/language/english/try_question_op.vani --backend=c      # C
+
+intent "Arc 8 v3.1 sugar: postfix `?` operator over `try`";
+
+// The postfix `?` operator is pure parse-time sugar over the
+// existing `try EXPR` keyword (T2.6 phase 2). `EXPR?` builds the
+// same `Try` AST node the keyword form produces, so all of try's
+// narrow-gate restrictions apply unchanged:
+//   - Allowed only as the RHS of the FIRST `let` in a function body
+//   - Function body must end with `return EXPR;`
+//   - The target enum must have exactly one payloaded variant
+//     (e.g. `Some(T)`) and one payload-less variant (e.g. `None`)
+//
+// Two forms now mean the same thing:
+//   let v: i64 = try o;       // keyword (still supported)
+//   let v: i64 = o?;          // postfix (this example)
+
+enum Opt { Some(i64), None }
+
+// Pure propagation via postfix `?` — extract `o`, double, re-wrap.
+// Short-circuits None.
+fn doubled_q(o: Opt) -> Opt {
+  let v: i64 = o?;
+  return Opt.Some(v * 2);
+}
+
+// Mixed style: the first `let` uses `?`, intermediate `let`s and
+// print stmts thread through, final `return` re-wraps.
+fn pipeline_q(o: Opt) -> Opt {
+  let v: i64 = o?;
+  let doubled_v: i64 = v * 2;
+  let plus_hundred: i64 = doubled_v + 100;
+  return Opt.Some(plus_hundred);
+}
+
+fn unwrap_or(o: Opt, def: i64) -> i64 {
+  return match o {
+    Opt.Some(v) then v,
+    Opt.None then def,
+  };
+}
+
+fn main() -> i64 {
+  // Some(5)? → 10, re-wrapped Some(10).
+  let a: Opt = doubled_q(Opt.Some(5));
+  assert unwrap_or(a, 0) == 10;
+
+  // None? short-circuits and returns Opt.None.
+  let b: Opt = doubled_q(Opt.None);
+  assert unwrap_or(b, 99) == 99;
+
+  // Pipeline form: 5 → 10 → 110, with `?` propagating None.
+  let c: Opt = pipeline_q(Opt.Some(5));
+  assert unwrap_or(c, 0) == 110;
+
+  let d: Opt = pipeline_q(Opt.None);
+  assert unwrap_or(d, 99) == 99;
+
+  print "doubled_q(Some(5)) =", unwrap_or(a, 0);
+  print "doubled_q(None) defaulted to", unwrap_or(b, 99);
+  print "pipeline_q(Some(5)) =", unwrap_or(c, 0);
+  print "pipeline_q(None) defaulted to", unwrap_or(d, 99);
+  return 0;
+}

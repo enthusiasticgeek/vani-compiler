@@ -1,0 +1,82 @@
+// Arc 8 v3.1 sugar — postfix `?` operator inside an async fn.
+//
+// Mirrors echo_p24_try_keyword.vani except the `try maybe_size(mode)`
+// line is written as `maybe_size(mode)?`. The parser produces the
+// same `ExprKind::Try` AST node, so `desugar_try_in_v31_body` (Phase
+// 2.4) handles both forms identically. This example exercises the
+// async-fn path end-to-end.
+//
+// build & run:
+//   vanic run examples/language/english/echo_p24_question_op.vani                # LLVM
+//   vanic run examples/language/english/echo_p24_question_op.vani --backend=c    # C
+
+intent "Arc 8 v3.1 sugar — postfix `?` in async fn body";
+
+enum FetchResult { Ok(i64), Err(i64) }
+
+fn maybe_size(mode: i64) -> FetchResult {
+  return match mode {
+    0 then FetchResult.Ok(64),
+    1 then FetchResult.Ok(32),
+    _ then FetchResult.Err(0 - 99)
+  };
+}
+
+async fn fetch(fd: i64, mode: i64) -> FetchResult {
+  // `maybe_size(mode)?` — postfix `?` desugars to `try maybe_size(mode)`.
+  let size: i64 = maybe_size(mode)?;
+  let n: i64 = io_recv_async(fd, size);
+  return FetchResult.Ok(n);
+}
+
+fn drive(ep: i64, t: mut ref Task__fetch) -> FetchResult {
+  while true {
+    let r: i64 = __poll_fetch(t);
+    if r == 0 { return t.__result; }
+    if r == 0 - 1 { return FetchResult.Err(0 - 1); }
+    let _ = epoll_wait_one(ep, 1000);
+  }
+  return FetchResult.Err(0);
+}
+
+fn result_to_i64(r: FetchResult) -> i64 {
+  return match r {
+    FetchResult.Ok(v) then v,
+    FetchResult.Err(e) then e
+  };
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ok");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // mode=0 — `?` succeeds, recv runs, async fn returns Ok(2).
+  let t0: Task__fetch = fetch(cfd, 0);
+  let r0: FetchResult = drive(ep, mut ref t0);
+  print "fetch(0) (?-succeeds):", result_to_i64(r0);
+
+  // mode=99 — `?` propagates Err(-99) without entering the suspend.
+  let t9: Task__fetch = fetch(cfd, 99);
+  let r9: FetchResult = drive(ep, mut ref t9);
+  print "fetch(99) (?-propagates):", result_to_i64(r9);
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

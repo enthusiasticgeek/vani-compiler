@@ -10,7 +10,66 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 🟢 Session 2026-06-08 (cont.) — L2 Phase 3b: Box\<dyn Iface\> LLVM parity
+## 🟢 Session 2026-06-08 (cont.) — Arc 8 v3.1 sugar: postfix `?` operator
+
+The `?` postfix operator joins the `try` keyword as a parse-time
+alias for Option / Result propagation. `EXPR?` and `try EXPR`
+build the *same* `ExprKind::Try` AST node, so every downstream
+pass — the synchronous-fn `desugar_try_let_in_program` pre-pass,
+the async-fn `desugar_try_in_v31_body` (Phase 2.4), and the
+checker's narrow-gate diagnostics — treats both spellings
+identically. The keyword form stays the default in examples;
+`?` is the Rust-style affordance for users who reach for the
+punctuation.
+
+```vani
+enum Opt { Some(i64), None }
+
+fn doubled(o: Opt) -> Opt {
+  let v: i64 = o?;           // postfix `?` — same as `try o`
+  return Opt.Some(v * 2);
+}
+
+async fn fetch(fd: i64, mode: i64) -> FetchResult {
+  let size: i64 = maybe_size(mode)?;   // works in async-fn bodies too
+  let n: i64 = io_recv_async(fd, size);
+  return FetchResult.Ok(n);
+}
+```
+
+**What shipped**:
+- New `TokenKind::Question` in `src/lexer.rs` + ASCII `?`
+  dispatch in the byte-tokenize loop.
+- Postfix arm in `parse_call_expr` (`src/parser.rs:4083+`) that
+  wraps the receiver in `ExprKind::Try { inner }`. Binds at
+  call-expr precedence so `f()?` parses as `(f())?` and
+  `EXPR + EXPR?` parses as `EXPR + (EXPR?)`.
+- Two regression tests (`postfix_question_op_parses_to_try_node`,
+  `postfix_question_op_compiles_let_try_return_pattern`) confirm
+  the AST shape + dual-backend compile.
+- Two examples:
+  - [examples/language/english/try_question_op.vani](examples/language/english/try_question_op.vani)
+    — synchronous fns mirroring `try_keyword.vani`.
+  - [examples/language/english/echo_p24_question_op.vani](examples/language/english/echo_p24_question_op.vani)
+    — async-fn variant mirroring `echo_p24_try_keyword.vani`,
+    exercising the Phase 2.4 desugar end-to-end.
+
+**Narrow-gate restrictions carry over unchanged**: `?` only works
+at the RHS of the first `let` in a function body, on a target
+enum with one payloaded + one payload-less variant, with the
+body ending in `return EXPR;`. Any violation surfaces the same
+diagnostic the keyword form produces today.
+
+**Scope note**: A4.4 (CancelToken auto-plumbing) was the original
+candidate this session but expands beyond a contained ship —
+storing `ref CancelToken` in the v3.1 Task struct hits **L4**
+(refs are second-class). Postfix `?` was picked as the
+contained Arc 8 v3.1 sugar item that flows entirely through
+existing IR + backend lowering.
+
+Lib ledger: **2002 lib** green (+2 from prior 2000).
+
+## 🟢 Session 2026-06-08 (earlier) — L2 Phase 3b: Box\<dyn Iface\> LLVM parity
 
 LLVM backend reaches parity with C for `Box<dyn Iface>`. The
 Phase 3 pre-codegen gate (which directed users to

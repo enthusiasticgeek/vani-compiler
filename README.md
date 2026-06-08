@@ -957,7 +957,7 @@ on the left will compile on the right with identical generated code:
 | `Vec::with_capacity(n)` | `vec_with_capacity(n)` | free function — no path |
 | `impl Drop for T` | `implement Drop for T` | auto-called at scope exit |
 | `match Some(x) => …` | `match Opt.Some(x) then …` | `then` instead of `=>` |
-| `xs?` (try operator) | `try expr` (keyword form) | Option / Result early-return |
+| `xs?` (try operator) | `try expr` *or* `expr?` | both spellings share one AST node |
 | `loop { … }` | `while true { … }` | one looping construct |
 | `for x in &xs` | `for x in ref xs` | borrow at the loop header |
 | `mod foo { … }` | `module foo { … }` | `mod` accepted as alias |
@@ -1322,11 +1322,15 @@ Supported today (800 lib + 47 e2e tests passing):
   scrutinee patterns are gated.
 - **Block expressions** `let r = { let a = …; let b = …; a + b };` — Let
   stmts followed by a tail expression. Inner shadows don't leak.
-- **`try EXPR`** — Option/Result-like error-propagation sugar. In a
-  function whose return type is a payloaded enum, `let v: T = try opt;`
-  extracts the payload or short-circuits the function with the
-  payload-less variant. Restricted shape in v1 (let-try as first stmt,
-  intermediate lets, return) — see [examples/try_keyword.vani](examples/try_keyword.vani).
+- **`try EXPR` / `EXPR?`** — Option/Result-like error-propagation sugar.
+  In a function whose return type is a payloaded enum, both
+  `let v: T = try opt;` and `let v: T = opt?;` extract the payload or
+  short-circuit the function with the payload-less variant. The postfix
+  `?` form is pure parse-time sugar — it builds the same `ExprKind::Try`
+  AST node, so narrow-gate restrictions (let-try as first stmt,
+  intermediate lets, return) apply identically. See
+  [examples/language/english/try_keyword.vani](examples/language/english/try_keyword.vani) (keyword form)
+  and [examples/language/english/try_question_op.vani](examples/language/english/try_question_op.vani) (`?` form).
 - Short-circuit `&&` and `||` honor compile-time const folding —
   `false && (provably-bad)` and `true || (provably-bad)` compile cleanly.
 - Lexical scoping: inner `let x` shadowing of an outer same-name binding

@@ -4087,6 +4087,22 @@ impl Parser {
                         ));
                     }
                 }
+            } else if let Some(q) =
+                self.match_token(|k| matches!(k, TokenKind::Question))
+            {
+                // Postfix `?` — sugar for `try EXPR`. Builds the
+                // same `ExprKind::Try` node the keyword form
+                // produces, so the existing `desugar_try_in_v31_body`
+                // (Arc 8 Phase 2.4) and the synchronous-fn `try`
+                // desugar handle it identically. Narrow-gate
+                // restrictions (Option-like enum, first-let-RHS
+                // position) apply unchanged — diagnostics surface
+                // through the same checker path.
+                let span = expr.span.merge(q.span);
+                expr = Expr {
+                    kind: ExprKind::Try { inner: Box::new(expr) },
+                    span,
+                };
             } else {
                 return Ok(expr);
             }

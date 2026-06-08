@@ -195,7 +195,7 @@ coverage.
 |---|---|---|---|
 | ~~L2 Phase 3b — Box\<dyn Iface\> on LLVM~~ | ✅ shipped 2026-06-08 | — | Mirrored the C lowering on LLVM end-to-end. L2 is now fully closed. Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>` remains as a small optional follow-up. |
 | **Phase 10.2 Mandarin** | 30-50h | None (independent). The CJK Unified Ideographs block is reachable today; what's missing is the segmentation arc. | CJK Unified Ideographs without whitespace word boundaries — needs lookahead-based dictionary-driven segmentation. Distinct from Phase 9b Japanese which has Hiragana particles as natural separators. |
-| **Arc 8 v3.1 sugar** | 25-40h | Arc 8 v1/v2/v3 runtime (✅ shipped). | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. The underlying capability + v3 hand-rolled state-machine pattern already ship; this is the ergonomic compiler transform. |
+| **Arc 8 v3.1 sugar** | 20-35h | Arc 8 v1/v2/v3 runtime (✅ shipped). | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. The underlying capability + v3 hand-rolled state-machine pattern already ship; this is the ergonomic compiler transform. Postfix `?` operator landed 2026-06-08 (parses to same `ExprKind::Try` as the keyword — see STATUS.md current session); A4.4 (CancelToken auto-plumbing) is blocked on L4 (refs-in-fields); A4.3 (multi-task scheduling) remains the next dedicated arc. |
 
 ### 🌏 Language rollout — DONE (refreshed 2026-06-08)
 

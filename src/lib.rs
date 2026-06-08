@@ -2381,6 +2381,50 @@ mod tests {
     }
 
     #[test]
+    fn postfix_question_op_parses_to_try_node() {
+        // Arc 8 v3.1 sugar: postfix `?` is parse-time sugar
+        // over the existing `try` keyword. `EXPR?` builds the
+        // same `ExprKind::Try { inner: EXPR }` AST node so all
+        // downstream passes (desugar_try_let_in_program,
+        // desugar_try_in_v31_body, checker narrow-gate) treat
+        // both spellings identically.
+        use crate::ast::ExprKind;
+        use crate::lexer::lex;
+        use crate::parser::parse;
+        let source = "enum Opt { Some(i64), None } fn main() -> i64 { let v: i64 = o?; return v; }";
+        let tokens = lex(source).expect("lex");
+        let (program, _diags) = parse(tokens);
+        let main_fn = program.functions.iter().find(|f| f.name == "main").unwrap();
+        let let_stmt = main_fn.body.iter().find_map(|s| match s {
+            crate::ast::Stmt::Let { expr, .. } => Some(expr),
+            _ => None,
+        }).expect("let stmt");
+        assert!(
+            matches!(let_stmt.kind, ExprKind::Try { .. }),
+            "postfix `?` should produce a Try node, got {:?}",
+            let_stmt.kind
+        );
+    }
+
+    #[test]
+    fn postfix_question_op_compiles_let_try_return_pattern() {
+        // Mirrors `try_keyword_desugars_let_try_return_pattern`
+        // — same shape, `?` instead of `try`. Verifies the
+        // postfix form flows through the desugar + both backends.
+        let source = r#"
+            enum Opt { Some(i64), None }
+            fn doubled(o: Opt) -> Opt {
+              let v: i64 = o?;
+              return Opt.Some(v * 2);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("`?` should desugar like `try`");
+        compile_to_c(source).expect("C backend accepts `?` form");
+        compile_to_llvm(source).expect("LLVM backend accepts `?` form");
+    }
+
+    #[test]
     fn while_loop_between_try_and_return_compiles() {
         // Closure #238: Block-expr now accepts `while` loops
         // (with Assign / Print body), and the try desugar's

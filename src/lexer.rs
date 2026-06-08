@@ -171,6 +171,13 @@ pub enum TokenKind {
     /// `#` — start of an attribute marker (`#[bounded(N)]`,
     /// etc.). Closure #286.
     Hash,
+    /// `?` — postfix Result/Option propagation operator. Sugar
+    /// over the `try` keyword: `EXPR?` desugars to `try EXPR` at
+    /// parse time, so all of `try`'s narrow-gate restrictions
+    /// (Option-like enum, first-let-RHS position, payload-less
+    /// short-circuit) apply unchanged. Surface affordance for
+    /// users who expect Rust's `?`. Arc 8 v3.1 sugar.
+    Question,
     Arrow,
     /// `module name { ... }` — namespace declaration (closure
     /// #242). vāṇī uses Rust-style modules: explicit paths
@@ -5617,6 +5624,7 @@ impl<'a> Lexer<'a> {
                 // attributes (`inline`, `deprecated`, etc.)
                 // ride the same token.
                 b'#' => self.push(TokenKind::Hash, start),
+                b'?' => self.push(TokenKind::Question, start),
                 other => {
                     return Err(Diagnostic::new(
                         Span::new(start, start + 1),
