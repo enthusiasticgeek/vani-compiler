@@ -394,17 +394,21 @@ typedef.
 bundle around the per-Iface element type at lowering time); the
 collision only happened on tree-C. The fix is C-only.
 
-### L9 — LLVM backend: identifiers with non-ASCII chars require mangling
+### L9 — LLVM backend: identifiers with non-ASCII chars ✅ SHIPPED 2026-06-08
 
 LLVM IR's bare-identifier grammar restricts characters to
-printable ASCII. Devanagari function / struct names mangle to
-`_uHHHH` (uppercase hex per codepoint) on emission.
+printable ASCII. Devanagari/Bengali/Tamil/etc. function /
+struct / local names mangle to `_uHHHH` (uppercase hex per
+codepoint) on emission via `llvm_mangle_ident` (see
+[src/backend_llvm.rs:239](../src/backend_llvm.rs)).
 
-**Why**: LLVM IR design choice, not a vāṇी limitation per se.
-
-**Workaround**: shipped — `llvm_mangle_ident` handles this
-transparently. The C backend uses UTF-8 directly. No user-
-visible change.
+**Status**: Fully shipped. Verified 2026-06-08 against
+[examples/language/sanskrit/pure_devanagari.vani](../examples/language/sanskrit/pure_devanagari.vani)
+(function name `द्विपदगुणक`, locals `वामभाग`/`दक्षिणभाग`/`मूल्य`,
+type name `पूर्णांक`) plus Marathi/Bengali examples — every
+backend path that emits an LLVM identifier routes through
+`llvm_mangle_ident`. No user-visible change; C backend uses
+UTF-8 directly.
 
 ---
 
