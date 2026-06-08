@@ -202,6 +202,19 @@ pass. Tier 4 (deploy / CI / GH-Actions) deferred to the very end.
 **Tier 1 is now empty.** Escalate to Tier 2 in a fresh
 dedicated session.
 
+### 🔮 Queued for fresh sessions (2026-06-08 end-of-session)
+
+Two substantive items investigated 2026-06-08 but deferred to
+fresh sessions with cold context. Design notes captured in
+[`docs/next_session_design.md`](docs/next_session_design.md) —
+read those before starting.
+
+| Order | Task | Effort | Notes |
+|---|---|---|---|
+| **1** | **v3.1 liveness optimization** | 6-10h, one session | Detect "state-local" v3.1 locals (declared + read entirely within one state-machine arm) and emit as poll-fn stack locals instead of Task struct fields. Saves ~8-32 bytes per Task instance. Investigation showed the implementation surface clearly: `parser.rs:7890` codegen + filter `rename` + filter Task struct field list. |
+| **2** | **L4 (B) Phase 1+2 — let-binding refs + scope-escape analyzer** | 8-12h, one session | First half of the lexical-scope-only refs lift. `let r: ref Foo = ref x;` accepted; analyzer rejects returns, struct-stores, captures that outlive the source. The analyzer is the load-bearing piece. |
+| **3** | **L4 (B) Phase 3+4 — ref struct fields + Vec elements** | 5-10h, one session | Smaller gates + tests once the analyzer ships. Lifts ref-rejection at user-struct fields + Vec elements. |
+
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
 
 | Order | Task | Effort | Dependencies |
