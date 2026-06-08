@@ -847,9 +847,20 @@ fn handle_completion(
 pub fn compute_completion(source: &str, position: Position) -> Vec<lsp_types::CompletionItem> {
     let mut items: Vec<lsp_types::CompletionItem> = Vec::new();
 
-    // Keywords + types are always available.
+    // Polish (2026-06-08): pragma-aware keyword completion. When
+    // the file declares `// vani-lang: <tag>`, surface that
+    // dialect's keywords (in addition to English — they share
+    // the same TokenKinds so the parser accepts either). Avoids
+    // dumping all 60+ dialects' keywords into every completion
+    // popup. Default (no pragma) is English-only.
+    let pragma_tag = crate::lexer::detect_pragma_tag(source);
     for kw in KEYWORDS {
         items.push(plain_completion(kw, lsp_types::CompletionItemKind::KEYWORD));
+    }
+    if let Some(tag) = pragma_tag.as_deref() {
+        for kw in dialect_keywords_for(tag) {
+            items.push(plain_completion(kw, lsp_types::CompletionItemKind::KEYWORD));
+        }
     }
     for ty in TYPE_NAMES {
         items.push(plain_completion(ty, lsp_types::CompletionItemKind::CLASS));
@@ -998,12 +1009,117 @@ fn stmt_first_span(stmt: &TypedStmt) -> Option<crate::span::Span> {
 /// always knows them even if the user is mid-edit and the
 /// document doesn't compile.
 const KEYWORDS: &[&str] = &[
-    "fn", "pure", "parallel", "reduce", "with", "task", "join",
-    "let", "return", "if", "else", "while", "break", "continue",
-    "mut", "for", "in", "intent", "use",
-    "requires", "ensures", "invariant",
-    "assert", "prove", "print",
-    "true", "false", "as",
+    // Declarations + visibility.
+    "fn", "let", "const", "struct", "enum", "type",
+    "pub", "module", "use",
+    // Control flow.
+    "return", "if", "else", "while", "break", "continue",
+    "match", "then", "for", "in", "from", "to",
+    // Refs + mutability.
+    "ref", "mut",
+    // Verification.
+    "requires", "ensures", "invariant", "assert", "prove",
+    // I/O + literals.
+    "print", "true", "false", "as",
+    // Concurrency + purity.
+    "task", "join", "pure", "parallel", "reduce", "with",
+    // Interfaces + methods.
+    "interface", "implement", "methods", "where", "is",
+    // Error-handling.
+    "try", "async",
+    // Embedded.
+    "unsafe", "region", "extern",
+    // Doc / metadata.
+    "intent",
+];
+
+/// Polish (2026-06-08): per-dialect keyword tables for LSP
+/// completion. The user's `// vani-lang: <tag>` pragma keys
+/// into this lookup so non-English dialects also surface their
+/// own keyword spellings in the autocomplete popup.
+///
+/// v1 ships Mandarin + the three Devanagari Indo-Aryan
+/// dialects (Sanskrit / Hindi / Marathi share the same
+/// keyword set in the lexer; their LSP entry returns that
+/// union). Other dialects can be wired in as users surface
+/// the need — the mechanism is just a lookup table.
+fn dialect_keywords_for(tag: &str) -> &'static [&'static str] {
+    match tag {
+        "mandarin" | "chinese" | "zh" => MANDARIN_KEYWORDS,
+        "sanskrit" | "sa" | "hindi" | "hi" | "marathi" | "mr"
+        | "nepali" | "ne" | "maithili" | "mai"
+        | "konkani" | "kok" => DEVANAGARI_KEYWORDS,
+        _ => &[],
+    }
+}
+
+/// Phase 10.2 — Mandarin Chinese (中文) keyword set. Mirrors
+/// the entries in `mandarin_keyword` in `src/lexer.rs`. Order
+/// matches the lexer file (DECLARATIONS / VISIBILITY / CONTROL
+/// FLOW / REFS / MATCH / VERIFICATION / BOOL+PRINT / PURITY /
+/// INTERFACES / BOUNDS / CONCURRENCY / EMBEDDED / SOV-S7).
+const MANDARIN_KEYWORDS: &[&str] = &[
+    "函数", "让", "结构", "结构体", "枚举", "常量",
+    "公开", "模块", "使用", "作为",
+    "返回", "如果", "否则", "当", "对于", "从", "到",
+    "中断", "继续", "那么",
+    "引用", "可变",
+    "匹配",
+    "断言", "证明", "要求", "保证", "不变量",
+    "真", "假", "打印", "输出",
+    "纯", "纯粹", "并行",
+    "接口", "实现", "方法",
+    "其中",
+    "尝试", "任务", "等待", "合并",
+    "不安全", "区域",
+    "目的", "意图", "类型", "外部",
+];
+
+/// Phase 2 — Devanagari Indo-Aryan keyword union (Sanskrit /
+/// Hindi / Marathi / Nepali / Maithili / Konkani). The lexer
+/// accepts the union of these spellings; the LSP suggests them
+/// all so a user mid-typing can pick any natural spelling.
+/// Compact list (most-used keywords); not exhaustive.
+const DEVANAGARI_KEYWORDS: &[&str] = &[
+    // Declarations.
+    "कार्य", "फलन",        // fn (Sanskrit / Hindi)
+    "माना", "मान",          // let (Sanskrit-rooted alts)
+    "संरचना",              // struct
+    "विकल्प",               // enum
+    "स्थिर",               // const
+    // Visibility / modules.
+    "सार्वजनिक",          // pub
+    "मॉड्यूल",             // module
+    "उपयोग",              // use
+    "रूप_में",            // as
+    // Control flow.
+    "पुनरागम", "वापस",    // return
+    "यदि",                 // if
+    "अन्यथा",              // else
+    "जब_तक",              // while
+    "तोड़ो", "विराम",     // break
+    "जारी",                // continue
+    "तदा",                 // then
+    "के_लिए",             // for
+    // Refs + mut.
+    "संदर्भ",              // ref
+    "परिवर्तनीय",        // mut
+    // Match.
+    "मेल", "मिलान",       // match
+    // Verification.
+    "सिद्धम्",              // assert
+    "प्रमाण",              // prove
+    "अपेक्षित",           // requires
+    "गारंटी",              // ensures
+    // Bool + print.
+    "सत्य",                // true
+    "असत्य",               // false
+    "लिख", "मुद्रण",      // print
+    // Concurrency.
+    "प्रयास",              // try
+    "कार्य_अनुसूची",    // task
+    // Intent.
+    "उद्देश्य", "लक्ष्य", // intent
 ];
 
 const TYPE_NAMES: &[&str] = &[
@@ -2567,5 +2683,57 @@ mod tests {
             "inner shadow's use leaked into outer x's references: {:?}",
             refs
         );
+    }
+
+    #[test]
+    fn completion_includes_mandarin_keywords_under_mandarin_pragma() {
+        // Polish (2026-06-08): LSP completion is pragma-aware.
+        // A file declaring `// vani-lang: mandarin` surfaces
+        // Mandarin keyword spellings alongside the English ones.
+        let src = "// vani-lang: mandarin\n函数 main() -> i64 { 返回 0; }\n";
+        let items = compute_completion(src, Position { line: 1, character: 0 });
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"函数"), "expected 函数 in completion, got: {:?}", labels);
+        assert!(labels.contains(&"返回"), "expected 返回 in completion, got: {:?}", labels);
+        // English keywords stay available — both dialects share TokenKinds.
+        assert!(labels.contains(&"fn"), "English `fn` should still appear");
+    }
+
+    #[test]
+    fn completion_includes_devanagari_keywords_under_sanskrit_pragma() {
+        let src = "// vani-lang: sanskrit\nकार्य main() -> i64 { पुनरागम 0; }\n";
+        let items = compute_completion(src, Position { line: 1, character: 0 });
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(labels.contains(&"कार्य"), "expected कार्य in completion");
+        assert!(labels.contains(&"पुनरागम"), "expected पुनरागम in completion");
+    }
+
+    #[test]
+    fn completion_default_pragma_omits_dialect_keywords() {
+        // No pragma → English-only completion. Mandarin/Devanagari
+        // keywords don't appear, so the popup stays focused.
+        let src = "fn main() -> i64 { return 0; }\n";
+        let items = compute_completion(src, Position { line: 0, character: 0 });
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(!labels.contains(&"函数"), "Mandarin should not appear without pragma");
+        assert!(!labels.contains(&"कार्य"), "Devanagari should not appear without pragma");
+        assert!(labels.contains(&"fn"), "English `fn` always present");
+    }
+
+    #[test]
+    fn completion_expanded_english_keywords_include_match_struct_enum() {
+        // The original KEYWORDS list was missing many core
+        // language keywords (match, struct, enum, etc.).
+        // Verify the expanded list covers them.
+        let src = "fn main() -> i64 { return 0; }\n";
+        let items = compute_completion(src, Position { line: 0, character: 0 });
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        for required in &["match", "struct", "enum", "try", "async", "interface", "implement", "module", "pub"] {
+            assert!(
+                labels.contains(required),
+                "expected `{}` in completion, got: {:?}",
+                required, labels
+            );
+        }
     }
 }

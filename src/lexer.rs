@@ -5027,6 +5027,31 @@ impl Script {
 /// Scan the first ~10 lines of source for a `// vani-lang: <name>`
 /// pragma comment. Returns the declared dialect when found, or
 /// None for back-compat (no pragma → script-level purity only).
+/// Public helper used by the LSP (and any downstream tool) to
+/// recover the raw `// vani-lang: <tag>` value without needing
+/// access to the `DialectLang` enum. Returns the lowercase tag
+/// (`"mandarin"`, `"sanskrit"`, etc.) or `None` when no pragma
+/// is present in the first 10 comment lines.
+pub fn detect_pragma_tag(source: &str) -> Option<String> {
+    for (i, line) in source.lines().enumerate() {
+        if i > 10 {
+            break;
+        }
+        let trimmed = line.trim_start();
+        if !trimmed.starts_with("//") {
+            continue;
+        }
+        let body = trimmed.trim_start_matches("//").trim();
+        let Some(rest) = body.strip_prefix("vani-lang:").or_else(|| {
+            body.strip_prefix("vani-lang :")
+        }) else {
+            continue;
+        };
+        return Some(rest.trim().to_ascii_lowercase());
+    }
+    None
+}
+
 fn detect_language_pragma(source: &str) -> Option<DialectLang> {
     for (i, line) in source.lines().enumerate() {
         if i > 10 {
