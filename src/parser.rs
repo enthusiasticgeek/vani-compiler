@@ -1974,6 +1974,26 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Deque(Box::new(element)));
             }
+            // L2 Phase 1 (2026-06-07): Box<T> — owning heap pointer.
+            // Affine; freed at scope exit. v1 restricts T to Copy
+            // primitives + Copy structs; the checker enforces.
+            // Lookahead: only treat `Box` as the builtin type when
+            // immediately followed by `<` (the generic open).
+            // Otherwise fall through to the regular type-name path
+            // so user code that declares `struct Box { … }` still
+            // works.
+            if name == "Box"
+                && matches!(
+                    self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                    Some(TokenKind::Less)
+                )
+            {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::Box(Box::new(element)));
+            }
             if name == "HashSet" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;

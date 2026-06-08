@@ -850,6 +850,23 @@ pub enum Type {
     /// (two pointer-sized fields). Composition-only — no
     /// inheritance, no parent-class walks. Epic A Phase 1.
     Object(String),
+    /// `Box<T>` — owning heap pointer to a sized value of type T.
+    /// Affine: each box has exactly one owner and is freed at
+    /// scope exit unless moved. Layout is a single pointer
+    /// (sizeof(*T)) at the machine level. Constructed via
+    /// `box(expr)` which performs the heap allocation and copies
+    /// `expr` into the new slot; read via `*b` unary deref;
+    /// dropped via `free(b)` at scope exit.
+    ///
+    /// v1 restrictions (L2 Phase 1, 2026-06-07):
+    /// - T must be Copy + sized (primitives + Copy structs). Box
+    ///   of an already-affine type would need recursive drop and
+    ///   is queued.
+    /// - C backend only — LLVM backend gates with a clear error
+    ///   directing users to `--backend=c`. Queued for L2 Phase 2.
+    /// - `Box<dyn Iface>` queued for L2 Phase 3 (the documented
+    ///   `struct Drawer { r: Box<dyn Renderer> }` blocker).
+    Box(Box<Type>),
     /// `Condvar` — affine handle to a kernel waiter (futex on
     /// Linux, WaitOnAddress on Windows, pthread_cond_t
     /// fallback). Pairs with `Mutex<T>` + `Guard<T>` for
@@ -1127,7 +1144,11 @@ impl Type {
             | Type::Pool(_)
             // `Region` is affine — owns the bump-allocated buffer
             // (Layer 5 v2 foundation of `unsafe.md`).
-            | Type::Region => false,
+            | Type::Region
+            // `Box<T>` is affine — owns a heap allocation that
+            // must be freed at scope exit. Copying would alias
+            // the heap pointer and double-free. L2 Phase 1.
+            | Type::Box(_) => false,
             // `Handle<T>` is Copy — two u32 fields, 8 bytes
             // total, no ownership story. The Pool owns the
             // storage; the Handle is just an opaque key.
@@ -1173,7 +1194,7 @@ impl Type {
             Type::I16 | Type::U16 => Some(16),
             Type::I32 | Type::U32 => Some(32),
             Type::I64 | Type::U64 => Some(64),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1184,7 +1205,7 @@ impl Type {
             Type::I32 => Some(i32::MIN as i128),
             Type::I64 => Some(i64::MIN as i128),
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => Some(0),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1198,7 +1219,7 @@ impl Type {
             Type::U16 => Some(u16::MAX as i128),
             Type::U32 => Some(u32::MAX as i128),
             Type::U64 => Some(u64::MAX as i128),
-            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => None,
+            Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1244,6 +1265,7 @@ impl fmt::Display for Type {
             Type::Guard(inner) => write!(formatter, "Guard<{}>", inner),
             Type::Condvar => write!(formatter, "Condvar"),
             Type::Deque(inner) => write!(formatter, "Deque<{}>", inner),
+            Type::Box(inner) => write!(formatter, "Box<{}>", inner),
             Type::HashSet(inner) => write!(formatter, "HashSet<{}>", inner),
             Type::HashMap(k, v) => write!(formatter, "HashMap<{}, {}>", k, v),
             Type::BTreeSet(inner) => write!(formatter, "BTreeSet<{}>", inner),

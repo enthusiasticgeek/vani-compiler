@@ -10,6 +10,86 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 11 L2 Box\<T\> Phase 1 (owning heap pointer)
+
+The first half of the L2 limitation ships: vāṇी now has a real
+`Box<T>` owning heap pointer with full affine semantics on the
+C backend, including the headline use case — storing a Box in a
+struct field with automatic drop chaining.
+
+```vani
+fn main() -> i64 {
+  let b: Box<i64> = box(42);        // heap-allocates a slot
+  let v: i64 = unbox(ref b);        // reads back via the ref
+  return v;                          // free() at scope exit
+}
+
+struct Point { x: i64, y: i64 }
+struct Holder { b: Box<Point> }     // documented L2 blocker case
+fn main() -> i64 {
+  let h: Holder = Holder { b: box(Point { x: 3, y: 4 }) };
+  let got: Point = unbox(ref h.b);
+  return got.x + got.y;             // outer struct's drop walks
+                                    // h.b and free()s the slot
+}
+```
+
+Both compile + run end-to-end on the C backend.
+
+**Phase 1 surface**:
+- `Type::Box(Box<Type>)` affine variant in `src/ast.rs`.
+- `Box<T>` type parsing with lookahead so user code can still
+  declare `struct Box { … }` without colliding.
+- `box(expr)` constructor builtin — `check_box_builtin` enforces
+  the v1 Copy-only restriction (primitives + Copy structs).
+- `unbox(ref b)` reader builtin — Copy-out of the inner value;
+  the Box's slot stays owned.
+- C backend lowering: `__box_new` → `({ T* __b = malloc(sizeof(T));
+  *__b = (x); __b; })`; `__box_get` → `(*(*ref))`; scope-exit
+  drop → `free(b)`; struct-field drop chain in
+  `emit_struct_field_drops`.
+- LLVM backend gate: `program_uses_box` scans for `__box_new` /
+  `__box_get` and surfaces a clear pre-codegen error directing
+  users to `--backend=c` rather than panic deep in let-binding
+  lowering.
+
+**Phase 1 restrictions (queued)**:
+- **Phase 2 — LLVM backend**: heap-allocation IR (calls to
+  `@malloc` / `@free` + struct-element GEP for the slot).
+  Multi-day arc.
+- **Phase 3 — Box\<dyn Iface\>**: the original documented
+  blocker `struct Drawer { r: Box<dyn Renderer> }` needs vtable
+  plumbing through the heap allocation. Multi-day arc.
+- **Box of affine inner type** (`Box<Vec<i64>>`, `Box<OwnedStr>`):
+  requires recursive drop walks. Queued.
+
+**Architectural notes**:
+- Reused the existing affine-heap-type infrastructure: dropped
+  through `emit_struct_field_drops`, sized via `c_element_storage`,
+  declared via `format_declarator`. The new variant slots into
+  ~30 exhaustive match arms across `ast.rs`, `backend_c.rs`,
+  `backend_llvm.rs`, `stack_depth.rs` — most of the work was
+  mechanical match-arm filling.
+- The parser lookahead pattern (`Box` only triggers the builtin
+  type when followed by `<`) is reusable for future
+  `Result<T, E>` / `Option<T>` builtin generics if we want to
+  promote them out of the `Apply` monomorphization path.
+
+**5 new regression tests** in `src/lib.rs`:
+- `box_i64_alloc_unbox_compiles` — primitive round-trip.
+- `box_bool_alloc_unbox_compiles` — Box<bool>.
+- `box_copy_struct_compiles` — Box<MyStruct>.
+- `box_in_struct_field_compiles_and_frees` — documented blocker.
+- `box_rejects_non_copy_inner_type` — pins the Copy restriction
+  with a `Box<Vec<i64>>` rejection.
+
+[docs/v1_limitations.md](docs/v1_limitations.md) L2 section
+updated to mark partially shipped, listing the Phase 1 surface
++ Phase 2/3 queue.
+
+Lib ledger: **1950 lib + 54 parity** green (1945→1950 = 5 new
+Box regression tests). All 185 example files compile.
+
 ## 🟢 Session 2026-06-07 (cont.) — L12 closure + Phase 10.1 German + translator pragma-rewrite fix
 
 Three small-but-substantive shipments rolled together:

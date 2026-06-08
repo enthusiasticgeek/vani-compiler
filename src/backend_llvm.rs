@@ -332,6 +332,7 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Channel(_, _) => 32, // ring buffer header — generous
         Type::Task => 16, // pthread_t + ctx*
         Type::Condvar => 8, // pointer to heap-allocated cv state
+        Type::Box(_) => 8, // L2 Phase 1: Box<T> lowers to T* (a single 64-bit pointer)
         Type::Deque(_) => 32, // {data ptr, front, len, capacity}
         Type::HashSet(_) => 40, // closure #342: + tombstones for hashset_remove
         Type::HashMap(_, _) => 48, // closure #343: + tombstones for hashmap_remove
@@ -595,6 +596,18 @@ fn emit_brahmi_print_helper_ll(
 }
 
 pub fn emit_llvm(program: &TypedProgram) -> String {
+    // L2 Phase 1 (2026-06-07): Box<T> codegen is C-only in v1.
+    // The LLVM backend's heap-allocation IR (calls to @malloc /
+    // @free + struct-element GEP) lives behind a follow-up arc;
+    // emit a clear pre-codegen error directing users to the C
+    // backend rather than panic deep in let-binding lowering.
+    if program_uses_box(program) {
+        panic!(
+            "Box<T> codegen is C-backend only in v1 (L2 Phase 1). \
+             Run with `--backend=c` to compile this program. \
+             LLVM Box codegen is queued for L2 Phase 2."
+        );
+    }
     let mut out = String::new();
     out.push_str("; ModuleID = 'intent'\n");
     // Populate the enum payload registry from the program's
@@ -22291,6 +22304,74 @@ pub(crate) fn emit_intent_str_trim_definition(out: &mut String) {
 /// Walk the typed program for any Call to seed_rng / rand_i64
 /// / rand_in_range. Triggers emission of the RNG runtime
 /// helpers + thread_local global at module scope.
+/// L2 Phase 1 (2026-06-07): detect any use of the Box<T>
+/// builtins so the LLVM backend can emit a clear pre-codegen
+/// error directing users to `--backend=c`. The two synthetic
+/// call names produced by `check_box_builtin` /
+/// `check_unbox_builtin` are reliable markers — both must come
+/// from the checker's box paths (users can't synthesize them
+/// directly).
+fn program_uses_box(program: &TypedProgram) -> bool {
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        match &expr.kind {
+            E::Call { name, args, .. } => {
+                if matches!(name.as_str(), "__box_new" | "__box_get") {
+                    return true;
+                }
+                args.iter().any(expr_uses)
+            }
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            _ => false,
+        }
+    }
+    fn stmt_uses(stmt: &S) -> bool {
+        match stmt {
+            S::Let { expr, .. } | S::Reassign { expr, .. } | S::Discard { expr } => expr_uses(expr),
+            S::Return { expr } => expr_uses(expr),
+            S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|item| match item {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
+            }
+            S::ForIter { body, .. } => body.iter().any(stmt_uses),
+            S::TaskSpawn { body, .. } => body.iter().any(stmt_uses),
+            S::UnsafeBlock { body, .. } => body.iter().any(stmt_uses),
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    for f in &program.functions {
+        if f.body.iter().any(stmt_uses) {
+            return true;
+        }
+    }
+    false
+}
+
 fn program_uses_rng(program: &TypedProgram) -> bool {
     use crate::ir::TypedExprKind as E;
     use crate::ir::TypedStmt as S;

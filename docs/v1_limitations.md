@@ -69,24 +69,69 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — No `Box<T>` / owning-interface-object pointer
+### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phase 1)
 
-vāṇी doesn't have a `Box<T>` (owning heap pointer to a sized
-type). Owning a `dyn Iface` value inside a struct field is
-therefore not supported.
+**Status**: Phase 1 shipped 2026-06-07. `Box<T>` for Copy
+primitives + Copy structs works end-to-end on the C backend,
+including struct-field storage with automatic drop chaining.
+LLVM backend and `Box<dyn Iface>` queued for Phase 2/3.
 
 ```vani
-struct Drawer { r: dyn Renderer }   // ❌ — needs Box<dyn Renderer>
+fn main() -> i64 {
+  let b: Box<i64> = box(42);        // ✅ heap-allocates the slot
+  let v: i64 = unbox(ref b);        // ✅ reads back; b still owns
+  return v;                          // implicit free() at scope exit
+}
+
+struct Point { x: i64, y: i64 }
+struct Holder { b: Box<Point> }     // ✅ Box in struct field
+                                    // outer struct drop chains
+                                    // into the Box's free()
 ```
 
-**Why**: affine-ownership rules combined with the lack of an
-explicit owning-pointer type would force lifetime-erased
-storage. v1 deliberately omits it.
+**Phase 1 surface**:
+- `Box<T>` type where T is Copy + sized (primitives like `i64`,
+  `bool`, …; Copy structs).
+- `box(expr)` constructor (heap-allocates + copies expr into
+  the slot).
+- `unbox(ref b)` reader (returns the inner value by Copy).
+- Affine: each Box has exactly one owner; transferring requires
+  a move; the implicit scope-exit drop frees the heap slot.
+- Struct-field storage works — the outer struct's drop walker
+  chains into the Box field's `free()`.
 
-**Workaround**: use an integer discriminator + parallel fields,
-or pass the dyn value through a function parameter instead of a
-struct field. See the
-[Bridge pattern example](../examples/language/english/design_patterns/structural/bridge.vani).
+**Phase 1 restrictions (queued follow-ups)**:
+- **LLVM backend** — Box codegen is C-only in v1; programs using
+  Box on the LLVM backend hit a clear pre-codegen error
+  directing users to `--backend=c`. Phase 2.
+- **`Box<dyn Iface>`** — the original documented blocker
+  (`struct Drawer { r: Box<dyn Renderer> }`) needs vtable
+  plumbing through the heap allocation. Phase 3.
+- **Box of affine inner type** (`Box<Vec<i64>>`, `Box<OwnedStr>`)
+  — requires recursive drop walks. Queued.
+
+**Fix surface** (already in `main` as of 2026-06-07):
+- `src/ast.rs::Type::Box(Box<Type>)` — new affine variant.
+- `src/parser.rs` — `Box<T>` recognized as a type when followed
+  by `<` (lookahead so user `struct Box { … }` still parses).
+- `src/checker.rs::check_box_builtin` + `check_unbox_builtin` —
+  the constructor + reader, with the v1 Copy-only restriction.
+- `src/backend_c.rs` — `__box_new` emission as a GCC compound
+  statement `({ T* __b = malloc(sizeof(T)); *__b = (x); __b; })`,
+  `__box_get` as `(*(*ref))`, scope-exit drop as `free(b)`,
+  struct-field drop chain in `emit_struct_field_drops`, type
+  spelling in `c_type_name` / `format_declarator` / `c_element_storage`.
+- `src/backend_llvm.rs::program_uses_box` — pre-codegen detector
+  that surfaces the actionable `--backend=c` directive.
+
+**Regression coverage**:
+- `lib.rs::box_i64_alloc_unbox_compiles` — primitive round-trip.
+- `lib.rs::box_bool_alloc_unbox_compiles` — Box<bool>.
+- `lib.rs::box_copy_struct_compiles` — Box<MyStruct>.
+- `lib.rs::box_in_struct_field_compiles_and_frees` — the
+  documented blocker shape (Box as struct field).
+- `lib.rs::box_rejects_non_copy_inner_type` — pins the v1 Copy
+  restriction with a Box<Vec<i64>> rejection.
 
 ### L3 — Pattern-match scrutinee must be by value ✅ SHIPPED 2026-06-07
 

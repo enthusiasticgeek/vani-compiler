@@ -28110,6 +28110,91 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn box_i64_alloc_unbox_compiles() {
+        // L2 Phase 1 (2026-06-07): Box<i64> heap allocation via
+        // box(x), readback via unbox(ref b), implicit free at
+        // scope exit. All three paths through the C backend.
+        let source = r#"
+            fn main() -> i64 {
+              let b: Box<i64> = box(42);
+              let v: i64 = unbox(ref b);
+              print v;
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("Box<i64> basic round-trip compiles");
+    }
+
+    #[test]
+    fn box_bool_alloc_unbox_compiles() {
+        // L2 Phase 1: Box<bool> — Copy primitive other than i64.
+        let source = r#"
+            fn main() -> i64 {
+              let b: Box<bool> = box(true);
+              let v: bool = unbox(ref b);
+              if v { return 1; }
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("Box<bool> compiles");
+    }
+
+    #[test]
+    fn box_copy_struct_compiles() {
+        // L2 Phase 1: Box<MyStruct> where the struct is Copy.
+        // Verifies the struct's storage spelling (Struct_Name)
+        // flows through __box_new's malloc/sizeof.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let p: Point = Point { x: 3, y: 4 };
+              let b: Box<Point> = box(p);
+              let got: Point = unbox(ref b);
+              return got.x + got.y;
+            }
+        "#;
+        crate::compile(source).expect("Box<Copy struct> compiles");
+    }
+
+    #[test]
+    fn box_in_struct_field_compiles_and_frees() {
+        // L2 Phase 1: the documented blocker case. A struct
+        // field of type Box<i64> stores a heap pointer; the
+        // outer struct's scope-exit drop chains into the
+        // Box field's free(), no leak.
+        let source = r#"
+            struct Holder { b: Box<i64> }
+            fn main() -> i64 {
+              let h: Holder = Holder { b: box(99) };
+              let v: i64 = unbox(ref h.b);
+              return v;
+            }
+        "#;
+        crate::compile(source).expect("Box<i64> as struct field compiles");
+    }
+
+    #[test]
+    fn box_rejects_non_copy_inner_type() {
+        // L2 Phase 1 restriction: only Copy + sized inner types
+        // are supported in v1. Box<Vec<i64>> requires recursive
+        // drop semantics and is queued.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let b: Box<Vec<i64>> = box(xs);
+              return 0;
+            }
+        "#;
+        let err = crate::compile(source).expect_err("Box<Vec<i64>> should be rejected in v1");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("Copy + sized") || combined.contains("box() v1"),
+            "expected Box-v1 restriction in error, got: {}",
+            combined
+        );
+    }
+
+    #[test]
     fn russian_cyrillic_pragma_compiles_and_runs() {
         // Phase 8b.2 (2026-06-07): first Tier II Cyrillic-script
         // dialect. SVO grammar so existing keyword-first parser

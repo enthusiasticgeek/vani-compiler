@@ -10763,6 +10763,12 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
         // through to the placeholder `intent_dyn` from
         // `c_leaf_type` and cc rejects with "unknown type".
         Type::Object(iface) => format!("intent_dyn_{}", iface),
+        // L2 Phase 1 (2026-06-07): Box<T> storage spelling is
+        // `T*` — a single owning pointer. The c_leaf_type
+        // fallback returns the `/* Box<T> */` placeholder; this
+        // arm produces the real type so struct fields and Vec
+        // elements compile cleanly.
+        Type::Box(inner) => format!("{}*", format_declarator(inner, "").trim()),
         _ => c_leaf_type(ty).to_string(),
     }
 }
@@ -11430,6 +11436,16 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 // stack-allocated; only `data` lives on the
                 // heap.
                 out.push_str("  intent_deque_i64_drop(&");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
+            Type::Box(_) => {
+                // L2 Phase 1 (2026-06-07): Box<T> owns a single
+                // heap slot allocated by box(x). Scope-exit drop
+                // simply `free`s the slot. The binding's machine
+                // word (the pointer) is reclaimed with the stack
+                // frame.
+                out.push_str("  free(");
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
@@ -12424,6 +12440,17 @@ fn emit_struct_field_drops(
                 out.push_str("  ");
                 out.push_str(&vec_helper(element, "free"));
                 out.push('(');
+                out.push_str(path);
+                out.push('.');
+                out.push_str(field_name);
+                out.push_str(");\n");
+            }
+            // L2 Phase 1 (2026-06-07): Box<T> field drop. The
+            // struct's scope-exit drop chains into the field's
+            // free() so heap slots owned by Box-typed fields are
+            // released along with the outer struct.
+            Type::Box(_) => {
+                out.push_str("  free(");
                 out.push_str(path);
                 out.push('.');
                 out.push_str(field_name);
@@ -13670,6 +13697,38 @@ fn hashmap_type_tag_c(ty: &Type) -> &'static str {
 
 fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
     match name {
+        // L2 Phase 1 (2026-06-07): box(x) heap-allocates a slot
+        // for x and returns a Box<T>. Lowered to a GCC compound
+        // statement expression: `({ T* __b = malloc(sizeof(T));
+        // *__b = (x); __b; })`. The result type is Box<T>; we
+        // extract T to size the allocation and cast the pointer.
+        // Use `c_type_name` for the spelling (knows about
+        // `Struct_<Name>`, etc.); `c_leaf_type` returns a
+        // `/* struct */` placeholder for nominal types.
+        "__box_new" if args.len() == 1 => {
+            let inner_ty = match result_ty {
+                Type::Box(inner) => &**inner,
+                _ => unreachable!("__box_new's result type must be Box<T>"),
+            };
+            // c_type_name returns "Struct_Point" / "int64_t" etc.
+            // Wrap in a recoverable spelling via format_declarator
+            // — without the inner-decl trim it's the right storage
+            // spelling for malloc/sizeof.
+            let c_ty = format_declarator(inner_ty, "").trim().to_string();
+            let val = emit_expr(&args[0]);
+            return format!(
+                "({{ {0}* __b = ({0}*)malloc(sizeof({0})); *__b = ({1}); __b; }})",
+                c_ty, val
+            );
+        }
+        // L2 Phase 1: unbox(ref b) reads the inner value of a
+        // Box<T>. Argument is a `ref Box<T>` which lowers to
+        // `T**` in C; the read is `(*(*ref))` — first deref the
+        // ref, then deref the Box pointer.
+        "__box_get" if args.len() == 1 => {
+            let arg = emit_expr(&args[0]);
+            return format!("(*(*({})))", arg);
+        }
         "min" => {
             // Inline ternary. Operands are evaluated once each
             // (no fresh stmt-emit machinery available here), so a
@@ -17432,6 +17491,13 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // Lowers to `int64_t*` (same as raw pointer); the
         // safety is compile-time only.
         Type::ArenaRef(_) => "int64_t*",
+        // `Box<T>` — owning heap pointer. L2 Phase 1. c_leaf_type
+        // returns &'static str so it can't synthesize per-T
+        // spellings; callers needing the full declarator (e.g.
+        // `int64_t*` for `Box<i64>`) route through `c_type_name`
+        // which recurses into the inner type. The fallback here
+        // keeps any leaf-only path emitting valid C.
+        Type::Box(_) => "/* Box<T> */",
     }
 }
 
@@ -17446,6 +17512,13 @@ fn c_type_name(ty: &Type) -> String {
             format!("const {}*", inner_decl)
         }
         Type::PtrMut(inner) => {
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("{}*", inner_decl)
+        }
+        // L2 Phase 1 (2026-06-07): Box<T> lowers to T* — a single
+        // 64-bit owning pointer to the heap slot. malloc'd by
+        // box(x), freed by the scope-exit drop emission.
+        Type::Box(inner) => {
             let inner_decl = format_declarator(inner, "").trim_end().to_string();
             format!("{}*", inner_decl)
         }
@@ -17607,6 +17680,14 @@ fn format_declarator(ty: &Type, name: &str) -> String {
         Type::PtrMut(inner) => {
             // `*mut T` — same shape minus the `const`. Same
             // recursion pattern. Layer 1.1+ of `unsafe.md`.
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("{}* {}", inner_decl, name)
+        }
+        // L2 Phase 1 (2026-06-07): `Box<T>` storage spelling is
+        // `T* name` — same shape as `*mut T` but the affine
+        // ownership is enforced at the checker level. malloc'd
+        // by `box(x)`, freed by the scope-exit drop emission.
+        Type::Box(inner) => {
             let inner_decl = format_declarator(inner, "").trim_end().to_string();
             format!("{}* {}", inner_decl, name)
         }
@@ -17799,7 +17880,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -17842,7 +17923,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
-        | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) => unreachable!("shift count must be an integer"),
+        | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => unreachable!("shift count must be an integer"),
     }
 }
 

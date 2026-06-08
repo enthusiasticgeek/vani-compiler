@@ -656,7 +656,13 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                 // fields are admitted. Drop chains
                 // recursively through the per-backend Drop
                 // emit. T1.2 phase 2b follow-up.
-                || matches!(&field.ty, Type::Struct(_));
+                || matches!(&field.ty, Type::Struct(_))
+                // L2 Phase 1 (2026-06-07): Box<T> field storage —
+                // the documented blocker for the limitation
+                // `struct Drawer { r: Box<dyn Renderer> }`. Box
+                // is a single pointer at the machine level; the
+                // outer struct's drop chains into the Box's free.
+                || matches!(&field.ty, Type::Box(_));
             if !field_allowed {
                 diagnostics.push(Diagnostic::new(
                     field.span,
@@ -664,8 +670,8 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                         "struct field '{}::{}' has non-Copy type {} — \
                          v1 supports Copy types, OwnedStr, Vec<T>, \
                          [T; N] of Copy elements, Task, Atomic<T>, \
-                         Mutex<T>, and Channel<T, N> as struct fields; \
-                         Guard<T> still needs explicit wiring",
+                         Mutex<T>, Channel<T, N>, and Box<T> as struct \
+                         fields; Guard<T> still needs explicit wiring",
                         decl.name, field.name, field.ty
                     ),
                 ));
@@ -15362,6 +15368,18 @@ fn check_call(
     // require plumbing name_span through every builtin
     // checker, which is a follow-up.
     match name {
+        // L2 Phase 1 (2026-06-07): Box<T> heap-allocating
+        // constructor. `box(expr)` → `Box<typeof expr>`. v1
+        // requires expr's type to be Copy + sized — primitives
+        // and Copy structs. Box of an already-affine type would
+        // need recursive drop and is queued.
+        "box" => return check_box_builtin(args, env, signatures, name_span, span, diagnostics),
+        // L2 Phase 1: read the inner value of a Box<T> by
+        // copying. Takes `ref Box<T>` so the box stays valid
+        // (the slot's contents are Copy, so we can read without
+        // moving). v1 only supports Copy inner types so this
+        // is sound.
+        "unbox" => return check_unbox_builtin(args, env, signatures, span, diagnostics),
         "vec" => return check_vec_builtin(args, env, signatures, span, diagnostics),
         // Closure #284: try_vec(n: u64) -> Result<Vec<i64>,
         // AllocError>. Builtin that allocates a Vec<i64> of
@@ -17403,6 +17421,130 @@ fn check_try_vec_builtin(
             args: vec![arg.expr],
         },
         Type::Enum(mangled),
+        None,
+        span,
+    )
+}
+
+/// L2 Phase 1 (2026-06-07): `box(expr)` heap-allocating
+/// constructor. Returns `Box<typeof expr>`. v1 restricts the
+/// inner type to Copy + sized — primitives (`i64`, `bool`, …)
+/// and Copy structs. The rationale: Box of an already-affine
+/// type (`Box<Vec<i64>>`, `Box<OwnedStr>`) would need recursive
+/// drop walks and is queued for v2.
+fn check_box_builtin(
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    _name_span: Span,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if args.len() != 1 {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "box(expr) takes exactly 1 argument; got {}. Use `let b: Box<T> = box(value);`",
+                args.len()
+            ),
+        ));
+        return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
+    }
+    let inner = check_expr(&args[0], env, signatures, diagnostics);
+    let inner_ty = inner.ty().clone();
+    // v1 gates Box element type to Copy + sized. Refs / vecs /
+    // owned-strs / other boxes / dyn-iface fat pointers / etc.
+    // need either recursive drop (Vec, OwnedStr) or vtable
+    // plumbing (dyn) and are queued.
+    let is_supported = match &inner_ty {
+        Type::I8 | Type::I16 | Type::I32 | Type::I64
+        | Type::U8 | Type::U16 | Type::U32 | Type::U64
+        | Type::F32 | Type::F64
+        | Type::Bool => true,
+        Type::Struct(_) => inner_ty.is_copy(),
+        _ => false,
+    };
+    if !is_supported {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            format!(
+                "box() v1 only supports Copy + sized element types (primitives + Copy structs); \
+                 got `{}`. Recursive drop (Box<Vec<…>>, Box<OwnedStr>) and \
+                 Box<dyn Iface> are queued follow-ups",
+                inner_ty
+            ),
+        ));
+        return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
+    }
+    let result_ty = Type::Box(Box::new(inner_ty));
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "__box_new".to_string(),
+            name_span: span,
+            args: vec![inner.expr],
+        },
+        result_ty,
+        None,
+        span,
+    )
+}
+
+/// L2 Phase 1 (2026-06-07): `unbox(ref b)` reads the inner
+/// value of a Box<T>. The argument must be `ref Box<T>` (a
+/// read-only borrow) so the box's ownership and lifetime are
+/// preserved. Returns T by value. v1 only supports Copy inner
+/// types so the read is just a memcpy.
+fn check_unbox_builtin(
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if args.len() != 1 {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "unbox(b) takes exactly 1 argument (a `ref Box<T>`); got {}",
+                args.len()
+            ),
+        ));
+        return CheckedExpr::fallback(Type::I64, span);
+    }
+    let checked = check_expr(&args[0], env, signatures, diagnostics);
+    let inner_ty = match checked.ty() {
+        Type::Ref(inner) | Type::RefMut(inner) => match &**inner {
+            Type::Box(boxed) => (**boxed).clone(),
+            _ => {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "unbox() needs a `ref Box<T>` argument, got `{}`",
+                        checked.ty()
+                    ),
+                ));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+        },
+        _ => {
+            diagnostics.push(Diagnostic::new(
+                args[0].span,
+                format!(
+                    "unbox() needs a `ref Box<T>` argument, got `{}` — \
+                     take a reference: `unbox(ref b)`",
+                    checked.ty()
+                ),
+            ));
+            return CheckedExpr::fallback(Type::I64, span);
+        }
+    };
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "__box_get".to_string(),
+            name_span: span,
+            args: vec![checked.expr],
+        },
+        inner_ty,
         None,
         span,
     )
