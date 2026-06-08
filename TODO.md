@@ -192,8 +192,87 @@ to land cleanly with full backend + test coverage.
 
 | Item | Effort | Scope |
 |---|---|---|
-| **L2 Box\<T\> / owning-interface-object** | 8-15h | New `Type::Box(Box<Type>)` variant; parser grammar for `Box<T>` + `Box::new(x)` + `*b` deref; affine ownership + drop semantics; C backend `malloc`/`free` + indirect access; LLVM backend heap codegen; struct-field storage (the documented blocker `struct Drawer { r: Box<dyn Renderer> }`); full method dispatch through Box<dyn Iface>; ~30 regression tests. Single dedicated session. |
+| **L2 Phase 3 — `Box<dyn Iface>`** | 8-12h | Vtable plumbing through the heap allocation. The original documented blocker `struct Drawer { r: Box<dyn Renderer> }`. Phases 1 + 2 (Box<T> for Copy + sized inner types on both backends) shipped 2026-06-07. |
 | **Arc 8 v3.1 sugar** | 25-40h | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. Single dedicated multi-day arc. |
+| **Phase 10.2 Mandarin** | 30-50h | CJK Unified Ideographs without whitespace word boundaries — needs lookahead-based segmentation. Distinct from Phase 9b Japanese which has separating particles. |
+| **Pragma threading into Lexer** | 4-6h | Threads the `// vani-lang:` pragma into `Lexer` state so per-dialect pure-ASCII keywords (Spanish `si`/`para`/`verdadero`, French `fonction`/`pour`, German `wenn`/`wahr`, Russian — already done via disjoint Cyrillic, etc.) can be safely enabled without colliding with English identifiers. Architectural enabler for the basic-Latin-alphabet languages (Indonesian, Swahili, Filipino, Malay) which have no diacritics to anchor the v1 design on. |
+
+### 🌏 Language rollout queue (Phase 13 + Phase 10.2) — refreshed 2026-06-07
+
+**Shipped to date — 27 dialects across 14 scripts**:
+
+- **Indic + Perso-Arabic (Tier I — 21)**: Sanskrit, Hindi, Marathi, Nepali, Maithili, Konkani-Devanagari, Bengali, Assamese, Tamil, Telugu, Gujarati, Punjabi (Gurmukhi + Shahmukhi), Kannada, Malayalam, Odia, Sinhala, Urdu, Sindhi, Persian, Pashto
+- **Global (Tier II + III — 6)**: English, Russian (Cyrillic), Spanish (Latin+accents), French (Latin+accents), Japanese (3-script Kanji+Hiragana+Katakana), German (Latin+accents), Korean (Hangul)
+
+#### Cheap — rides existing Latin-with-accents infra (~2-4h each)
+
+These ship via the unified `lex_ident` path that consumes
+non-ASCII continuation bytes. Add `DialectLang::X` variant +
+pragma + non-ASCII keyword table + `DiagLang::X` + example +
+test. No new `Script` variant needed.
+
+| Language | ISO | Distinctive non-ASCII glyphs | Notes |
+|---|---|---|---|
+| **Portuguese** | pt | ã/õ/ç/á/é/í/ó/ú/â/ê/ô | Closest to Spanish + French; trivial after them |
+| **Italian** | it | à/è/ì/ò/ù | Latin SVO |
+| **Polish** | pl | ą/ć/ę/ł/ń/ó/ś/ź/ż | Latin SVO |
+| **Turkish** | tr | ç/ğ/ı/İ/ö/ş/ü | Note: agglutinative; v1 keyword set is small enough to avoid SOV issues |
+| **Vietnamese** | vi | ă/â/đ/ê/ô/ơ/ư + 5 tone marks (~120 unique syllable spellings) | More extensive diacritic set → ~4-6h ship |
+| **Romanian** | ro | ă/â/î/ș/ț | Latin SVO |
+| **Czech** | cs | á/č/ď/é/ě/í/ň/ó/ř/š/ť/ú/ů/ý/ž | |
+| **Slovak** | sk | á/ä/č/ď/é/í/ĺ/ľ/ň/ó/ô/ŕ/š/ť/ú/ý/ž | |
+| **Hungarian** | hu | á/é/í/ó/ö/ő/ú/ü/ű | Agglutinative SOV-ish |
+| **Swedish** | sv | å/ä/ö | |
+| **Norwegian** | no | æ/ø/å | |
+| **Danish** | da | æ/ø/å | |
+| **Finnish** | fi | ä/ö | Latin-with-umlauts only |
+| **Catalan** | ca | à/ç/é/è/í/ï/ó/ò/ú/ü | |
+| **Yoruba** | yo | ẹ/ọ/ṣ + tone marks | Diacritic-heavy African language |
+
+#### Cheap — basic Latin alphabet (~2-3h once pragma threading lands)
+
+These languages have NO native non-ASCII anchors (no umlauts,
+no tone marks). They need pragma-threading first so their
+pure-ASCII keywords can be safely enabled inside a pragma'd
+file without breaking English code.
+
+| Language | ISO | Notes |
+|---|---|---|
+| **Indonesian / Malay** | id / ms | Bahasa Indonesia / Bahasa Melayu — basic Latin |
+| **Swahili** | sw | East African lingua franca, Latin |
+| **Filipino / Tagalog** | tl | Latin (Baybayin script also exists but rarely used) |
+| **Dutch** | nl | Latin (rare ë/ï mostly drops the diaeresis in tech writing) |
+| **Hausa** | ha | Latin or Ajami (Arabic-based) — Latin form is pure ASCII |
+
+#### Medium — needs new `Script` variant (~5-7h each)
+
+Each requires: Script enum variant + classify range +
+DialectLang + pragma + keyword table + DiagLang + example +
+test. Same 6-touchpoint pattern as Hangul.
+
+| Language | Script | Unicode block | Direction notes |
+|---|---|---|---|
+| **Greek** | Greek | U+0370..03FF | LTR |
+| **Hebrew** | Hebrew | U+0590..05FF | RTL — can reuse Arabic infra |
+| **Yiddish** | Hebrew | U+0590..05FF | RTL — would share Hebrew table |
+| **Thai** | Thai | U+0E00..0E7F | LTR, no spaces between words → bias to whitespace-friendly keywords |
+| **Lao** | Lao | U+0E80..0EFF | Same family as Thai |
+| **Khmer (Cambodian)** | Khmer | U+1780..17FF | LTR |
+| **Burmese (Myanmar)** | Myanmar | U+1000..109F | LTR |
+| **Armenian** | Armenian | U+0530..058F | LTR |
+| **Georgian** | Georgian | U+10A0..10FF + U+2D00..2D2F | LTR |
+| **Amharic (Ethiopian)** | Ethiopic | U+1200..137F | LTR; syllabary |
+| **Tibetan** | Tibetan | U+0F00..0FFF | LTR |
+| **Cherokee** | Cherokee | U+13A0..13FF | LTR; syllabary |
+| **Modern Standard Arabic** | Arabic | U+0600..06FF (already wired) | Native Arabic vocabulary on existing Perso-Arabic infra. Distinct from the shipped Urdu/Sindhi/Shahmukhi/Persian/Pashto dialects which use the Arabic SCRIPT but are Indo-Iranian/Indo-Aryan languages |
+
+#### Big architectural lifts (multi-day; in dedicated-session lifts table above)
+
+| Item | Effort | Why big |
+|---|---|---|
+| **Phase 10.2 Mandarin** | 30-50h | CJK no-whitespace tokenizer |
+| **Pragma threading into Lexer** | 4-6h | Architectural enabler for basic-Latin-alphabet languages |
+| **Mongolian (traditional)** | 15-25h | Vertical-script layout complicates rendering; Cyrillic Mongolian is much cheaper (rides Cyrillic infra) |
 
 ### External-blocked items (drop in anywhere when unblocked)
 
