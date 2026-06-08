@@ -27953,6 +27953,28 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn indonesian_basic_latin_pragma_compiles() {
+        // Phase 13.3 (2026-06-08): first basic-Latin dialect.
+        // Indonesian has no diacritics; the ENTIRE surface
+        // rides the pragma-threading enabler. Without the
+        // pragma gate `untuk`, `jika`, `benar`, `cetak` would
+        // collide with potential English identifiers.
+        let source = "// vani-lang: indonesian\n\
+                      tujuan \"basic Indonesian demo\";\n\
+                      fungsi add(a: i64, b: i64) -> i64 {\n  \
+                        kembali a + b;\n\
+                      }\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan x: i64 = add(20, 22);\n  \
+                        pastikan x == 42;\n  \
+                        buktikan 2 + 2 == 4;\n  \
+                        cetak x;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Indonesian basics compile");
+    }
+
+    #[test]
     fn portuguese_pragma_mixed_accented_and_ascii_compiles() {
         // Phase 13.2 (2026-06-08): Portuguese rides both the
         // unified `lex_ident` non-ASCII continuation path AND

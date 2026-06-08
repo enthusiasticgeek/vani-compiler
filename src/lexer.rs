@@ -1056,6 +1056,90 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.3 (2026-06-08): Indonesian (Bahasa Indonesia)
+/// keyword resolution. First basic-Latin Tier II dialect — has
+/// no diacritics, so the only path is the pragma-gated ASCII
+/// keyword table (no companion non-ASCII table). The pragma
+/// gate is REQUIRED: words like `untuk`, `jika`, `benar`,
+/// `salah`, `cetak` are all natural Indonesian identifiers
+/// that English code might legitimately use as variable names.
+fn indonesian_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "fungsi" => TokenKind::Fn,            // function
+        "biarkan" => TokenKind::Let,          // "let it be"
+        "misalkan" => TokenKind::Let,         // "suppose" (alt)
+        "struktur" => TokenKind::Struct,      // structure
+        "enumerasi" => TokenKind::Enum,       // enumeration
+        "tetap" => TokenKind::Const,          // fixed / constant
+        // === VISIBILITY / MODULES ===
+        "publik" => TokenKind::Pub,           // public
+        "umum" => TokenKind::Pub,             // general / common (alt)
+        "modul" => TokenKind::Module,         // module
+        "pakai" => TokenKind::Use,            // use
+        "sebagai" => TokenKind::As,           // as
+        // === CONTROL FLOW ===
+        "kembali" => TokenKind::Return,       // return
+        "kembalikan" => TokenKind::Return,    // return! (imperative)
+        "jika" => TokenKind::If,              // if
+        "selainnya" => TokenKind::Else,       // else / "other than"
+        "lainnya" => TokenKind::Else,         // other (alt)
+        "selama" => TokenKind::While,         // while / during
+        "untuk" => TokenKind::For,            // for
+        "dalam" => TokenKind::In,             // inside
+        "dari" => TokenKind::From,            // from
+        "sampai" => TokenKind::To,            // until / to
+        "hingga" => TokenKind::To,            // until (alt)
+        "berhenti" => TokenKind::Break,       // stop / break
+        "lanjutkan" => TokenKind::Continue,   // continue
+        "maka" => TokenKind::Then,            // then
+        // === REFS / MUT ===
+        "lihat" => TokenKind::Ref,            // see / look
+        "dapatberubah" => TokenKind::Mut,     // changeable (compound)
+        "berubah" => TokenKind::Mut,          // changing
+        // === MATCH ===
+        "cocokkan" => TokenKind::Match,       // match!
+        "padanan" => TokenKind::Match,        // match (noun, alt)
+        // === VERIFICATION ===
+        "pastikan" => TokenKind::Assert,      // make sure / assert
+        "buktikan" => TokenKind::Prove,       // prove
+        "perlu" => TokenKind::Requires,       // needs / requires
+        "jamin" => TokenKind::Ensures,        // guarantee
+        // === BOOL / PRINT ===
+        "benar" => TokenKind::True,           // true / correct
+        "salah" => TokenKind::False,          // false / wrong
+        "cetak" => TokenKind::Print,          // print
+        "tulis" => TokenKind::Print,          // write (alt)
+        // === PURITY / PARALLEL ===
+        "murni" => TokenKind::Pure,           // pure
+        "paralel" => TokenKind::Parallel,     // parallel (loanword)
+        // === INTERFACES / METHODS ===
+        "antarmuka" => TokenKind::Interface,  // interface
+        "terapkan" => TokenKind::Implement,   // apply / implement
+        "implementasi" => TokenKind::Implement, // implementation (alt)
+        "metode" => TokenKind::Methods,       // methods
+        // === BOUNDS ===
+        "dimana" => TokenKind::Where,         // where
+        "adalah" => TokenKind::Is,            // is
+        // === CONCURRENCY ===
+        "coba" => TokenKind::Try,             // try
+        "tugas" => TokenKind::Task,           // task
+        "gabungkan" => TokenKind::Join,       // join!
+        // === EMBEDDED ===
+        "bahaya" => TokenKind::Unsafe,        // danger / unsafe
+        "wilayah" => TokenKind::RegionKw,     // region
+        // === SOV-S7 PARITY ===
+        "tujuan" => TokenKind::Intent,        // purpose / intent
+        "niat" => TokenKind::Intent,          // intent (alt)
+        "tipe" => TokenKind::Type,            // type
+        "jenis" => TokenKind::Type,           // kind (alt)
+        "eksternal" => TokenKind::Extern,     // external
+        "invarian" => TokenKind::Invariant,   // invariant (loanword)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.2 (2026-06-08): Portuguese (português) keyword
 /// resolution. Fourth Latin-with-accents Tier II dialect. Same
 /// v1 split as Spanish/French/German: this table holds the
@@ -2111,6 +2195,14 @@ enum DialectLang {
     // forms (`função`, `não`, `até`, `senão`). Brazilian and
     // European Portuguese share the same keyword surface.
     Portuguese,
+    // Phase 13.3 (2026-06-08): Indonesian (Bahasa Indonesia) —
+    // first BASIC-Latin Tier II dialect, fully enabled by the
+    // pragma-threading shipped in this session. Indonesian has
+    // no diacritics so it can't use the unified-lex_ident path
+    // (no non-ASCII anchors); the pragma-gated ASCII keyword
+    // table is the only path. SVO grammar — keyword-first
+    // works directly.
+    Indonesian,
 }
 
 impl DialectLang {
@@ -2145,6 +2237,7 @@ impl DialectLang {
             DialectLang::German => "german",
             DialectLang::Korean => "korean",
             DialectLang::Portuguese => "portuguese",
+            DialectLang::Indonesian => "indonesian",
         }
     }
 
@@ -2191,6 +2284,7 @@ impl DialectLang {
             DialectLang::German => Script::Latin,
             DialectLang::Korean => Script::Hangul,
             DialectLang::Portuguese => Script::Latin,
+            DialectLang::Indonesian => Script::Latin,
         }
     }
 }
@@ -2411,6 +2505,10 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             "portuguese" | "português" | "portugues" | "pt"
                 | "brasileiro" | "brasil"
                 => Some(DialectLang::Portuguese),
+            // Phase 13.3 (2026-06-08): first basic-Latin dialect
+            // riding pure pragma-threading (no diacritics).
+            "indonesian" | "indonesia" | "bahasa" | "id"
+                => Some(DialectLang::Indonesian),
             _ => None,
         };
     }
@@ -3386,6 +3484,7 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::French) => french_ascii_keyword(text),
                     Some(DialectLang::German) => german_ascii_keyword(text),
                     Some(DialectLang::Portuguese) => portuguese_ascii_keyword(text),
+                    Some(DialectLang::Indonesian) => indonesian_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/indonesian/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/indonesian/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.3 v1: Indonesian (Bahasa Indonesia) is the first
+// basic-Latin Tier II dialect — no diacritics, no umlauts, no
+// tone marks. The whole surface rides the pragma-threading
+// enabler shipped in commit c3a2bb6. Outside a Bahasa-pragma'd
+// file, words like `untuk`, `jika`, `benar`, `cetak` stay as
+// plain identifiers, so English code is unaffected.
+
+tujuan "Compute a small score with checked constraints";
+
+fungsi add(a: i64, b: i64) -> i64 {
+  kembali a + b;
+}
+
+fungsi bounded_score(base: i64) -> i64
+perlu base >= 0;
+{
+  biarkan doubled: i64 = base * 2;
+  pastikan doubled >= base;
+  kembali add(doubled, 2);
+}
+
+fungsi main() -> i64 {
+  biarkan answer = bounded_score(20);
+  buktikan 2 + 2 == 4;
+  pastikan answer >= 0;
+  cetak answer;
+  kembali 0;
+}
