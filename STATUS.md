@@ -10,6 +10,132 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.12 + 13.13 + 13.14 + 13.15: Vietnamese + Romanian + Dutch + Thai
+
+Four more dialects, three patterns. Roster grows **37 → 41
+dialects across 17 scripts** (Thai adds a new Script variant).
+
+### Phase 13.12 — Vietnamese (Tiếng Việt)
+
+**First Southeast Asian Latin-script dialect.** ~95M speakers.
+Extensive diacritic + tone-mark combinations (ă/â/đ/ê/ô/ơ/ư +
+5 tones combining → hundreds of unique syllable glyphs). The
+keyword surface is almost entirely non-ASCII.
+
+```rust
+// vani-lang: vietnamese
+mục_đích "Compute a small score with checked constraints";
+
+hàm add(a: i64, b: i64) -> i64 {
+  trả_về a + b;
+}
+
+hàm bounded_score(base: i64) -> i64
+yêu_cầu base >= 0;
+{
+  đặt doubled: i64 = base * 2;
+  khẳng_định doubled >= base;
+  trả_về add(doubled, 2);
+}
+
+hàm main() -> i64 {
+  đặt answer = bounded_score(20);
+  chứng_minh 2 + 2 == 4;
+  khẳng_định answer >= 0;
+  in_ra answer;
+  trả_về 0;
+}
+```
+
+Prints `42`. `vietnamese_keyword` table holds ~45 non-ASCII
+entries; `vietnamese_ascii_keyword` has just the one pure-ASCII
+keyword `in_ra` (Print) which would otherwise collide with
+English identifiers.
+
+### Phase 13.13 — Romanian (limba română)
+
+**Completes the Romance family** in vāṇी: Spanish + French +
+Italian + Portuguese + Romanian (German Latin-with-accents
+adjacent). Distinctive ă/â/î/ș/ț diacritics. ~25M speakers.
+
+```rust
+// vani-lang: romanian
+scop "Compute a small score with checked constraints";
+
+funcție add(a: i64, b: i64) -> i64 {
+  întoarce a + b;
+}
+
+funcție main() -> i64 {
+  fie answer = 20 + 22;
+  afirmă answer == 42;
+  tipărește answer;
+  întoarce 0;
+}
+```
+
+### Phase 13.14 — Dutch (Nederlands)
+
+**Basic-Latin Germanic.** Rides pragma threading directly —
+no diacritics anchor.
+
+```rust
+// vani-lang: dutch
+functie main() -> i64 {
+  laat x: i64 = 20 + 22;
+  bevestig x == 42;
+  druk x;
+  terug 0;
+}
+```
+
+### Phase 13.15 — Thai (ไทย)
+
+**First Thai-script dialect.** New `Script::Thai` covering
+block U+0E00..U+0E7F. ~70M speakers. v1 ships keyword-first
+SVO surface; native Thai prose has no word-internal spaces
+but vāṇी source still uses whitespace separators like every
+host language a Thai programmer would write.
+
+```rust
+// vani-lang: thai
+จุดประสงค์ "Compute a small score with checked constraints";
+
+ฟังก์ชัน add(a: i64, b: i64) -> i64 {
+  คืน a + b;
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ answer = 20 + 22;
+  ยืนยัน answer == 42;
+  พิสูจน์ 2 + 2 == 4;
+  พิมพ์ answer;
+  คืน 0;
+}
+```
+
+All four print `42` on both backends.
+
+### Per-dialect summary
+
+| Dialect | Pattern | DiagLang labels |
+|---|---|---|
+| Vietnamese | Latin+accents + 1 ASCII | `lỗi` / `ghi_chú` |
+| Romanian | Latin+accents + pragma ASCII | `eroare` / `notă` |
+| Dutch | basic Latin (pragma) | `fout` / `opmerking` |
+| Thai | new Script::Thai | `ข้อผิดพลาด` / `หมายเหตุ` |
+
+### 5 new regression tests
+
+- `vietnamese_latin_with_tone_marks_compiles`
+- `romanian_completes_romance_family`
+- `dutch_basic_latin_pragma_compiles`
+- `thai_script_pragma_compiles_and_runs`
+- `thai_script_purity_rejects_mixed_thai_and_devanagari`
+
+Lib ledger: **1976 lib + 54 parity** green (1971→1976 = 5 new
+regression tests). All 200 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.8 + 13.9 + 13.10 + 13.11: Polish + Turkish + Malay + Swahili
 
 Four dialects in one commit spanning two patterns. Roster grows

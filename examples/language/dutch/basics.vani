@@ -1,0 +1,27 @@
+// श्री।
+// vani-lang: dutch
+//
+// Phase 13.14: basic-Latin Germanic. Mostly pure-ASCII surface
+// — rides pragma threading.
+
+doel "Compute a small score with checked constraints";
+
+functie add(a: i64, b: i64) -> i64 {
+  terug a + b;
+}
+
+functie bounded_score(base: i64) -> i64
+vereist base >= 0;
+{
+  laat doubled: i64 = base * 2;
+  bevestig doubled >= base;
+  terug add(doubled, 2);
+}
+
+functie main() -> i64 {
+  laat answer = bounded_score(20);
+  bewijs 2 + 2 == 4;
+  bevestig answer >= 0;
+  druk answer;
+  terug 0;
+}

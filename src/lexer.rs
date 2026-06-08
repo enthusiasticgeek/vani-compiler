@@ -1056,6 +1056,302 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.12 (2026-06-08): Vietnamese (Tiếng Việt) keyword
+/// resolution. First Southeast Asian Latin-script dialect.
+/// Distinctive diacritic + tone-mark combinations
+/// (ă/â/đ/ê/ô/ơ/ư + 5 tones). This table holds natural
+/// accented forms; the pure-ASCII fallbacks live in
+/// `vietnamese_ascii_keyword`.
+fn vietnamese_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "hàm" => TokenKind::Fn,               // (function)
+        "trả_về" => TokenKind::Return,        // (return value)
+        "nếu" => TokenKind::If,               // (if)
+        "ngược_lại" => TokenKind::Else,       // (otherwise)
+        "trong_khi" => TokenKind::While,      // (while)
+        "với_mỗi" => TokenKind::For,          // (for each)
+        "từ" => TokenKind::From,              // (from)
+        "đến" => TokenKind::To,               // (to)
+        "ngắt" => TokenKind::Break,           // (break)
+        "tiếp_tục" => TokenKind::Continue,    // (continue)
+        "thì" => TokenKind::Then,             // (then)
+        "tham_chiếu" => TokenKind::Ref,       // (reference)
+        "có_thể_thay_đổi" => TokenKind::Mut,  // (changeable)
+        "khớp" => TokenKind::Match,           // (match)
+        "khẳng_định" => TokenKind::Assert,    // (assert)
+        "chứng_minh" => TokenKind::Prove,     // (prove)
+        "yêu_cầu" => TokenKind::Requires,     // (requires)
+        "đảm_bảo" => TokenKind::Ensures,      // (ensures)
+        "đúng" => TokenKind::True,            // (true / correct)
+        "giao_diện" => TokenKind::Interface,  // (interface)
+        "phương_thức" => TokenKind::Methods,  // (methods)
+        "ở_đâu" => TokenKind::Where,          // (where)
+        "là" => TokenKind::Is,                // (is)
+        "thử" => TokenKind::Try,              // (try)
+        "công_việc" => TokenKind::Task,       // (task)
+        "kết_hợp" => TokenKind::Join,         // (join)
+        "không_an_toàn" => TokenKind::Unsafe, // (unsafe)
+        "vùng" => TokenKind::RegionKw,        // (region)
+        "mục_đích" => TokenKind::Intent,      // (purpose)
+        "kiểu" => TokenKind::Type,            // (type)
+        "bất_biến" => TokenKind::Invariant,   // (invariant)
+        "công_khai" => TokenKind::Pub,        // (public)
+        "mô_đun" => TokenKind::Module,        // (module)
+        "cấu_trúc" => TokenKind::Struct,      // (structure)
+        "liệt_kê" => TokenKind::Enum,         // (enumeration)
+        "hằng" => TokenKind::Const,           // (constant)
+        "thuần_túy" => TokenKind::Pure,       // (pure)
+        "song_song" => TokenKind::Parallel,   // (parallel)
+        "triển_khai" => TokenKind::Implement, // (implement)
+        "sử_dụng" => TokenKind::Use,          // (use)
+        "như" => TokenKind::As,               // (as)
+        "đặt" => TokenKind::Let,              // (set / let)
+        "sai" => TokenKind::False,            // (false / wrong)
+        "bên_ngoài" => TokenKind::Extern,     // (external)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.12 (2026-06-08): pure-ASCII Vietnamese keyword
+/// table. Vietnamese keywords are mostly non-ASCII (extensive
+/// tone+diacritic marks), but `in_ra` (print) is one of the few
+/// natural pure-ASCII keywords. Pragma-gated.
+fn vietnamese_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "in_ra" => TokenKind::Print,          // print (pure-ASCII Vietnamese)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.13 (2026-06-08): Romanian (limba română) keyword
+/// resolution. Distinctive ă/â/î/ș/ț diacritics. This table
+/// holds non-ASCII forms; pure-ASCII fallbacks are
+/// `romanian_ascii_keyword`.
+fn romanian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funcție" => TokenKind::Fn,           // (function)
+        "întoarce" => TokenKind::Return,      // (return)
+        "dacă" => TokenKind::If,              // (if)
+        "altfel" => TokenKind::Else,          // (else) — also pure-ASCII, registered here for completeness
+        "cât_timp" => TokenKind::While,       // (while; multi-word)
+        "pentru" => TokenKind::For,           // (for) — ASCII, but listed
+        "până" => TokenKind::To,              // (until)
+        "rupe" => TokenKind::Break,           // (break) — ASCII
+        "continuă" => TokenKind::Continue,    // (continue!)
+        "atunci" => TokenKind::Then,          // (then) — ASCII
+        "vezi" => TokenKind::Ref,             // (see) — ASCII
+        "schimbabil" => TokenKind::Mut,       // (changeable) — ASCII
+        "potrivește" => TokenKind::Match,     // (match!)
+        "afirmă" => TokenKind::Assert,        // (assert!)
+        "dovedește" => TokenKind::Prove,      // (prove!)
+        "necesită" => TokenKind::Requires,    // (requires)
+        "garantează" => TokenKind::Ensures,   // (ensures)
+        "adevărat" => TokenKind::True,        // (true)
+        "fals" => TokenKind::False,           // (false) — ASCII
+        "tipărește" => TokenKind::Print,      // (print!)
+        "scrie" => TokenKind::Print,          // (write — ASCII alt)
+        "interfață" => TokenKind::Interface,  // (interface)
+        "implementează" => TokenKind::Implement, // (implement!)
+        "metode" => TokenKind::Methods,       // (methods) — ASCII
+        "unde" => TokenKind::Where,           // (where) — ASCII
+        "este" => TokenKind::Is,              // (is) — ASCII
+        "încearcă" => TokenKind::Try,         // (try!)
+        "sarcină" => TokenKind::Task,         // (task)
+        "unește" => TokenKind::Join,          // (join!)
+        "nesigur" => TokenKind::Unsafe,       // (unsafe) — ASCII
+        "regiune" => TokenKind::RegionKw,     // (region) — ASCII
+        "scop" => TokenKind::Intent,          // (goal) — ASCII
+        "tip" => TokenKind::Type,             // (type) — ASCII
+        "extern" => TokenKind::Extern,        // (external) — ASCII, shared with English alias
+        "invariant" => TokenKind::Invariant,  // (invariant) — ASCII
+        "structură" => TokenKind::Struct,     // (structure)
+        "enumerare" => TokenKind::Enum,       // (enumeration)
+        "constantă" => TokenKind::Const,      // (constant)
+        "public" => TokenKind::Pub,           // (public) — ASCII
+        "modul" => TokenKind::Module,         // (module) — ASCII
+        "folosește" => TokenKind::Use,        // (use!)
+        "ca" => TokenKind::As,                // (as) — ASCII
+        "fie" => TokenKind::Let,              // (let it be) — ASCII
+        "pur" => TokenKind::Pure,             // (pure) — ASCII
+        "paralel" => TokenKind::Parallel,     // (parallel) — ASCII
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.13 (2026-06-08): pure-ASCII Romanian keyword table.
+/// Pragma-gated. Many Romanian keywords are inherently ASCII
+/// so this table is intentionally smaller — many entries above
+/// in `romanian_keyword` are already ASCII and reachable via
+/// either path (they just need pragma gating to fire as
+/// keywords).
+fn romanian_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // ASCII versions and no-diacritic alternates:
+        "functie" => TokenKind::Fn,           // function (no diacritic)
+        "intoarce" => TokenKind::Return,      // return (no diacritic)
+        "daca" => TokenKind::If,              // if (no diacritic)
+        "altfel" => TokenKind::Else,
+        "cat_timp" => TokenKind::While,       // while (no diacritic)
+        "pentru" => TokenKind::For,
+        "pana" => TokenKind::To,              // until (no diacritic)
+        "rupe" => TokenKind::Break,
+        "continua" => TokenKind::Continue,    // (no diacritic alt)
+        "atunci" => TokenKind::Then,
+        "vezi" => TokenKind::Ref,
+        "schimbabil" => TokenKind::Mut,
+        "potriveste" => TokenKind::Match,     // (no diacritic)
+        "afirma" => TokenKind::Assert,        // (no diacritic)
+        "dovedeste" => TokenKind::Prove,      // (no diacritic)
+        "necesita" => TokenKind::Requires,    // (no diacritic)
+        "garanteaza" => TokenKind::Ensures,   // (no diacritic)
+        "adevarat" => TokenKind::True,        // (no diacritic)
+        "fals" => TokenKind::False,
+        "tipareste" => TokenKind::Print,      // (no diacritic)
+        "scrie" => TokenKind::Print,
+        "interfata" => TokenKind::Interface,  // (no diacritic)
+        "implementeaza" => TokenKind::Implement, // (no diacritic)
+        "metode" => TokenKind::Methods,
+        "unde" => TokenKind::Where,
+        "este" => TokenKind::Is,
+        "incearca" => TokenKind::Try,         // (no diacritic)
+        "sarcina" => TokenKind::Task,         // (no diacritic)
+        "uneste" => TokenKind::Join,          // (no diacritic)
+        "nesigur" => TokenKind::Unsafe,
+        "regiune" => TokenKind::RegionKw,
+        "scop" => TokenKind::Intent,
+        "tip" => TokenKind::Type,
+        "invariant" => TokenKind::Invariant,
+        "structura" => TokenKind::Struct,     // (no diacritic)
+        "enumerare" => TokenKind::Enum,
+        "constanta" => TokenKind::Const,      // (no diacritic)
+        "public" => TokenKind::Pub,
+        "modul" => TokenKind::Module,
+        "foloseste" => TokenKind::Use,        // (no diacritic)
+        "ca" => TokenKind::As,
+        "fie" => TokenKind::Let,
+        "pur" => TokenKind::Pure,
+        "paralel" => TokenKind::Parallel,
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.14 (2026-06-08): Dutch (Nederlands) keyword
+/// resolution. Basic-Latin Germanic. Mostly pure-ASCII surface.
+fn dutch_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "functie" => TokenKind::Fn,           // function
+        "laat" => TokenKind::Let,             // let
+        "structuur" => TokenKind::Struct,     // structure
+        "opsomming" => TokenKind::Enum,       // enumeration
+        "constante" => TokenKind::Const,      // constant
+        "openbaar" => TokenKind::Pub,         // public / open
+        "module" => TokenKind::Module,        // module
+        "gebruik" => TokenKind::Use,          // use
+        "als" => TokenKind::As,               // as
+        "terug" => TokenKind::Return,         // back / return
+        "indien" => TokenKind::If,            // if
+        "anders" => TokenKind::Else,          // otherwise
+        "zolang" => TokenKind::While,         // as long as / while
+        "voor" => TokenKind::For,             // for
+        "in" => TokenKind::In,                // in (same as English)
+        "van" => TokenKind::From,             // from
+        "tot" => TokenKind::To,               // to / until
+        "stop" => TokenKind::Break,           // stop
+        "verder" => TokenKind::Continue,      // continue
+        "dan" => TokenKind::Then,             // then
+        "zie" => TokenKind::Ref,              // see
+        "veranderlijk" => TokenKind::Mut,     // changeable
+        "vergelijk" => TokenKind::Match,      // compare / match
+        "bevestig" => TokenKind::Assert,      // confirm / assert
+        "bewijs" => TokenKind::Prove,         // prove
+        "vereist" => TokenKind::Requires,     // requires
+        "verzekert" => TokenKind::Ensures,    // ensures
+        "waar" => TokenKind::True,            // true
+        "onwaar" => TokenKind::False,         // false / untrue
+        "druk" => TokenKind::Print,           // print
+        "schrijf" => TokenKind::Print,        // write (alt)
+        "zuiver" => TokenKind::Pure,          // pure
+        "parallel" => TokenKind::Parallel,    // parallel
+        "interface" => TokenKind::Interface,  // interface
+        "implementeer" => TokenKind::Implement, // implement
+        "methoden" => TokenKind::Methods,     // methods
+        "waar_is" => TokenKind::Where,        // where_is (avoid `waar` collision with True)
+        "is" => TokenKind::Is,                // is (same as English)
+        "probeer" => TokenKind::Try,          // try
+        "taak" => TokenKind::Task,            // task
+        "verbind" => TokenKind::Join,         // connect / join
+        "onveilig" => TokenKind::Unsafe,      // unsafe
+        "gebied" => TokenKind::RegionKw,      // region / area
+        "doel" => TokenKind::Intent,          // goal
+        "type" => TokenKind::Type,            // type (loanword)
+        "extern" => TokenKind::Extern,        // external (same as English alias)
+        "invariant" => TokenKind::Invariant,  // invariant (same)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.15 (2026-06-08): Thai (ไทย) keyword resolution.
+/// First Thai-script dialect. SVO grammar; all keywords start
+/// with Thai-block codepoints so they route through
+/// `lex_unicode_ident`.
+fn thai_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ฟังก์ชัน" => TokenKind::Fn,         // fangkchan (function)
+        "ให้" => TokenKind::Let,              // hai (let / give)
+        "โครงสร้าง" => TokenKind::Struct,    // khrongsang (structure)
+        "การแจงนับ" => TokenKind::Enum,      // kan jaengnap (enumeration)
+        "คงที่" => TokenKind::Const,         // khongthi (fixed / constant)
+        "สาธารณะ" => TokenKind::Pub,         // satarana (public)
+        "โมดูล" => TokenKind::Module,        // modun (module — loanword)
+        "ใช้" => TokenKind::Use,             // chai (use)
+        "เป็น" => TokenKind::As,             // pen (as / is)
+        "คืน" => TokenKind::Return,          // khuen (return!)
+        "ถ้า" => TokenKind::If,              // tha (if)
+        "ไม่เช่นนั้น" => TokenKind::Else,    // maichennan (otherwise)
+        "ขณะที่" => TokenKind::While,        // khanathi (while)
+        "สำหรับ" => TokenKind::For,          // samrap (for)
+        "ใน" => TokenKind::In,               // nai (in)
+        "จาก" => TokenKind::From,            // chak (from)
+        "ถึง" => TokenKind::To,              // thueng (to / until)
+        "หยุด" => TokenKind::Break,          // yut (stop)
+        "ดำเนินต่อ" => TokenKind::Continue,  // damnoen to (continue)
+        "แล้ว" => TokenKind::Then,           // laeo (then / already)
+        "ดู" => TokenKind::Ref,              // du (see)
+        "เปลี่ยนแปลงได้" => TokenKind::Mut,  // plian plaeng dai (changeable)
+        "ตรงกัน" => TokenKind::Match,        // trongkan (match)
+        "ยืนยัน" => TokenKind::Assert,       // yuenyan (confirm)
+        "พิสูจน์" => TokenKind::Prove,       // phisut (prove)
+        "ต้องการ" => TokenKind::Requires,    // tongkan (requires)
+        "รับประกัน" => TokenKind::Ensures,   // rapprakan (guarantees)
+        "จริง" => TokenKind::True,           // jing (true)
+        "เท็จ" => TokenKind::False,          // thet (false)
+        "พิมพ์" => TokenKind::Print,         // phim (print)
+        "บริสุทธิ์" => TokenKind::Pure,      // borisut (pure)
+        "ขนาน" => TokenKind::Parallel,       // khanan (parallel)
+        "อินเทอร์เฟซ" => TokenKind::Interface, // interface (loanword)
+        "ดำเนินการ" => TokenKind::Implement, // damnoen kan (execute / implement)
+        "วิธีการ" => TokenKind::Methods,     // withikan (methods)
+        "ที่ไหน" => TokenKind::Where,        // thinai (where)
+        "คือ" => TokenKind::Is,              // khue (is)
+        "ลอง" => TokenKind::Try,             // long (try)
+        "งาน" => TokenKind::Task,            // ngan (task / work)
+        "รวม" => TokenKind::Join,            // ruam (join / combine)
+        "ไม่ปลอดภัย" => TokenKind::Unsafe,   // mai plotphai (unsafe)
+        "พื้นที่" => TokenKind::RegionKw,    // phuenthi (area / region)
+        "จุดประสงค์" => TokenKind::Intent,   // chut prasong (purpose)
+        "ชนิด" => TokenKind::Type,           // chanit (kind / type)
+        "ภายนอก" => TokenKind::Extern,       // phainok (external)
+        "ไม่เปลี่ยน" => TokenKind::Invariant, // mai plian (invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.8 (2026-06-08): Polish (polski) keyword resolution.
 /// Sixth Latin-with-accents Tier II dialect, first Slavic Latin
 /// variant. This table holds the natural non-ASCII keyword
@@ -2594,6 +2890,7 @@ fn script_label(script: Script) -> &'static str {
         Script::Hangul => "Hangul (Korean)",
         Script::Greek => "Greek",
         Script::Hebrew => "Hebrew",
+        Script::Thai => "Thai",
     }
 }
 
@@ -2886,6 +3183,28 @@ enum DialectLang {
     // African Tier II dialect. Basic Latin alphabet, SVO
     // grammar, lingua franca of East Africa.
     Swahili,
+    // Phase 13.12 (2026-06-08): Vietnamese (Tiếng Việt) — first
+    // Southeast Asian Tier II dialect using Latin script.
+    // Distinctive extensive diacritic + tone-mark system
+    // (ă/â/đ/ê/ô/ơ/ư + 5 tone marks combine to ~100+ unique
+    // glyphs). SVO grammar.
+    Vietnamese,
+    // Phase 13.13 (2026-06-08): Romanian (limba română) —
+    // completes the Romance family extension in vāṇी (Spanish +
+    // French + Italian + Portuguese + Romanian). Distinctive
+    // diacritics: ă/â/î/ș/ț.
+    Romanian,
+    // Phase 13.14 (2026-06-08): Dutch (Nederlands) — basic-
+    // Latin Germanic dialect. Mostly pure-ASCII keyword surface
+    // (the occasional diaeresis ë/ï in regular text is rare in
+    // technical vocabulary).
+    Dutch,
+    // Phase 13.15 (2026-06-08): Thai (ไทย) — first Thai-script
+    // dialect. Block U+0E00..U+0E7F. SVO grammar; no spaces
+    // between words in prose Thai, but vāṇी keywords are
+    // individually tokenized with surrounding whitespace as
+    // separators (same convention modern Thai code uses).
+    Thai,
 }
 
 impl DialectLang {
@@ -2929,6 +3248,10 @@ impl DialectLang {
             DialectLang::Turkish => "turkish",
             DialectLang::Malay => "malay",
             DialectLang::Swahili => "swahili",
+            DialectLang::Vietnamese => "vietnamese",
+            DialectLang::Romanian => "romanian",
+            DialectLang::Dutch => "dutch",
+            DialectLang::Thai => "thai",
         }
     }
 
@@ -2984,6 +3307,10 @@ impl DialectLang {
             DialectLang::Turkish => Script::Latin,
             DialectLang::Malay => Script::Latin,
             DialectLang::Swahili => Script::Latin,
+            DialectLang::Vietnamese => Script::Latin,
+            DialectLang::Romanian => Script::Latin,
+            DialectLang::Dutch => Script::Latin,
+            DialectLang::Thai => Script::Thai,
         }
     }
 }
@@ -3056,6 +3383,11 @@ enum Script {
     // bidi handling is needed at the parse level — the RTL
     // direction is a rendering concern.
     Hebrew,
+    // Phase 13.15 (2026-06-08): Thai — block U+0E00..U+0E7F.
+    // LTR. Modern Thai prose lacks word-internal spaces but
+    // vāṇी keywords rely on whitespace as separators, which
+    // matches how Thai programmers write source files.
+    Thai,
 }
 
 impl Script {
@@ -3146,6 +3478,10 @@ impl Script {
             // but distinct Unicode block).
             if ('\u{0590}'..='\u{05FF}').contains(&c) {
                 return Script::Hebrew;
+            }
+            // Phase 13.15 (2026-06-08): Thai script.
+            if ('\u{0E00}'..='\u{0E7F}').contains(&c) {
+                return Script::Thai;
             }
         }
         Script::Latin
@@ -3266,6 +3602,19 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.11 (2026-06-08): first African dialect.
             "swahili" | "kiswahili" | "sw"
                 => Some(DialectLang::Swahili),
+            // Phase 13.12 (2026-06-08): first Southeast Asian
+            // Latin-script dialect.
+            "vietnamese" | "tiếng-việt" | "tiengviet" | "vi"
+                => Some(DialectLang::Vietnamese),
+            // Phase 13.13 (2026-06-08): completes Romance family.
+            "romanian" | "română" | "romana" | "ro"
+                => Some(DialectLang::Romanian),
+            // Phase 13.14 (2026-06-08): basic-Latin Germanic.
+            "dutch" | "nederlands" | "nl"
+                => Some(DialectLang::Dutch),
+            // Phase 13.15 (2026-06-08): first Thai-script dialect.
+            "thai" | "ไทย" | "th"
+                => Some(DialectLang::Thai),
             _ => None,
         };
     }
@@ -4086,6 +4435,13 @@ impl<'a> Lexer<'a> {
             // when keywords start with a diacritic letter.
             .or_else(|| polish_keyword(text))
             .or_else(|| turkish_keyword(text))
+            // Phase 13.12 (2026-06-08): Vietnamese — extensive
+            // diacritic + tone-mark combinations.
+            .or_else(|| vietnamese_keyword(text))
+            // Phase 13.13 (2026-06-08): Romanian — ă/â/î/ș/ț.
+            .or_else(|| romanian_keyword(text))
+            // Phase 13.15 (2026-06-08): Thai script keywords.
+            .or_else(|| thai_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -4244,6 +4600,8 @@ impl<'a> Lexer<'a> {
                 .or_else(|| portuguese_keyword(text))
                 .or_else(|| polish_keyword(text))
                 .or_else(|| turkish_keyword(text))
+                .or_else(|| vietnamese_keyword(text))
+                .or_else(|| romanian_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -4265,6 +4623,9 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Turkish) => turkish_ascii_keyword(text),
                     Some(DialectLang::Malay) => malay_ascii_keyword(text),
                     Some(DialectLang::Swahili) => swahili_ascii_keyword(text),
+                    Some(DialectLang::Romanian) => romanian_ascii_keyword(text),
+                    Some(DialectLang::Dutch) => dutch_ascii_keyword(text),
+                    Some(DialectLang::Vietnamese) => vietnamese_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

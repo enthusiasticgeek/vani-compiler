@@ -27953,6 +27953,96 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vietnamese_latin_with_tone_marks_compiles() {
+        // Phase 13.12: first Southeast Asian Latin-script
+        // dialect. Vietnamese uses extensive tone marks +
+        // diacritics (ă/â/đ/ê/ô/ơ/ư + 5 tones combining).
+        let source = "// vani-lang: vietnamese\n\
+                      mục_đích \"basic Vietnamese demo\";\n\
+                      hàm add(a: i64, b: i64) -> i64 {\n  \
+                        trả_về a + b;\n\
+                      }\n\
+                      hàm main() -> i64 {\n  \
+                        đặt x: i64 = add(20, 22);\n  \
+                        khẳng_định x == 42;\n  \
+                        chứng_minh 2 + 2 == 4;\n  \
+                        in_ra x;\n  \
+                        trả_về 0;\n\
+                      }\n";
+        crate::compile(source).expect("Vietnamese basics compile");
+    }
+
+    #[test]
+    fn romanian_completes_romance_family() {
+        // Phase 13.13: completes Romance family (Spanish +
+        // French + Italian + Portuguese + Romanian).
+        let source = "// vani-lang: romanian\n\
+                      scop \"basic Romanian demo\";\n\
+                      funcție add(a: i64, b: i64) -> i64 {\n  \
+                        întoarce a + b;\n\
+                      }\n\
+                      funcție main() -> i64 {\n  \
+                        fie x: i64 = add(20, 22);\n  \
+                        afirmă x == 42;\n  \
+                        dovedește 2 + 2 == 4;\n  \
+                        tipărește x;\n  \
+                        întoarce 0;\n\
+                      }\n";
+        crate::compile(source).expect("Romanian basics compile");
+    }
+
+    #[test]
+    fn dutch_basic_latin_pragma_compiles() {
+        // Phase 13.14: basic-Latin Germanic. Rides pragma
+        // threading directly.
+        let source = "// vani-lang: dutch\n\
+                      doel \"basic Dutch demo\";\n\
+                      functie add(a: i64, b: i64) -> i64 {\n  \
+                        terug a + b;\n\
+                      }\n\
+                      functie main() -> i64 {\n  \
+                        laat x: i64 = add(20, 22);\n  \
+                        bevestig x == 42;\n  \
+                        bewijs 2 + 2 == 4;\n  \
+                        druk x;\n  \
+                        terug 0;\n\
+                      }\n";
+        crate::compile(source).expect("Dutch basics compile");
+    }
+
+    #[test]
+    fn thai_script_pragma_compiles_and_runs() {
+        // Phase 13.15: first Thai-script dialect. New
+        // Script::Thai variant covering U+0E00..U+0E7F.
+        let source = "// vani-lang: thai\n\
+                      จุดประสงค์ \"basic Thai demo\";\n\
+                      ฟังก์ชัน add(a: i64, b: i64) -> i64 {\n  \
+                        คืน a + b;\n\
+                      }\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        ให้ x: i64 = add(20, 22);\n  \
+                        ยืนยัน x == 42;\n  \
+                        พิสูจน์ 2 + 2 == 4;\n  \
+                        พิมพ์ x;\n  \
+                        คืน 0;\n\
+                      }\n";
+        crate::compile(source).expect("Thai basics compile");
+    }
+
+    #[test]
+    fn thai_script_purity_rejects_mixed_thai_and_devanagari() {
+        let source = "// vani-lang: thai\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        कार्य x(): i64 { return 0; }\n  \
+                        คืน 0;\n\
+                      }\n";
+        assert!(
+            crate::compile(source).is_err(),
+            "Thai pragma + Devanagari keyword must be rejected"
+        );
+    }
+
+    #[test]
     fn polish_latin_with_accents_compiles() {
         // Phase 13.8 (2026-06-08): first Slavic Latin variant.
         // Polish uses ą/ć/ę/ł/ń/ó/ś/ź/ż — natural accented forms

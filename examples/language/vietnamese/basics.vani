@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: vietnamese
+//
+// Phase 13.12: first Southeast Asian Latin-script dialect.
+// Vietnamese uses ă/â/đ/ê/ô/ơ/ư + 5 tone marks → very
+// distinctive non-ASCII keyword surface.
+
+mục_đích "Compute a small score with checked constraints";
+
+hàm add(a: i64, b: i64) -> i64 {
+  trả_về a + b;
+}
+
+hàm bounded_score(base: i64) -> i64
+yêu_cầu base >= 0;
+{
+  đặt doubled: i64 = base * 2;
+  khẳng_định doubled >= base;
+  trả_về add(doubled, 2);
+}
+
+hàm main() -> i64 {
+  đặt answer = bounded_score(20);
+  chứng_minh 2 + 2 == 4;
+  khẳng_định answer >= 0;
+  in_ra answer;
+  trả_về 0;
+}

@@ -105,6 +105,15 @@ enum DiagLang {
     Malay,
     // Phase 13.11 (2026-06-08): Swahili — first African dialect.
     Swahili,
+    // Phase 13.12 (2026-06-08): Vietnamese — first SE Asian
+    // Latin-script dialect.
+    Vietnamese,
+    // Phase 13.13 (2026-06-08): Romanian — Romance family.
+    Romanian,
+    // Phase 13.14 (2026-06-08): Dutch — basic-Latin Germanic.
+    Dutch,
+    // Phase 13.15 (2026-06-08): Thai — first Thai-script dialect.
+    Thai,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -195,6 +204,18 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.11 (2026-06-08): Swahili.
             "swahili" | "kiswahili" | "sw"
                 => Some(DiagLang::Swahili),
+            // Phase 13.12 (2026-06-08): Vietnamese.
+            "vietnamese" | "tiếng-việt" | "tiengviet" | "vi"
+                => Some(DiagLang::Vietnamese),
+            // Phase 13.13 (2026-06-08): Romanian.
+            "romanian" | "română" | "romana" | "ro"
+                => Some(DiagLang::Romanian),
+            // Phase 13.14 (2026-06-08): Dutch.
+            "dutch" | "nederlands" | "nl"
+                => Some(DiagLang::Dutch),
+            // Phase 13.15 (2026-06-08): Thai.
+            "thai" | "ไทย" | "th"
+                => Some(DiagLang::Thai),
             _ => None,
         };
     }
@@ -247,6 +268,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Turkish)) => "hata (error)".to_string(),
         ("error", Some(DiagLang::Malay)) => "ralat (error)".to_string(),
         ("error", Some(DiagLang::Swahili)) => "kosa (error)".to_string(),
+        ("error", Some(DiagLang::Vietnamese)) => "lỗi (error)".to_string(),
+        ("error", Some(DiagLang::Romanian)) => "eroare (error)".to_string(),
+        ("error", Some(DiagLang::Dutch)) => "fout (error)".to_string(),
+        ("error", Some(DiagLang::Thai)) => "ข้อผิดพลาด (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -277,6 +302,10 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Turkish)) => "not (note)".to_string(),
         ("note", Some(DiagLang::Malay)) => "nota (note)".to_string(),
         ("note", Some(DiagLang::Swahili)) => "kumbuka (note)".to_string(),
+        ("note", Some(DiagLang::Vietnamese)) => "ghi_chú (note)".to_string(),
+        ("note", Some(DiagLang::Romanian)) => "notă (note)".to_string(),
+        ("note", Some(DiagLang::Dutch)) => "opmerking (note)".to_string(),
+        ("note", Some(DiagLang::Thai)) => "หมายเหตุ (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -663,6 +692,43 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("cannot prove", "haiwezi kuthibitishwa (cannot prove)"),
             ("function ", "kazi "),
             ("invalid", "batili (invalid)"),
+        ][..],
+        DiagLang::Vietnamese => &[
+            ("expected ", "đã_mong_đợi "),
+            ("unknown variable", "biến không xác định (unknown variable)"),
+            ("unknown function", "hàm không xác định (unknown function)"),
+            ("type mismatch", "kiểu không khớp (type mismatch)"),
+            ("cannot prove", "không thể chứng minh (cannot prove)"),
+            ("function ", "hàm "),
+            ("invalid", "không hợp lệ (invalid)"),
+        ][..],
+        DiagLang::Romanian => &[
+            ("expected ", "așteptat "),
+            ("unknown variable", "variabilă necunoscută (unknown variable)"),
+            ("unknown function", "funcție necunoscută (unknown function)"),
+            ("type mismatch", "tipuri incompatibile (type mismatch)"),
+            ("cannot prove", "imposibil de dovedit (cannot prove)"),
+            ("function ", "funcție "),
+            ("invalid", "nevalid (invalid)"),
+        ][..],
+        DiagLang::Dutch => &[
+            ("expected ", "verwacht "),
+            ("unknown variable", "onbekende variabele (unknown variable)"),
+            ("unknown function", "onbekende functie (unknown function)"),
+            ("type mismatch", "type komt niet overeen (type mismatch)"),
+            ("cannot prove", "kan niet bewijzen (cannot prove)"),
+            ("function ", "functie "),
+            ("invalid", "ongeldig (invalid)"),
+        ][..],
+        DiagLang::Thai => &[
+            ("expected ", "คาดหวัง "),
+            ("unknown variable", "ตัวแปรที่ไม่รู้จัก (unknown variable)"),
+            ("unknown function", "ฟังก์ชันที่ไม่รู้จัก (unknown function)"),
+            ("type mismatch", "ชนิดไม่ตรงกัน (type mismatch)"),
+            ("cannot prove", "พิสูจน์ไม่ได้ (cannot prove)"),
+            ("function ", "ฟังก์ชัน "),
+            ("script mismatch", "ระบบการเขียนไม่ตรงกัน (script mismatch)"),
+            ("invalid", "ไม่ถูกต้อง (invalid)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

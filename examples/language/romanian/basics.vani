@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: romanian
+//
+// Phase 13.13: completes the Romance family extension in vāṇी
+// (Spanish + French + Italian + Portuguese + Romanian).
+// Romanian uses ă/â/î/ș/ț diacritics.
+
+scop "Compute a small score with checked constraints";
+
+funcție add(a: i64, b: i64) -> i64 {
+  întoarce a + b;
+}
+
+funcție bounded_score(base: i64) -> i64
+necesită base >= 0;
+{
+  fie doubled: i64 = base * 2;
+  afirmă doubled >= base;
+  întoarce add(doubled, 2);
+}
+
+funcție main() -> i64 {
+  fie answer = bounded_score(20);
+  dovedește 2 + 2 == 4;
+  afirmă answer >= 0;
+  tipărește answer;
+  întoarce 0;
+}
