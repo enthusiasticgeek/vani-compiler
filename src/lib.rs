@@ -27953,6 +27953,111 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn khmer_script_compiles() {
+        let source = "// vani-lang: khmer\n\
+                      គោលបំណង \"basic Khmer demo\";\n\
+                      មុខងារ add(a: i64, b: i64) -> i64 {\n  \
+                        ត្រលប់ a + b;\n\
+                      }\n\
+                      មុខងារ main() -> i64 {\n  \
+                        អោយ x: i64 = add(20, 22);\n  \
+                        បញ្ជាក់ x == 42;\n  \
+                        បោះពុម្ព x;\n  \
+                        ត្រលប់ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Khmer basics compile");
+    }
+
+    #[test]
+    fn burmese_script_compiles() {
+        let source = "// vani-lang: burmese\n\
+                      ရည်ရွယ်ချက် \"basic Burmese demo\";\n\
+                      လုပ်ဆောင်ချက် add(a: i64, b: i64) -> i64 {\n  \
+                        ပြန် a + b;\n\
+                      }\n\
+                      လုပ်ဆောင်ချက် main() -> i64 {\n  \
+                        ထား x: i64 = add(20, 22);\n  \
+                        သေချာ x == 42;\n  \
+                        ပုံနှိပ် x;\n  \
+                        ပြန် 0;\n\
+                      }\n";
+        crate::compile(source).expect("Burmese basics compile");
+    }
+
+    #[test]
+    fn amharic_script_compiles() {
+        let source = "// vani-lang: amharic\n\
+                      ዓላማ \"basic Amharic demo\";\n\
+                      ተግባር add(a: i64, b: i64) -> i64 {\n  \
+                        መልስ a + b;\n\
+                      }\n\
+                      ተግባር main() -> i64 {\n  \
+                        ይሁን x: i64 = add(20, 22);\n  \
+                        አረጋግጥ x == 42;\n  \
+                        ህትመት x;\n  \
+                        መልስ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Amharic basics compile");
+    }
+
+    #[test]
+    fn tibetan_script_compiles() {
+        let source = "// vani-lang: tibetan\n\
+                      དམིགས་ཡུལ \"basic Tibetan demo\";\n\
+                      ལས་ཀ main() -> i64 {\n  \
+                        ཡོད་པར་ཤོག x: i64 = 20 + 22;\n  \
+                        ངེས x == 42;\n  \
+                        པར x;\n  \
+                        ལོག 0;\n\
+                      }\n";
+        crate::compile(source).expect("Tibetan basics compile");
+    }
+
+    #[test]
+    fn cherokee_syllabary_compiles() {
+        let source = "// vani-lang: cherokee\n\
+                      ᎤᎲᏍᏛ \"basic Cherokee demo\";\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {\n  \
+                        ᎠᏁᎳ x: i64 = 20 + 22;\n  \
+                        ᎠᎴᏂᏍᎬᎢ x;\n  \
+                        ᏗᎬᏎᏗ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Cherokee basics compile");
+    }
+
+    #[test]
+    fn lao_script_compiles() {
+        let source = "// vani-lang: lao\n\
+                      ຈຸດປະສົງ \"basic Lao demo\";\n\
+                      ໜ້າທີ່ add(a: i64, b: i64) -> i64 {\n  \
+                        ກັບຄືນ a + b;\n\
+                      }\n\
+                      ໜ້າທີ່ main() -> i64 {\n  \
+                        ໃຫ້ x: i64 = add(20, 22);\n  \
+                        ຢືນຢັນ x == 42;\n  \
+                        ພິມ x;\n  \
+                        ກັບຄືນ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Lao basics compile");
+    }
+
+    #[test]
+    fn mongolian_traditional_script_compiles() {
+        let source = "// vani-lang: mongolian\n\
+                      ᠵᠣᠷᠢᠯᠭ᠎ᠠ \"basic Mongolian demo\";\n\
+                      ᠴᠠᠭ add(a: i64, b: i64) -> i64 {\n  \
+                        ᠪᠤᠴᠠ a + b;\n\
+                      }\n\
+                      ᠴᠠᠭ main() -> i64 {\n  \
+                        ᠶᠠᠪᠤᠭᠤᠯ x: i64 = add(20, 22);\n  \
+                        ᠪᠠᠲᠤᠯ x == 42;\n  \
+                        ᠬᠡᠪᠯᠡ x;\n  \
+                        ᠪᠤᠴᠠ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mongolian basics compile");
+    }
+
+    #[test]
     fn slovak_slavic_latin_compiles() {
         let source = "// vani-lang: slovak\n\
                       účel \"basic Slovak demo\";\n\

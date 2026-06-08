@@ -1,0 +1,26 @@
+// श्री।
+// vani-lang: amharic
+//
+// Phase 13.31: Amharic (አማርኛ) — ~32M speakers, Ethiopian.
+
+ዓላማ "Compute a small score with checked constraints";
+
+ተግባር add(a: i64, b: i64) -> i64 {
+  መልስ a + b;
+}
+
+ተግባር bounded_score(base: i64) -> i64
+ይፈልጋል base >= 0;
+{
+  ይሁን doubled: i64 = base * 2;
+  አረጋግጥ doubled >= base;
+  መልስ add(doubled, 2);
+}
+
+ተግባር main() -> i64 {
+  ይሁን answer = bounded_score(20);
+  አስረዳ 2 + 2 == 4;
+  አረጋግጥ answer >= 0;
+  ህትመት answer;
+  መልስ 0;
+}

@@ -1,0 +1,20 @@
+// श्री।
+// vani-lang: mongolian
+//
+// Phase 13.35: Traditional Mongolian script (ᠮᠣᠩᠭᠣᠯ) — ~6M
+// speakers in Inner Mongolia. Vertical layout is a display
+// concern only; the lexer reads UTF-8 in logical byte order.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Compute a small score with checked constraints";
+
+ᠴᠠᠭ add(a: i64, b: i64) -> i64 {
+  ᠪᠤᠴᠠ a + b;
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ x: i64 = 20 + 22;
+  ᠪᠠᠲᠤᠯ x == 42;
+  ᠨᠣᠲᠠᠯᠠ 2 + 2 == 4;
+  ᠬᠡᠪᠯᠡ x;
+  ᠪᠤᠴᠠ 0;
+}

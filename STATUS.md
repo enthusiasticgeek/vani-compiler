@@ -10,6 +10,142 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.29–13.35: Khmer + Burmese + Amharic + Tibetan + Cherokee + Lao + Mongolian
+
+**Seven new scripts in one commit** — the final new-script
+batch from TODO.md §*Language rollout queue*. Roster grows
+**54 → 61 dialects across 26 scripts**.
+
+### The seven new scripts
+
+| Script | Block | Dialect | Speakers |
+|---|---|---|---|
+| **Khmer** | U+1780..17FF | Cambodian | ~16M |
+| **Myanmar (Burmese)** | U+1000..109F | Burmese | ~33M |
+| **Ethiopic** | U+1200..137F + supplements | Amharic | ~32M |
+| **Tibetan** | U+0F00..0FFF | Tibetan | ~7M |
+| **Cherokee** | U+13A0..13FF + supplement | Cherokee (endangered, ~2K) | preserve heritage |
+| **Lao** | U+0E80..0EFF | Lao | ~30M |
+| **Mongolian** (traditional vertical) | U+1800..18AF | Mongolian | ~6M |
+
+### Working examples (all print `42` on both backends)
+
+```rust
+// vani-lang: khmer
+មុខងារ main() -> i64 {
+  អោយ x: i64 = 20 + 22;
+  បញ្ជាក់ x == 42;
+  បោះពុម្ព x;
+  ត្រលប់ 0;
+}
+```
+
+```rust
+// vani-lang: burmese
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား x: i64 = 20 + 22;
+  သေချာ x == 42;
+  ပုံနှိပ် x;
+  ပြန် 0;
+}
+```
+
+```rust
+// vani-lang: amharic
+ተግባር main() -> i64 {
+  ይሁን x: i64 = 20 + 22;
+  አረጋግጥ x == 42;
+  ህትመት x;
+  መልስ 0;
+}
+```
+
+```rust
+// vani-lang: tibetan
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག x: i64 = 20 + 22;
+  ངེས x == 42;
+  པར x;
+  ལོག 0;
+}
+```
+
+```rust
+// vani-lang: cherokee
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ x: i64 = 20 + 22;
+  ᎠᎴᏂᏍᎬᎢ x;
+  ᏗᎬᏎᏗ 0;
+}
+```
+
+```rust
+// vani-lang: lao
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ x: i64 = 20 + 22;
+  ຢືນຢັນ x == 42;
+  ພິມ x;
+  ກັບຄືນ 0;
+}
+```
+
+```rust
+// vani-lang: mongolian
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ x: i64 = 20 + 22;
+  ᠪᠠᠲᠤᠯ x == 42;
+  ᠬᠡᠪᠯᠡ x;
+  ᠪᠤᠴᠠ 0;
+}
+```
+
+All 7 print `42` on both C and LLVM backends.
+
+### Per-dialect surface notes
+
+Each dialect ships ~25-45 keywords covering every structure
+keyword. Native DiagLang labels for each:
+
+| Dialect | Error label | Note label |
+|---|---|---|
+| Khmer | `កំហុស (error)` | `កំណត់ចំណាំ (note)` |
+| Burmese | `အမှား (error)` | `မှတ်ချက် (note)` |
+| Amharic | `ስህተት (error)` | `ማስታወሻ (note)` |
+| Tibetan | `ནོར་འཁྲུལ (error)` | `དྲན་གསོ (note)` |
+| Cherokee | `ᎤᎴᏗ (error)` | `ᏗᎪᏪᎶᏗ (note)` |
+| Lao | `ຂໍ້ຜິດພາດ (error)` | `ໝາຍເຫດ (note)` |
+| Mongolian | `ᠠᠯᠳᠠᠭ (error)` | `ᠲᠡᠮᠳᠡᠭ (note)` |
+
+### Cumulative new-script milestone
+
+vāṇी now spans **26 distinct scripts**: Latin, Devanagari,
+Bengali, Tamil, Telugu, Gujarati, Gurmukhi, Kannada, Malayalam,
+Odia, Sinhala, Arabic, Cyrillic, Japanese (3-block), Hangul,
+Greek, Hebrew, Thai, Armenian, Georgian, Khmer, Burmese,
+Ethiopic, Tibetan, Cherokee, Lao, Mongolian. (Plus the
+3-block Japanese collapse and the multi-block Ethiopic
+classification count as one each.)
+
+### 7 new regression tests
+
+- `khmer_script_compiles`
+- `burmese_script_compiles`
+- `amharic_script_compiles`
+- `tibetan_script_compiles`
+- `cherokee_syllabary_compiles`
+- `lao_script_compiles`
+- `mongolian_traditional_script_compiles`
+
+Lib ledger: **1997 lib + 54 parity** green (1990→1997 = 7 new
+regression tests). All 220 example files compile.
+
+This batch **closes the entire new-script queue** from
+TODO.md §*Language rollout queue* §"Medium (~5-7h each, new
+Script variant)". The only remaining items are the big-lift
+deferreds (Mandarin CJK tokenizer, Box\<dyn Iface\>, Arc 8 v3.1
+sugar) and Cyrillic Mongolian (sibling of traditional, would
+ride existing Cyrillic infra).
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.24–13.28: Slovak + Finnish + Catalan + Yoruba + Hausa
 
 Five Latin-script dialects shipped together, spanning five

@@ -142,6 +142,14 @@ enum DiagLang {
     Yoruba,
     // Phase 13.28 (2026-06-08): Hausa — Afroasiatic.
     Hausa,
+    // Phase 13.29..35 (2026-06-08): seven new-Script dialects.
+    Khmer,
+    Burmese,
+    Amharic,
+    Tibetan,
+    Cherokee,
+    Lao,
+    Mongolian,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -280,6 +288,16 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             "yoruba" | "yorùbá" | "yo" => Some(DiagLang::Yoruba),
             // Phase 13.28 (2026-06-08): Hausa.
             "hausa" | "hawsa" | "ha" => Some(DiagLang::Hausa),
+            // Phase 13.29..35: seven new-Script dialects.
+            "khmer" | "ខ្មែរ" | "km" => Some(DiagLang::Khmer),
+            "burmese" | "myanmar" | "မြန်မာ" | "my"
+                => Some(DiagLang::Burmese),
+            "amharic" | "አማርኛ" | "am" => Some(DiagLang::Amharic),
+            "tibetan" | "བོད་ཡིག" | "bo" => Some(DiagLang::Tibetan),
+            "cherokee" | "ᏣᎳᎩ" | "chr" => Some(DiagLang::Cherokee),
+            "lao" | "ລາວ" | "lo" => Some(DiagLang::Lao),
+            "mongolian" | "ᠮᠣᠩᠭᠣᠯ" | "mn"
+                => Some(DiagLang::Mongolian),
             _ => None,
         };
     }
@@ -349,6 +367,13 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Catalan)) => "error".to_string(),
         ("error", Some(DiagLang::Yoruba)) => "àṣìṣe (error)".to_string(),
         ("error", Some(DiagLang::Hausa)) => "kuskure (error)".to_string(),
+        ("error", Some(DiagLang::Khmer)) => "កំហុស (error)".to_string(),
+        ("error", Some(DiagLang::Burmese)) => "အမှား (error)".to_string(),
+        ("error", Some(DiagLang::Amharic)) => "ስህተት (error)".to_string(),
+        ("error", Some(DiagLang::Tibetan)) => "ནོར་འཁྲུལ (error)".to_string(),
+        ("error", Some(DiagLang::Cherokee)) => "ᎤᎴᏗ (error)".to_string(),
+        ("error", Some(DiagLang::Lao)) => "ຂໍ້ຜິດພາດ (error)".to_string(),
+        ("error", Some(DiagLang::Mongolian)) => "ᠠᠯᠳᠠᠭ (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -396,6 +421,13 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Catalan)) => "nota (note)".to_string(),
         ("note", Some(DiagLang::Yoruba)) => "àkíyèsí (note)".to_string(),
         ("note", Some(DiagLang::Hausa)) => "lura (note)".to_string(),
+        ("note", Some(DiagLang::Khmer)) => "កំណត់ចំណាំ (note)".to_string(),
+        ("note", Some(DiagLang::Burmese)) => "မှတ်ချက် (note)".to_string(),
+        ("note", Some(DiagLang::Amharic)) => "ማስታወሻ (note)".to_string(),
+        ("note", Some(DiagLang::Tibetan)) => "དྲན་གསོ (note)".to_string(),
+        ("note", Some(DiagLang::Cherokee)) => "ᏗᎪᏪᎶᏗ (note)".to_string(),
+        ("note", Some(DiagLang::Lao)) => "ໝາຍເຫດ (note)".to_string(),
+        ("note", Some(DiagLang::Mongolian)) => "ᠲᠡᠮᠳᠡᠭ (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -938,6 +970,63 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("cannot prove", "ba_a_iya_tabbatar (cannot prove)"),
             ("function ", "aiki "),
             ("invalid", "marar_inganci (invalid)"),
+        ][..],
+        DiagLang::Khmer => &[
+            ("expected ", "រំពឹង "),
+            ("unknown variable", "អថេរមិនស្គាល់ (unknown variable)"),
+            ("unknown function", "មុខងារមិនស្គាល់ (unknown function)"),
+            ("type mismatch", "ប្រភេទមិនត្រូវគ្នា (type mismatch)"),
+            ("cannot prove", "មិនអាចបង្ហាញ (cannot prove)"),
+            ("function ", "មុខងារ "),
+            ("invalid", "មិនត្រឹមត្រូវ (invalid)"),
+        ][..],
+        DiagLang::Burmese => &[
+            ("expected ", "မျှော်လင့်သည် "),
+            ("unknown variable", "မသိရှိသော variable (unknown variable)"),
+            ("unknown function", "မသိရှိသော function (unknown function)"),
+            ("type mismatch", "အမျိုးအစား မကိုက်ညီ (type mismatch)"),
+            ("cannot prove", "သက်သေပြ၍မရ (cannot prove)"),
+            ("function ", "လုပ်ဆောင်ချက် "),
+            ("invalid", "မမှန်ကန် (invalid)"),
+        ][..],
+        DiagLang::Amharic => &[
+            ("expected ", "የተጠበቀ "),
+            ("unknown variable", "ያልታወቀ variable (unknown variable)"),
+            ("unknown function", "ያልታወቀ function (unknown function)"),
+            ("type mismatch", "የtype አለመመጣጠን (type mismatch)"),
+            ("cannot prove", "ማስረዳት አይቻልም (cannot prove)"),
+            ("function ", "ተግባር "),
+            ("invalid", "ልክ ያልሆነ (invalid)"),
+        ][..],
+        DiagLang::Tibetan => &[
+            ("expected ", "རེ་སྒུག "),
+            ("unknown variable", "ངོ་མ་ཤེས་པའི་ variable (unknown variable)"),
+            ("type mismatch", "རིགས་མི་མཐུན (type mismatch)"),
+            ("cannot prove", "བསྒྲུབ་མི་ཐུབ (cannot prove)"),
+            ("invalid", "མི་འགྲིག (invalid)"),
+        ][..],
+        DiagLang::Cherokee => &[
+            ("expected ", "ᎤᏚᎩ "),
+            ("unknown variable", "ᎤᏝᎩ variable (unknown variable)"),
+            ("type mismatch", "ᎢᎬᎾᏍᏗ ᎤᏝᎩ (type mismatch)"),
+            ("cannot prove", "ᎬᏩᎵᏍᏛᏗᏎᏍᏗ ᎤᏝ (cannot prove)"),
+            ("invalid", "ᎤᏝᎩ (invalid)"),
+        ][..],
+        DiagLang::Lao => &[
+            ("expected ", "ຄາດຫວັງ "),
+            ("unknown variable", "ຕົວແປບໍ່ຮູ້ຈັກ (unknown variable)"),
+            ("unknown function", "ຟັງຊັນບໍ່ຮູ້ຈັກ (unknown function)"),
+            ("type mismatch", "ປະເພດບໍ່ກົງກັນ (type mismatch)"),
+            ("cannot prove", "ບໍ່ສາມາດພິສູດໄດ້ (cannot prove)"),
+            ("function ", "ໜ້າທີ່ "),
+            ("invalid", "ບໍ່ຖືກຕ້ອງ (invalid)"),
+        ][..],
+        DiagLang::Mongolian => &[
+            ("expected ", "ᠬᠦᠯᠢᠶᠡᠭᠰᠡᠨ "),
+            ("unknown variable", "ᠦᠯᠦ ᠮᠡᠳᠡᠬᠦ хувьсагч (unknown variable)"),
+            ("type mismatch", "ᠲᠥᠷᠥᠯ ᠦᠯᠦ ᠨᠡᠶᠢᠴᠡ (type mismatch)"),
+            ("cannot prove", "ᠨᠣᠲᠠᠯᠠᠵᠤ ᠦᠯᠦ ᠴᠢᠳᠠ (cannot prove)"),
+            ("invalid", "ᠬᠦᠴᠦᠨ ᠦᠭᠡᠢ (invalid)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

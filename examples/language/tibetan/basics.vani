@@ -1,0 +1,26 @@
+// श्री।
+// vani-lang: tibetan
+//
+// Phase 13.32: Tibetan (བོད་ཡིག) — ~7M speakers.
+
+དམིགས་ཡུལ "Compute a small score with checked constraints";
+
+ལས་ཀ add(a: i64, b: i64) -> i64 {
+  ལོག a + b;
+}
+
+ལས་ཀ bounded_score(base: i64) -> i64
+དགོས base >= 0;
+{
+  ཡོད་པར་ཤོག doubled: i64 = base * 2;
+  ངེས doubled >= base;
+  ལོག add(doubled, 2);
+}
+
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག answer = bounded_score(20);
+  བསྒྲུབས 2 + 2 == 4;
+  ངེས answer >= 0;
+  པར answer;
+  ལོག 0;
+}

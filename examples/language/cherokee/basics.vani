@@ -1,0 +1,18 @@
+// श्री।
+// vani-lang: cherokee
+//
+// Phase 13.33: Cherokee (ᏣᎳᎩ) syllabary — endangered (~2K
+// speakers). vāṇी gives the syllabary a programming-language
+// host. Minimal keyword set in v1.
+
+ᎤᎲᏍᏛ "Compute a small score with checked constraints";
+
+ᏗᎦᏬᏂᎯᏍᏗ add(a: i64, b: i64) -> i64 {
+  ᏗᎬᏎᏗ a + b;
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ x: i64 = 20 + 22;
+  ᎠᎴᏂᏍᎬᎢ x;
+  ᏗᎬᏎᏗ 0;
+}

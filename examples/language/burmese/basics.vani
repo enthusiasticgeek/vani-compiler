@@ -1,0 +1,26 @@
+// श्री।
+// vani-lang: burmese
+//
+// Phase 13.30: Burmese (မြန်မာ) — ~33M speakers.
+
+ရည်ရွယ်ချက် "Compute a small score with checked constraints";
+
+လုပ်ဆောင်ချက် add(a: i64, b: i64) -> i64 {
+  ပြန် a + b;
+}
+
+လုပ်ဆောင်ချက် bounded_score(base: i64) -> i64
+လို base >= 0;
+{
+  ထား doubled: i64 = base * 2;
+  သေချာ doubled >= base;
+  ပြန် add(doubled, 2);
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား answer = bounded_score(20);
+  သက်သေပြ 2 + 2 == 4;
+  သေချာ answer >= 0;
+  ပုံနှိပ် answer;
+  ပြန် 0;
+}

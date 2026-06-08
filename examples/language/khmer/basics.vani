@@ -1,0 +1,26 @@
+// श्री।
+// vani-lang: khmer
+//
+// Phase 13.29: Khmer (ខ្មែរ) — ~16M speakers in Cambodia.
+
+គោលបំណង "Compute a small score with checked constraints";
+
+មុខងារ add(a: i64, b: i64) -> i64 {
+  ត្រលប់ a + b;
+}
+
+មុខងារ bounded_score(base: i64) -> i64
+ត្រូវការ base >= 0;
+{
+  អោយ doubled: i64 = base * 2;
+  បញ្ជាក់ doubled >= base;
+  ត្រលប់ add(doubled, 2);
+}
+
+មុខងារ main() -> i64 {
+  អោយ answer = bounded_score(20);
+  បង្ហាញ 2 + 2 == 4;
+  បញ្ជាក់ answer >= 0;
+  បោះពុម្ព answer;
+  ត្រលប់ 0;
+}

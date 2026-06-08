@@ -1,0 +1,26 @@
+// श्री।
+// vani-lang: lao
+//
+// Phase 13.34: Lao (ລາວ) — ~30M speakers; sibling of Thai.
+
+ຈຸດປະສົງ "Compute a small score with checked constraints";
+
+ໜ້າທີ່ add(a: i64, b: i64) -> i64 {
+  ກັບຄືນ a + b;
+}
+
+ໜ້າທີ່ bounded_score(base: i64) -> i64
+ຕ້ອງການ base >= 0;
+{
+  ໃຫ້ doubled: i64 = base * 2;
+  ຢືນຢັນ doubled >= base;
+  ກັບຄືນ add(doubled, 2);
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ answer = bounded_score(20);
+  ພິສູດ 2 + 2 == 4;
+  ຢືນຢັນ answer >= 0;
+  ພິມ answer;
+  ກັບຄືນ 0;
+}

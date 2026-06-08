@@ -1056,6 +1056,330 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.29 (2026-06-08): Khmer (ខ្មែរ). ~16M speakers.
+fn khmer_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "មុខងារ" => TokenKind::Fn,             // muk-ngear (function)
+        "អោយ" => TokenKind::Let,                // aoy (let)
+        "ត្រលប់" => TokenKind::Return,          // trolop (return)
+        "បើ" => TokenKind::If,                  // boe (if)
+        "ផ្សេង" => TokenKind::Else,             // psen (other / else)
+        "ខណៈ" => TokenKind::While,              // khna (while)
+        "សម្រាប់" => TokenKind::For,            // samrap (for)
+        "ក្នុង" => TokenKind::In,               // knong (inside)
+        "ពី" => TokenKind::From,                // pi (from)
+        "ដល់" => TokenKind::To,                 // dol (to)
+        "បំបាក់" => TokenKind::Break,           // bombak (break)
+        "បន្ត" => TokenKind::Continue,          // bont (continue)
+        "បន្ទាប់មក" => TokenKind::Then,         // bontoap mok (then)
+        "មើល" => TokenKind::Ref,                // mel (look)
+        "អាចផ្លាស់ប្តូរ" => TokenKind::Mut,    // achplas pdor (changeable)
+        "ផ្គូផ្គង" => TokenKind::Match,         // phkuphkong (match)
+        "បញ្ជាក់" => TokenKind::Assert,         // banh-cheak (confirm)
+        "បង្ហាញ" => TokenKind::Prove,           // bang-haynh (show)
+        "ត្រូវការ" => TokenKind::Requires,      // trov ka (requires)
+        "ធានា" => TokenKind::Ensures,           // thnea (guarantee)
+        "ពិត" => TokenKind::True,               // pit (true)
+        "មិនពិត" => TokenKind::False,           // min pit (not true)
+        "បោះពុម្ព" => TokenKind::Print,         // boh-pum (print)
+        "បរិសុទ្ធ" => TokenKind::Pure,          // borisuthr (pure)
+        "ស្របគ្នា" => TokenKind::Parallel,      // srab knea (parallel)
+        "ចំណុចប្រទាក់" => TokenKind::Interface, // chamnuch protaak
+        "វិធីសាស្ត្រ" => TokenKind::Methods,    // vithisar (methods)
+        "ណា" => TokenKind::Where,               // na (where)
+        "គឺ" => TokenKind::Is,                  // kue (is)
+        "ព្យាយាម" => TokenKind::Try,            // pyayam (try)
+        "ភារកិច្ច" => TokenKind::Task,          // pheakkechh (task)
+        "ភ្ជាប់" => TokenKind::Join,            // phjeap (join)
+        "មិនមានសុវត្ថិភាព" => TokenKind::Unsafe, // unsafe
+        "តំបន់" => TokenKind::RegionKw,         // tombon (region)
+        "គោលបំណង" => TokenKind::Intent,         // kolboumnong (goal)
+        "ប្រភេទ" => TokenKind::Type,            // probhett (type)
+        "ខាងក្រៅ" => TokenKind::Extern,         // khang krov (outside)
+        "មិនប្រែប្រួល" => TokenKind::Invariant, // unchanging
+        "រចនាសម្ព័ន្ធ" => TokenKind::Struct,    // structure
+        "ការរាប់បញ្ចូល" => TokenKind::Enum,     // counting
+        "ថេរ" => TokenKind::Const,              // theer (constant)
+        "សាធារណៈ" => TokenKind::Pub,            // satheareak (public)
+        "ម៉ូឌុល" => TokenKind::Module,          // modul (loanword)
+        "ប្រើ" => TokenKind::Use,               // proeu (use)
+        "ជា" => TokenKind::As,                  // chea (as)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.30 (2026-06-08): Burmese (မြန်မာ). ~33M speakers.
+fn burmese_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "လုပ်ဆောင်ချက်" => TokenKind::Fn,       // loutsaungchet (fn)
+        "ထား" => TokenKind::Let,                // htar (let)
+        "ပြန်" => TokenKind::Return,            // pyan (return)
+        "ဆိုလျှင်" => TokenKind::If,            // sho lyin (if)
+        "မဟုတ်ပါက" => TokenKind::Else,          // ma hote pa (else)
+        "နေစဉ်" => TokenKind::While,            // ne sin (while)
+        "အတွက်" => TokenKind::For,              // atwet (for)
+        "ထဲမှာ" => TokenKind::In,               // htel hma (in)
+        "မှ" => TokenKind::From,                // hma (from)
+        "သို့" => TokenKind::To,                // sou (to)
+        "ရပ်" => TokenKind::Break,              // yat (break)
+        "ဆက်လုပ်" => TokenKind::Continue,       // set lout (continue)
+        "ထို့နောက်" => TokenKind::Then,         // htou nout (then)
+        "ကြည့်" => TokenKind::Ref,              // kyi (look)
+        "ပြောင်းလဲနိုင်" => TokenKind::Mut,    // pyaung le nain (mutable)
+        "ကိုက်ညီ" => TokenKind::Match,          // kaik nyi (match)
+        "သေချာ" => TokenKind::Assert,           // the cha (confirm)
+        "သက်သေပြ" => TokenKind::Prove,          // thethe pya (prove)
+        "လို" => TokenKind::Requires,           // lou (need)
+        "ဆောင်ရွက်" => TokenKind::Ensures,      // saung ywet (ensure)
+        "မှန်" => TokenKind::True,              // man (true)
+        "မှား" => TokenKind::False,             // m`a (false)
+        "ပုံနှိပ်" => TokenKind::Print,         // poun hnip (print)
+        "သန့်ရှင်း" => TokenKind::Pure,         // than shin (pure)
+        "ပြိုင်တူ" => TokenKind::Parallel,      // pyaung tu (parallel)
+        "မျက်နှာပြင်" => TokenKind::Interface,  // myet hna pyin
+        "နည်းလမ်း" => TokenKind::Methods,       // ne lam
+        "ဘယ်မှာ" => TokenKind::Where,           // be hma
+        "ဖြစ်သည်" => TokenKind::Is,             // pyit de
+        "ကြိုးစား" => TokenKind::Try,           // kyo sar
+        "တာဝန်" => TokenKind::Task,             // ta wun
+        "ပူးပေါင်း" => TokenKind::Join,         // poo paung
+        "ဘေးကင်းမှု" => TokenKind::Unsafe,      // be kin hmu
+        "ဒေသ" => TokenKind::RegionKw,           // de tha
+        "ရည်ရွယ်ချက်" => TokenKind::Intent,     // yi ywet chet
+        "အမျိုးအစား" => TokenKind::Type,        // amyo asar
+        "အပြင်" => TokenKind::Extern,           // a pyin
+        "မပြောင်းလဲ" => TokenKind::Invariant,   // ma pyaung le
+        "ဖွဲ့စည်းပုံ" => TokenKind::Struct,     // pwe si poun
+        "စာရင်း" => TokenKind::Enum,            // sayin
+        "ပုံသေ" => TokenKind::Const,            // poun the
+        "အများပြည်သူ" => TokenKind::Pub,        // amya pyi thu
+        "ယူနစ်" => TokenKind::Module,           // yu nit (loanword)
+        "သုံး" => TokenKind::Use,               // thoun
+        "အဖြစ်" => TokenKind::As,               // a pyit
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.31 (2026-06-08): Amharic (አማርኛ). ~32M speakers.
+fn amharic_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ተግባር" => TokenKind::Fn,               // tegbar (function/task)
+        "ይሁን" => TokenKind::Let,                // yihun (let)
+        "መልስ" => TokenKind::Return,             // mels (return)
+        "ከ" => TokenKind::If,                   // ke (if)
+        "ካልሆነ" => TokenKind::Else,              // kal hone (if not)
+        "ሲ" => TokenKind::While,                // si (while)
+        "ለ" => TokenKind::For,                  // le (for)
+        "ውስጥ" => TokenKind::In,                 // wist (in)
+        "ስብር" => TokenKind::Break,              // sber (break)
+        "ቀጥል" => TokenKind::Continue,           // qetel (continue)
+        "ከዚያ" => TokenKind::Then,               // kezia (then)
+        "ይመልከት" => TokenKind::Ref,              // yimelket (look)
+        "ሊቀየር" => TokenKind::Mut,               // likeyer (changeable)
+        "ተዛመደ" => TokenKind::Match,             // tezamede (match)
+        "አረጋግጥ" => TokenKind::Assert,           // aregagit (confirm)
+        "አስረዳ" => TokenKind::Prove,             // asreda (prove)
+        "ይፈልጋል" => TokenKind::Requires,         // yefelegal (needs)
+        "ያረጋግጣል" => TokenKind::Ensures,         // yaregagital (ensures)
+        "እውነት" => TokenKind::True,              // ewenet (truth)
+        "ሐሰት" => TokenKind::False,              // haset (lie)
+        "ህትመት" => TokenKind::Print,             // htmet (print)
+        "ንጹህ" => TokenKind::Pure,               // ntsuh (pure)
+        "ትይዩ" => TokenKind::Parallel,           // tyiyu (parallel)
+        "በይነገጽ" => TokenKind::Interface,        // beyinegets
+        "ዘዴዎች" => TokenKind::Methods,           // zedewotch
+        "የት" => TokenKind::Where,               // yet (where)
+        "ነው" => TokenKind::Is,                  // new (is)
+        "ሞክር" => TokenKind::Try,                // mokr (try)
+        "ስራ" => TokenKind::Task,                // sra (task)
+        "ቀላቀል" => TokenKind::Join,              // kelakel
+        "አደገኛ" => TokenKind::Unsafe,            // adegegna (dangerous)
+        "ክልል" => TokenKind::RegionKw,           // kll (region)
+        "ዓላማ" => TokenKind::Intent,             // alama (goal)
+        "አይነት" => TokenKind::Type,              // aynet
+        "ውጫዊ" => TokenKind::Extern,             // wchawi (external)
+        "የማይለወጥ" => TokenKind::Invariant,       // unchanging
+        "መዋቅር" => TokenKind::Struct,            // mewakr
+        "ቆጠራ" => TokenKind::Enum,               // qotera
+        "ቋሚ" => TokenKind::Const,               // qwami
+        "ሕዝባዊ" => TokenKind::Pub,               // hzbawi
+        "ሞዱል" => TokenKind::Module,             // modul
+        "ተጠቀም" => TokenKind::Use,               // tetekem
+        "እንደ" => TokenKind::As,                 // ende
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.32 (2026-06-08): Tibetan (བོད་ཡིག). ~7M speakers.
+/// Note: Tibetan uses the tsek (་) as syllable separator within
+/// a word; the resulting "word" is one ident.
+fn tibetan_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ལས་ཀ" => TokenKind::Fn,                // lay-ka (work / fn)
+        "ཡོད་པར་ཤོག" => TokenKind::Let,         // yod-par-shog (let it be)
+        "ལོག" => TokenKind::Return,              // lokh (return)
+        "གལ་ཏེ" => TokenKind::If,                // galte (if)
+        "གཞན" => TokenKind::Else,                // zhan (else)
+        "བར" => TokenKind::While,                // bar (while)
+        "ལ" => TokenKind::For,                   // la (for)
+        "ནང" => TokenKind::In,                   // nang (in)
+        "ནས" => TokenKind::From,                 // nas (from)
+        "བར་དུ" => TokenKind::To,                // bar-du (until)
+        "འགོག" => TokenKind::Break,              // gog (block)
+        "མུ་མཐུད" => TokenKind::Continue,        // mu-thud (continue)
+        "དེ་ནས" => TokenKind::Then,              // de-nas (then)
+        "ལྟ" => TokenKind::Ref,                  // lta (see)
+        "འགྱུར" => TokenKind::Mut,               // gyur (change)
+        "མཐུན" => TokenKind::Match,              // thun (agree)
+        "ངེས" => TokenKind::Assert,              // nges (certain)
+        "བསྒྲུབས" => TokenKind::Prove,           // sgrubs (proven)
+        "དགོས" => TokenKind::Requires,           // gos (need)
+        "ཁག" => TokenKind::Ensures,              // khag (guarantee)
+        "བདེན" => TokenKind::True,               // den (true)
+        "རྫུན" => TokenKind::False,              // dzun (false)
+        "པར" => TokenKind::Print,                // par (print)
+        "གཙང" => TokenKind::Pure,                // tsang (pure)
+        "མཉམ" => TokenKind::Parallel,            // nyam (parallel)
+        "གང" => TokenKind::Where,                // gang (where)
+        "ཡིན" => TokenKind::Is,                  // yin (is)
+        "འབད" => TokenKind::Try,                 // ed (try)
+        "ལས" => TokenKind::Task,                 // las (work — could conflict; pragma-gated)
+        "མཐུན་སྦྱོར" => TokenKind::Join,         // thun-jor
+        "ཉེན་ཁ" => TokenKind::Unsafe,            // nyen-kha (danger)
+        "ཁུལ" => TokenKind::RegionKw,            // khul (region)
+        "དམིགས་ཡུལ" => TokenKind::Intent,        // mig-yul (goal)
+        "རིགས" => TokenKind::Type,               // rig (type / kind)
+        "ཕྱི" => TokenKind::Extern,              // chi (outer)
+        "རྩིས" => TokenKind::Enum,               // tsis (counting)
+        "རྟག" => TokenKind::Const,               // tag (constant)
+        "སྤྱི" => TokenKind::Pub,                // chi (public)
+        "ཚན" => TokenKind::Module,               // tsen (module)
+        "བཀོལ" => TokenKind::Use,                // kol (use)
+        "དུ" => TokenKind::As,                   // du (as)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.33 (2026-06-08): Cherokee (ᏣᎳᎩ). Minimal keyword
+/// set to give the syllabary a host in vāṇी.
+fn cherokee_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ᏗᎦᏬᏂᎯᏍᏗ" => TokenKind::Fn,             // digawonihisdi (function)
+        "ᎠᏁᎳ" => TokenKind::Let,                 // anela (let)
+        "ᏗᎬᏎᏗ" => TokenKind::Return,             // digusedi (return)
+        "ᎢᏳᏃ" => TokenKind::If,                  // iyuno (if)
+        "ᎪᎯ" => TokenKind::Else,                 // gohi (other)
+        "ᏰᎵᏊ" => TokenKind::While,               // yelikwu (while)
+        "ᏌᏊ" => TokenKind::For,                  // sakwu (each / for)
+        "ᎭᏫᎾ" => TokenKind::In,                  // hawina (in)
+        "ᎤᎵᏍᎩᏗ" => TokenKind::Break,             // ulisgidi (break)
+        "ᏗᎧᎵᏍᏗ" => TokenKind::Continue,          // diqalisdi (continue)
+        "ᎯᎪᎲᎢ" => TokenKind::Ref,                // higohvi (see)
+        "ᏚᎵᎮᎵᎬᎢ" => TokenKind::Mut,             // dulihelvgvi (changeable)
+        "ᎤᏙᎯᏳ" => TokenKind::True,               // udohiyu (true)
+        "ᎤᏝ" => TokenKind::False,                // utla (false)
+        "ᎠᎴᏂᏍᎬᎢ" => TokenKind::Print,           // alenisgvgi (print)
+        "ᎯᏍᏗᏎᏍᏗ" => TokenKind::Assert,          // confirm
+        "ᎠᎩᏠᏯᏍᏗ" => TokenKind::Prove,           // demonstrate
+        "ᎠᏙᏢᏍᎩ" => TokenKind::Struct,           // structure
+        "ᎬᏙᏗ" => TokenKind::Use,                 // gvdodi (use)
+        "ᎤᎲᏍᏛ" => TokenKind::Intent,             // uhvsdv (purpose)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.34 (2026-06-08): Lao (ລາວ). ~30M speakers. Closely
+/// related to Thai but distinct script.
+fn lao_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ໜ້າທີ່" => TokenKind::Fn,               // na thi (function)
+        "ໃຫ້" => TokenKind::Let,                  // hai (give / let)
+        "ກັບຄືນ" => TokenKind::Return,            // kap kuen (return)
+        "ຖ້າ" => TokenKind::If,                   // tha (if)
+        "ບໍ່ດັ່ງນັ້ນ" => TokenKind::Else,         // bo dang nan
+        "ໃນຂະນະທີ່" => TokenKind::While,          // nai khanat thi
+        "ສຳລັບ" => TokenKind::For,                // samlap (for)
+        "ໃນ" => TokenKind::In,                    // nai (in)
+        "ຈາກ" => TokenKind::From,                 // chak (from)
+        "ເຖິງ" => TokenKind::To,                  // theung (to)
+        "ຢຸດ" => TokenKind::Break,                // yut (stop)
+        "ສືບຕໍ່" => TokenKind::Continue,          // sueb to (continue)
+        "ແລ້ວ" => TokenKind::Then,                // laeo (then)
+        "ເບິ່ງ" => TokenKind::Ref,                // beung (look)
+        "ປ່ຽນແປງໄດ້" => TokenKind::Mut,          // pian paeng dai
+        "ກົງກັນ" => TokenKind::Match,             // kong kan (match)
+        "ຢືນຢັນ" => TokenKind::Assert,            // yuenyan (confirm)
+        "ພິສູດ" => TokenKind::Prove,              // phisuat (prove)
+        "ຕ້ອງການ" => TokenKind::Requires,         // tongkan (need)
+        "ຮັບປະກັນ" => TokenKind::Ensures,         // hap pa kan
+        "ຈິງ" => TokenKind::True,                 // jing (true)
+        "ບໍ່ຈິງ" => TokenKind::False,             // bo jing (false)
+        "ພິມ" => TokenKind::Print,                // phim (print)
+        "ບໍລິສຸດ" => TokenKind::Pure,             // bolisuth (pure)
+        "ຂະໜານ" => TokenKind::Parallel,           // khanan (parallel)
+        "ສ່ວນຕິດຕໍ່" => TokenKind::Interface,     // suan tit to
+        "ວິທີການ" => TokenKind::Methods,          // vithikan (methods)
+        "ບ່ອນທີ່" => TokenKind::Where,            // bon thi (where)
+        "ແມ່ນ" => TokenKind::Is,                  // maen (is)
+        "ລອງ" => TokenKind::Try,                  // long (try)
+        "ວຽກງານ" => TokenKind::Task,              // viak ngan (task)
+        "ເຊື່ອມ" => TokenKind::Join,              // sueam (join)
+        "ບໍ່ປອດໄພ" => TokenKind::Unsafe,          // bo pot phai (unsafe)
+        "ພູມພາກ" => TokenKind::RegionKw,          // phumphak (region)
+        "ຈຸດປະສົງ" => TokenKind::Intent,          // chutpasong (intent)
+        "ປະເພດ" => TokenKind::Type,               // paphet (type)
+        "ພາຍນອກ" => TokenKind::Extern,            // phay nok (external)
+        "ບໍ່ປ່ຽນ" => TokenKind::Invariant,        // bo pian (invariant)
+        "ໂຄງສ້າງ" => TokenKind::Struct,           // khong sang (structure)
+        "ການນັບ" => TokenKind::Enum,              // kan nap (counting)
+        "ຄົງທີ່" => TokenKind::Const,             // khong thi (constant)
+        "ສາທາລະນະ" => TokenKind::Pub,             // satharana (public)
+        "ໂມດູນ" => TokenKind::Module,             // modun (module)
+        "ໃຊ້" => TokenKind::Use,                  // sai (use)
+        "ເປັນ" => TokenKind::As,                  // pen (as)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.35 (2026-06-08): Mongolian traditional (ᠮᠣᠩᠭᠣᠯ).
+/// ~6M speakers in Inner Mongolia. Minimal v1 keyword set.
+fn mongolian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ᠴᠠᠭ" => TokenKind::Fn,                  // tsag (function — using "task")
+        "ᠶᠠᠪᠤᠭᠤᠯ" => TokenKind::Let,           // yabuul (send / let)
+        "ᠪᠤᠴᠠ" => TokenKind::Return,             // butsa (return!)
+        "ᠬᠡᠷᠪᠡ" => TokenKind::If,                // kerbe (if)
+        "ᠡᠰᠡᠪᠡᠯ" => TokenKind::Else,             // esebel (or else)
+        "ᠶᠠᠭ᠎ᠠ" => TokenKind::While,             // yaga (while)
+        "ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ" => TokenKind::For,         // for
+        "ᠠᠴᠠ" => TokenKind::From,                // atsa (from)
+        "ᠬᠦᠷᠲᠡᠯᠡ" => TokenKind::To,              // kürtele (to)
+        "ᠵᠣᠭᠰᠣ" => TokenKind::Break,             // zogso (stop)
+        "ᠦᠷᠭᠦᠯᠵᠢᠯᠡ" => TokenKind::Continue,     // urgelje (continue)
+        "ᠳᠠᠷᠠᠭ᠎ᠠ" => TokenKind::Then,            // daraga (then)
+        "ᠦᠵᠡ" => TokenKind::Ref,                 // üze (see)
+        "ᠦᠨᠡᠨ" => TokenKind::True,               // ünen (true)
+        "ᠬᠤᠳᠠᠯ" => TokenKind::False,             // hudal (false)
+        "ᠬᠡᠪᠯᠡ" => TokenKind::Print,             // keble (print)
+        "ᠪᠠᠲᠤᠯ" => TokenKind::Assert,            // batul (verify)
+        "ᠨᠣᠲᠠᠯᠠ" => TokenKind::Prove,            // notala (prove)
+        "ᠴᠡᠪᠡᠷ" => TokenKind::Pure,              // tseber (pure)
+        "ᠡᠭᠦᠷᠭᠡ" => TokenKind::Task,             // ügüre (task)
+        "ᠬᠡᠷᠡᠭᠯᠡ" => TokenKind::Use,             // keregle (use)
+        "ᠬᠡᠯᠪᠡᠷᠢ" => TokenKind::Type,            // kelberi (type / kind)
+        "ᠪᠦᠳᠦᠭᠴᠡ" => TokenKind::Struct,          // büdüktse (structure)
+        "ᠵᠣᠷᠢᠯᠭ᠎ᠠ" => TokenKind::Intent,         // zorilga (goal / purpose)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.24 (2026-06-08): Slovak (slovenčina). Third Slavic
 /// Latin variant. Shares ASCII fallbacks with Czech but uses
 /// distinct keyword choices.
@@ -3788,6 +4112,13 @@ fn script_label(script: Script) -> &'static str {
         Script::Thai => "Thai",
         Script::Armenian => "Armenian",
         Script::Georgian => "Georgian",
+        Script::Khmer => "Khmer",
+        Script::Burmese => "Myanmar (Burmese)",
+        Script::Ethiopic => "Ethiopic",
+        Script::Tibetan => "Tibetan",
+        Script::Cherokee => "Cherokee",
+        Script::Lao => "Lao",
+        Script::Mongolian => "Mongolian (traditional)",
     }
 }
 
@@ -4159,6 +4490,32 @@ enum DialectLang {
     // ~80M speakers (largely in Nigeria + Niger). Latin Boko
     // script with implosive consonants ɓ/ɗ/ƙ/ƴ.
     Hausa,
+    // Phase 13.29 (2026-06-08): Khmer (ខ្មែរ) — block
+    // U+1780..17FF. ~16M speakers in Cambodia.
+    Khmer,
+    // Phase 13.30 (2026-06-08): Burmese (မြန်မာ) — Myanmar
+    // block U+1000..109F. ~33M speakers.
+    Burmese,
+    // Phase 13.31 (2026-06-08): Amharic (አማርኛ) — Ethiopic
+    // block U+1200..137F. ~32M speakers in Ethiopia.
+    Amharic,
+    // Phase 13.32 (2026-06-08): Tibetan (བོད་ཡིག) — block
+    // U+0F00..0FFF. ~7M speakers.
+    Tibetan,
+    // Phase 13.33 (2026-06-08): Cherokee (ᏣᎳᎩ) — Cherokee
+    // syllabary U+13A0..13FF. Endangered (~2K speakers); v1
+    // ships a minimal keyword set to give the syllabary a
+    // host in vāṇी.
+    Cherokee,
+    // Phase 13.34 (2026-06-08): Lao (ລາວ) — block
+    // U+0E80..0EFF. ~30M speakers; closely related to Thai.
+    Lao,
+    // Phase 13.35 (2026-06-08): Mongolian (ᠮᠣᠩᠭᠣᠯ) — traditional
+    // vertical script block U+1800..18AF. ~6M speakers
+    // (Inner Mongolia). The lexer reads UTF-8 in logical
+    // (byte) order so vertical rendering is purely a display
+    // concern.
+    Mongolian,
 }
 
 impl DialectLang {
@@ -4219,6 +4576,13 @@ impl DialectLang {
             DialectLang::Catalan => "catalan",
             DialectLang::Yoruba => "yoruba",
             DialectLang::Hausa => "hausa",
+            DialectLang::Khmer => "khmer",
+            DialectLang::Burmese => "burmese",
+            DialectLang::Amharic => "amharic",
+            DialectLang::Tibetan => "tibetan",
+            DialectLang::Cherokee => "cherokee",
+            DialectLang::Lao => "lao",
+            DialectLang::Mongolian => "mongolian",
         }
     }
 
@@ -4291,6 +4655,13 @@ impl DialectLang {
             DialectLang::Catalan => Script::Latin,
             DialectLang::Yoruba => Script::Latin,
             DialectLang::Hausa => Script::Latin,
+            DialectLang::Khmer => Script::Khmer,
+            DialectLang::Burmese => Script::Burmese,
+            DialectLang::Amharic => Script::Ethiopic,
+            DialectLang::Tibetan => Script::Tibetan,
+            DialectLang::Cherokee => Script::Cherokee,
+            DialectLang::Lao => Script::Lao,
+            DialectLang::Mongolian => Script::Mongolian,
         }
     }
 }
@@ -4377,6 +4748,28 @@ enum Script {
     // (Nuskhuri). Modern Georgian uses Mkhedruli (lowercase-
     // only — no letter case in modern Georgian).
     Georgian,
+    // Phase 13.29 (2026-06-08): Khmer — block U+1780..17FF.
+    Khmer,
+    // Phase 13.30 (2026-06-08): Myanmar (Burmese) — block
+    // U+1000..109F.
+    Burmese,
+    // Phase 13.31 (2026-06-08): Ethiopic syllabary — block
+    // U+1200..137F (main) + U+1380..139F (supplement) +
+    // U+2D80..2DDF (extended) + U+AB00..AB2F (Ethiopic
+    // Extended-A).
+    Ethiopic,
+    // Phase 13.32 (2026-06-08): Tibetan — block U+0F00..0FFF.
+    Tibetan,
+    // Phase 13.33 (2026-06-08): Cherokee syllabary — block
+    // U+13A0..13FF (main) + U+AB70..ABBF (supplement).
+    Cherokee,
+    // Phase 13.34 (2026-06-08): Lao — block U+0E80..0EFF.
+    Lao,
+    // Phase 13.35 (2026-06-08): Mongolian — block U+1800..18AF.
+    // Traditional vertical script; the lexer reads UTF-8 in
+    // logical (byte) order so vertical rendering is a display
+    // concern only.
+    Mongolian,
 }
 
 impl Script {
@@ -4482,6 +4875,40 @@ impl Script {
                 || ('\u{2D00}'..='\u{2D2F}').contains(&c)
             {
                 return Script::Georgian;
+            }
+            // Phase 13.29: Khmer.
+            if ('\u{1780}'..='\u{17FF}').contains(&c) {
+                return Script::Khmer;
+            }
+            // Phase 13.30: Myanmar (Burmese).
+            if ('\u{1000}'..='\u{109F}').contains(&c) {
+                return Script::Burmese;
+            }
+            // Phase 13.31: Ethiopic (Amharic).
+            if ('\u{1200}'..='\u{137F}').contains(&c)
+                || ('\u{1380}'..='\u{139F}').contains(&c)
+                || ('\u{2D80}'..='\u{2DDF}').contains(&c)
+                || ('\u{AB00}'..='\u{AB2F}').contains(&c)
+            {
+                return Script::Ethiopic;
+            }
+            // Phase 13.32: Tibetan.
+            if ('\u{0F00}'..='\u{0FFF}').contains(&c) {
+                return Script::Tibetan;
+            }
+            // Phase 13.33: Cherokee syllabary.
+            if ('\u{13A0}'..='\u{13FF}').contains(&c)
+                || ('\u{AB70}'..='\u{ABBF}').contains(&c)
+            {
+                return Script::Cherokee;
+            }
+            // Phase 13.34: Lao.
+            if ('\u{0E80}'..='\u{0EFF}').contains(&c) {
+                return Script::Lao;
+            }
+            // Phase 13.35: Mongolian traditional.
+            if ('\u{1800}'..='\u{18AF}').contains(&c) {
+                return Script::Mongolian;
             }
         }
         Script::Latin
@@ -4655,6 +5082,21 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.28 (2026-06-08): Afroasiatic W. Africa.
             "hausa" | "hawsa" | "ha"
                 => Some(DialectLang::Hausa),
+            // Phase 13.29..13.35 — seven new-Script dialects.
+            "khmer" | "ខ្មែរ" | "km"
+                => Some(DialectLang::Khmer),
+            "burmese" | "myanmar" | "မြန်မာ" | "my"
+                => Some(DialectLang::Burmese),
+            "amharic" | "አማርኛ" | "am"
+                => Some(DialectLang::Amharic),
+            "tibetan" | "བོད་ཡིག" | "bo"
+                => Some(DialectLang::Tibetan),
+            "cherokee" | "ᏣᎳᎩ" | "chr"
+                => Some(DialectLang::Cherokee),
+            "lao" | "ລາວ" | "lo"
+                => Some(DialectLang::Lao),
+            "mongolian" | "ᠮᠣᠩᠭᠣᠯ" | "mn"
+                => Some(DialectLang::Mongolian),
             _ => None,
         };
     }
@@ -5499,6 +5941,14 @@ impl<'a> Lexer<'a> {
             .or_else(|| catalan_keyword(text))
             .or_else(|| yoruba_keyword(text))
             .or_else(|| hausa_keyword(text))
+            // Phase 13.29..13.35: seven new-Script dialects.
+            .or_else(|| khmer_keyword(text))
+            .or_else(|| burmese_keyword(text))
+            .or_else(|| amharic_keyword(text))
+            .or_else(|| tibetan_keyword(text))
+            .or_else(|| cherokee_keyword(text))
+            .or_else(|| lao_keyword(text))
+            .or_else(|| mongolian_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
