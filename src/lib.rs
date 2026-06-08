@@ -27953,6 +27953,42 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn korean_hangul_pragma_compiles_and_runs() {
+        // Phase 13.1 (2026-06-07): first Hangul-script dialect.
+        // SOV grammar continues the Japanese precedent; v1
+        // ships keyword-first surface — Korean SOV grammar
+        // (만약 x 그러면 { ... }) queued for v2.
+        let source = "// vani-lang: korean\n\
+                      목적 \"basic Korean demo\";\n\
+                      함수 add(a: i64, b: i64) -> i64 {\n  \
+                        반환 a + b;\n\
+                      }\n\
+                      함수 main() -> i64 {\n  \
+                        정의 x: i64 = add(20, 22);\n  \
+                        확인 x == 42;\n  \
+                        증명 2 + 2 == 4;\n  \
+                        출력 x;\n  \
+                        반환 0;\n\
+                      }\n";
+        crate::compile(source).expect("Korean basics compile");
+    }
+
+    #[test]
+    fn korean_script_purity_rejects_mixed_hangul_and_devanagari() {
+        // A Korean-pragma file with a Devanagari structure
+        // keyword must be rejected by the script-purity gate.
+        let source = "// vani-lang: korean\n\
+                      함수 main() -> i64 {\n  \
+                        कार्य x(): i64 { return 0; }\n  \
+                        반환 0;\n\
+                      }\n";
+        assert!(
+            crate::compile(source).is_err(),
+            "Korean pragma + Devanagari keyword must be rejected"
+        );
+    }
+
+    #[test]
     fn german_latin_with_umlauts_pragma_compiles_and_runs() {
         // Phase 10.1 (2026-06-07): third Latin-with-accents
         // Tier II dialect. Same v1 scope as Spanish + French —

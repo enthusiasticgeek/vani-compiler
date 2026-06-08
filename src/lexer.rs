@@ -1133,6 +1133,83 @@ fn german_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.1 (2026-06-07): Korean (한국어) keyword resolution.
+/// First Hangul-script dialect. SOV grammar continues the
+/// Japanese precedent — keyword-first surface in v1, native SOV
+/// statement shapes queued behind the same generalization needed
+/// for Japanese SOV. The keyword set uses precomposed Hangul
+/// syllables (Unicode block U+AC00..U+D7AF) rather than
+/// decomposed jamo, matching how modern Korean is typed and
+/// rendered.
+fn korean_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "함수" => TokenKind::Fn,             // hamsu (function)
+        "정의" => TokenKind::Let,            // jeongui (definition / let)
+        "구조체" => TokenKind::Struct,       // gujoche (structure)
+        "열거" => TokenKind::Enum,           // yeolgeo (enumeration)
+        "상수" => TokenKind::Const,          // sangsu (constant)
+        // === VISIBILITY / MODULES ===
+        "공개" => TokenKind::Pub,            // gonggae (public / open)
+        "모듈" => TokenKind::Module,         // modyul (module — loanword)
+        "사용" => TokenKind::Use,            // sayong (use)
+        "로서" => TokenKind::As,             // roseo (as)
+        // === CONTROL FLOW ===
+        "반환" => TokenKind::Return,         // banhwan (return)
+        "돌려주기" => TokenKind::Return,     // dollyeojugi (give back)
+        "만약" => TokenKind::If,             // manyak (if)
+        "만일" => TokenKind::If,             // manil (if — alt)
+        "아니면" => TokenKind::Else,         // animyeon (otherwise)
+        "동안" => TokenKind::While,          // dongan (while / during)
+        "각각" => TokenKind::For,            // gakgak (each / for)
+        "안에" => TokenKind::In,             // ane (in / inside)
+        "에서" => TokenKind::From,           // eseo (from)
+        "까지" => TokenKind::To,             // kkaji (until)
+        "중단" => TokenKind::Break,          // jungdan (interruption)
+        "계속" => TokenKind::Continue,       // gyesok (continue)
+        "그러면" => TokenKind::Then,         // geureomyeon (then)
+        // === REFS / MUT ===
+        "참조" => TokenKind::Ref,            // chamjo (reference)
+        "가변" => TokenKind::Mut,            // gabyeon (changeable / mutable)
+        // === MATCH ===
+        "일치" => TokenKind::Match,          // ilchi (match / agreement)
+        // === VERIFICATION ===
+        "확인" => TokenKind::Assert,         // hwagin (verify / confirm)
+        "증명" => TokenKind::Prove,          // jeungmyeong (prove)
+        "필요" => TokenKind::Requires,       // piryo (need / require)
+        "보장" => TokenKind::Ensures,        // bojang (guarantee)
+        // === BOOL / PRINT ===
+        "참" => TokenKind::True,             // cham (true)
+        "거짓" => TokenKind::False,          // geojit (false)
+        "출력" => TokenKind::Print,          // chullyeok (output)
+        "쓰기" => TokenKind::Print,          // sseugi (write — alt)
+        // === PURITY / PARALLEL ===
+        "순수" => TokenKind::Pure,           // sunsu (pure)
+        "병렬" => TokenKind::Parallel,       // byeongnyeol (parallel)
+        // === INTERFACES / METHODS ===
+        "인터페이스" => TokenKind::Interface, // inteopeyiseu (interface — loanword)
+        "구현" => TokenKind::Implement,      // guhyeon (implementation)
+        "메서드" => TokenKind::Methods,      // meseodeu (methods — loanword)
+        // === BOUNDS ===
+        "여기서" => TokenKind::Where,        // yeogiseo (where / here)
+        "이다" => TokenKind::Is,             // ida (to be — Korean copula)
+        // === CONCURRENCY ===
+        "시도" => TokenKind::Try,            // sido (try / attempt)
+        "작업" => TokenKind::Task,           // jageop (task / work)
+        "결합" => TokenKind::Join,           // gyeolhap (join / unite)
+        // === EMBEDDED ===
+        "위험" => TokenKind::Unsafe,         // wiheom (danger / unsafe)
+        "영역" => TokenKind::RegionKw,       // yeongyeok (region / area)
+        // === SOV-S7 PARITY ===
+        "목적" => TokenKind::Intent,         // mokjeok (purpose / intent)
+        "타입" => TokenKind::Type,           // taip (type — loanword)
+        "외부" => TokenKind::Extern,         // oebu (external)
+        "불변" => TokenKind::Invariant,      // bulbyeon (invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 9b (2026-06-07): Japanese (日本語) keyword resolution.
 /// First three-script dialect and first non-Indic SOV target. The
 /// keyword set freely mixes Kanji (function = 関数), Katakana
@@ -1463,6 +1540,7 @@ fn script_label(script: Script) -> &'static str {
         Script::Arabic => "Perso-Arabic",
         Script::Cyrillic => "Cyrillic",
         Script::Japanese => "Japanese (Hiragana/Katakana/Kanji)",
+        Script::Hangul => "Hangul (Korean)",
     }
 }
 
@@ -1688,6 +1766,12 @@ enum DialectLang {
     // keyword-first surface applies cleanly — V2 / subordinate-
     // SOV parser hooks queued for v2.
     German,
+    // Phase 13.1 (2026-06-07): Korean (한국어) — first Hangul-
+    // script dialect. SOV grammar like Japanese; the keyword
+    // table uses precomposed Hangul syllables (e.g. 함수 for
+    // "function" — ham + su). Korean continues the SOV-for-
+    // now-keyword-first design from Japanese.
+    Korean,
 }
 
 impl DialectLang {
@@ -1720,6 +1804,7 @@ impl DialectLang {
             DialectLang::French => "french",
             DialectLang::Japanese => "japanese",
             DialectLang::German => "german",
+            DialectLang::Korean => "korean",
         }
     }
 
@@ -1764,6 +1849,7 @@ impl DialectLang {
             DialectLang::French => Script::Latin,
             DialectLang::Japanese => Script::Japanese,
             DialectLang::German => Script::Latin,
+            DialectLang::Korean => Script::Hangul,
         }
     }
 }
@@ -1810,6 +1896,16 @@ enum Script {
     // 関数 (Kanji) + タスク (Katakana) + ならば (Hiragana) the
     // way native Japanese code does. LTR.
     Japanese,
+    // Phase 13.1 (2026-06-07): Hangul — Korean's featural
+    // alphabet packaged as precomposed syllables. Block
+    // U+AC00..U+D7AF (Hangul Syllables) is the main code-point
+    // range used by modern Korean; U+1100..U+11FF (Hangul Jamo)
+    // gives the underlying jamo components and U+A960..U+A97F
+    // / U+D7B0..U+D7FF carry the Extended-A/B supplements.
+    // Korean is SOV; keyword-first surface in v1 (SOV grammar
+    // queued behind the same generalization needed for
+    // Japanese).
+    Hangul,
 }
 
 impl Script {
@@ -1879,6 +1975,15 @@ impl Script {
                 || ('\u{3400}'..='\u{4DBF}').contains(&c)    // CJK Extension A
             {
                 return Script::Japanese;
+            }
+            // Phase 13.1 (2026-06-07): Hangul — Korean syllables
+            // (precomposed) + Jamo (decomposed) + Extended-A/B.
+            if ('\u{AC00}'..='\u{D7AF}').contains(&c)        // Hangul Syllables
+                || ('\u{1100}'..='\u{11FF}').contains(&c)    // Hangul Jamo
+                || ('\u{A960}'..='\u{A97F}').contains(&c)    // Hangul Jamo Extended-A
+                || ('\u{D7B0}'..='\u{D7FF}').contains(&c)    // Hangul Jamo Extended-B
+            {
+                return Script::Hangul;
             }
         }
         Script::Latin
@@ -1956,6 +2061,9 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
                 => Some(DialectLang::Japanese),
             // Phase 10.1 (2026-06-07): third Latin-with-accents.
             "german" | "deutsch" | "de" => Some(DialectLang::German),
+            // Phase 13.1 (2026-06-07): first Hangul-script dialect.
+            "korean" | "한국어" | "hangugeo" | "ko"
+                => Some(DialectLang::Korean),
             _ => None,
         };
     }
@@ -2740,6 +2848,9 @@ impl<'a> Lexer<'a> {
             // keywords start non-ASCII (Hiragana / Katakana /
             // Kanji code points all sit above U+0080).
             .or_else(|| japanese_keyword(text))
+            // Phase 13.1 (2026-06-07): Korean — Hangul syllables
+            // all sit at U+AC00+ (above U+0080).
+            .or_else(|| korean_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this

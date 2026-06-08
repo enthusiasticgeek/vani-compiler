@@ -1,0 +1,35 @@
+// श्री।
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/korean/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/korean/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.1 v1: first Hangul-script vāṇी dialect. SOV grammar
+// continues the Japanese precedent — keyword-first surface in v1;
+// Korean SOV statement shapes (만약 x 그러면 { ... } / x 동안
+// { ... } / etc.) queued for v2 once the SOV statement-shape
+// detector generalizes beyond Devanagari.
+
+목적 "Compute a small score with checked constraints";
+
+함수 add(a: i64, b: i64) -> i64 {
+  반환 a + b;
+}
+
+함수 bounded_score(base: i64) -> i64
+필요 base >= 0;
+{
+  정의 doubled: i64 = base * 2;
+  확인 doubled >= base;
+  반환 add(doubled, 2);
+}
+
+함수 main() -> i64 {
+  정의 answer = bounded_score(20);
+  증명 2 + 2 == 4;
+  확인 answer >= 0;
+  출력 answer;
+  반환 0;
+}

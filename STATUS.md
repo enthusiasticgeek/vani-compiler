@@ -10,6 +10,87 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 13.1 Korean (first Hangul-script dialect)
+
+**Korean (한국어)** ships as vāṇी's first Hangul-script dialect
+and second non-Indic SOV target (after Japanese). Roster grows
+to **27 dialects across 14 scripts**.
+
+```rust
+// vani-lang: korean
+목적 "Compute a small score with checked constraints";
+
+함수 add(a: i64, b: i64) -> i64 {
+  반환 a + b;
+}
+
+함수 bounded_score(base: i64) -> i64
+필요 base >= 0;
+{
+  정의 doubled: i64 = base * 2;
+  확인 doubled >= base;
+  반환 add(doubled, 2);
+}
+
+함수 main() -> i64 {
+  정의 answer = bounded_score(20);
+  증명 2 + 2 == 4;
+  확인 answer >= 0;
+  출력 answer;
+  반환 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Architectural surface**:
+- New `Script::Hangul` variant covering four Unicode blocks
+  (Hangul Syllables U+AC00..D7AF — the main one used by
+  modern Korean, Hangul Jamo U+1100..11FF, Extended-A
+  U+A960..A97F, Extended-B U+D7B0..D7FF).
+- New `DialectLang::Korean` → `Script::Hangul`.
+- Pragma resolver accepts `// vani-lang: korean`, `한국어`,
+  `hangugeo`, `ko`.
+- New `korean_keyword(text)` table with ~45 keywords spanning
+  every structure category — function declarations (함수,
+  구조체, 열거), control flow (만약, 아니면, 동안, 각각, 반환,
+  중단, 계속), verification (확인, 증명, 필요, 보장), bool
+  literals (참, 거짓), I/O (출력, 쓰기), interfaces (인터페이스,
+  구현, 메서드), concurrency (시도, 작업, 결합, 병렬), and
+  SOV-S7 parity (목적, 타입, 외부, 불변).
+- Chained into `lex_unicode_ident` (all Hangul syllables sit
+  above U+0080).
+
+**New `DiagLang::Korean`** with Korean prefix table — error
+labels render as `오류 (error)` / `참고 (note)`, plus prefix
+translations for `예상` (expected), `알 수 없는 함수`
+(unknown function), `타입 불일치` (type mismatch), `증명할 수
+없음` (cannot prove), etc.
+
+**v1 scope — keyword-first surface**: Korean SOV statement
+shapes (`만약 x 그러면 { ... }`, `x 동안 { ... }`) queued
+behind the same SOV-detector generalization needed for
+Japanese SOV. The Hangul infrastructure is ready to host SOV
+forms once that lift lands.
+
+**2 new regression tests**:
+- `korean_hangul_pragma_compiles_and_runs` — full pipeline
+  through 함수 / 정의 / 확인 / 증명 / 출력.
+- `korean_script_purity_rejects_mixed_hangul_and_devanagari`
+  — pins the cross-script purity gate.
+
+**Architecture validation**: adding Hangul was a clean
+6-touchpoint extension (Script variant + classify range +
+DialectLang + pragma + keyword table + DiagLang) — same shape
+as every prior script ship. The per-script abstraction from
+Phase 5b now spans Devanagari, Brahmi-derived (Bengali +
+Tamil/Telugu/Gujarati/Gurmukhi/Kannada/Malayalam/Odia/Sinhala),
+Perso-Arabic, Cyrillic, three-script Japanese, Latin-with-
+accents, and Hangul.
+
+Lib ledger: **1954 lib + 54 parity** green (1952→1954 = 2 new
+Korean regression tests). All 186 example files compile.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 L2 Box\<T\> Phase 2 (LLVM backend codegen)
 
 The LLVM backend reaches parity with C for `Box<T>` — same v1
