@@ -184,18 +184,54 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Dedicated-session lifts (multi-day, refreshed 2026-06-08)
+### Recommended task queue (refreshed 2026-06-08)
 
-Three multi-day arcs remain. Each needs its own contiguous
-session — they don't fit the rolling "ship one phase per turn"
-cadence and need to land contiguously with full backend + test
-coverage.
+User direction: ship Tier 1 in rolling sessions (one item per
+session). Tier 2 multi-day items run in dedicated fresh sessions
+later. Tier 3 deferred indefinitely except the grammar-consultant
+pass. Tier 4 (deploy / CI / GH-Actions) deferred to the very end.
 
-| Item | Effort | Dependencies | Scope |
+#### 🟢 Tier 1 — Contained, high-value, single-session each
+
+| Order | Task | Effort | Why now |
 |---|---|---|---|
-| ~~L2 Phase 3b — Box\<dyn Iface\> on LLVM~~ | ✅ shipped 2026-06-08 | — | Mirrored the C lowering on LLVM end-to-end. L2 is now fully closed. Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>` remains as a small optional follow-up. |
-| **Phase 10.2 Mandarin** | 30-50h | None (independent). The CJK Unified Ideographs block is reachable today; what's missing is the segmentation arc. | CJK Unified Ideographs without whitespace word boundaries — needs lookahead-based dictionary-driven segmentation. Distinct from Phase 9b Japanese which has Hiragana particles as natural separators. |
-| **Arc 8 v3.1 sugar** | 20-35h | Arc 8 v1/v2/v3 runtime (✅ shipped). | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. The underlying capability + v3 hand-rolled state-machine pattern already ship; this is the ergonomic compiler transform. Postfix `?` operator landed 2026-06-08 (parses to same `ExprKind::Try` as the keyword — see STATUS.md current session); A4.4 (CancelToken auto-plumbing) is blocked on L4 (refs-in-fields); A4.3 (multi-task scheduling) remains the next dedicated arc. |
+| **1** | **L9 — LLVM identifier mangling for non-ASCII** | 2-4h | Closes the quiet asymmetry between the C and LLVM backends: example files using Devanagari/Bengali/Tamil/etc. identifiers currently only run cleanly on the C backend. Smallest open L. See [docs/v1_limitations.md L9](docs/v1_limitations.md#L9). |
+| **2** | **Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>`** | 3-5h | L2 follow-up flagged in STATUS.md after Phase 3b shipped. Free + Drop chain through one more layer when the boxed type itself owns heap. |
+| **3** | **`box(value)` expected-type threading** (drop the `as dyn Iface` cast) | 4-6h | Cosmetic L2 follow-up. Currently users must spell `box(value as dyn Iface)`. Threading the expected type lets the cast become optional. |
+
+#### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
+
+| Order | Task | Effort | Dependencies |
+|---|---|---|---|
+| **4** | **A4.3 Multi-task scheduling (v3.1)** | 6-10h | Closest contained big-arc item. The next substantive Arc 8 v3.1 caveat after postfix `?` (2026-06-08). |
+| **5** | **L4 partial lift — refs in v3.1 Task fields** (unblocks A4.4 CancelToken auto-plumbing) | 12-15h | Touches checker + both backends. Closes A4.4 once L4 lifts. |
+| **6** | **Phase 10.2 Mandarin** (CJK tokenizer + dialect) | 30-50h, multi-day | Last queued language. Needs dictionary-driven word segmentation since CJK has no whitespace. |
+
+#### 🔵 Tier 3 — Deferred (user direction 2026-06-08)
+
+All external-blocked items below are deferred indefinitely
+EXCEPT the grammar-consultant pass:
+
+- ✅ KEEP: **Grammar consultant pass** — native-speaker linguist
+  review across the 61 shipped dialects. Ongoing/external.
+- ⏸ DEFER: macOS empirical verification (L10)
+- ⏸ DEFER: Windows empirical verification (L10)
+- ⏸ DEFER: Arc 9 a/b/e/f Kosh package manager
+- ⏸ DEFER: Arc 7 Win64 / AArch64 cross-platform CI
+
+#### ⚪ Tier 4 — Deferred to last (standing instruction)
+
+GH-Actions / CI / deploy work — see
+[~/.claude/projects/-home-ptambe-shortcut-mcp-server/memory/feedback_defer_deploy_last.md].
+Touch only after every other Tier is complete.
+
+### Dedicated-session lifts (legacy table — kept for reference)
+
+| Item | Status |
+|---|---|
+| ~~L2 Phase 3b — Box\<dyn Iface\> on LLVM~~ | ✅ shipped 2026-06-08 |
+| Phase 10.2 Mandarin | Queued — see Tier 2 #6 above |
+| Arc 8 v3.1 sugar | Postfix `?` shipped 2026-06-08; A4.3/A4.4 queued — see Tier 2 #4/#5 above |
 
 ### 🌏 Language rollout — DONE (refreshed 2026-06-08)
 
