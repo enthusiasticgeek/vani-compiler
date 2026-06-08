@@ -10,6 +10,87 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Tier 2 #6: Mandarin Chinese (Phase 10.2)
+
+Mandarin Chinese (中文) ships as the 62nd dialect, closing the
+last queued language item. The original estimate was 30-50h
+multi-day because of the perceived need for a dictionary-driven
+CJK word segmenter; the actual lift was ~10 surgical changes
+because the Japanese pipeline already handles the CJK Unified
+Ideographs block and the same whitespace-separation convention
+works for Mandarin.
+
+```vani
+// vani-lang: mandarin
+目的 "basic Mandarin demo";
+
+函数 add(a: i64, b: i64) -> i64 {
+  返回 a + b;
+}
+
+函数 main() -> i64 {
+  让 x: i64 = add(20, 22);
+  断言 x == 42;
+  打印 x;
+  返回 0;
+}
+```
+
+**Architecture decision**: `DialectLang::Mandarin →
+Script::Japanese`. Mandarin and Japanese share the same Script
+slot because they share the CJK Unified Ideographs block — the
+purity gate doesn't need to distinguish them. The pragma +
+keyword table do all the disambiguation:
+- Japanese keywords mix Kanji + Hiragana / Katakana (関数 /
+  もし / タスク).
+- Mandarin keywords are pure-Han (函数 / 如果 / 任务).
+- Strings are distinct, so the dispatch chain `japanese_keyword`
+  → `mandarin_keyword` just falls through.
+
+The `Script::Japanese` label became "CJK (Han / Hiragana /
+Katakana)" to accurately cover both dialects.
+
+**No CJK segmenter needed**: users separate identifiers from
+keywords with whitespace, same convention as Japanese code.
+A real Mandarin file looks like `函数 add(a: i64, b: i64) -> i64`,
+not `函数add(a:i64,b:i64)->i64`. The standard tokenizer handles
+this without lookahead — the whitespace tells it where one
+identifier ends and the next token begins.
+
+**Wiring** (4 files touched):
+- `src/lexer.rs`:
+  - `DialectLang::Mandarin` variant + `name() → "mandarin"`
+  - `Mandarin → Script::Japanese` script mapping
+  - Pragma resolver: `"mandarin" | "chinese" | "中文" | "汉语" | "漢語" | "zh"`
+  - `mandarin_keyword` fn with ~55 keyword entries
+  - `mandarin_keyword` added to lex_unicode_ident dispatch chain
+    (after Japanese — so Japanese's mixed-script keywords match
+    first; pure-Han Mandarin falls through cleanly)
+  - `Script::Japanese` label updated to neutral CJK wording
+- [examples/language/mandarin/basics.vani](examples/language/mandarin/basics.vani)
+  — mirrors `examples/language/japanese/basics.vani` shape.
+- Two regression tests (`mandarin_pragma_compiles_and_runs`,
+  `mandarin_pragma_disambiguates_from_japanese`).
+
+**Caveats**:
+- Mandarin SOV grammar forms (如果 x 那么 { ... }) queued for
+  v2 (matches the Japanese queueing decision).
+- The shared Script::Japanese slot means a file with mixed
+  Japanese + Mandarin keywords won't surface a script-purity
+  mismatch — both pass the gate. The pragma identifies which
+  set is "intended"; in practice this is fine because the
+  user picks one pragma per file.
+
+**Lib ledger**: **2011 lib** green (+2 from prior 2009).
+
+**Dialect total**: **62 dialects across 26 scripts** (Mandarin
+joins as the 62nd, riding the existing CJK script slot).
+
+This closes Tier 2 #6 of the [TODO.md "Recommended task queue"](TODO.md).
+**All Tier 1 and Tier 2 items are now shipped.** Only Tier 3
+(deferred except grammar consultant) and Tier 4 (deploy/CI,
+deferred to last) remain.
+
 ## 🟢 Session 2026-06-08 (cont.) — Tier 2 #5: L4 partial lift + A4.4 CancelToken auto-plumbing
 
 Closes the last two open Arc 8 v3.1 caveats in one ship: #5 (ref

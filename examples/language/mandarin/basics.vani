@@ -1,0 +1,38 @@
+// श्री。
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/mandarin/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/mandarin/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 10.2 (2026-06-08): Mandarin Chinese (中文) — the load-
+// bearing CJK target. Shares the CJK Unified Ideographs block
+// (U+4E00..9FFF + Extension A) with Japanese; pragma + keyword
+// table disambiguate. Japanese keywords mix Kanji + Hiragana
+// (関数 / もし); Mandarin keywords are pure-Han (函数 / 如果).
+// Users separate identifiers from keywords with whitespace,
+// same convention as Japanese — no dictionary-driven segmenter
+// required.
+
+目的 "Compute a small score with checked constraints";
+
+函数 add(a: i64, b: i64) -> i64 {
+  返回 a + b;
+}
+
+函数 bounded_score(base: i64) -> i64
+要求 base >= 0;
+{
+  让 doubled: i64 = base * 2;
+  断言 doubled >= base;
+  返回 add(doubled, 2);
+}
+
+函数 main() -> i64 {
+  让 answer: i64 = bounded_score(20);
+  证明 2 + 2 == 4;
+  断言 answer >= 0;
+  打印 answer;
+  返回 0;
+}

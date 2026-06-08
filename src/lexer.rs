@@ -3860,6 +3860,94 @@ fn japanese_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 10.2 (2026-06-08): Mandarin Chinese (中文) keyword resolution.
+/// Shares the CJK Unified Ideographs block (U+4E00..9FFF +
+/// Extension A U+3400..4DBF) with Japanese, so this fn lives
+/// downstream of `japanese_keyword` in the dispatch chain.
+/// Mandarin keyword strings are all pure-Han — they don't
+/// collide with the Japanese mixed Kanji+Hiragana / Kanji+
+/// Katakana forms used by `japanese_keyword`. SVO grammar so
+/// existing keyword-first parser applies.
+///
+/// Idiomatic separation: users put whitespace between identifiers
+/// and keywords (e.g. `函数 add(a: 整数, b: 整数) -> 整数`),
+/// same convention as Japanese code. No dictionary-driven
+/// segmenter required for v1.
+fn mandarin_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "函数" => TokenKind::Fn,             // hánshù (function)
+        "函数主要" => TokenKind::Fn,         // alt with main; kept for completeness
+        "让" => TokenKind::Let,              // ràng (let / make)
+        "结构" => TokenKind::Struct,         // jiégòu (structure)
+        "结构体" => TokenKind::Struct,       // jiégòutǐ (struct body)
+        "枚举" => TokenKind::Enum,           // méijǔ (enumerate)
+        "常量" => TokenKind::Const,          // chángliàng (constant)
+        // === VISIBILITY / MODULES ===
+        "公开" => TokenKind::Pub,            // gōngkāi (public)
+        "模块" => TokenKind::Module,         // mókuài (module)
+        "使用" => TokenKind::Use,            // shǐyòng (use)
+        "作为" => TokenKind::As,             // zuòwéi (as)
+        // === CONTROL FLOW ===
+        "返回" => TokenKind::Return,         // fǎnhuí (return)
+        "如果" => TokenKind::If,             // rúguǒ (if)
+        "否则" => TokenKind::Else,           // fǒuzé (otherwise / else)
+        "当" => TokenKind::While,            // dāng (while / when)
+        "对于" => TokenKind::For,            // duìyú (for)
+        "从" => TokenKind::From,             // cóng (from)
+        "到" => TokenKind::To,               // dào (to)
+        "中断" => TokenKind::Break,          // zhōngduàn (break / interrupt)
+        "继续" => TokenKind::Continue,       // jìxù (continue)
+        "那么" => TokenKind::Then,           // nàme (then)
+        // === REFS / MUT ===
+        "引用" => TokenKind::Ref,            // yǐnyòng (reference)
+        "可变" => TokenKind::Mut,            // kěbiàn (mutable / changeable)
+        // === MATCH ===
+        "匹配" => TokenKind::Match,          // pǐpèi (match)
+        // === VERIFICATION ===
+        "断言" => TokenKind::Assert,         // duànyán (assert)
+        "证明" => TokenKind::Prove,          // zhèngmíng (prove)
+        "要求" => TokenKind::Requires,       // yāoqiú (requires / precondition)
+        "保证" => TokenKind::Ensures,        // bǎozhèng (ensures / guarantee)
+        "不变量" => TokenKind::Invariant,    // bùbiànliàng (invariant)
+        // === BOOL / PRINT ===
+        "真" => TokenKind::True,             // zhēn (true). NOTE: collides with
+                                              // Japanese "shin" (also TokenKind::True),
+                                              // which is harmless — both dialects mean True.
+        "假" => TokenKind::False,            // jiǎ (false)
+        "打印" => TokenKind::Print,          // dǎyìn (print)
+        "输出" => TokenKind::Print,          // shūchū (output)
+        // === PURITY / PARALLEL ===
+        "纯" => TokenKind::Pure,             // chún (pure)
+        "纯粹" => TokenKind::Pure,           // chúncuì (pure). NOTE: also Japanese
+                                              // "junsui" → TokenKind::Pure; same meaning.
+        "并行" => TokenKind::Parallel,       // bìngxíng (parallel)
+        // === INTERFACES / METHODS ===
+        "接口" => TokenKind::Interface,      // jiēkǒu (interface)
+        "实现" => TokenKind::Implement,      // shíxiàn (implement)
+        "方法" => TokenKind::Methods,        // fāngfǎ (method)
+        // === BOUNDS ===
+        "其中" => TokenKind::Where,          // qízhōng (among / where)
+        // === CONCURRENCY ===
+        "尝试" => TokenKind::Try,            // chángshì (try)
+        "任务" => TokenKind::Task,           // rènwù (task)
+        "等待" => TokenKind::Join,           // děngdài (wait / join)
+        "合并" => TokenKind::Join,           // hébìng (merge / join)
+        // === EMBEDDED ===
+        "不安全" => TokenKind::Unsafe,       // bù'ānquán (unsafe)
+        "区域" => TokenKind::RegionKw,       // qūyù (region / area)
+        // === SOV-S7 PARITY ===
+        "目的" => TokenKind::Intent,         // mùdì (purpose). NOTE: same string
+                                              // as Japanese "mokuteki" → Intent —
+                                              // both dialects use 目的 for intent.
+        "意图" => TokenKind::Intent,         // yìtú (intention)
+        "类型" => TokenKind::Type,           // lèixíng (type)
+        "外部" => TokenKind::Extern,         // wàibù (external)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 8b.3 (2026-06-07): French (français) keyword resolution.
 /// Second Latin-with-accents Tier II dialect. Same v1 design as
 /// Spanish: only natural non-ASCII French keywords are registered,
@@ -4112,7 +4200,7 @@ fn script_label(script: Script) -> &'static str {
         Script::Sinhala => "Sinhala",
         Script::Arabic => "Perso-Arabic",
         Script::Cyrillic => "Cyrillic",
-        Script::Japanese => "Japanese (Hiragana/Katakana/Kanji)",
+        Script::Japanese => "CJK (Han / Hiragana / Katakana)",
         Script::Hangul => "Hangul (Korean)",
         Script::Greek => "Greek",
         Script::Hebrew => "Hebrew",
@@ -4523,6 +4611,18 @@ enum DialectLang {
     // (byte) order so vertical rendering is purely a display
     // concern.
     Mongolian,
+    // Phase 10.2 (2026-06-08): Mandarin Chinese (中文) — the
+    // load-bearing CJK target. ~1.1B speakers. Shares the
+    // CJK Unified Ideographs block (U+4E00..9FFF + Extension A
+    // U+3400..4DBF) with Japanese, so the same `Script::Japanese`
+    // slot covers both for the purity gate. Disambiguation
+    // between the two relies on the pragma + the keyword
+    // table: Japanese keywords use mixed Kanji + Hiragana
+    // (関数 / もし); Mandarin keywords are pure-Han (函数 /
+    // 如果). Users separate identifiers from keywords with
+    // whitespace, same as the Japanese convention — no
+    // dictionary-driven segmenter required for v1.
+    Mandarin,
 }
 
 impl DialectLang {
@@ -4590,6 +4690,7 @@ impl DialectLang {
             DialectLang::Cherokee => "cherokee",
             DialectLang::Lao => "lao",
             DialectLang::Mongolian => "mongolian",
+            DialectLang::Mandarin => "mandarin",
         }
     }
 
@@ -4669,6 +4770,7 @@ impl DialectLang {
             DialectLang::Cherokee => Script::Cherokee,
             DialectLang::Lao => Script::Lao,
             DialectLang::Mongolian => Script::Mongolian,
+            DialectLang::Mandarin => Script::Japanese,
         }
     }
 }
@@ -5104,6 +5206,11 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
                 => Some(DialectLang::Lao),
             "mongolian" | "ᠮᠣᠩᠭᠣᠯ" | "mn"
                 => Some(DialectLang::Mongolian),
+            // Phase 10.2 (2026-06-08): Mandarin Chinese — pragma
+            // disambiguates between Japanese and Mandarin since
+            // they share the CJK Unified Ideographs block.
+            "mandarin" | "chinese" | "中文" | "汉语" | "漢語" | "zh"
+                => Some(DialectLang::Mandarin),
             _ => None,
         };
     }
@@ -5901,6 +6008,12 @@ impl<'a> Lexer<'a> {
             // keywords start non-ASCII (Hiragana / Katakana /
             // Kanji code points all sit above U+0080).
             .or_else(|| japanese_keyword(text))
+            // Phase 10.2 (2026-06-08): Mandarin — pure-Han keywords
+            // on the shared CJK code-point block. Routes AFTER
+            // Japanese so Japanese's mixed-Kanji+Hiragana forms
+            // (関数 / もし) match their TokenKind first; pure-Han
+            // Mandarin forms (函数 / 如果) fall through to here.
+            .or_else(|| mandarin_keyword(text))
             // Phase 13.1 (2026-06-07): Korean — Hangul syllables
             // all sit at U+AC00+ (above U+0080).
             .or_else(|| korean_keyword(text))

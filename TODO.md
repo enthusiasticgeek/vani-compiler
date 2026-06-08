@@ -208,7 +208,11 @@ dedicated session.
 |---|---|---|---|
 | ~~A4.3 Multi-task scheduling (v3.1)~~ | ✅ SHIPPED 2026-06-08 | — | Shipped via `mut ref vec[i]` language lift + echo_pool.vani acceptance. See STATUS.md current session. Caveat #12 closed. |
 | ~~L4 partial lift — refs in v3.1 Task fields + A4.4 CancelToken auto-plumbing~~ | ✅ SHIPPED 2026-06-08 | — | Actual scope was 4 narrow surgical changes plus the A4.4 pre-pass — far smaller than the 12-15h estimate. Caveats #5 + #6 closed. See STATUS.md current session. |
-| **6** | **Phase 10.2 Mandarin** (CJK tokenizer + dialect) | 30-50h, multi-day | Last queued language. Needs dictionary-driven word segmentation since CJK has no whitespace. |
+| ~~Phase 10.2 Mandarin (CJK tokenizer + dialect)~~ | ✅ SHIPPED 2026-06-08 | — | Surface was ~10 surgical changes, not 30-50h. No CJK segmenter needed — users separate identifiers from keywords with whitespace, same as Japanese convention. 62nd dialect. See STATUS.md current session. |
+
+**All Tier 1 and Tier 2 items are now shipped.** Tier 3 (except
+grammar-consultant pass) and Tier 4 (deploy/CI) remain deferred
+per the standing direction.
 
 #### 🔵 Tier 3 — Deferred (user direction 2026-06-08)
 

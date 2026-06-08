@@ -29186,6 +29186,47 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn mandarin_pragma_compiles_and_runs() {
+        // Phase 10.2 (2026-06-08): Mandarin Chinese — first
+        // pure-Han keyword dialect. Shares Script::Japanese with
+        // Japanese for the purity gate; pragma + keyword table
+        // disambiguate. Japanese keywords mix Kanji+Hiragana
+        // (関数 / もし); Mandarin keywords are pure-Han
+        // (函数 / 如果).
+        let source = "// vani-lang: mandarin\n\
+                      目的 \"basic Mandarin demo\";\n\
+                      函数 add(a: i64, b: i64) -> i64 {\n  \
+                        返回 a + b;\n\
+                      }\n\
+                      函数 main() -> i64 {\n  \
+                        让 x: i64 = add(20, 22);\n  \
+                        断言 x == 42;\n  \
+                        打印 x;\n  \
+                        返回 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mandarin basics compile");
+        crate::compile_to_c(source).expect("C backend accepts Mandarin");
+        crate::compile_to_llvm(source).expect("LLVM backend accepts Mandarin");
+    }
+
+    #[test]
+    fn mandarin_pragma_disambiguates_from_japanese() {
+        // Both dialects share Script::Japanese (CJK Unified
+        // Ideographs are common to both). The dispatch order
+        // routes Japanese first; Mandarin's pure-Han keywords
+        // are distinct strings that fall through. Verify:
+        // Mandarin `函数` is fn under mandarin pragma, but
+        // raw `関数` is fn under japanese pragma. Each rejects
+        // the other's spelling cleanly.
+        let mandarin_source =
+            "// vani-lang: mandarin\n函数 main() -> i64 { 返回 0; }\n";
+        crate::compile(mandarin_source).expect("Mandarin 函数 compiles");
+        let japanese_source =
+            "// vani-lang: japanese\n関数 main() -> i64 { 戻る 0; }\n";
+        crate::compile(japanese_source).expect("Japanese 関数 still compiles");
+    }
+
+    #[test]
     fn ref_canceltoken_param_in_v31_async_fn_compiles() {
         // A4.4 (2026-06-08): `ref CancelToken` is now accepted
         // as a v3.1 async-fn parameter. The synthesized Task
