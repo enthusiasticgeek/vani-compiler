@@ -1,6 +1,12 @@
 // build & run:
-//   vanic run examples/language/english/box_dyn_iface.vani --backend=c   # C backend (v1)
-//   # LLVM backend codegen for Box<dyn Iface> is queued for L2 Phase 3b.
+//   vanic run examples/language/english/box_dyn_iface.vani                # LLVM
+//   vanic run examples/language/english/box_dyn_iface.vani --backend=c    # C
+//
+// L2 Phase 3b (LLVM backend codegen for Box<dyn Iface>) shipped
+// 2026-06-08 — both backends parity-green. The recursive-drop
+// follow-up + `box(value)` expected-type sugar also shipped same
+// day; see [box_recursive_drop.vani](box_recursive_drop.vani) +
+// [box_dyn_sugar.vani](box_dyn_sugar.vani) for the new surface.
 
 intent "L2 Phase 3 — Box<dyn Iface> with heap-owning fat pointers";
 

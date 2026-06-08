@@ -214,6 +214,20 @@ dedicated session.
 grammar-consultant pass) and Tier 4 (deploy/CI) remain deferred
 per the standing direction.
 
+#### 🟣 Polish queue — small follow-ups (added 2026-06-08, no scheduling commitment)
+
+These are surface-level refinements that surfaced during the
+2026-06-08 multi-arc session but aren't blocking any user-facing
+capability. Pick one whenever the user revisits vāṇी work.
+
+| Task | Effort | Notes |
+|---|---|---|
+| **LSP — Mandarin keyword autocomplete + hover docs** | 2-3h | Mandarin's ~55 keywords auto-highlight as keywords today (they route through existing TokenKinds via the dispatch chain), but the LSP completion provider doesn't yet *suggest* Mandarin spellings when typing in a `// vani-lang: mandarin` file. Same for postfix `?` hover text. Should mirror the existing Japanese/Devanagari completion arms (whichever provide per-dialect suggestions today). |
+| **LSP — VS Code grammar (TextMate / tree-sitter) sync** | 1-2h | If a `vani.tmLanguage.json` or tree-sitter grammar ships separately from the compiler, it needs Mandarin keyword entries (函数, 让, 返回, 如果, 否则, 当, 对于, 引用, 可变, 匹配, 断言, 证明, 真, 假, 打印, 接口, 实现, 任务, 等待, 目的, 类型, 外部, etc.) and the `?` postfix operator token. Auto-derive from `mandarin_keyword` in `src/lexer.rs` if practical. |
+| **v3.1 caveat #2 — liveness initial-impl polish** | 3-5h | STATUS.md design-caveats table item #2: "Liveness analysis for affine types across awaits — initial implementation" is marked as initial-only. A deeper sweep across all v3.1-supported types may surface edge cases worth pinning with regression tests. |
+| **v3.1 caveat #15 — test-surface polish** | 2-3h | "How do we test compiler-generated state machines?" — currently relies on parity tests + acceptance examples. Could add snapshot tests on the generated typed-IR shape per async-fn pattern (state-struct + poll-fn AST). |
+| **Devanagari counterparts for new English examples** | 2-3h | Add Sanskrit/Hindi/Marathi versions of `box_recursive_drop.vani`, `echo_pool.vani`, `async_cancel_auto.vani`, and `try_question_op.vani` to demonstrate the new features work across scripts. Optional but improves dialect parity. |
+
 #### 🔵 Tier 3 — Deferred (user direction 2026-06-08)
 
 All external-blocked items below are deferred indefinitely

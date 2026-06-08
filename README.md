@@ -109,7 +109,9 @@ semantic model **borrowed from Rust** and a code-generator that
 **Control flow + verification:**
 - `if`/`else`/`else if`, `while`, `for i from lo to hi`, `for x in xs`,
   `break` / `continue`, `match` with payloaded-variant destructure,
-  `try` keyword for early-return on Option/Result-like enums.
+  `try EXPR` keyword AND postfix `EXPR?` operator (parse-time
+  sugar over the same AST node) for early-return on
+  Option/Result-like enums.
 - **SMT-discharged** `requires` / `ensures` / `assert` / `prove` /
   `invariant` via Z3. Bounds / divisor / shift / overflow checks
   elided when proven safe.
@@ -275,11 +277,38 @@ below.
   - **v1.6 blocking TCP** (commits `9aaec41`, `83010ab`): 8-builtin TCP family + [tcp_echo.vani](examples/tcp_echo.vani) (1 client) + [tcp_multi_echo.vani](examples/tcp_multi_echo.vani) (3 task clients).
   - **v2 epoll + non-blocking I/O** (commit `92864de`): 7-builtin epoll + nb family. [tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani) — 3 concurrent clients multiplexed on ONE OS thread.
   - **v3 async aliases + state-machine pattern** (commit `f7743a1`): 3 async-flavored builtin aliases (`io_recv_async` / `io_send_async` / `io_accept_async`) + [tcp_echo_state_machine.vani](examples/tcp_echo_state_machine.vani) showing the hand-rolled state-machine pattern (struct + poll fn + driver loop).
-  - **Arc 8 v3.1 sugar — FEATURE-COMPLETE through Phase 4c-broad (2026-06-06)** for typical user code: the parser-level compiler transform auto-rewrites `async fn` bodies into state-machine struct/poll/constructor triples that users previously wrote by hand. **All phases shipped**: Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow + **4c-broad (full generic async fns)**. Covers linear bodies + non-suspending control flow + suspend-in-branch state-splitting + fall-through merge + nested ifs + ANF lifting + loops + break/continue + **match-with-suspends for every literal + enum pattern shape** (Int / Bool / Str / Float / Variant / VariantWithBinding / Wildcard) + **`try EXPR` keyword for Result propagation** + **non-i64 types across the entire async-fn boundary** (params + locals + returns: bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array `[T; N]`) + **nested async** (`let sub: Task__inner = inner(args); let r = __poll_inner(mut ref sub);` as `await sub`) + **multi-task scheduling** (multiple concurrent sub-tasks in one async fn) + **generic async fns** (`async fn identity<T>(...) -> T`). 28 acceptance examples + generic-async smoke all cross-backend parity-green. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
+  - **Arc 8 v3.1 sugar — FEATURE-COMPLETE 2026-06-08** for typical user code (postfix `?`, multi-task scheduling, ref CancelToken + A4.4 auto-plumbing all shipped same day; full ledger above): the parser-level compiler transform auto-rewrites `async fn` bodies into state-machine struct/poll/constructor triples that users previously wrote by hand. **All phases shipped**: Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow + **4c-broad (full generic async fns)**. Covers linear bodies + non-suspending control flow + suspend-in-branch state-splitting + fall-through merge + nested ifs + ANF lifting + loops + break/continue + **match-with-suspends for every literal + enum pattern shape** (Int / Bool / Str / Float / Variant / VariantWithBinding / Wildcard) + **`try EXPR` keyword for Result propagation** + **non-i64 types across the entire async-fn boundary** (params + locals + returns: bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array `[T; N]`) + **nested async** (`let sub: Task__inner = inner(args); let r = __poll_inner(mut ref sub);` as `await sub`) + **multi-task scheduling** (multiple concurrent sub-tasks in one async fn) + **generic async fns** (`async fn identity<T>(...) -> T`). 28 acceptance examples + generic-async smoke all cross-backend parity-green. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-08: 1997 lib + 54 parity green** (post Phase 13 long-tail rollout — **61 dialects across 26 scripts**: English, the original Devanagari trio (Sanskrit / Hindi / Marathi) plus Tier-I Devanagari extensions (Nepali / Maithili / Konkani), the Brahmi-derived batch (Bengali / Tamil / Telugu / Gujarati / Punjabi-Gurmukhi / Kannada / Malayalam / Odia / Assamese / Sinhala), Perso-Arabic family (Urdu / Sindhi / Punjabi-Shahmukhi / Persian / Pashto / Modern Standard Arabic), Cyrillic (Russian), Latin Tier II (Spanish / French / German / Italian / Portuguese / Polish / Turkish / Romanian / Dutch / Hungarian / Czech / Slovak / Swedish / Norwegian / Danish / Finnish / Catalan / Yoruba / Hausa), basic-Latin pragma-threaded (Indonesian / Malay / Swahili / Filipino), three-script Japanese, Korean (Hangul), Greek, Hebrew, Thai, Khmer, Burmese, Amharic (Ethiopic), Tibetan, Cherokee, Lao, Mongolian (traditional), Armenian, Georgian, and Vietnamese. Plus L2 Box\<T\> Phase 1+2 (C + LLVM backends for Copy + sized inner types) and pragma-threading enabler. Full feature surface across all backends; clean warning-free build.).
+**Test ledger at 2026-06-08 (end of day): 2011 lib green** —
+**62 dialects across 26 scripts** with Mandarin Chinese (中文)
+joining the CJK family as the 62nd dialect. Additional ships
+on the same day:
+
+- **L2 fully closed**: Box\<T\> Phases 1+2+3+3b on both backends
+  (Copy + sized inner types AND `Box<dyn Iface>` heap-owning fat
+  pointer), plus recursive-drop follow-up (`Box<Vec<T>>` /
+  `Box<OwnedStr>` chain Drop into the inner destructor), plus
+  expected-type threading sugar (`let b: Box<dyn Iface> =
+  box(value);` works without the `as dyn Iface` cast).
+- **Arc 8 v3.1 caveats #5, #6, #12 closed**:
+  - Postfix `?` operator (Result/Option propagation sugar; same
+    AST as `try` keyword).
+  - L4 partial lift — `ref CancelToken` / `mut ref Struct`
+    parameters now flow through v3.1; synthesized Task struct
+    stores raw pointer field.
+  - A4.4 CancelToken auto-plumbing — `if token.cancelled {
+    return 0 - 1; }` injected before every suspend point
+    automatically.
+  - A4.3 multi-task scheduling — `mut ref vec[i]` as a first-
+    class expression unblocks `__poll_<fn>(mut ref pool[i])`
+    over a `Vec<Task__<fn>>`. echo_pool.vani shows N concurrent
+    clients on one OS thread via Vec-of-Tasks + round-robin
+    + epoll multiplex.
+- **Arc 8 v3.1 caveats remaining (of 15)**: only #2 (liveness
+  polish) and #15 (test surface polish). The compiler-driven
+  async transform is now genuinely feature-complete for v1.
 
 ## Memory safety & concurrency model
 

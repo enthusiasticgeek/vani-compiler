@@ -548,7 +548,12 @@ pub fn compute_semantic_tokens(source: &str) -> Vec<lsp_types::SemanticToken> {
             | crate::lexer::TokenKind::OrOr
             | crate::lexer::TokenKind::Caret
             | crate::lexer::TokenKind::Arrow
-            | crate::lexer::TokenKind::DotDot => None,
+            | crate::lexer::TokenKind::DotDot
+            // Postfix `?` operator (Result/Option propagation —
+            // parse-time sugar over `try`). Treated like other
+            // operators here so editors don't paint it with the
+            // keyword tint.
+            | crate::lexer::TokenKind::Question => None,
             // Everything else is a keyword.
             _ => Some(token_index(TOKEN_KEYWORD)),
         };

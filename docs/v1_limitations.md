@@ -269,7 +269,7 @@ fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
 
 ## Reference + binding limitations
 
-### L4 — `let` annotation cannot be a reference type
+### L4 — `let` annotation cannot be a reference type (partial lift for v3.1 Task fields)
 
 ```vani
 let r: ref Foo = ref some_foo;       // ❌ — let annotation cannot be a reference type
@@ -283,6 +283,15 @@ doesn't have.
 **Workaround**: pass the reference directly through function
 parameters; bind the value first and take `ref` at the call
 site.
+
+**Partial lift shipped 2026-06-08**: synthesized v3.1 Task
+structs (those named `Task__<fn>`) accept `ref Struct` /
+`mut ref Struct` *parameter* types — the field stores a raw
+pointer (`const Struct_X*` in C); lifetime is the caller's
+discipline. This unlocks `async fn fetch(token: ref
+CancelToken)` flowing through v3.1 + A4.4 CancelToken auto-
+plumbing. User-declared structs and `let` bindings still
+reject ref types.
 
 ### L5 — `let mut x` is not a thing
 
