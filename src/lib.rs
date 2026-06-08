@@ -29163,6 +29163,56 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn box_value_infers_dyn_iface_cast_from_annotation() {
+        // L2 follow-up (2026-06-08): `let b: Box<dyn Iface> = box(value);`
+        // — the explicit `as dyn Iface` cast is no longer required.
+        // The checker's `try_elaborate_box_to_dyn` pre-pass synthesizes
+        // the same DynCoerce node the explicit form produces.
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Drawable { fn area(self: Circle) -> i64; }
+            implement Drawable for Circle {
+              fn area(self: Circle) -> i64 { return self.r * self.r; }
+            }
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 7 };
+              let b: Box<dyn Drawable> = box(c);
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("box(value) sugar compiles");
+        crate::compile_to_c(source).expect("box(value) sugar on C");
+        crate::compile_to_llvm(source).expect("box(value) sugar on LLVM");
+    }
+
+    #[test]
+    fn box_value_dyn_sugar_requires_iface_impl() {
+        // The elaboration only fires when the concrete type
+        // already `implement`s the iface; missing-impl case
+        // surfaces a clear diagnostic that names both types.
+        let source = r#"
+            struct Circle { r: i64 }
+            struct NotDrawable { x: i64 }
+            interface Drawable { fn area(self: Circle) -> i64; }
+            implement Drawable for Circle {
+              fn area(self: Circle) -> i64 { return self.r; }
+            }
+            fn main() -> i64 {
+              let n: NotDrawable = NotDrawable { x: 1 };
+              let b: Box<dyn Drawable> = box(n);
+              return 0;
+            }
+        "#;
+        let err = crate::compile(source).expect_err("missing impl must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("NotDrawable") && combined.contains("Drawable"),
+            "expected impl-missing diagnostic that names both types, got: {}",
+            combined
+        );
+    }
+
+    #[test]
     fn box_rejects_unbox_of_non_copy_inner() {
         // The recursive-drop wiring stores the inner value's
         // pointer-state on the heap; `unbox(ref b)` would copy

@@ -197,7 +197,10 @@ pass. Tier 4 (deploy / CI / GH-Actions) deferred to the very end.
 |---|---|---|---|
 | ~~L9 — LLVM identifier mangling for non-ASCII~~ | ✅ ALREADY SHIPPED | — | Re-verified 2026-06-08: every LLVM-IR identifier path routes through `llvm_mangle_ident`. [pure_devanagari.vani](examples/language/sanskrit/pure_devanagari.vani), Marathi, Bengali all run end-to-end on LLVM. Doc updated; was incorrectly listed as open. |
 | ~~Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>`~~ | ✅ SHIPPED 2026-06-08 | — | The box() builtin accepts Vec<T> / OwnedStr inner; scope-exit Drop chains into the inner destructor on both backends. unbox(ref b) for non-Copy stays gated (would alias). See STATUS.md current session. |
-| **1** | **`box(value)` expected-type threading** (drop the `as dyn Iface` cast) | 4-6h | Cosmetic L2 follow-up. Currently users must spell `box(value as dyn Iface)`. Threading the expected type lets the cast become optional. |
+| ~~`box(value)` expected-type threading~~ | ✅ SHIPPED 2026-06-08 | — | `let b: Box<dyn Iface> = box(value);` works without the `as dyn Iface` cast. Var-shaped source only (same restriction as the explicit-cast form). See STATUS.md current session. |
+
+**Tier 1 is now empty.** Escalate to Tier 2 in a fresh
+dedicated session.
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
 

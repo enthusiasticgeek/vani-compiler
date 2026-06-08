@@ -69,21 +69,27 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — `Box<T>` owning heap pointer ✅ SHIPPED (Phases 1 + 2 + 3 + 3b + recursive-drop)
+### L2 — `Box<T>` owning heap pointer ✅ SHIPPED (Phases 1 + 2 + 3 + 3b + recursive-drop + dyn-sugar)
 
 **Status**: All four phases plus the recursive-drop follow-up
-shipped 2026-06-07 → 2026-06-08. Box\<T\> for Copy + sized
-inner types, `Box<dyn Iface>` (heap-allocated concrete behind
-an owning fat pointer), `Box<Vec<T>>`, and `Box<OwnedStr>` all
-work on both backends (C + LLVM). The recursive-drop wiring
-chains scope-exit Drop into the inner type's destructor before
-freeing the box's own heap slot; the source binding is marked
-moved by `check_box_builtin` so its own Drop is suppressed.
+plus the expected-type-threading sugar shipped 2026-06-07 →
+2026-06-08. Box\<T\> for Copy + sized inner types,
+`Box<dyn Iface>` (heap-allocated concrete behind an owning fat
+pointer), `Box<Vec<T>>`, and `Box<OwnedStr>` all work on both
+backends (C + LLVM).
 
-`unbox(ref b)` is still gated to Copy / dyn inner — copying a
-non-Copy inner by value would alias the heap slot the box
-still owns. Pass `ref b` to a function or store the box in a
-struct field to use Vec / OwnedStr inner.
+- The recursive-drop wiring chains scope-exit Drop into the
+  inner type's destructor before freeing the box's own heap
+  slot; the source binding is marked moved by
+  `check_box_builtin` so its own Drop is suppressed.
+- The expected-type-threading sugar lets `let b: Box<dyn Iface>
+  = box(value);` work without the `as dyn Iface` cast (Var-
+  shaped source only, same restriction as the explicit-cast
+  form).
+- `unbox(ref b)` is still gated to Copy / dyn inner — copying
+  a non-Copy inner by value would alias the heap slot the box
+  still owns. Pass `ref b` to a function or store the box in a
+  struct field to use Vec / OwnedStr inner.
 
 ```vani
 struct Circle { r: i64 }

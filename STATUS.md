@@ -10,6 +10,58 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Tier 1 #2: box(value) infers `as dyn Iface`
+
+The L2 Box<dyn Iface> surface drops the boilerplate cast. With a
+`Box<dyn Iface>` annotation in scope, `box(value)` works the same
+as `box(value as dyn Iface)` — the checker's
+`try_elaborate_box_to_dyn` pre-pass synthesizes the DynCoerce
+node that `__box_new` would otherwise need from the manual cast.
+
+```vani
+let c: Circle = Circle { r: 7 };
+
+// Before:
+let b: Box<dyn Drawable> = box(c as dyn Drawable);
+
+// Now:
+let b: Box<dyn Drawable> = box(c);          // cast inferred
+```
+
+**How it threads**: the same `Let { annotation: Some(_), .. }`
+position that already feeds `try_elaborate_empty_vec` and
+`try_elaborate_empty_hashmap` now also runs
+`try_elaborate_box_to_dyn`. The elaboration:
+1. Checks the let annotation is `Box<dyn Iface>`.
+2. Verifies the box-arg is a Var (the C/LLVM backends'
+   `__box_new` for Box<dyn Iface> needs a stable lvalue source).
+3. Confirms the concrete type implements the target iface.
+4. Synthesizes a `DynCoerce` wrapping the inner Var and calls
+   `__box_new` with that single arg — identical AST to the
+   explicit-cast form.
+
+**Diagnostic**: missing-impl surfaces a clear "`Circle` to
+`implement Drawable`" message that names both types and points
+at the box-arg span.
+
+**Restrictions preserved**: non-Var sources (struct literals,
+calls) still need a temporary `let temp = …;` first. This is
+the same restriction the existing `box(value as dyn Iface)`
+form has — the LLVM/C backends require a stable lvalue for the
+DynCoerce's source.
+
+Two regression tests pin the surface
+(`box_value_infers_dyn_iface_cast_from_annotation`,
+`box_value_dyn_sugar_requires_iface_impl`).
+[examples/language/english/box_dyn_sugar.vani](examples/language/english/box_dyn_sugar.vani)
+joins the e2e parity sweep.
+
+Lib ledger: **2005 lib** green (+2 from prior 2003).
+
+This closes Tier 1 #2 of the [TODO.md "Recommended task queue"](TODO.md).
+Tier 1 is now empty — Tier 2 #4 (A4.3 Multi-task scheduling) is
+the next dedicated arc; recommend a fresh session for it.
+
 ## 🟢 Session 2026-06-08 (cont.) — Tier 1 #1: Box<Vec<T>> + Box<OwnedStr> recursive drop
 
 The last gap in the L2 Box<T> surface closes. `box()` accepts

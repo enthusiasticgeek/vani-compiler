@@ -1047,6 +1047,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "try_keyword.vani",
         "try_question_op.vani",
         "box_recursive_drop.vani",
+        "box_dyn_sugar.vani",
         "tuple_eq.vani",
         "type_associated_fn.vani",
         "union_find.vani",

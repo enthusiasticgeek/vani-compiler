@@ -1,0 +1,74 @@
+// build & run:
+//   vanic run examples/language/english/box_dyn_sugar.vani                # LLVM
+//   vanic run examples/language/english/box_dyn_sugar.vani --backend=c    # C
+
+intent "L2 follow-up — `box(value)` infers `as dyn Iface` from let annotation";
+
+// L2 follow-up (2026-06-08): when the let annotation is
+// `Box<dyn Iface>`, the explicit `as dyn Iface` cast on the
+// box-arg is now optional. The checker's
+// `try_elaborate_box_to_dyn` pre-pass synthesizes the DynCoerce
+// node `__box_new` would otherwise need from a manual cast.
+//
+// Both forms are accepted today:
+//   let b: Box<dyn Drawable> = box(c as dyn Drawable);   // explicit
+//   let b: Box<dyn Drawable> = box(c);                   // sugar
+//
+// The sugar requires the box-arg to be a Var (a simple
+// identifier) so the C backend's `__box_new` for Box<dyn Iface>
+// can route it through a stable lvalue. More complex shapes
+// (struct literals, calls) still need a temporary `let temp =
+// …;` and then `box(temp)` — which is the same restriction the
+// explicit-cast path has.
+
+struct Circle { r: i64 }
+struct Square { side: i64 }
+
+interface Drawable {
+  fn area(self: Circle) -> i64;
+}
+
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+
+implement Drawable for Square {
+  fn area(self: Square) -> i64 { return self.side * self.side; }
+}
+
+fn report_area(b: ref Box<dyn Drawable>) -> i64 {
+  return b.area();
+}
+
+// Box<dyn> as a struct field — the sugar threads through field
+// position too, since the inferred annotation is the field's
+// type.
+struct Drawer {
+  rend: Box<dyn Drawable>,
+}
+
+fn main() -> i64 {
+  // (1) Local — cast inferred from annotation.
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c);
+  let a1: i64 = report_area(ref b);
+  assert a1 == 49;
+
+  // (2) Different concrete type, same iface.
+  let sq: Square = Square { side: 4 };
+  let bs: Box<dyn Drawable> = box(sq);
+  let a2: i64 = report_area(ref bs);
+  assert a2 == 16;
+
+  // (3) Struct-field — Drawer.rend is Box<dyn Drawable>.
+  // (Explicit-cast form still works as a struct-field init too;
+  // the sugar restricts to Var-shaped arg, so we bind first.)
+  let sq2: Square = Square { side: 5 };
+  let bs2: Box<dyn Drawable> = box(sq2);
+  let d: Drawer = Drawer { rend: bs2 };
+  let inside: i64 = d.rend.area();
+  assert inside == 25;
+
+  print "areas:", a1, a2, inside;     // 49 16 25
+  return 0;
+}

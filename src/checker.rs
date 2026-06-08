@@ -8411,6 +8411,14 @@ fn check_one_stmt(
                     // ARC 1.1: `let m: HashMap<K, V> = hashmap_new();`
                     // infers (K, V) from the annotation.
                     elaborated
+                } else if let Some(elaborated) = try_elaborate_box_to_dyn(
+                    expr, annotation, env, signatures, diagnostics,
+                ) {
+                    // L2 follow-up (2026-06-08): `let b: Box<dyn Iface> =
+                    // box(value);` synthesizes the DynCoerce that the
+                    // explicit `box(value as dyn Iface)` form built
+                    // manually — the `as` cast is now optional.
+                    elaborated
                 } else {
                     let raw = check_expr(expr, env, signatures, diagnostics);
                     coerce_checked(
@@ -17380,6 +17388,96 @@ fn try_elaborate_empty_hashmap(
             args: vec![],
         },
         Type::HashMap(Box::new(k_ty), Box::new(v_ty)),
+        None,
+        expr.span,
+    ))
+}
+
+/// L2 follow-up (2026-06-08): expected-type threading for `box()`.
+///
+/// When the let annotation is `Box<dyn Iface>` and the user writes
+/// `let b: Box<dyn Iface> = box(value);` without the explicit
+/// `as dyn Iface` cast, this helper synthesizes the DynCoerce node
+/// that `__box_new` codegen expects — making the cast optional in
+/// the common case.
+///
+/// Restrictions kept from the explicit-cast path:
+/// - The source must be a `Var(_)` identifier (the C backend's
+///   __box_new for Box<dyn Iface> requires the DynCoerce arg's
+///   inner to be a Var so the synthetic-let hoist applies).
+/// - The concrete type must already implement the target iface.
+///
+/// Returns `None` for shapes the elaboration doesn't cover, so the
+/// existing `box() v1 ...` gate path stays in effect with the same
+/// diagnostic.
+fn try_elaborate_box_to_dyn(
+    expr: &Expr,
+    expected: &Type,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CheckedExpr> {
+    let ExprKind::Call { name, args, .. } = &expr.kind else {
+        return None;
+    };
+    if name != "box" || args.len() != 1 {
+        return None;
+    }
+    // Only intercept when the annotation is Box<dyn Iface>; all
+    // other Box<T> shapes (Box<i64>, Box<Vec<T>>, Box<OwnedStr>,
+    // Box<Copy struct>) flow through the existing path which
+    // doesn't need a cast.
+    let Type::Box(inner_box) = expected else {
+        return None;
+    };
+    let iface_name = match &**inner_box {
+        Type::Object(n) => n.clone(),
+        _ => return None,
+    };
+    // Don't intercept if the user already wrote `box(value as dyn Iface)`
+    // (or any cast at the top level) — let the existing path handle it.
+    if matches!(&args[0].kind, ExprKind::Cast { .. }) {
+        return None;
+    }
+    // Only the Var(_) source shape is supported — see the
+    // doc-comment restriction above.
+    if !matches!(&args[0].kind, ExprKind::Var(_)) {
+        return None;
+    }
+    let checked_inner = check_expr(&args[0], env, signatures, diagnostics);
+    let concrete_name = match checked_inner.ty().clone() {
+        Type::Struct(n) | Type::Enum(n) => n,
+        _ => return None,
+    };
+    if !crate::ast::iface_impl_exists(&iface_name, &concrete_name) {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            format!(
+                "`box({})` with annotation `Box<dyn {}>` requires `{}` to \
+                 `implement {}`; no such impl is in scope",
+                concrete_name, iface_name, concrete_name, iface_name
+            ),
+        ));
+        return Some(CheckedExpr::fallback(expected.clone(), expr.span));
+    }
+    // Mark the source binding as moved (the box now owns the heap
+    // allocation containing the concrete value).
+    consume_if_moved_var(&args[0], &checked_inner, env);
+    let target_obj = Type::Object(iface_name.clone());
+    let coerce = make_dyn_coerce(
+        checked_inner.expr,
+        iface_name,
+        concrete_name,
+        target_obj,
+        expr.span,
+    );
+    Some(CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "__box_new".to_string(),
+            name_span: expr.span,
+            args: vec![coerce],
+        },
+        expected.clone(),
         None,
         expr.span,
     ))
