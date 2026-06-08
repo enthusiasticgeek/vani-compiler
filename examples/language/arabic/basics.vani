@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/arabic/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/arabic/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.7 v1: Modern Standard Arabic (العربية) is the actual
+// Arabic LANGUAGE on the existing Arabic SCRIPT infrastructure
+// (already shipped for Urdu / Sindhi / Punjabi-Shahmukhi /
+// Persian / Pashto — Indo-Iranian / Indo-Aryan languages that
+// borrow the Arabic script). RTL is a rendering concern only;
+// the lexer reads UTF-8 in logical byte order.
+
+هدف "Compute a small score with checked constraints";
+
+دالة add(a: i64, b: i64) -> i64 {
+  أرجع a + b;
+}
+
+دالة bounded_score(base: i64) -> i64
+يتطلب base >= 0;
+{
+  ليكن doubled: i64 = base * 2;
+  تأكد doubled >= base;
+  أرجع add(doubled, 2);
+}
+
+دالة main() -> i64 {
+  ليكن answer = bounded_score(20);
+  أثبت 2 + 2 == 4;
+  تأكد answer >= 0;
+  اطبع answer;
+  أرجع 0;
+}

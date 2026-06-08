@@ -90,6 +90,12 @@ enum DiagLang {
     // Phase 13.5 (2026-06-08): Hebrew — second RTL-script
     // dialect (after Perso-Arabic).
     Hebrew,
+    // Phase 13.6 (2026-06-08): Italian — fifth Latin-with-
+    // accents dialect (mostly pure ASCII surface).
+    Italian,
+    // Phase 13.7 (2026-06-08): Modern Standard Arabic on the
+    // existing Script::Arabic infrastructure.
+    Arabic,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -164,6 +170,11 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.5 (2026-06-08): second RTL dialect.
             "hebrew" | "עברית" | "ivrit" | "he" | "iw"
                 => Some(DiagLang::Hebrew),
+            // Phase 13.6 (2026-06-08): fifth Latin-with-accents.
+            "italian" | "italiano" | "it" => Some(DiagLang::Italian),
+            // Phase 13.7 (2026-06-08): Modern Standard Arabic.
+            "arabic" | "العربية" | "arabi" | "ar"
+                => Some(DiagLang::Arabic),
             _ => None,
         };
     }
@@ -210,6 +221,8 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Indonesian)) => "kesalahan (error)".to_string(),
         ("error", Some(DiagLang::Greek)) => "σφάλμα (error)".to_string(),
         ("error", Some(DiagLang::Hebrew)) => "שגיאה (error)".to_string(),
+        ("error", Some(DiagLang::Italian)) => "errore (error)".to_string(),
+        ("error", Some(DiagLang::Arabic)) => "خطأ (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -234,6 +247,8 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Indonesian)) => "catatan (note)".to_string(),
         ("note", Some(DiagLang::Greek)) => "σημείωση (note)".to_string(),
         ("note", Some(DiagLang::Hebrew)) => "הערה (note)".to_string(),
+        ("note", Some(DiagLang::Italian)) => "nota (note)".to_string(),
+        ("note", Some(DiagLang::Arabic)) => "ملاحظة (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -554,6 +569,32 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("invalid", "לא חוקי (invalid)"),
             ("integer literal", "מספר שלם (integer literal)"),
             ("float literal", "מספר עשרוני (float literal)"),
+        ][..],
+        DiagLang::Italian => &[
+            ("expected ", "atteso "),
+            ("unknown variable", "variabile sconosciuta (unknown variable)"),
+            ("unknown function", "funzione sconosciuta (unknown function)"),
+            ("unknown struct", "struttura sconosciuta (unknown struct)"),
+            ("type mismatch", "tipi incompatibili (type mismatch)"),
+            ("cannot prove", "non si può dimostrare (cannot prove)"),
+            ("function ", "funzione "),
+            ("language mismatch", "lingua incompatibile (language mismatch)"),
+            ("invalid", "non valido (invalid)"),
+            ("integer literal", "letterale intero (integer literal)"),
+            ("float literal", "letterale decimale (float literal)"),
+        ][..],
+        DiagLang::Arabic => &[
+            ("expected ", "متوقع "),
+            ("unknown variable", "متغير غير معروف (unknown variable)"),
+            ("unknown function", "دالة غير معروفة (unknown function)"),
+            ("unknown struct", "بنية غير معروفة (unknown struct)"),
+            ("type mismatch", "عدم تطابق النوع (type mismatch)"),
+            ("cannot prove", "تعذر الإثبات (cannot prove)"),
+            ("function ", "دالة "),
+            ("language mismatch", "عدم تطابق اللغة (language mismatch)"),
+            ("invalid", "غير صالح (invalid)"),
+            ("integer literal", "عدد صحيح (integer literal)"),
+            ("float literal", "عدد عشري (float literal)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

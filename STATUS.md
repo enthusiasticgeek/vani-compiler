@@ -10,6 +10,114 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.6 + 13.7: Italian + Modern Standard Arabic
+
+Two more dialects round out two important groupings:
+
+### Phase 13.6 — Italian (italiano)
+
+**Romance family complete in vāṇी.** Italian joins Spanish,
+French, Portuguese (and German Latin-with-accents) as the
+fifth Latin Tier II dialect. Italian keyword surface is mostly
+pure-ASCII (`funzione`, `sia`, `se`, `mentre`, `per`, `vero`,
+`falso`), so the dialect rides pragma threading directly —
+similar pattern to Indonesian. The only natural non-ASCII
+keyword candidate would be `è` (single-char grave-accented
+"is"), too short to register safely.
+
+```rust
+// vani-lang: italian
+scopo "Compute a small score with checked constraints";
+
+funzione add(a: i64, b: i64) -> i64 {
+  ritornare a + b;
+}
+
+funzione bounded_score(base: i64) -> i64
+richiede base >= 0;
+{
+  sia doubled: i64 = base * 2;
+  affermare doubled >= base;
+  ritornare add(doubled, 2);
+}
+
+funzione main() -> i64 {
+  sia answer = bounded_score(20);
+  dimostrare 2 + 2 == 4;
+  affermare answer >= 0;
+  stampare answer;
+  ritornare 0;
+}
+```
+
+Prints `42` on both backends. Pragma accepts `italian |
+italiano | it`. ~45 ASCII keyword entries.
+
+### Phase 13.7 — Modern Standard Arabic (العربية)
+
+**Native Arabic vocabulary on the existing Arabic SCRIPT.** A
+crucial distinction: the 5 Perso-Arabic dialects already
+shipped — Urdu (Indo-Aryan), Sindhi (Indo-Aryan), Punjabi-
+Shahmukhi (Indo-Aryan), Persian (Iranian), Pashto (Iranian)
+— borrow the Arabic SCRIPT for entirely different language
+families. Phase 13.7 ships Modern Standard Arabic itself, the
+6th-most-spoken language on Earth.
+
+```rust
+// vani-lang: arabic
+هدف "Compute a small score with checked constraints";
+
+دالة add(a: i64, b: i64) -> i64 {
+  أرجع a + b;
+}
+
+دالة bounded_score(base: i64) -> i64
+يتطلب base >= 0;
+{
+  ليكن doubled: i64 = base * 2;
+  تأكد doubled >= base;
+  أرجع add(doubled, 2);
+}
+
+دالة main() -> i64 {
+  ليكن answer = bounded_score(20);
+  أثبت 2 + 2 == 4;
+  تأكد answer >= 0;
+  اطبع answer;
+  أرجع 0;
+}
+```
+
+Prints `42` on both backends. Pragma accepts `arabic |
+العربية | arabi | ar`. ~45 keyword entries using native
+Arabic vocabulary (دالة, ليكن, إذا, بينما, لكل, أرجع, تأكد,
+أثبت, صحيح/خطأ, اطبع, واجهة, منطقة, هدف, …).
+
+Rides the existing `Script::Arabic` infra (no new Script
+variant needed). The dispatch chain in `lex_unicode_ident`
+already had the Indo-Iranian dialects; Arabic slots in as one
+more `or_else` arm consulting `arabic_keyword`. New
+`DiagLang::Arabic` with native error/note labels (`خطأ` /
+`ملاحظة`) + prefix table (`متوقع`, `متغير غير معروف`, `عدم
+تطابق النوع`, `تعذر الإثبات`).
+
+### Roster summary
+
+Roster grows **31 → 33 dialects across 16 scripts**. The 16
+scripts are: Latin, Devanagari, Bengali, Tamil, Telugu,
+Gujarati, Gurmukhi, Kannada, Malayalam, Odia, Sinhala, Arabic,
+Cyrillic, Japanese (3-block collapsed), Hangul, Greek, Hebrew.
+
+### 2 new regression tests
+
+- `italian_basic_latin_pragma_compiles` — Italian under pragma.
+- `arabic_modern_standard_compiles_and_runs` — full Arabic
+  pipeline on existing Script::Arabic.
+
+Lib ledger: **1967 lib + 54 parity** green (1965→1967 = 2 new
+Italian + Arabic regression tests). All 192 example files
+compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.3 + 13.4 + 13.5: Indonesian + Greek + Hebrew
 
 Three back-to-back ships, each adding a different architectural

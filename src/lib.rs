@@ -27953,6 +27953,50 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn italian_basic_latin_pragma_compiles() {
+        // Phase 13.6 (2026-06-08): fifth Latin-with-accents
+        // dialect (Romance family complete: Spanish + French +
+        // Portuguese + Italian + German earlier). Italian is
+        // mostly pure-ASCII so it primarily rides pragma
+        // threading.
+        let source = "// vani-lang: italian\n\
+                      scopo \"basic Italian demo\";\n\
+                      funzione add(a: i64, b: i64) -> i64 {\n  \
+                        ritornare a + b;\n\
+                      }\n\
+                      funzione main() -> i64 {\n  \
+                        sia x: i64 = add(20, 22);\n  \
+                        affermare x == 42;\n  \
+                        dimostrare 2 + 2 == 4;\n  \
+                        stampare x;\n  \
+                        ritornare 0;\n\
+                      }\n";
+        crate::compile(source).expect("Italian basics compile");
+    }
+
+    #[test]
+    fn arabic_modern_standard_compiles_and_runs() {
+        // Phase 13.7 (2026-06-08): Modern Standard Arabic on the
+        // existing Arabic SCRIPT infra. Distinct from the
+        // shipped Urdu/Sindhi/Shahmukhi/Persian/Pashto dialects
+        // which use Arabic script for Indo-Iranian/Indo-Aryan
+        // languages.
+        let source = "// vani-lang: arabic\n\
+                      هدف \"basic Arabic demo\";\n\
+                      دالة add(a: i64, b: i64) -> i64 {\n  \
+                        أرجع a + b;\n\
+                      }\n\
+                      دالة main() -> i64 {\n  \
+                        ليكن x: i64 = add(20, 22);\n  \
+                        تأكد x == 42;\n  \
+                        أثبت 2 + 2 == 4;\n  \
+                        اطبع x;\n  \
+                        أرجع 0;\n\
+                      }\n";
+        crate::compile(source).expect("Arabic basics compile");
+    }
+
+    #[test]
     fn greek_script_pragma_compiles_and_runs() {
         // Phase 13.4 (2026-06-08): first Greek-script dialect.
         // Modern Greek monotonic accents in keyword spellings.

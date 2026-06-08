@@ -1056,6 +1056,156 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.6 (2026-06-08): Italian (italiano) keyword
+/// resolution. Italian keyword surface is mostly pure ASCII —
+/// the only natural non-ASCII keyword would be `è` (single-char
+/// grave-accented "is"), which is too short / ambiguous to
+/// register as a keyword. The full surface is pragma-gated
+/// like Indonesian.
+fn italian_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "funzione" => TokenKind::Fn,          // function
+        "sia" => TokenKind::Let,              // "let it be" (subjunctive)
+        "struttura" => TokenKind::Struct,     // structure
+        "enumerazione" => TokenKind::Enum,    // enumeration
+        "costante" => TokenKind::Const,       // constant
+        // === VISIBILITY / MODULES ===
+        "pubblico" => TokenKind::Pub,         // public
+        "modulo" => TokenKind::Module,        // module
+        "usare" => TokenKind::Use,            // use
+        "come" => TokenKind::As,              // as
+        // === CONTROL FLOW ===
+        "ritornare" => TokenKind::Return,     // return
+        "ritorna" => TokenKind::Return,       // return! (imperative)
+        "se" => TokenKind::If,                // if
+        "altrimenti" => TokenKind::Else,      // else / otherwise
+        "mentre" => TokenKind::While,         // while
+        "per" => TokenKind::For,              // for / "for each"
+        "da" => TokenKind::From,              // from
+        "fino" => TokenKind::To,              // until / to
+        "rompere" => TokenKind::Break,        // break
+        "interrompere" => TokenKind::Break,   // interrupt (alt)
+        "continuare" => TokenKind::Continue,  // continue
+        "allora" => TokenKind::Then,          // then
+        // === REFS / MUT ===
+        "vedere" => TokenKind::Ref,           // see / reference
+        "mutevole" => TokenKind::Mut,         // changeable / mutable
+        // === MATCH ===
+        "corrispondere" => TokenKind::Match,  // match / correspond
+        "combaciare" => TokenKind::Match,     // match / fit together (alt)
+        // === VERIFICATION ===
+        "affermare" => TokenKind::Assert,     // assert
+        "dimostrare" => TokenKind::Prove,     // prove / demonstrate
+        "richiede" => TokenKind::Requires,    // requires
+        "garantisce" => TokenKind::Ensures,   // guarantees
+        // === BOOL / PRINT ===
+        "vero" => TokenKind::True,            // true
+        "falso" => TokenKind::False,          // false
+        "stampare" => TokenKind::Print,       // print
+        "scrivere" => TokenKind::Print,       // write (alt)
+        // === PURITY / PARALLEL ===
+        "puro" => TokenKind::Pure,            // pure
+        "parallelo" => TokenKind::Parallel,   // parallel
+        // === INTERFACES / METHODS ===
+        "interfaccia" => TokenKind::Interface, // interface
+        "implementare" => TokenKind::Implement, // implement
+        "metodi" => TokenKind::Methods,       // methods
+        // === BOUNDS ===
+        "dove" => TokenKind::Where,           // where
+        // === CONCURRENCY ===
+        "tentare" => TokenKind::Try,          // try / attempt
+        "compito" => TokenKind::Task,         // task / assignment
+        "unire" => TokenKind::Join,           // join / unite
+        // === EMBEDDED ===
+        "insicuro" => TokenKind::Unsafe,      // unsafe / insecure
+        "regione" => TokenKind::RegionKw,     // region
+        // === SOV-S7 PARITY ===
+        "scopo" => TokenKind::Intent,         // purpose / intent
+        "intenzione" => TokenKind::Intent,    // intent (alt)
+        "obiettivo" => TokenKind::Intent,     // objective (alt)
+        "tipo" => TokenKind::Type,            // type
+        "esterno" => TokenKind::Extern,       // external
+        "invariante" => TokenKind::Invariant, // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.7 (2026-06-08): Modern Standard Arabic (العربية)
+/// keyword resolution. Distinct from the shipped Perso-Arabic
+/// dialects which use the Arabic SCRIPT for Indo-Iranian /
+/// Indo-Aryan languages (Urdu, Sindhi, Shahmukhi, Persian,
+/// Pashto). This table holds native Arabic vocabulary on the
+/// existing Script::Arabic infrastructure. All keywords start
+/// non-ASCII (Arabic block U+0600..06FF) so they route through
+/// `lex_unicode_ident`.
+fn arabic_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "دالة" => TokenKind::Fn,              // dāla (function)
+        "ليكن" => TokenKind::Let,             // li-yakun ("let there be")
+        "بنية" => TokenKind::Struct,          // binya (structure)
+        "تعداد" => TokenKind::Enum,           // ta'dād (enumeration)
+        "قيمة_ثابتة" => TokenKind::Const,     // qima thabita (constant value)
+        // === VISIBILITY / MODULES ===
+        "عام" => TokenKind::Pub,              // 'āmm (general / public)
+        "وحدة" => TokenKind::Module,          // waḥda (unit / module)
+        "استخدم" => TokenKind::Use,           // istakhdim (use!)
+        // === CONTROL FLOW ===
+        "أرجع" => TokenKind::Return,          // arja' (return!)
+        "إرجاع" => TokenKind::Return,         // irjā' (return — noun)
+        "إذا" => TokenKind::If,               // idhā (if)
+        "وإلا" => TokenKind::Else,            // wa-illā ("and otherwise")
+        "بينما" => TokenKind::While,          // bayna-mā (while)
+        "لكل" => TokenKind::For,              // li-kull (for each)
+        "في" => TokenKind::In,                // fī (in)
+        "من" => TokenKind::From,              // min (from)
+        "إلى" => TokenKind::To,               // ilā (to / until)
+        "كسر" => TokenKind::Break,            // kasr (break)
+        "استمر" => TokenKind::Continue,       // istamir (continue!)
+        "ثم" => TokenKind::Then,              // thumma (then)
+        // === REFS / MUT ===
+        "مرجع" => TokenKind::Ref,             // marja' (reference)
+        "متغير" => TokenKind::Mut,            // mutaghayyir (changing / variable)
+        // === MATCH ===
+        "طابق" => TokenKind::Match,           // ṭābiq (match!)
+        // === VERIFICATION ===
+        "تأكد" => TokenKind::Assert,          // ta'akkad (make sure)
+        "أثبت" => TokenKind::Prove,           // athbit (prove!)
+        "يتطلب" => TokenKind::Requires,       // yatatallab (requires)
+        "يضمن" => TokenKind::Ensures,         // yaḍman (guarantees)
+        // === BOOL / PRINT ===
+        "صحيح" => TokenKind::True,            // ṣaḥīḥ (true / correct)
+        "خطأ" => TokenKind::False,            // khaṭa' (wrong / mistake)
+        "اطبع" => TokenKind::Print,           // iṭba' (print!)
+        // === PURITY / PARALLEL ===
+        "نقي" => TokenKind::Pure,             // naqī (pure)
+        "متوازي" => TokenKind::Parallel,      // mutawāzī (parallel)
+        // === INTERFACES / METHODS ===
+        "واجهة" => TokenKind::Interface,      // wājiha (interface)
+        "نفذ" => TokenKind::Implement,        // naffidh (execute / implement)
+        "طرق" => TokenKind::Methods,          // ṭuruq (methods / ways)
+        // === BOUNDS ===
+        "حيث" => TokenKind::Where,            // ḥaythu (where)
+        "هو" => TokenKind::Is,                // huwa (he / it / is)
+        // === CONCURRENCY ===
+        "حاول" => TokenKind::Try,             // ḥāwil (try!)
+        "مهمة" => TokenKind::Task,            // muhimma (task / mission)
+        "اربط" => TokenKind::Join,            // urbiṭ (link!)
+        // === EMBEDDED ===
+        "غير_آمن" => TokenKind::Unsafe,       // ghayr āmin (unsafe — compound)
+        "منطقة" => TokenKind::RegionKw,       // minṭaqa (region / area)
+        // === SOV-S7 PARITY ===
+        "هدف" => TokenKind::Intent,           // hadaf (goal / intent)
+        "نوع" => TokenKind::Type,             // naw' (type / kind)
+        "خارجي" => TokenKind::Extern,         // khārijī (external)
+        "ثابت" => TokenKind::Invariant,       // thābit (constant / invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.4 (2026-06-08): Greek (Ελληνικά) keyword resolution.
 /// First Greek-script dialect. Uses modern Greek's monotonic
 /// accent system (single acute mark + diaeresis). All keywords
@@ -2363,6 +2513,21 @@ enum DialectLang {
     // Phase 13.5 (2026-06-08): Hebrew (עברית) — second RTL
     // script dialect after Perso-Arabic. SVO grammar.
     Hebrew,
+    // Phase 13.6 (2026-06-08): Italian (italiano) — fifth
+    // Latin-with-accents dialect. Italian keyword surface is
+    // mostly pure ASCII (`funzione`, `sia`, `se`, `mentre`,
+    // `per`, `vero`, `falso`, ...), so the dialect rides the
+    // pragma-threading enabler primarily; a handful of accented
+    // forms (`è` etc.) are deliberately omitted in v1 since
+    // they're single-char or otherwise ambiguous as keywords.
+    Italian,
+    // Phase 13.7 (2026-06-08): Modern Standard Arabic (العربية)
+    // — distinct from the shipped Perso-Arabic dialects which
+    // use the Arabic SCRIPT for Indo-Iranian/Indo-Aryan
+    // languages (Urdu, Sindhi, Shahmukhi, Persian, Pashto).
+    // Native Arabic vocabulary on the existing Script::Arabic
+    // infrastructure. SVO/VSO grammar; v1 ships keyword-first.
+    Arabic,
 }
 
 impl DialectLang {
@@ -2400,6 +2565,8 @@ impl DialectLang {
             DialectLang::Indonesian => "indonesian",
             DialectLang::Greek => "greek",
             DialectLang::Hebrew => "hebrew",
+            DialectLang::Italian => "italian",
+            DialectLang::Arabic => "arabic",
         }
     }
 
@@ -2449,6 +2616,8 @@ impl DialectLang {
             DialectLang::Indonesian => Script::Latin,
             DialectLang::Greek => Script::Greek,
             DialectLang::Hebrew => Script::Hebrew,
+            DialectLang::Italian => Script::Latin,
+            DialectLang::Arabic => Script::Arabic,
         }
     }
 }
@@ -2709,6 +2878,14 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // block U+0590..U+05FF.
             "hebrew" | "עברית" | "ivrit" | "he" | "iw"
                 => Some(DialectLang::Hebrew),
+            // Phase 13.6 (2026-06-08): fifth Latin-with-accents
+            // (Romance family completes — Spanish + French +
+            // Portuguese + Italian + German already shipped).
+            "italian" | "italiano" | "it" => Some(DialectLang::Italian),
+            // Phase 13.7 (2026-06-08): Modern Standard Arabic
+            // distinct from the shipped Perso-Arabic dialects.
+            "arabic" | "العربية" | "arabi" | "ar"
+                => Some(DialectLang::Arabic),
             _ => None,
         };
     }
@@ -3519,6 +3696,11 @@ impl<'a> Lexer<'a> {
             // Phase 13.5 (2026-06-08): Hebrew — every keyword
             // starts with a Hebrew-block codepoint (U+0590+).
             .or_else(|| hebrew_keyword(text))
+            // Phase 13.7 (2026-06-08): Modern Standard Arabic
+            // — distinct from the Indo-Iranian Perso-Arabic
+            // dialects; native Arabic vocabulary on the same
+            // Script::Arabic infrastructure.
+            .or_else(|| arabic_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -3691,6 +3873,7 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::German) => german_ascii_keyword(text),
                     Some(DialectLang::Portuguese) => portuguese_ascii_keyword(text),
                     Some(DialectLang::Indonesian) => indonesian_ascii_keyword(text),
+                    Some(DialectLang::Italian) => italian_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

@@ -1,0 +1,34 @@
+// श्री।
+// vani-lang: italian
+//
+// build & run:
+//   vanic run examples/language/italian/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/italian/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/italian/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.6 v1: fifth Latin-with-accents Tier II dialect. Italian
+// is largely pure-ASCII; rides the pragma-threading enabler.
+// Romance language family (Spanish + French + Portuguese +
+// Italian) is now complete in vāṇी.
+
+scopo "Compute a small score with checked constraints";
+
+funzione add(a: i64, b: i64) -> i64 {
+  ritornare a + b;
+}
+
+funzione bounded_score(base: i64) -> i64
+richiede base >= 0;
+{
+  sia doubled: i64 = base * 2;
+  affermare doubled >= base;
+  ritornare add(doubled, 2);
+}
+
+funzione main() -> i64 {
+  sia answer = bounded_score(20);
+  dimostrare 2 + 2 == 4;
+  affermare answer >= 0;
+  stampare answer;
+  ritornare 0;
+}
