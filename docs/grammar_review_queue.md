@@ -108,6 +108,38 @@ Open a PR that:
 
 *(none yet — first review pass pending)*
 
+## Polish-arc 2026-06-08 additions — needs review
+
+The 2026-06-08 multi-arc session shipped four sets of dialect
+spellings that should be reviewed alongside the SOV-S9 picks
+above:
+
+### Async / await dialect lift
+
+| Keyword | Pick | Dialects | Confidence | Notes |
+|---|---|---|---|---|
+| `async` | `अतुल्यकालिक` *atulyakālika* | Sanskrit / Hindi / Marathi | Low | Tatsama coinage = "non-synchronous". Used in some Sanskrit-academic CS writing but not native-speaker validated. Wired via parser-level `is_async_ident` helper (not the lexer's keyword table — `async` stays contextual). |
+| `async` | `异步` *yìbù* | Mandarin | Medium | Widely-attested CS spelling (Rust/Go/Python translations). |
+| `async` | `非同期` *hidouki* | Japanese | Medium | Widely-attested CS spelling. |
+| `await` | `प्रतीक्षा` *pratīkṣā* | Sanskrit / Hindi / Marathi | Low | "Wait" — tatsama. |
+| `await` | `等候` *děnghòu* | Mandarin | Medium | Chosen because `等待` already means `join` in this dialect. |
+| `await` | `待機` *taiki* | Japanese | Medium | "Standby / wait" — common CS spelling. |
+
+### Mandarin keyword table (Phase 10.2)
+
+The full Mandarin keyword set is in `src/lexer.rs:mandarin_keyword`.
+~55 spellings — most are direct CS-vocabulary calques widely
+attested in Mandarin programming literature (函数 / 让 / 返回 /
+如果 / 否则 / 引用 / 可变 / 任务 / 等待 / 等等). Confidence:
+**Medium** overall; native-speaker validation queued.
+
+The full list is mirrored in two places:
+- `src/lexer.rs:mandarin_keyword` (lexer dispatch)
+- `tools/vani_translate.py:ALIASES` (translator)
+- `src/lsp.rs:MANDARIN_KEYWORDS` (LSP autocomplete)
+
+A single-source-of-truth refactor is queued in TODO.md.
+
 ## Sources / references
 
 - **Sanskrit**: Monier-Williams Sanskrit–English Dictionary
