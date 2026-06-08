@@ -1056,6 +1056,120 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.2 (2026-06-08): Portuguese (português) keyword
+/// resolution. Fourth Latin-with-accents Tier II dialect. Same
+/// v1 split as Spanish/French/German: this table holds the
+/// natural non-ASCII forms (`função`, `módulo`, `público`,
+/// `região`, `intenção`, `enumeração`, `métodos`, `até`,
+/// `senão`, `então`, `mutável`, `referência`, `não`) that can't
+/// collide with English identifiers; the pure-ASCII forms live
+/// in `portuguese_ascii_keyword` and are pragma-gated.
+fn portuguese_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "função" => TokenKind::Fn,            // function
+        "enumeração" => TokenKind::Enum,      // enumeration
+        // === VISIBILITY / MODULES ===
+        "público" => TokenKind::Pub,          // public
+        "módulo" => TokenKind::Module,        // module
+        // === CONTROL FLOW ===
+        "senão" => TokenKind::Else,           // else / otherwise
+        "então" => TokenKind::Then,           // then
+        "até" => TokenKind::To,               // to / until
+        // === REFS / MUT ===
+        "referência" => TokenKind::Ref,       // reference
+        "mutável" => TokenKind::Mut,          // mutable
+        // === INTERFACES / METHODS ===
+        "métodos" => TokenKind::Methods,      // methods
+        // === SOV-S7 PARITY ===
+        "intenção" => TokenKind::Intent,      // intent
+        "propósito" => TokenKind::Intent,     // purpose (alt)
+        "região" => TokenKind::RegionKw,      // region
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.2 (2026-06-08): pure-ASCII Portuguese keyword table.
+/// Pragma-gated like Spanish/French/German — only consulted
+/// when the file declares `// vani-lang: portuguese` (or
+/// `brasileiro`, `pt`).
+fn portuguese_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "funcao" => TokenKind::Fn,            // function (sem til alt)
+        "seja" => TokenKind::Let,             // "let it be"
+        "estrutura" => TokenKind::Struct,     // structure
+        "constante" => TokenKind::Const,      // constant
+        "enumeracao" => TokenKind::Enum,      // enumeration (sem til)
+        // === VISIBILITY / MODULES ===
+        "publico" => TokenKind::Pub,          // public (sem acento)
+        "modulo" => TokenKind::Module,        // module (sem acento)
+        "usar" => TokenKind::Use,             // use
+        "como" => TokenKind::As,              // as
+        // === CONTROL FLOW ===
+        "retornar" => TokenKind::Return,      // return
+        "retorne" => TokenKind::Return,       // return! (imperative)
+        "se" => TokenKind::If,                // if
+        "senao" => TokenKind::Else,           // else (sem til)
+        "enquanto" => TokenKind::While,       // while
+        "para" => TokenKind::For,             // for
+        "em" => TokenKind::In,                // in
+        "desde" => TokenKind::From,           // from
+        "ate" => TokenKind::To,               // until (sem acento)
+        "parar" => TokenKind::Break,          // stop / break
+        "interromper" => TokenKind::Break,    // interrupt (alt)
+        "continuar" => TokenKind::Continue,   // continue
+        "entao" => TokenKind::Then,           // then (sem til)
+        // === REFS / MUT ===
+        "ver" => TokenKind::Ref,              // see
+        "mutavel" => TokenKind::Mut,          // mutable (sem acento)
+        // === MATCH ===
+        "combinar" => TokenKind::Match,       // match / combine
+        "corresponder" => TokenKind::Match,   // match / correspond (alt)
+        // === VERIFICATION ===
+        "afirmar" => TokenKind::Assert,       // assert
+        "provar" => TokenKind::Prove,         // prove
+        "demonstrar" => TokenKind::Prove,     // demonstrate (alt)
+        "requer" => TokenKind::Requires,      // requires
+        "garante" => TokenKind::Ensures,      // guarantees
+        // === BOOL / PRINT ===
+        "verdadeiro" => TokenKind::True,      // true
+        "falso" => TokenKind::False,          // false
+        "imprimir" => TokenKind::Print,       // print
+        "escrever" => TokenKind::Print,       // write (alt)
+        // === PURITY / PARALLEL ===
+        "puro" => TokenKind::Pure,            // pure
+        "paralelo" => TokenKind::Parallel,    // parallel
+        // === INTERFACES / METHODS ===
+        "interface" => TokenKind::Interface,  // interface
+        "implementar" => TokenKind::Implement, // implement
+        "metodos" => TokenKind::Methods,      // methods (sem acento)
+        // === BOUNDS ===
+        "onde" => TokenKind::Where,           // where
+        "eh" => TokenKind::Is,                // "is" (ASCII transliteration
+                                              // of `é`; sometimes used
+                                              // in informal Portuguese)
+        // === CONCURRENCY ===
+        "tentar" => TokenKind::Try,           // try
+        "tarefa" => TokenKind::Task,          // task
+        "juntar" => TokenKind::Join,          // join
+        "unir" => TokenKind::Join,            // unite (alt)
+        // === EMBEDDED ===
+        "inseguro" => TokenKind::Unsafe,      // unsafe
+        "regiao" => TokenKind::RegionKw,      // region (sem til)
+        // === SOV-S7 PARITY ===
+        "intencao" => TokenKind::Intent,      // intent (sem til)
+        "proposito" => TokenKind::Intent,     // purpose (sem acento, alt)
+        "objetivo" => TokenKind::Intent,      // objective (alt)
+        "tipo" => TokenKind::Type,            // type
+        "externo" => TokenKind::Extern,       // external
+        "invariante" => TokenKind::Invariant, // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase pragma-threading (2026-06-08): pure-ASCII Spanish
 /// keyword table. Only consulted when the file declares
 /// `// vani-lang: spanish`. The non-ASCII Spanish keywords
@@ -1988,6 +2102,15 @@ enum DialectLang {
     // "function" — ham + su). Korean continues the SOV-for-
     // now-keyword-first design from Japanese.
     Korean,
+    // Phase 13.2 (2026-06-08): Portuguese (português) — fourth
+    // Latin-with-accents Tier II dialect (after Spanish, French,
+    // German). Rides both the unified `lex_ident` non-ASCII
+    // continuation path AND the pragma-threading enabler so
+    // natural pure-ASCII Portuguese (`funcao`, `seja`, `se`,
+    // `enquanto`, `verdadeiro`, ...) works alongside accented
+    // forms (`função`, `não`, `até`, `senão`). Brazilian and
+    // European Portuguese share the same keyword surface.
+    Portuguese,
 }
 
 impl DialectLang {
@@ -2021,6 +2144,7 @@ impl DialectLang {
             DialectLang::Japanese => "japanese",
             DialectLang::German => "german",
             DialectLang::Korean => "korean",
+            DialectLang::Portuguese => "portuguese",
         }
     }
 
@@ -2066,6 +2190,7 @@ impl DialectLang {
             DialectLang::Japanese => Script::Japanese,
             DialectLang::German => Script::Latin,
             DialectLang::Korean => Script::Hangul,
+            DialectLang::Portuguese => Script::Latin,
         }
     }
 }
@@ -2280,6 +2405,12 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.1 (2026-06-07): first Hangul-script dialect.
             "korean" | "한국어" | "hangugeo" | "ko"
                 => Some(DialectLang::Korean),
+            // Phase 13.2 (2026-06-08): fourth Latin-with-accents.
+            // Accepts both European (português) and Brazilian
+            // (brasileiro) spellings; same surface either way.
+            "portuguese" | "português" | "portugues" | "pt"
+                | "brasileiro" | "brasil"
+                => Some(DialectLang::Portuguese),
             _ => None,
         };
     }
@@ -3079,6 +3210,11 @@ impl<'a> Lexer<'a> {
             // Phase 13.1 (2026-06-07): Korean — Hangul syllables
             // all sit at U+AC00+ (above U+0080).
             .or_else(|| korean_keyword(text))
+            // Phase 13.2 (2026-06-08): Portuguese — non-ASCII
+            // keywords (até, senão, então, mutável, função, etc.)
+            // route through this entry point when they start
+            // with a non-ASCII byte (não, …).
+            .or_else(|| portuguese_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -3234,6 +3370,7 @@ impl<'a> Lexer<'a> {
             _ if text.bytes().any(|b| b >= 0x80) => spanish_keyword(text)
                 .or_else(|| french_keyword(text))
                 .or_else(|| german_keyword(text))
+                .or_else(|| portuguese_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -3248,6 +3385,7 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Spanish) => spanish_ascii_keyword(text),
                     Some(DialectLang::French) => french_ascii_keyword(text),
                     Some(DialectLang::German) => german_ascii_keyword(text),
+                    Some(DialectLang::Portuguese) => portuguese_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

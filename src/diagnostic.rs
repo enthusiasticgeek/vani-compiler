@@ -78,6 +78,9 @@ enum DiagLang {
     // Phase 13.1 (2026-06-07): Korean — first Hangul-script
     // dialect.
     Korean,
+    // Phase 13.2 (2026-06-08): Portuguese — fourth Latin-with-
+    // accents Tier II dialect.
+    Portuguese,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -139,6 +142,10 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.1 (2026-06-07): first Hangul-script dialect.
             "korean" | "한국어" | "hangugeo" | "ko"
                 => Some(DiagLang::Korean),
+            // Phase 13.2 (2026-06-08): fourth Latin-with-accents.
+            "portuguese" | "português" | "portugues" | "pt"
+                | "brasileiro" | "brasil"
+                => Some(DiagLang::Portuguese),
             _ => None,
         };
     }
@@ -181,6 +188,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Japanese)) => "エラー (error)".to_string(),
         ("error", Some(DiagLang::German)) => "Fehler (error)".to_string(),
         ("error", Some(DiagLang::Korean)) => "오류 (error)".to_string(),
+        ("error", Some(DiagLang::Portuguese)) => "erro (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -201,6 +209,7 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Japanese)) => "注記 (note)".to_string(),
         ("note", Some(DiagLang::German)) => "Hinweis (note)".to_string(),
         ("note", Some(DiagLang::Korean)) => "참고 (note)".to_string(),
+        ("note", Some(DiagLang::Portuguese)) => "nota (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -467,6 +476,19 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("invalid", "잘못됨 (invalid)"),
             ("integer literal", "정수 리터럴 (integer literal)"),
             ("float literal", "실수 리터럴 (float literal)"),
+        ][..],
+        DiagLang::Portuguese => &[
+            ("expected ", "esperado "),
+            ("unknown variable", "variável desconhecida (unknown variable)"),
+            ("unknown function", "função desconhecida (unknown function)"),
+            ("unknown struct", "estrutura desconhecida (unknown struct)"),
+            ("type mismatch", "tipos incompatíveis (type mismatch)"),
+            ("cannot prove", "não é possível provar (cannot prove)"),
+            ("function ", "função "),
+            ("language mismatch", "idioma incompatível (language mismatch)"),
+            ("invalid", "inválido (invalid)"),
+            ("integer literal", "literal inteiro (integer literal)"),
+            ("float literal", "literal decimal (float literal)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

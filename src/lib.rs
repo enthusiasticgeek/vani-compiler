@@ -27953,6 +27953,50 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn portuguese_pragma_mixed_accented_and_ascii_compiles() {
+        // Phase 13.2 (2026-06-08): Portuguese rides both the
+        // unified `lex_ident` non-ASCII continuation path AND
+        // the pragma-threading enabler. A Portuguese-pragma
+        // file can freely mix accented forms (função, módulo,
+        // até, então, senão, mutável, intenção, métodos) with
+        // pure-ASCII alternates (funcao, modulo, ate, entao,
+        // seja, se, enquanto, retornar, verdadeiro, etc.).
+        let source = "// vani-lang: portuguese\n\
+                      intenção \"basic Portuguese demo\";\n\
+                      função add(a: i64, b: i64) -> i64 {\n  \
+                        retornar a + b;\n\
+                      }\n\
+                      função main() -> i64 {\n  \
+                        seja x: i64 = add(20, 22);\n  \
+                        afirmar x == 42;\n  \
+                        provar 2 + 2 == 4;\n  \
+                        imprimir x;\n  \
+                        retornar 0;\n\
+                      }\n";
+        crate::compile(source).expect("Portuguese basics compile");
+    }
+
+    #[test]
+    fn portuguese_pure_ascii_only_compiles_under_pragma() {
+        // The pure-ASCII-only Portuguese surface — every keyword
+        // expressed without an accent. Exercises the
+        // portuguese_ascii_keyword table independently of the
+        // accented variants.
+        let source = "// vani-lang: portuguese\n\
+                      intencao \"pure-ASCII Portuguese\";\n\
+                      funcao main() -> i64 {\n  \
+                        seja x: i64 = 20 + 22;\n  \
+                        se x == 42 {\n    \
+                          imprimir x;\n  \
+                        } senao {\n    \
+                          imprimir 0;\n  \
+                        }\n  \
+                        retornar 0;\n\
+                      }\n";
+        crate::compile(source).expect("pure-ASCII Portuguese compiles under pragma");
+    }
+
+    #[test]
     fn korean_hangul_pragma_compiles_and_runs() {
         // Phase 13.1 (2026-06-07): first Hangul-script dialect.
         // SOV grammar continues the Japanese precedent; v1

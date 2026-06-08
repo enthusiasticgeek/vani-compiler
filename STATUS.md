@@ -10,6 +10,89 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phase 13.2 Portuguese (fourth Latin-with-accents)
+
+**Portuguese (português)** joins as the fourth Latin-with-
+accents Tier II dialect, riding BOTH the unified `lex_ident`
+non-ASCII continuation path AND the pragma-threading enabler
+shipped in the prior commit. Roster grows to **28 dialects
+across 14 scripts**. Brazilian and European Portuguese share
+the same keyword surface.
+
+```rust
+// vani-lang: portuguese
+intenção "Compute a small score with checked constraints";
+
+função add(a: i64, b: i64) -> i64 {
+  retornar a + b;
+}
+
+função bounded_score(base: i64) -> i64
+requer base >= 0;
+{
+  seja doubled: i64 = base * 2;
+  afirmar doubled >= base;
+  retornar add(doubled, 2);
+}
+
+função main() -> i64 {
+  seja answer = bounded_score(20);
+  provar 2 + 2 == 4;
+  afirmar answer >= 0;
+  imprimir answer;
+  retornar 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Architectural surface — minimal additions on top of two prior
+shipments**:
+- `DialectLang::Portuguese` → `Script::Latin`. Pragma accepts
+  `portuguese | português | portugues | pt | brasileiro | brasil`.
+- `portuguese_keyword(text)` — natural non-ASCII forms (~14
+  entries): `função`, `enumeração`, `público`, `módulo`,
+  `senão`, `então`, `até`, `referência`, `mutável`, `métodos`,
+  `intenção`, `propósito`, `região`. Chained into both
+  `lex_ident` and `lex_unicode_ident`.
+- `portuguese_ascii_keyword(text)` — pure-ASCII forms (~45
+  entries): `funcao`, `seja`, `estrutura`, `enumeracao`,
+  `publico`, `modulo`, `usar`, `como`, `retornar`/`retorne`,
+  `se`, `senao`, `enquanto`, `para`, `em`, `desde`, `ate`,
+  `parar`/`interromper`, `continuar`, `entao`, `ver`,
+  `mutavel`, `combinar`/`corresponder`, `afirmar`,
+  `provar`/`demonstrar`, `requer`, `garante`, `verdadeiro`,
+  `falso`, `imprimir`/`escrever`, `puro`, `paralelo`,
+  `interface`, `implementar`, `metodos`, `onde`, `eh`,
+  `tentar`, `tarefa`, `juntar`/`unir`, `inseguro`, `regiao`,
+  `intencao`/`proposito`/`objetivo`, `tipo`, `externo`,
+  `invariante`. Pragma-gated like Spanish/French/German.
+- New `DiagLang::Portuguese` with native labels (`erro`/`nota`)
+  + prefix table (`esperado`, `variável desconhecida`, `tipos
+  incompatíveis`, `não é possível provar`, etc.).
+
+**Why Portuguese was cheap to ship**: rides every architectural
+piece already in main —
+- Unified `lex_ident` (Phase 8b.1) for accented Latin chars.
+- Pragma threading (today's prior commit) for pure-ASCII forms.
+- The 6-touchpoint per-script abstraction pattern.
+
+Total work: ~50 lines of keyword tables + 6 lines of pragma
+wiring + 12 lines of DiagLang. The pattern is now so well
+established that adding the next basic-Latin Tier II dialect
+(Indonesian, Italian, Polish, Turkish, Dutch, Swahili, …) is
+a similar 2-3h effort.
+
+**2 new regression tests**:
+- `portuguese_pragma_mixed_accented_and_ascii_compiles` —
+  exercises both keyword tables in the same file.
+- `portuguese_pure_ascii_only_compiles_under_pragma` —
+  pure-ASCII Portuguese surface, isolating the
+  `portuguese_ascii_keyword` table.
+
+Lib ledger: **1960 lib + 54 parity** green (1958→1960 = 2 new
+Portuguese regression tests). All 187 example files compile.
+
 ## 🟢 Session 2026-06-08 — Pragma threading: pure-ASCII keywords for Spanish / French / German
 
 The architectural enabler queued in [TODO.md §*Dedicated-

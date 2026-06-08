@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/portuguese/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/portuguese/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.2 v1: Portuguese-pragma files freely mix natural
+// non-ASCII forms (função, módulo, intenção, métodos, até, então,
+// senão) AND pure-ASCII alternates (funcao, modulo, ate, entao,
+// seja, se, enquanto, retornar, verdadeiro, falso, imprimir).
+// Either spelling tokenizes to the same TokenKind — write
+// whichever reads more naturally for your code.
+
+intenção "Compute a small score with checked constraints";
+
+função add(a: i64, b: i64) -> i64 {
+  retornar a + b;
+}
+
+função bounded_score(base: i64) -> i64
+requer base >= 0;
+{
+  seja doubled: i64 = base * 2;
+  afirmar doubled >= base;
+  retornar add(doubled, 2);
+}
+
+função main() -> i64 {
+  seja answer = bounded_score(20);
+  provar 2 + 2 == 4;
+  afirmar answer >= 0;
+  imprimir answer;
+  retornar 0;
+}
