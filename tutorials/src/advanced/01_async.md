@@ -81,10 +81,12 @@ await cancellable(7, tok)  = -1
 
 | Today | Queued |
 |---|---|
-| `async fn` + `await` synchronous desugar | Real suspend-point state machine (Arc 8 step 8c) |
-| `CancelToken` cooperative cancellation | Auto-injected cancel checks at await points |
-| `try EXPR` sugar in async bodies | `try EXPR` sugar in sync bodies |
-| `Future<R>` for scalar R | `Future<T>` for aggregate R |
+| `async fn` + `await` synchronous desugar (v1) AND real suspend-point state machine (v3.1, FEATURE-COMPLETE 2026-06-08) | — |
+| `CancelToken` cooperative cancellation AND **A4.4** auto-injected cancel guards at every suspend point | — |
+| `try EXPR` keyword AND postfix `EXPR?` operator in both sync + async bodies | — |
+| `Future<R>` for scalar R AND v3.1 Task<T> for all v3.1-allowed T | — |
+| **A4.3** dynamic-N multi-task scheduling via `mut ref pool[i]` over `Vec<Task__<fn>>` | — |
+| Per-dialect spellings: `अतुल्यकालिक` / `异步` / `非同期` for `async`; `प्रतीक्षा` / `等候` / `待機` for `await` | — |
 
 ## Common patterns
 

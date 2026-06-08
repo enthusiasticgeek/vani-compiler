@@ -57,6 +57,7 @@ temp. Pre-existed in both backends.
 
 ## Filing issues
 
-Small repro program > prose. Include the `intentc` command line,
+Small repro program > prose. Include the `vanic` command line,
 the source file, and the output (stderr inclusive). For verifier
-issues, the SMT trace via `INTENTC_SMT_DEBUG=1` is gold.
+issues, the SMT trace via `VANIC_SMT_DEBUG=1` (or the legacy
+`INTENTC_SMT_DEBUG=1`) is gold.

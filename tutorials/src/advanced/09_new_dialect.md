@@ -148,9 +148,13 @@ Thanks to Phase 6's parameterized print helpers:
   of the editor, not a compiler concern. But cursor
   navigation + selection in RTL source files is the editor's
   job, not vāṇी's.
-- **Logographic scripts** (Mandarin, Japanese kanji) need a
-  tokenizer that knows about CJK word boundaries. Phase 10
-  queued.
+- **Logographic scripts** (Mandarin, Japanese kanji) historically
+  needed a tokenizer that knew about CJK word boundaries.
+  Japanese (Phase 9b) and Mandarin (Phase 10.2, 2026-06-08)
+  both ship today — the convention is that users separate
+  identifiers from keywords with whitespace, same as natural
+  CJK programming style. No dictionary-driven segmenter
+  required.
 - **Multi-script bidialects** (Punjabi-Gurmukhi vs Punjabi-
   Shahmukhi) need two parallel pragma tags pointing at two
   different `Script` variants. v1 ships Punjabi-Gurmukhi

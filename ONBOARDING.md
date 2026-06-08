@@ -24,13 +24,15 @@ opt --version
 cc --version
 ```
 
-The compiler **runs** without the LLVM tools — `intentc check` only
-needs Rust and z3. `intentc run --backend=llvm` needs `lli`; `intentc
+The compiler **runs** without the LLVM tools — `vanic check` only
+needs Rust and z3. `vanic run --backend=llvm` needs `lli`; `vanic
 build` needs `llc` + `cc` (+ optional `opt`). The C backend (`run
---backend=c`) needs `cc`.
+--backend=c`) needs `cc`. (`intentc` is the legacy alias for
+`vanic`, kept for one release — see TODO.md §*CLI rename*.)
 
-`INTENTC_NO_VERIFY=1` skips SMT entirely for fast iteration on
-non-proof code changes. Don't set it in CI.
+`VANIC_NO_VERIFY=1` (or the legacy `INTENTC_NO_VERIFY=1`) skips
+SMT entirely for fast iteration on non-proof code changes. Don't
+set it in CI.
 
 ## Build, test, run
 
@@ -71,7 +73,7 @@ src/
   ssa_backend_c.rs    SSA-C backend (used for parallel-for + tasks paths)
   ssa_backend_llvm.rs SSA-LLVM backend (used when the SSA path supports
                       the program shape; falls back to tree-LLVM otherwise)
-  format.rs           Formatter (`intentc fmt`); preserves comments + blank
+  format.rs           Formatter (`vanic fmt`); preserves comments + blank
                       lines, round-trips to the same AST.
 tests/
   run_end_to_end.rs   Integration: invoke the binary on real .vani files
