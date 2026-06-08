@@ -13952,6 +13952,41 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             ));
             p
         }
+        TypedExprKind::RefMutIndex { vec, index, element_ty } => {
+            // `mut ref vec[i]` → GEP into the Vec's heap data
+            // buffer. The local at `vec` holds a Vec struct
+            // value (`{T*, i64, i64}`); extract its data
+            // pointer, then GEP at the element index.
+            let (vec_ty, vec_addr) = ctx
+                .locals
+                .get(vec)
+                .cloned()
+                .unwrap_or_else(|| unreachable!(
+                    "checker: mut ref vec[i] on undeclared binding '{}'",
+                    vec
+                ));
+            let s_ty = llvm_type_string(vec_ty.deref());
+            // Load the data pointer (slot 0 of the Vec struct).
+            let data_ptr = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr {}, {}* {}, i64 0, i32 0\n",
+                data_ptr, s_ty, s_ty, vec_addr
+            ));
+            let elt_ll = llvm_type_string(element_ty);
+            let data = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load {}*, {}** {}\n",
+                data, elt_ll, elt_ll, data_ptr
+            ));
+            // Index into data[i].
+            let idx_v = emit_expr(index, ctx, out);
+            let slot = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr {}, {}* {}, i64 {}\n",
+                slot, elt_ll, elt_ll, data, idx_v
+            ));
+            slot
+        }
         TypedExprKind::FnRef { name, .. } => {
             // Taking the address of a top-level function: LLVM
             // exposes it as `@function_name`. The type is the
@@ -39727,6 +39762,9 @@ fn collect_strings_in_expr<F>(
         TypedExprKind::DynCoerce { value, .. } => {
             collect_strings_in_expr(value, msgs, idx, intern);
         }
+        TypedExprKind::RefMutIndex { index, .. } => {
+            collect_strings_in_expr(index, msgs, idx, intern);
+        }
         TypedExprKind::Int(_)
         | TypedExprKind::Float(_)
         | TypedExprKind::Bool(_)
@@ -40271,6 +40309,12 @@ pub(crate) fn walk_expr(
             // Capture the struct binding; the GEP into its
             // field lives inside the outlined body.
             note_capture(object, declared, order, seen);
+        }
+        TypedExprKind::RefMutIndex { vec, index, .. } => {
+            // Capture the Vec binding; the index sub-expr may
+            // reference other locals.
+            note_capture(vec, declared, order, seen);
+            walk_expr(index, declared, order, seen);
         }
         TypedExprKind::FnRef { .. } => {
             // Function references aren't captured locals;

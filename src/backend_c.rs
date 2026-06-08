@@ -12946,6 +12946,16 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 _ => format!("&{}", local_name(name)),
             }
         }
+        TypedExprKind::RefMutIndex { vec, index, .. } => {
+            // `mut ref vec[i]` → `&v_vec.data[idx]`. The Vec's
+            // `.data` heap buffer is a contiguous array of
+            // element-sized slots; the resulting pointer is
+            // valid until the surrounding code resizes the Vec
+            // (the user is responsible for that discipline —
+            // same as `mut ref Var` semantics today).
+            let idx_expr = emit_expr(index);
+            format!("(&{}.data[{}])", local_name(vec), idx_expr)
+        }
         TypedExprKind::RefField { object, field, object_ty, .. }
         | TypedExprKind::RefMutField { object, field, object_ty, .. } => {
             // `ref t.x` / `mut ref t.x` — take the address of

@@ -10,6 +10,81 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Tier 2 #4: A4.3 multi-task via `mut ref vec[i]`
+
+Arc 8 v3.1's last substantive caveat (#12 multi-task scheduling)
+closes via a language-level lift rather than a runtime addition.
+The `mut ref vec[i]` mut-borrow of a Vec element is now a
+first-class expression, which means `__poll_<fn>(mut ref pool[i])`
+over a `Vec<Task__<fn>>` compiles cleanly — the dynamic-N
+counterpart to Phase 4b's fixed-N named-slot pattern.
+
+```vani
+async fn handle(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n;
+}
+
+fn main() -> i64 {
+  let pool: Vec<Task__handle> = vec();
+  // accept loop: push one Task__handle per client connection
+  // ...
+
+  // round-robin schedule:
+  let j: i64 = 0;
+  while done < n {
+    let r: i64 = __poll_handle(mut ref pool[j]);  // ← the lift
+    if r != 0 - 2 { /* task completed */ }
+    j = (j + 1) % n;
+    if j == 0 { let _ = epoll_wait_one(ep, 1000); }
+  }
+  return 0;
+}
+```
+
+**Wiring**:
+- New `TypedExprKind::RefMutIndex { vec, index, element_ty }` in
+  `src/ir.rs`. Variant carries the source Var name + the index
+  sub-expression + the element type for backend lowering.
+- `check_ref_mut` accepts `ExprKind::Index { array: Var(_), .. }`
+  as a third source form alongside `Var` and `obj.field`.
+  Requires the binding to be `Vec<T>` (Array/Ref/etc. rejected
+  with a typed diagnostic). Validates the index is i64.
+- C backend: `&v_<vec>.data[<idx>]` — the Vec's `.data` heap
+  buffer is contiguous, so the pointer is valid until the user
+  resizes the Vec.
+- LLVM backend: GEP into the loaded Vec's data pointer, then GEP
+  at the element index. Mirror of `RefMutField` for struct
+  fields.
+- SSA path returns LowerError → routes through the tree
+  backend (same fall-through `RefMutField` uses).
+
+**Restrictions kept** (consistent with `mut ref Var` semantics):
+- No alias fence — caller is responsible for not resizing the
+  Vec while the borrow is live. The language doesn't enforce
+  borrow exclusivity statically, so this matches the existing
+  `mut ref Var` discipline.
+- Source must be a Var bound to `Vec<T>`. No `Array<T,N>` (later
+  follow-up), no nested expressions, no field-access source.
+- Element type must be sized (no T = ref).
+
+**Example shipped**: [echo_pool.vani](examples/language/english/echo_pool.vani)
+— three peers, three Tasks in a `Vec<Task__handle>`, round-robin
+polled, single-threaded epoll multiplex. Total bytes 9 = 2 + 3 +
+4 across peers. Byte-identical on both backends.
+
+Two regression tests
+(`mut_ref_vec_index_compiles_and_types`,
+`mut_ref_vec_index_rejects_non_vec_source`) pin the surface.
+
+Lib ledger: **2007 lib** green (+2 from prior 2005). e2e parity
+green.
+
+This closes Tier 2 #4 — Arc 8 v3.1 caveat #12. Tier 2 #5 next:
+**L4 partial lift** to unblock A4.4 CancelToken auto-plumbing.
+A standalone `Array<T,N>` extension of `mut ref vec[i]` is a
+small optional follow-up.
+
 ## 🟢 Session 2026-06-08 (cont.) — Tier 1 #2: box(value) infers `as dyn Iface`
 
 The L2 Box<dyn Iface> surface drops the boilerplate cast. With a

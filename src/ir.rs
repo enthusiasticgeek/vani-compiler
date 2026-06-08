@@ -390,6 +390,23 @@ pub enum TypedExprKind {
         field_index: u32,
         object_ty: Type,
     },
+    /// `mut ref vec[i]` — mut-borrow of a Vec element by index.
+    /// Result type is `Type::RefMut(element_ty)`. v1 restrictions:
+    /// - Source must be a Var bound to `Vec<T>` (no nested
+    ///   index, no field-access source).
+    /// - Element type T must be a value-sized type (no T = ref).
+    /// - No alias-fence: the surrounding code must not push /
+    ///   pop / resize the Vec while the borrow is live (the same
+    ///   discipline `mut ref Var` already requires; v1 doesn't
+    ///   enforce it statically).
+    /// A4.3 (multi-task scheduling): the load-bearing use is
+    /// `__poll_<fn>(mut ref pool[i])` over a `Vec<Task__<fn>>`,
+    /// which the existing v3.1 transform produces.
+    RefMutIndex {
+        vec: String,
+        index: Box<TypedExpr>,
+        element_ty: Type,
+    },
     /// Reference to a top-level function as a first-class
     /// value. Produced when an identifier in value position
     /// resolves to a function (not a binding). The result type

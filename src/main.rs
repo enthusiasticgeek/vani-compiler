@@ -681,6 +681,8 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
         // SSA doesn't model field-paths yet. T1.2 phase 2b
         // follow-up.
         TypedExprKind::RefField { .. } | TypedExprKind::RefMutField { .. } => false,
+        // `mut ref vec[i]` is tree-backend only (A4.3 v1 lift).
+        TypedExprKind::RefMutIndex { .. } => false,
         // `dyn Iface` method dispatch / coercion route
         // through tree backends; SSA vtable lowering lands
         // with Phase 3.

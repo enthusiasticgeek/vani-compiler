@@ -1,0 +1,110 @@
+// Arc 8 v3.1 — A4.3 + A4.6 acceptance: echo_pool.
+//
+// Single-threaded server handling N concurrent client tasks
+// via a dynamic Vec<Task__handle> with round-robin polling
+// and epoll multiplex. The load-bearing language piece is
+// `mut ref pool[i]` — the new RefMutIndex form added 2026-06-08
+// to support `__poll_X(mut ref pool[i])` over a `Vec<Task__X>`.
+//
+// Before this commit: `mut ref pool[i]` was rejected with
+// "can only borrow a named variable or a struct field".
+// Concurrent N-task scheduling had to use named-slot patterns
+// (`struct Pool { t0: Task, t1: Task, ... }`) which scaled to
+// fixed N only.
+//
+// build & run:
+//   vanic run examples/language/english/echo_pool.vani                # LLVM
+//   vanic run examples/language/english/echo_pool.vani --backend=c    # C
+
+intent "A4.3 echo_pool — N concurrent v3.1 Tasks on one reactor";
+
+async fn handle(fd: i64) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "server bound (port > 0):", port > 0;
+
+  // Three peers, staggered connect times so the scheduler
+  // exercises the epoll-wait path between polls.
+  task peer1 {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ab");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+  task peer2 {
+    let _ = sleep_ms(15);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "cde");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+  task peer3 {
+    let _ = sleep_ms(20);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "fghi");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  // Pool of tasks. `alive` parallels pool, marking which
+  // slots still have a Pending task (vs ones that already
+  // completed and shouldn't be polled again).
+  let pool: Vec<Task__handle> = vec();
+  let alive: Vec<bool> = vec(true, true, true);
+
+  let i: i64 = 0;
+  while i < 3 {
+    let c: i64 = tcp_accept(server);
+    let _ = tcp_set_nonblocking(c);
+    let _ = epoll_add_read(ep, c);
+    let t: Task__handle = handle(c);
+    let _ = push(mut ref pool, t);
+    i = i + 1;
+  }
+
+  // Round-robin scheduler: walk slot-by-slot, polling each
+  // live task. Tasks return -2 (Pending) when their fd has
+  // no data ready yet; the scheduler skips them and moves on.
+  // After a full pass through the pool, sleep on epoll so the
+  // kernel can wake us when ANY fd becomes ready. Loop until
+  // all slots transition out of Pending.
+  let done: i64 = 0;
+  let total: i64 = 0;
+  let j: i64 = 0;
+  while done < 3 {
+    if alive[j] {
+      let r: i64 = __poll_handle(mut ref pool[j]);
+      if r != 0 - 2 {
+        if r > 0 { total = total + r; }
+        alive[j] = false;
+        done = done + 1;
+      }
+    }
+    j = j + 1;
+    if j >= 3 {
+      j = 0;
+      // Full pass complete — wait for any registered fd to
+      // become ready (or timeout). The kernel multiplexes
+      // readiness across all three peer sockets; one
+      // epoll_wait_one wakeup may correspond to any peer.
+      let _ = epoll_wait_one(ep, 1000);
+    }
+  }
+  // peer1 sends 2 bytes, peer2 sends 3, peer3 sends 4 — total 9.
+  assert total == 9;
+  print "total bytes received across pool:", total;
+
+  join peer1;
+  join peer2;
+  join peer3;
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

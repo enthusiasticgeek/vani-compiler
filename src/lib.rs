@@ -29186,6 +29186,52 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn mut_ref_vec_index_compiles_and_types() {
+        // A4.3 (2026-06-08): `mut ref vec[i]` is now accepted.
+        // Result type is `RefMut(element_ty)`; both backends
+        // lower it to a pointer into the Vec's data buffer.
+        // This unlocks `__poll_X(mut ref pool[i])` over a
+        // `Vec<Task__X>` — the load-bearing multi-task pattern.
+        let source = r#"
+            fn modify(slot: mut ref i64) -> i64 {
+              return 0;
+            }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let _ = modify(mut ref xs[1]);
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("mut ref vec[i] compiles");
+        crate::compile_to_c(source).expect("C backend accepts mut ref vec[i]");
+        crate::compile_to_llvm(source).expect("LLVM backend accepts mut ref vec[i]");
+    }
+
+    #[test]
+    fn mut_ref_vec_index_rejects_non_vec_source() {
+        // The new arm requires the indexed binding to be a
+        // Vec<T>. Indexing a non-Vec via `mut ref` surfaces a
+        // helpful diagnostic.
+        let source = r#"
+            fn modify(slot: mut ref i64) -> i64 {
+              return 0;
+            }
+            fn main() -> i64 {
+              let n: i64 = 42;
+              let _ = modify(mut ref n[0]);
+              return 0;
+            }
+        "#;
+        let err = crate::compile(source).expect_err("non-Vec source must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("Vec") || combined.contains("vec"),
+            "expected Vec-required diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
     fn box_value_dyn_sugar_requires_iface_impl() {
         // The elaboration only fires when the concrete type
         // already `implement`s the iface; missing-impl case

@@ -12679,7 +12679,7 @@ fn check_expr(
         }
         ExprKind::Len { array } => check_len(array, env, signatures, expr.span, diagnostics),
         ExprKind::Ref { inner } => check_ref(inner, env, expr.span, diagnostics),
-        ExprKind::RefMut { inner } => check_ref_mut(inner, env, expr.span, diagnostics),
+        ExprKind::RefMut { inner } => check_ref_mut(inner, env, signatures, expr.span, diagnostics),
         ExprKind::Tuple(elements) => {
             // v1 tuples: 2..=4 elements, Copy-only, no nested
             // affine resources. Recurse to type-check each
@@ -13862,10 +13862,79 @@ fn check_expr(
 
 fn check_ref_mut(
     inner: &Expr,
-    env: &Env,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
+    // A4.3 (2026-06-08): `mut ref vec[i]` — mut-borrow of a
+    // Vec element by index. Restricted to Var-shaped Vec source;
+    // the index sub-expression is type-checked through check_expr
+    // (needs &mut Env for that — historical signature was &Env).
+    if let ExprKind::Index { array, index, .. } = &inner.kind {
+        if let ExprKind::Var(vec_name) = &array.kind {
+            let info = match env.lookup(vec_name) {
+                Some(info) => info.clone(),
+                None => {
+                    diagnostics.push(Diagnostic::new(
+                        array.span,
+                        format!("unknown variable '{}'", vec_name),
+                    ));
+                    return CheckedExpr::fallback_integer(span);
+                }
+            };
+            let element_ty = match &info.ty {
+                Type::Vec(elem) => (**elem).clone(),
+                _ => {
+                    // Not a Vec — fall through to the regular
+                    // Var/FieldAccess error paths below. The
+                    // user probably wanted `mut ref Var` and
+                    // accidentally indexed.
+                    diagnostics.push(Diagnostic::new(
+                        array.span,
+                        format!(
+                            "`mut ref {}[…]` requires '{}' to be a Vec; got {}",
+                            vec_name, vec_name, info.ty
+                        ),
+                    ));
+                    return CheckedExpr::fallback_integer(span);
+                }
+            };
+            if info.moved.is_some() {
+                diagnostics.push(Diagnostic::new(
+                    array.span,
+                    format!(
+                        "cannot mutably borrow element of '{}' after it was moved",
+                        vec_name
+                    ),
+                ));
+            }
+            let checked_idx = check_expr(index, env, signatures, diagnostics);
+            // Index must be an integer. coerce_checked would be
+            // overkill — Vec indexing already requires i64 in
+            // check_index.
+            if !matches!(checked_idx.ty(), Type::I64) {
+                diagnostics.push(Diagnostic::new(
+                    index.span,
+                    format!(
+                        "vec index must be i64, got {}",
+                        checked_idx.ty()
+                    ),
+                ));
+            }
+            let ref_ty = Type::RefMut(Box::new(element_ty.clone()));
+            return CheckedExpr::new(
+                TypedExprKind::RefMutIndex {
+                    vec: vec_name.clone(),
+                    index: Box::new(checked_idx.expr),
+                    element_ty,
+                },
+                ref_ty,
+                None,
+                span,
+            );
+        }
+    }
     // `mut ref t.field` — single-level field-borrow. The base
     // binding must be an owned struct and have a field of the
     // given name. T1.2 phase 2b follow-up.
@@ -27079,6 +27148,7 @@ fn verify_pure_body(
             | TypedExprKind::RefMut { .. }
             | TypedExprKind::RefField { .. }
             | TypedExprKind::RefMutField { .. }
+            | TypedExprKind::RefMutIndex { .. }
             | TypedExprKind::FnRef { .. } => {}
             TypedExprKind::CallIndirect { callee, args } => {
                 // The name-based purity gate above can't see
@@ -28332,6 +28402,18 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
                         span: t.span,
                     }),
                     field: field.clone(),
+                },
+                span: t.span,
+            }),
+        },
+        TypedExprKind::RefMutIndex { vec, index, .. } => ExprKind::RefMut {
+            inner: Box::new(Expr {
+                kind: ExprKind::Index {
+                    array: Box::new(Expr {
+                        kind: ExprKind::Var(vec.clone()),
+                        span: t.span,
+                    }),
+                    index: Box::new(typed_to_expr(index)),
                 },
                 span: t.span,
             }),

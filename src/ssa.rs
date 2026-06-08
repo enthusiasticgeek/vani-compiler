@@ -2303,6 +2303,17 @@ fn lower_expr_to_operand(
                 span: expr.span,
             })
         }
+        TypedExprKind::RefMutIndex { .. } => {
+            // SSA path doesn't lower vec-element mut-borrows
+            // (`mut ref vec[i]`) yet — surface a LowerError so
+            // the tree backend handles the program. A4.3 follow-up.
+            Err(LowerError {
+                message: "SSA lowering of `mut ref vec[i]` is not yet \
+                          implemented; routing to the tree backend"
+                    .to_string(),
+                span: expr.span,
+            })
+        }
         TypedExprKind::FnRef { name, .. } => {
             // Materialize the function pointer as an SSA value
             // of fn-ptr type. Backends consuming SSA emit the
@@ -2404,6 +2415,7 @@ fn expr_kind_name(kind: &TypedExprKind) -> &'static str {
         TypedExprKind::RefMut { .. } => "RefMut",
         TypedExprKind::RefField { .. } => "RefField",
         TypedExprKind::RefMutField { .. } => "RefMutField",
+        TypedExprKind::RefMutIndex { .. } => "RefMutIndex",
         TypedExprKind::FnRef { .. } => "FnRef",
         TypedExprKind::CallIndirect { .. } => "CallIndirect",
         TypedExprKind::Tuple { .. } => "Tuple",
