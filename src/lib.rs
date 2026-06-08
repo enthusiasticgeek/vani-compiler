@@ -21290,6 +21290,105 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn v31_caveat2_bool_local_across_suspend_compiles() {
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let b: bool = true;
+              let n: i64 = io_recv_async(fd, 64);
+              if b { return n + 1; }
+              return n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("bool across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_f64_local_across_suspend_compiles() {
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let x: f64 = 3.14;
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("f64 across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_unit_enum_local_across_suspend_compiles() {
+        let source = r#"
+            enum Color { Red, Green, Blue }
+            async fn p(fd: i64) -> i64 {
+              let c: Color = Color.Red;
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("unit enum across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_payloaded_enum_local_across_suspend_compiles() {
+        let source = r#"
+            enum Opt { Some(i64), None }
+            async fn p(fd: i64) -> i64 {
+              let o: Opt = Opt.Some(42);
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("payloaded enum across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_array_local_across_suspend_compiles() {
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let xs: [i64; 4] = [10, 20, 30, 40];
+              let n: i64 = io_recv_async(fd, 64);
+              return n + xs[0];
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("[i64; 4] across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_nested_vec_local_across_suspend_compiles() {
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let xs: Vec<Vec<i64>> = vec(vec(1, 2), vec(3, 4));
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("Vec<Vec<i64>> across suspend compiles");
+    }
+
+    #[test]
+    fn v31_caveat2_struct_with_owned_field_across_suspend_compiles() {
+        // Struct whose field is OwnedStr — the v31_default_init
+        // fix for OwnedStr propagates recursively through the
+        // struct field-default. Verifies the fix didn't only
+        // patch the direct-OwnedStr case.
+        let source = r#"
+            struct Tag { name: OwnedStr, n: i64 }
+            async fn p(fd: i64) -> i64 {
+              let t: Tag = Tag { name: "x" + "y", n: 7 };
+              let n: i64 = io_recv_async(fd, 64);
+              return n + t.n;
+            }
+            fn main() -> i64 { let _ = p; return 0; }
+        "#;
+        crate::compile(source).expect("struct-with-OwnedStr across suspend compiles");
+    }
+
+    #[test]
     fn v31_caveat2_multi_suspend_with_affine_local_drops_correctly() {
         // Two suspend points with an OwnedStr declared between:
         //   recv → owned_str = ... → send → return
