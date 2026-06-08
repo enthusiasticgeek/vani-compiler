@@ -1,0 +1,43 @@
+// श्री।
+// vani-lang: sanskrit
+//
+// build & run:
+//   vanic run examples/language/sanskrit/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/sanskrit/async_cancel_auto.vani --backend=c    # C
+//
+// Polish-arc Sanskrit demo of the async/await dialect lift
+// (2026-06-08). The `async` keyword spells as `अतुल्यकालिक`
+// (atulyakālika, "non-synchronous") and `await(…)` spells as
+// `प्रतीक्षा(…)` (pratīkṣā, "wait/await"). The full v3.1
+// CancelToken auto-plumbing surface (A4.4) is documented in
+// examples/language/english/async_cancel_auto.vani — its full
+// translation would also require Sanskrit spellings of `task`,
+// `join`, `ref`, `mut`, `true`, and the synthesized `Task__<fn>`
+// / `__poll_<fn>` mangled names. Most of those exist
+// (नियोग / संयोजन / दृष्ट्या / परिवर्तनीय / सत्य); the
+// mangled-name pass is queued as a separate Tier 3 follow-up.
+//
+// Caveat: the Sanskrit spellings of `async` / `await` are
+// tatsama coinages (verified for face-validity, not native-
+// speaker active-use validated). Grammar-consultant pass
+// (Tier 3) will revise.
+
+उद्देश्य "Sanskrit async/await dialect lift smoke";
+
+अतुल्यकालिक कार्य delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  पुनरागम v;
+}
+
+कार्य main() -> i64 {
+  // v1 async-await desugar: each `अतुल्यकालिक कार्य` runs
+  // synchronously to completion + returns `Future.Ready(v)`;
+  // `प्रतीक्षा(…)` extracts the payload.
+  माना a: i64 = प्रतीक्षा(delay(5, 42));
+  माना b: i64 = प्रतीक्षा(delay(10, 7));
+
+  सिद्धम् a == 42;
+  सिद्धम् b == 7;
+  लिख "delays:", a, b;
+  पुनरागम 0;
+}

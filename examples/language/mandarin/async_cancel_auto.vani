@@ -1,0 +1,75 @@
+// श्री。
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/mandarin/async_cancel_auto.vani --backend=c    # C
+//
+// A4.4 — CancelToken auto-plumbing demo under the Mandarin
+// pragma. The `async` keyword spells as `异步` (yìbù); `await`
+// spells as `等候` (děnghòu — distinct from Mandarin's `等待`
+// which is `join` / `等待 任务`). The v3.1 transform's
+// synthesized `Task__<fn>` + `__poll_<fn>` mangled-name prefix
+// stays English; the function-name suffix preserves the user's
+// chosen spelling.
+//
+// Caveat: 异步 + 等候 are widely-attested CS spellings (used in
+// Rust / Go / Python translations); 等候 chosen for await
+// because `等待` is already bound to `join` in this dialect.
+// Grammar-consultant pass (Tier 3) will verify against
+// active-use idiom.
+
+目的 "Mandarin A4.4 — CancelToken auto-plumbing";
+
+异步 函数 fetch_auto(fd: i64, token: 引用 CancelToken) -> i64 {
+  让 n: i64 = io_recv_async(fd, 64);
+  返回 n;
+}
+
+函数 drive(ep: i64, t: 可变 引用 Task__fetch_auto) -> i64 {
+  当 真 {
+    让 r: i64 = __poll_fetch_auto(t);
+    如果 r != 0 - 2 { 返回 r; }
+    让 _: i64 = epoll_wait_one(ep, 100);
+  }
+  返回 0;
+}
+
+函数 main() -> i64 {
+  让 ep: i64 = epoll_new();
+  让 server: i64 = tcp_listen(0);
+  让 port: i64 = tcp_socket_port(server);
+  打印 "port > 0:", port > 0;
+
+  任务 peer {
+    让 _: i64 = sleep_ms(10);
+    让 c: i64 = tcp_connect_local(port);
+    让 _: i64 = tcp_send_str(c, "ok");
+    让 _: i64 = sleep_ms(50);
+    让 _: i64 = tcp_close(c);
+  }
+
+  让 cfd: i64 = tcp_accept(server);
+  让 _: i64 = tcp_set_nonblocking(cfd);
+  让 _: i64 = epoll_add_read(ep, cfd);
+
+  // (1) Cancel BEFORE polling — A4.4 auto-injected guard fires.
+  让 tok1: CancelToken = CancelToken { cancelled: 真 };
+  让 t1: Task__fetch_auto = fetch_auto(cfd, 引用 tok1);
+  让 r1: i64 = drive(ep, 可变 引用 t1);
+  断言 r1 == 0 - 1;
+  打印 "auto-cancelled:", r1;
+
+  // (2) Not cancelled — runs to completion, recv returns 2.
+  让 tok2: CancelToken = CancelToken { cancelled: 假 };
+  让 t2: Task__fetch_auto = fetch_auto(cfd, 引用 tok2);
+  让 r2: i64 = drive(ep, 可变 引用 t2);
+  断言 r2 == 2;
+  打印 "ran to completion:", r2;
+
+  等待 peer;
+  让 _: i64 = tcp_close(cfd);
+  让 _: i64 = tcp_close(server);
+  让 _: i64 = epoll_close(ep);
+  返回 0;
+}

@@ -3873,7 +3873,7 @@ impl Parser {
                 // Future<i64> directly. For other scalar T, the
                 // user writes `await(expr) as T`. For non-scalar
                 // T, manually destructure with match.
-                if name == "await" && args.len() == 1 {
+                if is_await_ident(&name) && args.len() == 1 {
                     let inner = args.into_iter().next().unwrap();
                     expr = synthesize_await_desugar(inner, span);
                 } else {
@@ -4840,15 +4840,28 @@ impl Parser {
     }
 
     /// Arc 8 step 8b — peek for the `async` contextual keyword.
-    /// True iff current token is `Ident("async")` AND the next
-    /// is `fn` (with optional `pure` between) so that bare
-    /// identifiers named `async` in expression position keep
-    /// working.
+    /// True iff current token is `Ident("<async-spelling>")` AND
+    /// the next is `fn` (with optional `pure` between). The
+    /// identifier shape (not a real `TokenKind::Async`) preserves
+    /// the existing carve-out: bare identifiers named `async`
+    /// in expression position keep working.
+    ///
+    /// Per-dialect spellings shipped 2026-06-08 (polish queue):
+    ///   English   — `async`
+    ///   Sanskrit / Hindi / Marathi — `अतुल्यकालिक` (atulyakālika,
+    ///                                "non-synchronous")
+    ///   Mandarin  — `异步` (yìbù)
+    ///   Japanese  — `非同期` (hidouki)
+    ///
+    /// Caveat: the non-English spellings are tatsama / technical-
+    /// coinage attestations, not native-speaker validated.
+    /// Grammar-consultant review (Tier 3) will revise these if
+    /// the canonical form differs in active CS usage.
     fn check_async_prefix(&self) -> bool {
         let TokenKind::Ident(name) = &self.current().kind else {
             return false;
         };
-        if name != "async" {
+        if !is_async_ident(name) {
             return false;
         }
         // Peek past the `async` token. Allow `async fn` and
@@ -4898,6 +4911,33 @@ fn ident_text(token: Token) -> String {
 /// works directly for `Future<i64>`; the user explicitly casts
 /// (`await(future_f64) as f64` would type-check via the
 /// surrounding context's coercion). Non-scalar T should match
+/// Polish (2026-06-08) — async/await dialect lift. Recognize
+/// the per-dialect spellings of `async` (as a contextual
+/// fn-prefix) and `await` (as a function-call-style operator).
+/// Each predicate returns true when the identifier text matches
+/// the English form OR one of the registered dialect aliases.
+///
+/// Spellings: English `async` + Sanskrit-rooted Indo-Aryan
+/// `अतुल्यकालिक` (atulyakālika) + Mandarin `异步` (yìbù) +
+/// Japanese `非同期` (hidouki). For `await`: English + Indo-
+/// Aryan `प्रतीक्षा` (pratīkṣā) + Mandarin `等候` (děnghòu —
+/// distinct from `等待` which is Mandarin's `join`) + Japanese
+/// `待機` (taiki). Grammar consultant pass (Tier 3) will
+/// revise these against native-speaker active-use spellings.
+fn is_async_ident(name: &str) -> bool {
+    matches!(
+        name,
+        "async" | "अतुल्यकालिक" | "异步" | "非同期"
+    )
+}
+
+fn is_await_ident(name: &str) -> bool {
+    matches!(
+        name,
+        "await" | "प्रतीक्षा" | "等候" | "待機"
+    )
+}
+
 /// manually until the state-machine codegen (Arc 8 step 8c)
 /// lands.
 fn synthesize_await_desugar(inner: Expr, span: Span) -> Expr {

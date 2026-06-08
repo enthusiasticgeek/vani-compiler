@@ -974,6 +974,13 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // wouldn't read cleanly.
         "../sanskrit/try_question_op.vani",
         "../sanskrit/box_recursive_drop.vani",
+        // Polish (2026-06-08): async/await dialect lift — the
+        // `async` + `await` contextual identifiers now accept
+        // per-dialect spellings (Sanskrit: अतुल्यकालिक /
+        // प्रतीक्षा, Mandarin: 异步 / 等候). Sanskrit ships a
+        // simplified smoke; Mandarin ships the full A4.4 surface.
+        "../sanskrit/async_cancel_auto.vani",
+        "../mandarin/async_cancel_auto.vani",
         // Phase 10.2 (2026-06-08): Mandarin Chinese basics —
         // 62nd dialect. Shares Script::Japanese for the purity
         // gate; pure-Han keyword table disambiguates from
