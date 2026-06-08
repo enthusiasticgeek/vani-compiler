@@ -28114,6 +28114,86 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn spanish_pure_ascii_keywords_compile_under_pragma() {
+        // Phase pragma threading (2026-06-08): pure-ASCII Spanish
+        // keywords (funcion, sea, si, mientras, regresar,
+        // verdadero, falso, imprimir, afirmar, demostrar) now
+        // tokenize as their TokenKind equivalents when the file
+        // declares `// vani-lang: spanish`. Outside the pragma
+        // they stay as plain identifiers so English code isn't
+        // broken.
+        let source = "// vani-lang: spanish\n\
+                      intencion \"pure-ASCII Spanish demo\";\n\
+                      funcion add(a: i64, b: i64) -> i64 {\n  \
+                        regresar a + b;\n\
+                      }\n\
+                      funcion main() -> i64 {\n  \
+                        sea x: i64 = add(20, 22);\n  \
+                        afirmar x == 42;\n  \
+                        demostrar 2 + 2 == 4;\n  \
+                        imprimir x;\n  \
+                        regresar 0;\n\
+                      }\n";
+        crate::compile(source).expect("pure-ASCII Spanish compiles under pragma");
+    }
+
+    #[test]
+    fn french_pure_ascii_keywords_compile_under_pragma() {
+        let source = "// vani-lang: french\n\
+                      but \"pure-ASCII French demo\";\n\
+                      fonction add(a: i64, b: i64) -> i64 {\n  \
+                        retourner a + b;\n\
+                      }\n\
+                      fonction main() -> i64 {\n  \
+                        soit x: i64 = add(20, 22);\n  \
+                        affirmer x == 42;\n  \
+                        prouver 2 + 2 == 4;\n  \
+                        imprimer x;\n  \
+                        retourner 0;\n\
+                      }\n";
+        crate::compile(source).expect("pure-ASCII French compiles under pragma");
+    }
+
+    #[test]
+    fn german_pure_ascii_keywords_compile_under_pragma() {
+        let source = "// vani-lang: german\n\
+                      absicht \"pure-ASCII German demo\";\n\
+                      funktion add(a: i64, b: i64) -> i64 {\n  \
+                        zurueck a + b;\n\
+                      }\n\
+                      funktion main() -> i64 {\n  \
+                        sei x: i64 = add(20, 22);\n  \
+                        behaupten x == 42;\n  \
+                        beweisen 2 + 2 == 4;\n  \
+                        drucken x;\n  \
+                        zurueck 0;\n\
+                      }\n";
+        crate::compile(source).expect("pure-ASCII German compiles under pragma");
+    }
+
+    #[test]
+    fn pragma_threading_protects_english_files_from_dialect_keyword_collisions() {
+        // Critical safety property of pragma threading: a file
+        // WITHOUT a Spanish/French/German pragma must still
+        // accept `si`, `funcion`, `wahr`, etc. as plain
+        // identifiers — these are common variable names. The
+        // dialect-specific keyword lookup is gated on the
+        // pragma so it never fires in English code.
+        let source = r#"
+            fn main() -> i64 {
+              let si: i64 = 1;        // Spanish "if" as variable
+              let para: i64 = 2;      // Spanish "for" as variable
+              let funcion: i64 = 3;   // Spanish "function" as variable
+              let wahr: i64 = 4;      // German "true" as variable
+              let fonction: i64 = 5;  // French "function" as variable
+              let pour: i64 = 6;      // French "for" as variable
+              return si + para + funcion + wahr + fonction + pour;
+            }
+        "#;
+        crate::compile(source).expect("pragma-less English file treats dialect words as identifiers");
+    }
+
+    #[test]
     fn spanish_latin_with_accents_pragma_compiles_and_runs() {
         // Phase 8b.1 (2026-06-07): first Latin-script Tier II
         // dialect. v1 ships non-ASCII Spanish keywords only

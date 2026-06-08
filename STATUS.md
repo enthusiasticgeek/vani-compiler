@@ -10,6 +10,142 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 — Pragma threading: pure-ASCII keywords for Spanish / French / German
+
+The architectural enabler queued in [TODO.md §*Dedicated-
+session lifts*](TODO.md) lands. The `Lexer` now caches the
+file's `// vani-lang:` pragma at construction time and uses it
+to gate per-dialect ASCII keyword tables — so words like
+Spanish `si`/`para`/`verdadero`, French `fonction`/`pour`/`vrai`,
+and German `wenn`/`wahr`/`funktion` tokenize as keywords ONLY
+inside their pragma'd files, never colliding with English
+identifiers in pragma-less code.
+
+```rust
+// vani-lang: spanish
+intencion "pure-ASCII Spanish demo";
+
+funcion add(a: i64, b: i64) -> i64 {
+  regresar a + b;
+}
+
+funcion main() -> i64 {
+  sea x: i64 = add(20, 22);
+  afirmar x == 42;
+  demostrar 2 + 2 == 4;
+  imprimir x;
+  regresar 0;
+}
+```
+
+```rust
+// vani-lang: french
+but "pure-ASCII French demo";
+
+fonction add(a: i64, b: i64) -> i64 {
+  retourner a + b;
+}
+
+fonction main() -> i64 {
+  soit x: i64 = add(20, 22);
+  affirmer x == 42;
+  prouver 2 + 2 == 4;
+  imprimer x;
+  retourner 0;
+}
+```
+
+```rust
+// vani-lang: german
+absicht "pure-ASCII German demo";
+
+funktion add(a: i64, b: i64) -> i64 {
+  zurueck a + b;
+}
+
+funktion main() -> i64 {
+  sei x: i64 = add(20, 22);
+  behaupten x == 42;
+  beweisen 2 + 2 == 4;
+  drucken x;
+  zurueck 0;
+}
+```
+
+All three compile + run end-to-end on the C backend (and LLVM)
+→ output `42`.
+
+**Architectural surface**:
+- `Lexer` struct gains a `pragma: Option<DialectLang>` field,
+  populated in `Lexer::new()` by reusing the existing
+  `detect_language_pragma(source)` scan. The pragma is
+  visible to every per-token branch (no need to re-scan or
+  thread parameters through `lex_ident`).
+- `lex_ident`'s fallback arm (text that doesn't match the
+  English keyword table and contains no non-ASCII bytes) now
+  consults a per-dialect ASCII lookup keyed off the pragma:
+  - `Some(DialectLang::Spanish)` → `spanish_ascii_keyword`
+  - `Some(DialectLang::French)` → `french_ascii_keyword`
+  - `Some(DialectLang::German)` → `german_ascii_keyword`
+  - Any other pragma (or none) → fall through to `Ident`.
+- Three new keyword tables ~35-45 entries each, covering every
+  structure keyword in natural pure-ASCII forms:
+  - **Spanish** — `funcion`, `sea`, `estructura`, `enumeracion`,
+    `regresar`/`retornar`/`volver`, `si`, `sino`, `mientras`,
+    `para`, `en`, `desde`, `hasta`, `romper`, `continuar`,
+    `entonces`, `ver`, `mutable`, `coincidir`, `afirmar`,
+    `demostrar`, `requiere`, `garantiza`, `verdadero`, `falso`,
+    `imprimir`, `escribir`, `puro`, `paralelo`, `interfaz`,
+    `implementar`, `metodos`, `donde`, `es`, `intentar`,
+    `tarea`, `unir`, `inseguro`, `region`, `intencion`, `tipo`,
+    `externo`, `invariante`, plus sin-tilde alternates for
+    `publico`/`modulo`.
+  - **French** — `fonction`, `soit`, `structure`, `constante`,
+    `public`, `module`, `utiliser`, `comme`, `retourner`/`retourne`,
+    `si`, `sinon`, `tandis`, `pour`, `dans`, `depuis`, `vers`,
+    `interrompre`, `continuer`, `alors`, `voir`, `muable`,
+    `correspondre`, `affirmer`, `prouver`, `exige`, `garantit`,
+    `vrai`, `faux`, `imprimer`, `afficher`, `pur`, `interface`,
+    `implementer`, `methodes`, `ou`, `est`, `essayer`, `tache`,
+    `joindre`, `dangereux`, `but`, `objectif`, `type`, `externe`,
+    `invariant`.
+  - **German** — `funktion`, `sei`, `struktur`, `konstante`,
+    `modul`, `verwenden`, `als`, `zurueck`, `wenn`, `sonst`,
+    `solange`, `jede`, `in`, `von`, `bis`, `brechen`, `weiter`,
+    `dann`, `sehen`, `wandelbar`, `passend`, `behaupten`,
+    `beweisen`, `benoetigt`, `garantiert`, `wahr`, `falsch`,
+    `drucken`, `schreiben`, `rein`, `parallel`, `schnittstelle`,
+    `implementieren`, `methoden`, `wo`, `ist`, `versuchen`,
+    `aufgabe`, `verbinden`, `unsicher`, `absicht`, `typ`,
+    `extern`, `unveraenderlich`.
+
+**Critical safety property**: an English-pragma'd file (or one
+without any pragma) MUST still accept `si`, `para`, `funcion`,
+`wahr`, `fonction`, `pour`, etc. as plain identifiers since
+these are common variable/parameter/struct-field names. The
+gate ensures dialect keywords NEVER fire outside their declared
+pragma. Pinned by
+`pragma_threading_protects_english_files_from_dialect_keyword_collisions`.
+
+**4 new regression tests** in `src/lib.rs`:
+- `spanish_pure_ascii_keywords_compile_under_pragma`
+- `french_pure_ascii_keywords_compile_under_pragma`
+- `german_pure_ascii_keywords_compile_under_pragma`
+- `pragma_threading_protects_english_files_from_dialect_keyword_collisions`
+  (the safety property — the most important one).
+
+**Unblocks**: the Phase 13 long-tail "basic Latin alphabet"
+languages (Indonesian, Malay, Swahili, Filipino, Dutch, Hausa)
+which have no diacritics to anchor on. Each becomes a ~2-3h
+ship now that the pragma-gate exists. The existing
+Latin-with-accents dialects (Spanish, French, German) now have
+a full native-reading surface — every keyword has a natural
+pure-ASCII or non-ASCII form in every language, regardless of
+whether the user types accents.
+
+Lib ledger: **1958 lib + 54 parity** green (1954→1958 = 4 new
+pragma-threading tests). All 186 example files compile.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 13.1 Korean (first Hangul-script dialect)
 
 **Korean (한국어)** ships as vāṇी's first Hangul-script dialect

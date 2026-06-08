@@ -1056,6 +1056,222 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase pragma-threading (2026-06-08): pure-ASCII Spanish
+/// keyword table. Only consulted when the file declares
+/// `// vani-lang: spanish`. The non-ASCII Spanish keywords
+/// (función, módulo, público, intención, …) live in
+/// `spanish_keyword` and fire regardless of pragma since they
+/// can't collide with English identifiers; this table covers
+/// the natural pure-ASCII forms (si, para, sea, regresar, etc.)
+/// that would collide.
+fn spanish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "funcion" => TokenKind::Fn,           // function (sin tilde alt for función)
+        "sea" => TokenKind::Let,              // "let it be"
+        "estructura" => TokenKind::Struct,    // structure
+        "constante" => TokenKind::Const,      // constant
+        "enumeracion" => TokenKind::Enum,     // enumeration (sin tilde alt)
+        // === VISIBILITY / MODULES ===
+        "publico" => TokenKind::Pub,          // public (sin tilde alt)
+        "modulo" => TokenKind::Module,        // module (sin tilde alt)
+        "usar" => TokenKind::Use,             // use
+        "como" => TokenKind::As,              // as
+        // === CONTROL FLOW ===
+        "regresar" => TokenKind::Return,      // return / go back
+        "retornar" => TokenKind::Return,      // return (alt)
+        "volver" => TokenKind::Return,        // return (alt)
+        "si" => TokenKind::If,                // if
+        "sino" => TokenKind::Else,            // else / "if not"
+        "mientras" => TokenKind::While,       // while
+        "para" => TokenKind::For,             // for
+        "en" => TokenKind::In,                // in
+        "desde" => TokenKind::From,           // from
+        "hasta" => TokenKind::To,             // until / to
+        "romper" => TokenKind::Break,         // break
+        "continuar" => TokenKind::Continue,   // continue
+        "entonces" => TokenKind::Then,        // then
+        // === REFS / MUT ===
+        "ver" => TokenKind::Ref,              // see / reference
+        "mutable" => TokenKind::Mut,          // mutable
+        // === MATCH ===
+        "coincidir" => TokenKind::Match,      // match / coincide
+        // === VERIFICATION ===
+        "afirmar" => TokenKind::Assert,       // assert / affirm
+        "demostrar" => TokenKind::Prove,      // prove / demonstrate
+        "requiere" => TokenKind::Requires,    // requires
+        "garantiza" => TokenKind::Ensures,    // guarantees
+        // === BOOL / PRINT ===
+        "verdadero" => TokenKind::True,       // true
+        "falso" => TokenKind::False,          // false
+        "imprimir" => TokenKind::Print,       // print
+        "escribir" => TokenKind::Print,       // write (alt)
+        // === PURITY / PARALLEL ===
+        "puro" => TokenKind::Pure,            // pure
+        "paralelo" => TokenKind::Parallel,    // parallel
+        // === INTERFACES / METHODS ===
+        "interfaz" => TokenKind::Interface,   // interface
+        "implementar" => TokenKind::Implement, // implement
+        "metodos" => TokenKind::Methods,      // methods (sin tilde alt)
+        // === BOUNDS ===
+        "donde" => TokenKind::Where,          // where (relative — no accent)
+        "es" => TokenKind::Is,                // is
+        // === CONCURRENCY ===
+        "intentar" => TokenKind::Try,         // try
+        "tarea" => TokenKind::Task,           // task
+        "unir" => TokenKind::Join,            // join / unite
+        // === EMBEDDED ===
+        "inseguro" => TokenKind::Unsafe,      // unsafe
+        "region" => TokenKind::RegionKw,      // region (sin tilde alt)
+        // === SOV-S7 PARITY ===
+        "intencion" => TokenKind::Intent,     // intent (sin tilde alt)
+        "tipo" => TokenKind::Type,            // type
+        "externo" => TokenKind::Extern,       // external
+        "invariante" => TokenKind::Invariant, // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase pragma-threading (2026-06-08): pure-ASCII French
+/// keyword table. Same gating as Spanish — only consulted under
+/// `// vani-lang: french`.
+fn french_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "fonction" => TokenKind::Fn,          // function
+        "soit" => TokenKind::Let,             // "let"
+        "structure" => TokenKind::Struct,     // structure
+        "constante" => TokenKind::Const,      // constant
+        // === VISIBILITY / MODULES ===
+        "public" => TokenKind::Pub,           // public
+        "module" => TokenKind::Module,        // module
+        "utiliser" => TokenKind::Use,         // use
+        "comme" => TokenKind::As,             // as
+        // === CONTROL FLOW ===
+        "retourner" => TokenKind::Return,     // return
+        "retourne" => TokenKind::Return,      // return! (imperative)
+        "si" => TokenKind::If,                // if
+        "sinon" => TokenKind::Else,           // else
+        "tandis" => TokenKind::While,         // while
+        "pour" => TokenKind::For,             // for
+        "dans" => TokenKind::In,              // in
+        "depuis" => TokenKind::From,          // from
+        "vers" => TokenKind::To,              // toward / to
+        "interrompre" => TokenKind::Break,    // break
+        "continuer" => TokenKind::Continue,   // continue
+        "alors" => TokenKind::Then,           // then
+        // === REFS / MUT ===
+        "voir" => TokenKind::Ref,             // see
+        "muable" => TokenKind::Mut,           // mutable / changeable
+        // === MATCH ===
+        "correspondre" => TokenKind::Match,   // match / correspond
+        // === VERIFICATION ===
+        "affirmer" => TokenKind::Assert,      // assert
+        "prouver" => TokenKind::Prove,        // prove
+        "exige" => TokenKind::Requires,       // requires
+        "garantit" => TokenKind::Ensures,     // guarantees
+        // === BOOL / PRINT ===
+        "vrai" => TokenKind::True,            // true
+        "faux" => TokenKind::False,           // false
+        "imprimer" => TokenKind::Print,       // print
+        "afficher" => TokenKind::Print,       // display (alt)
+        // === PURITY / PARALLEL ===
+        "pur" => TokenKind::Pure,             // pure
+        // === INTERFACES / METHODS ===
+        "interface" => TokenKind::Interface,  // interface
+        "implementer" => TokenKind::Implement, // implement (no accent alt)
+        "methodes" => TokenKind::Methods,     // methods (no accent alt)
+        // === BOUNDS ===
+        "ou" => TokenKind::Where,             // where (no accent — distinct from "ou" or)
+                                              // careful: `ou` also means "or"
+                                              // but vāṇी uses `||` so safe
+        "est" => TokenKind::Is,               // is
+        // === CONCURRENCY ===
+        "essayer" => TokenKind::Try,          // try
+        "tache" => TokenKind::Task,           // task (no accent alt)
+        "joindre" => TokenKind::Join,         // join
+        // === EMBEDDED ===
+        "dangereux" => TokenKind::Unsafe,     // dangerous
+        // === SOV-S7 PARITY ===
+        "but" => TokenKind::Intent,           // goal / intent
+        "objectif" => TokenKind::Intent,      // objective (alt)
+        "type" => TokenKind::Type,            // type
+        "externe" => TokenKind::Extern,       // external
+        "invariant" => TokenKind::Invariant,  // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase pragma-threading (2026-06-08): pure-ASCII German
+/// keyword table. Same gating — only under `// vani-lang: german`.
+fn german_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "funktion" => TokenKind::Fn,          // function
+        "sei" => TokenKind::Let,              // "let" / "be"
+        "struktur" => TokenKind::Struct,      // structure
+        "konstante" => TokenKind::Const,      // constant
+        // === VISIBILITY / MODULES ===
+        "modul" => TokenKind::Module,         // module
+        "verwenden" => TokenKind::Use,        // use
+        "als" => TokenKind::As,               // as
+        // === CONTROL FLOW ===
+        "zurueck" => TokenKind::Return,       // return (no umlaut alt for `zurück`)
+        "wenn" => TokenKind::If,              // if
+        "sonst" => TokenKind::Else,           // else / otherwise
+        "solange" => TokenKind::While,        // as long as / while
+        "jede" => TokenKind::For,             // every / for
+        "in" => TokenKind::In,                // in (same as English; harmless overlap
+                                              // since "in" is already an English
+                                              // keyword)
+        "von" => TokenKind::From,             // from
+        "bis" => TokenKind::To,               // to / until
+        "brechen" => TokenKind::Break,        // break
+        "weiter" => TokenKind::Continue,      // continue
+        "dann" => TokenKind::Then,            // then
+        // === REFS / MUT ===
+        "sehen" => TokenKind::Ref,            // see
+        "wandelbar" => TokenKind::Mut,        // changeable / mutable
+        // === MATCH ===
+        "passend" => TokenKind::Match,        // matching
+        // === VERIFICATION ===
+        "behaupten" => TokenKind::Assert,     // assert / claim
+        "beweisen" => TokenKind::Prove,       // prove
+        "benoetigt" => TokenKind::Requires,   // requires (no umlaut alt)
+        "garantiert" => TokenKind::Ensures,   // guarantees
+        // === BOOL / PRINT ===
+        "wahr" => TokenKind::True,            // true
+        "falsch" => TokenKind::False,         // false
+        "drucken" => TokenKind::Print,        // print
+        "schreiben" => TokenKind::Print,      // write (alt)
+        // === PURITY / PARALLEL ===
+        "rein" => TokenKind::Pure,            // pure
+        "parallel" => TokenKind::Parallel,    // parallel (loanword)
+        // === INTERFACES / METHODS ===
+        "schnittstelle" => TokenKind::Interface, // interface
+        "implementieren" => TokenKind::Implement, // implement
+        "methoden" => TokenKind::Methods,     // methods
+        // === BOUNDS ===
+        "wo" => TokenKind::Where,             // where
+        "ist" => TokenKind::Is,               // is
+        // === CONCURRENCY ===
+        "versuchen" => TokenKind::Try,        // try
+        "aufgabe" => TokenKind::Task,         // task / assignment
+        "verbinden" => TokenKind::Join,       // join / connect
+        // === EMBEDDED ===
+        "unsicher" => TokenKind::Unsafe,      // unsafe / insecure
+        // === SOV-S7 PARITY ===
+        "absicht" => TokenKind::Intent,       // intent
+        "typ" => TokenKind::Type,             // type
+        "extern" => TokenKind::Extern,        // external (same as English alias!)
+        "unveraenderlich" => TokenKind::Invariant, // invariant (no umlaut alt)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 8b.1 (2026-06-07): Spanish (español) keyword resolution.
 /// First Latin-script Tier II dialect. To avoid breaking existing
 /// English code, v1 only registers Spanish keywords whose natural
@@ -2493,6 +2709,17 @@ struct Lexer<'a> {
     bytes: &'a [u8],
     pos: usize,
     tokens: Vec<Token>,
+    /// Phase: pragma threading (2026-06-08). The pragma is
+    /// scanned once up-front by `detect_language_pragma` and
+    /// cached here so the per-dialect ASCII-keyword lookups
+    /// (Spanish `si`/`para`/`verdadero`, French `fonction`/`pour`,
+    /// German `wenn`/`wahr`) can fire only inside a file that
+    /// declares the matching dialect. Without this gate, those
+    /// words would collide with potential user identifiers in
+    /// English files. None means no pragma (or an unrecognized
+    /// one) — the lexer falls back to the English-only ASCII
+    /// keyword table just like before.
+    pragma: Option<DialectLang>,
 }
 
 impl<'a> Lexer<'a> {
@@ -2502,6 +2729,7 @@ impl<'a> Lexer<'a> {
             bytes: source.as_bytes(),
             pos: 0,
             tokens: Vec::new(),
+            pragma: detect_language_pragma(source),
         }
     }
 
@@ -3007,7 +3235,23 @@ impl<'a> Lexer<'a> {
                 .or_else(|| french_keyword(text))
                 .or_else(|| german_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
-            _ => TokenKind::Ident(text.to_owned()),
+            // Phase pragma threading (2026-06-08): pure-ASCII text
+            // that doesn't match an English keyword routes through
+            // the per-dialect ASCII tables ONLY when the file
+            // declares that dialect's pragma. Otherwise the text
+            // becomes a plain Ident — protects English code from
+            // accidentally matching `si` (Spanish if) / `para`
+            // (Spanish for) / `wahr` (German true) etc. as
+            // keywords.
+            _ => {
+                let pragma_match = match self.pragma {
+                    Some(DialectLang::Spanish) => spanish_ascii_keyword(text),
+                    Some(DialectLang::French) => french_ascii_keyword(text),
+                    Some(DialectLang::German) => german_ascii_keyword(text),
+                    _ => None,
+                };
+                pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))
+            }
         };
 
         self.tokens.push(Token {
