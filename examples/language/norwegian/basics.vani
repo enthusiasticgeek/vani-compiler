@@ -1,0 +1,27 @@
+// श्री।
+// vani-lang: norwegian
+//
+// Phase 13.20: second Nordic dialect. Uses å/æ/ø (Norwegian /
+// Danish core Nordic set, distinct from Swedish's å/ä/ö).
+
+formål "Compute a small score with checked constraints";
+
+funksjon add(a: i64, b: i64) -> i64 {
+  returner a + b;
+}
+
+funksjon bounded_score(base: i64) -> i64
+krever base >= 0;
+{
+  la doubled: i64 = base * 2;
+  påstå doubled >= base;
+  returner add(doubled, 2);
+}
+
+funksjon main() -> i64 {
+  la answer = bounded_score(20);
+  bevis 2 + 2 == 4;
+  påstå answer >= 0;
+  skriv answer;
+  returner 0;
+}

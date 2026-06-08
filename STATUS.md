@@ -10,6 +10,92 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.20 + 13.21 + 13.22 + 13.23: Norwegian + Danish + Armenian + Georgian
+
+Four more dialects: two siblings (Norwegian + Danish — both
+Nordic Latin with å/æ/ø) plus two new Caucasus scripts
+(Armenian + Georgian). Roster grows **45 → 49 dialects across
+19 scripts** (Armenian + Georgian add the 18th + 19th).
+
+### Phase 13.20 — Norwegian (norsk bokmål)
+**Second Nordic.** Uses å/æ/ø (the Norwegian/Danish core,
+distinct from Swedish's å/ä/ö).
+
+```rust
+// vani-lang: norwegian
+funksjon main() -> i64 {
+  la x: i64 = 20 + 22;
+  påstå x == 42;
+  skriv x;
+  returner 0;
+}
+```
+
+### Phase 13.21 — Danish (dansk)
+**Third Nordic.** Shares å/æ/ø with Norwegian; distinct
+keyword choices.
+
+```rust
+// vani-lang: danish
+funktion main() -> i64 {
+  lad x: i64 = 20 + 22;
+  påstå x == 42;
+  udskriv x;
+  returner 0;
+}
+```
+
+### Phase 13.22 — Armenian (Հայերեն)
+**First Caucasus-region script.** New `Script::Armenian`
+(U+0530..058F). ~6M speakers.
+
+```rust
+// vani-lang: armenian
+ֆունկցիա main() -> i64 {
+  թող x: i64 = 20 + 22;
+  հաստատել x == 42;
+  տպել x;
+  վերադարձ 0;
+}
+```
+
+### Phase 13.23 — Georgian (ქართული)
+**Second Caucasus script.** New `Script::Georgian` (Mkhedruli
+U+10A0..10FF + supplement U+2D00..2D2F). ~4M speakers. Modern
+Georgian is unicase (no upper/lower distinction).
+
+```rust
+// vani-lang: georgian
+ფუნქცია main() -> i64 {
+  მიეცი x: i64 = 20 + 22;
+  დაამოწმე x == 42;
+  ბეჭდვა x;
+  დაბრუნება 0;
+}
+```
+
+All four print `42` on both backends.
+
+### Per-dialect summary
+
+| Dialect | Script | Pattern | DiagLang labels |
+|---|---|---|---|
+| Norwegian | Latin (å/æ/ø) | + pragma ASCII | `feil` / `merknad` |
+| Danish | Latin (å/æ/ø) | + pragma ASCII | `fejl` / `note` |
+| Armenian | NEW `Script::Armenian` | unicode-ident | `սխալ` / `նշում` |
+| Georgian | NEW `Script::Georgian` | unicode-ident | `შეცდომა` / `შენიშვნა` |
+
+### 5 new regression tests
+
+- `norwegian_nordic_compiles`
+- `danish_nordic_compiles`
+- `armenian_script_pragma_compiles_and_runs`
+- `georgian_script_pragma_compiles_and_runs`
+- `armenian_georgian_script_purity_rejects_mixed_scripts`
+
+Lib ledger: **1985 lib + 54 parity** green (1980→1985 = 5 new
+regression tests). All 208 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.16 + 13.17 + 13.18 + 13.19: Hungarian + Czech + Swedish + Filipino
 
 Four more Latin-script dialects, four different language

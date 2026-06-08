@@ -1,0 +1,27 @@
+// श्री।
+// vani-lang: danish
+//
+// Phase 13.21: third Nordic dialect. Shares å/æ/ø with
+// Norwegian but distinct keyword choices.
+
+formål "Compute a small score with checked constraints";
+
+funktion add(a: i64, b: i64) -> i64 {
+  returner a + b;
+}
+
+funktion bounded_score(base: i64) -> i64
+kræver base >= 0;
+{
+  lad doubled: i64 = base * 2;
+  påstå doubled >= base;
+  returner add(doubled, 2);
+}
+
+funktion main() -> i64 {
+  lad answer = bounded_score(20);
+  bevis 2 + 2 == 4;
+  påstå answer >= 0;
+  udskriv answer;
+  returner 0;
+}

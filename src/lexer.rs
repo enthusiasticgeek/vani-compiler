@@ -1056,6 +1056,258 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.20 (2026-06-08): Norwegian (norsk bokmål) keyword
+/// resolution. Second Nordic dialect after Swedish; uses å/æ/ø.
+fn norwegian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "være" => TokenKind::Let,              // "be"
+        "påstå" => TokenKind::Assert,          // claim / assert
+        "prøv" => TokenKind::Try,              // try!
+        "formål" => TokenKind::Intent,         // purpose
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.20 (2026-06-08): pure-ASCII Norwegian. Pragma-gated.
+/// Norwegian is mostly pure-ASCII (few keyword glyphs carry the
+/// å/æ/ø marks) so this table holds the bulk of the surface.
+fn norwegian_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funksjon" => TokenKind::Fn,           // function
+        "la" => TokenKind::Let,                // let (short imperative)
+        "struktur" => TokenKind::Struct,       // structure
+        "oppregning" => TokenKind::Enum,       // enumeration
+        "konstant" => TokenKind::Const,        // constant
+        "offentlig" => TokenKind::Pub,         // public
+        "modul" => TokenKind::Module,          // module
+        "bruk" => TokenKind::Use,              // use
+        "som" => TokenKind::As,                // as
+        "returner" => TokenKind::Return,       // return!
+        "tilbake" => TokenKind::Return,        // back (alt)
+        "hvis" => TokenKind::If,               // if
+        "ellers" => TokenKind::Else,           // else
+        "mens" => TokenKind::While,            // while
+        "fra" => TokenKind::From,              // from
+        "til" => TokenKind::To,                // to
+        "bryt" => TokenKind::Break,            // break
+        "fortsett" => TokenKind::Continue,     // continue
+        "da" => TokenKind::Then,               // then
+        "endrelig" => TokenKind::Mut,          // mutable (alt)
+        "foranderlig" => TokenKind::Mut,       // changeable
+        "sammenlign" => TokenKind::Match,      // compare / match
+        "bekreft" => TokenKind::Assert,        // confirm (ASCII alt)
+        "bevis" => TokenKind::Prove,           // prove
+        "krever" => TokenKind::Requires,       // requires
+        "garanterer" => TokenKind::Ensures,    // guarantees
+        "sant" => TokenKind::True,             // true
+        "usant" => TokenKind::False,           // false
+        "skriv" => TokenKind::Print,           // write (shared w/ Swedish ASCII)
+        "ren" => TokenKind::Pure,              // pure
+        "parallell" => TokenKind::Parallel,    // parallel
+        "grensesnitt" => TokenKind::Interface, // interface
+        "implementer" => TokenKind::Implement, // implement
+        "metoder" => TokenKind::Methods,       // methods
+        "hvor" => TokenKind::Where,            // where
+        "er" => TokenKind::Is,                 // is
+        "oppgave" => TokenKind::Task,          // task
+        "forene" => TokenKind::Join,           // join
+        "usikker" => TokenKind::Unsafe,        // unsafe
+        "ekstern" => TokenKind::Extern,        // external
+        "uforanderlig" => TokenKind::Invariant, // invariant
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.21 (2026-06-08): Danish (dansk) keyword resolution.
+/// Third Nordic dialect. Shares å/æ/ø with Norwegian; distinct
+/// keyword choices.
+fn danish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "fortsæt" => TokenKind::Continue,      // continue
+        "så" => TokenKind::Then,               // so / then
+        "påstå" => TokenKind::Assert,          // claim / assert
+        "kræver" => TokenKind::Requires,       // requires
+        "grænseflade" => TokenKind::Interface, // interface
+        "implementér" => TokenKind::Implement, // implement!
+        "prøv" => TokenKind::Try,              // try!
+        "forén" => TokenKind::Join,            // join
+        "område" => TokenKind::RegionKw,       // area / region
+        "formål" => TokenKind::Intent,         // purpose
+        "optælling" => TokenKind::Enum,        // enumeration
+        "mutérbar" => TokenKind::Mut,          // mutable (alt)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.21 (2026-06-08): pure-ASCII Danish. Pragma-gated.
+fn danish_ascii_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "funktion" => TokenKind::Fn,           // function
+        "lad" => TokenKind::Let,               // let
+        "struktur" => TokenKind::Struct,       // structure
+        "konstant" => TokenKind::Const,        // constant
+        "offentlig" => TokenKind::Pub,         // public
+        "modul" => TokenKind::Module,          // module
+        "brug" => TokenKind::Use,              // use
+        "som" => TokenKind::As,                // as
+        "returner" => TokenKind::Return,       // return
+        "vend" => TokenKind::Return,           // turn (alt)
+        "hvis" => TokenKind::If,               // if
+        "ellers" => TokenKind::Else,           // else
+        "mens" => TokenKind::While,            // while
+        "fra" => TokenKind::From,              // from
+        "til" => TokenKind::To,                // to
+        "bryd" => TokenKind::Break,            // break
+        "fortsaet" => TokenKind::Continue,     // continue (no diacritic)
+        "saa" => TokenKind::Then,              // then (no å)
+        "se" => TokenKind::Ref,                // see
+        "foranderlig" => TokenKind::Mut,       // changeable
+        "match" => TokenKind::Match,           // match (loanword)
+        "bekraeft" => TokenKind::Assert,       // confirm (no æ)
+        "paastaa" => TokenKind::Assert,        // (no å alt)
+        "bevis" => TokenKind::Prove,           // prove
+        "kraever" => TokenKind::Requires,      // (no æ)
+        "garanterer" => TokenKind::Ensures,    // guarantees
+        "sandt" => TokenKind::True,            // true
+        "falsk" => TokenKind::False,           // false
+        "udskriv" => TokenKind::Print,         // print out
+        "ren" => TokenKind::Pure,              // pure
+        "parallel" => TokenKind::Parallel,     // parallel
+        "graenseflade" => TokenKind::Interface, // (no æ)
+        "implementer" => TokenKind::Implement, // implement
+        "metoder" => TokenKind::Methods,       // methods
+        "hvor" => TokenKind::Where,            // where
+        "er" => TokenKind::Is,                 // is
+        "proev" => TokenKind::Try,             // (no ø)
+        "opgave" => TokenKind::Task,           // task
+        "foren" => TokenKind::Join,            // join (no é)
+        "usikker" => TokenKind::Unsafe,        // unsafe
+        "omraade" => TokenKind::RegionKw,      // area (no å)
+        "formaal" => TokenKind::Intent,        // purpose (no å)
+        "type" => TokenKind::Type,             // type (loanword)
+        "extern" => TokenKind::Extern,         // external
+        "uforanderlig" => TokenKind::Invariant, // invariant
+        "optaelling" => TokenKind::Enum,       // (no æ)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.22 (2026-06-08): Armenian (Հայերեն) keyword
+/// resolution. First Caucasus-region script. Block
+/// U+0530..058F. SVO grammar.
+fn armenian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ֆունկցիա" => TokenKind::Fn,           // funktsia (function)
+        "թող" => TokenKind::Let,                // togh (let)
+        "կառուցվածք" => TokenKind::Struct,     // karutsvatsk (structure)
+        "թվարկում" => TokenKind::Enum,         // tvarkum (enumeration)
+        "հաստատուն" => TokenKind::Const,       // hastatun (constant)
+        "հանրային" => TokenKind::Pub,          // hanrayin (public)
+        "մոդուլ" => TokenKind::Module,         // modul (module)
+        "օգտագործել" => TokenKind::Use,        // ogtagortsel (use)
+        "որպես" => TokenKind::As,              // vorpes (as)
+        "վերադարձ" => TokenKind::Return,       // veradarcz (return)
+        "եթե" => TokenKind::If,                // yete (if)
+        "այլապես" => TokenKind::Else,          // aylapes (otherwise)
+        "քանի" => TokenKind::While,            // qani (while)
+        "ամեն" => TokenKind::For,              // amen (each / for)
+        "մեջ" => TokenKind::In,                // mech (in)
+        "ից" => TokenKind::From,               // its (from suffix)
+        "մինչև" => TokenKind::To,              // minchev (until)
+        "ընդհատել" => TokenKind::Break,        // yndhatel (interrupt)
+        "շարունակել" => TokenKind::Continue,   // sharunakel (continue)
+        "ապա" => TokenKind::Then,              // apa (then)
+        "տեսնել" => TokenKind::Ref,            // tesnel (see)
+        "փոփոխական" => TokenKind::Mut,         // popoxakan (variable / mutable)
+        "համապատասխանեցնել" => TokenKind::Match, // hamapatasxanetsnel (match)
+        "հաստատել" => TokenKind::Assert,       // hastatel (assert)
+        "ապացուցել" => TokenKind::Prove,       // apatsutsel (prove)
+        "պահանջում" => TokenKind::Requires,    // pahanchum (requires)
+        "երաշխավորում" => TokenKind::Ensures,  // yerashxavorum (guarantees)
+        "ճշմարիտ" => TokenKind::True,          // tcshmarit (true)
+        "կեղծ" => TokenKind::False,            // keltz (false)
+        "տպել" => TokenKind::Print,            // tpel (print)
+        "մաքուր" => TokenKind::Pure,           // mak'ur (pure)
+        "զուգահեռ" => TokenKind::Parallel,     // zugaherr (parallel)
+        "միջերես" => TokenKind::Interface,     // mijeres (interface)
+        "իրականացնել" => TokenKind::Implement, // irakanatsnel (realize / implement)
+        "մեթոդներ" => TokenKind::Methods,      // metodner (methods)
+        "որտեղ" => TokenKind::Where,           // vortegh (where)
+        "է" => TokenKind::Is,                  // e (is)
+        "փորձել" => TokenKind::Try,            // porcel (try)
+        "խնդիր" => TokenKind::Task,            // xndir (task)
+        "միանալ" => TokenKind::Join,           // mianal (join)
+        "անապահով" => TokenKind::Unsafe,       // anapahov (unsafe)
+        "տարածք" => TokenKind::RegionKw,       // taratsk (region)
+        "նպատակ" => TokenKind::Intent,         // npatak (purpose)
+        "տեսակ" => TokenKind::Type,            // tesak (type / kind)
+        "արտաքին" => TokenKind::Extern,        // artak'in (external)
+        "անփոփոխ" => TokenKind::Invariant,     // anpopox (unchanging)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.23 (2026-06-08): Georgian (ქართული) keyword
+/// resolution. Mkhedruli (lowercase modern Georgian). SVO
+/// grammar.
+fn georgian_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        "ფუნქცია" => TokenKind::Fn,            // punkcia (function)
+        "მიეცი" => TokenKind::Let,             // miexi (let / "be given")
+        "სტრუქტურა" => TokenKind::Struct,      // strukturra (structure)
+        "ჩამოთვლა" => TokenKind::Enum,         // chamotvla (listing / enum)
+        "მუდმივი" => TokenKind::Const,         // mudmivi (constant)
+        "საჯარო" => TokenKind::Pub,            // sajaro (public)
+        "მოდული" => TokenKind::Module,         // moduli (module)
+        "გამოყენება" => TokenKind::Use,        // gamokeneba (use)
+        "როგორც" => TokenKind::As,             // rogorts (as)
+        "დაბრუნება" => TokenKind::Return,      // dabruneba (return)
+        "თუ" => TokenKind::If,                 // tu (if)
+        "სხვა" => TokenKind::Else,             // sxva (else / other)
+        "სანამ" => TokenKind::While,           // sanam (while)
+        "თითოეული" => TokenKind::For,          // titoeuli (each)
+        "ში" => TokenKind::In,                 // shi (in)
+        "დან" => TokenKind::From,              // dan (from suffix)
+        "მდე" => TokenKind::To,                // mde (to suffix)
+        "შეჩერება" => TokenKind::Break,        // shechereba (halt)
+        "გაგრძელება" => TokenKind::Continue,   // gagrdzeleba (continue)
+        "მაშინ" => TokenKind::Then,            // mashin (then)
+        "ნახე" => TokenKind::Ref,              // naxe (see!)
+        "ცვალებადი" => TokenKind::Mut,         // tsvaledadi (changeable)
+        "შესაბამისობა" => TokenKind::Match,    // shesabamis oba (correspondence)
+        "დაამოწმე" => TokenKind::Assert,       // daamotsme (verify!)
+        "დაამტკიცე" => TokenKind::Prove,       // daamtkitse (prove!)
+        "მოითხოვს" => TokenKind::Requires,     // moitxovs (requires)
+        "უზრუნველყოფს" => TokenKind::Ensures,  // uzrunvelyofs (ensures)
+        "ჭეშმარიტი" => TokenKind::True,        // tches_mariti (true)
+        "მცდარი" => TokenKind::False,          // mtsdari (false / mistaken)
+        "ბეჭდვა" => TokenKind::Print,          // bechdva (printing)
+        "სუფთა" => TokenKind::Pure,            // sup'ta (pure / clean)
+        "პარალელური" => TokenKind::Parallel,   // paraleluri (parallel)
+        "ინტერფეისი" => TokenKind::Interface,  // interfeisi (interface)
+        "განხორციელება" => TokenKind::Implement, // ganxortsieleba (implementation)
+        "მეთოდები" => TokenKind::Methods,      // metodebi (methods)
+        "სად" => TokenKind::Where,             // sad (where)
+        "არის" => TokenKind::Is,               // aris (is)
+        "სცადე" => TokenKind::Try,             // stsade (try!)
+        "დავალება" => TokenKind::Task,         // davaleba (task / assignment)
+        "შეერთება" => TokenKind::Join,         // sheert'eba (joining)
+        "სახიფათო" => TokenKind::Unsafe,       // saxipato (dangerous)
+        "რეგიონი" => TokenKind::RegionKw,      // regioni (region — loanword)
+        "მიზანი" => TokenKind::Intent,         // mizani (goal)
+        "ტიპი" => TokenKind::Type,             // tipi (type)
+        "გარე" => TokenKind::Extern,           // gare (outer)
+        "უცვლელი" => TokenKind::Invariant,     // utsvleli (unchanging)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.16 (2026-06-08): Hungarian (magyar) keyword
 /// resolution. Uralic family with distinctive double-acute
 /// ő/ű in addition to standard á/é/í/ó/ö/ú/ü.
@@ -3171,6 +3423,8 @@ fn script_label(script: Script) -> &'static str {
         Script::Greek => "Greek",
         Script::Hebrew => "Hebrew",
         Script::Thai => "Thai",
+        Script::Armenian => "Armenian",
+        Script::Georgian => "Georgian",
     }
 }
 
@@ -3504,6 +3758,24 @@ enum DialectLang {
     // Indonesian/Malay sibling pair already shipped). ~45M
     // speakers in the Philippines.
     Filipino,
+    // Phase 13.20 (2026-06-08): Norwegian (norsk bokmål) —
+    // second Nordic dialect after Swedish. Uses å/æ/ø (the
+    // Norwegian/Danish Nordic core; Swedish swaps æ/ø for ä/ö).
+    Norwegian,
+    // Phase 13.21 (2026-06-08): Danish (dansk) — third Nordic
+    // dialect. Shares å/æ/ø with Norwegian; closely related but
+    // distinct keyword choices.
+    Danish,
+    // Phase 13.22 (2026-06-08): Armenian (Հայերեն) — first
+    // Caucasus-region script. Block U+0530..058F. ~6M speakers.
+    // The script is alphabetic with both upper- and lowercase
+    // forms; vāṇी keywords stay lowercase.
+    Armenian,
+    // Phase 13.23 (2026-06-08): Georgian (ქართული) — second
+    // Caucasus-region script. Block U+10A0..10FF (Asomtavruli /
+    // Mkhedruli main script) + U+2D00..2D2F (Nuskhuri). ~4M
+    // speakers. Mkhedruli is the standard modern form.
+    Georgian,
 }
 
 impl DialectLang {
@@ -3555,6 +3827,10 @@ impl DialectLang {
             DialectLang::Czech => "czech",
             DialectLang::Swedish => "swedish",
             DialectLang::Filipino => "filipino",
+            DialectLang::Norwegian => "norwegian",
+            DialectLang::Danish => "danish",
+            DialectLang::Armenian => "armenian",
+            DialectLang::Georgian => "georgian",
         }
     }
 
@@ -3618,6 +3894,10 @@ impl DialectLang {
             DialectLang::Czech => Script::Latin,
             DialectLang::Swedish => Script::Latin,
             DialectLang::Filipino => Script::Latin,
+            DialectLang::Norwegian => Script::Latin,
+            DialectLang::Danish => Script::Latin,
+            DialectLang::Armenian => Script::Armenian,
+            DialectLang::Georgian => Script::Georgian,
         }
     }
 }
@@ -3695,6 +3975,15 @@ enum Script {
     // vāṇी keywords rely on whitespace as separators, which
     // matches how Thai programmers write source files.
     Thai,
+    // Phase 13.22 (2026-06-08): Armenian — block U+0530..058F.
+    // Alphabetic with upper/lowercase forms; the keyword
+    // table uses lowercase Mesropian letters.
+    Armenian,
+    // Phase 13.23 (2026-06-08): Georgian — main block
+    // U+10A0..10FF (Asomtavruli + Mkhedruli) plus U+2D00..2D2F
+    // (Nuskhuri). Modern Georgian uses Mkhedruli (lowercase-
+    // only — no letter case in modern Georgian).
+    Georgian,
 }
 
 impl Script {
@@ -3789,6 +4078,17 @@ impl Script {
             // Phase 13.15 (2026-06-08): Thai script.
             if ('\u{0E00}'..='\u{0E7F}').contains(&c) {
                 return Script::Thai;
+            }
+            // Phase 13.22 (2026-06-08): Armenian.
+            if ('\u{0530}'..='\u{058F}').contains(&c) {
+                return Script::Armenian;
+            }
+            // Phase 13.23 (2026-06-08): Georgian (Mkhedruli +
+            // Asomtavruli main block + Nuskhuri supplement).
+            if ('\u{10A0}'..='\u{10FF}').contains(&c)
+                || ('\u{2D00}'..='\u{2D2F}').contains(&c)
+            {
+                return Script::Georgian;
             }
         }
         Script::Latin
@@ -3934,6 +4234,19 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // Phase 13.19 (2026-06-08): Austronesian basic Latin.
             "filipino" | "tagalog" | "fil" | "tl"
                 => Some(DialectLang::Filipino),
+            // Phase 13.20 (2026-06-08): second Nordic.
+            "norwegian" | "norsk" | "bokmål" | "bokmal" | "no" | "nb"
+                => Some(DialectLang::Norwegian),
+            // Phase 13.21 (2026-06-08): third Nordic.
+            "danish" | "dansk" | "da"
+                => Some(DialectLang::Danish),
+            // Phase 13.22 (2026-06-08): first Caucasus-region
+            // script.
+            "armenian" | "հայերեն" | "hayeren" | "hy"
+                => Some(DialectLang::Armenian),
+            // Phase 13.23 (2026-06-08): second Caucasus script.
+            "georgian" | "ქართული" | "kartuli" | "ka"
+                => Some(DialectLang::Georgian),
             _ => None,
         };
     }
@@ -4766,6 +5079,12 @@ impl<'a> Lexer<'a> {
             .or_else(|| hungarian_keyword(text))
             .or_else(|| czech_keyword(text))
             .or_else(|| swedish_keyword(text))
+            // Phase 13.20/13.21: Norwegian + Danish non-ASCII.
+            .or_else(|| norwegian_keyword(text))
+            .or_else(|| danish_keyword(text))
+            // Phase 13.22/13.23: Armenian + Georgian scripts.
+            .or_else(|| armenian_keyword(text))
+            .or_else(|| georgian_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
@@ -4929,6 +5248,8 @@ impl<'a> Lexer<'a> {
                 .or_else(|| hungarian_keyword(text))
                 .or_else(|| czech_keyword(text))
                 .or_else(|| swedish_keyword(text))
+                .or_else(|| norwegian_keyword(text))
+                .or_else(|| danish_keyword(text))
                 .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             // Phase pragma threading (2026-06-08): pure-ASCII text
             // that doesn't match an English keyword routes through
@@ -4957,6 +5278,8 @@ impl<'a> Lexer<'a> {
                     Some(DialectLang::Czech) => czech_ascii_keyword(text),
                     Some(DialectLang::Swedish) => swedish_ascii_keyword(text),
                     Some(DialectLang::Filipino) => filipino_ascii_keyword(text),
+                    Some(DialectLang::Norwegian) => norwegian_ascii_keyword(text),
+                    Some(DialectLang::Danish) => danish_ascii_keyword(text),
                     _ => None,
                 };
                 pragma_match.unwrap_or_else(|| TokenKind::Ident(text.to_owned()))

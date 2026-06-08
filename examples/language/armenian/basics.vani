@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: armenian
+//
+// Phase 13.22: first Caucasus-region script vāṇी dialect.
+// Armenian (Հայերեն) uses an alphabetic script block
+// U+0530..058F. SVO grammar; keywords stay lowercase.
+
+նպատակ "Compute a small score with checked constraints";
+
+ֆունկցիա add(a: i64, b: i64) -> i64 {
+  վերադարձ a + b;
+}
+
+ֆունկցիա bounded_score(base: i64) -> i64
+պահանջում base >= 0;
+{
+  թող doubled: i64 = base * 2;
+  հաստատել doubled >= base;
+  վերադարձ add(doubled, 2);
+}
+
+ֆունկցիա main() -> i64 {
+  թող answer = bounded_score(20);
+  ապացուցել 2 + 2 == 4;
+  հաստատել answer >= 0;
+  տպել answer;
+  վերադարձ 0;
+}

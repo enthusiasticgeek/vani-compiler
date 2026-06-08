@@ -27953,6 +27953,95 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn norwegian_nordic_compiles() {
+        // Phase 13.20: second Nordic. Uses å/æ/ø.
+        let source = "// vani-lang: norwegian\n\
+                      formål \"basic Norwegian demo\";\n\
+                      funksjon add(a: i64, b: i64) -> i64 {\n  \
+                        returner a + b;\n\
+                      }\n\
+                      funksjon main() -> i64 {\n  \
+                        la x: i64 = add(20, 22);\n  \
+                        påstå x == 42;\n  \
+                        bevis 2 + 2 == 4;\n  \
+                        skriv x;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Norwegian basics compile");
+    }
+
+    #[test]
+    fn danish_nordic_compiles() {
+        // Phase 13.21: third Nordic. Shares å/æ/ø with Norwegian.
+        let source = "// vani-lang: danish\n\
+                      formål \"basic Danish demo\";\n\
+                      funktion add(a: i64, b: i64) -> i64 {\n  \
+                        returner a + b;\n\
+                      }\n\
+                      funktion main() -> i64 {\n  \
+                        lad x: i64 = add(20, 22);\n  \
+                        påstå x == 42;\n  \
+                        bevis 2 + 2 == 4;\n  \
+                        udskriv x;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Danish basics compile");
+    }
+
+    #[test]
+    fn armenian_script_pragma_compiles_and_runs() {
+        // Phase 13.22: first Caucasus-region script. Armenian
+        // block U+0530..058F.
+        let source = "// vani-lang: armenian\n\
+                      նպատակ \"basic Armenian demo\";\n\
+                      ֆունկցիա add(a: i64, b: i64) -> i64 {\n  \
+                        վերադարձ a + b;\n\
+                      }\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        թող x: i64 = add(20, 22);\n  \
+                        հաստատել x == 42;\n  \
+                        ապացուցել 2 + 2 == 4;\n  \
+                        տպել x;\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Armenian basics compile");
+    }
+
+    #[test]
+    fn georgian_script_pragma_compiles_and_runs() {
+        // Phase 13.23: second Caucasus-region script. Georgian
+        // Mkhedruli block U+10A0..10FF.
+        let source = "// vani-lang: georgian\n\
+                      მიზანი \"basic Georgian demo\";\n\
+                      ფუნქცია add(a: i64, b: i64) -> i64 {\n  \
+                        დაბრუნება a + b;\n\
+                      }\n\
+                      ფუნქცია main() -> i64 {\n  \
+                        მიეცი x: i64 = add(20, 22);\n  \
+                        დაამოწმე x == 42;\n  \
+                        დაამტკიცე 2 + 2 == 4;\n  \
+                        ბეჭდვა x;\n  \
+                        დაბრუნება 0;\n\
+                      }\n";
+        crate::compile(source).expect("Georgian basics compile");
+    }
+
+    #[test]
+    fn armenian_georgian_script_purity_rejects_mixed_scripts() {
+        // Armenian and Georgian are distinct scripts — mixing
+        // them in one file must fire the script-purity gate.
+        let source = "// vani-lang: armenian\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        ფუნქცია x(): i64 { return 0; }\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        assert!(
+            crate::compile(source).is_err(),
+            "Armenian pragma + Georgian keyword must be rejected"
+        );
+    }
+
+    #[test]
     fn hungarian_uralic_latin_compiles() {
         // Phase 13.16: Uralic family, first non-Indo-European
         // Latin-script dialect. Double-acute ő/ű + standard

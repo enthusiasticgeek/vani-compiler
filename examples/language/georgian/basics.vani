@@ -1,0 +1,28 @@
+// श्री।
+// vani-lang: georgian
+//
+// Phase 13.23: second Caucasus-region script. Georgian
+// (ქართული) uses Mkhedruli (block U+10A0..10FF + supplements).
+// Modern Georgian is lowercase-only — no letter case.
+
+მიზანი "Compute a small score with checked constraints";
+
+ფუნქცია add(a: i64, b: i64) -> i64 {
+  დაბრუნება a + b;
+}
+
+ფუნქცია bounded_score(base: i64) -> i64
+მოითხოვს base >= 0;
+{
+  მიეცი doubled: i64 = base * 2;
+  დაამოწმე doubled >= base;
+  დაბრუნება add(doubled, 2);
+}
+
+ფუნქცია main() -> i64 {
+  მიეცი answer = bounded_score(20);
+  დაამტკიცე 2 + 2 == 4;
+  დაამოწმე answer >= 0;
+  ბეჭდვა answer;
+  დაბრუნება 0;
+}
