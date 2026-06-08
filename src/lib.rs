@@ -29141,22 +29141,47 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn box_rejects_non_copy_inner_type() {
-        // L2 Phase 1 restriction: only Copy + sized inner types
-        // are supported in v1. Box<Vec<i64>> requires recursive
-        // drop semantics and is queued.
+    fn box_accepts_vec_and_owned_str_with_recursive_drop() {
+        // L2 follow-up (2026-06-08): Box<Vec<T>> and Box<OwnedStr>
+        // are now accepted. The box() builtin marks the source
+        // var as moved (so its own scope-exit Drop is suppressed),
+        // and the scope-exit drop for Box<Vec<T>> / Box<OwnedStr>
+        // chains into the inner type's Drop before freeing the
+        // box's own heap slot. Replaces the prior gating-test.
         let source = r#"
             fn main() -> i64 {
               let xs: Vec<i64> = vec(1, 2, 3);
               let b: Box<Vec<i64>> = box(xs);
+              let s: OwnedStr = "a" + "b";
+              let bs: Box<OwnedStr> = box(s);
               return 0;
             }
         "#;
-        let err = crate::compile(source).expect_err("Box<Vec<i64>> should be rejected in v1");
+        crate::compile(source).expect("Box<Vec<i64>> + Box<OwnedStr> compile after follow-up");
+        crate::compile_to_c(source).expect("C backend accepts Box<Vec<T>> + Box<OwnedStr>");
+        crate::compile_to_llvm(source).expect("LLVM backend accepts Box<Vec<T>> + Box<OwnedStr>");
+    }
+
+    #[test]
+    fn box_rejects_unbox_of_non_copy_inner() {
+        // The recursive-drop wiring stores the inner value's
+        // pointer-state on the heap; `unbox(ref b)` would copy
+        // that state out by value, aliasing the buffer the box
+        // still owns. v1 rejects this with a diagnostic that
+        // points users toward by-ref / struct-field usage.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              let b: Box<Vec<i64>> = box(xs);
+              let copied: Vec<i64> = unbox(ref b);
+              return 0;
+            }
+        "#;
+        let err = crate::compile(source).expect_err("unbox of non-Copy inner must be rejected");
         let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
         assert!(
-            combined.contains("Copy + sized") || combined.contains("box() v1"),
-            "expected Box-v1 restriction in error, got: {}",
+            combined.contains("alias") || combined.contains("non-Copy"),
+            "expected unbox-non-Copy diagnostic, got: {}",
             combined
         );
     }

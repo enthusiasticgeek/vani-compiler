@@ -7198,6 +7198,12 @@ fn collect_vec_elements(
         }
         Type::Array { element, .. } => collect_vec_elements(element, seen, out),
         Type::Ref(inner) | Type::RefMut(inner) => collect_vec_elements(inner, seen, out),
+        // L2 follow-up (2026-06-08): `Box<Vec<T>>` as a struct
+        // field type needs the inner Vec bundle pre-emitted
+        // (the typedef references `intent_vec_<T>` in the
+        // field's pointer-to spelling). Without this, structs
+        // carrying Box<Vec<T>> emit before their dependency.
+        Type::Box(inner) => collect_vec_elements(inner, seen, out),
         _ => {}
     }
 }
@@ -11457,14 +11463,42 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 // `.data` (the heap concrete); the struct itself
                 // is in the local alloca and reclaimed with the
                 // stack frame.
-                if matches!(&**inner, Type::Object(_)) {
-                    out.push_str("  free(");
-                    out.push_str(&local_name(name));
-                    out.push_str(".data);\n");
-                } else {
-                    out.push_str("  free(");
-                    out.push_str(&local_name(name));
-                    out.push_str(");\n");
+                // L2 follow-up (2026-06-08): Box<Vec<T>> and
+                // Box<OwnedStr> own a heap slot whose contained
+                // value ALSO owns heap memory. Chain the inner
+                // type's Drop before freeing the box's slot:
+                //   Box<Vec<T>>:    intent_vec_T__free(*box);
+                //                   free(box);
+                //   Box<OwnedStr>:  free(*box);  free(box);
+                match &**inner {
+                    Type::Object(_) => {
+                        out.push_str("  free(");
+                        out.push_str(&local_name(name));
+                        out.push_str(".data);\n");
+                    }
+                    Type::Vec(element) => {
+                        out.push_str("  ");
+                        out.push_str(&vec_helper(element, "free"));
+                        out.push_str("(*");
+                        out.push_str(&local_name(name));
+                        out.push_str(");\n");
+                        out.push_str("  free(");
+                        out.push_str(&local_name(name));
+                        out.push_str(");\n");
+                    }
+                    Type::OwnedStr => {
+                        out.push_str("  free((void*)*");
+                        out.push_str(&local_name(name));
+                        out.push_str(");\n");
+                        out.push_str("  free(");
+                        out.push_str(&local_name(name));
+                        out.push_str(");\n");
+                    }
+                    _ => {
+                        out.push_str("  free(");
+                        out.push_str(&local_name(name));
+                        out.push_str(");\n");
+                    }
                 }
             }
             Type::HashSet(_) => {
@@ -12470,21 +12504,51 @@ fn emit_struct_field_drops(
             // L2 Phase 3 (2026-06-08): Box<dyn Iface> field
             // owns its `.data` heap slot; free that rather than
             // the field address.
-            Type::Box(box_inner) => {
-                if matches!(&**box_inner, Type::Object(_)) {
+            // L2 follow-up (2026-06-08): Box<Vec<T>> / Box<OwnedStr>
+            // field — chain into the inner type's Drop before
+            // freeing the box slot itself.
+            Type::Box(box_inner) => match &**box_inner {
+                Type::Object(_) => {
                     out.push_str("  free(");
                     out.push_str(path);
                     out.push('.');
                     out.push_str(field_name);
                     out.push_str(".data);\n");
-                } else {
+                }
+                Type::Vec(element) => {
+                    out.push_str("  ");
+                    out.push_str(&vec_helper(element, "free"));
+                    out.push_str("(*");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(");\n");
                     out.push_str("  free(");
                     out.push_str(path);
                     out.push('.');
                     out.push_str(field_name);
                     out.push_str(");\n");
                 }
-            }
+                Type::OwnedStr => {
+                    out.push_str("  free((void*)*");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(");\n");
+                    out.push_str("  free(");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(");\n");
+                }
+                _ => {
+                    out.push_str("  free(");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(");\n");
+                }
+            },
             Type::Struct(inner_name) => {
                 // Recurse into the nested struct's fields.
                 let inner_fields = STRUCT_FIELDS_REGISTRY

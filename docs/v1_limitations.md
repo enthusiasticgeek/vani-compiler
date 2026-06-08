@@ -69,15 +69,21 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — `Box<T>` owning heap pointer ✅ SHIPPED (Phases 1 + 2 + 3 + 3b)
+### L2 — `Box<T>` owning heap pointer ✅ SHIPPED (Phases 1 + 2 + 3 + 3b + recursive-drop)
 
-**Status**: All four phases shipped 2026-06-07 → 2026-06-08.
-Box\<T\> for Copy + sized inner types works on both backends
-(C + LLVM). `Box<dyn Iface>` heap-allocates a concrete value
-into an owning fat pointer with method dispatch through the
-existing vtable infrastructure — unlocks the originally
-documented blocker `struct Drawer { r: Box<dyn Renderer> }`
-on both backends.
+**Status**: All four phases plus the recursive-drop follow-up
+shipped 2026-06-07 → 2026-06-08. Box\<T\> for Copy + sized
+inner types, `Box<dyn Iface>` (heap-allocated concrete behind
+an owning fat pointer), `Box<Vec<T>>`, and `Box<OwnedStr>` all
+work on both backends (C + LLVM). The recursive-drop wiring
+chains scope-exit Drop into the inner type's destructor before
+freeing the box's own heap slot; the source binding is marked
+moved by `check_box_builtin` so its own Drop is suppressed.
+
+`unbox(ref b)` is still gated to Copy / dyn inner — copying a
+non-Copy inner by value would alias the heap slot the box
+still owns. Pass `ref b` to a function or store the box in a
+struct field to use Vec / OwnedStr inner.
 
 ```vani
 struct Circle { r: i64 }

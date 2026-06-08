@@ -196,8 +196,8 @@ pass. Tier 4 (deploy / CI / GH-Actions) deferred to the very end.
 | Order | Task | Effort | Why now |
 |---|---|---|---|
 | ~~L9 — LLVM identifier mangling for non-ASCII~~ | ✅ ALREADY SHIPPED | — | Re-verified 2026-06-08: every LLVM-IR identifier path routes through `llvm_mangle_ident`. [pure_devanagari.vani](examples/language/sanskrit/pure_devanagari.vani), Marathi, Bengali all run end-to-end on LLVM. Doc updated; was incorrectly listed as open. |
-| **1** | **Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>`** | 3-5h | L2 follow-up flagged in STATUS.md after Phase 3b shipped. The `box()` builtin currently rejects non-Copy inner with "Recursive drop ... is a queued follow-up". Free + Drop chain through one more layer when the boxed type itself owns heap. |
-| **2** | **`box(value)` expected-type threading** (drop the `as dyn Iface` cast) | 4-6h | Cosmetic L2 follow-up. Currently users must spell `box(value as dyn Iface)`. Threading the expected type lets the cast become optional. |
+| ~~Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>`~~ | ✅ SHIPPED 2026-06-08 | — | The box() builtin accepts Vec<T> / OwnedStr inner; scope-exit Drop chains into the inner destructor on both backends. unbox(ref b) for non-Copy stays gated (would alias). See STATUS.md current session. |
+| **1** | **`box(value)` expected-type threading** (drop the `as dyn Iface` cast) | 4-6h | Cosmetic L2 follow-up. Currently users must spell `box(value as dyn Iface)`. Threading the expected type lets the cast become optional. |
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
 

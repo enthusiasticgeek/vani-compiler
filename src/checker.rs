@@ -17486,20 +17486,34 @@ fn check_box_builtin(
         // Box<dyn Iface> to heap-allocate the concrete value
         // and emit an owning fat pointer.
         Type::Object(_) => true,
+        // L2 follow-up (2026-06-08): Box<Vec<T>> + Box<OwnedStr>.
+        // Recursive-drop wiring: the box owns the heap slot for
+        // the inner struct/pointer; scope-exit Drop additionally
+        // chains into the inner type's Drop (vec_helper(_,"free")
+        // for Vec<T>, free() for OwnedStr) before freeing the
+        // box's own slot. The source binding is consumed via
+        // consume_if_moved_var below so its own scope-exit Drop
+        // doesn't double-free.
+        Type::Vec(_) | Type::OwnedStr => true,
         _ => false,
     };
     if !is_supported {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "box() v1 only supports Copy + sized element types (primitives, Copy structs) \
-                 plus `dyn Iface`; got `{}`. Recursive drop (Box<Vec<…>>, Box<OwnedStr>) \
-                 is a queued follow-up",
+                "box() v1 supports Copy + sized element types (primitives, Copy structs), \
+                 `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. Other owning inner \
+                 types (Box<Box<T>>, Box<HashMap<…>>, etc.) remain a follow-up.",
                 inner_ty
             ),
         ));
         return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
     }
+    // L2 follow-up: for non-Copy inner (Vec, OwnedStr), the
+    // source Var is moved into the box — mark it so the
+    // scope-exit pass doesn't emit a Drop for it (which would
+    // double-free the inner buffer the box now owns).
+    consume_if_moved_var(&args[0], &inner, env);
     let result_ty = Type::Box(Box::new(inner_ty));
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -17518,6 +17532,13 @@ fn check_box_builtin(
 /// read-only borrow) so the box's ownership and lifetime are
 /// preserved. Returns T by value. v1 only supports Copy inner
 /// types so the read is just a memcpy.
+///
+/// L2 follow-up (2026-06-08): when `box()` accepts `Vec<T>` /
+/// `OwnedStr` inner (recursive-drop wiring), `unbox(ref b)` is
+/// still gated to Copy inner — returning the affine value by
+/// value would alias the box's heap slot and double-free on
+/// scope exit. Users access non-Copy inner via method calls
+/// or by storing the box in a struct field.
 fn check_unbox_builtin(
     args: &[Expr],
     env: &mut Env,
@@ -17562,6 +17583,26 @@ fn check_unbox_builtin(
             return CheckedExpr::fallback(Type::I64, span);
         }
     };
+    // L2 follow-up (2026-06-08): reject unbox of non-Copy inner.
+    // `box()` accepts `Vec<T>` / `OwnedStr` for recursive-drop
+    // storage, but copying the inner value back out via unbox
+    // would alias the box's heap slot — the temp and the box
+    // would both think they own the inner buffer and double-free
+    // on scope exit. Pass the box by ref to a function, or
+    // store it as a struct field, to use non-Copy inner.
+    if !inner_ty.is_copy() && !matches!(inner_ty, Type::Object(_)) {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            format!(
+                "unbox(ref b) where the boxed type `{}` is non-Copy would \
+                 alias the heap slot (returning by value copies pointer-state \
+                 the box still owns). Pass `ref b` to a function instead, \
+                 or store the box in a struct field.",
+                inner_ty
+            ),
+        ));
+        return CheckedExpr::fallback(Type::I64, span);
+    }
     CheckedExpr::new(
         TypedExprKind::Call {
             name: "__box_get".to_string(),

@@ -1,0 +1,62 @@
+// build & run:
+//   vanic run examples/language/english/box_recursive_drop.vani                # LLVM
+//   vanic run examples/language/english/box_recursive_drop.vani --backend=c    # C
+
+intent "L2 follow-up — Box<Vec<T>> + Box<OwnedStr> with recursive drop";
+
+// L2 follow-up (2026-06-08) closes the last gap in the Box<T>
+// surface. Phase 1 (Copy primitives + Copy structs) shipped
+// 2026-06-07; Phase 3 + 3b (Box<dyn Iface> on C + LLVM)
+// shipped 2026-06-08; this commit accepts `Vec<T>` and
+// `OwnedStr` as the inner type and chains scope-exit Drop into
+// the inner type's destructor before freeing the box's own
+// heap slot.
+//
+// Wiring overview:
+//
+//   let xs: Vec<i64> = vec(1, 2, 3);
+//   let b: Box<Vec<i64>> = box(xs);
+//   // ^-- checker marks `xs` as moved; b's local stores Vec_T*
+//   //     pointing at a heap-allocated Vec struct, which in turn
+//   //     owns its own .data heap buffer
+//
+//   // scope exit:
+//   //   intent_vec_int64_t__free(*b);   // free Vec's inner buffer
+//   //   free(b);                         // free the Vec struct
+//
+// The same pattern works for Box<OwnedStr> (the inner pointer
+// is the owned char*; both layers free in order). Box<T> as a
+// struct FIELD chains identically through the struct's
+// scope-exit field walker.
+//
+// Restrictions kept from Phase 1:
+// - `unbox(ref b)` for non-Copy inner is rejected — returning
+//   the inner by value would alias the heap slot the box still
+//   owns. Pass the box by ref or store it as a struct field.
+
+struct Bag {
+  contents: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  // (1) Plain Box<Vec<i64>> in a local — scope-exit Drop chains
+  // into intent_vec_int64_t__free(*b) then free(b).
+  let v: Vec<i64> = vec(10, 20, 30);
+  let b: Box<Vec<i64>> = box(v);
+  print "constructed Box<Vec<i64>>";
+
+  // (2) Box<Vec<i64>> as a struct field — the struct's
+  // field-Drop walker emits the same two-line chain when bag
+  // goes out of scope.
+  let v2: Vec<i64> = vec(7, 8, 9);
+  let bag: Bag = Bag { contents: box(v2) };
+  print "constructed Bag { contents: Box<Vec<i64>> }";
+
+  // (3) Box<OwnedStr> — heap'd char* slot. Drop frees the
+  // OwnedStr buffer, then frees the slot.
+  let s: OwnedStr = "hi" + "!";
+  let bs: Box<OwnedStr> = box(s);
+  print "constructed Box<OwnedStr>";
+
+  return 0;
+}

@@ -2420,6 +2420,71 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         out.push_str(&format!("  call void @free(i8* {})\n", data_i8));
                         return;
                     }
+                    // L2 follow-up (2026-06-08): Box<Vec<T>> drop.
+                    // The local holds a Vec_T* (pointer to a heap-
+                    // allocated Vec struct). Load the pointer,
+                    // load the Vec value, call intent_vec_<T>__free
+                    // to free the Vec's .data buffer, then free
+                    // the Vec_T* itself.
+                    if let Type::Vec(element) = &**inner {
+                        let s_ty = vec_struct_name(element);
+                        let free_name = format!(
+                            "@intent_vec_{}__free",
+                            vec_struct_tag(element)
+                        );
+                        let ptr = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}*, {}** {}\n",
+                            ptr, s_ty, s_ty, addr
+                        ));
+                        let vec_val = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}, {}* {}\n",
+                            vec_val, s_ty, s_ty, ptr
+                        ));
+                        out.push_str(&format!(
+                            "  call void {}({} {})\n",
+                            free_name, s_ty, vec_val
+                        ));
+                        let as_i8 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast {}* {} to i8*\n",
+                            as_i8, s_ty, ptr
+                        ));
+                        out.push_str(&format!("  call void @free(i8* {})\n", as_i8));
+                        return;
+                    }
+                    // L2 follow-up (2026-06-08): Box<OwnedStr> drop.
+                    // The local holds an i8** (pointer to a heap-
+                    // allocated char* slot). Load the i8**, load
+                    // the i8* inside, free the i8* (the OwnedStr
+                    // buffer), then free the i8** itself.
+                    if matches!(&**inner, Type::OwnedStr) {
+                        let ptr = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load i8**, i8*** {}\n",
+                            ptr, addr
+                        ));
+                        let str_val = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load i8*, i8** {}\n",
+                            str_val, ptr
+                        ));
+                        out.push_str(&format!(
+                            "  call void @free(i8* {})\n",
+                            str_val
+                        ));
+                        let as_i8 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast i8** {} to i8*\n",
+                            as_i8, ptr
+                        ));
+                        out.push_str(&format!(
+                            "  call void @free(i8* {})\n",
+                            as_i8
+                        ));
+                        return;
+                    }
                     let llvm_inner = llvm_type_string(inner);
                     let ptr = ctx.fresh_tmp();
                     out.push_str(&format!(
@@ -40021,6 +40086,126 @@ fn emit_llvm_struct_field_drops(
                     );
                 }
             }
+            // L2 Phase 3b (2026-06-08) + L2 follow-up (2026-06-08):
+            // Box<T> as a struct field — chain into the inner
+            // type's Drop before freeing the box's heap slot.
+            //   Box<dyn Iface>:  free the fat pointer's .data (heap concrete)
+            //   Box<Vec<T>>:     intent_vec_<T>__free(*box) + free(box)
+            //   Box<OwnedStr>:   free(*box) + free(box)
+            //   Box<Copy T>:     free(box)
+            // Mirrors the per-local Drop arm above and the C backend's
+            // struct-field path.
+            Type::Box(inner) => match &**inner {
+                Type::Object(iface_name) => {
+                    let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                    let fp = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                        fp, s_ty, s_ty, addr, idx
+                    ));
+                    let fat = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        fat, dyn_ty, dyn_ty, fp
+                    ));
+                    let data_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = extractvalue {} {}, 1\n",
+                        data_i8, dyn_ty, fat
+                    ));
+                    out.push_str(&format!(
+                        "  call void @free(i8* {})\n",
+                        data_i8
+                    ));
+                }
+                Type::Vec(element) => {
+                    let v_struct = vec_struct_name(element);
+                    let fp = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                        fp, s_ty, s_ty, addr, idx
+                    ));
+                    let ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}*, {}** {}\n",
+                        ptr, v_struct, v_struct, fp
+                    ));
+                    let vec_val = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        vec_val, v_struct, v_struct, ptr
+                    ));
+                    let free_name = format!(
+                        "@intent_vec_{}__free",
+                        vec_struct_tag(element)
+                    );
+                    out.push_str(&format!(
+                        "  call void {}({} {})\n",
+                        free_name, v_struct, vec_val
+                    ));
+                    let as_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast {}* {} to i8*\n",
+                        as_i8, v_struct, ptr
+                    ));
+                    out.push_str(&format!(
+                        "  call void @free(i8* {})\n",
+                        as_i8
+                    ));
+                }
+                Type::OwnedStr => {
+                    let fp = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                        fp, s_ty, s_ty, addr, idx
+                    ));
+                    let ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load i8**, i8*** {}\n",
+                        ptr, fp
+                    ));
+                    let str_val = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load i8*, i8** {}\n",
+                        str_val, ptr
+                    ));
+                    out.push_str(&format!(
+                        "  call void @free(i8* {})\n",
+                        str_val
+                    ));
+                    let as_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i8** {} to i8*\n",
+                        as_i8, ptr
+                    ));
+                    out.push_str(&format!(
+                        "  call void @free(i8* {})\n",
+                        as_i8
+                    ));
+                }
+                _ => {
+                    let llvm_inner = llvm_type_string(inner);
+                    let fp = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                        fp, s_ty, s_ty, addr, idx
+                    ));
+                    let ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}*, {}** {}\n",
+                        ptr, llvm_inner, llvm_inner, fp
+                    ));
+                    let as_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast {}* {} to i8*\n",
+                        as_i8, llvm_inner, ptr
+                    ));
+                    out.push_str(&format!(
+                        "  call void @free(i8* {})\n",
+                        as_i8
+                    ));
+                }
+            },
             _ => {}
         }
     }

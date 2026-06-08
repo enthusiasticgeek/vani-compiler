@@ -10,7 +10,73 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 🟢 Session 2026-06-08 (cont.) — Arc 8 v3.1 sugar: postfix `?` operator
+## 🟢 Session 2026-06-08 (cont.) — Tier 1 #1: Box<Vec<T>> + Box<OwnedStr> recursive drop
+
+The last gap in the L2 Box<T> surface closes. `box()` accepts
+`Vec<T>` and `OwnedStr` as the inner type; scope-exit Drop
+chains into the inner type's destructor before freeing the
+box's own heap slot, on both backends. The struct-field path
+gets the same chain via the field-Drop walker.
+
+```vani
+struct Bag { contents: Box<Vec<i64>> }
+
+fn main() -> i64 {
+  let v: Vec<i64> = vec(10, 20, 30);
+  let b: Box<Vec<i64>> = box(v);        // v marked moved by checker
+
+  let bag: Bag = Bag { contents: box(vec(7, 8, 9)) };
+
+  let s: OwnedStr = "hi" + "!";
+  let bs: Box<OwnedStr> = box(s);
+  return 0;
+}
+```
+
+**Drop wiring**:
+- **Box<Vec<T>>**: scope-exit emits `intent_vec_<T>__free(*b);
+  free(b);` (C) — the helper frees the inner Vec's `.data`
+  buffer; the second `free` releases the Vec struct itself.
+  LLVM mirrors with `load Vec*`, `load Vec`, `call ...__free`,
+  bitcast + `free`.
+- **Box<OwnedStr>**: `free((void*)*b); free(b);` — the inner
+  char* + the slot holding it.
+- **Box<dyn Iface>** (already shipped): free `.data`.
+- **Box<Copy T>** (already shipped): single `free(b)`.
+
+**Checker wiring**: `check_box_builtin` now calls
+`consume_if_moved_var` on its argument, so the source binding
+(`v` / `s` in the example above) is marked moved and the
+scope-exit pass skips its own Drop — no double-free.
+
+**unbox gate**: `unbox(ref b)` is still rejected for non-Copy
+inner because the by-value return would alias the heap slot
+the box still owns. Diagnostic redirects users to by-ref or
+struct-field usage.
+
+**LLVM struct-field gap closed**: the LLVM struct-field Drop
+walker had no `Type::Box(_)` arm at all (pre-existing gap —
+Box-typed struct fields effectively leaked on LLVM). Added
+arms for Box<dyn Iface>, Box<Vec<T>>, Box<OwnedStr>, and the
+plain Box<Copy T> fallback.
+
+**C-side typedef ordering**: `collect_vec_elements` now
+recurses into `Type::Box(_)` so a struct field of type
+`Box<Vec<T>>` triggers the inner Vec bundle's pre-emit
+(previously the struct typedef emitted before its dep).
+
+Two regression tests (`box_accepts_vec_and_owned_str_with_recursive_drop`,
+`box_rejects_unbox_of_non_copy_inner`) pin the surface;
+[examples/language/english/box_recursive_drop.vani](examples/language/english/box_recursive_drop.vani)
+joins the e2e parity sweep.
+
+Lib ledger: **2003 lib** green (+1 net; replaced one gating
+test with two positive/negative tests).
+
+This closes Tier 1 #1 of the [TODO.md "Recommended task queue"](TODO.md).
+Tier 1 #2 next: `box(value)` expected-type threading.
+
+## 🟢 Session 2026-06-08 (earlier) — Arc 8 v3.1 sugar: postfix `?` operator
 
 The `?` postfix operator joins the `try` keyword as a parse-time
 alias for Option / Result propagation. `EXPR?` and `try EXPR`
