@@ -69,12 +69,57 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phases 1 + 2)
+### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phases 1 + 2 + 3-on-C)
 
-**Status**: Phases 1 + 2 shipped 2026-06-07. `Box<T>` for Copy
-primitives + Copy structs works end-to-end on **both backends**
-(C + LLVM), including struct-field storage with automatic drop
-chaining. `Box<dyn Iface>` queued for Phase 3.
+**Status**: Phases 1 + 2 shipped 2026-06-07 (Box\<T\> for Copy
+primitives + Copy structs on both backends). **Phase 3 shipped
+2026-06-08 on the C backend** — `Box<dyn Iface>` heap-allocates
+a concrete value into an owning fat pointer and unlocks the
+documented blocker `struct Drawer { r: Box<dyn Renderer> }`.
+Phase 3 LLVM codegen (Phase 3b) is queued.
+
+```vani
+struct Circle { r: i64 }
+interface Drawable { fn area(self: Circle) -> i64; }
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+
+// Originally documented L2 blocker — works in Phase 3:
+struct Drawer { rend: Box<dyn Drawable> }
+
+fn main() -> i64 {
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c as dyn Drawable);  // ✅ heap-
+                                                       // alloc +
+                                                       // own fat ptr
+  return b.area();                                     // ✅ 49
+}
+```
+
+**Phase 3 surface**:
+- `Box<dyn Iface>` parses + type-checks; checker validates the
+  source implements the interface.
+- `box(value as dyn Iface)` heap-allocates a copy of `value`,
+  builds the owning fat pointer { vtable, heap_data_ptr }, stores
+  in the local. The local IS the 16-byte fat pointer struct
+  (NOT a pointer to one).
+- Method dispatch through `Box<dyn Iface>` / `ref Box<dyn Iface>`
+  uses the same vtable path as plain `dyn Iface`.
+- Drop emits `free(box.data)` — frees the heap concrete; the
+  fat-pointer struct in the local alloca is reclaimed with the
+  stack frame.
+- Struct fields can hold `Box<dyn Iface>`; the outer struct's
+  drop walker chains into the field's `.data` free.
+
+**Phase 3 restrictions (queued)**:
+- **LLVM backend** — Phase 3b. Programs using `Box<dyn Iface>`
+  on the LLVM backend hit a clear pre-codegen error directing
+  users to `--backend=c`. The detector (`program_uses_box_dyn`)
+  walks struct fields, fn params/returns, let types, and
+  TypedExpr types.
+- **`box(concrete)` without explicit `as dyn Iface`** — needs
+  expected-type threading into `check_box_builtin`. Queued.
 
 ```vani
 fn main() -> i64 {

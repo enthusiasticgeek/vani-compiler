@@ -10768,7 +10768,14 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
         // fallback returns the `/* Box<T> */` placeholder; this
         // arm produces the real type so struct fields and Vec
         // elements compile cleanly.
-        Type::Box(inner) => format!("{}*", format_declarator(inner, "").trim()),
+        // L2 Phase 3 (2026-06-08): Box<dyn Iface> spelling is
+        // the fat-pointer struct itself (16 bytes), NOT a
+        // pointer to it. The struct's `.data` field owns the
+        // heap allocation; the local IS the fat pointer.
+        Type::Box(inner) => match &**inner {
+            Type::Object(iface) => format!("intent_dyn_{}", iface),
+            _ => format!("{}*", format_declarator(inner, "").trim()),
+        },
         _ => c_leaf_type(ty).to_string(),
     }
 }
@@ -11439,15 +11446,26 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
-            Type::Box(_) => {
+            Type::Box(inner) => {
                 // L2 Phase 1 (2026-06-07): Box<T> owns a single
                 // heap slot allocated by box(x). Scope-exit drop
                 // simply `free`s the slot. The binding's machine
                 // word (the pointer) is reclaimed with the stack
                 // frame.
-                out.push_str("  free(");
-                out.push_str(&local_name(name));
-                out.push_str(");\n");
+                // L2 Phase 3 (2026-06-08): Box<dyn Iface> is a
+                // fat pointer struct with owning `.data`. Free
+                // `.data` (the heap concrete); the struct itself
+                // is in the local alloca and reclaimed with the
+                // stack frame.
+                if matches!(&**inner, Type::Object(_)) {
+                    out.push_str("  free(");
+                    out.push_str(&local_name(name));
+                    out.push_str(".data);\n");
+                } else {
+                    out.push_str("  free(");
+                    out.push_str(&local_name(name));
+                    out.push_str(");\n");
+                }
             }
             Type::HashSet(_) => {
                 out.push_str("  intent_hashset_i64_drop(&");
@@ -12449,12 +12467,23 @@ fn emit_struct_field_drops(
             // struct's scope-exit drop chains into the field's
             // free() so heap slots owned by Box-typed fields are
             // released along with the outer struct.
-            Type::Box(_) => {
-                out.push_str("  free(");
-                out.push_str(path);
-                out.push('.');
-                out.push_str(field_name);
-                out.push_str(");\n");
+            // L2 Phase 3 (2026-06-08): Box<dyn Iface> field
+            // owns its `.data` heap slot; free that rather than
+            // the field address.
+            Type::Box(box_inner) => {
+                if matches!(&**box_inner, Type::Object(_)) {
+                    out.push_str("  free(");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(".data);\n");
+                } else {
+                    out.push_str("  free(");
+                    out.push_str(path);
+                    out.push('.');
+                    out.push_str(field_name);
+                    out.push_str(");\n");
+                }
             }
             Type::Struct(inner_name) => {
                 // Recurse into the nested struct's fields.
@@ -13710,6 +13739,43 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 Type::Box(inner) => &**inner,
                 _ => unreachable!("__box_new's result type must be Box<T>"),
             };
+            // L2 Phase 3 (2026-06-08): Box<dyn Iface>. The
+            // argument is a DynCoerce node — extract the
+            // concrete type + iface name, heap-allocate the
+            // CONCRETE (not the fat pointer), and emit the
+            // owning fat pointer literal. The Box<dyn Iface>
+            // local is itself the 16-byte fat pointer struct
+            // (NOT a pointer to one) with `.data` pointing
+            // into the heap. Drop frees `.data`.
+            if let Type::Object(iface) = inner_ty {
+                if let TypedExprKind::DynCoerce { value, from_type_name, .. } = &args[0].kind {
+                    // The DynCoerce source must be a Var by
+                    // the checker's synthetic-let hoist
+                    // invariant (closure #276); the concrete
+                    // value lives in a stack alloca that we
+                    // need to copy into the heap slot.
+                    let src_name = match &value.kind {
+                        TypedExprKind::Var(n) => n.clone(),
+                        _ => unreachable!(
+                            "Box<dyn Iface> DynCoerce source must be a Var; got {:?}",
+                            value.kind
+                        ),
+                    };
+                    let concrete_ty = format_declarator(&value.ty, "").trim().to_string();
+                    return format!(
+                        "({{ {ct}* __heap = ({ct}*)malloc(sizeof({ct})); *__heap = ({src}); \
+                          (intent_dyn_{iface}){{ .vtable = &intent_vtbl_{iface}_{conc}, .data = (void*)__heap }}; }})",
+                        ct = concrete_ty,
+                        src = local_name(&src_name),
+                        iface = iface,
+                        conc = from_type_name,
+                    );
+                }
+                unreachable!(
+                    "Box<dyn Iface> __box_new expected a DynCoerce arg; got {:?}",
+                    args[0].kind
+                );
+            }
             // c_type_name returns "Struct_Point" / "int64_t" etc.
             // Wrap in a recoverable spelling via format_declarator
             // — without the inner-decl trim it's the right storage
@@ -17518,10 +17584,16 @@ fn c_type_name(ty: &Type) -> String {
         // L2 Phase 1 (2026-06-07): Box<T> lowers to T* — a single
         // 64-bit owning pointer to the heap slot. malloc'd by
         // box(x), freed by the scope-exit drop emission.
-        Type::Box(inner) => {
-            let inner_decl = format_declarator(inner, "").trim_end().to_string();
-            format!("{}*", inner_decl)
-        }
+        // L2 Phase 3 (2026-06-08): Box<dyn Iface> is the 16-byte
+        // fat pointer struct itself (with owning .data), NOT a
+        // pointer to one.
+        Type::Box(inner) => match &**inner {
+            Type::Object(iface) => format!("intent_dyn_{}", iface),
+            _ => {
+                let inner_decl = format_declarator(inner, "").trim_end().to_string();
+                format!("{}*", inner_decl)
+            }
+        },
         Type::Vec(element) => vec_c_struct(element),
         // Closure #239: arrays in return-type position are
         // spelled as the struct wrapper `intent_arr_ret_<N>_<T>`.
@@ -17687,10 +17759,16 @@ fn format_declarator(ty: &Type, name: &str) -> String {
         // `T* name` — same shape as `*mut T` but the affine
         // ownership is enforced at the checker level. malloc'd
         // by `box(x)`, freed by the scope-exit drop emission.
-        Type::Box(inner) => {
-            let inner_decl = format_declarator(inner, "").trim_end().to_string();
-            format!("{}* {}", inner_decl, name)
-        }
+        // L2 Phase 3 (2026-06-08): `Box<dyn Iface>` is the
+        // 16-byte fat pointer struct itself (NOT a pointer);
+        // the struct's `.data` field owns the heap concrete.
+        Type::Box(inner) => match &**inner {
+            Type::Object(iface) => format!("intent_dyn_{} {}", iface, name),
+            _ => {
+                let inner_decl = format_declarator(inner, "").trim_end().to_string();
+                format!("{}* {}", inner_decl, name)
+            }
+        },
         Type::Ref(inner) => match &**inner {
             Type::Array { element, .. } => format!("const {}* {}", c_leaf_type(element), name),
             Type::Vec(element) => format!("const {}* {}", vec_c_struct(element), name),
@@ -17708,6 +17786,14 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             // Vtables Phase 4c: `ref dyn Iface` lowers to a
             // pointer to the per-Iface fat pointer typedef.
             Type::Object(iface) => format!("const intent_dyn_{}* {}", iface, name),
+            // L2 Phase 3 (2026-06-08): `ref Box<dyn Iface>` —
+            // same shape as `ref dyn Iface` since Box<dyn Iface>
+            // is itself the fat pointer struct.
+            Type::Box(box_inner) => match &**box_inner {
+                Type::Object(iface) => format!("const intent_dyn_{}* {}", iface, name),
+                _ => format!("const {}* {}",
+                    format_declarator(box_inner, "").trim_end(), name),
+            },
             // Phase 11 (2026-06-07): `ref T` where T is a
             // payloaded enum lowers to a pointer to the
             // `Enum_<Name>` tagged-union struct, NOT to the
@@ -17733,6 +17819,12 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             // Vtables Phase 4c: `mut ref dyn Iface` lowers
             // to a (mutable) pointer to the fat pointer.
             Type::Object(iface) => format!("intent_dyn_{}* {}", iface, name),
+            // L2 Phase 3 (2026-06-08): `mut ref Box<dyn Iface>`.
+            Type::Box(box_inner) => match &**box_inner {
+                Type::Object(iface) => format!("intent_dyn_{}* {}", iface, name),
+                _ => format!("{}* {}",
+                    format_declarator(box_inner, "").trim_end(), name),
+            },
             // Phase 11 (2026-06-07): `mut ref T` where T is a
             // payloaded enum lowers to a pointer to the
             // `Enum_<Name>` tagged-union struct.

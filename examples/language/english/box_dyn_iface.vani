@@ -1,0 +1,65 @@
+// build & run:
+//   vanic run examples/language/english/box_dyn_iface.vani --backend=c   # C backend (v1)
+//   # LLVM backend codegen for Box<dyn Iface> is queued for L2 Phase 3b.
+
+intent "L2 Phase 3 — Box<dyn Iface> with heap-owning fat pointers";
+
+// L2 Phase 3 (2026-06-08): `Box<dyn Iface>` is the missing v1
+// shape that lets a struct *own* a heterogeneous value through
+// an interface. The fat pointer { vtable, heap_data_ptr } lives
+// in the local / field as a single 16-byte value; `.data`
+// points at a heap allocation owned by the box. Drop frees
+// `.data`.
+//
+// Construction surface: `box(value as dyn Iface)`. The explicit
+// `as dyn Iface` coercion at the call site picks the correct
+// vtable; the `box(…)` wrapper heap-allocates the concrete and
+// builds the owning fat pointer in one step.
+//
+// Method dispatch goes through the same vtable lookup as plain
+// `dyn Iface` — the underlying layout is identical, only data
+// ownership differs.
+
+struct Circle { r: i64 }
+struct Square { side: i64 }
+
+interface Drawable {
+  fn area(self: Circle) -> i64;
+}
+
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+
+implement Drawable for Square {
+  fn area(self: Square) -> i64 { return self.side * self.side; }
+}
+
+// Owned dyn-iface argument — like plain `dyn Drawable` but the
+// caller heap-allocates and we drop on scope exit.
+fn report_area(b: ref Box<dyn Drawable>) -> i64 {
+  return b.area();
+}
+
+// The originally documented L2 blocker: struct field holds a
+// heterogeneous Drawable, owned via Box<dyn>. The Drawer's
+// scope-exit drop chains into the Box's `.data` free, so no
+// leaks.
+struct Drawer {
+  rend: Box<dyn Drawable>,
+}
+
+fn main() -> i64 {
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c as dyn Drawable);
+  let direct: i64 = report_area(ref b);
+  assert direct == 49;
+
+  let sq: Square = Square { side: 4 };
+  let d: Drawer = Drawer { rend: box(sq as dyn Drawable) };
+  let inside: i64 = d.rend.area();
+  assert inside == 16;
+
+  print direct, inside;
+  return 0;
+}

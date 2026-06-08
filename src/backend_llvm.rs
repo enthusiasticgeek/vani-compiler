@@ -600,10 +600,20 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // Box<T> end-to-end for the same v1 surface as the C
     // backend — Copy + sized inner types, primitives + Copy
     // structs. The gate that previously redirected users to
-    // `--backend=c` has been removed. `program_uses_box` is
-    // kept as a no-op helper in case future arcs need it for
-    // diagnostics. (See L2 Phase 3 for Box<dyn Iface>.)
+    // `--backend=c` has been removed.
+    // L2 Phase 3 (2026-06-08): Box<dyn Iface> ships on the C
+    // backend only in v1; the LLVM heap-alloc + fat-pointer
+    // owning-data lowering is queued. Detect Box<dyn Iface>
+    // specifically and surface the actionable C-backend
+    // directive.
     let _ = program_uses_box(program);
+    if program_uses_box_dyn(program) {
+        panic!(
+            "Box<dyn Iface> codegen is C-backend only in v1 (L2 Phase 3). \
+             Run with `--backend=c` to compile this program. \
+             LLVM Box<dyn Iface> codegen is queued for L2 Phase 3b."
+        );
+    }
     let mut out = String::new();
     out.push_str("; ModuleID = 'intent'\n");
     // Populate the enum payload registry from the program's
@@ -22436,6 +22446,87 @@ fn program_uses_box(program: &TypedProgram) -> bool {
     }
     for f in &program.functions {
         if f.body.iter().any(stmt_uses) {
+            return true;
+        }
+    }
+    false
+}
+
+/// L2 Phase 3 (2026-06-08): detect Box<dyn Iface> usage so the
+/// LLVM backend can emit a clear pre-codegen error directing
+/// users to `--backend=c`. Looks for any TypedExpr with type
+/// `Type::Box(Box::new(Type::Object(_)))`, plus any TypedStmt
+/// `Let` whose declared type matches.
+fn program_uses_box_dyn(program: &TypedProgram) -> bool {
+    use crate::ir::TypedExprKind as E;
+    use crate::ir::TypedStmt as S;
+    fn ty_is_box_dyn(ty: &Type) -> bool {
+        matches!(ty, Type::Box(inner) if matches!(**inner, Type::Object(_)))
+    }
+    fn expr_uses(expr: &crate::ir::TypedExpr) -> bool {
+        if ty_is_box_dyn(&expr.ty) {
+            return true;
+        }
+        match &expr.kind {
+            E::Call { args, .. } => args.iter().any(expr_uses),
+            E::Unary { expr, .. } | E::Cast { expr, .. } => expr_uses(expr),
+            E::Len { array, .. } => expr_uses(array),
+            E::Binary { left, right, .. } => expr_uses(left) || expr_uses(right),
+            E::CallIndirect { callee, args } => {
+                expr_uses(callee) || args.iter().any(expr_uses)
+            }
+            E::ArrayLit { elements } => elements.iter().any(expr_uses),
+            E::Index { array, index, .. } => expr_uses(array) || expr_uses(index),
+            E::Tuple { elements } => elements.iter().any(expr_uses),
+            E::TupleAccess { tuple, .. } => expr_uses(tuple),
+            E::StructLit { fields, .. } => fields.iter().any(|(_, v)| expr_uses(v)),
+            E::FieldAccess { object, .. } => expr_uses(object),
+            E::EnumVariantWithPayload { payload, .. } => expr_uses(payload),
+            _ => false,
+        }
+    }
+    fn stmt_uses(stmt: &S) -> bool {
+        match stmt {
+            S::Let { ty, expr, .. } => ty_is_box_dyn(ty) || expr_uses(expr),
+            S::Reassign { expr, .. } | S::Discard { expr } => expr_uses(expr),
+            S::Drop { ty, .. } => ty_is_box_dyn(ty),
+            S::Return { expr } => expr_uses(expr),
+            S::Assert { expr, .. } | S::Prove { expr } => expr_uses(expr),
+            S::Print { items } => items.iter().any(|item| match item {
+                crate::ir::TypedPrintItem::Expr(e) => expr_uses(e),
+                _ => false,
+            }),
+            S::If { cond, then_body, else_body } => {
+                expr_uses(cond)
+                    || then_body.iter().any(stmt_uses)
+                    || else_body.iter().any(stmt_uses)
+            }
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::For { start, end, body, .. } => {
+                expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
+            }
+            S::ForIter { body, .. } => body.iter().any(stmt_uses),
+            S::TaskSpawn { body, .. } => body.iter().any(stmt_uses),
+            S::UnsafeBlock { body, .. } => body.iter().any(stmt_uses),
+            S::IndexAssign { index, value, .. } => expr_uses(index) || expr_uses(value),
+            S::FieldAssign { object, value, .. } => expr_uses(object) || expr_uses(value),
+            _ => false,
+        }
+    }
+    // Also catch struct fields declaring Box<dyn Iface>.
+    for s in &program.structs {
+        if s.fields.iter().any(|(_, ty)| ty_is_box_dyn(ty)) {
+            return true;
+        }
+    }
+    for f in &program.functions {
+        if f.body.iter().any(stmt_uses) {
+            return true;
+        }
+        if f.params.iter().any(|p| ty_is_box_dyn(&p.ty)) {
+            return true;
+        }
+        if ty_is_box_dyn(&f.return_type) {
             return true;
         }
     }

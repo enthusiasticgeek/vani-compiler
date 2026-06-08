@@ -10,6 +10,87 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — L2 Phase 3: Box\<dyn Iface\> (C backend)
+
+The originally documented L2 blocker —
+`struct Drawer { r: Box<dyn Renderer> }` — works. `Box<dyn Iface>`
+heap-allocates the concrete value and wraps it in an owning fat
+pointer; the struct field, method dispatch through borrow, and
+drop chain all compose cleanly on the C backend. LLVM
+codegen for Phase 3 (Phase 3b) is queued; programs using
+`Box<dyn>` on `--backend=llvm` get a clear directive to use
+`--backend=c`.
+
+```vani
+struct Circle { r: i64 }
+interface Drawable { fn area(self: Circle) -> i64; }
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+
+struct Drawer { rend: Box<dyn Drawable> }
+
+fn main() -> i64 {
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c as dyn Drawable);
+  let d: Drawer = Drawer { rend: box(Circle { r: 4 } as dyn Drawable) };
+  print b.area(), d.rend.area();  // 49 16
+  return 0;
+}
+```
+
+**Architectural surface**:
+- **Checker** (src/checker.rs):
+  - `check_box_builtin` now accepts `Type::Object(_)` as a Box
+    inner — previously rejected.
+  - `as dyn Iface` explicit cast routes through the same
+    `make_dyn_coerce` node path the implicit-coercion path uses,
+    so `box(value as dyn Iface)` produces a DynCoerce inside
+    `__box_new`.
+  - Method-dispatch arm extended to accept `Box<dyn Iface>` and
+    `ref Box<dyn Iface>` receivers (same machine layout as plain
+    `dyn Iface` — only data ownership differs).
+- **C backend** (src/backend_c.rs):
+  - `__box_new` special-cases `Type::Box(Box::new(Type::Object))`:
+    extracts the DynCoerce's `from_type_name`, heap-allocates
+    the concrete (`Struct_Concrete* __heap = malloc(sizeof…)`),
+    copies the source value (`*__heap = (v_src)`), and emits
+    the owning fat pointer literal
+    `(intent_dyn_<Iface>){ .vtable = &intent_vtbl_<Iface>_<Concrete>, .data = (void*)__heap }`.
+  - Storage spelling: `c_element_storage` / `c_type_name` /
+    `format_declarator` all special-case `Box<dyn Iface>` to
+    return the fat-pointer struct (16 bytes), NOT `T*` (8 bytes).
+  - Drop emission (scope-exit + struct-field): when inner is
+    `Type::Object`, emits `free(box.data)` to release the heap
+    concrete (the fat-pointer struct itself lives in the
+    binding's alloca).
+- **LLVM backend** (src/backend_llvm.rs):
+  - New `program_uses_box_dyn` detector walks struct fields,
+    fn params/returns, Let types, Drop types, and TypedExpr
+    types. If any of them is `Type::Box(Box::new(Type::Object(_)))`,
+    the LLVM emit panics with the actionable C-backend message.
+
+**3 new regression tests** in src/lib.rs:
+- `box_dyn_iface_construction_compiles` — basic round-trip.
+- `box_dyn_iface_method_dispatch_through_ref` — `b.area()`
+  through `ref Box<dyn Drawable>` param.
+- `box_dyn_iface_in_struct_field_unblocks_l2` — the documented
+  L2 blocker case.
+
+**New example file**:
+[examples/language/english/box_dyn_iface.vani](examples/language/english/box_dyn_iface.vani)
+demonstrates direct `Box<dyn>`, `ref Box<dyn>` param dispatch,
+struct-field ownership with a heterogeneous Circle + Square,
+plus runtime `assert` checks. Prints `49 16`.
+
+L2 Phase 3 closes the **substantive** half of the documented
+L2 blocker on the C backend. Phase 3b (LLVM parity) is the
+remaining piece and is queued in TODO.md §*Dedicated-session
+lifts* as a separate small arc.
+
+Lib ledger: **2000 lib + 54 parity** green (1997→2000 = 3 new
+Box<dyn> regression tests). All 221 example files compile.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phases 13.29–13.35: Khmer + Burmese + Amharic + Tibetan + Cherokee + Lao + Mongolian
 
 **Seven new scripts in one commit** — the final new-script

@@ -12428,9 +12428,23 @@ fn check_expr(
             // sits behind a borrow. Dispatch through the
             // same vtable; the data side is the same data
             // pointer the fat pointer already carries.
+            // L2 Phase 3 (2026-06-08): also accept `Box<dyn Iface>`
+            // (and `ref Box<dyn Iface>`) as a method receiver.
+            // Box<dyn Iface> has the same machine layout as
+            // plain `dyn Iface` (a 16-byte fat pointer) — the
+            // only difference is ownership of `.data`. Method
+            // dispatch is identical.
             let dyn_iface: Option<String> = match &recv_ty {
                 Type::Object(name) => Some(name.clone()),
                 Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Object(name) => Some(name.clone()),
+                    Type::Box(box_inner) => match box_inner.as_ref() {
+                        Type::Object(name) => Some(name.clone()),
+                        _ => None,
+                    },
+                    _ => None,
+                },
+                Type::Box(box_inner) => match box_inner.as_ref() {
                     Type::Object(name) => Some(name.clone()),
                     _ => None,
                 },
@@ -17452,25 +17466,35 @@ fn check_box_builtin(
     }
     let inner = check_expr(&args[0], env, signatures, diagnostics);
     let inner_ty = inner.ty().clone();
-    // v1 gates Box element type to Copy + sized. Refs / vecs /
-    // owned-strs / other boxes / dyn-iface fat pointers / etc.
-    // need either recursive drop (Vec, OwnedStr) or vtable
-    // plumbing (dyn) and are queued.
+    // v1 gates Box element type to Copy + sized OR `dyn Iface`.
+    // Refs / vecs / owned-strs / other boxes need recursive
+    // drop (Vec, OwnedStr) and are queued. `dyn Iface` ships in
+    // Phase 3 (2026-06-08): Box<dyn Iface> is a 16-byte fat
+    // pointer { vtable, heap_data_ptr } where the data slot is
+    // heap-allocated and owned — unlocks the documented
+    // blocker `struct Drawer { r: Box<dyn Renderer> }`.
     let is_supported = match &inner_ty {
         Type::I8 | Type::I16 | Type::I32 | Type::I64
         | Type::U8 | Type::U16 | Type::U32 | Type::U64
         | Type::F32 | Type::F64
         | Type::Bool => true,
         Type::Struct(_) => inner_ty.is_copy(),
+        // L2 Phase 3 (2026-06-08): Box<dyn Iface>. The inner
+        // expression is expected to be a DynCoerce node (the
+        // result of `value as dyn Iface`). The C backend
+        // special-cases __box_new when result_ty is
+        // Box<dyn Iface> to heap-allocate the concrete value
+        // and emit an owning fat pointer.
+        Type::Object(_) => true,
         _ => false,
     };
     if !is_supported {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "box() v1 only supports Copy + sized element types (primitives + Copy structs); \
-                 got `{}`. Recursive drop (Box<Vec<…>>, Box<OwnedStr>) and \
-                 Box<dyn Iface> are queued follow-ups",
+                "box() v1 only supports Copy + sized element types (primitives, Copy structs) \
+                 plus `dyn Iface`; got `{}`. Recursive drop (Box<Vec<…>>, Box<OwnedStr>) \
+                 is a queued follow-up",
                 inner_ty
             ),
         ));
@@ -25291,6 +25315,29 @@ fn explicit_cast(
             return cast_expr(checked, target.clone(), None, span);
         }
         _ => {}
+    }
+
+    // L2 Phase 3 (2026-06-08): explicit `value as dyn Iface`
+    // cast — route through the same DynCoerce node the
+    // implicit-coercion path uses. Lets `box(value as dyn Iface)`
+    // surface the dyn coercion inline without needing a
+    // temporary `let d: dyn Iface = value;`. The validation
+    // (concrete type implements iface) lives in make_dyn_coerce
+    // / coerce_checked already; we just need to route here too.
+    if let Type::Object(iface_name) = target {
+        if let Type::Struct(type_name) | Type::Enum(type_name) = checked.ty().clone() {
+            // Sanity: the impl must exist. The implicit-coercion
+            // path (coerce_checked) emits a helpful diagnostic
+            // if it doesn't; we mirror that by calling through.
+            let coerce = make_dyn_coerce(
+                checked.expr,
+                iface_name.clone(),
+                type_name,
+                target.clone(),
+                span,
+            );
+            return CheckedExpr::new(coerce.kind, coerce.ty, coerce.constant, coerce.span);
+        }
     }
 
     if !checked.ty().is_numeric() || !target.is_numeric() {

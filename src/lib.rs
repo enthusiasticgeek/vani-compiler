@@ -29027,6 +29027,76 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn box_dyn_iface_construction_compiles() {
+        // L2 Phase 3 (2026-06-08): `Box<dyn Iface>` heap-allocates
+        // a concrete value and wraps it in an owning fat pointer
+        // { vtable, heap_data_ptr }. The local IS the 16-byte
+        // fat pointer struct, NOT a pointer to one. Drop frees
+        // `.data` (the heap concrete).
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Drawable { fn area(self: Circle) -> i64; }
+            implement Drawable for Circle {
+              fn area(self: Circle) -> i64 { return self.r * self.r; }
+            }
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 6 };
+              let b: Box<dyn Drawable> = box(c as dyn Drawable);
+              return 0;
+            }
+        "#;
+        crate::compile(source).expect("Box<dyn Iface> basic compile");
+    }
+
+    #[test]
+    fn box_dyn_iface_method_dispatch_through_ref() {
+        // L2 Phase 3: method dispatch through `ref Box<dyn Iface>`.
+        // The checker treats Box<dyn Iface> the same as plain
+        // `dyn Iface` for method-call receivers — the underlying
+        // fat pointer is identical in layout, only the data slot
+        // ownership differs.
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Drawable { fn area(self: Circle) -> i64; }
+            implement Drawable for Circle {
+              fn area(self: Circle) -> i64 { return self.r * self.r; }
+            }
+            fn area_of_box(b: ref Box<dyn Drawable>) -> i64 {
+              return b.area();
+            }
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 7 };
+              let b: Box<dyn Drawable> = box(c as dyn Drawable);
+              let a: i64 = area_of_box(ref b);
+              return a;
+            }
+        "#;
+        crate::compile(source).expect("Box<dyn> method dispatch compile");
+    }
+
+    #[test]
+    fn box_dyn_iface_in_struct_field_unblocks_l2() {
+        // L2 Phase 3 — the originally documented L2 blocker case:
+        // `struct Drawer { r: Box<dyn Renderer> }`. The outer
+        // struct's scope-exit drop chains into the Box<dyn>
+        // field's `.data` free.
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Renderer { fn render(self: Circle) -> i64; }
+            implement Renderer for Circle {
+              fn render(self: Circle) -> i64 { return self.r * 2; }
+            }
+            struct Drawer { rend: Box<dyn Renderer> }
+            fn main() -> i64 {
+              let c: Circle = Circle { r: 5 };
+              let d: Drawer = Drawer { rend: box(c as dyn Renderer) };
+              return d.rend.render();
+            }
+        "#;
+        crate::compile(source).expect("Box<dyn> as struct field — L2 blocker — compiles");
+    }
+
+    #[test]
     fn box_rejects_non_copy_inner_type() {
         // L2 Phase 1 restriction: only Copy + sized inner types
         // are supported in v1. Box<Vec<i64>> requires recursive

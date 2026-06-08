@@ -193,7 +193,7 @@ coverage.
 
 | Item | Effort | Dependencies | Scope |
 |---|---|---|---|
-| **L2 Phase 3 — `Box<dyn Iface>`** | 8-12h | L2 Phases 1+2 (✅ shipped: C + LLVM Box\<T\> for Copy + sized inner). | Vtable plumbing through the heap allocation. Unlocks the original documented blocker `struct Drawer { r: Box<dyn Renderer> }`. Recursive drop for `Box<Vec<T>>` / `Box<OwnedStr>` may slot in as a Phase 3b. |
+| **L2 Phase 3b — `Box<dyn Iface>` on LLVM** | 4-6h | L2 Phase 3 ✅ (C backend, 2026-06-08). | Mirror the C backend's heap-alloc + fat-pointer-with-owning-data lowering on the LLVM backend. The detector `program_uses_box_dyn` currently panics with a clear `--backend=c` directive; remove that gate once codegen lands. Recursive-drop for `Box<Vec<T>>` / `Box<OwnedStr>` is a separate small follow-up. |
 | **Phase 10.2 Mandarin** | 30-50h | None (independent). The CJK Unified Ideographs block is reachable today; what's missing is the segmentation arc. | CJK Unified Ideographs without whitespace word boundaries — needs lookahead-based dictionary-driven segmentation. Distinct from Phase 9b Japanese which has Hiragana particles as natural separators. |
 | **Arc 8 v3.1 sugar** | 25-40h | Arc 8 v1/v2/v3 runtime (✅ shipped). | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. The underlying capability + v3 hand-rolled state-machine pattern already ship; this is the ergonomic compiler transform. |
 
