@@ -1,0 +1,86 @@
+// Arc 8 v3.1 — A4.4 acceptance: CancelToken auto-plumbing.
+//
+// When an async fn has a `ref CancelToken` / `mut ref CancelToken`
+// parameter AND its return type is i64, the v3.1 transform auto-
+// injects `if token.cancelled { return 0 - 1; }` before every
+// suspend point in the body. The user no longer has to write the
+// manual guard between every `await`. Caveat #6 closed.
+//
+// Land-bearing language pieces (also shipped 2026-06-08):
+//   - L4 partial lift: `ref Struct` / `mut ref Struct` are now
+//     allowed as v3.1 async-fn parameter types, stored as
+//     `const Struct_T* token` fields in the synthesized Task
+//     struct (raw pointer; lifetime is the caller's discipline,
+//     same as v1 refs elsewhere).
+//   - The user-struct field-ref-rejection check skips Task__X
+//     structs (synthesized by the v3.1 transform).
+//   - C backend toposorts `ref Struct` field types and emits the
+//     pointer declarator (`const Struct_X* field` instead of
+//     `/* ref */ field`).
+//   - LLVM backend already supports this shape via the
+//     existing `llvm_type_string(Type::Ref(_))` lowering.
+//
+// build & run:
+//   vanic run examples/language/english/async_cancel_auto.vani                # LLVM
+//   vanic run examples/language/english/async_cancel_auto.vani --backend=c    # C
+
+intent "A4.4 — CancelToken auto-plumbing (no manual cancel check)";
+
+// NOTE: no manual `if token.cancelled { ... }` here. The v3.1
+// transform auto-injects one immediately before each
+// suspend point. Compare against echo_p24_try_keyword.vani's
+// manual pattern.
+async fn fetch_auto(fd: i64, token: ref CancelToken) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);
+  return n;
+}
+
+fn drive(ep: i64, t: mut ref Task__fetch_auto) -> i64 {
+  while true {
+    let r: i64 = __poll_fetch_auto(t);
+    if r != 0 - 2 { return r; }
+    let _ = epoll_wait_one(ep, 100);
+  }
+  return 0;
+}
+
+fn main() -> i64 {
+  let ep: i64 = epoll_new();
+  let server: i64 = tcp_listen(0);
+  let port: i64 = tcp_socket_port(server);
+  print "port > 0:", port > 0;
+
+  task peer {
+    let _ = sleep_ms(10);
+    let c: i64 = tcp_connect_local(port);
+    let _ = tcp_send_str(c, "ok");
+    let _ = sleep_ms(50);
+    let _ = tcp_close(c);
+  }
+
+  let cfd: i64 = tcp_accept(server);
+  let _ = tcp_set_nonblocking(cfd);
+  let _ = epoll_add_read(ep, cfd);
+
+  // (1) Cancel BEFORE polling — auto-injected guard fires
+  // and short-circuits with the sentinel -1.
+  let tok1: CancelToken = CancelToken { cancelled: true };
+  let t1: Task__fetch_auto = fetch_auto(cfd, ref tok1);
+  let r1: i64 = drive(ep, mut ref t1);
+  assert r1 == 0 - 1;
+  print "auto-cancelled before suspend:", r1;
+
+  // (2) Not cancelled — fetch_auto's `io_recv_async` runs to
+  // completion, recv returns 2 bytes.
+  let tok2: CancelToken = CancelToken { cancelled: false };
+  let t2: Task__fetch_auto = fetch_auto(cfd, ref tok2);
+  let r2: i64 = drive(ep, mut ref t2);
+  assert r2 == 2;
+  print "ran to completion:", r2;
+
+  join peer;
+  let _ = tcp_close(cfd);
+  let _ = tcp_close(server);
+  let _ = epoll_close(ep);
+  return 0;
+}

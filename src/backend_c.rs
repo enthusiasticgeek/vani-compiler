@@ -408,6 +408,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
             Type::Struct(name) => out.push(name.clone()),
             Type::Array { element, .. } => struct_deps_in_ty(element, out),
             Type::Vec(element) => struct_deps_in_ty(element, out),
+            // A4.4 (2026-06-08): `ref Struct` / `mut ref Struct`
+            // fields in synthesized v3.1 Task structs lower to
+            // `const Struct_X*` — the pointee struct's typedef
+            // must still emit first for the C compiler to resolve
+            // the spelling (typedefs are anonymous-tagged, so
+            // they can't forward-declare).
+            Type::Ref(inner) | Type::RefMut(inner) => struct_deps_in_ty(inner, out),
             _ => {}
         }
     }
@@ -17756,6 +17763,17 @@ pub(crate) fn emit_struct_bundle(
         // through to their normal storage spelling.
         match fty {
             Type::Array { .. } => {
+                out.push_str("    ");
+                out.push_str(&format_declarator(fty, fname));
+                out.push_str(";\n");
+            }
+            // A4.4 (2026-06-08): `ref Struct` / `mut ref Struct`
+            // fields in synthesized v3.1 Task structs (the
+            // checker rejects them on user-declared structs).
+            // Lower to a pointer field via `format_declarator`,
+            // which already spells `const Struct_X* name` for
+            // `Type::Ref(Box<Struct>)` etc.
+            Type::Ref(_) | Type::RefMut(_) => {
                 out.push_str("    ");
                 out.push_str(&format_declarator(fty, fname));
                 out.push_str(";\n");

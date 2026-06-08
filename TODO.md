@@ -207,7 +207,7 @@ dedicated session.
 | Order | Task | Effort | Dependencies |
 |---|---|---|---|
 | ~~A4.3 Multi-task scheduling (v3.1)~~ | ✅ SHIPPED 2026-06-08 | — | Shipped via `mut ref vec[i]` language lift + echo_pool.vani acceptance. See STATUS.md current session. Caveat #12 closed. |
-| **5** | **L4 partial lift — refs in v3.1 Task fields** (unblocks A4.4 CancelToken auto-plumbing) | 12-15h | Touches checker + both backends. Closes A4.4 once L4 lifts. |
+| ~~L4 partial lift — refs in v3.1 Task fields + A4.4 CancelToken auto-plumbing~~ | ✅ SHIPPED 2026-06-08 | — | Actual scope was 4 narrow surgical changes plus the A4.4 pre-pass — far smaller than the 12-15h estimate. Caveats #5 + #6 closed. See STATUS.md current session. |
 | **6** | **Phase 10.2 Mandarin** (CJK tokenizer + dialect) | 30-50h, multi-day | Last queued language. Needs dictionary-driven word segmentation since CJK has no whitespace. |
 
 #### 🔵 Tier 3 — Deferred (user direction 2026-06-08)

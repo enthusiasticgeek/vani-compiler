@@ -6681,8 +6681,36 @@ fn validate_v31_linear_body(
     }
     // Phase 3-params (Phase 3p): params route through v31_local_
     // type_allowed.
+    //
+    // A4.4 (2026-06-08): also accept `ref Struct` / `mut ref Struct`
+    // as a param type — the v3.1 Task struct field stores a raw
+    // pointer to the borrowed struct (no lifetime tracking; user
+    // is responsible for keeping the borrow alive across awaits,
+    // same as v1 ref discipline elsewhere). This unblocks
+    // `async fn foo(token: ref CancelToken) -> i64` which
+    // composes with the CancelToken auto-plumbing pass to add
+    // cancellation guards before every suspend point.
+    //
+    // Restrictions kept:
+    //   - Ref/RefMut only for params (NOT locals — L4 stays for
+    //     locals).
+    //   - Inner type must be Struct(name) — no `ref i64`, no
+    //     `ref Vec<T>`, no `ref Box<T>`. The narrow case
+    //     CancelToken-shaped (a struct with bool / numeric
+    //     fields) is the load-bearing one.
+    fn param_ty_allowed(ty: &Type, type_params: &[String]) -> bool {
+        if v31_local_type_allowed_with_params(ty, type_params) {
+            return true;
+        }
+        match ty {
+            Type::Ref(inner) | Type::RefMut(inner) => {
+                matches!(&**inner, Type::Struct(_) | Type::Enum(_))
+            }
+            _ => false,
+        }
+    }
     for p in params {
-        if !v31_local_type_allowed_with_params(&p.ty, type_params) {
+        if !param_ty_allowed(&p.ty, type_params) {
             return Err(Diagnostic::new(
                 p.span,
                 format!(
@@ -7097,6 +7125,107 @@ fn rewrite_vars_to_fields(
 /// but doesn't satisfy Phase 1's narrow shape — the diagnostic
 /// is bubbled up so the user sees a clear pointer to which
 /// later phase handles their case.
+/// A4.4 (2026-06-08) — auto-inject cancel-guards before each
+/// suspend point in a v3.1 async fn body. Called by
+/// `try_v31_transform` only when the async fn has a
+/// `ref CancelToken` / `mut ref CancelToken` parameter and the
+/// return type is i64.
+///
+/// For each top-level suspend point (any `Stmt::Let` whose RHS
+/// is a Call to `io_*_async` or `__poll_*`), prepends:
+///   `if <token>.cancelled { return 0 - 1; }`
+/// Suspends nested inside if/while bodies get the same
+/// treatment via recursion. The guard uses `0 - 1` rather than
+/// a bare `-1` literal because vāṇी doesn't have unary minus
+/// (negative literals are lexed as binary subtraction by
+/// existing examples; mirror that convention here).
+fn inject_cancel_guards(body: &[Stmt], token_name: &str, span: Span) -> Vec<Stmt> {
+    fn is_suspend_let(s: &Stmt) -> bool {
+        if let Stmt::Let { expr, .. } = s {
+            if let ExprKind::Call { name, .. } = &expr.kind {
+                return name.starts_with("__poll_")
+                    || matches!(
+                        name.as_str(),
+                        "io_recv_async" | "io_send_async" | "io_accept_async"
+                    );
+            }
+        }
+        false
+    }
+    fn make_guard(token_name: &str, span: Span) -> Stmt {
+        // Sentinel = `0 - 1` (i64 = -1). The C / LLVM constant
+        // folders collapse it.
+        let neg_one = Expr {
+            kind: ExprKind::Binary {
+                op: crate::ast::BinaryOp::Sub,
+                left: Box::new(Expr {
+                    kind: ExprKind::Int(0),
+                    span,
+                }),
+                right: Box::new(Expr {
+                    kind: ExprKind::Int(1),
+                    span,
+                }),
+            },
+            span,
+        };
+        Stmt::If {
+            cond: Expr {
+                kind: ExprKind::FieldAccess {
+                    object: Box::new(Expr {
+                        kind: ExprKind::Var(token_name.to_string()),
+                        span,
+                    }),
+                    field: "cancelled".to_string(),
+                },
+                span,
+            },
+            then_body: vec![Stmt::Return {
+                expr: neg_one,
+                span,
+            }],
+            else_body: vec![],
+            span,
+        }
+    }
+    let mut out: Vec<Stmt> = Vec::new();
+    for s in body {
+        if is_suspend_let(s) {
+            out.push(make_guard(token_name, span));
+        }
+        match s {
+            Stmt::If {
+                cond,
+                then_body,
+                else_body,
+                span: s_span,
+            } => {
+                out.push(Stmt::If {
+                    cond: cond.clone(),
+                    then_body: inject_cancel_guards(then_body, token_name, span),
+                    else_body: inject_cancel_guards(else_body, token_name, span),
+                    span: *s_span,
+                });
+            }
+            Stmt::While {
+                cond,
+                invariants,
+                body: w_body,
+                span: s_span,
+            } => {
+                out.push(Stmt::While {
+                    cond: cond.clone(),
+                    invariants: invariants.clone(),
+                    body: inject_cancel_guards(w_body, token_name, span),
+                    span: *s_span,
+                });
+            }
+            other => out.push(other.clone()),
+        }
+    }
+    out
+}
+
 pub(crate) fn try_v31_transform(
     fn_name: &str,
     fn_name_span: crate::span::Span,
@@ -7153,6 +7282,42 @@ pub(crate) fn try_v31_transform(
     let mut anf_counter: usize = 0;
     let lifted_body = anf_lift_body(body, &mut anf_counter);
     let body = lifted_body.as_slice();
+
+    // A4.4 (2026-06-08) — CancelToken auto-plumbing. When the
+    // async fn has a `ref CancelToken` / `mut ref CancelToken`
+    // parameter AND the return type is i64 (sentinel-friendly),
+    // walk the lifted body and inject
+    //   if <token>.cancelled { return 0 - 1; }
+    // immediately before each top-level suspend point (any
+    // `Stmt::Let` whose RHS is a Call to `io_*_async` or
+    // `__poll_*`). Suspends nested inside if/while bodies get the
+    // same treatment via recursion.
+    //
+    // Non-i64 returns (Phase 3-returns ABI: `__result` field +
+    // status code) keep the user's manual cancellation pattern
+    // for v1 — auto-injection there would require synthesizing
+    // a default `__result` value, which is shape-dependent.
+    let cancel_token_param: Option<String> = params.iter().find_map(|p| {
+        let inner = match &p.ty {
+            Type::Ref(inner) | Type::RefMut(inner) => &**inner,
+            _ => return None,
+        };
+        match inner {
+            Type::Struct(name) if name == "CancelToken" => Some(p.name.clone()),
+            _ => None,
+        }
+    });
+    let auto_guarded_body: Vec<Stmt>;
+    let body = if matches!(return_type, Type::I64) {
+        if let Some(token_name) = cancel_token_param.as_ref() {
+            auto_guarded_body = inject_cancel_guards(body, token_name, fn_name_span);
+            auto_guarded_body.as_slice()
+        } else {
+            body
+        }
+    } else {
+        body
+    };
 
     let locals = match validate_v31_linear_body(
         fn_type_params, params, body, return_type

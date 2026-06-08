@@ -619,8 +619,16 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                 ),
             ));
         }
+        // A4.4 (2026-06-08): synthesized v3.1 Task structs (named
+        // `Task__<fn>`) are allowed to carry `ref Struct` /
+        // `mut ref Struct` fields — they're the storage shape for
+        // a v3.1 async fn's `ref CancelToken` (and similar)
+        // parameter. The reference's lifetime is the caller's
+        // responsibility, same as v1 ref discipline elsewhere.
+        // User-declared structs still get the L4 rejection here.
+        let is_v31_synth = decl.name.starts_with("Task__");
         for field in &decl.fields {
-            if field.ty.is_ref() || field.ty.is_ref_mut() {
+            if !is_v31_synth && (field.ty.is_ref() || field.ty.is_ref_mut()) {
                 diagnostics.push(Diagnostic::new(
                     field.span,
                     format!(

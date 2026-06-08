@@ -10,6 +10,87 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Tier 2 #5: L4 partial lift + A4.4 CancelToken auto-plumbing
+
+Closes the last two open Arc 8 v3.1 caveats in one ship: #5 (ref
+params in v3.1) and #6 (CancelToken auto-plumbing). The original
+estimate was 12-15h for L4; the actual lift turned out to be 4
+narrow surgical changes plus the A4.4 pre-pass.
+
+```vani
+// Before this ship: rejected at v3.1 narrow-gate; user had to
+// fall through to v1 desugar (no real cancellation).
+//
+// After: `ref CancelToken` flows through v3.1, the Task struct
+// stores a `const Struct_CancelToken*` field, and A4.4 injects
+// `if token.cancelled { return 0 - 1; }` before every suspend.
+async fn fetch_auto(fd: i64, token: ref CancelToken) -> i64 {
+  let n: i64 = io_recv_async(fd, 64);  // ← guard auto-injected here
+  return n;
+}
+```
+
+**L4 partial lift** (refs in v3.1 Task fields):
+1. `validate_v31_linear_body` accepts `Type::Ref(Box<Struct>)` /
+   `Type::RefMut(Box<Struct>)` as a parameter type — narrowed
+   via `param_ty_allowed` helper. Locals still rejected (L4
+   stays for locals).
+2. `check_program` skips the user-struct field-ref-rejection
+   check for synthesized v3.1 Task structs (name prefix
+   `Task__`).
+3. C backend's `emit_struct_bundle` lowers ref-typed fields
+   via `format_declarator` (`const Struct_X* token`) instead of
+   the placeholder `c_element_storage` spelling.
+4. C backend's struct-typedef toposort recurses into
+   `Type::Ref(_)` / `Type::RefMut(_)` so pointee structs emit
+   first.
+5. LLVM "just worked" — `llvm_type_string` already handles
+   `Type::Ref(_)` correctly, and the field-access codegen
+   auto-derefs through pointer fields via existing GEPs.
+
+**A4.4 CancelToken auto-plumbing** (`inject_cancel_guards` in
+`src/parser.rs`):
+- Detect `ref CancelToken` / `mut ref CancelToken` param.
+- For each top-level suspend point (`Stmt::Let { expr: Call(
+  "io_*_async" | "__poll_*") }`), prepend:
+  `if <token>.cancelled { return 0 - 1; }`.
+- Recurses into `Stmt::If` / `Stmt::While` bodies so nested
+  suspend points get the guard.
+- Restricted to i64 return type for v1; non-i64 returns
+  (Phase 3-returns ABI: `__result` field + status) keep the
+  manual pattern since auto-injection needs a default
+  `__result` value to materialize.
+- Runs AFTER `desugar_try_in_v31_body` + `anf_lift_body`,
+  BEFORE `validate_v31_linear_body` — so the validator sees
+  the guard-injected body and the segment collector treats
+  the synthesized If/Return like any other branch.
+
+**Example shipped**:
+[async_cancel_auto.vani](examples/language/english/async_cancel_auto.vani)
+— `fetch_auto` with no manual cancel check; A4.4 inserts the
+guard, the cancelled path returns -1, the alive path runs to
+completion and returns 2 bytes. Byte-identical on both
+backends; in the e2e parity sweep.
+
+Two regression tests
+(`ref_canceltoken_param_in_v31_async_fn_compiles`,
+`a44_auto_injects_cancel_guard_before_suspend`) pin the
+surface.
+
+**Caveats closed**:
+- #5 ref/mut ref parameters — narrow Struct-only case shipped;
+  `ref Vec<T>` / `ref Box<T>` / etc. remain rejected.
+- #6 CancelToken auto-plumbing — i64-return case shipped.
+- Caveats #2 (liveness initial impl) and #15 (test surface)
+  are the only remaining v3.1 design notes; both are polish.
+
+Lib ledger: **2009 lib** green (+2 from prior 2007). e2e + parity
+green.
+
+This closes Tier 2 #5 of the [TODO.md "Recommended task queue"](TODO.md).
+Tier 2 #6 (Phase 10.2 Mandarin CJK) is the only remaining
+queued arc.
+
 ## 🟢 Session 2026-06-08 (cont.) — Tier 2 #4: A4.3 multi-task via `mut ref vec[i]`
 
 Arc 8 v3.1's last substantive caveat (#12 multi-task scheduling)

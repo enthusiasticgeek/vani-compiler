@@ -29186,6 +29186,52 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn ref_canceltoken_param_in_v31_async_fn_compiles() {
+        // A4.4 (2026-06-08): `ref CancelToken` is now accepted
+        // as a v3.1 async-fn parameter. The synthesized Task
+        // struct carries it as a `const Struct_CancelToken*`
+        // field; the body's `token.cancelled` reads compile to
+        // `self->token->cancelled` via existing ref-deref paths.
+        let source = r#"
+            async fn fetcher(fd: i64, token: ref CancelToken) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        crate::compile(source).expect("ref CancelToken param compiles");
+        crate::compile_to_c(source).expect("C backend accepts ref CancelToken");
+        crate::compile_to_llvm(source).expect("LLVM backend accepts ref CancelToken");
+    }
+
+    #[test]
+    fn a44_auto_injects_cancel_guard_before_suspend() {
+        // A4.4 auto-plumbing: when an async fn has a
+        // `ref CancelToken` param + i64 return, the v3.1
+        // transform injects `if token.cancelled { return 0 - 1; }`
+        // before each suspend point. Verify by emitting C and
+        // looking for the synthesized check.
+        let source = r#"
+            async fn auto(fd: i64, token: ref CancelToken) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = crate::compile_to_c(source).expect("compiles");
+        // The auto-injected guard reads through the Task struct's
+        // token pointer field, so it emits roughly:
+        //   if (((v___t)->token)->cancelled) { return -1; }
+        // Looking for the cancelled-field read is a strong signal
+        // even though the surrounding shape may vary.
+        assert!(
+            c.contains("->cancelled") || c.contains(".cancelled"),
+            "A4.4 guard not visible in generated C; got:\n{}",
+            c
+        );
+    }
+
+    #[test]
     fn mut_ref_vec_index_compiles_and_types() {
         // A4.3 (2026-06-08): `mut ref vec[i]` is now accepted.
         // Result type is `RefMut(element_ty)`; both backends
