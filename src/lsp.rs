@@ -295,10 +295,65 @@ fn handle_hover(state: &LspState, params: lsp_types::HoverParams) -> Option<Hove
 /// Look up the type of the smallest typed expression covering the
 /// given cursor position. Returns `None` when the document doesn't
 /// parse/check or when the cursor isn't inside any typed expression.
+///
+/// Polish (2026-06-08): when the cursor lands on a postfix `?`
+/// token, augment the hover with a short doc-block explaining the
+/// operator's semantics + the equivalent `try` keyword form.
+/// The type is still the Try-wrapped payload type from the
+/// enclosing AST node, so users see both the type and the
+/// operator's meaning.
 pub fn compute_hover(source: &str, position: Position) -> Option<Hover> {
-    let checked = crate::compile(source).ok()?;
     let offset = position_to_byte_offset(source, position)?;
-    let (ty, span) = find_smallest_typed_at(&checked.ir, offset)?;
+
+    // Cursor-on-`?` check: lex the source and look for a
+    // `TokenKind::Question` whose span covers the offset. The
+    // `?` desugars at parse-time into a match-based form, so
+    // the `find_smallest_typed_at` lookup below may not see a
+    // typed expr at the original `?` byte. Even when type
+    // lookup fails, the operator's doc block is what the
+    // user wants on hover here.
+    let q_span = crate::lexer::lex(source)
+        .ok()
+        .into_iter()
+        .flatten()
+        .find(|tok| {
+            matches!(tok.kind, crate::lexer::TokenKind::Question)
+                && tok.span.start <= offset
+                && offset < tok.span.end
+        })
+        .map(|tok| tok.span);
+
+    let typed = crate::compile(source)
+        .ok()
+        .and_then(|checked| find_smallest_typed_at(&checked.ir, offset));
+
+    if let Some(q_span) = q_span {
+        // Always emit hover for `?` — even when type lookup
+        // fails (broken document) or when the desugar moved
+        // the typed expr's span away from the original `?`.
+        let type_prefix = match &typed {
+            Some((ty, _)) => format!("```intent\n: {}\n```\n\n", ty),
+            None => String::new(),
+        };
+        let value = format!(
+            "{}**Postfix `?` operator** — Option / Result early-return sugar. \
+             `EXPR?` desugars to `try EXPR` at parse time (same AST node, same \
+             narrow-gate restrictions: first-let-RHS position, payloaded enum, \
+             payload-less short-circuit variant). Returns the payload of the \
+             success variant; short-circuits the enclosing function with the \
+             failure variant otherwise.",
+            type_prefix
+        );
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value,
+            }),
+            range: Some(span_to_range(source, q_span)),
+        });
+    }
+
+    let (ty, span) = typed?;
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
@@ -2683,6 +2738,51 @@ mod tests {
             "inner shadow's use leaked into outer x's references: {:?}",
             refs
         );
+    }
+
+    #[test]
+    fn hover_on_postfix_question_includes_operator_doc() {
+        // Polish (2026-06-08): hovering on a `?` token augments
+        // the type info with a doc-block explaining the postfix
+        // sugar. Cursor positioning is by byte offset; the lexer
+        // pass finds the Question token covering the offset.
+        let src = "enum Opt { Some(i64), None } fn doit(o: Opt) -> Opt { let v: i64 = o?; return Opt.Some(v); }\n";
+        let q_offset = src.find('?').expect("`?` present in source");
+        let pos = byte_offset_to_position(src, q_offset);
+        let hover = compute_hover(src, pos).expect("hover should resolve on `?`");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup hover content");
+        };
+        assert!(
+            content.value.contains("Postfix `?` operator"),
+            "expected `?`-doc in hover, got {:?}",
+            content.value
+        );
+        assert!(
+            content.value.contains("try EXPR"),
+            "expected reference to `try` form, got {:?}",
+            content.value
+        );
+    }
+
+    #[test]
+    fn hover_on_plain_expr_does_not_include_question_doc() {
+        // Inverse: hovering on a regular expression (here the
+        // numeric literal `42`) returns just the type, not the
+        // `?` operator doc.
+        let src = "fn main() -> i64 { return 42; }\n";
+        let lit = src.find("42").unwrap();
+        let pos = byte_offset_to_position(src, lit);
+        let hover = compute_hover(src, pos).expect("hover on literal");
+        let HoverContents::Markup(content) = hover.contents else {
+            panic!("expected markup hover content");
+        };
+        assert!(
+            !content.value.contains("Postfix `?` operator"),
+            "`?` doc should not appear on a non-`?` cursor: {:?}",
+            content.value
+        );
+        assert!(content.value.contains("i64"), "expected i64 type");
     }
 
     #[test]
