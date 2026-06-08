@@ -6,7 +6,9 @@ Currently:
 
 - [`vani_translate.py`](#vani_translatepy--cross-language-vani-source-translator)
   — keyword-level translation between English / Sanskrit /
-  Hindi / Marathi `.vani` source files (Phase B.1).
+  Hindi / Marathi / Mandarin `.vani` source files (Phase B.1).
+  Mandarin support added 2026-06-08; the other four were
+  Phase B.1 v1.
 - [`llm_context/`](llm_context/README.md) — assembles a
   prompt-engineering bundle for off-the-shelf LLMs to use as
   vāṇी programmers (Phase ML-1, shipped 2026-06-07) **plus** an
@@ -21,7 +23,8 @@ Currently:
 **Status**: B.1 v1 — shipped 2026-06-06 (commit pending).
 
 Token-level keyword substitution between vāṇी's supported natural
-languages: English, Sanskrit, Hindi, Marathi.
+languages: English, Sanskrit, Hindi, Marathi, Mandarin (added
+2026-06-08).
 
 ### Usage
 

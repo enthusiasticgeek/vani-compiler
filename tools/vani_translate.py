@@ -51,83 +51,83 @@ from typing import Dict, List, Optional, Tuple
 # (e.g. कार्य vs फलन for "fn" in Hindi).
 ALIASES: Dict[str, Dict[str, str]] = {
     # Declarations
-    "Fn":         {"english": "fn",       "sanskrit": "कार्य",       "hindi": "फलन",       "marathi": "कार्य"},
-    "Let":        {"english": "let",      "sanskrit": "माना",       "hindi": "माना",       "marathi": "मान"},
-    "Struct":     {"english": "struct",   "sanskrit": "संरचना",      "hindi": "संरचना",     "marathi": "संरचना"},
-    "Enum":       {"english": "enum",     "sanskrit": "विकल्प",      "hindi": "गणन",        "marathi": "गणन"},
-    "Const":      {"english": "const",    "sanskrit": "स्थिर",        "hindi": "स्थिर",      "marathi": "स्थिर"},
+    "Fn":         {"english": "fn",       "sanskrit": "कार्य",       "hindi": "फलन",       "marathi": "कार्य",        "mandarin": "函数"},
+    "Let":        {"english": "let",      "sanskrit": "माना",       "hindi": "माना",       "marathi": "मान",          "mandarin": "让"},
+    "Struct":     {"english": "struct",   "sanskrit": "संरचना",      "hindi": "संरचना",     "marathi": "संरचना",      "mandarin": "结构"},
+    "Enum":       {"english": "enum",     "sanskrit": "विकल्प",      "hindi": "गणन",        "marathi": "गणन",          "mandarin": "枚举"},
+    "Const":      {"english": "const",    "sanskrit": "स्थिर",        "hindi": "स्थिर",      "marathi": "स्थिर",        "mandarin": "常量"},
 
     # Visibility / modules / imports
-    "Pub":        {"english": "pub",      "sanskrit": "सार्वजनिक",   "hindi": "सार्वजनिक",  "marathi": "सार्वजनिक"},
-    "Module":     {"english": "module",   "sanskrit": "खण्ड",        "hindi": "मॉड्यूल",    "marathi": "मॉड्यूल"},
-    "Use":        {"english": "use",      "sanskrit": "उपयोग",       "hindi": "उपयोग",      "marathi": "उपयोग"},
-    "As":         {"english": "as",       "sanskrit": "यथा",         "hindi": "यथा",        "marathi": "यथा"},
+    "Pub":        {"english": "pub",      "sanskrit": "सार्वजनिक",   "hindi": "सार्वजनिक",  "marathi": "सार्वजनिक",  "mandarin": "公开"},
+    "Module":     {"english": "module",   "sanskrit": "खण्ड",        "hindi": "मॉड्यूल",    "marathi": "मॉड्यूल",     "mandarin": "模块"},
+    "Use":        {"english": "use",      "sanskrit": "उपयोग",       "hindi": "उपयोग",      "marathi": "उपयोग",        "mandarin": "使用"},
+    "As":         {"english": "as",       "sanskrit": "यथा",         "hindi": "यथा",        "marathi": "यथा",          "mandarin": "作为"},
 
     # Control flow
-    "Return":     {"english": "return",   "sanskrit": "पुनरागम",     "hindi": "लौटाओ",      "marathi": "परत"},
-    "If":         {"english": "if",       "sanskrit": "यदि",         "hindi": "अगर",        "marathi": "जर"},
-    "Else":       {"english": "else",     "sanskrit": "अन्यथा",      "hindi": "वरना",       "marathi": "नाहीतर"},
-    "While":      {"english": "while",    "sanskrit": "यावत्",        "hindi": "जबतक",       "marathi": "जोपर्यंत"},
-    "For":        {"english": "for",      "sanskrit": "प्रति",        "hindi": "के लिए",     "marathi": "साठी"},
-    "In":         {"english": "in",       "sanskrit": "में",          "hindi": "में",         "marathi": "में"},
-    "From":       {"english": "from",     "sanskrit": "से",          "hindi": "से",          "marathi": "से"},
-    "To":         {"english": "to",       "sanskrit": "तक",          "hindi": "तक",          "marathi": "तक"},
-    "Break":      {"english": "break",    "sanskrit": "विराम",       "hindi": "रुको",        "marathi": "थांब"},
-    "Continue":   {"english": "continue", "sanskrit": "अग्रे",       "hindi": "आगे",         "marathi": "पुढे"},
-    "Then":       {"english": "then",     "sanskrit": "तदा",         "hindi": "तो",          "marathi": "तर"},
+    "Return":     {"english": "return",   "sanskrit": "पुनरागम",     "hindi": "लौटाओ",      "marathi": "परत",          "mandarin": "返回"},
+    "If":         {"english": "if",       "sanskrit": "यदि",         "hindi": "अगर",        "marathi": "जर",           "mandarin": "如果"},
+    "Else":       {"english": "else",     "sanskrit": "अन्यथा",      "hindi": "वरना",       "marathi": "नाहीतर",       "mandarin": "否则"},
+    "While":      {"english": "while",    "sanskrit": "यावत्",        "hindi": "जबतक",       "marathi": "जोपर्यंत",     "mandarin": "当"},
+    "For":        {"english": "for",      "sanskrit": "प्रति",        "hindi": "के लिए",     "marathi": "साठी",         "mandarin": "对于"},
+    "In":         {"english": "in",       "sanskrit": "में",          "hindi": "में",         "marathi": "में",          "mandarin": "in"},
+    "From":       {"english": "from",     "sanskrit": "से",          "hindi": "से",          "marathi": "से",           "mandarin": "从"},
+    "To":         {"english": "to",       "sanskrit": "तक",          "hindi": "तक",          "marathi": "तक",           "mandarin": "到"},
+    "Break":      {"english": "break",    "sanskrit": "विराम",       "hindi": "रुको",        "marathi": "थांब",         "mandarin": "中断"},
+    "Continue":   {"english": "continue", "sanskrit": "अग्रे",       "hindi": "आगे",         "marathi": "पुढे",         "mandarin": "继续"},
+    "Then":       {"english": "then",     "sanskrit": "तदा",         "hindi": "तो",          "marathi": "तर",           "mandarin": "那么"},
 
     # References
-    "Ref":        {"english": "ref",      "sanskrit": "दृष्ट्या",    "hindi": "देखो",        "marathi": "पहा"},
-    "Mut":        {"english": "mut",      "sanskrit": "परिवर्तनीय",  "hindi": "परिवर्तनीय",  "marathi": "बदल"},
+    "Ref":        {"english": "ref",      "sanskrit": "दृष्ट्या",    "hindi": "देखो",        "marathi": "पहा",          "mandarin": "引用"},
+    "Mut":        {"english": "mut",      "sanskrit": "परिवर्तनीय",  "hindi": "परिवर्तनीय",  "marathi": "बदल",          "mandarin": "可变"},
 
     # Matching
-    "Match":      {"english": "match",    "sanskrit": "मेल",         "hindi": "मिलान",       "marathi": "जुळवा"},
+    "Match":      {"english": "match",    "sanskrit": "मेल",         "hindi": "मिलान",       "marathi": "जुळवा",        "mandarin": "匹配"},
 
     # Verification
-    "Assert":     {"english": "assert",   "sanskrit": "सिद्धम्",      "hindi": "सुनिश्चित",  "marathi": "खात्री"},
-    "Prove":      {"english": "prove",    "sanskrit": "प्रमाण",      "hindi": "सिद्ध करो",   "marathi": "सिद्ध करा"},
-    "Requires":   {"english": "requires", "sanskrit": "अपेक्षित",    "hindi": "चाहिए",      "marathi": "पाहिजे"},
-    "Ensures":    {"english": "ensures",  "sanskrit": "सुनिश्चयित",  "hindi": "निश्चित",     "marathi": "निश्चित"},
+    "Assert":     {"english": "assert",   "sanskrit": "सिद्धम्",      "hindi": "सुनिश्चित",  "marathi": "खात्री",       "mandarin": "断言"},
+    "Prove":      {"english": "prove",    "sanskrit": "प्रमाण",      "hindi": "सिद्ध करो",   "marathi": "सिद्ध करा",    "mandarin": "证明"},
+    "Requires":   {"english": "requires", "sanskrit": "अपेक्षित",    "hindi": "चाहिए",      "marathi": "पाहिजे",        "mandarin": "要求"},
+    "Ensures":    {"english": "ensures",  "sanskrit": "सुनिश्चयित",  "hindi": "निश्चित",     "marathi": "निश्चित",      "mandarin": "保证"},
 
     # Bool / print
-    "True":       {"english": "true",     "sanskrit": "सत्य",        "hindi": "सत्य",        "marathi": "सत्य"},
-    "False":      {"english": "false",    "sanskrit": "असत्य",       "hindi": "असत्य",      "marathi": "असत्य"},
-    "Print":      {"english": "print",    "sanskrit": "लिख",         "hindi": "लिखो",        "marathi": "लिहा"},
+    "True":       {"english": "true",     "sanskrit": "सत्य",        "hindi": "सत्य",        "marathi": "सत्य",         "mandarin": "真"},
+    "False":      {"english": "false",    "sanskrit": "असत्य",       "hindi": "असत्य",      "marathi": "असत्य",        "mandarin": "假"},
+    "Print":      {"english": "print",    "sanskrit": "लिख",         "hindi": "लिखो",        "marathi": "लिहा",         "mandarin": "打印"},
 
     # Purity / parallelism
-    "Pure":       {"english": "pure",     "sanskrit": "शुद्ध",       "hindi": "शुद्ध",       "marathi": "शुद्ध"},
-    "Parallel":   {"english": "parallel", "sanskrit": "समानांतर",    "hindi": "समानांतर",   "marathi": "समानांतर"},
-    "Reduce":     {"english": "reduce",   "sanskrit": "संक्षेप",     "hindi": "संक्षेप",     "marathi": "संक्षेप"},
-    "With":       {"english": "with",     "sanskrit": "सह",          "hindi": "सह",          "marathi": "सह"},
+    "Pure":       {"english": "pure",     "sanskrit": "शुद्ध",       "hindi": "शुद्ध",       "marathi": "शुद्ध",        "mandarin": "纯"},
+    "Parallel":   {"english": "parallel", "sanskrit": "समानांतर",    "hindi": "समानांतर",   "marathi": "समानांतर",     "mandarin": "并行"},
+    "Reduce":     {"english": "reduce",   "sanskrit": "संक्षेप",     "hindi": "संक्षेप",     "marathi": "संक्षेप",      "mandarin": "reduce"},
+    "With":       {"english": "with",     "sanskrit": "सह",          "hindi": "सह",          "marathi": "सह",           "mandarin": "with"},
 
     # Interfaces / methods
-    "Interface":  {"english": "interface", "sanskrit": "संकेत",      "hindi": "संकेत",       "marathi": "संकेत"},
-    "Implement":  {"english": "implement", "sanskrit": "कार्यान्वित","hindi": "कार्यान्वित","marathi": "कार्यान्वित"},
-    "Methods":    {"english": "methods",   "sanskrit": "विधि",        "hindi": "विधि",        "marathi": "विधि"},
+    "Interface":  {"english": "interface", "sanskrit": "संकेत",      "hindi": "संकेत",       "marathi": "संकेत",       "mandarin": "接口"},
+    "Implement":  {"english": "implement", "sanskrit": "कार्यान्वित","hindi": "कार्यान्वित","marathi": "कार्यान्वित", "mandarin": "实现"},
+    "Methods":    {"english": "methods",   "sanskrit": "विधि",        "hindi": "विधि",        "marathi": "विधि",        "mandarin": "方法"},
 
     # Bounds
-    "Where":      {"english": "where",    "sanskrit": "यत्र",         "hindi": "जहाँ",        "marathi": "जिथे"},
-    "Is":         {"english": "is",       "sanskrit": "अस्ति",        "hindi": "है",          "marathi": "आहे"},
+    "Where":      {"english": "where",    "sanskrit": "यत्र",         "hindi": "जहाँ",        "marathi": "जिथे",         "mandarin": "其中"},
+    "Is":         {"english": "is",       "sanskrit": "अस्ति",        "hindi": "है",          "marathi": "आहे",          "mandarin": "is"},
 
     # Concurrency
-    "Try":        {"english": "try",      "sanskrit": "प्रयास",       "hindi": "प्रयास",     "marathi": "प्रयास"},
-    "Task":       {"english": "task",     "sanskrit": "नियोग",        "hindi": "नियोग",      "marathi": "नियोग"},
-    "Join":       {"english": "join",     "sanskrit": "संयोजन",       "hindi": "संयोजन",     "marathi": "संयोजन"},
+    "Try":        {"english": "try",      "sanskrit": "प्रयास",       "hindi": "प्रयास",     "marathi": "प्रयास",      "mandarin": "尝试"},
+    "Task":       {"english": "task",     "sanskrit": "नियोग",        "hindi": "नियोग",      "marathi": "नियोग",        "mandarin": "任务"},
+    "Join":       {"english": "join",     "sanskrit": "संयोजन",       "hindi": "संयोजन",     "marathi": "संयोजन",       "mandarin": "等待"},
 
     # Embedded — Layer 1.1 + 5
-    "Unsafe":     {"english": "unsafe",   "sanskrit": "असुरक्षित",    "hindi": "असुरक्षित",  "marathi": "असुरक्षित"},
-    "RegionKw":   {"english": "region",   "sanskrit": "क्षेत्र",       "hindi": "क्षेत्र",     "marathi": "क्षेत्र"},
+    "Unsafe":     {"english": "unsafe",   "sanskrit": "असुरक्षित",    "hindi": "असुरक्षित",  "marathi": "असुरक्षित",   "mandarin": "不安全"},
+    "RegionKw":   {"english": "region",   "sanskrit": "क्षेत्र",       "hindi": "क्षेत्र",     "marathi": "क्षेत्र",       "mandarin": "区域"},
 
     # SOV-S7 (2026-06-06): four newly-Devanagari-aliased
     # keywords. All tatsama Sanskrit roots shared across the
     # three Indo-Aryan dialects.
-    "Intent":     {"english": "intent",   "sanskrit": "उद्देश्य",     "hindi": "उद्देश्य",   "marathi": "उद्देश्य"},
-    "Type":       {"english": "type",     "sanskrit": "प्रकार",       "hindi": "प्रकार",      "marathi": "प्रकार"},
-    "Extern":     {"english": "extern",   "sanskrit": "बाह्य",        "hindi": "बाह्य",      "marathi": "बाह्य"},
-    "Invariant":  {"english": "invariant","sanskrit": "अपरिवर्तनीय",  "hindi": "अपरिवर्तनीय","marathi": "अपरिवर्तनीय"},
+    "Intent":     {"english": "intent",   "sanskrit": "उद्देश्य",     "hindi": "उद्देश्य",   "marathi": "उद्देश्य",     "mandarin": "目的"},
+    "Type":       {"english": "type",     "sanskrit": "प्रकार",       "hindi": "प्रकार",      "marathi": "प्रकार",       "mandarin": "类型"},
+    "Extern":     {"english": "extern",   "sanskrit": "बाह्य",        "hindi": "बाह्य",      "marathi": "बाह्य",        "mandarin": "外部"},
+    "Invariant":  {"english": "invariant","sanskrit": "अपरिवर्तनीय",  "hindi": "अपरिवर्तनीय","marathi": "अपरिवर्तनीय",  "mandarin": "不变量"},
 }
 
-SUPPORTED_LANGS = ("english", "sanskrit", "hindi", "marathi")
+SUPPORTED_LANGS = ("english", "sanskrit", "hindi", "marathi", "mandarin")
 
 
 def build_reverse_lookup() -> Dict[str, Tuple[str, str]]:
