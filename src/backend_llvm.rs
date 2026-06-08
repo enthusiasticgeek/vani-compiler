@@ -332,7 +332,12 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Channel(_, _) => 32, // ring buffer header — generous
         Type::Task => 16, // pthread_t + ctx*
         Type::Condvar => 8, // pointer to heap-allocated cv state
-        Type::Box(_) => 8, // L2 Phase 1: Box<T> lowers to T* (a single 64-bit pointer)
+        Type::Box(inner) => match &**inner {
+            // L2 Phase 3b: Box<dyn Iface> is the 16-byte
+            // fat-pointer struct (with owning .data), not 8-byte T*.
+            Type::Object(_) => 16,
+            _ => 8, // L2 Phase 1: Box<T> lowers to T* (a single 64-bit pointer)
+        },
         Type::Deque(_) => 32, // {data ptr, front, len, capacity}
         Type::HashSet(_) => 40, // closure #342: + tombstones for hashset_remove
         Type::HashMap(_, _) => 48, // closure #343: + tombstones for hashmap_remove
@@ -601,19 +606,16 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // backend — Copy + sized inner types, primitives + Copy
     // structs. The gate that previously redirected users to
     // `--backend=c` has been removed.
-    // L2 Phase 3 (2026-06-08): Box<dyn Iface> ships on the C
-    // backend only in v1; the LLVM heap-alloc + fat-pointer
-    // owning-data lowering is queued. Detect Box<dyn Iface>
-    // specifically and surface the actionable C-backend
-    // directive.
+    // L2 Phase 3b (2026-06-08): the LLVM backend now codegens
+    // Box<dyn Iface> end-to-end — same v1 surface as the C
+    // backend (heap-alloc concrete + owning fat pointer +
+    // `free(.data)` on drop). The pre-codegen panic gate that
+    // previously directed users to `--backend=c` is removed.
+    // `program_uses_box` + `program_uses_box_dyn` are kept as
+    // no-op helpers in case future arcs want them for
+    // diagnostics.
     let _ = program_uses_box(program);
-    if program_uses_box_dyn(program) {
-        panic!(
-            "Box<dyn Iface> codegen is C-backend only in v1 (L2 Phase 3). \
-             Run with `--backend=c` to compile this program. \
-             LLVM Box<dyn Iface> codegen is queued for L2 Phase 3b."
-        );
-    }
+    let _ = program_uses_box_dyn(program);
     let mut out = String::new();
     out.push_str("; ModuleID = 'intent'\n");
     // Populate the enum payload registry from the program's
@@ -2398,6 +2400,26 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // with the stack frame.
             if let Type::Box(inner) = ty {
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    // L2 Phase 3b (2026-06-08): Box<dyn Iface>
+                    // drop. The local is the fat pointer struct;
+                    // its `.data` field (the second i8*) owns
+                    // the heap concrete. Load the fat pointer,
+                    // extract slot 1, call @free.
+                    if let Type::Object(iface_name) = &**inner {
+                        let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                        let fat = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}, {}* {}\n",
+                            fat, dyn_ty, dyn_ty, addr
+                        ));
+                        let data_i8 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1\n",
+                            data_i8, dyn_ty, fat
+                        ));
+                        out.push_str(&format!("  call void @free(i8* {})\n", data_i8));
+                        return;
+                    }
                     let llvm_inner = llvm_type_string(inner);
                     let ptr = ctx.fresh_tmp();
                     out.push_str(&format!(
@@ -8884,6 +8906,73 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     Type::Box(inner) => &**inner,
                     _ => unreachable!("__box_new result type must be Box<T>"),
                 };
+                // L2 Phase 3b (2026-06-08): Box<dyn Iface>. The
+                // argument is a DynCoerce node — extract the
+                // concrete value's source Var (its stack alloca
+                // address), malloc a heap slot of sizeof(concrete),
+                // load+store the value into the slot, and build the
+                // owning fat pointer aggregate
+                // {%intent_vtbl_<Iface>*, i8*}.
+                if let Type::Object(iface_name) = inner_ty {
+                    let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                    let vtbl_ty = format!("%intent_vtbl_{}", iface_name);
+                    let TypedExprKind::DynCoerce { value, from_type_name, .. } = &args[0].kind
+                    else {
+                        unreachable!(
+                            "Box<dyn Iface> __box_new expected a DynCoerce arg; got {:?}",
+                            args[0].kind
+                        );
+                    };
+                    let TypedExprKind::Var(src_name) = &value.kind else {
+                        unreachable!(
+                            "Box<dyn Iface> DynCoerce source must be a Var (checker hoist); \
+                             got {:?}",
+                            value.kind
+                        );
+                    };
+                    let (_src_ty, src_addr) = ctx
+                        .locals
+                        .get(src_name)
+                        .cloned()
+                        .expect("Box<dyn>: source var must be in scope");
+                    let concrete_llvm = llvm_type_string(&value.ty);
+                    let concrete_bytes = llvm_byte_size(&value.ty);
+                    // 1. Heap-allocate sizeof(concrete).
+                    let raw_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i8* @malloc(i64 {})\n",
+                        raw_i8, concrete_bytes
+                    ));
+                    // 2. bitcast to T* so we can store the value.
+                    let heap_typed = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i8* {} to {}*\n",
+                        heap_typed, raw_i8, concrete_llvm
+                    ));
+                    // 3. load concrete from src alloca, store into heap slot.
+                    let loaded = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        loaded, concrete_llvm, concrete_llvm, src_addr
+                    ));
+                    out.push_str(&format!(
+                        "  store {} {}, {}* {}\n",
+                        concrete_llvm, loaded, concrete_llvm, heap_typed
+                    ));
+                    // 4. Build the owning fat pointer aggregate.
+                    let vtbl_global = format!("@intent_vtbl_{}_{}", iface_name, from_type_name);
+                    let stage0 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} undef, {}* {}, 0\n",
+                        stage0, dyn_ty, vtbl_ty, vtbl_global
+                    ));
+                    let stage1 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} {}, i8* {}, 1\n",
+                        stage1, dyn_ty, stage0, raw_i8
+                    ));
+                    return stage1;
+                }
                 let llvm_inner = llvm_type_string(inner_ty);
                 let inner_bytes = llvm_byte_size(inner_ty);
                 let value = emit_expr(&args[0], ctx, out);
@@ -41457,7 +41546,13 @@ fn llvm_type_string(ty: &Type) -> String {
         // via @free at scope exit. Storage shape matches a raw
         // `*mut T` at the LLVM IR level — the difference is in
         // ownership semantics (the checker tracks it).
-        Type::Box(inner) => format!("{}*", llvm_type_string(inner)),
+        // L2 Phase 3b (2026-06-08): Box<dyn Iface> is the
+        // fat-pointer struct itself (16 bytes), NOT a pointer
+        // to one. The `.data` field owns the heap concrete.
+        Type::Box(inner) => match &**inner {
+            Type::Object(name) => format!("%intent_dyn_{}", name),
+            _ => format!("{}*", llvm_type_string(inner)),
+        },
         _ => llvm_type(ty).to_string(),
     }
 }

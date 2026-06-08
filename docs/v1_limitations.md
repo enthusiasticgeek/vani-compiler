@@ -69,14 +69,15 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phases 1 + 2 + 3-on-C)
+### L2 — `Box<T>` owning heap pointer ✅ SHIPPED (Phases 1 + 2 + 3 + 3b)
 
-**Status**: Phases 1 + 2 shipped 2026-06-07 (Box\<T\> for Copy
-primitives + Copy structs on both backends). **Phase 3 shipped
-2026-06-08 on the C backend** — `Box<dyn Iface>` heap-allocates
-a concrete value into an owning fat pointer and unlocks the
-documented blocker `struct Drawer { r: Box<dyn Renderer> }`.
-Phase 3 LLVM codegen (Phase 3b) is queued.
+**Status**: All four phases shipped 2026-06-07 → 2026-06-08.
+Box\<T\> for Copy + sized inner types works on both backends
+(C + LLVM). `Box<dyn Iface>` heap-allocates a concrete value
+into an owning fat pointer with method dispatch through the
+existing vtable infrastructure — unlocks the originally
+documented blocker `struct Drawer { r: Box<dyn Renderer> }`
+on both backends.
 
 ```vani
 struct Circle { r: i64 }
@@ -112,14 +113,30 @@ fn main() -> i64 {
 - Struct fields can hold `Box<dyn Iface>`; the outer struct's
   drop walker chains into the field's `.data` free.
 
-**Phase 3 restrictions (queued)**:
-- **LLVM backend** — Phase 3b. Programs using `Box<dyn Iface>`
-  on the LLVM backend hit a clear pre-codegen error directing
-  users to `--backend=c`. The detector (`program_uses_box_dyn`)
-  walks struct fields, fn params/returns, let types, and
-  TypedExpr types.
+**Phase 3b add (LLVM backend codegen)** — 2026-06-08:
+- `llvm_type_string(Type::Box(Box::new(Type::Object(name))))`
+  → `%intent_dyn_<Iface>` (the fat-pointer struct, 16 bytes),
+  NOT a pointer to one.
+- `llvm_byte_size(Type::Box(Box::new(Type::Object(_))))` → 16.
+- `__box_new` LLVM IR — when inner is `Type::Object(iface)`:
+  ```llvm
+  %raw = call i8* @malloc(i64 <sizeof concrete>)
+  %heap = bitcast i8* %raw to %Struct_Concrete*
+  %loaded = load %Struct_Concrete, %Struct_Concrete* %src_addr
+  store %Struct_Concrete %loaded, %Struct_Concrete* %heap
+  %s0 = insertvalue %intent_dyn_Iface undef, %intent_vtbl_Iface* @intent_vtbl_Iface_Concrete, 0
+  %s1 = insertvalue %intent_dyn_Iface %s0, i8* %raw, 1
+  ```
+- Drop emission: load the fat pointer struct, `extractvalue …, 1`
+  to pull out the i8* `.data`, `call void @free(i8* …)`.
+- The pre-codegen `program_uses_box_dyn` gate is removed; both
+  backends now reach parity for the full v1 surface.
+
+**Remaining follow-up (queued, optional)**:
 - **`box(concrete)` without explicit `as dyn Iface`** — needs
-  expected-type threading into `check_box_builtin`. Queued.
+  expected-type threading into `check_box_builtin`. Cosmetic
+  convenience; the current `box(value as dyn Iface)` surface
+  is fully functional.
 
 ```vani
 fn main() -> i64 {
@@ -190,6 +207,14 @@ struct Holder { b: Box<Point> }     // ✅ Box in struct field
   LLVM IR shape (`@malloc` + `bitcast i8*` + `@free`).
 - `lib.rs::box_llvm_struct_field_storage_compiles` — Box as
   struct field reaches LLVM codegen.
+- `lib.rs::box_dyn_iface_construction_compiles` — Box<dyn Iface>
+  round-trip (Phase 3 + 3b).
+- `lib.rs::box_dyn_iface_method_dispatch_through_ref` — method
+  call through `ref Box<dyn Iface>` parameter.
+- `lib.rs::box_dyn_iface_in_struct_field_unblocks_l2` — the
+  originally documented L2 blocker case.
+- [`examples/language/english/box_dyn_iface.vani`](../examples/language/english/box_dyn_iface.vani)
+  runs on both backends — prints `49 16`.
 
 ### L3 — Pattern-match scrutinee must be by value ✅ SHIPPED 2026-06-07
 

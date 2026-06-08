@@ -10,6 +10,76 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — L2 Phase 3b: Box\<dyn Iface\> LLVM parity
+
+LLVM backend reaches parity with C for `Box<dyn Iface>`. The
+Phase 3 pre-codegen gate (which directed users to
+`--backend=c`) is removed; programs using `Box<dyn>` now compile
+on both backends end-to-end. L2 is now **fully closed** —
+docs/v1_limitations.md L2 marks ✅ SHIPPED for all four phases
+(1 + 2 + 3 + 3b).
+
+```vani
+struct Drawer { rend: Box<dyn Drawable> }
+
+fn main() -> i64 {
+  let c: Circle = Circle { r: 7 };
+  let b: Box<dyn Drawable> = box(c as dyn Drawable);
+  let d: Drawer = Drawer { rend: box(Circle { r: 4 } as dyn Drawable) };
+  print b.area(), d.rend.area();    // 49 16  on BOTH backends
+  return 0;
+}
+```
+
+**LLVM lowering shipped**:
+- `llvm_type_string(Type::Box(Type::Object(name)))` → `%intent_dyn_<Iface>`
+  (the fat-pointer struct itself, 16 bytes, NOT `%intent_dyn_<Iface>*`).
+  Mirrors the C backend's storage shape exactly.
+- `llvm_byte_size(Type::Box(Type::Object(_)))` → 16.
+- `__box_new` LLVM IR — three-instruction lowering for Box<dyn>:
+  ```llvm
+  %raw = call i8* @malloc(i64 <sizeof concrete>)
+  %heap = bitcast i8* %raw to %Struct_Concrete*
+  %loaded = load %Struct_Concrete, %Struct_Concrete* %src_addr
+  store %Struct_Concrete %loaded, %Struct_Concrete* %heap
+  %s0 = insertvalue %intent_dyn_Iface undef, %vtbl_ptr, 0
+  %s1 = insertvalue %intent_dyn_Iface %s0, i8* %raw, 1
+  ```
+  The source value's stack alloca is `load`-ed and `store`-d
+  into the heap slot — concrete is now owned by the box's
+  `.data` field.
+- Drop emission for `Type::Box(Type::Object(iface))`:
+  ```llvm
+  %fat = load %intent_dyn_Iface, %intent_dyn_Iface* %addr
+  %data_i8 = extractvalue %intent_dyn_Iface %fat, 1
+  call void @free(i8* %data_i8)
+  ```
+  Frees the heap concrete; the fat pointer struct in the
+  binding's alloca is reclaimed with the stack frame.
+- Method dispatch through `Box<dyn Iface>` was already wired
+  in Phase 3 (checker arm extended for the receiver case) and
+  routes through the existing `DynDispatch` LLVM codegen.
+
+**Pre-codegen panic gate removed**: `program_uses_box` and
+`program_uses_box_dyn` are kept as no-op helpers (the call
+sites reduced to `let _ = …;`) in case future arcs want them
+for diagnostics, but neither emits a panic anymore.
+
+**Regression tests** in `src/lib.rs` continue to pass — the
+three Box<dyn> tests from Phase 3 now exercise both backends
+via the shared `crate::compile` path which lowers through
+LLVM by default. The
+[examples/language/english/box_dyn_iface.vani](examples/language/english/box_dyn_iface.vani)
+example runs end-to-end on both backends and prints `49 16`.
+
+L2 is fully shipped. The remaining cosmetic follow-up
+(expected-type threading so `box(value)` works without an
+explicit `as dyn Iface` cast) is documented but not blocking
+— the current surface is fully functional.
+
+Lib ledger: **2000 lib + 54 parity** green (unchanged from
+Phase 3). All 221 example files compile across both backends.
+
 ## 🟢 Session 2026-06-08 (cont.) — L2 Phase 3: Box\<dyn Iface\> (C backend)
 
 The originally documented L2 blocker —
