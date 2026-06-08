@@ -28174,6 +28174,41 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn box_llvm_codegen_emits_malloc_store_free() {
+        // L2 Phase 2 (2026-06-07): LLVM backend codegens Box<T>
+        // for Copy + sized inner types. Pin the IR shape so
+        // future refactors notice if the heap-alloc / store /
+        // free trio drifts.
+        let source = r#"
+            fn main() -> i64 {
+              let b: Box<i64> = box(42);
+              let v: i64 = unbox(ref b);
+              return v;
+            }
+        "#;
+        let ir = compile_to_llvm(source).expect("Box<i64> LLVM codegen");
+        assert!(ir.contains("call i8* @malloc"), "expected @malloc call in IR: {}", ir);
+        assert!(ir.contains("call void @free"), "expected @free call in IR: {}", ir);
+        assert!(ir.contains("bitcast i8*"), "expected bitcast i8* in IR: {}", ir);
+    }
+
+    #[test]
+    fn box_llvm_struct_field_storage_compiles() {
+        // L2 Phase 2: Box as a struct field also reaches LLVM
+        // codegen (uniform scalar Let path + struct typedef
+        // with T* field).
+        let source = r#"
+            struct Holder { b: Box<i64> }
+            fn main() -> i64 {
+              let h: Holder = Holder { b: box(99) };
+              let v: i64 = unbox(ref h.b);
+              return v;
+            }
+        "#;
+        compile_to_llvm(source).expect("Box<i64> as struct field LLVM-compiles");
+    }
+
+    #[test]
     fn box_rejects_non_copy_inner_type() {
         // L2 Phase 1 restriction: only Copy + sized inner types
         // are supported in v1. Box<Vec<i64>> requires recursive

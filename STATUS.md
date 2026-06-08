@@ -10,6 +10,80 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — Phase 11 L2 Box\<T\> Phase 2 (LLVM backend codegen)
+
+The LLVM backend reaches parity with C for `Box<T>` — same v1
+surface (Copy + sized inner types), same end-to-end behavior on
+primitive, Copy-struct, and struct-field cases. The Phase 1
+pre-codegen gate (which directed users to `--backend=c`) is
+removed.
+
+```vani
+fn main() -> i64 {
+  let b: Box<i64> = box(42);
+  let v: i64 = unbox(ref b);
+  return v;                          // runs on both backends now
+}
+```
+
+```vani
+struct Holder { b: Box<i64> }
+fn main() -> i64 {
+  let h: Holder = Holder { b: box(99) };
+  let v: i64 = unbox(ref h.b);
+  return v;                          // outer struct drop chains
+                                    // into the Box's free()
+}                                   // on both C and LLVM
+```
+
+**LLVM-side surface**:
+- `llvm_type_string(Type::Box(inner))` → `{T}*` (single typed
+  pointer; same shape as `Type::Ref` / `Type::Ptr`).
+- `__box_new` LLVM IR — three-instruction lowering:
+  ```llvm
+  %raw = call i8* @malloc(i64 <sizeof T>)
+  %typed = bitcast i8* %raw to T*
+  store T %value, T* %typed
+  ```
+- `__box_get` LLVM IR — double load through the `ref Box<T>`:
+  ```llvm
+  %box_ptr = load T*, T** %ref_to_box
+  %value = load T, T* %box_ptr
+  ```
+- Scope-exit drop in `TypedStmt::Drop`:
+  ```llvm
+  %ptr = load T*, T** %addr
+  %as_i8 = bitcast T* %ptr to i8*
+  call void @free(i8* %as_i8)
+  ```
+- `is_scalar(Type::Box(_))` returns true so the uniform Let
+  `alloca + store` path applies — Box stores like any other
+  machine-word scalar (raw ptr, fn-ptr, etc.).
+
+**Pre-codegen gate removed**: `program_uses_box` is kept as a
+no-op helper (the call site reduced to `let _ = program_uses_box(program);`)
+in case future arcs want it for diagnostics, but Box no longer
+hits a panic; full LLVM codegen runs end-to-end.
+
+**2 new regression tests** in `src/lib.rs`:
+- `box_llvm_codegen_emits_malloc_store_free` — pins the IR
+  shape (`@malloc`, `bitcast i8*`, `@free`) so future refactors
+  surface drift.
+- `box_llvm_struct_field_storage_compiles` — Box-in-struct-field
+  reaches LLVM codegen cleanly.
+
+**Phase 3 remaining**:
+- `Box<dyn Iface>` with vtable plumbing — the original
+  documented blocker (`struct Drawer { r: Box<dyn Renderer> }`).
+- Box of affine inner types (`Box<Vec<i64>>`, `Box<OwnedStr>`)
+  with recursive drop walks.
+
+[docs/v1_limitations.md](docs/v1_limitations.md) L2 section
+updated to reflect Phase 1 + 2 shipped, Phase 3 queued.
+
+Lib ledger: **1952 lib + 54 parity** green (1950→1952 = 2 new
+LLVM Box regression tests). All 185 example files compile.
+
 ## 🟢 Session 2026-06-07 (cont.) — Phase 11 L2 Box\<T\> Phase 1 (owning heap pointer)
 
 The first half of the L2 limitation ships: vāṇी now has a real

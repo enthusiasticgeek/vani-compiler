@@ -69,12 +69,12 @@ The diagnostic now points at the documented workaround
 - `lib.rs::enum_non_copy_payload_binding_now_compiles_via_value_l1`
   — updated from the previous rejection test.
 
-### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phase 1)
+### L2 — `Box<T>` owning heap pointer ⚠️ PARTIALLY SHIPPED (Phases 1 + 2)
 
-**Status**: Phase 1 shipped 2026-06-07. `Box<T>` for Copy
-primitives + Copy structs works end-to-end on the C backend,
-including struct-field storage with automatic drop chaining.
-LLVM backend and `Box<dyn Iface>` queued for Phase 2/3.
+**Status**: Phases 1 + 2 shipped 2026-06-07. `Box<T>` for Copy
+primitives + Copy structs works end-to-end on **both backends**
+(C + LLVM), including struct-field storage with automatic drop
+chaining. `Box<dyn Iface>` queued for Phase 3.
 
 ```vani
 fn main() -> i64 {
@@ -100,15 +100,24 @@ struct Holder { b: Box<Point> }     // ✅ Box in struct field
 - Struct-field storage works — the outer struct's drop walker
   chains into the Box field's `free()`.
 
-**Phase 1 restrictions (queued follow-ups)**:
-- **LLVM backend** — Box codegen is C-only in v1; programs using
-  Box on the LLVM backend hit a clear pre-codegen error
-  directing users to `--backend=c`. Phase 2.
+**Remaining restrictions (queued follow-ups)**:
 - **`Box<dyn Iface>`** — the original documented blocker
   (`struct Drawer { r: Box<dyn Renderer> }`) needs vtable
   plumbing through the heap allocation. Phase 3.
 - **Box of affine inner type** (`Box<Vec<i64>>`, `Box<OwnedStr>`)
   — requires recursive drop walks. Queued.
+
+**Phase 2 add (LLVM backend codegen)** — 2026-06-07:
+- `llvm_type_string(Type::Box(inner))` → `{T}*`.
+- `__box_new` LLVM IR: `call i8* @malloc(i64 <sizeof>)` +
+  `bitcast i8* to T*` + `store T <value>, T* <ptr>`.
+- `__box_get` LLVM IR: `load T*` from the `ref Box<T>` (T**),
+  then `load T` from the resulting Box pointer.
+- Scope-exit drop in `TypedStmt::Drop` arm: load T*, bitcast to
+  i8*, `call void @free(i8* …)`.
+- `is_scalar(Type::Box(_))` returns true so the uniform Let
+  alloca-and-store path applies.
+- Pre-codegen `program_uses_box` gate removed.
 
 **Fix surface** (already in `main` as of 2026-06-07):
 - `src/ast.rs::Type::Box(Box<Type>)` — new affine variant.
@@ -132,6 +141,10 @@ struct Holder { b: Box<Point> }     // ✅ Box in struct field
   documented blocker shape (Box as struct field).
 - `lib.rs::box_rejects_non_copy_inner_type` — pins the v1 Copy
   restriction with a Box<Vec<i64>> rejection.
+- `lib.rs::box_llvm_codegen_emits_malloc_store_free` — pins the
+  LLVM IR shape (`@malloc` + `bitcast i8*` + `@free`).
+- `lib.rs::box_llvm_struct_field_storage_compiles` — Box as
+  struct field reaches LLVM codegen.
 
 ### L3 — Pattern-match scrutinee must be by value ✅ SHIPPED 2026-06-07
 

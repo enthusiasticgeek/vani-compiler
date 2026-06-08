@@ -596,18 +596,14 @@ fn emit_brahmi_print_helper_ll(
 }
 
 pub fn emit_llvm(program: &TypedProgram) -> String {
-    // L2 Phase 1 (2026-06-07): Box<T> codegen is C-only in v1.
-    // The LLVM backend's heap-allocation IR (calls to @malloc /
-    // @free + struct-element GEP) lives behind a follow-up arc;
-    // emit a clear pre-codegen error directing users to the C
-    // backend rather than panic deep in let-binding lowering.
-    if program_uses_box(program) {
-        panic!(
-            "Box<T> codegen is C-backend only in v1 (L2 Phase 1). \
-             Run with `--backend=c` to compile this program. \
-             LLVM Box codegen is queued for L2 Phase 2."
-        );
-    }
+    // L2 Phase 2 (2026-06-07): the LLVM backend now codegens
+    // Box<T> end-to-end for the same v1 surface as the C
+    // backend — Copy + sized inner types, primitives + Copy
+    // structs. The gate that previously redirected users to
+    // `--backend=c` has been removed. `program_uses_box` is
+    // kept as a no-op helper in case future arcs need it for
+    // diagnostics. (See L2 Phase 3 for Box<dyn Iface>.)
+    let _ = program_uses_box(program);
     let mut out = String::new();
     out.push_str("; ModuleID = 'intent'\n");
     // Populate the enum payload registry from the program's
@@ -2385,6 +2381,28 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             }
         }
         TypedStmt::Drop { name, ty, moved_fields } => {
+            // L2 Phase 2 (2026-06-07): Box<T> scope-exit drop.
+            // The local stores T* (the heap slot pointer). Load
+            // it as i8*, then call @free. The slot itself is
+            // freed; the alloca holding the pointer is reclaimed
+            // with the stack frame.
+            if let Type::Box(inner) = ty {
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    let llvm_inner = llvm_type_string(inner);
+                    let ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}*, {}** {}\n",
+                        ptr, llvm_inner, llvm_inner, addr
+                    ));
+                    let as_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast {}* {} to i8*\n",
+                        as_i8, llvm_inner, ptr
+                    ));
+                    out.push_str(&format!("  call void @free(i8* {})\n", as_i8));
+                }
+                return;
+            }
             // Deque<i64>: free the heap data buffer at scope
             // exit. Handle's stack-allocated struct otherwise.
             if matches!(ty, Type::Deque(_)) {
@@ -8844,6 +8862,58 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     dest, s
                 ));
                 return dest;
+            }
+            // L2 Phase 2 (2026-06-07): Box<T> heap allocation +
+            // read. __box_new lowers to: bitcast i8* from @malloc,
+            // store the inner value through that pointer, return
+            // the typed pointer. __box_get lowers to a load
+            // through a `ref Box<T>` (= T**) — first load the
+            // T*, then load *T from it.
+            if name == "__box_new" {
+                let inner_ty = match &expr.ty {
+                    Type::Box(inner) => &**inner,
+                    _ => unreachable!("__box_new result type must be Box<T>"),
+                };
+                let llvm_inner = llvm_type_string(inner_ty);
+                let inner_bytes = llvm_byte_size(inner_ty);
+                let value = emit_expr(&args[0], ctx, out);
+                // i8* raw_ptr = malloc(sizeof(T))
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @malloc(i64 {})\n",
+                    raw, inner_bytes
+                ));
+                // typed_ptr = bitcast i8* raw to T*
+                let typed_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to {}*\n",
+                    typed_ptr, raw, llvm_inner
+                ));
+                // store T value into *typed_ptr
+                out.push_str(&format!(
+                    "  store {} {}, {}* {}\n",
+                    llvm_inner, value, llvm_inner, typed_ptr
+                ));
+                return typed_ptr;
+            }
+            if name == "__box_get" {
+                // The arg is a `ref Box<T>` which lowers to T**.
+                // First load the T* (the Box's heap pointer),
+                // then load *T from it.
+                let inner_ty = &expr.ty;
+                let llvm_inner = llvm_type_string(inner_ty);
+                let ref_ptr = emit_expr(&args[0], ctx, out);
+                let box_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}*, {}** {}\n",
+                    box_ptr, llvm_inner, llvm_inner, ref_ptr
+                ));
+                let value = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}, {}* {}\n",
+                    value, llvm_inner, llvm_inner, box_ptr
+                ));
+                return value;
             }
             // Deque<i64> builtins (closure #303). Call
             // outlined helpers emitted at module scope.
@@ -40920,6 +40990,10 @@ fn is_scalar(ty: &Type) -> bool {
         // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
         // Machine word, same scalar Let path.
         || matches!(ty, Type::ArenaRef(_))
+        // L2 Phase 2 (2026-06-07): Box<T> is a single pointer at
+        // the machine level (T*). The scalar Let path's
+        // `alloca T*` and `store T*` work uniformly.
+        || matches!(ty, Type::Box(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -41287,6 +41361,12 @@ fn llvm_type_string(ty: &Type) -> String {
         // types). Only emitted when the interface is actually
         // used as `dyn Iface` somewhere.
         Type::Object(name) => format!("%intent_dyn_{}", name),
+        // L2 Phase 2 (2026-06-07): Box<T> lowers to a single T*
+        // pointer. Constructed via @malloc (in __box_new), freed
+        // via @free at scope exit. Storage shape matches a raw
+        // `*mut T` at the LLVM IR level — the difference is in
+        // ownership semantics (the checker tracks it).
+        Type::Box(inner) => format!("{}*", llvm_type_string(inner)),
         _ => llvm_type(ty).to_string(),
     }
 }
