@@ -279,7 +279,7 @@ below.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-07: 1928 lib + 54 parity green** (post Phase 4c-broad + Phase 5/6 cross-platform port + Devanagari purity arc + 22 GoF design patterns + Tier I/II language rollout doc + v1 limitations catalog + Phase 1.1 Devanagari runtime PRINT + Phase 1.2 C-backend Vec<dyn Iface> fix + Phase 2 Tier-I dialect extensions (Nepali/Maithili/Konkani) + Phase 5b Bengali + Phase 6 full Brahmi batch (Tamil/Telugu/Gujarati/Punjabi/Kannada/Malayalam/Odia/Assamese/Sinhala) + Phase 11 L3 match-on-ref lift + L1 affine-payload destructure + L7 for-iter-over-self.field + Phase 12 expanded Perso-Arabic family (Urdu / Sindhi / Punjabi-Shahmukhi / Persian / Pashto across two numeral blocks) — full feature surface across all backends; clean warning-free build).
+**Test ledger at 2026-06-08: 1997 lib + 54 parity green** (post Phase 13 long-tail rollout — **61 dialects across 26 scripts**: English, the original Devanagari trio (Sanskrit / Hindi / Marathi) plus Tier-I Devanagari extensions (Nepali / Maithili / Konkani), the Brahmi-derived batch (Bengali / Tamil / Telugu / Gujarati / Punjabi-Gurmukhi / Kannada / Malayalam / Odia / Assamese / Sinhala), Perso-Arabic family (Urdu / Sindhi / Punjabi-Shahmukhi / Persian / Pashto / Modern Standard Arabic), Cyrillic (Russian), Latin Tier II (Spanish / French / German / Italian / Portuguese / Polish / Turkish / Romanian / Dutch / Hungarian / Czech / Slovak / Swedish / Norwegian / Danish / Finnish / Catalan / Yoruba / Hausa), basic-Latin pragma-threaded (Indonesian / Malay / Swahili / Filipino), three-script Japanese, Korean (Hangul), Greek, Hebrew, Thai, Khmer, Burmese, Amharic (Ethiopic), Tibetan, Cherokee, Lao, Mongolian (traditional), Armenian, Georgian, and Vietnamese. Plus L2 Box\<T\> Phase 1+2 (C + LLVM backends for Copy + sized inner types) and pragma-threading enabler. Full feature surface across all backends; clean warning-free build.).
 
 ## Memory safety & concurrency model
 
@@ -3782,20 +3782,56 @@ logographic, etc.) one at a time.
 
 ### Tier II — Global (after Tier I)
 
-> Major world languages ordered by the user's stated rollout
-> priority. Each requires a new keyword table; grammar adaptations
-> (SVO order for most, head-final for Japanese, RTL for Arabic
-> already covered in Tier I) drop in as separate parser hooks.
+> Major world languages with non-Indic scripts and grammars. The
+> per-script abstraction from Phase 5b (Bengali) plus the
+> pragma-threading enabler (commit `c3a2bb6`) made the global
+> rollout possible — adding a new dialect is now a 6-touchpoint
+> mechanical change (Script + classify range + DialectLang +
+> pragma + keyword table + DiagLang) regardless of script family.
 
 | # | Language | Script | Word order | Status |
 |---|---|---|---|---|
-| 1 | Spanish (*español*) | Latin | SVO | Queued — Tier II priority 1 |
-| 2 | Mandarin Chinese (*zhōngwén*) | Han logograms | SVO + topic-prominent | Queued — Tier II priority 2; tokenizer needs CJK word boundaries |
-| 3 | Japanese (*nihongo*) | Kanji + Hiragana + Katakana | **SOV** | Queued — Tier II priority 3; vāṇी's SOV plumbing transfers directly |
-| 4 | Russian (*russkiy*) | Cyrillic | SVO + free order (case-marked) | Queued — Tier II priority 4 |
-| 5 | German (*deutsch*) | Latin | V2 + SOV in subordinate clauses | Queued — Tier II priority 5; partial SOV reuse |
-| 6 | French (*français*) | Latin | SVO | Queued — Tier II priority 6 |
-| ... | Arabic, Portuguese, Korean, Vietnamese, Indonesian, Swahili, Turkish, ... | various | various | Queued — Tier II tail |
+| 1 | Spanish (*español*) | Latin | SVO | ✅ **SHIPPED** (Phase 8b.1) — natural ASCII + accented surface (`función`, `si`, `para`, `verdadero`, `imprimir`) |
+| 2 | French (*français*) | Latin | SVO | ✅ **SHIPPED** (Phase 8b.3) — `fonction`, `si`, `pour`, `vrai`, `écrire` |
+| 3 | German (*deutsch*) | Latin | V2 + subordinate SOV | ✅ **SHIPPED** (Phase 10.1) — `funktion`, `wenn`, `solange`, `wahr`, `drucken` |
+| 4 | Russian (*русский*) | Cyrillic | SVO + free order | ✅ **SHIPPED** (Phase 8b.2) — first Cyrillic dialect (`функция`, `если`, `пока`, `печатать`) |
+| 5 | Italian (*italiano*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.6) — Romance family completes |
+| 6 | Portuguese (*português*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.2) — `função`, `seja`, `enquanto`, `imprimir` |
+| 7 | Polish (*polski*) | Latin (ą/ć/ę/ł/ń/ó/ś/ź/ż) | SVO | ✅ **SHIPPED** (Phase 13.8) — first Slavic Latin |
+| 8 | Turkish (*Türkçe*) | Latin (ç/ğ/ı/İ/ö/ş/ü) | SOV (agglutinative) | ✅ **SHIPPED** (Phase 13.9) — Turkic family |
+| 9 | Vietnamese (*Tiếng Việt*) | Latin (extensive tone marks) | SVO | ✅ **SHIPPED** (Phase 13.12) — first Southeast Asian Latin |
+| 10 | Romanian (*română*) | Latin (ă/â/î/ș/ț) | SVO | ✅ **SHIPPED** (Phase 13.13) — Romance family |
+| 11 | Dutch (*Nederlands*) | Latin | V2 + SOV | ✅ **SHIPPED** (Phase 13.14) — Germanic |
+| 12 | Hungarian (*magyar*) | Latin (ő/ű + standard) | SOV (agglutinative) | ✅ **SHIPPED** (Phase 13.16) — Uralic family |
+| 13 | Czech (*čeština*) | Latin (ř + háček marks) | free order | ✅ **SHIPPED** (Phase 13.17) — second Slavic |
+| 14 | Slovak (*slovenčina*) | Latin | free order | ✅ **SHIPPED** (Phase 13.24) — third Slavic |
+| 15 | Swedish (*svenska*) | Latin (å/ä/ö) | SVO | ✅ **SHIPPED** (Phase 13.18) — first Nordic |
+| 16 | Norwegian (*norsk bokmål*) | Latin (å/æ/ø) | SVO | ✅ **SHIPPED** (Phase 13.20) — second Nordic |
+| 17 | Danish (*dansk*) | Latin (å/æ/ø) | SVO | ✅ **SHIPPED** (Phase 13.21) — third Nordic |
+| 18 | Finnish (*suomi*) | Latin (ä/ö) | SVO (agglutinative) | ✅ **SHIPPED** (Phase 13.25) — second Uralic |
+| 19 | Catalan (*català*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.26) — sixth Romance |
+| 20 | Modern Standard Arabic (*العربية*) | Arabic (RTL) | VSO/SVO | ✅ **SHIPPED** (Phase 13.7) — distinct from shipped Perso-Arabic dialects |
+| 21 | Korean (*한국어*) | Hangul (new) | SOV | ✅ **SHIPPED** (Phase 13.1) — first Hangul-script dialect |
+| 22 | Japanese (*日本語*) | Kanji + Hiragana + Katakana | SOV | ✅ **SHIPPED** (Phase 9b) — first three-script collapsed Script variant |
+| 23 | Greek (*Ελληνικά*) | Greek (new) | SVO | ✅ **SHIPPED** (Phase 13.4) |
+| 24 | Hebrew (*עברית*) | Hebrew (new, RTL) | SVO | ✅ **SHIPPED** (Phase 13.5) — second RTL after Perso-Arabic |
+| 25 | Thai (*ไทย*) | Thai (new) | SVO | ✅ **SHIPPED** (Phase 13.15) |
+| 26 | Khmer (*ខ្មែរ*) | Khmer (new) | SVO | ✅ **SHIPPED** (Phase 13.29) |
+| 27 | Burmese (*မြန်မာ*) | Myanmar (new) | SOV | ✅ **SHIPPED** (Phase 13.30) |
+| 28 | Lao (*ລາວ*) | Lao (new) | SVO | ✅ **SHIPPED** (Phase 13.34) — Thai sibling |
+| 29 | Amharic (*አማርኛ*) | Ethiopic (new) | SOV | ✅ **SHIPPED** (Phase 13.31) — first Ethiopian dialect |
+| 30 | Tibetan (*བོད་ཡིག*) | Tibetan (new) | SOV | ✅ **SHIPPED** (Phase 13.32) |
+| 31 | Cherokee (*ᏣᎳᎩ*) | Cherokee syllabary (new) | SOV | ✅ **SHIPPED** (Phase 13.33) — endangered, preservation step |
+| 32 | Mongolian (*ᠮᠣᠩᠭᠣᠯ*) | Mongolian traditional (new) | SOV | ✅ **SHIPPED** (Phase 13.35) |
+| 33 | Armenian (*Հայերեն*) | Armenian (new) | SOV | ✅ **SHIPPED** (Phase 13.22) — first Caucasus script |
+| 34 | Georgian (*ქართული*) | Georgian Mkhedruli (new) | SOV | ✅ **SHIPPED** (Phase 13.23) — second Caucasus script |
+| 35 | Indonesian (*Bahasa Indonesia*) | Latin (no diacritics) | SVO | ✅ **SHIPPED** (Phase 13.3) — first basic-Latin pragma-threaded |
+| 36 | Malay (*Bahasa Melayu*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.10) — Indonesian sibling |
+| 37 | Filipino (*Tagalog*) | Latin | VSO | ✅ **SHIPPED** (Phase 13.19) — Austronesian |
+| 38 | Swahili (*Kiswahili*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.11) — first East African (Bantu) |
+| 39 | Yoruba (*Èdè Yorùbá*) | Latin (ẹ/ọ/ṣ + tone marks) | SVO | ✅ **SHIPPED** (Phase 13.27) — Niger-Congo |
+| 40 | Hausa | Latin (ɓ/ɗ/ƙ/ƴ) | SVO | ✅ **SHIPPED** (Phase 13.28) — Afroasiatic |
+| ... | Mandarin (Han logograms, no whitespace tokenizer) | various | various | Queued — needs CJK word-segmentation arc (~30-50h) |
 
 ### Why Indian-subcontinent-first
 

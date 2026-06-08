@@ -479,9 +479,11 @@ design" in
 
 When a file declares `// vani-lang: <dialect>`, error messages
 render with localized labels (Sanskrit `त्रुटिः`, Hindi `त्रुटि`,
-Marathi `चूक`) and a translated leading prefix for the most
-common error families. The body of the error stays English so
-search engines + existing docs still match.
+Marathi `चूक`, plus ~58 other dialects shipped through 2026-06-08
+— including Russian `ошибка`, German `Fehler`, Hebrew `שגיאה`,
+Cherokee `ᎤᎴᏗ`, etc.) and a translated leading prefix for the
+most common error families. The body of the error stays English
+so search engines + existing docs still match.
 
 **Why**: full body translation requires translating dynamic
 content (paths, type names, variable names) — too noisy for
