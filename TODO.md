@@ -184,6 +184,17 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 └─────────────────────────────────────────────────────────────┘
 ```
 
+### Dedicated-session lifts (multi-day, scoped 2026-06-07)
+
+These are individually too large for the rolling "ship one
+phase per turn" cadence. Each needs its own contiguous session
+to land cleanly with full backend + test coverage.
+
+| Item | Effort | Scope |
+|---|---|---|
+| **L2 Box\<T\> / owning-interface-object** | 8-15h | New `Type::Box(Box<Type>)` variant; parser grammar for `Box<T>` + `Box::new(x)` + `*b` deref; affine ownership + drop semantics; C backend `malloc`/`free` + indirect access; LLVM backend heap codegen; struct-field storage (the documented blocker `struct Drawer { r: Box<dyn Renderer> }`); full method dispatch through Box<dyn Iface>; ~30 regression tests. Single dedicated session. |
+| **Arc 8 v3.1 sugar** | 25-40h | Compiler-driven `async fn` → `Task<T>` transform per the 15 design caveats in STATUS.md's "v3.1 design caveats" table. Single dedicated multi-day arc. |
+
 ### External-blocked items (drop in anywhere when unblocked)
 
 | Item | Blocker | Effort once unblocked |

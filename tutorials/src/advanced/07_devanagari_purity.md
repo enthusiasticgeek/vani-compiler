@@ -85,6 +85,35 @@ Within Perso-Arabic, two distinct numeral blocks are wired —
 Eastern Arabic-Indic ٠..٩ (Urdu/Sindhi/Shahmukhi) and Persian
 ۰..۹ (Persian/Pashto).
 
+## Natural-everyday vs. formal-tatsama keywords
+
+A 2026-06-07 audit across all 10 Indic dialects layered
+**natural everyday** spellings alongside the Sanskrit-rooted
+tatsama forms. Both registers compile — pick whichever reads
+more naturally for your file:
+
+| Dialect | True (formal / everyday) | False (formal / everyday) |
+|---|---|---|
+| Marathi | `सत्य` / `बरोबर`, `खरे` | `असत्य` / `खोटे`, `चूक` |
+| Hindi | `सत्य`, `सही` / `सच` | `असत्य`, `अशुद्ध` / `झूठ`, `गलत` |
+| Bengali | `সত্য` / `ঠিক` | `অসত্য` / `মিথ্যা`, `ভুল` |
+| Kannada | `ಸತ್ಯ` / `ಸರಿ` | `ಸುಳ್ಳು` / `ತಪ್ಪು` |
+| Malayalam | `സത്യം` / `ശരി` | `അസത്യം` / `തെറ്റ്` |
+| Sinhala | `සත්‍ය` / `හරි` | `අසත්‍ය` / `වැරදි` |
+
+Sanskrit gained a classical Match form: `मेलन` (melana, deverbal
+noun) alongside the colloquial `मेल`.
+
+**Marathi-specific note**: `सही` means "signature" (noun) in
+Marathi and `अशुद्ध` strictly means "impure"; both are
+Hindi-only as bool literals. Marathi's `बदल` is the noun
+"change" — the proper mutable adjective is `बदलणारा`. And
+Marathi conjugates `print` from `लिह्-` (`लिहा` / `लिही` /
+`लिहिया`), not the Hindi `लिख्-` root.
+
+Bool literals stay outside the per-file purity gate by design,
+so adding spellings never breaks old files.
+
 ## A worked Sanskrit example
 
 ```rust

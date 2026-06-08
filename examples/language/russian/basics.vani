@@ -1,0 +1,29 @@
+// श्री।
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/russian/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/russian/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+
+цель "Compute a small score with checked constraints";
+
+функция add(a: i64, b: i64) -> i64 {
+  вернуть a + b;
+}
+
+функция bounded_score(base: i64) -> i64
+требует base >= 0;
+{
+  пусть doubled: i64 = base * 2;
+  утверждать doubled >= base;
+  вернуть add(doubled, 2);
+}
+
+функция main() -> i64 {
+  пусть answer = bounded_score(20);
+  доказать 2 + 2 == 4;
+  утверждать answer >= 0;
+  печатать answer;
+  вернуть 0;
+}

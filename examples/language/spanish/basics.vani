@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/spanish/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/spanish/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 8b.1 v1: Spanish-pragma files use the natural non-ASCII
+// Spanish aliases (función, módulo, público, intención, métodos,
+// región, enumeración) alongside English ASCII keywords for the
+// remaining structure words. Full Spanish keyword coverage
+// (including pure-ASCII forms like `si`, `para`, `verdadero`)
+// is queued for v2 once the Lexer threads the pragma through.
+
+intención "Compute a small score with checked constraints";
+
+función add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+función bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  assert doubled >= base;
+  return add(doubled, 2);
+}
+
+función main() -> i64 {
+  let answer = bounded_score(20);
+  prove 2 + 2 == 4;
+  assert answer >= 0;
+  print answer;
+  return 0;
+}

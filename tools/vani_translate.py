@@ -176,7 +176,12 @@ def translate(source: str, target_lang: str) -> str:
     Walk `source` character-by-character, substituting any keyword
     token with the target_lang's spelling. Preserves everything
     else verbatim — comments, strings, whitespace, identifiers,
-    operators, numbers.
+    operators, numbers. The `// vani-lang: <name>` pragma comment
+    is rewritten to match `target_lang` so the output passes the
+    per-file dialect-purity gate (fixed 2026-06-07: prior versions
+    left the source pragma intact, which caused
+    marathi→hindi/hindi→marathi translations to fail purity
+    narrowing).
     """
     assert target_lang in SUPPORTED_LANGS, f"unknown target {target_lang}"
     rev = build_reverse_lookup()
@@ -185,12 +190,24 @@ def translate(source: str, target_lang: str) -> str:
     n = len(source)
     while i < n:
         c = source[i]
-        # Line comment — copy through end of line.
+        # Line comment — copy through end of line, but rewrite a
+        # `// vani-lang: <name>` pragma to match target_lang so
+        # the dialect-purity gate in the output file accepts the
+        # translated keywords.
         if c == "/" and i + 1 < n and source[i + 1] == "/":
             j = source.find("\n", i)
             if j == -1:
                 j = n
-            out.append(source[i:j])
+            line = source[i:j]
+            # Match e.g. `// vani-lang: marathi` (optional spaces).
+            stripped = line.lstrip("/").strip()
+            if stripped.startswith("vani-lang:") or stripped.startswith("vani-lang :"):
+                # Preserve leading slashes/whitespace, replace the
+                # body so the pragma now declares target_lang.
+                leading = line[: len(line) - len(line.lstrip("/ \t"))]
+                out.append(f"{leading}vani-lang: {target_lang}")
+            else:
+                out.append(line)
             i = j
             continue
         # String literal — copy through closing quote, handling

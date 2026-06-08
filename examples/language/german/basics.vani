@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: german
+//
+// build & run:
+//   vanic run examples/language/german/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/german/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/german/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 10.1 v1: German-pragma files use natural non-ASCII German
+// aliases (für, während, zurück, überprüfe, möglichkeit, ausführe,
+// öffentlich, aufzählung, äußere) alongside English ASCII keywords
+// for the remaining structure words. Full German keyword coverage
+// (including pure-ASCII forms like `funktion`, `wenn`, `wahr`,
+// `falsch`, V2 + subordinate-SOV grammar) is queued for v2.
+
+intent "Compute a small score with checked constraints";
+
+fn add(a: i64, b: i64) -> i64 {
+  zurück a + b;
+}
+
+fn bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  überprüfe doubled >= base;
+  zurück add(doubled, 2);
+}
+
+fn main() -> i64 {
+  let answer = bounded_score(20);
+  prove 2 + 2 == 4;
+  überprüfe answer >= 0;
+  ausführe answer;
+  zurück 0;
+}

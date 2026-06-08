@@ -10,6 +10,516 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-07 (cont.) — L12 closure + Phase 10.1 German + translator pragma-rewrite fix
+
+Three small-but-substantive shipments rolled together:
+
+### L12 cross-fn SMT — already implemented, now formally closed
+
+A probe of the verifier revealed that **L12 was already
+solved** — the limitation doc was just out of date. Cross-
+function SMT proof bridging works via the special `_return`
+identifier in `ensures` clauses:
+
+```vani
+fn add(a: i64, b: i64) -> i64
+ensures _return == a + b;
+{
+  return a + b;
+}
+
+fn main() -> i64 {
+  prove add(3, 4) == 7;          // ✅ proven
+  prove add(double(3), 1) == 7;  // ✅ nested calls also work
+  return 0;
+}
+```
+
+The bridge lives in
+[src/checker.rs::rewrite_calls_to_fresh_vars](src/checker.rs):
+replaces each call with a fresh symbolic var, then injects the
+callee's ensures (with `_return` → fresh-var and formals → actuals
+substituted) as facts. When the callee has no ensures, the
+verifier surfaces the actionable hint:
+
+> cannot prove expression: SMT encoder skipped this query
+> (function call `foo` not supported in SMT v1) (add an
+> 'ensures' clause to the callee so the verifier can use its
+> return value).
+
+Updated [docs/v1_limitations.md L12](docs/v1_limitations.md)
+section to mark resolved + cross-reference the supporting
+checker pass. Three regression tests pin the behavior:
+- `smt_proves_through_ensures_bridge` — base case.
+- `smt_proves_through_nested_call_ensures` — nested calls.
+- `smt_hint_when_callee_missing_ensures` — pins the helpful
+  diagnostic.
+
+### Phase 10.1 German — third Latin-with-accents dialect
+
+```rust
+// vani-lang: german
+intent "Compute a small score with checked constraints";
+
+fn add(a: i64, b: i64) -> i64 {
+  zurück a + b;
+}
+
+fn bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  überprüfe doubled >= base;
+  zurück add(doubled, 2);
+}
+
+fn main() -> i64 {
+  let answer = bounded_score(20);
+  prove 2 + 2 == 4;
+  überprüfe answer >= 0;
+  ausführe answer;
+  zurück 0;
+}
+```
+
+Prints `42` on the C backend. Roster grows to **26 dialects
+across 13 scripts**. Same v1 scope as Spanish + French: ~20
+genuine non-ASCII German keywords (umlauts ä/ö/ü and ß) are
+registered — `während`, `für`, `zurück`, `überprüfe`,
+`ausführe`, `möglichkeit`, `öffentlich`, `aufzählung`,
+`äußere`, `veränderlich`, `auflösen`, `übereinstimmen`, etc.
+Pure-ASCII German keywords (`funktion`, `wenn`, `wahr`,
+`falsch`) and V2/subordinate-SOV grammar queued for v2.
+
+New `DiagLang::German` with German prefix table:
+`erwartet` (expected), `unbekannte Funktion`, `Typenkonflikt`,
+`kann nicht beweisen`, etc. + native labels `Fehler (error)` /
+`Hinweis (note)`.
+
+### Translator pragma-rewrite fix
+
+Verifying [tools/vani_translate.py](tools/vani_translate.py)
+across all 4 supported language pairs surfaced a real bug:
+the `// vani-lang: <name>` pragma was carried over verbatim
+when translating between dialects. So `marathi → hindi`
+produced a file declaring `// vani-lang: marathi` but using
+Hindi-only keywords (`लौटाओ` etc.), which the
+script-purity dialect-narrowing then rejected.
+
+Fix: `translate()` now detects the pragma line and rewrites
+its language tag to match `target_lang`. All 7 verified pairs
+round-trip cleanly:
+
+```
+english → hindi    : ok
+english → marathi  : ok
+marathi → hindi    : ok    ← previously failed
+hindi   → marathi  : ok    ← previously failed
+sanskrit → english : ok
+english → sanskrit : ok
+marathi → sanskrit : ok
+```
+
+### Forward queue — L2 Box\<T\> properly scoped
+
+Investigation showed L2 (Box\<T\>) is a genuinely
+multi-session 8-15h architectural lift (parser + type system +
+both backends + drop semantics + struct-field storage + ~30
+regression tests). Moved to [TODO.md §*Dedicated-session
+lifts*](TODO.md) so a future session can pick it up cleanly
+with full focus.
+
+Lib ledger: **1945 lib + 54 parity** green (1941→1945 = 3
+L12 + 1 German regression tests). All 185 example files
+compile.
+
+## 🟢 Session 2026-06-07 (cont.) — Phase 9b Japanese (first three-script, first non-Indic SOV target)
+
+**Japanese (日本語)** ships as the first three-script dialect
+and the first **non-Indic SOV-grammar target**. Roster grows
+to **25 dialects across 13 scripts**.
+
+```rust
+// vani-lang: japanese
+目的 "Compute a small score with checked constraints";
+
+関数 add(a: i64, b: i64) -> i64 {
+  戻る a + b;
+}
+
+関数 bounded_score(base: i64) -> i64
+前提 base >= 0;
+{
+  代入 doubled: i64 = base * 2;
+  確認 doubled >= base;
+  戻る add(doubled, 2);
+}
+
+関数 main() -> i64 {
+  代入 answer = bounded_score(20);
+  証明 2 + 2 == 4;
+  確認 answer >= 0;
+  表示 answer;
+  戻る 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Architectural novelty — one `Script` variant covers three
+Unicode blocks**. Native Japanese code naturally mixes Hiragana
+(U+3040..U+309F, native phonetic), Katakana (U+30A0..U+30FF,
+loanword phonetic), and CJK Unified Ideographs (U+4E00..U+9FFF,
+Kanji) within a single keyword expression — e.g. `関数 main()`
+(Kanji) + `タスク` (Katakana) + `もし x ならば` (Kanji + Hiragana).
+The script-purity gate would have falsely rejected this as
+"3 scripts in one file" if each block was its own `Script`
+variant. Solution: `Script::Japanese` collapses all three blocks
+into a single classification — `Script::classify` returns
+`Japanese` for any of the four ranges (including CJK Extension
+A U+3400..U+4DBF). Regression test
+`japanese_mixes_kanji_katakana_hiragana_in_one_file` pins this.
+
+**Keyword set spans all three scripts** (~35 keywords):
+
+| Source script | Examples |
+|---|---|
+| **Kanji** (Chinese characters) | `関数` (fn), `戻る` (return), `代入` (let), `構造体` (struct), `列挙` (enum), `定数` (const), `確認` (assert), `証明` (prove), `真`/`偽` (true/false), `表示` (print), `参照` (ref), `可変` (mut), `公開` (pub), `純粋` (pure), `並列` (parallel), `実装` (implement), `領域` (region), `目的` (intent), `型` (type), `外部` (extern), `不変` (invariant), `危険` (unsafe) |
+| **Hiragana** (native phonetic) | `もし` (if), `そうでなければ` (else), `ならば` (then), `から` (from), `まで` (to), `として` (as), `ここで` (where), `は` (is — topic particle) |
+| **Katakana** (loanword phonetic) | `タスク` (task), `マッチ` (match), `モジュール` (module), `インターフェース` (interface), `メソッド` (methods) |
+
+**v1 scope — keyword-first surface only**. Japanese SOV grammar
+forms — `もし x > 0 ならば { ... }`, `x の間 { ... }`, `x は 5
+です` — are queued for v2 once the SOV statement-shape detector
+generalizes beyond Devanagari. Today's Japanese files read as
+"Japanese vocabulary, English clause order"; tomorrow's will
+read as genuine SOV Japanese.
+
+**New `DiagLang::Japanese`** with Japanese prefix table — error
+labels render as `エラー (error)`, `注記 (note)`, plus prefix
+translations for `期待される` (expected), `未定義の関数`
+(unknown function), `型が一致しません` (type mismatch),
+`証明できません` (cannot prove), etc.
+
+**Numerals**: modern Japanese code uses Arabic 0-9 in practice,
+so Japanese routes through the ASCII print helper — no new
+numeral codepoint helper needed. (Kanji numerals 一二三 and
+full-width ０..９ remain available as future v2 alternatives.)
+
+**3 new regression tests**:
+- `japanese_three_script_pragma_compiles_and_runs` — full
+  pipeline through `関数` / `代入` / `確認` / `証明` / `表示`.
+- `japanese_mixes_kanji_katakana_hiragana_in_one_file` — pins
+  the design decision that all three blocks share one
+  `Script::Japanese` variant so the purity gate accepts native
+  mixed-script Japanese.
+- `japanese_script_purity_rejects_mixed_japanese_and_devanagari`
+  — confirms cross-script mixing IS still rejected (Japanese
+  vs Devanagari).
+
+Lib ledger: **1941 lib + 54 parity** green (1938→1941 = 3 new
+Japanese regression tests). All 184 example files compile.
+
+This session shipped 4 Tier II / global dialects back-to-back:
+**Russian** (Cyrillic SVO) + **Spanish** (Latin+accents SVO) +
+**French** (Latin+accents SVO) + **Japanese** (three-script
+SVO-for-now-SOV-later). vāṇी now spans 25 dialects across 13
+scripts.
+
+## 🟢 Session 2026-06-07 (cont.) — Phase 8b.3 French (second Latin-with-accents dialect)
+
+**French (français)** rides the Latin-with-accents infrastructure
+that Phase 8b.1 shipped for Spanish — proves the unified
+`lex_ident` path generalizes across multiple Latin-script Tier II
+dialects with minimal additional wiring. Roster grows to **24
+dialects across 12 scripts**.
+
+```rust
+// vani-lang: french
+intent "Compute a small score with checked constraints";
+
+fn add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+fn bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  vérifie doubled >= base;
+  return add(doubled, 2);
+}
+
+fn main() -> i64 {
+  let answer = bounded_score(20);
+  démontre 2 + 2 == 4;
+  vérifie answer >= 0;
+  écris answer;
+  return 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Bug found + fixed mid-ship**: French exposed a real gap that
+Spanish didn't trigger — French keywords starting with a
+non-ASCII byte (`écris`, `étranger`, `énumération`) route through
+`lex_unicode_ident`, not `lex_ident`. Spanish's keywords all
+start with ASCII bytes (f, m, p, i, d, e, r) so its single
+call-site in `lex_ident` worked. The fix: chain both
+`spanish_keyword` and `french_keyword` into `lex_unicode_ident`
+too, mirroring the `lex_ident` fallback. New regression test
+`french_non_ascii_first_keyword_routes_through_unicode_ident`
+pins the fix.
+
+**v1 non-ASCII French keyword set (~17 keywords)**:
+
+| TokenKind | French keyword |
+|---|---|
+| `Enum` | `énumération` |
+| `Ref` | `référence` |
+| `Assert` | `vérifier` / `vérifie` |
+| `Prove` | `démontrer` / `démontre` |
+| `True` | `vérité` |
+| `Print` | `écrire` / `écris` / `imprimé` |
+| `Where` | `où` |
+| `Task` | `tâche` |
+| `Parallel` | `parallèle` |
+| `Methods` | `méthodes` |
+| `Implement` | `implémenter` |
+| `RegionKw` | `région` |
+| `Extern` | `étranger` |
+
+Pure-ASCII French keywords (`fonction`, `module`, `pour`, `si`,
+`sinon`, `tandis`, `retourner`, `vrai`, `faux`, `vérité` ASCII
+form, etc.) queued for v2 once pragma-threading is in.
+
+**New `DiagLang::French`** with French prefix table (`attendu`,
+`fonction inconnue`, `types incompatibles`, `impossible à
+prouver`, etc.) + native label rendering (`erreur (error)`,
+`remarque (note)`).
+
+Lib ledger: **1938 lib + 54 parity** green (1936→1938 = 2 new
+French regression tests). All 183 example files compile.
+
+## 🟢 Session 2026-06-07 (cont.) — Phase 8b.1 Spanish (first Latin-script Tier II dialect)
+
+vāṇी lands its first **Latin-script-with-accents** Tier II
+dialect: **Spanish (español)**. The roster grows to **23
+dialects across 12 scripts**.
+
+```rust
+// vani-lang: spanish
+intención "Compute a small score with checked constraints";
+
+función add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+función bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  assert doubled >= base;
+  return add(doubled, 2);
+}
+
+función main() -> i64 {
+  let answer = bounded_score(20);
+  prove 2 + 2 == 4;
+  assert answer >= 0;
+  print answer;
+  return 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Architectural change**: the previously separate `lex_ident`
+(ASCII-only) and `lex_unicode_ident` (non-ASCII-first) paths
+needed unification for Latin-with-accents handling. `lex_ident`
+now consumes non-ASCII continuation bytes too, so words like
+`función` (ASCII `f` + accented `ó` + ASCII `unción`) tokenize
+as a single word instead of getting chopped at the accent.
+When the word contains any non-ASCII byte and the English
+keyword table doesn't match, the lexer falls through to a
+`spanish_keyword(text)` lookup before defaulting to `Ident` —
+pure-ASCII English identifiers stay safe from collisions.
+
+**v1 scope — non-ASCII Spanish keywords only**:
+
+| TokenKind | Spanish keyword |
+|---|---|
+| `Fn` | `función` |
+| `Enum` | `enumeración` |
+| `Pub` | `público` |
+| `Module` | `módulo` |
+| `Intent` | `intención` / `propósito` |
+| `Methods` | `métodos` |
+| `RegionKw` | `región` |
+| `Where` | `dónde` (interrogative form) |
+
+Pure-ASCII Spanish keywords (`si` for if, `para` for for,
+`verdadero` for true, `imprimir` for print, etc.) require
+pragma-threading into the `Lexer` struct so they can be
+selectively enabled per-file without colliding with English
+identifiers. Queued for v2. v1 Spanish-pragma files are a
+hybrid: natural non-ASCII Spanish surface words for the major
+declarations, English ASCII keywords elsewhere — still compiles
+to identical IR.
+
+**New `DiagLang::Spanish`** with Spanish prefix table:
+`esperado` (expected), `variable desconocida`, `función
+desconocida`, `tipos incompatibles`, `no se puede probar`, etc.
+
+**New regression tests**:
+- `spanish_latin_with_accents_pragma_compiles_and_runs` — full
+  pipeline through `función` / `intención` declarations.
+- `lex_ident_consumes_non_ascii_continuation` — pins the
+  refactor of `lex_ident`, verifying a non-keyword Latin-with-
+  accent identifier (`café`) round-trips as a single `Ident`
+  token rather than getting chopped at the accent.
+
+Lib ledger: **1936 lib + 54 parity** green (1934→1936 = 2 new
+Spanish/Latin-accent regression tests). All 182 example files
+compile.
+
+## 🟢 Session 2026-06-07 (cont.) — Phase 8b.2 Russian (first Tier II + first Cyrillic dialect)
+
+vāṇी crosses out of Indic + Perso-Arabic for the first time:
+**Russian** ships as the first Tier II dialect and the first
+**Cyrillic-script** dialect. The roster grows to **22 dialects
+across 12 scripts**.
+
+```rust
+// vani-lang: russian
+цель "Compute a small score with checked constraints";
+
+функция add(a: i64, b: i64) -> i64 {
+  вернуть a + b;
+}
+
+функция bounded_score(base: i64) -> i64
+требует base >= 0;
+{
+  пусть doubled: i64 = base * 2;
+  утверждать doubled >= base;
+  вернуть add(doubled, 2);
+}
+
+функция main() -> i64 {
+  пусть answer = bounded_score(20);
+  доказать 2 + 2 == 4;
+  утверждать answer >= 0;
+  печатать answer;
+  вернуть 0;
+}
+```
+
+Prints `42` on both C and LLVM backends.
+
+**Architectural impact**:
+- New `Script::Cyrillic` variant — block `U+0400..U+04FF` plus
+  Cyrillic Supplement / Extended-A / Extended-B
+  (`U+0500..052F`, `U+2DE0..2DFF`, `U+A640..A69F`).
+- New `DialectLang::Russian` variant routing to `Script::Cyrillic`.
+- `cyrillic_keyword(text)` table with ~40 keywords covering
+  all structure keywords + SOV-S7 parity (`цель` intent, `тип`
+  type, `внешний` extern, `инвариант` invariant).
+- Pragma resolver accepts `// vani-lang: russian`, `русский`, `ru`.
+- `DiagLang::Russian` with native Cyrillic error/note prefixes
+  (`ошибка`, `примечание`, etc.) + a localized prefix table.
+
+**SVO, not SOV**: Russian is Subject-Verb-Object like English,
+so the existing keyword-first statement parser applies directly
+— no SOV statement-shape plumbing was added. Russian uses Arabic
+0-9 numerals (Cyrillic letter-numeral notation is archaic), so
+no new numeral codepoint helper was needed — it routes through
+the ASCII print path.
+
+**Natural everyday forms layered alongside formal Russian**:
+- `True`: `истина` (formal "truth"), `верно` (everyday "right").
+- `False`: `ложь` (formal "lie"), `неверно` (everyday "wrong").
+- `Fn`: `функция` (loanword), `дело` (native "work").
+- `Print`: `печатать` (print), `писать` (write).
+- `Return`: `вернуть` (infinitive), `верни` (imperative).
+
+Regression tests added:
+- `russian_cyrillic_pragma_compiles_and_runs` — full pipeline
+  smoke test through pragma + keyword + assert + prove + print.
+- `russian_script_purity_rejects_mixed_cyrillic_and_devanagari`
+  — pins the script-purity gate rejecting a Devanagari
+  structure keyword in a Russian-pragma file.
+
+**Validates the architecture**: the per-script abstraction
+introduced in Phase 5b (Bengali) generalizes cleanly across the
+Brahmi-derived batch (Phase 6), Perso-Arabic (Phase 12),
+**and** now non-Indic Cyrillic. Adding a new script costs:
+1 Script-enum variant + 1 classify range + 1 DialectLang
+variant + 1 keyword table + 1 DiagLang variant + 1 pragma arm.
+No core lexer / parser / typechecker / backend changes needed.
+
+Lib ledger: **1934 lib + 54 parity** green (1932→1934 = 2 new
+Russian regression tests). All 181 example files compile.
+
+## 🟢 Session 2026-06-07 (cont.) — Natural-language audit across 10 Indic dialects
+
+The Marathi `लिखो → लिहा` native-speaker fix triggered a broader
+audit: every Devanagari + Brahmi-script keyword table got
+reviewed for **Hindi-bleed**, **register mismatch**, and **POS
+correctness** so the code reads as the language is actually
+spoken — not as transliterated Hindi.
+
+Concrete fixes in `src/lexer.rs::devanagari_keyword`:
+
+- **Marathi True**: added `बरोबर` (correct), `खरे` (true).
+  Retagged `सही` as Hindi-only — it means "signature" (noun) in
+  Marathi, not "correct".
+- **Marathi False**: added `खोटे` (false/lie), `चूक` (mistake).
+  Retagged `अशुद्ध` as Hindi-only — strictly "impure" in Marathi.
+- **Marathi Mut**: added `बदलणारा` (the changing/mutable
+  adjective); `बदल` alone is the noun "change".
+- **Hindi True**: added `सच` (truth — natural everyday Hindi).
+- **Hindi False**: added `झूठ` (lie), `गलत` (wrong) — both
+  natural everyday Hindi alongside formal `अशुद्ध`.
+- **Sanskrit Match**: added `मेलन` (melana, classical Sanskrit
+  deverbal) alongside colloquial `मेल`.
+
+Same audit extended to Brahmi-script tables:
+
+- **Bengali**: added `ঠিক` (true), `মিথ্যা` / `ভুল` (false) —
+  natural everyday alongside formal tatsama.
+- **Kannada**: added `ಸರಿ` (true), `ತಪ್ಪು` (false).
+- **Malayalam**: added `ശരി` (true), `തെറ്റ്` (false).
+- **Sinhala**: added `හරි` (true), `වැරදි` (false).
+
+Tamil, Telugu, Punjabi, Gujarati, Odia already shipped natural
+everyday forms (`மெய்/பொய்`, `నిజం/అబద్ధం`, `ਸੱਚ/ਝੂਠ`,
+`સાચું/ખોટું`, `ସତ୍ୟ/ମିଥ୍ୟା`) — no changes needed.
+
+Regression tests added to `src/lib.rs`:
+- `marathi_true_false_use_native_forms` — pins the new Marathi
+  natural forms parse + compile.
+- `hindi_true_false_natural_forms` — pins `सच` / `झूठ`.
+- `sanskrit_match_classical_melana_form` — pins `मेलन` as Match.
+- `multilang_natural_bool_literals_lex` — smoke-tests Bengali /
+  Kannada / Malayalam additions through the lexer.
+
+**Design note**: bool literals stay outside the structure-purity
+gate by design (`is_structure_keyword_kind` treats literals as
+neutral), so adding spellings can never break existing files —
+old forms continue to work everywhere, the new natural forms
+just join them as accepted alternates.
+
+Memory updated at
+`~/.claude/projects/-home-ptambe-shortcut-mcp-server/memory/
+project_marathi_print_keyword.md` so future sessions inherit
+the broader audit findings, not just the Marathi `print` fix.
+
+Lib ledger: **1932 lib + 54 parity** green (1928→1932 = 4 new
+regression tests). All 180 example files compile cleanly across
+all 21 dialects.
+
 ## 🟢 Session 2026-06-07 (cont.) — Native-speaker correction: Marathi `print` keyword
 
 Native-speaker fix from the project owner: in Marathi, the

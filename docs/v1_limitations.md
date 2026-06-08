@@ -348,21 +348,53 @@ side.
 
 ## Verification (SMT) limitations
 
-### L12 — SMT can't prove across function-call boundaries by default
+### L12 — SMT can't prove across function-call boundaries by default ✅ SHIPPED
+
+**Status**: Resolved. The SMT verifier bridges through calls
+whose callee declares an `ensures` clause referencing the
+special return-value identifier `_return`.
 
 ```vani
-prove some_fn(0) == 1;   // ❌ — SMT skipped: function call not supported
+fn add(a: i64, b: i64) -> i64
+ensures _return == a + b;
+{
+  return a + b;
+}
+
+fn main() -> i64 {
+  prove add(3, 4) == 7;          // ✅ proven via ensures clause
+  prove add(double(3), 1) == 7;  // ✅ nested calls also work
+  return 0;
+}
 ```
 
-**Why**: the v1 SMT encoder only handles integer + bool
-arithmetic + comparison. Function calls in a `prove` goal need
-the callee's `ensures` clause to bridge.
+When the callee has no `ensures` clause, the verifier surfaces
+the actionable hint suggesting one be added:
 
-**Workaround**: add `ensures` clauses to the callee, OR convert
-the `prove` to a runtime `assert`. See
-[`examples/language/sanskrit/pure_devanagari.vani`](../examples/language/sanskrit/pure_devanagari.vani)
-for an example that uses `सिद्धम्` (assert) instead of `प्रमाण`
-(prove) for results that depend on function calls.
+> cannot prove expression: SMT encoder skipped this query
+> (function call `foo` not supported in SMT v1) (add an
+> 'ensures' clause to the callee so the verifier can use its
+> return value).
+
+**Fix surface** (already in `main` as of 2026-06-07):
+- `src/checker.rs::prove_with_calls` — orchestrates the
+  rewrite passes.
+- `src/checker.rs::rewrite_calls_to_fresh_vars` — replaces
+  `f(a, b)` in the proof goal with a fresh symbol
+  `__call_N`, registers `__call_N`'s type, and injects the
+  callee's `ensures` clauses (with `_return` → `__call_N` and
+  formal-params → actual-args substitutions) as facts.
+- `src/checker.rs::rewrite_method_calls_to_calls` —
+  desugars `p.m(a)` into `Type_m(p, a)` before the call-
+  rewriter sees it, so method ensures bridge the same way.
+
+**Regression coverage**:
+- `lib.rs::smt_proves_through_ensures_bridge` pins the
+  basic add-via-ensures case.
+- `lib.rs::smt_proves_through_nested_call_ensures` pins
+  the nested-call substitution (`add(double(3), 1) == 7`).
+- `lib.rs::smt_hint_when_callee_missing_ensures` pins the
+  "add an ensures clause" diagnostic.
 
 ---
 

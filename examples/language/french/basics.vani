@@ -1,0 +1,36 @@
+// श्री।
+// vani-lang: french
+//
+// build & run:
+//   vanic run examples/language/french/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/french/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/french/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 8b.3 v1: French-pragma files use natural non-ASCII French
+// aliases (vérifier, démontrer, où, écris, méthodes, région,
+// tâche, parallèle) alongside English ASCII keywords for the
+// remaining structure words. Full French keyword coverage
+// (including pure-ASCII forms like `fonction`, `module`, `pour`)
+// is queued for v2.
+
+intent "Compute a small score with checked constraints";
+
+fn add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+fn bounded_score(base: i64) -> i64
+requires base >= 0;
+{
+  let doubled: i64 = base * 2;
+  vérifie doubled >= base;
+  return add(doubled, 2);
+}
+
+fn main() -> i64 {
+  let answer = bounded_score(20);
+  démontre 2 + 2 == 4;
+  vérifie answer >= 0;
+  écris answer;
+  return 0;
+}

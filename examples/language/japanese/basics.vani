@@ -1,0 +1,35 @@
+// श्री。
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/japanese/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/japanese/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 9b v1: first three-script vāṇी dialect — keywords mix
+// Kanji (関数, 戻る, 確認, 証明, 真, 表示), Katakana (タスク,
+// マッチ, モジュール, インターフェース, メソッド) and Hiragana
+// (もし, ならば, から, まで). Keyword-first surface in v1;
+// Japanese SOV grammar forms (もし x ならば { ... }) queued for v2.
+
+目的 "Compute a small score with checked constraints";
+
+関数 add(a: i64, b: i64) -> i64 {
+  戻る a + b;
+}
+
+関数 bounded_score(base: i64) -> i64
+前提 base >= 0;
+{
+  代入 doubled: i64 = base * 2;
+  確認 doubled >= base;
+  戻る add(doubled, 2);
+}
+
+関数 main() -> i64 {
+  代入 answer = bounded_score(20);
+  証明 2 + 2 == 4;
+  確認 answer >= 0;
+  表示 answer;
+  戻る 0;
+}

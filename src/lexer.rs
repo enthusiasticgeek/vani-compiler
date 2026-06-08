@@ -253,13 +253,20 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "पहा" => TokenKind::Ref,          // pahā (Marathi: "see/look")
         "देखो" => TokenKind::Ref,         // dekho (Hindi: "see!")
         "दृष्ट्या" => TokenKind::Ref,     // dṛṣṭyā (Sanskrit: instrumental "via sight / by reference") — SOV-S10 add 2026-06-06
-        // mut — closure #267 fills Sanskrit + Hindi gaps
-        "बदल" => TokenKind::Mut,          // badla (Marathi root: "change")
-        "परिवर्तनीय" => TokenKind::Mut,   // parivartanīya (Sanskrit/Hindi: "mutable")
-        // match
+        // mut — closure #267 fills Sanskrit + Hindi gaps. Marathi
+        // गzaps closed 2026-06-07 (linguistic audit): बदल alone is
+        // the noun "change"; the Marathi adjective for "mutable" is
+        // बदलणारा (changing) or the formal बदलण्यायोग्य.
+        "बदल" => TokenKind::Mut,          // badla (Marathi: "change" — informal/noun)
+        "बदलणारा" => TokenKind::Mut,      // badalṇārā (Marathi: "changing/mutable")
+        "परिवर्तनीय" => TokenKind::Mut,   // parivartanīya (Sanskrit/Hindi/Marathi tatsama: "mutable")
+        // match — मेल is the colloquial Sanskrit/Hindi form;
+        // मेलन (melana, "joining/matching") is the classical
+        // Sanskrit deverbal noun. Added 2026-06-07.
         "जुळवा" => TokenKind::Match,      // juḷvā (Marathi: "match")
         "मिलान" => TokenKind::Match,      // milān (Hindi: "match")
         "मेल" => TokenKind::Match,        // mela (Sanskrit: "join/match")
+        "मेलन" => TokenKind::Match,       // melana (Sanskrit classical: "joining/matching")
         // assert
         "खात्री" => TokenKind::Assert,    // khātrī (Marathi: "certainty")
         "सुनिश्चित" => TokenKind::Assert, // sunishchit (Hindi: "ensured")
@@ -279,12 +286,25 @@ fn devanagari_keyword(text: &str) -> Option<TokenKind> {
         "निश्चित" => TokenKind::Ensures,   // nishchit (Hindi/Marathi: "definite")
         "सुनिश्चयित" => TokenKind::Ensures, // sunischayita (Sanskrit: "ensured")
         // bool literals — `सत्य/असत्य` are tatsama (Sanskrit
-        // loanwords) widely used in all three languages. Add
-        // colloquial Hindi/Marathi alternates. Closure #267.
-        "सत्य" => TokenKind::True,         // satya (Sanskrit, shared)
-        "सही" => TokenKind::True,          // sahī (Hindi/Marathi colloquial: "correct")
-        "असत्य" => TokenKind::False,       // asatya (Sanskrit, shared)
-        "अशुद्ध" => TokenKind::False,      // aśuddha (Hindi/Marathi: "incorrect")
+        // loanwords) widely used in all three languages.
+        //
+        // Linguistic audit 2026-06-07: `सही` means "signature"
+        // in Marathi (a noun), not "correct" — Hindi-only now.
+        // `अशुद्ध` strictly means "impure" in Marathi; natural
+        // Marathi for "false" is खोटे (khote, "false/lie") or
+        // चूक (chūk, "mistake"). Natural Hindi for "true"/"false"
+        // is सच (sach) / झूठ (jhūṭh).
+        "सत्य" => TokenKind::True,         // satya (Sanskrit, shared tatsama)
+        "सही" => TokenKind::True,          // sahī (Hindi colloquial: "correct")
+        "सच" => TokenKind::True,           // sach (Hindi natural: "truth")
+        "बरोबर" => TokenKind::True,        // barobar (Marathi natural: "correct/right")
+        "खरे" => TokenKind::True,          // khare (Marathi natural: "true")
+        "असत्य" => TokenKind::False,       // asatya (Sanskrit, shared tatsama)
+        "अशुद्ध" => TokenKind::False,      // aśuddha (Hindi: "incorrect")
+        "झूठ" => TokenKind::False,         // jhūṭh (Hindi natural: "false/lie")
+        "गलत" => TokenKind::False,         // galat (Hindi natural: "wrong/incorrect")
+        "खोटे" => TokenKind::False,        // khoṭe (Marathi natural: "false/lie")
+        "चूक" => TokenKind::False,         // chūk (Marathi natural: "mistake/wrong")
         // print / write — `लिख` (likh, root for "write") +
         // imperative `लिखो` (likho, "write!"). `छाप` (chāp,
         // "imprint/stamp") was the previous spelling but
@@ -450,8 +470,15 @@ fn bengali_keyword(text: &str) -> Option<TokenKind> {
         "প্রয়োজনীয়" => TokenKind::Requires,  // proyojaniya (required)
         "সুনিশ্চিত" => TokenKind::Ensures,     // sunishchit (assured outcome)
         // === BOOL / PRINT ===
-        "সত্য" => TokenKind::True,             // satya (truth)
-        "অসত্য" => TokenKind::False,           // asatya (untruth)
+        // Bengali natural-everyday forms added 2026-06-07 audit:
+        // `ঠিক` (thik, "correct/right") + `মিথ্যা` (mithya, "lie")
+        // / `ভুল` (bhul, "wrong/mistake") read more naturally than
+        // the formal Sanskrit-rooted সত্য/অসত্য in everyday code.
+        "সত্য" => TokenKind::True,             // satya (truth — tatsama)
+        "ঠিক" => TokenKind::True,              // thik (natural everyday: "correct/right")
+        "অসত্য" => TokenKind::False,           // asatya (untruth — tatsama)
+        "মিথ্যা" => TokenKind::False,          // mithya (natural: "lie/false")
+        "ভুল" => TokenKind::False,             // bhul (natural everyday: "wrong/mistake")
         "লেখ" => TokenKind::Print,             // lekh (write — same Sanskrit root)
         "লিখো" => TokenKind::Print,            // likho (write; alt)
         // === PURITY / PARALLEL ===
@@ -712,7 +739,9 @@ fn kannada_keyword(text: &str) -> Option<TokenKind> {
         "ಅಗತ್ಯ" => TokenKind::Requires,              // agatya (required)
         "ಖಚಿತ" => TokenKind::Ensures,                // khachita (assured)
         "ಸತ್ಯ" => TokenKind::True,                   // satya (true — tatsama)
-        "ಸುಳ್ಳು" => TokenKind::False,                // sullu (false)
+        "ಸರಿ" => TokenKind::True,                    // sari (natural everyday: "correct/right")
+        "ಸುಳ್ಳು" => TokenKind::False,                // sullu (false — natural)
+        "ತಪ್ಪು" => TokenKind::False,                 // tappu (natural everyday: "wrong/mistake")
         "ಬರೆ" => TokenKind::Print,                   // bare (write)
         "ಮುದ್ರಿಸಿ" => TokenKind::Print,             // mudrisi (print — tatsama)
         "ಉದ್ದೇಶ" => TokenKind::Intent,               // uddesha (intent — tatsama)
@@ -756,7 +785,9 @@ fn malayalam_keyword(text: &str) -> Option<TokenKind> {
         "ആവശ്യം" => TokenKind::Requires,             // aavasyam (required — tatsama)
         "ഉറപ്പ്" => TokenKind::Ensures,              // urappu (assurance)
         "സത്യം" => TokenKind::True,                  // sathyam (true — tatsama)
+        "ശരി" => TokenKind::True,                    // shari (natural everyday: "correct/right")
         "അസത്യം" => TokenKind::False,                // asathyam (false — tatsama)
+        "തെറ്റ്" => TokenKind::False,                // thettu (natural everyday: "wrong/mistake")
         "എഴുതുക" => TokenKind::Print,                // ezhuthuka (write)
         "അച്ചടിക്കുക" => TokenKind::Print,          // achchadikuka (print)
         "ഉദ്ദേശ്യം" => TokenKind::Intent,            // uddeshyam (intent — tatsama)
@@ -844,7 +875,9 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "අවශ්‍ය" => TokenKind::Requires,             // avashya (required — tatsama)
         "සහතික" => TokenKind::Ensures,                // sahathika (assured)
         "සත්‍ය" => TokenKind::True,                   // sathya (true — tatsama)
+        "හරි" => TokenKind::True,                    // hari (natural everyday: "correct/right")
         "අසත්‍ය" => TokenKind::False,                 // asathya (false — tatsama)
+        "වැරදි" => TokenKind::False,                  // varadi (natural everyday: "wrong/mistake")
         "ලියන්න" => TokenKind::Print,                 // liyanna (write)
         "මුද්‍රණය" => TokenKind::Print,               // mudranaya (print — tatsama)
         "අරමුණ" => TokenKind::Intent,                 // aramuna (intent/purpose)
@@ -1023,6 +1056,277 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 8b.1 (2026-06-07): Spanish (español) keyword resolution.
+/// First Latin-script Tier II dialect. To avoid breaking existing
+/// English code, v1 only registers Spanish keywords whose natural
+/// spelling contains non-ASCII characters — these can't collide
+/// with English identifiers since the lexer wouldn't tokenize an
+/// ASCII English keyword the same way. Pure-ASCII Spanish keywords
+/// (`si` for if, `para` for for, `verdadero` for true, etc.)
+/// require pragma threading into the Lexer struct to enable
+/// safely; queued for a v2 follow-up. In v1 a Spanish-pragma file
+/// uses these non-ASCII Spanish aliases alongside English ASCII
+/// keywords — partial Spanish surface, but every keyword that has
+/// a natural non-ASCII Spanish form is available.
+fn spanish_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "función" => TokenKind::Fn,           // function
+        "enumeración" => TokenKind::Enum,     // enumeration
+        // === VISIBILITY / MODULES ===
+        "público" => TokenKind::Pub,          // public
+        "módulo" => TokenKind::Module,        // module
+        // === SOV-S7 PARITY (all natural non-ASCII Spanish) ===
+        "intención" => TokenKind::Intent,     // intent
+        "propósito" => TokenKind::Intent,     // purpose (alt for intent)
+        "métodos" => TokenKind::Methods,      // methods
+        "región" => TokenKind::RegionKw,      // region
+        // === BOUNDS ===
+        // `dónde` (interrogative "where?") is distinct from `donde`
+        // (relative "where"); both have a use, but only the accented
+        // form is non-ASCII so safe to register without pragma gate.
+        "dónde" => TokenKind::Where,          // where (interrogative)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 10.1 (2026-06-07): German (Deutsch) keyword resolution.
+/// Third Latin-with-accents Tier II dialect. Same v1 design as
+/// Spanish and French: only genuinely natural non-ASCII German
+/// keywords are registered (umlauts ä/ö/ü and ß), so pure-ASCII
+/// German words (`Funktion`, `wenn`, `dann`, `wahr`, `falsch`,
+/// etc.) don't accidentally collide with user identifiers in
+/// non-pragma files. Pragma threading queued for v2 to unlock
+/// the full German keyword set.
+fn german_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "aufzählung" => TokenKind::Enum,       // enumeration (has ä)
+        // === VISIBILITY ===
+        "öffentlich" => TokenKind::Pub,        // public (has ö)
+        // === CONTROL FLOW ===
+        "während" => TokenKind::While,         // while (has ä)
+        "für" => TokenKind::For,               // for (has ü)
+        "zurück" => TokenKind::Return,         // return / back (has ü)
+        "auflösen" => TokenKind::Break,        // resolve / break (has ö)
+        // === REFS / MUT ===
+        "veränderlich" => TokenKind::Mut,      // changeable / mutable (has ä)
+        "veränderbar" => TokenKind::Mut,       // alt mutable form (has ä)
+        // === MATCH / VERIFICATION ===
+        "übereinstimmen" => TokenKind::Match,  // match / agree (has ü)
+        "überprüfen" => TokenKind::Assert,     // verify (has ü)
+        "überprüfe" => TokenKind::Assert,      // verify! imperative (has ü)
+        "prüfen" => TokenKind::Assert,         // check (has ü)
+        "prüfe" => TokenKind::Assert,          // check! imperative (has ü)
+        // === PRINT ===
+        "ausführen" => TokenKind::Print,       // execute (has ü)
+        "ausführe" => TokenKind::Print,        // execute! imperative (has ü)
+        // === CONCURRENCY ===
+        "ausführbar" => TokenKind::Task,       // executable / task (has ü)
+        // === SOV-S7 PARITY ===
+        "möglichkeit" => TokenKind::Intent,    // possibility / intent (has ö)
+        "äußere" => TokenKind::Extern,         // external (has ä + ß)
+        "äußerer" => TokenKind::Extern,        // external (declined form, has ä + ß)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 9b (2026-06-07): Japanese (日本語) keyword resolution.
+/// First three-script dialect and first non-Indic SOV target. The
+/// keyword set freely mixes Kanji (function = 関数), Katakana
+/// (task = タスク), and Hiragana (verb endings). v1 ships
+/// keyword-first surface — Japanese SOV grammar forms (もし x
+/// ならば { ... }) queued for v2.
+fn japanese_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "関数" => TokenKind::Fn,             // kansuu (function — Kanji)
+        "代入" => TokenKind::Let,            // dainyuu (assignment)
+        "構造体" => TokenKind::Struct,       // kouzoutai (structure)
+        "列挙" => TokenKind::Enum,           // rekkyou (enumeration)
+        "定数" => TokenKind::Const,          // teisuu (constant)
+        // === VISIBILITY / MODULES ===
+        "公開" => TokenKind::Pub,            // koukai (public)
+        "モジュール" => TokenKind::Module,    // mojuuru (module — Katakana loanword)
+        "単位" => TokenKind::Module,         // tan'i (unit — alt for module)
+        "使用" => TokenKind::Use,            // shiyou (use)
+        "として" => TokenKind::As,           // toshite (as — Hiragana)
+        // === CONTROL FLOW ===
+        "戻る" => TokenKind::Return,         // modoru (return / go back)
+        "返す" => TokenKind::Return,         // kaesu (return — transitive)
+        "もし" => TokenKind::If,             // moshi (if — Hiragana)
+        "そうでなければ" => TokenKind::Else, // sou denakereba (otherwise — Hiragana)
+        "の間" => TokenKind::While,          // no aida (while — multi-codepoint, single ident)
+        "間" => TokenKind::While,            // aida (while — short form)
+        "中断" => TokenKind::Break,          // chuudan (interrupt / break)
+        "続行" => TokenKind::Continue,       // zokkou (continue / proceed)
+        "ならば" => TokenKind::Then,         // naraba (then — Hiragana)
+        "対象" => TokenKind::For,            // taishou (for each / target)
+        "から" => TokenKind::From,           // kara (from — Hiragana)
+        "まで" => TokenKind::To,             // made (to/until — Hiragana)
+        // === REFS / MUT ===
+        "参照" => TokenKind::Ref,            // sanshou (reference)
+        "可変" => TokenKind::Mut,            // kahen (changeable / mutable)
+        // === MATCH ===
+        "一致" => TokenKind::Match,          // icchi (match / agreement)
+        "マッチ" => TokenKind::Match,        // macchi (match — Katakana loanword)
+        // === VERIFICATION ===
+        "確認" => TokenKind::Assert,         // kakunin (assert / confirm)
+        "証明" => TokenKind::Prove,          // shoumei (prove / proof)
+        "前提" => TokenKind::Requires,       // zentei (precondition / requires)
+        "保証" => TokenKind::Ensures,        // hoshou (guarantee / ensures)
+        // === BOOL / PRINT ===
+        "真" => TokenKind::True,             // shin (true / truth)
+        "偽" => TokenKind::False,            // gi (false / falsity)
+        "表示" => TokenKind::Print,          // hyouji (display)
+        "書く" => TokenKind::Print,          // kaku (write)
+        // === PURITY / PARALLEL ===
+        "純粋" => TokenKind::Pure,           // junsui (pure)
+        "並列" => TokenKind::Parallel,       // heiretsu (parallel)
+        // === INTERFACES / METHODS ===
+        "インターフェース" => TokenKind::Interface, // intaafeesu (interface — Katakana)
+        "実装" => TokenKind::Implement,      // jissou (implementation)
+        "メソッド" => TokenKind::Methods,    // mesoddo (methods — Katakana)
+        // === BOUNDS ===
+        "ここで" => TokenKind::Where,        // koko de (where — Hiragana)
+        "は" => TokenKind::Is,               // wa (topic particle — used as "is")
+        // === CONCURRENCY ===
+        "試行" => TokenKind::Try,            // shikou (try)
+        "タスク" => TokenKind::Task,         // tasuku (task — Katakana)
+        "結合" => TokenKind::Join,           // ketsugou (join / union)
+        // === EMBEDDED ===
+        "危険" => TokenKind::Unsafe,         // kiken (danger / unsafe)
+        "領域" => TokenKind::RegionKw,       // ryouiki (region / area)
+        // === SOV-S7 PARITY ===
+        "目的" => TokenKind::Intent,         // mokuteki (purpose / intent)
+        "意図" => TokenKind::Intent,         // ito (intention)
+        "型" => TokenKind::Type,             // kata (type)
+        "外部" => TokenKind::Extern,         // gaibu (external)
+        "不変" => TokenKind::Invariant,      // fuhen (invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 8b.3 (2026-06-07): French (français) keyword resolution.
+/// Second Latin-with-accents Tier II dialect. Same v1 design as
+/// Spanish: only natural non-ASCII French keywords are registered,
+/// so pure-ASCII French keywords (`si`, `pour`, `module`, etc.)
+/// don't accidentally collide with user identifiers in non-pragma
+/// files. Pragma threading queued for v2.
+fn french_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "énumération" => TokenKind::Enum,    // enumeration
+        // === REFS / MUT / VIS ===
+        "référence" => TokenKind::Ref,       // reference
+        // === MATCH / VERIFICATION ===
+        "vérifier" => TokenKind::Assert,     // verify (infinitive)
+        "vérifie" => TokenKind::Assert,      // verify! (imperative)
+        "démontrer" => TokenKind::Prove,     // prove (infinitive)
+        "démontre" => TokenKind::Prove,      // prove! (imperative)
+        // === BOOL ===
+        "vérité" => TokenKind::True,         // truth
+        // === PRINT ===
+        "écrire" => TokenKind::Print,        // to write
+        "écris" => TokenKind::Print,         // write! (imperative)
+        "imprimé" => TokenKind::Print,       // printed (past participle alt)
+        // === BOUNDS ===
+        "où" => TokenKind::Where,            // where (très naturel)
+        // === CONCURRENCY ===
+        "tâche" => TokenKind::Task,          // task
+        "parallèle" => TokenKind::Parallel,  // parallel
+        // === INTERFACES / METHODS ===
+        "méthodes" => TokenKind::Methods,    // methods
+        "implémenter" => TokenKind::Implement, // implement
+        // === SOV-S7 PARITY ===
+        "région" => TokenKind::RegionKw,     // region
+        "étranger" => TokenKind::Extern,     // foreign / external
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 8b.2 (2026-06-07): Russian (русский) keyword resolution.
+/// First Cyrillic-script dialect. SVO grammar so existing keyword-
+/// first statement parser applies directly — no SOV plumbing.
+/// Uses Arabic 0-9 numerals (Cyrillic numeric letter notation is
+/// archaic, not used in modern Russian).
+fn cyrillic_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "функция" => TokenKind::Fn,           // funktsiya (function — loanword)
+        "дело" => TokenKind::Fn,              // delo (work — alt)
+        "пусть" => TokenKind::Let,            // pust' (let — natural Russian)
+        "структура" => TokenKind::Struct,     // struktura (structure)
+        "перечисление" => TokenKind::Enum,    // perechislenie (enumeration)
+        "постоянная" => TokenKind::Const,     // postoyannaya (constant)
+        // === VISIBILITY / MODULES ===
+        "публичный" => TokenKind::Pub,        // publichnyy (public — formal)
+        "общий" => TokenKind::Pub,            // obshchiy (common/public)
+        "модуль" => TokenKind::Module,        // modul' (module)
+        "использовать" => TokenKind::Use,     // ispol'zovat' (use)
+        "как" => TokenKind::As,               // kak (as)
+        // === CONTROL FLOW ===
+        "вернуть" => TokenKind::Return,       // vernut' (return)
+        "верни" => TokenKind::Return,         // verni (return! — imperative)
+        "если" => TokenKind::If,              // yesli (if)
+        "иначе" => TokenKind::Else,           // inache (else)
+        "пока" => TokenKind::While,           // poka (while/as long as)
+        "для" => TokenKind::For,              // dlya (for)
+        "в" => TokenKind::In,                 // v (in)
+        "от" => TokenKind::From,              // ot (from)
+        "до" => TokenKind::To,                // do (to/until)
+        "прервать" => TokenKind::Break,       // prervat' (interrupt/break)
+        "продолжить" => TokenKind::Continue,  // prodolzhit' (continue)
+        "тогда" => TokenKind::Then,           // togda (then)
+        // === REFS / MUT ===
+        "смотри" => TokenKind::Ref,           // smotri (see/look! — imperative)
+        "изменяемый" => TokenKind::Mut,       // izmenyayemyy (mutable)
+        // === MATCH ===
+        "совпадение" => TokenKind::Match,     // sovpadeniye (match/coincidence)
+        // === VERIFICATION ===
+        "утверждать" => TokenKind::Assert,    // utverzhdat' (assert)
+        "доказать" => TokenKind::Prove,       // dokazat' (prove)
+        "требует" => TokenKind::Requires,     // trebuet (requires)
+        "гарантирует" => TokenKind::Ensures,  // garantiruet (ensures)
+        // === BOOL / PRINT ===
+        "истина" => TokenKind::True,          // istina (truth — formal)
+        "верно" => TokenKind::True,           // verno (correct/right — everyday)
+        "ложь" => TokenKind::False,           // lozh' (lie — formal)
+        "неверно" => TokenKind::False,        // neverno (incorrect — everyday)
+        "печатать" => TokenKind::Print,       // pechatat' (print)
+        "писать" => TokenKind::Print,         // pisat' (write — alt)
+        // === PURITY / PARALLEL ===
+        "чистый" => TokenKind::Pure,          // chistyy (pure)
+        "параллельный" => TokenKind::Parallel, // parallel'nyy (parallel)
+        // === INTERFACES / METHODS ===
+        "интерфейс" => TokenKind::Interface,  // interfeys (interface — loanword)
+        "реализовать" => TokenKind::Implement, // realizovat' (implement)
+        "методы" => TokenKind::Methods,       // metody (methods)
+        // === BOUNDS ===
+        "где" => TokenKind::Where,            // gde (where)
+        "есть" => TokenKind::Is,              // yest' (is — Russian copula)
+        // === CONCURRENCY ===
+        "попытка" => TokenKind::Try,          // popytka (attempt/try)
+        "задача" => TokenKind::Task,          // zadacha (task)
+        "соединить" => TokenKind::Join,       // soyedinit' (join/unite)
+        // === EMBEDDED ===
+        "небезопасно" => TokenKind::Unsafe,   // nebezopasno (unsafe)
+        "область" => TokenKind::RegionKw,     // oblast' (region/area)
+        // === SOV-S7 PARITY (not actually SOV here — Russian is
+        // SVO — but these are the keyword names) ===
+        "цель" => TokenKind::Intent,          // tsel' (goal/intent)
+        "тип" => TokenKind::Type,             // tip (type)
+        "внешний" => TokenKind::Extern,       // vneshniy (external)
+        "инвариант" => TokenKind::Invariant,  // invariant (loanword)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 pub fn lex(source: &str) -> Result<Vec<Token>, Diagnostic> {
     let mut tokens = Lexer::new(source).lex()?;
     merge_multi_word_devanagari_aliases(&mut tokens, source);
@@ -1157,6 +1461,8 @@ fn script_label(script: Script) -> &'static str {
         Script::Odia => "Odia",
         Script::Sinhala => "Sinhala",
         Script::Arabic => "Perso-Arabic",
+        Script::Cyrillic => "Cyrillic",
+        Script::Japanese => "Japanese (Hiragana/Katakana/Kanji)",
     }
 }
 
@@ -1343,6 +1649,45 @@ enum DialectLang {
     // Pashto-specific letters (ښ ګ ړ etc). Uses Persian-Indic
     // numerals in modern publishing.
     Pashto,
+    // Phase 8b.2 (2026-06-07): Russian (русский) — first Tier
+    // II Cyrillic-script dialect. SVO grammar so no SOV
+    // statement-shape plumbing is needed; existing keyword-
+    // first statement parser applies. Uses Arabic 0-9 numerals
+    // (Cyrillic-numeral letter notation is archaic and not used
+    // in modern Russian) — routes through the ASCII print
+    // helper, no new numeral codepoint helper required.
+    Russian,
+    // Phase 8b.1 (2026-06-07): Spanish (español) — first Tier
+    // II Latin-script (with accents) dialect. SVO grammar so
+    // existing keyword-first statement parser applies. Stays
+    // on Script::Latin since Spanish keywords with accents
+    // (función, módulo, público) live in Latin-1 Supplement
+    // (U+0080..U+00FF), which is not its own script — the
+    // accented chars are just continuation bytes within Latin.
+    Spanish,
+    // Phase 8b.3 (2026-06-07): French (français) — second
+    // Latin-with-accents Tier II dialect. Rides the same
+    // unified `lex_ident` infrastructure shipped with Spanish.
+    // SVO grammar, Latin-1 Supplement accents (é, è, à, ù, ê,
+    // â, ô, î, ï, ç).
+    French,
+    // Phase 9b (2026-06-07): Japanese (日本語) — first three-
+    // script dialect (Hiragana + Katakana + Kanji) and first
+    // non-Indic SOV target. v1 ships keyword-first surface
+    // (関数 main() { 戻る 0; }) — Japanese SOV grammar forms
+    // (もし x ならば { ... }) queued for v2 once the SOV
+    // statement-shape detector generalizes beyond Devanagari.
+    Japanese,
+    // Phase 10.1 (2026-06-07): German (Deutsch) — third
+    // Latin-with-accents Tier II dialect. Rides the same
+    // unified `lex_ident` infrastructure as Spanish + French.
+    // German umlauts ä/ö/ü and ß all live in Latin-1
+    // Supplement (U+00C4, U+00D6, U+00DC, U+00DF and their
+    // lowercase counterparts). German is V2 (verb-second) in
+    // main clauses and SOV in subordinate clauses, but v1
+    // keyword-first surface applies cleanly — V2 / subordinate-
+    // SOV parser hooks queued for v2.
+    German,
 }
 
 impl DialectLang {
@@ -1370,6 +1715,11 @@ impl DialectLang {
             DialectLang::PunjabiShahmukhi => "punjabi-shahmukhi",
             DialectLang::Persian => "persian",
             DialectLang::Pashto => "pashto",
+            DialectLang::Russian => "russian",
+            DialectLang::Spanish => "spanish",
+            DialectLang::French => "french",
+            DialectLang::Japanese => "japanese",
+            DialectLang::German => "german",
         }
     }
 
@@ -1409,6 +1759,11 @@ impl DialectLang {
             DialectLang::PunjabiShahmukhi => Script::Arabic,
             DialectLang::Persian => Script::Arabic,
             DialectLang::Pashto => Script::Arabic,
+            DialectLang::Russian => Script::Cyrillic,
+            DialectLang::Spanish => Script::Latin,
+            DialectLang::French => Script::Latin,
+            DialectLang::Japanese => Script::Japanese,
+            DialectLang::German => Script::Latin,
         }
     }
 }
@@ -1438,6 +1793,23 @@ enum Script {
     // Extended ranges. RTL text-direction is a rendering
     // detail; the lexer reads UTF-8 in logical (byte) order.
     Arabic,
+    // Phase 8b.2 (2026-06-07): Cyrillic — first non-Brahmi,
+    // non-Arabic script. Russian + later Ukrainian / Belarusian
+    // / Bulgarian / Serbian Cyrillic. Block U+0400..U+04FF +
+    // Cyrillic Supplement U+0500..U+052F + Cyrillic Extended-A
+    // U+2DE0..U+2DFF and Extended-B U+A640..U+A69F. LTR like
+    // Latin so no bidi handling needed.
+    Cyrillic,
+    // Phase 9b (2026-06-07): Japanese — first script that
+    // legitimately mixes three Unicode blocks within a single
+    // keyword. Hiragana (U+3040..U+309F, phonetic native),
+    // Katakana (U+30A0..U+30FF, phonetic foreign), CJK Unified
+    // Ideographs (U+4E00..U+9FFF, Kanji), and CJK Extension A
+    // (U+3400..U+4DBF). All three blocks collapse to this one
+    // Script variant so a Japanese-pragma file is free to mix
+    // 関数 (Kanji) + タスク (Katakana) + ならば (Hiragana) the
+    // way native Japanese code does. LTR.
+    Japanese,
 }
 
 impl Script {
@@ -1488,6 +1860,25 @@ impl Script {
                 || ('\u{FE70}'..='\u{FEFF}').contains(&c)
             {
                 return Script::Arabic;
+            }
+            // Phase 8b.2 (2026-06-07): Cyrillic block + supplements.
+            if ('\u{0400}'..='\u{04FF}').contains(&c)
+                || ('\u{0500}'..='\u{052F}').contains(&c)
+                || ('\u{2DE0}'..='\u{2DFF}').contains(&c)
+                || ('\u{A640}'..='\u{A69F}').contains(&c)
+            {
+                return Script::Cyrillic;
+            }
+            // Phase 9b (2026-06-07): Japanese — three blocks
+            // collapse to a single Script variant since native
+            // Japanese code mixes Hiragana + Katakana + Kanji
+            // within a single keyword (関数 / タスク / もし etc).
+            if ('\u{3040}'..='\u{309F}').contains(&c)        // Hiragana
+                || ('\u{30A0}'..='\u{30FF}').contains(&c)    // Katakana
+                || ('\u{4E00}'..='\u{9FFF}').contains(&c)    // CJK Unified Ideographs
+                || ('\u{3400}'..='\u{4DBF}').contains(&c)    // CJK Extension A
+            {
+                return Script::Japanese;
             }
         }
         Script::Latin
@@ -1551,6 +1942,20 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
                 => Some(DialectLang::Persian),
             "pashto" | "paṣ́tō" | "ps"
                 => Some(DialectLang::Pashto),
+            // Phase 8b.2 (2026-06-07): first Cyrillic dialect.
+            "russian" | "русский" | "ru" => Some(DialectLang::Russian),
+            // Phase 8b.1 (2026-06-07): first Latin-script Tier II
+            // dialect (with non-ASCII accent chars).
+            "spanish" | "español" | "castellano" | "es"
+                => Some(DialectLang::Spanish),
+            // Phase 8b.3 (2026-06-07): second Latin-with-accents.
+            "french" | "français" | "francais" | "fr"
+                => Some(DialectLang::French),
+            // Phase 9b (2026-06-07): first non-Indic SOV target.
+            "japanese" | "日本語" | "nihongo" | "ja"
+                => Some(DialectLang::Japanese),
+            // Phase 10.1 (2026-06-07): third Latin-with-accents.
+            "german" | "deutsch" | "de" => Some(DialectLang::German),
             _ => None,
         };
     }
@@ -1641,11 +2046,13 @@ fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
         "देखो" => &[Hindi],
         "दृष्ट्या" => &[Sanskrit],
         "बदल" => &[Marathi],
-        "परिवर्तनीय" => &[Sanskrit, Hindi],
+        "बदलणारा" => &[Marathi],  // Marathi natural mutable adjective
+        "परिवर्तनीय" => &[Sanskrit, Hindi, Marathi],  // tatsama, formal in all three
         // === MATCH ===
         "जुळवा" => &[Marathi],
         "मिलान" => &[Hindi],
         "मेल" => &[Sanskrit],
+        "मेलन" => &[Sanskrit],  // classical Sanskrit deverbal
         // === VERIFICATION ===
         "खात्री" => &[Marathi],
         "सुनिश्चित" => &[Hindi],
@@ -1662,9 +2069,20 @@ fn spelling_supports_dialect(spelling: &str, lang: DialectLang) -> bool {
         "सुनिश्चयित" => &[Sanskrit],
         // === BOOL / PRINT ===
         "सत्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
-        "सही" => &[Hindi, Marathi],
+        // सही means "signature" in Marathi (noun) — Hindi-only.
+        // Native-speaker audit 2026-06-07.
+        "सही" => &[Hindi],
+        "सच" => &[Hindi],          // Hindi natural truth
+        "बरोबर" => &[Marathi],    // Marathi natural true
+        "खरे" => &[Marathi],      // Marathi natural true
         "असत्य" => &[Sanskrit, Hindi, Marathi],  // tatsama
-        "अशुद्ध" => &[Hindi, Marathi],
+        // अशुद्ध strictly means "impure" in Marathi — Hindi-only
+        // for "false". Native-speaker audit 2026-06-07.
+        "अशुद्ध" => &[Hindi],
+        "झूठ" => &[Hindi],         // Hindi natural false
+        "गलत" => &[Hindi],         // Hindi natural wrong/false
+        "खोटे" => &[Marathi],     // Marathi natural false
+        "चूक" => &[Marathi],      // Marathi natural false/mistake
         "लिख" => &[Sanskrit],
         "लिखो" => &[Hindi],  // Marathi uses लिह- root forms below
         "लिहा" => &[Marathi],
@@ -2309,6 +2727,24 @@ impl<'a> Lexer<'a> {
             .or_else(|| urdu_keyword(text))
             .or_else(|| persian_keyword(text))
             .or_else(|| pashto_keyword(text))
+            .or_else(|| cyrillic_keyword(text))
+            // Phase 8b.1/8b.3 (2026-06-07): Latin-with-accents
+            // dialects (Spanish, French) — their non-ASCII
+            // keywords starting with an accented letter (e.g.
+            // French `écris`, `étranger`, `énumération`) route
+            // through this entry point instead of `lex_ident`,
+            // so the lookup chain has to live in both places.
+            .or_else(|| spanish_keyword(text))
+            .or_else(|| french_keyword(text))
+            // Phase 9b (2026-06-07): Japanese — all Japanese
+            // keywords start non-ASCII (Hiragana / Katakana /
+            // Kanji code points all sit above U+0080).
+            .or_else(|| japanese_keyword(text))
+            // Phase 10.1 (2026-06-07): German Latin-with-accents
+            // — keywords starting with non-ASCII (`äußere`,
+            // `öffentlich`, `überprüfen`) route through this
+            // unicode entry point.
+            .or_else(|| german_keyword(text))
             .unwrap_or_else(|| TokenKind::Ident(text.to_owned()));
         self.tokens.push(Token {
             kind,
@@ -2317,11 +2753,21 @@ impl<'a> Lexer<'a> {
     }
 
     fn lex_ident(&mut self, start: usize) {
-        while matches!(
-            self.peek(),
-            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
-        ) {
-            self.advance();
+        // Phase 8b.1 (2026-06-07): also consume non-ASCII bytes
+        // as identifier continuation so Latin-script-with-accent
+        // keywords (Spanish `función`, `módulo`, `público`;
+        // French `très`; German `ä/ö/ü`) tokenize as one word.
+        // The byte-loop is the same as `lex_unicode_ident`; the
+        // entry point differs only in which dispatch arm the
+        // main lex loop chose.
+        while let Some(b) = self.peek() {
+            if matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+                || b >= 0x80
+            {
+                self.advance();
+            } else {
+                break;
+            }
         }
 
         let text = &self.source[start..self.pos];
@@ -2437,6 +2883,19 @@ impl<'a> Lexer<'a> {
             "f64" => TokenKind::F64,
             "bool" => TokenKind::Bool,
             "Vec" => TokenKind::Vec,
+            // Phase 8b.1 (2026-06-07): when the word contains
+            // non-ASCII characters (e.g. Spanish `función`,
+            // French `très`), fall through to the script-keyword
+            // chain instead of defaulting to `Ident`. Pure-ASCII
+            // unknown words still become `Ident` so user
+            // identifiers like `foo` don't accidentally match a
+            // dialect keyword. Latin-with-accent dialects
+            // (Spanish, future French/German) live in their own
+            // tables called from this chain.
+            _ if text.bytes().any(|b| b >= 0x80) => spanish_keyword(text)
+                .or_else(|| french_keyword(text))
+                .or_else(|| german_keyword(text))
+                .unwrap_or_else(|| TokenKind::Ident(text.to_owned())),
             _ => TokenKind::Ident(text.to_owned()),
         };
 

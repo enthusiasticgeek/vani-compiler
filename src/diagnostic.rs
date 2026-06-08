@@ -60,6 +60,21 @@ enum DiagLang {
     // has its own label table; Pashto routes through Persian.
     Persian,
     Pashto,
+    // Phase 8b.2 (2026-06-07): Russian — first Cyrillic-script
+    // dialect with its own label table.
+    Russian,
+    // Phase 8b.1 (2026-06-07): Spanish — first Latin-script
+    // Tier II dialect. Latin error labels with Spanish words.
+    Spanish,
+    // Phase 8b.3 (2026-06-07): French — second Latin-with-
+    // accents Tier II dialect.
+    French,
+    // Phase 9b (2026-06-07): Japanese — first three-script
+    // dialect (Hiragana + Katakana + Kanji).
+    Japanese,
+    // Phase 10.1 (2026-06-07): German — third Latin-with-
+    // accents Tier II dialect.
+    German,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -105,6 +120,19 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
                 => Some(DiagLang::PunjabiShahmukhi),
             "persian" | "farsi" | "fārsī" | "fa" => Some(DiagLang::Persian),
             "pashto" | "paṣ́tō" | "ps" => Some(DiagLang::Pashto),
+            // Phase 8b.2 (2026-06-07): first Cyrillic dialect.
+            "russian" | "русский" | "ru" => Some(DiagLang::Russian),
+            // Phase 8b.1 (2026-06-07): first Latin Tier II dialect.
+            "spanish" | "español" | "castellano" | "es"
+                => Some(DiagLang::Spanish),
+            // Phase 8b.3 (2026-06-07): second Latin-with-accents.
+            "french" | "français" | "francais" | "fr"
+                => Some(DiagLang::French),
+            // Phase 9b (2026-06-07): first three-script dialect.
+            "japanese" | "日本語" | "nihongo" | "ja"
+                => Some(DiagLang::Japanese),
+            // Phase 10.1 (2026-06-07): third Latin-with-accents.
+            "german" | "deutsch" | "de" => Some(DiagLang::German),
             _ => None,
         };
     }
@@ -141,6 +169,11 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Sinhala)) => "දෝෂය (error)".to_string(),
         ("error", Some(DiagLang::Urdu)) => "غلطی (error)".to_string(),
         ("error", Some(DiagLang::Persian)) => "خطا (error)".to_string(),
+        ("error", Some(DiagLang::Russian)) => "ошибка (error)".to_string(),
+        ("error", Some(DiagLang::Spanish)) => "error".to_string(),
+        ("error", Some(DiagLang::French)) => "erreur (error)".to_string(),
+        ("error", Some(DiagLang::Japanese)) => "エラー (error)".to_string(),
+        ("error", Some(DiagLang::German)) => "Fehler (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -155,6 +188,11 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Sinhala)) => "සටහන (note)".to_string(),
         ("note", Some(DiagLang::Urdu)) => "نوٹ (note)".to_string(),
         ("note", Some(DiagLang::Persian)) => "یادداشت (note)".to_string(),
+        ("note", Some(DiagLang::Russian)) => "примечание (note)".to_string(),
+        ("note", Some(DiagLang::Spanish)) => "nota (note)".to_string(),
+        ("note", Some(DiagLang::French)) => "remarque (note)".to_string(),
+        ("note", Some(DiagLang::Japanese)) => "注記 (note)".to_string(),
+        ("note", Some(DiagLang::German)) => "Hinweis (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -341,6 +379,72 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("cannot prove", "قابل اثبات نیست (cannot prove)"),
             ("language mismatch", "عدم تطابق زبان (language mismatch)"),
             ("script mismatch", "عدم تطابق خط (script mismatch)"),
+        ][..],
+        DiagLang::Russian => &[
+            ("expected ", "ожидалось "),
+            ("unknown variable", "неизвестная переменная (unknown variable)"),
+            ("unknown function", "неизвестная функция (unknown function)"),
+            ("unknown struct", "неизвестная структура (unknown struct)"),
+            ("type mismatch", "несоответствие типов (type mismatch)"),
+            ("cannot prove", "не удаётся доказать (cannot prove)"),
+            ("language mismatch", "несоответствие языка (language mismatch)"),
+            ("script mismatch", "несоответствие письменности (script mismatch)"),
+            ("invalid", "недопустимо (invalid)"),
+            ("integer literal", "целочисленный литерал (integer literal)"),
+            ("float literal", "вещественный литерал (float literal)"),
+        ][..],
+        DiagLang::Spanish => &[
+            ("expected ", "esperado "),
+            ("unknown variable", "variable desconocida (unknown variable)"),
+            ("unknown function", "función desconocida (unknown function)"),
+            ("unknown struct", "estructura desconocida (unknown struct)"),
+            ("type mismatch", "tipos incompatibles (type mismatch)"),
+            ("cannot prove", "no se puede probar (cannot prove)"),
+            ("function ", "función "),
+            ("language mismatch", "idioma incompatible (language mismatch)"),
+            ("invalid", "inválido (invalid)"),
+            ("integer literal", "literal entero (integer literal)"),
+            ("float literal", "literal decimal (float literal)"),
+        ][..],
+        DiagLang::French => &[
+            ("expected ", "attendu "),
+            ("unknown variable", "variable inconnue (unknown variable)"),
+            ("unknown function", "fonction inconnue (unknown function)"),
+            ("unknown struct", "structure inconnue (unknown struct)"),
+            ("type mismatch", "types incompatibles (type mismatch)"),
+            ("cannot prove", "impossible à prouver (cannot prove)"),
+            ("function ", "fonction "),
+            ("language mismatch", "langue incompatible (language mismatch)"),
+            ("invalid", "invalide (invalid)"),
+            ("integer literal", "littéral entier (integer literal)"),
+            ("float literal", "littéral décimal (float literal)"),
+        ][..],
+        DiagLang::Japanese => &[
+            ("expected ", "期待される "),
+            ("unknown variable", "未定義の変数 (unknown variable)"),
+            ("unknown function", "未定義の関数 (unknown function)"),
+            ("unknown struct", "未定義の構造体 (unknown struct)"),
+            ("type mismatch", "型が一致しません (type mismatch)"),
+            ("cannot prove", "証明できません (cannot prove)"),
+            ("function ", "関数 "),
+            ("language mismatch", "言語が一致しません (language mismatch)"),
+            ("script mismatch", "文字体系が一致しません (script mismatch)"),
+            ("invalid", "無効 (invalid)"),
+            ("integer literal", "整数リテラル (integer literal)"),
+            ("float literal", "浮動小数点リテラル (float literal)"),
+        ][..],
+        DiagLang::German => &[
+            ("expected ", "erwartet "),
+            ("unknown variable", "unbekannte Variable (unknown variable)"),
+            ("unknown function", "unbekannte Funktion (unknown function)"),
+            ("unknown struct", "unbekannte Struktur (unknown struct)"),
+            ("type mismatch", "Typenkonflikt (type mismatch)"),
+            ("cannot prove", "kann nicht beweisen (cannot prove)"),
+            ("function ", "Funktion "),
+            ("language mismatch", "Sprachkonflikt (language mismatch)"),
+            ("invalid", "ungültig (invalid)"),
+            ("integer literal", "Ganzzahlliteral (integer literal)"),
+            ("float literal", "Dezimalliteral (float literal)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.
