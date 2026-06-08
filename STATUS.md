@@ -10,6 +10,138 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 🟢 Session 2026-06-08 (cont.) — Phases 13.3 + 13.4 + 13.5: Indonesian + Greek + Hebrew
+
+Three back-to-back ships, each adding a different architectural
+dimension. Roster grows **28 → 31 dialects across 16 scripts**
+(Latin, Devanagari, Bengali, Tamil, Telugu, Gujarati, Gurmukhi,
+Kannada, Malayalam, Odia, Sinhala, Arabic, Cyrillic, Japanese,
+Hangul, Greek, Hebrew — 16 with the two new ones).
+
+### Phase 13.3 — Indonesian (Bahasa Indonesia)
+
+**First basic-Latin Tier II dialect.** Indonesian has no
+diacritics — the WHOLE keyword surface rides the pragma-
+threading enabler shipped in commit `c3a2bb6`. Validates that
+pragma threading actually unblocks basic-Latin languages with
+no diacritic anchors.
+
+```rust
+// vani-lang: indonesian
+tujuan "compute a small score with checked constraints";
+
+fungsi add(a: i64, b: i64) -> i64 {
+  kembali a + b;
+}
+
+fungsi main() -> i64 {
+  biarkan x: i64 = add(20, 22);
+  pastikan x == 42;
+  buktikan 2 + 2 == 4;
+  cetak x;
+  kembali 0;
+}
+```
+
+Prints `42` on both backends. Pragma accepts `indonesian |
+indonesia | bahasa | id`. ~55 ASCII keyword entries.
+
+### Phase 13.4 — Greek (Ελληνικά)
+
+**First Greek-script dialect.** New `Script::Greek` covering
+Greek and Coptic (U+0370..03FF) + Greek Extended (U+1F00..1FFF
+for polytonic-accented forms). Modern Greek uses the monotonic
+accent system (single acute mark + diaeresis); the keyword
+table follows that convention.
+
+```rust
+// vani-lang: greek
+σκοπός "compute a small score with checked constraints";
+
+συνάρτηση add(a: i64, b: i64) -> i64 {
+  επιστροφή a + b;
+}
+
+συνάρτηση main() -> i64 {
+  έστω x: i64 = add(20, 22);
+  επιβεβαίωση x == 42;
+  απόδειξη 2 + 2 == 4;
+  εκτύπωση x;
+  επιστροφή 0;
+}
+```
+
+Prints `42` on both backends. Pragma accepts `greek |
+ελληνικά | ellinika | el`. ~45 keyword entries.
+
+### Phase 13.5 — Hebrew (עברית)
+
+**Second RTL-script dialect** after the Perso-Arabic batch.
+New `Script::Hebrew` covering U+0590..05FF. The lexer reads
+UTF-8 in logical (byte) order so RTL is purely a rendering
+concern — same model the shipped Urdu/Sindhi/Shahmukhi/Persian/
+Pashto dialects already use.
+
+```rust
+// vani-lang: hebrew
+מטרה "compute a small score with checked constraints";
+
+פונקציה add(a: i64, b: i64) -> i64 {
+  החזר a + b;
+}
+
+פונקציה main() -> i64 {
+  יהי x: i64 = add(20, 22);
+  ודא x == 42;
+  הוכח 2 + 2 == 4;
+  הדפס x;
+  החזר 0;
+}
+```
+
+Prints `42` on both backends. Pragma accepts `hebrew | עברית |
+ivrit | he | iw`. ~45 keyword entries.
+
+### Per-dialect surface notes
+
+| Dialect | DiagLang labels | Keywords |
+|---|---|---|
+| Indonesian | `kesalahan` / `catatan` | `fungsi`, `biarkan`, `jika`, `selama`, `untuk`, `kembali`, `pastikan`, `buktikan`, `benar`, `salah`, `cetak`, … |
+| Greek | `σφάλμα` / `σημείωση` | `συνάρτηση`, `έστω`, `αν`, `όσο`, `για`, `επιστροφή`, `επιβεβαίωση`, `απόδειξη`, `αληθές`, `ψευδές`, `εκτύπωση`, … |
+| Hebrew | `שגיאה` / `הערה` | `פונקציה`, `יהי`, `אם`, `כאשר`, `עבור`, `החזר`, `ודא`, `הוכח`, `אמת`, `שקר`, `הדפס`, … |
+
+### Architecture validation
+
+Each ship was the same 6-touchpoint pattern:
+1. `Script::X` variant (or reuse `Script::Latin`).
+2. `Script::classify` range (or n/a for Latin).
+3. `DialectLang::X` enum variant.
+4. Pragma resolver arm.
+5. `x_keyword` table (chained into `lex_unicode_ident` for
+   non-Latin scripts, or `lex_ident` pragma branch for ASCII).
+6. `DiagLang::X` + native error/note labels + prefix table.
+
+The per-script abstraction from Phase 5b (Bengali) now spans
+**16 scripts** including the three new entries (Greek + Hebrew
++ Indonesian's pragma-threaded Latin path).
+
+### 5 new regression tests
+
+- `indonesian_basic_latin_pragma_compiles` — first proof that
+  pragma threading enables basic-Latin languages.
+- `greek_script_pragma_compiles_and_runs` — full Greek pipeline.
+- `greek_script_purity_rejects_mixed_greek_and_devanagari` —
+  cross-script purity gate.
+- `hebrew_script_pragma_compiles_and_runs` — full Hebrew pipeline.
+- `hebrew_script_purity_rejects_mixed_hebrew_and_greek` —
+  Greek/Hebrew cross-script rejection (different new scripts).
+
+Lib ledger: **1965 lib + 54 parity** green (1960→1965 = 5 new
+regression tests). All 190 example files compile.
+
+Indonesian was committed standalone (`5335fdf`); Greek + Hebrew
+shipped together in this commit.
+
 ## 🟢 Session 2026-06-08 (cont.) — Phase 13.2 Portuguese (fourth Latin-with-accents)
 
 **Portuguese (português)** joins as the fourth Latin-with-

@@ -27953,6 +27953,75 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn greek_script_pragma_compiles_and_runs() {
+        // Phase 13.4 (2026-06-08): first Greek-script dialect.
+        // Modern Greek monotonic accents in keyword spellings.
+        let source = "// vani-lang: greek\n\
+                      σκοπός \"basic Greek demo\";\n\
+                      συνάρτηση add(a: i64, b: i64) -> i64 {\n  \
+                        επιστροφή a + b;\n\
+                      }\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        έστω x: i64 = add(20, 22);\n  \
+                        επιβεβαίωση x == 42;\n  \
+                        απόδειξη 2 + 2 == 4;\n  \
+                        εκτύπωση x;\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        crate::compile(source).expect("Greek basics compile");
+    }
+
+    #[test]
+    fn greek_script_purity_rejects_mixed_greek_and_devanagari() {
+        let source = "// vani-lang: greek\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        कार्य x(): i64 { return 0; }\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        assert!(
+            crate::compile(source).is_err(),
+            "Greek pragma + Devanagari keyword must be rejected"
+        );
+    }
+
+    #[test]
+    fn hebrew_script_pragma_compiles_and_runs() {
+        // Phase 13.5 (2026-06-08): first Hebrew-script dialect.
+        // Second RTL-script dialect after the Perso-Arabic batch.
+        // The lexer reads UTF-8 in logical byte order so RTL is
+        // purely a rendering concern.
+        let source = "// vani-lang: hebrew\n\
+                      מטרה \"basic Hebrew demo\";\n\
+                      פונקציה add(a: i64, b: i64) -> i64 {\n  \
+                        החזר a + b;\n\
+                      }\n\
+                      פונקציה main() -> i64 {\n  \
+                        יהי x: i64 = add(20, 22);\n  \
+                        ודא x == 42;\n  \
+                        הוכח 2 + 2 == 4;\n  \
+                        הדפס x;\n  \
+                        החזר 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hebrew basics compile");
+    }
+
+    #[test]
+    fn hebrew_script_purity_rejects_mixed_hebrew_and_greek() {
+        // Hebrew (U+0590..05FF) and Greek (U+0370..03FF) are
+        // distinct scripts; mixing them in one file must fire
+        // the script-purity gate.
+        let source = "// vani-lang: hebrew\n\
+                      פונקציה main() -> i64 {\n  \
+                        συνάρτηση x(): i64 { return 0; }\n  \
+                        החזר 0;\n\
+                      }\n";
+        assert!(
+            crate::compile(source).is_err(),
+            "Hebrew pragma + Greek keyword must be rejected"
+        );
+    }
+
+    #[test]
     fn indonesian_basic_latin_pragma_compiles() {
         // Phase 13.3 (2026-06-08): first basic-Latin dialect.
         // Indonesian has no diacritics; the ENTIRE surface

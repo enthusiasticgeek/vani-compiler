@@ -84,6 +84,12 @@ enum DiagLang {
     // Phase 13.3 (2026-06-08): Indonesian — first basic-Latin
     // (no diacritics) Tier II dialect.
     Indonesian,
+    // Phase 13.4 (2026-06-08): Greek — first Greek-script
+    // dialect.
+    Greek,
+    // Phase 13.5 (2026-06-08): Hebrew — second RTL-script
+    // dialect (after Perso-Arabic).
+    Hebrew,
 }
 
 fn detect_diag_lang(source: &str) -> Option<DiagLang> {
@@ -152,6 +158,12 @@ fn detect_diag_lang(source: &str) -> Option<DiagLang> {
             // Phase 13.3 (2026-06-08): first basic-Latin dialect.
             "indonesian" | "indonesia" | "bahasa" | "id"
                 => Some(DiagLang::Indonesian),
+            // Phase 13.4 (2026-06-08): first Greek-script dialect.
+            "greek" | "ελληνικά" | "ellinika" | "el"
+                => Some(DiagLang::Greek),
+            // Phase 13.5 (2026-06-08): second RTL dialect.
+            "hebrew" | "עברית" | "ivrit" | "he" | "iw"
+                => Some(DiagLang::Hebrew),
             _ => None,
         };
     }
@@ -196,6 +208,8 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("error", Some(DiagLang::Korean)) => "오류 (error)".to_string(),
         ("error", Some(DiagLang::Portuguese)) => "erro (error)".to_string(),
         ("error", Some(DiagLang::Indonesian)) => "kesalahan (error)".to_string(),
+        ("error", Some(DiagLang::Greek)) => "σφάλμα (error)".to_string(),
+        ("error", Some(DiagLang::Hebrew)) => "שגיאה (error)".to_string(),
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
@@ -218,6 +232,8 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Korean)) => "참고 (note)".to_string(),
         ("note", Some(DiagLang::Portuguese)) => "nota (note)".to_string(),
         ("note", Some(DiagLang::Indonesian)) => "catatan (note)".to_string(),
+        ("note", Some(DiagLang::Greek)) => "σημείωση (note)".to_string(),
+        ("note", Some(DiagLang::Hebrew)) => "הערה (note)".to_string(),
         _ => level.to_string(),
     }
 }
@@ -510,6 +526,34 @@ fn localize_message(message: &str, lang: Option<DiagLang>) -> String {
             ("invalid", "tidak valid (invalid)"),
             ("integer literal", "literal bilangan bulat (integer literal)"),
             ("float literal", "literal desimal (float literal)"),
+        ][..],
+        DiagLang::Greek => &[
+            ("expected ", "αναμένεται "),
+            ("unknown variable", "άγνωστη μεταβλητή (unknown variable)"),
+            ("unknown function", "άγνωστη συνάρτηση (unknown function)"),
+            ("unknown struct", "άγνωστη δομή (unknown struct)"),
+            ("type mismatch", "ασυμβατότητα τύπων (type mismatch)"),
+            ("cannot prove", "αδύνατη απόδειξη (cannot prove)"),
+            ("function ", "συνάρτηση "),
+            ("language mismatch", "ασυμβατότητα γλωσσών (language mismatch)"),
+            ("script mismatch", "ασυμβατότητα γραφών (script mismatch)"),
+            ("invalid", "άκυρο (invalid)"),
+            ("integer literal", "ακέραιο σταθερό (integer literal)"),
+            ("float literal", "δεκαδικό σταθερό (float literal)"),
+        ][..],
+        DiagLang::Hebrew => &[
+            ("expected ", "צפוי "),
+            ("unknown variable", "משתנה לא ידוע (unknown variable)"),
+            ("unknown function", "פונקציה לא ידועה (unknown function)"),
+            ("unknown struct", "מבנה לא ידוע (unknown struct)"),
+            ("type mismatch", "חוסר התאמת טיפוס (type mismatch)"),
+            ("cannot prove", "לא ניתן להוכיח (cannot prove)"),
+            ("function ", "פונקציה "),
+            ("language mismatch", "חוסר התאמת שפה (language mismatch)"),
+            ("script mismatch", "חוסר התאמת כתב (script mismatch)"),
+            ("invalid", "לא חוקי (invalid)"),
+            ("integer literal", "מספר שלם (integer literal)"),
+            ("float literal", "מספר עשרוני (float literal)"),
         ][..],
         // Collapsed above to Hindi/Marathi/Bengali/Urdu; rustc
         // requires the arms to be syntactically exhaustive.

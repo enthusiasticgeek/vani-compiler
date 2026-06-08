@@ -1,0 +1,33 @@
+// श्री।
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/hebrew/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/hebrew/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.5 v1: second RTL-script vāṇी dialect (after the
+// Perso-Arabic batch). The lexer reads UTF-8 in logical (byte)
+// order so RTL is purely a rendering concern.
+
+מטרה "Compute a small score with checked constraints";
+
+פונקציה add(a: i64, b: i64) -> i64 {
+  החזר a + b;
+}
+
+פונקציה bounded_score(base: i64) -> i64
+דורש base >= 0;
+{
+  יהי doubled: i64 = base * 2;
+  ודא doubled >= base;
+  החזר add(doubled, 2);
+}
+
+פונקציה main() -> i64 {
+  יהי answer = bounded_score(20);
+  הוכח 2 + 2 == 4;
+  ודא answer >= 0;
+  הדפס answer;
+  החזר 0;
+}

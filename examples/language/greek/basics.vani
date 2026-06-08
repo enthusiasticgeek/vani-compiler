@@ -1,0 +1,33 @@
+// श्री।
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/basics.vani                          # LLVM backend, JIT via lli
+//   vanic run examples/language/greek/basics.vani --backend=c              # C backend, gcc
+//   vanic build examples/language/greek/basics.vani -o /tmp/basics && /tmp/basics   # native binary
+//
+// Phase 13.4 v1: first Greek-script vāṇी dialect. Modern Greek
+// uses the monotonic accent system (single acute mark +
+// diaeresis); the keyword set follows that convention.
+
+σκοπός "Compute a small score with checked constraints";
+
+συνάρτηση add(a: i64, b: i64) -> i64 {
+  επιστροφή a + b;
+}
+
+συνάρτηση bounded_score(base: i64) -> i64
+απαιτεί base >= 0;
+{
+  έστω doubled: i64 = base * 2;
+  επιβεβαίωση doubled >= base;
+  επιστροφή add(doubled, 2);
+}
+
+συνάρτηση main() -> i64 {
+  έστω answer = bounded_score(20);
+  απόδειξη 2 + 2 == 4;
+  επιβεβαίωση answer >= 0;
+  εκτύπωση answer;
+  επιστροφή 0;
+}

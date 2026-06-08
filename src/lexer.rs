@@ -1056,6 +1056,155 @@ fn pashto_keyword(text: &str) -> Option<TokenKind> {
     Some(kind)
 }
 
+/// Phase 13.4 (2026-06-08): Greek (Ελληνικά) keyword resolution.
+/// First Greek-script dialect. Uses modern Greek's monotonic
+/// accent system (single acute mark + diaeresis). All keywords
+/// start with non-ASCII (Greek block starts at U+0370) so they
+/// route through `lex_unicode_ident`.
+fn greek_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "συνάρτηση" => TokenKind::Fn,         // synártisi (function)
+        "έστω" => TokenKind::Let,             // ésto (let / "let it be")
+        "δομή" => TokenKind::Struct,          // domí (structure)
+        "απαρίθμηση" => TokenKind::Enum,      // aparíthmisi (enumeration)
+        "σταθερά" => TokenKind::Const,        // stathérá (constant)
+        // === VISIBILITY / MODULES ===
+        "δημόσιο" => TokenKind::Pub,          // dimósio (public)
+        "ενότητα" => TokenKind::Module,       // enótita (unit / module)
+        "άρθρωμα" => TokenKind::Module,       // árthroma (module — alt)
+        "χρήση" => TokenKind::Use,            // khrísi (use)
+        "ως" => TokenKind::As,                // os (as)
+        // === CONTROL FLOW ===
+        "επιστροφή" => TokenKind::Return,     // epistrofí (return)
+        "αν" => TokenKind::If,                // an (if)
+        "αλλιώς" => TokenKind::Else,          // alliós (else)
+        "όσο" => TokenKind::While,            // óso (while / as long as)
+        "για" => TokenKind::For,              // gia (for)
+        "σε" => TokenKind::In,                // se (in)
+        "από" => TokenKind::From,             // apó (from)
+        "μέχρι" => TokenKind::To,             // méhri (until / to)
+        "διακοπή" => TokenKind::Break,        // diakopí (interruption / break)
+        "συνέχεια" => TokenKind::Continue,    // synéheia (continuation)
+        "τότε" => TokenKind::Then,            // tóte (then)
+        // === REFS / MUT ===
+        "αναφορά" => TokenKind::Ref,          // anaforá (reference)
+        "μεταβλητό" => TokenKind::Mut,        // metavlitó (changeable / mutable)
+        // === MATCH ===
+        "αντιστοιχία" => TokenKind::Match,    // antistoikhía (correspondence)
+        // === VERIFICATION ===
+        "επιβεβαίωση" => TokenKind::Assert,   // epivevaíosi (confirmation)
+        "απόδειξη" => TokenKind::Prove,       // apódeixi (proof)
+        "απαιτεί" => TokenKind::Requires,     // apaiteí (requires)
+        "εγγυάται" => TokenKind::Ensures,     // engyátai (guarantees)
+        // === BOOL / PRINT ===
+        "αληθές" => TokenKind::True,          // alithés (true)
+        "ψευδές" => TokenKind::False,         // pseudés (false)
+        "εκτύπωση" => TokenKind::Print,       // ektýposi (print)
+        "γράψε" => TokenKind::Print,          // grápse (write! — alt)
+        // === PURITY / PARALLEL ===
+        "καθαρό" => TokenKind::Pure,          // katharó (pure)
+        "παράλληλο" => TokenKind::Parallel,   // parállilo (parallel)
+        // === INTERFACES / METHODS ===
+        "διεπαφή" => TokenKind::Interface,    // diepafí (interface)
+        "υλοποίηση" => TokenKind::Implement,  // ylopoíisi (implementation)
+        "μέθοδοι" => TokenKind::Methods,      // méthodoi (methods)
+        // === BOUNDS ===
+        "όπου" => TokenKind::Where,           // ópou (where)
+        "είναι" => TokenKind::Is,             // eínai (is)
+        // === CONCURRENCY ===
+        "δοκιμή" => TokenKind::Try,           // dokimí (try)
+        "εργασία" => TokenKind::Task,         // ergasía (work / task)
+        "ένωση" => TokenKind::Join,           // énosi (union / join)
+        // === EMBEDDED ===
+        "επικίνδυνο" => TokenKind::Unsafe,    // epikíndyno (dangerous)
+        "περιοχή" => TokenKind::RegionKw,     // perioχí (region)
+        // === SOV-S7 PARITY ===
+        "σκοπός" => TokenKind::Intent,        // skopós (purpose)
+        "τύπος" => TokenKind::Type,           // týpos (type)
+        "εξωτερικό" => TokenKind::Extern,     // exoterikó (external)
+        "αμετάβλητο" => TokenKind::Invariant, // ametávlito (invariant)
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// Phase 13.5 (2026-06-08): Hebrew (עברית) keyword resolution.
+/// First Hebrew-script dialect. RTL writing direction is a
+/// rendering concern only — the lexer reads UTF-8 in logical
+/// (byte) order, same approach as the shipped Perso-Arabic
+/// batch.
+fn hebrew_keyword(text: &str) -> Option<TokenKind> {
+    let kind = match text {
+        // === DECLARATIONS ===
+        "פונקציה" => TokenKind::Fn,           // funktsia (function — loanword)
+        "פעולה" => TokenKind::Fn,             // peulah (action — alt for fn)
+        "יהי" => TokenKind::Let,              // yehi ("let there be")
+        "מבנה" => TokenKind::Struct,          // mivneh (structure)
+        "ספירה" => TokenKind::Enum,           // sefirah (counting / enumeration)
+        "קבוע" => TokenKind::Const,           // kavua (constant / fixed)
+        // === VISIBILITY / MODULES ===
+        "ציבורי" => TokenKind::Pub,           // tsiburi (public)
+        "מודול" => TokenKind::Module,         // modul (module — loanword)
+        "מודולים" => TokenKind::Module,       // moduliym (modules — alt)
+        "השתמש" => TokenKind::Use,            // hishtamesh (use!)
+        // === CONTROL FLOW ===
+        "החזר" => TokenKind::Return,          // hakher (return!)
+        "חזרה" => TokenKind::Return,          // chazara (return — noun)
+        "אם" => TokenKind::If,                // im (if)
+        "אחרת" => TokenKind::Else,            // aheret (else / otherwise)
+        "כאשר" => TokenKind::While,           // kasher (while / when)
+        "עבור" => TokenKind::For,             // avur (for / "on behalf of")
+        "בתוך" => TokenKind::In,              // betoch (inside)
+        "מתוך" => TokenKind::From,            // mitokh (from)
+        "עד" => TokenKind::To,                // ad (until)
+        "שבור" => TokenKind::Break,           // shvor (break!)
+        "הפסק" => TokenKind::Break,           // hafsek (stop! — alt)
+        "המשך" => TokenKind::Continue,        // hemshech (continue!)
+        "אז" => TokenKind::Then,              // az (then)
+        // === REFS / MUT ===
+        "הפנייה" => TokenKind::Ref,           // hapnaya (reference)
+        "משתנה" => TokenKind::Mut,            // mishtaneh (changing / variable)
+        // === MATCH ===
+        "התאם" => TokenKind::Match,           // hat'em (match!)
+        // === VERIFICATION ===
+        "ודא" => TokenKind::Assert,           // vada (verify!)
+        "הוכח" => TokenKind::Prove,           // hokach (prove!)
+        "דורש" => TokenKind::Requires,        // doresh (requires)
+        "מבטיח" => TokenKind::Ensures,        // mavtiakh (guarantees)
+        // === BOOL / PRINT ===
+        "אמת" => TokenKind::True,             // emet (truth / true)
+        "שקר" => TokenKind::False,            // sheker (lie / false)
+        "הדפס" => TokenKind::Print,           // hadpes (print!)
+        "כתוב" => TokenKind::Print,           // ktov (write! — alt)
+        // === PURITY / PARALLEL ===
+        "טהור" => TokenKind::Pure,            // tahor (pure)
+        "מקבילי" => TokenKind::Parallel,      // makbili (parallel)
+        // === INTERFACES / METHODS ===
+        "ממשק" => TokenKind::Interface,       // memshak (interface)
+        "ממש" => TokenKind::Implement,        // mamesh (implement / realize)
+        "שיטות" => TokenKind::Methods,        // shitot (methods)
+        // === BOUNDS ===
+        "איפה" => TokenKind::Where,           // eyfo (where)
+        "הוא" => TokenKind::Is,               // hu (is — "he/it")
+        // === CONCURRENCY ===
+        "נסה" => TokenKind::Try,              // naseh (try!)
+        "משימה" => TokenKind::Task,           // mesimah (task)
+        "חיבור" => TokenKind::Join,           // khibur (connection / join)
+        // === EMBEDDED ===
+        "מסוכן" => TokenKind::Unsafe,         // mesukan (dangerous / unsafe)
+        "אזור" => TokenKind::RegionKw,        // azor (region / area)
+        // === SOV-S7 PARITY ===
+        "מטרה" => TokenKind::Intent,          // matarah (goal / intent)
+        "סוג" => TokenKind::Type,             // sug (kind)
+        "טיפוס" => TokenKind::Type,           // tipus (type — alt loanword)
+        "חיצוני" => TokenKind::Extern,        // khitsoni (external)
+        "בלתי-משתנה" => TokenKind::Invariant, // bilti-mishtaneh (unchanging)
+        _ => return None,
+    };
+    Some(kind)
+}
+
 /// Phase 13.3 (2026-06-08): Indonesian (Bahasa Indonesia)
 /// keyword resolution. First basic-Latin Tier II dialect — has
 /// no diacritics, so the only path is the pragma-gated ASCII
@@ -1955,6 +2104,8 @@ fn script_label(script: Script) -> &'static str {
         Script::Cyrillic => "Cyrillic",
         Script::Japanese => "Japanese (Hiragana/Katakana/Kanji)",
         Script::Hangul => "Hangul (Korean)",
+        Script::Greek => "Greek",
+        Script::Hebrew => "Hebrew",
     }
 }
 
@@ -2203,6 +2354,15 @@ enum DialectLang {
     // table is the only path. SVO grammar — keyword-first
     // works directly.
     Indonesian,
+    // Phase 13.4 (2026-06-08): Greek (Ελληνικά) — first
+    // Greek-script dialect. Modern Greek uses the monotonic
+    // accent system (single acute + diaeresis) for stress
+    // marks; the keyword table follows monotonic conventions.
+    // SVO grammar.
+    Greek,
+    // Phase 13.5 (2026-06-08): Hebrew (עברית) — second RTL
+    // script dialect after Perso-Arabic. SVO grammar.
+    Hebrew,
 }
 
 impl DialectLang {
@@ -2238,6 +2398,8 @@ impl DialectLang {
             DialectLang::Korean => "korean",
             DialectLang::Portuguese => "portuguese",
             DialectLang::Indonesian => "indonesian",
+            DialectLang::Greek => "greek",
+            DialectLang::Hebrew => "hebrew",
         }
     }
 
@@ -2285,6 +2447,8 @@ impl DialectLang {
             DialectLang::Korean => Script::Hangul,
             DialectLang::Portuguese => Script::Latin,
             DialectLang::Indonesian => Script::Latin,
+            DialectLang::Greek => Script::Greek,
+            DialectLang::Hebrew => Script::Hebrew,
         }
     }
 }
@@ -2341,6 +2505,22 @@ enum Script {
     // queued behind the same generalization needed for
     // Japanese).
     Hangul,
+    // Phase 13.4 (2026-06-08): Greek — first Greek-script
+    // dialect. Block U+0370..U+03FF (Greek and Coptic) covers
+    // both modern and polytonic Greek letters; U+1F00..U+1FFF
+    // (Greek Extended) carries the polytonic-accented forms
+    // used in classical / ecclesiastical texts. Modern Greek
+    // uses the monotonic system (single acute accent + diaeresis)
+    // and is SVO.
+    Greek,
+    // Phase 13.5 (2026-06-08): Hebrew — second RTL script
+    // (after Perso-Arabic). Block U+0590..U+05FF covers Hebrew
+    // letters + vowel points (niqqud) + cantillation marks +
+    // punctuation. Like the shipped Perso-Arabic dialects, the
+    // lexer reads UTF-8 in logical (byte) order so no special
+    // bidi handling is needed at the parse level — the RTL
+    // direction is a rendering concern.
+    Hebrew,
 }
 
 impl Script {
@@ -2419,6 +2599,18 @@ impl Script {
                 || ('\u{D7B0}'..='\u{D7FF}').contains(&c)    // Hangul Jamo Extended-B
             {
                 return Script::Hangul;
+            }
+            // Phase 13.4 (2026-06-08): Greek and Coptic + Greek
+            // Extended for polytonic-accented forms.
+            if ('\u{0370}'..='\u{03FF}').contains(&c)        // Greek and Coptic
+                || ('\u{1F00}'..='\u{1FFF}').contains(&c)    // Greek Extended
+            {
+                return Script::Greek;
+            }
+            // Phase 13.5 (2026-06-08): Hebrew (RTL like Arabic
+            // but distinct Unicode block).
+            if ('\u{0590}'..='\u{05FF}').contains(&c) {
+                return Script::Hebrew;
             }
         }
         Script::Latin
@@ -2509,6 +2701,14 @@ fn detect_language_pragma(source: &str) -> Option<DialectLang> {
             // riding pure pragma-threading (no diacritics).
             "indonesian" | "indonesia" | "bahasa" | "id"
                 => Some(DialectLang::Indonesian),
+            // Phase 13.4 (2026-06-08): first Greek-script dialect.
+            "greek" | "ελληνικά" | "ellinika" | "el"
+                => Some(DialectLang::Greek),
+            // Phase 13.5 (2026-06-08): second RTL dialect (after
+            // Perso-Arabic batch). Hebrew uses its own Unicode
+            // block U+0590..U+05FF.
+            "hebrew" | "עברית" | "ivrit" | "he" | "iw"
+                => Some(DialectLang::Hebrew),
             _ => None,
         };
     }
@@ -3313,6 +3513,12 @@ impl<'a> Lexer<'a> {
             // route through this entry point when they start
             // with a non-ASCII byte (não, …).
             .or_else(|| portuguese_keyword(text))
+            // Phase 13.4 (2026-06-08): Greek — every keyword
+            // starts with a Greek-block codepoint (U+0370+).
+            .or_else(|| greek_keyword(text))
+            // Phase 13.5 (2026-06-08): Hebrew — every keyword
+            // starts with a Hebrew-block codepoint (U+0590+).
+            .or_else(|| hebrew_keyword(text))
             // Phase 10.1 (2026-06-07): German Latin-with-accents
             // — keywords starting with non-ASCII (`äußere`,
             // `öffentlich`, `überprüfen`) route through this
