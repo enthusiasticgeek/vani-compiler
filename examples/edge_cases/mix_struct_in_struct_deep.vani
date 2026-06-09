@@ -1,0 +1,19 @@
+// Mixed-feature: deeply nested struct fields including
+// non-Copy types.
+struct Inner { name: OwnedStr, value: i64 }
+struct Middle { id: i64, inner: Inner, refs: Vec<i64> }
+struct Outer { tag: i64, mid: Middle, label: OwnedStr }
+
+fn main() -> i64 {
+  let o: Outer = Outer {
+    tag: 1,
+    mid: Middle {
+      id: 2,
+      inner: Inner { name: "deep" + "", value: 42 },
+      refs: vec(10, 20, 30),
+    },
+    label: "outer" + "",
+  };
+  print o.mid.inner.value;
+  return 0;
+}

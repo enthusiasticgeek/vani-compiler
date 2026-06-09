@@ -13858,32 +13858,70 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // (NOT a pointer to one) with `.data` pointing
             // into the heap. Drop frees `.data`.
             if let Type::Object(iface) = inner_ty {
-                if let TypedExprKind::DynCoerce { value, from_type_name, .. } = &args[0].kind {
-                    // The DynCoerce source must be a Var by
-                    // the checker's synthetic-let hoist
-                    // invariant (closure #276); the concrete
-                    // value lives in a stack alloca that we
-                    // need to copy into the heap slot.
-                    let src_name = match &value.kind {
-                        TypedExprKind::Var(n) => n.clone(),
-                        _ => unreachable!(
-                            "Box<dyn Iface> DynCoerce source must be a Var; got {:?}",
-                            value.kind
-                        ),
-                    };
-                    let concrete_ty = format_declarator(&value.ty, "").trim().to_string();
-                    return format!(
-                        "({{ {ct}* __heap = ({ct}*)malloc(sizeof({ct})); *__heap = ({src}); \
-                          (intent_dyn_{iface}){{ .vtable = &intent_vtbl_{iface}_{conc}, .data = (void*)__heap }}; }})",
-                        ct = concrete_ty,
-                        src = local_name(&src_name),
-                        iface = iface,
-                        conc = from_type_name,
-                    );
+                // The arg can be either a direct DynCoerce node OR
+                // a Block-wrapped DynCoerce. The Block wrapper appears
+                // when the source is constructed inline (e.g.
+                // `box(Circle { r: 5 } as dyn Drawable)`) and the
+                // checker hoisted the concrete into a synthetic let.
+                // Unwrap the Block here: emit its stmts as part of
+                // the compound-statement-expression, then emit the
+                // dyn-coerce + heap-alloc + fat-pointer literal.
+                let (prelude_stmts, dyn_coerce_expr): (
+                    Vec<TypedStmt>,
+                    &TypedExpr,
+                ) = match &args[0].kind {
+                    TypedExprKind::DynCoerce { .. } => (Vec::new(), &args[0]),
+                    TypedExprKind::Block { stmts, tail }
+                        if matches!(tail.kind, TypedExprKind::DynCoerce { .. }) =>
+                    {
+                        (stmts.clone(), tail.as_ref())
+                    }
+                    _ => unreachable!(
+                        "Box<dyn Iface> __box_new expected a DynCoerce arg; got {:?}",
+                        args[0].kind
+                    ),
+                };
+                let (value, from_type_name) = match &dyn_coerce_expr.kind {
+                    TypedExprKind::DynCoerce {
+                        value,
+                        from_type_name,
+                        ..
+                    } => (value.as_ref(), from_type_name.as_str()),
+                    _ => unreachable!(),
+                };
+                let src_name = match &value.kind {
+                    TypedExprKind::Var(n) => n.clone(),
+                    _ => unreachable!(
+                        "Box<dyn Iface> DynCoerce source must be a Var; got {:?}",
+                        value.kind
+                    ),
+                };
+                let concrete_ty = format_declarator(&value.ty, "").trim().to_string();
+                let mut prelude = String::new();
+                for s in &prelude_stmts {
+                    if let TypedStmt::Let { name, ty, expr: rhs } = s {
+                        // Same emission shape as the Block-statement
+                        // path in emit_expr: declare a local, assign
+                        // the RHS, follow with a semicolon-space.
+                        prelude.push_str(&format!(
+                            "{} v_{} = ({}); ",
+                            c_type_name(ty),
+                            name,
+                            emit_expr(rhs),
+                        ));
+                    }
+                    // Other stmt kinds (Drop / Print / etc.) don't
+                    // currently appear in the dyn-coerce hoist Block;
+                    // if they ever do, extend here.
                 }
-                unreachable!(
-                    "Box<dyn Iface> __box_new expected a DynCoerce arg; got {:?}",
-                    args[0].kind
+                return format!(
+                    "({{ {prelude}{ct}* __heap = ({ct}*)malloc(sizeof({ct})); *__heap = ({src}); \
+                      (intent_dyn_{iface}){{ .vtable = &intent_vtbl_{iface}_{conc}, .data = (void*)__heap }}; }})",
+                    prelude = prelude,
+                    ct = concrete_ty,
+                    src = local_name(&src_name),
+                    iface = iface,
+                    conc = from_type_name,
                 );
             }
             // c_type_name returns "Struct_Point" / "int64_t" etc.

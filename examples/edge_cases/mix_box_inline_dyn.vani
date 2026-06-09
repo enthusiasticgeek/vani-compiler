@@ -1,0 +1,17 @@
+// Mixed-feature: inline `box(X as dyn Iface)` without a
+// prior let-bind. EXPECTED: documented compiler panic.
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+}
+
+fn main() -> i64 {
+  // The inline form panics in the C backend. The workaround
+  // is to let-bind the concrete first.
+  let b: Box<dyn Drawable> = box(Circle { r: 5 } as dyn Drawable);
+  return 0;
+}

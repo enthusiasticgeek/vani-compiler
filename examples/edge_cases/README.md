@@ -3,14 +3,27 @@
 > Curated set of `.vani` programs designed to test
 > compiler edge cases — deep nesting, large signatures,
 > heavy SMT, pathological recursion, mutual references,
-> nested generics. All compile cleanly today; this is the
-> "did anything actually break?" check.
-> Run them with `vanic run <file> --backend=c` (or
-> `--backend=llvm`) to verify.
+> nested generics, **and mixed-feature combinations** (the
+> shapes where two or three features interact in ways the
+> per-feature tests didn't cover). All "should-pass" cases
+> here compile cleanly today; the "should-reject" cases
+> reject with clear diagnostics; one panic was found and
+> fixed (see below). Run with `vanic run <file>
+> --backend=c` (or `--backend=llvm`) to verify.
 
 Last verified 2026-06-09 against `vanic` HEAD.
 
-## Test inventory
+> **Why mixed-feature tests matter.** A feature working in
+> isolation is necessary but not sufficient. `Box<T>` works.
+> `dyn Iface` works. `Box<dyn Iface>` works. **`box(X { ...
+> } as dyn Iface)` with an inline struct literal** — a
+> combination of three features (Box, struct lit, dyn-coerce
+> in box arg position) — **panicked both backends** until
+> fixed in this session. Every feature interaction is a
+> potential gap; combinatorial coverage matters more than
+> any single feature's depth.
+
+## Single-feature stress tests
 
 | File | Tests | Verified behavior |
 |---|---|---|
@@ -22,6 +35,17 @@ Last verified 2026-06-09 against `vanic` HEAD.
 | [`edge_match_overflow.vani`](edge_match_overflow.vani) | 30-variant enum + exhaustive match | Compiles + runs; output `17` |
 | [`edge_mutual_async.vani`](edge_mutual_async.vani) | Mutually recursive `async fn` (ping ↔ pong) | Compiles; Big-O = `O(recursive)` for both (mutual-recursion SCC) |
 
+## Mixed-feature stress tests
+
+These programs combine 2-3 features to test interaction
+shapes the per-feature tests don't reach.
+
+| File | Feature combo | Verified behavior |
+|---|---|---|
+| [`mix_box_inline_dyn.vani`](mix_box_inline_dyn.vani) | inline struct lit + `as dyn Iface` + `box(...)` | **PREVIOUSLY PANICKED**; fixed 2026-06-09. Now compiles + runs on both backends. The C and LLVM codegen now unwrap the Block-wrapped DynCoerce that the checker hoists. |
+| [`mix_struct_in_struct_deep.vani`](mix_struct_in_struct_deep.vani) | 3-deep struct nesting + OwnedStr + Vec field at each level | Compiles + runs; output `42`. Affine drops chain correctly through all three layers. |
+| [`mix_box_dyn_in_struct.vani`](mix_box_dyn_in_struct.vani) | Struct field is `Vec<Box<dyn Iface>>`; struct also has Vec\<i64\> + OwnedStr fields | Compiles + runs after the inline-box-dyn fix. |
+
 ## Tests that fail by design (rejection is the success case)
 
 | Scenario | Expected behavior |
@@ -32,6 +56,21 @@ Last verified 2026-06-09 against `vanic` HEAD.
 | `fn foo(a: ref T, b: ref T) -> ref T` | Rejected with multi-ref-param elision diagnostic |
 | `for x in xs; xs[i]` after consuming move | Rejected with `move_after_use` elaboration |
 | `parallel for i in 0..n { print i; }` | Rejected — race-unsafe side effect |
+
+## Documented mixed-feature gaps (NOT yet supported)
+
+These combinations are honestly rejected by the checker
+today. The documentation calls them out so users know to
+restructure rather than wonder if it's a bug.
+
+| Combination | Status | Workaround |
+|---|---|---|
+| `(Box<T>, U)` tuple element | Rejected — v1 tuples are Copy-only | Wrap in a named struct; structs accept non-Copy fields |
+| `(OwnedStr, U)` tuple element | Rejected — same reason | Same — named struct |
+| `Option<Box<T>>` enum payload | Rejected — v1 admits Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel only | Use Vec<Box<T>> of length 0 or 1, or wrap in a struct field with custom None handling |
+| `HashMap<K, V>` with non-scalar V | Rejected at use-site (`hashmap_insert`) | v1 HashMap is (i64, i64) only; index-into-Vec for non-scalar values |
+| `Mutex<Vec<T>>` | Not supported | Channel-transfer ownership instead |
+| Closure capturing non-Copy binding | Rejected with `closure_captures_affine` elaboration | Pre-extract scalar / pass as fn arg |
 
 ## What's been tried and works correctly
 
@@ -48,6 +87,27 @@ Last verified 2026-06-09 against `vanic` HEAD.
   carries facts through without losing them.
 - **Many-variant enums.** 30-variant exhaustive match
   compiles cleanly.
+- **Deeply nested structs.** 3-deep struct nesting with OwnedStr
+  + Vec at each level compiles + runs; affine drops chain.
+- **Vec<Box<dyn Iface>> in struct field.** Struct holds a Vec of
+  boxed interface objects alongside Vec<i64> + OwnedStr.
+
+## Notable findings during this round
+
+- **One compiler panic discovered + fixed**:
+  `box(Foo { ... } as dyn Iface)` with an inline struct
+  literal previously panicked both the C and LLVM backends
+  with `Box<dyn Iface> __box_new expected a DynCoerce arg;
+  got Block { ... }`. The checker hoists the inline struct
+  into a synthetic let inside a Block; the codegen now
+  unwraps the Block before pulling out the DynCoerce. New
+  regression test `box_dyn_iface_accepts_inline_struct_literal_source`
+  pins the fix. Working pattern (let-bind first) was never
+  affected; only the inline form was.
+- **Several documented limitations confirmed** (tuples can't
+  hold non-Copy types in v1, enum payloads exclude `Box<T>`,
+  HashMap value type is scalar-only). See the gap table
+  above.
 
 ## What would actually break the compiler
 

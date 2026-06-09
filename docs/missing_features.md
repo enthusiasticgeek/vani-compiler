@@ -11,6 +11,16 @@ This doc enumerates the genuinely-useful features that
 **aren't** in v1, paired with the idiomatic vāṇी substitute
 when one exists.
 
+> **⚠️ Feature combinations matter as much as features.** A
+> feature that works in isolation may still hit a gap when
+> composed with another feature. The adversarial test suite
+> ([`examples/edge_cases/`](../examples/edge_cases/)) caught
+> one real compiler panic — `box(X as dyn Iface)` with an
+> inline struct literal — and confirmed several deliberate
+> combination restrictions. The **Mixed-feature gaps** section
+> at the end of this doc enumerates the combination shapes
+> that don't compose in v1 plus the workaround for each.
+
 Sections:
 
 1. [Generics + type system](#generics--type-system)
@@ -473,6 +483,66 @@ flexibility. The accidental omissions (or-patterns, slice
 patterns, `if let`, `pub use ... as ...`, workspaces) are
 v1 gaps; some will land in follow-up releases once a real
 use case surfaces.
+
+---
+
+## Mixed-feature gaps
+
+Combinations of v1-supported features that don't compose
+today. Each row lists the shape, the reason it rejects, and
+the v1 workaround. The adversarial test set under
+[`examples/edge_cases/`](../examples/edge_cases/) keeps
+checking these as the compiler evolves.
+
+| Combination | Why it rejects | Workaround |
+|---|---|---|
+| `(Box<T>, U)` tuple element | v1 tuples are Copy-only; Box<T> is affine. The checker rejects with "tuple element N has non-Copy type X — v1 tuples are Copy-only". | Wrap the pair in a named struct: `struct Pair { box: Box<T>, other: U }`. Structs accept non-Copy fields. |
+| `(OwnedStr, U)` tuple element | Same reason — OwnedStr is non-Copy. | Same — named struct. |
+| `Option<Box<T>>` enum payload | v1 enum variants admit Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel payloads; Box<T> isn't in that list. | (a) Wrap Box<T> in a struct that has Vec<Box<T>> of length 0 or 1; (b) use a tag + separate Box<T> field with a default-init convention. |
+| `Result<Box<T>, E>` | Same — enum-payload restriction. | Same workarounds. |
+| `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | The tuple's non-Copy restriction propagates through Vec. | Wrap the tuple in a named struct (the struct can be a Vec element). |
+| `HashMap<K, V>` with non-scalar V | `hashmap_insert` v1 supports scalar V only (i64-shaped). | Use `Vec<KvPair>` (sorted) + linear or binary search; or wrap the V in an i64 index into a side `Vec<V>`. |
+| `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | v1 Mutex/Atomic payload is i64-shaped only. | Channel-transfer ownership between threads; or hold the Vec in main and pass refs after acquiring an external `Mutex<i64>` flag. |
+| Closure capturing non-Copy binding | Closures + tasks reject affine captures (rejected with `closure_captures_affine` elaboration). | Pre-extract scalar fields from the affine value, or pass it as a closure-fn argument rather than capturing. |
+| `box(X { ... } as dyn Iface)` inline | **Was a compiler panic; fixed 2026-06-09.** Now works on both backends. | Pinned by a lib regression test; previously the workaround was `let v = X { ... }; box(v as dyn Iface);` — the let-bind form was always safe. |
+| Two refs to the same Vec at once (read + write) | Aliasing rule: many shared XOR one mut. | End one borrow before taking the other; or split the operation into two passes. |
+| Generic fn with multiple lifetime-distinct ref params returning a ref | Path-D territory; v1 only does single-ref-param elision. | Split into two narrower fns, each with one ref param. |
+| `async fn` containing a `dyn Iface` method call across an `await` | `dyn`-method receivers can't be held across suspend points (Pin-like restriction would be needed). | Resolve the dyn before the await; pre-compute, then await, then use the result. |
+| Recursive `Drop` impl that calls another `Drop` impl on a borrowed field | Borrow-checker rule: `mut ref Self` during drop can't pass to another `Drop` taking `mut ref Self`. | Implement Drop only at the outermost level; let the compiler chain field-by-field drops automatically. |
+
+The pattern: when two features both reach for "non-Copy
+data", the combination often hits a v1 gap because the
+checker hasn't been lifted to handle that interaction yet.
+Single-feature use is well-tested; combination depth is
+where the bugs live.
+
+### How to find more
+
+The adversarial test set in
+[`examples/edge_cases/`](../examples/edge_cases/) is the
+canonical place to add new combination tests. The pattern:
+
+1. Write a `.vani` file that combines 2-3 features in a
+   way you'd plausibly want.
+2. Run `vanic check <file>` and `vanic run <file>
+   --backend=c` + `--backend=llvm`.
+3. Three outcomes:
+   - **Clean run** → add the file as a "should-pass" row
+     in the README.
+   - **Clear rejection diagnostic** → add a "should-reject"
+     row + the workaround for documentation.
+   - **Compiler panic / wrong output / silent
+     miscompile** → file a bug, write a regression test,
+     fix.
+
+Mixed-feature shapes worth probing (none observed broken
+in the current set, but watch for):
+- Box<T> through generics (`fn foo<T>(b: Box<T>) -> Box<T>`)
+- async fn returning a Vec<Box<dyn Iface>>
+- `parallel for` over a Vec of structs with OwnedStr fields
+- HashMap key = struct with Hash impl
+- Match-with-bindings on a deeply nested enum payload
+- Custom Drop impl with `mut ref` to a Vec field
 
 The honest list: vāṇी covers the **structural** ergonomics
 of Rust (ownership, types, async) and a **subset** of the

@@ -11127,6 +11127,32 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn box_dyn_iface_accepts_inline_struct_literal_source() {
+        // Regression: `box(Circle { r: 5 } as dyn Drawable)`
+        // with an inline struct literal previously panicked both
+        // backends ("Box<dyn Iface> __box_new expected a
+        // DynCoerce arg; got Block { ... }"). The checker
+        // hoists the concrete into a synthetic let inside a
+        // Block; the codegen now unwraps the Block before
+        // extracting the DynCoerce. Fixed 2026-06-09.
+        let source = r#"
+            interface Drawable {
+              fn area(self: ref Self) -> i64;
+            }
+            struct Circle { r: i64 }
+            implement Drawable for Circle {
+              fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; }
+            }
+            fn main() -> i64 {
+              let b: Box<dyn Drawable> = box(Circle { r: 5 } as dyn Drawable);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("inline box(Foo {} as dyn Iface) must compile (C)");
+        compile_to_llvm(source).expect("inline box(Foo {} as dyn Iface) must compile (LLVM)");
+    }
+
+    #[test]
     fn big_o_bounded_for_loop_constants_stays_constant() {
         // L4 (D) refinement: `for i from 0 to 16` is bounded —
         // the analyzer should NOT bump it to O(n) since the

@@ -8993,12 +8993,29 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 if let Type::Object(iface_name) = inner_ty {
                     let dyn_ty = format!("%intent_dyn_{}", iface_name);
                     let vtbl_ty = format!("%intent_vtbl_{}", iface_name);
-                    let TypedExprKind::DynCoerce { value, from_type_name, .. } = &args[0].kind
-                    else {
-                        unreachable!(
+                    // Unwrap a Block-wrapped DynCoerce — appears when
+                    // the source is constructed inline like
+                    // `box(Foo { x: 1 } as dyn Iface)`. Emit the
+                    // hoist-let's stmts first so the synthetic Var
+                    // is in scope when we look it up below.
+                    let dyn_coerce_expr: &TypedExpr = match &args[0].kind {
+                        TypedExprKind::DynCoerce { .. } => &args[0],
+                        TypedExprKind::Block { stmts, tail }
+                            if matches!(tail.kind, TypedExprKind::DynCoerce { .. }) =>
+                        {
+                            for s in stmts {
+                                emit_stmt(s, ctx, out);
+                            }
+                            tail.as_ref()
+                        }
+                        _ => unreachable!(
                             "Box<dyn Iface> __box_new expected a DynCoerce arg; got {:?}",
                             args[0].kind
-                        );
+                        ),
+                    };
+                    let TypedExprKind::DynCoerce { value, from_type_name, .. } = &dyn_coerce_expr.kind
+                    else {
+                        unreachable!()
                     };
                     let TypedExprKind::Var(src_name) = &value.kind else {
                         unreachable!(
