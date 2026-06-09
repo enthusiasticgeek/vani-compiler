@@ -172,8 +172,10 @@ semantic model **borrowed from Rust** and a code-generator that
   scope exit. User-defined `Drop` interface lets a struct hook into
   the scope-exit flow.
 - **References** are second-class keyword-first: `ref T` / `mut ref T`
-  in parameter position, `ref x` / `mut ref x` at call sites, with
-  aliasing rejected at compile time.
+  in parameter position, `let` bindings, and user struct fields, with
+  `ref x` / `mut ref x` at call sites, aliasing rejected at compile
+  time, and a scope-escape analyzer that rejects every shape that
+  would let the borrow outlive its source.
 
 **Generics + dispatch:**
 - **Monomorphized generics** (`fn id<T>(x: T) -> T`) — specialized per
@@ -358,10 +360,10 @@ below.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-08 (end of day): 2011 lib green** —
+**Test ledger at 2026-06-09: 2040 lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
-joining the CJK family as the 62nd dialect. Additional ships
-on the same day:
+joining the CJK family as the 62nd dialect on 2026-06-08.
+Other ships on the same day:
 
 - **L2 fully closed**: Box\<T\> Phases 1+2+3+3b on both backends
   (Copy + sized inner types AND `Box<dyn Iface>` heap-owning fat
@@ -423,7 +425,7 @@ on the left will compile on the right with identical generated code:
 
 | Rust / C++ | vāṇī | Notes |
 |---|---|---|
-| `&xs` (shared borrow) | `ref xs` | second-class, param-only |
+| `&xs` (shared borrow) | `ref xs` | second-class; param + `let` + struct-field positions, scope-escape checked |
 | `&mut xs` (mut borrow) | `mut ref xs` | same semantics |
 | `fn(&self)` | `fn name(self: ref Type)` | receiver is explicit |
 | `Vec::with_capacity(n)` | `vec_with_capacity(n)` | free function — no path |
@@ -453,7 +455,7 @@ Two source files that differ only in alias choice produce
 canonical form). The same program in English vs Hindi vs Sanskrit
 runs the same instructions on the same target.
 
-### वाणी (*vāṇī*) — Devanagari notation (Phase 2 shipped)
+### वाणी (*vāṇī*) — Devanagari + the 62-dialect family
 
 Devanagari notation lets the source read in the writer's mother tongue.
 The first three languages are **Sanskrit** (*saṁskṛta* — the canonical
@@ -969,8 +971,8 @@ pointer-safety and type-punning invariants.
 |---|---|---|
 | **Heap leak** ("forgot to free") | ✅ | Affine ownership. Every heap-owning binding (`Vec`, `OwnedStr`, `Atomic`, `Mutex`, `Guard`, `Channel`, `Task`, struct with heap fields) has exactly one owner. The codegen emits `free` / per-field drop at scope exit deterministically. There is no `forget()` equivalent. |
 | **Double-free** | ✅ | Move tracking. After `let y = x;` (where `x: Vec<i64>`), `x` becomes unreadable; the compiler emits a "value 'x' was moved; cannot use after move" diagnostic at the next reference. Drop fires exactly once on the new owner. User-defined `Drop` is also single-fire. |
-| **Use-after-free** | ✅ | Same affine machinery + second-class references. A `ref T` / `mut ref T` parameter can only be a parameter — it can't be stored in a struct, returned from a function, or held across `await` (there is no `await`). The borrow can never outlive the owner. |
-| **Dangling reference** | ✅ | References are second-class. Functions cannot return references; struct fields cannot be references; references cannot be stored in arrays / `Vec`. The compiler rejects any attempt syntactically. |
+| **Use-after-free** | ✅ | Same affine machinery + scope-escape analyzer for `ref T` / `mut ref T`. References can now appear in `let` bindings (L4 (B) Phase 1) and in user struct fields (L4 (B) Phase 3); the analyzer in `collect_ref_sources_in_expr` rejects every shape that would let the reference outlive its source — returning the ref-holding struct, storing it in a `Vec`, taking `mut ref T` across a suspend point, etc. The borrow can never outlive the owner. |
+| **Dangling reference** | ✅ | Scope-escape analyzer + structural rejects. Functions cannot **return** references (path-C territory, not in v1); references cannot be stored in arrays or `Vec<T>` (L4 (B) Phase 4, deferred — backend codegen work pending); a struct field that is a `ref T` cannot be returned, leaked into a `Vec`, or otherwise outlive any of its source bindings. Compiler emits "value 'x' is borrowed but goes out of scope" with the exact source location. |
 | **Aliasing mutable + immutable** | ✅ | A `mut ref T` borrow rejects every subsequent shared `ref T` on the same value (and vice-versa) for the scope of the borrow. Diagnostic: "value 'v' is borrowed mutably; cannot also share-borrow". |
 | **Data race in `parallel for`** | ✅ | The effects checker walks the loop body and rejects observable side effects: `print`, calls to impure functions, non-Copy moves into the body, indexed writes on captured arrays / `Vec`s. **As of closure #259**, captured Copy-typed mutations are also caught — `total = total + i;` on a binding declared OUTSIDE the body errors with "mutates captured variable 'total' without declaring it as a reduction" and points the user at `reduce` or `Atomic<T>`. Body-local lets remain free to mutate (per-iteration, not shared). Atomic / Mutex captures must be via `ref`. |
 | **Data race in `task`** | ✅ | `task` captures are Copy-only by default — affine handles (Vec, Atomic, Mutex, Guard, Channel) can't ride into the thread by value. Shared state goes through `Atomic<T>` (lock-free, seq-cst) or `Mutex<T>` + `Guard<T>` (RAII unlock at scope exit). |
@@ -1058,7 +1060,7 @@ anywhere** in the language.
 |---|---|---|
 | Primitive scalars (`i64`, `bool`, …) | Copy | Copy |
 | Borrowed string view (`&str` / `Str`) | Copy (pointer) | Copy (pointer) |
-| References (`&T` / `&mut T` vs `ref T` / `mut ref T`) | Copy | Copy (second-class, param-only) |
+| References (`&T` / `&mut T` vs `ref T` / `mut ref T`) | Copy | Copy (second-class; scope-bound via escape analysis — fine in params, `let` bindings, and struct fields; cannot be returned from a function or stored in a `Vec`) |
 | Heap string (`String` / `OwnedStr`) | Move (affine) | Move (affine) |
 | Heap vector (`Vec<T>` / `Vec<T>`) | Move (affine) | Move (affine) |
 | Fixed array (`[T; N]`) | Copy if `T: Copy`, else Move | Affine (Move) always — explicit |
@@ -1104,7 +1106,7 @@ by an existing primitive or **structurally avoided by the type system**:
 
 | Rust / C++ tool | What it solves | vāṇी's approach |
 |---|---|---|
-| `Box<T>` / `unique_ptr<T>` | Single-owner heap allocation | `Vec<T>` and `OwnedStr` already heap-allocate and own. There is no free-form `Box<T>` for arbitrary T — recursive data structures use index-based references into a `Vec`, or (once [unsafe.md](unsafe.md) Layer 2 ships) `Pool<T>` + `Handle<T>` for opaque single-owner indirection. See *Basic data structures* below. |
+| `Box<T>` / `unique_ptr<T>` | Single-owner heap allocation | **Ships natively as `Box<T>`** (L2 lift Phases 1+2+3+3b, 2026-06-08). `box(value)` heap-allocates a single T and returns an affine handle; the compiler emits recursive-drop on scope exit. Supported inner types: every Copy-sized `T`, `Box<dyn Iface>` (16-byte fat-pointer owning its concrete on the heap), `Box<Vec<T>>` and `Box<OwnedStr>` (both chain drop into the inner buffer), `Box<Box<T>>`, `Box<(...)>`, `Option<Box<T>>` for recursive-data shapes like `struct Node { next: Option<Box<Node>> }`. For sequences, `Vec<T>` and `OwnedStr` remain the dedicated heap-owning primitives. The Tutorial chapter on [Box and RAII](tutorials/src/intermediate/03a_box_raii_primer.md) walks the variations. |
 | `Rc<T>` / `Arc<T>` / `shared_ptr<T>` | Reference-counted shared ownership | **Not available by design.** Shared *ownership* is unrepresentable. Producer / consumer parallelism uses `Channel<T, N>`. Shared mutable state across threads uses `Atomic<T>` references or `Mutex<T>` + `Guard<T>` — borrowed (not cloned) into each thread. Non-owning shared *references* are expressible via `Handle<T>` (Layer 2 in [unsafe.md](unsafe.md)) — the Pool owns; multiple Handles can name the same slot. |
 | `RefCell<T>` (interior mutability) | Mutate through a shared reference at runtime | **Not available by design.** vāṇी has no runtime borrow-checker — every aliasing rule fires at compile time. The need is mitigated by `mut ref T` parameters + mixed-place assignment (`xs[i].field = v;` writes through an index into a struct field in one statement). |
 | `Weak<T>` (cycle breaker) | Non-owning back-reference to break `Rc`/`Arc` cycles | **Not needed for ownership cycles** — single-owner affine types make a cyclic *ownership* graph unrepresentable in the type system. **For data-structure cycles** (parent ↔ child, observer pattern), the supported idioms are: (1) indices into a `Vec<T>` (always available); (2) `Handle<T>` into a `Pool<T>` (Layer 2 in [unsafe.md](unsafe.md), generation-checked so stale handles return `None` instead of dangling); (3) `&'arena T` inside a region block (Layer 5, v2, zero runtime cost for safety-critical workloads). None of these introduce reference-counting overhead. |
@@ -1171,15 +1173,19 @@ are opt-in evolutions, not replacements.
 
 `dyn Iface` (closure #220–#228) covers the "heterogeneous collection
 without enumerating variants" use case that often pushes Rust users
-toward `Box<dyn Trait>`. vāṇी's `Vec<dyn Iface>` is a vector of
-fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
+toward `Box<dyn Trait>`. vāṇी offers both shapes: `Vec<dyn Iface>` is
+a vector of fat pointers (16 bytes each: vtable + data pointer) when
+you want inline storage; `Box<dyn Iface>` (L2 lift Phase 3, shipped)
+is a single-owner heap-allocated dyn handle when a struct field needs
+a fixed-size slot for one heterogeneous value with its own heap
+lifetime.
 
 ### What's NOT in the language (deliberate)
 
 - **No garbage collector.** Affine ownership + deterministic Drop
   cover what GC would cover, without the unpredictable pause.
 - **`async` / `await` / networking — ✅ FULLY COMPLETE
-  2026-06-04 (Arc 8 v1+v1.5+v1.6+v2).** Full user-facing
+  2026-06-08 (Arc 8 v1+v1.5+v1.6+v2+v3.1).** Full user-facing
   async + networking + concurrency surface ships:
   - `async fn` / `await(expr)` / `Future<T>` / `Poll<T>` /
     `CancelToken` parse and run with synchronous semantics.
@@ -1208,17 +1214,25 @@ fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
     [examples/tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani)
     (3 clients on ONE thread via epoll reactor).
 
-  **Arc 8 v3 sugar OPTIONAL** (ergonomics polish, not a
-  missing capability): compiler-driven state-machine codegen
-  auto-rewrites `async fn` bodies with `await(expr)` into
-  poll-functions over the existing epoll reactor. The
-  underlying single-thread multiplexing already ships;
-  `tcp_echo_epoll.vani` writes the reactor loop by hand;
-  v3 would hide that behind the `async fn` + `await` syntax.
-  Explicitly NOT shipping Rust-style `Pin<&mut Self>` self-
-  references (those stay 🛑 NON-COMPLIANT under affine).
-  See [STATUS.md](STATUS.md) *📋 Arc 8 v3* for the verbatim
-  handoff prompt.
+  **Arc 8 v3.1 sugar — FEATURE-COMPLETE 2026-06-08.**
+  The compiler-driven state-machine transform shipped:
+  the parser auto-rewrites `async fn` bodies (including
+  `await(expr)`, `try EXPR` / postfix `?`, suspend-in-branch
+  state-splitting, nested ifs, loops + `break` / `continue`,
+  match-with-suspends across every pattern shape, ANF
+  lifting, nested async fns, multi-task scheduling, generic
+  `async fn`, and non-i64 types across the entire async-fn
+  boundary) into state-machine struct/poll/constructor
+  triples over the existing epoll reactor. The hand-rolled
+  pattern in `tcp_echo_epoll.vani` and `tcp_echo_state_machine.vani`
+  still works; users no longer need to write it.
+  28 acceptance examples + generic-async smoke are
+  cross-backend parity-green. The v3.1 liveness optimization
+  also shipped (state-local locals → poll-fn stack lets,
+  cutting state-struct width). Explicitly NOT shipping
+  Rust-style `Pin<&mut Self>` self-references (those stay
+  🛑 NON-COMPLIANT under affine). See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md)
+  for the phased plan-of-record.
 - **No reference counting** (no `Rc` / `Arc` equivalent). Single-owner
   affine ownership means cycles can't form; there's nothing for an
   Rc to count.
@@ -1231,8 +1245,11 @@ fat pointers (16 bytes each: vtable + data pointer); no `Box` needed.
   current position* below and [unsafe.md](unsafe.md) for the
   layered safety net.
 - **No exceptions / no stack unwinding.** Errors are values via
-  payloaded enums (`Option`-like / `Result`-like) and propagated with
-  `try`. `assert` triggers a deterministic `abort()`.
+  payloaded enums (`Option`-like / `Result`-like) and propagated
+  with either the `try EXPR` keyword or the postfix `EXPR?`
+  operator (same AST node, two surface spellings — pick whichever
+  reads better; the postfix form chains naturally as
+  `foo()?.bar()?`). `assert` triggers a deterministic `abort()`.
 
 ### Embedded targets — current position (2026-06-01)
 
@@ -1245,9 +1262,12 @@ genuinely cannot prove safe.
 
 - **Pointers in the source language.** None of the raw kind on
   the safe path. The full safe pointer-shaped vocabulary is
-  `ref T` / `mut ref T` (second-class, param-position only),
-  `fn(...) -> R` function pointers, `dyn Iface` fat pointers,
-  and indices into `Vec<T>` for cyclic / graph shapes. There
+  `ref T` / `mut ref T` (second-class; param + `let` + struct-
+  field positions, scope-escape checked), `Box<T>` (single-
+  owner heap allocation with auto-recursive-drop), `fn(...) -> R`
+  function pointers, `dyn Iface` fat pointers, `Box<dyn Iface>`
+  (heap-owning single-dyn-value handle), and indices into
+  `Vec<T>` for cyclic / graph shapes. There
   is no `*const T` / `*mut T` outside an `unsafe` block. Most
   embedded code is still expected to be written *without* any
   `unsafe` — through the typed embedded primitives below.
@@ -3586,23 +3606,27 @@ The honest list, grouped by which work item closes them:
 
 - No GC, no Rc / Arc — affine + scope-exit Drop only.
 - Async / await / coroutines: **✅ FULLY COMPLETE
-  2026-06-04 (Arc 8 v1+v1.5+v1.6+v2+v3)** — every user-
+  2026-06-08 (Arc 8 v1+v1.5+v1.6+v2+v3.1)** — every user-
   visible async + networking + concurrency feature plus the
   hand-rolled state-machine pattern ships: `async fn`,
   `await(expr)`, `Future<T>`, `Poll<T>`, `CancelToken`,
   `sleep_ms`, 8-builtin blocking TCP family, 7-builtin epoll
   + non-blocking I/O for single-thread cooperative
   scheduling, 3-builtin `io_*_async` aliases for the state-
-  machine pattern. Five acceptance examples byte-identical
-  cross-backend. Three concurrency models supported:
-  thread-per-task via `task` + `join`, single-thread
+  machine pattern. 28 acceptance examples + generic-async smoke,
+  all byte-identical cross-backend. Three concurrency models
+  supported: thread-per-task via `task` + `join`, single-thread
   cooperative via epoll + nb variants, OR hand-rolled state
   machines using `io_*_async`. **Arc 8 v3.1 compiler-driven
-  sugar OPTIONAL** — parser-level transform that auto-
-  generates the struct/poll/constructor triples from an
-  `async fn` body. Explicitly NOT Rust-style `Pin<&mut Self>`
+  sugar — FEATURE-COMPLETE 2026-06-08** — parser-level transform
+  auto-generates the struct/poll/constructor triples from an
+  `async fn` body across the full surface (suspend-in-branch
+  state-splitting, nested ifs, loops + break/continue, match-
+  with-suspends, `try EXPR` / postfix `?`, non-i64 boundary
+  types, nested async, multi-task scheduling, generic
+  `async fn`). Explicitly NOT Rust-style `Pin<&mut Self>`
   self-references (those stay 🛑 NON-COMPLIANT under affine).
-  See [STATUS.md](STATUS.md) *📋 Arc 8 v3.1*.
+  See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md).
 - No exceptions (covered above).
 
 **Tooling**
@@ -3794,7 +3818,7 @@ roadmap surface and unblocks the items below it.
 | 17 | ✅ **Nested arrays `[[T; N]; M]` / `[Vec<T>; N]`** | — | medium | done 2026-05-27 (#291 Phases 1–4). Array-element Copy restriction lifted; `clone_at(ref arr, i)` extended to arrays; per-slot per-field drops including struct-slot field walks; tree-LLVM `len` of a Vec rvalue spills to alloca, GEPs `.len`, loads. |
 | 18 | ⏳ **Data structures + algorithms roadmap (Levels 1–4)** | #14 (for Level 2+) | high (multi-session) | Levels 1–4 sequenced under affine ownership. Level 1: `sort` / `sort_by` / `find` / `binary_search` / `pop` / RNG / Hash interface. Level 2: `HashSet` / `HashMap` (⚠️ AFFINE-TENSION — `get -> Option<ref V>`) / `BTreeSet` / `BTreeMap` / `Deque` / `BinaryHeap`. Level 3: closures + iterator combinators. Level 4: arena-based BST / B-tree / Trie / graphs + algorithms. Full per-item plan in [TODO.md](TODO.md). |
 | 19 | ✅ **Condition variables (`Condvar`)** | — | medium (single session) | done 2026-05-28 (closure #292). ✅ AFFINE — new builtin type, stack-by-value. 5 builtins (`condvar_new / wait(ref cv, mut ref g: Guard<i64>) / wait_timeout / notify_one / notify_all`). Tree-C + SSA-C: shared runtime helpers (futex/WaitOnAddress/spin-yield). Tree-LLVM: inline IR per call site (`%intent_condvar = type { i32 }`, atomicrmw + syscall/WakeByAddress). SSA-LLVM: falls back to tree-LLVM. 5 lib tests + `examples/condvar.vani` cross-backend parity. Pending follow-ups: cross-task wait/notify (needs task-capture rule expansion), direct SSA-LLVM support, wider Mutex widths. |
-| 20 | ⏳ **Async / asyncio** (⚠️ AFFINE-TENSION via compiler-lowered state machines; 🛑 NOT Pin / self-references) | Level 3 closures (#18) | high (multi-session) | Each `async fn` lowers to an enum-of-frames in `Vec<StateMachine>`. Single-threaded event-loop driver `intent_async_run`; non-blocking I/O (file / socket / timer) under epoll / kqueue / IOCP; `Channel<T, N>` is the cooperative coordination primitive; `Future<T>` = generic enum w/ `Ready(T)` / `Pending` (uses #281 + #283). NOT shipping: Rust-style `Pin<&mut Self>`, panic-based cancellation, stackful coroutines, async inside `parallel for`. Full design in [TODO.md](TODO.md) under *Async / asyncio*. |
+| 20 | ✅ **Async / asyncio** — SHIPPED 2026-06-08 (Arc 8 v1+v1.5+v1.6+v2+v3.1). ⚠️ AFFINE-TENSION via compiler-lowered state machines; 🛑 NOT Pin / self-references | Level 3 closures (#18) | high (multi-session) | Each `async fn` lowers (via Arc 8 v3.1 parser-level transform) to a struct/poll/constructor triple. Builtin TCP + epoll + non-blocking I/O families for single-thread cooperative scheduling; `Channel<T, N>` coordination primitive; `Future<T>` / `Poll<T>` / `CancelToken`. Linux verified; macOS kqueue + Windows IOCP branches ship with deferred host verification. 28 acceptance examples + generic-async smoke cross-backend parity-green. Not shipping: Rust-style `Pin<&mut Self>`, panic-based cancellation, stackful coroutines, async inside `parallel for`. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md). |
 | 21 | ⏳ **Kosh package manager + Vāṇī-Kosh registry** | #10, #13 | high (multi-session) | `kosh.toml` manifest, resolver + lockfile, `pub(kosh)` enforcement at the boundary, registry CLI (`intentc kosh add`, `kosh publish`), stdlib-as-kosh. Item #10 in [TODO.md](TODO.md). |
 
 **Devanagari aliases (#9) — current state + remaining work:**
@@ -3980,7 +4004,7 @@ logographic, etc.) one at a time.
 | 38 | Swahili (*Kiswahili*) | Latin | SVO | ✅ **SHIPPED** (Phase 13.11) — first East African (Bantu) |
 | 39 | Yoruba (*Èdè Yorùbá*) | Latin (ẹ/ọ/ṣ + tone marks) | SVO | ✅ **SHIPPED** (Phase 13.27) — Niger-Congo |
 | 40 | Hausa | Latin (ɓ/ɗ/ƙ/ƴ) | SVO | ✅ **SHIPPED** (Phase 13.28) — Afroasiatic |
-| ... | Mandarin (Han logograms, no whitespace tokenizer) | various | various | Queued — needs CJK word-segmentation arc (~30-50h) |
+| 62 | Mandarin Chinese (*中文*) | Han logograms (no whitespace tokenizer) | SVO | ✅ **SHIPPED** (2026-06-08) — 62nd dialect; CJK word-segmentation arc completed |
 
 ### Why Indian-subcontinent-first
 
@@ -4034,9 +4058,10 @@ addition — and works through the global priority list.
 >   any `.vani` source between English / Sanskrit / Hindi /
 >   Marathi, round-trip parity verified on 8 representative
 >   examples.
-> - **Global languages** (Spanish, Mandarin, etc.) — **not started**.
->   The lexer table is the right shape to receive them; the work is
->   curating the keyword sets.
+> - **Global languages**: Mandarin Chinese ✅ shipped 2026-06-08
+>   (62nd dialect); Spanish + other Romance/Germanic/Slavic families
+>   queued. The lexer table receives them readily; remaining work is
+>   curating the keyword sets per family.
 >
 > See [TODO.md](TODO.md) §*Open work — DEPENDENCY-ORDERED* for the
 > dependency-ordered remaining queue.
