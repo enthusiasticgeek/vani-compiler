@@ -11148,6 +11148,29 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_of_box_compiles_on_both_backends() {
+        // Regression: `Vec<Box<T>>` previously panicked both
+        // backends. C: `intent_vec_/*_Box<T>_*/__from(...)`
+        // — placeholder identifier broke cc. LLVM:
+        // `llvm_type: use llvm_type_string for aggregate / ref
+        // type Box(I64)`. Fixed 2026-06-09: element_tag and
+        // vec_struct_tag now recursively spell Box as
+        // `box_<inner_tag>` so per-shape Vec typedefs come out
+        // identifier-safe.
+        let source = r#"
+            struct Container { items: Vec<Box<i64>> }
+            fn main() -> i64 {
+              let c: Container = Container {
+                items: vec(box(1), box(2), box(3)),
+              };
+              return len(c.items) as i64;
+            }
+        "#;
+        compile_to_c(source).expect("Vec<Box<i64>> must compile (C)");
+        compile_to_llvm(source).expect("Vec<Box<i64>> must compile (LLVM)");
+    }
+
+    #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`
         // closure inside an `implement Iface for T { fn m(...) }`

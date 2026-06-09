@@ -136,6 +136,24 @@ pass runs.
 Regression tests: `closure_inside_iface_impl_method_lifts_correctly`
 + `closure_inside_methods_block_method_lifts_correctly`.
 
+### Bug 4 — `Vec<Box<T>>` panicked both backends (FIXED, partial)
+
+`Vec<Box<T>>` previously panicked both backends with placeholder-
+identifier emission (C: `intent_vec_/*_Box<T>_*/__from(...)`;
+LLVM: `unreachable: use llvm_type_string for aggregate / ref
+type Box(I64)`). Fixed for inner `i64` / `Vec<U>` / `OwnedStr` /
+`dyn Iface`. **C backend** now per-element-drops Box elements
+correctly (ASan-clean on the `Vec<Box<i64>>` shape). **LLVM
+backend** still leaks Box-element heap allocations in the
+Vec's `__free` (no Box arm in the per-element drop emit). The
+LLVM `Vec<Box<dyn Iface>>` case additionally crashes at
+scope-exit with "double free or corruption" — under
+investigation; the per-element drop wiring is incomplete on
+LLVM. Tracked as a follow-up.
+
+Regression test: `vec_of_box_compiles_on_both_backends` (pins
+the compile-succeeds case; runtime cleanup is a follow-up).
+
 ### Newly documented limitations
 
 - **Integer overflow guards are NOT emitted** in v1 despite

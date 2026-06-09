@@ -39929,6 +39929,10 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // `llvm_type(Ref(_))` would panic on the aggregate fallback.
         Type::Ref(inner) => format!("ref_{}", vec_struct_tag(inner)),
         Type::RefMut(inner) => format!("refmut_{}", vec_struct_tag(inner)),
+        // 2026-06-09: `Vec<Box<T>>` element tag. Mirrors the
+        // C backend's `box_<inner_tag>` shape so cross-backend
+        // identifier names match.
+        Type::Box(inner) => format!("box_{}", vec_struct_tag(inner)),
         // Note: Type::Vec(_) and Type::Array { .. } are handled
         // by the leading arms of this match (lines 38416-38418) —
         // earlier-arm shadowing made the trailing duplicates

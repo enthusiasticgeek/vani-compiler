@@ -1,0 +1,8 @@
+struct Container { items: Vec<Box<i64>> }
+fn main() -> i64 {
+  let c: Container = Container {
+    items: vec(box(1), box(2), box(3)),
+  };
+  print len(c.items) as i64;
+  return 0;
+}

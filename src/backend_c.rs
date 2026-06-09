@@ -9687,6 +9687,13 @@ pub(crate) fn element_tag(element: &Type) -> String {
         // ensures the pointers don't outlive their referents.
         Type::Ref(inner) => format!("ref_{}", element_tag(inner)),
         Type::RefMut(inner) => format!("refmut_{}", element_tag(inner)),
+        // 2026-06-09: `Vec<Box<T>>` element tag. c_leaf_type
+        // returns the `/* Box<T> */` placeholder which breaks
+        // `intent_vec_<tag>__from` etc. as identifiers. Spell
+        // recursively so `Vec<Box<i64>>` → `intent_vec_box_int64_t`.
+        // For `Box<dyn Iface>` the inner is Type::Object whose
+        // tag is `dyn_<Iface>` → `box_dyn_<Iface>`.
+        Type::Box(inner) => format!("box_{}", element_tag(inner)),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
@@ -10968,6 +10975,32 @@ pub(crate) fn c_element_drop_old(slot: &str, ty: &Type) -> String {
                 slot = slot
             )
         }
+        // 2026-06-09: `Vec<Box<T>>` per-element drop. Box owns
+        // a heap allocation; the Vec's `__free` walks each slot
+        // and must release it.
+        //   - Box<dyn Iface> stores the fat pointer struct
+        //     in-line; the `.data` field is the heap-allocated
+        //     concrete. Free that.
+        //   - Box<T> for plain T stores the raw pointer in the
+        //     slot. Free it directly. For inner T that's also
+        //     heap-owning (Vec<U>, OwnedStr, ...), recursive
+        //     drop on the deref'd value first, then free the
+        //     pointer.
+        Type::Box(inner) => match &**inner {
+            Type::Object(_iface) => {
+                format!("\n        free((void*){slot}.data);", slot = slot)
+            }
+            Type::Vec(elem) => format!(
+                "\n        {helper}(*({slot}));\n        free({slot});",
+                helper = vec_helper(elem, "free"),
+                slot = slot,
+            ),
+            Type::OwnedStr => format!(
+                "\n        free((void*)*({slot}));\n        free({slot});",
+                slot = slot,
+            ),
+            _ => format!("\n        free({slot});", slot = slot),
+        },
         _ => String::new(),
     }
 }

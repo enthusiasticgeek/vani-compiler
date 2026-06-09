@@ -1,0 +1,15 @@
+// Vec<Box<dyn Iface>> — the canonical heterogeneous-owned collection.
+interface Shape { fn area(self: ref Self) -> i64; }
+struct Circle { r: i64 }
+struct Square { s: i64 }
+implement Shape for Circle { fn area(self: ref Circle) -> i64 { return self.r * self.r * 3; } }
+implement Shape for Square { fn area(self: ref Square) -> i64 { return self.s * self.s; } }
+fn main() -> i64 {
+  let c: Circle = Circle { r: 5 };
+  let s: Square = Square { s: 4 };
+  let xs: Vec<Box<dyn Shape>> = vec(
+    box(c as dyn Shape),
+    box(s as dyn Shape),
+  );
+  return len(xs) as i64;
+}
