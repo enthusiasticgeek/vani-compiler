@@ -9,6 +9,7 @@
 - [Functions and the four return aliases](beginner/03_functions.md)
 - [`if` / `else`](beginner/04_if_else.md)
 - [`while` and `for` loops](beginner/05_loops.md)
+- [Recursion — intuition primer](beginner/05a_recursion_primer.md)
 - [Strings (`Str` vs `OwnedStr`)](beginner/06_strings.md)
 - [Pointers and references — intuition primer](beginner/06a_pointers_refs_primer.md)
 - [Heap and stack — intuition primer](beginner/06b_heap_vs_stack_primer.md)
@@ -22,6 +23,7 @@
 - [Modules and `pub`](beginner/10_modules.md)
 - [Challenges](beginner/11_challenges.md)
 - [Devanagari surface — optional intro](beginner/12_devanagari.md)
+- [Big-O notation — intuition primer](beginner/13a_big_o_primer.md)
 
 # Intermediate
 
@@ -50,6 +52,7 @@
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
 - [SMT — `requires` / `ensures` intuition primer](intermediate/12a_smt_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
+- [Compile time vs runtime — intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)
 
 # Advanced
 
