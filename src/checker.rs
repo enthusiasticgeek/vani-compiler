@@ -7697,13 +7697,21 @@ fn check_function(
     let saw_return = terminated;
 
     if !saw_return {
-        diagnostics.push(Diagnostic::new(
-            function.span,
-            format!(
-                "function '{}' must return a {}",
-                function.name, function.return_type
+        let ret_str = format!("{}", function.return_type);
+        diagnostics.push(
+            Diagnostic::new(
+                function.span,
+                format!(
+                    "function '{}' must return a {}",
+                    function.name, ret_str
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::missing_return(
+                    &function.name, &ret_str,
+                ),
             ),
-        ));
+        );
     }
 
     // Effects check for `pure fn`: walk the typed body and report
@@ -13373,13 +13381,20 @@ fn check_expr(
             // Reject unknown field names.
             for (fname, _) in fields {
                 if !decl_fields.iter().any(|(n, _)| n == fname) {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "struct '{}' has no field named '{}'",
-                            type_name, fname
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "struct '{}' has no field named '{}'",
+                                type_name, fname
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::field_not_found(
+                                fname, type_name,
+                            ),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             }
@@ -13985,28 +14000,44 @@ fn check_expr(
                     // Bool exhaustiveness: need both `true`
                     // and `false` arms, or a wildcard.
                     if !seen_bools.contains(&true) {
-                        diagnostics.push(Diagnostic::new(
-                            expr.span,
-                            "non-exhaustive match: missing arm for 'true'".to_string(),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                expr.span,
+                                "non-exhaustive match: missing arm for 'true'".to_string(),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::match_not_exhaustive("true"),
+                            ),
+                        );
                     }
                     if !seen_bools.contains(&false) {
-                        diagnostics.push(Diagnostic::new(
-                            expr.span,
-                            "non-exhaustive match: missing arm for 'false'".to_string(),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                expr.span,
+                                "non-exhaustive match: missing arm for 'false'".to_string(),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::match_not_exhaustive("false"),
+                            ),
+                        );
                     }
                 } else if let Some(enum_decl) = &enum_decl_opt {
                     let enum_name = enum_name_opt.as_deref().unwrap_or("");
                     for v in &enum_decl.variants {
                         if !seen_variants.contains(&v.as_str()) {
-                            diagnostics.push(Diagnostic::new(
-                                expr.span,
-                                format!(
-                                    "non-exhaustive match: missing arm for '{}.{}'",
-                                    enum_name, v
+                            let missing = format!("{}.{}", enum_name, v);
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    expr.span,
+                                    format!(
+                                        "non-exhaustive match: missing arm for '{}'",
+                                        missing,
+                                    ),
+                                )
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::match_not_exhaustive(&missing),
                                 ),
-                            ));
+                            );
                         }
                     }
                 }
@@ -14589,14 +14620,19 @@ fn check_ref_mut(
         ));
     }
     if info.ty.is_ref() {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            format!(
-                "cannot take '&mut' on '{}' because it is borrowed immutably (&T); \
-                 only owned bindings or '&mut T' parameters can be mutably borrowed",
-                name
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!(
+                    "cannot take '&mut' on '{}' because it is borrowed immutably (&T); \
+                     only owned bindings or '&mut T' parameters can be mutably borrowed",
+                    name
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::alias_mut_with_shared(name),
             ),
-        ));
+        );
     }
     let ref_ty = Type::RefMut(Box::new(info.ty.clone()));
     let decl_span = info.decl_span;
@@ -14833,15 +14869,27 @@ fn check_index(
     if !element_type.is_copy()
         && !matches!(element_type, Type::Ref(_) | Type::RefMut(_))
     {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "cannot index a Vec/array whose element type ({}) is non-Copy by value; \
-                 the element would alias the owner's slot and double-free. \
-                 Use `clone_at(&xs, i)` to bind an owned deep-clone of the slot.",
-                element_type
+        // Determine the source Var name for the elaboration hint
+        // (falls back to "xs" when the index expr doesn't have a
+        // simple Var root).
+        let src_name = match &array_checked.expr.kind {
+            TypedExprKind::Var(n) => n.clone(),
+            _ => "xs".to_string(),
+        };
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "cannot index a Vec/array whose element type ({}) is non-Copy by value; \
+                     the element would alias the owner's slot and double-free. \
+                     Use `clone_at(&xs, i)` to bind an owned deep-clone of the slot.",
+                    element_type
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::vec_index_non_copy_aliases(&src_name),
             ),
-        ));
+        );
         return CheckedExpr::fallback(element_type, span);
     }
 
@@ -16703,15 +16751,23 @@ fn check_call(
     };
 
     if args.len() != signature.params.len() {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "function '{}' expects {} argument(s), got {}",
-                name,
-                signature.params.len(),
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "function '{}' expects {} argument(s), got {}",
+                    name,
+                    signature.params.len(),
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(
+                    signature.params.len(),
+                    args.len(),
+                ),
             ),
-        ));
+        );
     }
 
     check_arg_aliasing(args, env, span, diagnostics);
@@ -18073,14 +18129,21 @@ fn try_elaborate_box_to_dyn(
         _ => return None,
     };
     if !crate::ast::iface_impl_exists(&iface_name, &concrete_name) {
-        diagnostics.push(Diagnostic::new(
-            args[0].span,
-            format!(
-                "`box({})` with annotation `Box<dyn {}>` requires `{}` to \
-                 `implement {}`; no such impl is in scope",
-                concrete_name, iface_name, concrete_name, iface_name
+        diagnostics.push(
+            Diagnostic::new(
+                args[0].span,
+                format!(
+                    "`box({})` with annotation `Box<dyn {}>` requires `{}` to \
+                     `implement {}`; no such impl is in scope",
+                    concrete_name, iface_name, concrete_name, iface_name
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::iface_not_impl(
+                    &iface_name, &concrete_name,
+                ),
             ),
-        ));
+        );
         return Some(CheckedExpr::fallback(expected.clone(), expr.span));
     }
     // Mark the source binding as moved (the box now owns the heap
@@ -27253,6 +27316,8 @@ fn check_for_captured_mutations(
                              concurrent counter.",
                             name, name
                         ),
+                    ).with_elaboration(
+                        crate::diagnostic_elaborations::parallel_for_mutates_capture(name),
                     ));
                 }
             }

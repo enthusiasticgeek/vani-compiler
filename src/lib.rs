@@ -11312,6 +11312,61 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn elaboration_renders_for_match_not_exhaustive_basic() {
+        // L4 (D) elaboration batch 2 (2026-06-09): bool match
+        // missing 'false' surfaces match_not_exhaustive helper.
+        use crate::diagnostic::format_diagnostics;
+        let source = r#"
+            fn name(b: bool) -> i64 {
+              return match b {
+                true then 1,
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("non-exhaustive match");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("help: 1.") && rendered.contains("exhaustive match"),
+            "expected match_not_exhaustive elaboration, got:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn elaboration_renders_for_wrong_arity_diagnostic() {
+        use crate::diagnostic::format_diagnostics;
+        let source = r#"
+            fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 {
+              return add(1, 2, 3);
+            }
+        "#;
+        let errors = compile(source).expect_err("wrong arity");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("help: 1.") && rendered.contains("2 argument"),
+            "expected wrong_arity elaboration, got:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn elaboration_renders_for_missing_return_diagnostic() {
+        use crate::diagnostic::format_diagnostics;
+        let source = r#"
+            fn pick(b: bool) -> i64 {
+              if b { return 1; }
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("missing return");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("help: 1.") && rendered.contains("every path"),
+            "expected missing_return elaboration, got:\n{rendered}",
+        );
+    }
+
+    #[test]
     fn elaboration_renders_for_return_escape_diagnostic() {
         use crate::diagnostic::format_diagnostics;
         let source = r#"
