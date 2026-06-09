@@ -10547,15 +10547,20 @@ fn check_one_stmt(
             for cap in &order {
                 if let Some(info) = env.lookup(cap) {
                     if !info.ty.is_copy() {
-                        diagnostics.push(Diagnostic::new(
-                            *span,
-                            format!(
-                                "task body captures non-Copy binding '{}' (type {}). \
-                                 Captures must be Copy types — pre-extract scalar \
-                                 values from `{}` before the spawn site.",
-                                cap, info.ty, cap,
+                        diagnostics.push(
+                            Diagnostic::new(
+                                *span,
+                                format!(
+                                    "task body captures non-Copy binding '{}' (type {}). \
+                                     Captures must be Copy types — pre-extract scalar \
+                                     values from `{}` before the spawn site.",
+                                    cap, info.ty, cap,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::closure_captures_affine(cap),
                             ),
-                        ));
+                        );
                     }
                     captures.push((cap.clone(), info.ty.clone()));
                 }
@@ -10658,14 +10663,19 @@ fn check_one_stmt(
             // target-triple check is the first thing the
             // embedded-target arc does.
             if std::env::var("INTENT_TARGET_EMBEDDED").ok().as_deref() != Some("1") {
-                diagnostics.push(Diagnostic::new(
-                    *span,
-                    "`unsafe(reason = \"…\")` is gated to embedded build \
-                     targets — current vāṇī builds default to hosted, \
-                     which rejects the construct (README: *Embedded \
-                     targets — current position*). Set `INTENT_TARGET_EMBEDDED=1` \
-                     to opt in until the `--target embedded` flag ships.",
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        *span,
+                        "`unsafe(reason = \"…\")` is gated to embedded build \
+                         targets — current vāṇī builds default to hosted, \
+                         which rejects the construct (README: *Embedded \
+                         targets — current position*). Set `INTENT_TARGET_EMBEDDED=1` \
+                         to opt in until the `--target embedded` flag ships.",
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unsafe_on_hosted(),
+                    ),
+                );
             }
             env.push_scope();
             let mut typed_body: Vec<TypedStmt> = Vec::new();
@@ -11345,16 +11355,21 @@ fn validate_no_raw_ptr_on_hosted(
         }
     }
     if has_raw_ptr(ty) {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "raw pointer type `{}` not permitted in {} on hosted targets — \
-                 set `INTENT_TARGET_EMBEDDED=1` to opt in to embedded mode \
-                 (Layer 1.1 of `unsafe.md`; the `--target embedded` flag will \
-                 supersede the env-var gate)",
-                ty, context
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "raw pointer type `{}` not permitted in {} on hosted targets — \
+                     set `INTENT_TARGET_EMBEDDED=1` to opt in to embedded mode \
+                     (Layer 1.1 of `unsafe.md`; the `--target embedded` flag will \
+                     supersede the env-var gate)",
+                    ty, context
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::unsafe_on_hosted(),
             ),
-        ));
+        );
     }
 }
 
@@ -12322,14 +12337,23 @@ fn check_expr(
                         } else {
                             // Calling a payload-less variant with
                             // args — clean diagnostic.
-                            diagnostics.push(Diagnostic::new(
-                                expr.span,
-                                format!(
-                                    "enum variant '{}.{}' has no payload — use \
-                                     `{}.{}` without parentheses",
-                                    enum_name, method, enum_name, method
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    expr.span,
+                                    format!(
+                                        "enum variant '{}.{}' has no payload — use \
+                                         `{}.{}` without parentheses",
+                                        enum_name, method, enum_name, method
+                                    ),
+                                )
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::enum_variant_arity(
+                                        &format!("{}.{}", enum_name, method),
+                                        0,
+                                        args.len(),
+                                    ),
                                 ),
-                            ));
+                            );
                             return CheckedExpr::fallback_integer(expr.span);
                         }
                     }
@@ -27159,7 +27183,12 @@ fn verify_ensures_at_return(
                 };
                 diagnostics.push(
                     Diagnostic::new(ens.span, detail)
-                        .with_related(return_expr.span, "return is here"),
+                        .with_related(return_expr.span, "return is here")
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::smt_ensures_failed(
+                                &function.name,
+                            ),
+                        ),
                 );
             }
             Verdict::Unknown | Verdict::Unavailable | Verdict::SkippedUnsupported(_) => {
@@ -27625,13 +27654,18 @@ fn verify_pure_body(
                             _ => None,
                         })
                         .unwrap_or_default();
-                    diagnostics.push(Diagnostic::new(
-                        span,
-                        format!(
-                            "{} cannot contain `print` (observable I/O is a side effect)",
-                            context
+                    diagnostics.push(
+                        Diagnostic::new(
+                            span,
+                            format!(
+                                "{} cannot contain `print` (observable I/O is a side effect)",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 TypedStmt::Assert { message: Some(_), expr, .. } => {
                     // Assert with a message is a user-facing abort
@@ -28975,7 +29009,12 @@ fn verify_call_args_in_expr(
                         };
                         diagnostics.push(
                             Diagnostic::new(expr.span, detail)
-                                .with_related(req.span, "callee precondition"),
+                                .with_related(req.span, "callee precondition")
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::smt_requires_failed(
+                                        name,
+                                    ),
+                                ),
                         );
                     }
                     // Unknown / SkippedUnsupported / Unavailable: stay
@@ -29812,12 +29851,27 @@ fn try_smt_prove(
                 Some(ctr) => format!("proof failed: SMT counterexample [{}]", ctr),
                 None => "proof failed: SMT solver found a counterexample (the expression is not universally true under the function's preconditions)".to_string(),
             };
-            diagnostics.push(Diagnostic::new(prove_expr.span, detail));
+            // Use a generic predicate label for the elaboration —
+            // the SMT counterexample is more useful than re-pretty-
+            // printing the expression here.
+            diagnostics.push(
+                Diagnostic::new(prove_expr.span, detail)
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::assert_not_proven(
+                            "this prove",
+                        ),
+                    ),
+            );
         }
-        Verdict::Unknown => diagnostics.push(Diagnostic::new(
-            prove_expr.span,
-            "cannot prove expression: SMT solver returned 'unknown' (try strengthening the preconditions or simplifying the claim)",
-        )),
+        Verdict::Unknown => diagnostics.push(
+            Diagnostic::new(
+                prove_expr.span,
+                "cannot prove expression: SMT solver returned 'unknown' (try strengthening the preconditions or simplifying the claim)",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::assert_not_proven("this prove"),
+            ),
+        ),
         Verdict::SkippedUnsupported(reason) => {
             // The most common cause is an inline call to a function
             // that has no `ensures` clause — the verifier has nothing

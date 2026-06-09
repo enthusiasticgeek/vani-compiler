@@ -11312,6 +11312,46 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn elaboration_renders_for_pure_fn_has_effect_diagnostic() {
+        use crate::diagnostic::format_diagnostics;
+        let source = r#"
+            pure fn impure(x: i64) -> i64 {
+              print x;
+              return x;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("pure fn with print");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("help: 1.") && rendered.contains("Pure functions"),
+            "expected pure_fn_has_effect elaboration, got:\n{rendered}",
+        );
+    }
+
+    #[test]
+    fn elaboration_renders_for_smt_ensures_failed_diagnostic() {
+        if !z3_available() {
+            return;
+        }
+        use crate::diagnostic::format_diagnostics;
+        let source = r#"
+            fn wrong(n: i64) -> i64
+            ensures _return > n;
+            {
+              return n - 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("ensures should fail");
+        let rendered = format_diagnostics("t.vani", source, &errors);
+        assert!(
+            rendered.contains("help: 1.") && rendered.contains("post-condition"),
+            "expected smt_ensures_failed elaboration, got:\n{rendered}",
+        );
+    }
+
+    #[test]
     fn elaboration_renders_for_match_not_exhaustive_basic() {
         // L4 (D) elaboration batch 2 (2026-06-09): bool match
         // missing 'false' surfaces match_not_exhaustive helper.
