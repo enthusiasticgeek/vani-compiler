@@ -1,0 +1,13 @@
+// User struct method with inline closure (similar to c5).
+struct Calc { base: i64 }
+methods on Calc {
+  fn double(self: ref Calc) -> i64 {
+    let f = fn(x: i64) -> i64 { return x + x; };
+    return f(self.base);
+  }
+}
+fn main() -> i64 {
+  let c: Calc = Calc { base: 21 };
+  print c.double();
+  return 0;
+}

@@ -94,20 +94,71 @@ restructure rather than wonder if it's a bug.
 
 ## Notable findings during this round
 
-- **One compiler panic discovered + fixed**:
-  `box(Foo { ... } as dyn Iface)` with an inline struct
-  literal previously panicked both the C and LLVM backends
-  with `Box<dyn Iface> __box_new expected a DynCoerce arg;
-  got Block { ... }`. The checker hoists the inline struct
-  into a synthetic let inside a Block; the codegen now
-  unwraps the Block before pulling out the DynCoerce. New
-  regression test `box_dyn_iface_accepts_inline_struct_literal_source`
-  pins the fix. Working pattern (let-bind first) was never
-  affected; only the inline form was.
-- **Several documented limitations confirmed** (tuples can't
-  hold non-Copy types in v1, enum payloads exclude `Box<T>`,
-  HashMap value type is scalar-only). See the gap table
-  above.
+Three compiler bugs found and fixed; several documented
+limitations confirmed.
+
+### Bug 1 — `box(X as dyn Iface)` inline form (FIXED)
+
+`box(Foo { ... } as dyn Iface)` with an inline struct
+literal previously panicked both the C and LLVM backends
+with `Box<dyn Iface> __box_new expected a DynCoerce arg;
+got Block { ... }`. The checker hoists the inline struct
+into a synthetic let inside a Block; the codegen now
+unwraps the Block before pulling out the DynCoerce.
+Regression test: `box_dyn_iface_accepts_inline_struct_literal_source`.
+
+### Bug 2 — Nested enum payloads (FIXED)
+
+`enum Outer { Wrap(Inner) }` where Inner is itself an enum
+previously rejected `Outer.Wrap(Inner.A(42))` with the
+nonsensical "enum payload must be assignable to Inner, got
+Inner" — same name on both sides. Root cause: the parser
+stamps the variant's payload type as `Type::Struct("Inner")`
+(parser doesn't know Inner is an enum yet); the
+`resolve_enum_types_in_program` pass walked function
+signatures, struct fields, type aliases, consts, methods
+blocks, and impls — but **not enum variant payloads**.
+Fixed by extending the pass.
+Regression test: `nested_enum_payload_accepts_enum_construction`.
+
+### Bug 3 — Closure inside iface impl / methods-block (FIXED)
+
+Inline `let f = fn(...) -> R { ... };` inside an
+`implement Iface for T { fn m(...) { ... } }` body or a
+`methods on T { fn m(...) { ... } }` body previously
+panicked the checker with "internal: anonymous fn expression
+survived the lambda-lift pass. This is a vāṇी compiler bug
+— please report." The `lambda_lift_program` walked only
+`program.functions`; impls were hoisted INTO functions later
+but never had their inline closures lifted. Fixed by lifting
+closures inside `methods_blocks` + `impls` before the hoist
+pass runs.
+Regression tests: `closure_inside_iface_impl_method_lifts_correctly`
++ `closure_inside_methods_block_method_lifts_correctly`.
+
+### Newly documented limitations
+
+- **Integer overflow guards are NOT emitted** in v1 despite
+  the README's claim. `i64::MAX + 1` silently wraps to
+  `i64::MIN` on both backends. Real safety gap; documented
+  in [`docs/missing_features.md`](../../docs/missing_features.md).
+- **Generic-call inference** is limited to literal args / Var
+  / (v3.1 only) Ref/RefMut(Var) at the T-position. Complex
+  argument expressions reject with a documented diagnostic;
+  no turbofish (`f::<i64>(...)`) syntax.
+- **Tuples are Copy-only.** `(Box<T>, U)` / `(OwnedStr, U)`
+  reject; workaround is a named struct.
+- **OwnedStr enum payloads** are exposed in match arm
+  bindings as `Str` (read-only borrow) not `OwnedStr` (owning).
+  Match arm returning the bound `s` then types as `Str`,
+  which mismatches if other arms return `OwnedStr`.
+  Workaround: `s + ""` to copy into OwnedStr at the binding
+  site.
+- **`Option<Box<T>>` enum payload** rejects — v1 enum
+  variant payloads admit Copy / OwnedStr / Vec / array /
+  Task / Atomic / Mutex / Channel only.
+- **Anonymous fn called inline from Vec slot** (`fs[0](10)`)
+  rejects — only named functions can be called.
 
 ## What would actually break the compiler
 

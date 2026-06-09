@@ -11127,6 +11127,78 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn nested_enum_payload_accepts_enum_construction() {
+        // Regression: `enum Outer { Wrap(Inner) }` where Inner
+        // is also an enum previously rejected `Outer.Wrap(Inner.A(42))`
+        // with "enum payload must be assignable to Inner, got
+        // Inner" — the parser stamps the variant's payload type
+        // as `Type::Struct("Inner")` (it doesn't know Inner is
+        // an enum yet), and the resolve-enum-types pass missed
+        // the enum-variant payloads. Fixed 2026-06-09 by extending
+        // the pass to walk every enum's variant payload list.
+        let source = r#"
+            enum Inner { A(i64), B }
+            enum Outer { Wrap(Inner), Empty }
+            fn main() -> i64 {
+              let o: Outer = Outer.Wrap(Inner.A(42));
+              return 0;
+            }
+        "#;
+        compile(source).expect("nested-enum payload must accept");
+    }
+
+    #[test]
+    fn closure_inside_iface_impl_method_lifts_correctly() {
+        // Regression: an inline `fn(x: i64) -> i64 { ... }`
+        // closure inside an `implement Iface for T { fn m(...) }`
+        // method body previously panicked the checker with
+        // "internal: anonymous fn expression survived the
+        // lambda-lift pass. This is a vāṇी compiler bug —
+        // please report." The lambda_lift_program pass walked
+        // only program.functions; impls were hoisted INTO
+        // functions later but never had their closures lifted.
+        // Fixed 2026-06-09 by lifting closures inside
+        // methods_blocks + impls BEFORE the hoist pass runs.
+        let source = r#"
+            interface Counter { fn tick(self: ref Self) -> i64; }
+            struct C { n: i64 }
+            implement Counter for C {
+              fn tick(self: ref C) -> i64 {
+                let f = fn(x: i64) -> i64 { return x + 1; };
+                return f(self.n);
+              }
+            }
+            fn main() -> i64 {
+              let c: C = C { n: 41 };
+              return c.tick();
+            }
+        "#;
+        compile(source).expect("closure-in-impl must lift");
+    }
+
+    #[test]
+    fn closure_inside_methods_block_method_lifts_correctly() {
+        // Parallel regression for `methods on T { fn m(...) }`
+        // blocks. Same fix path; covered as a separate test
+        // so the methods-block + impl branches stay
+        // independently pinned.
+        let source = r#"
+            struct Calc { base: i64 }
+            methods on Calc {
+              fn double(self: ref Calc) -> i64 {
+                let f = fn(x: i64) -> i64 { return x + x; };
+                return f(self.base);
+              }
+            }
+            fn main() -> i64 {
+              let c: Calc = Calc { base: 21 };
+              return c.double();
+            }
+        "#;
+        compile(source).expect("closure-in-methods-block must lift");
+    }
+
+    #[test]
     fn box_dyn_iface_accepts_inline_struct_literal_source() {
         // Regression: `box(Circle { r: 5 } as dyn Drawable)`
         // with an inline struct literal previously panicked both

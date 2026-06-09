@@ -1499,6 +1499,90 @@ fn lambda_lift_program(program: &mut Program) {
         top_level_names.insert((*n).to_string());
     }
 
+    // Lift closures inside `methods on T { ... }` and `implement
+    // Iface for T { ... }` blocks BEFORE they get hoisted into
+    // program.functions — otherwise inline closures inside an
+    // iface impl method survive past lift and panic at typecheck
+    // with "anonymous fn expression survived the lambda-lift
+    // pass". Caught by the adversarial test set 2026-06-09.
+    //
+    // Each method block + impl method becomes a temp Function
+    // and runs through the same lift logic the top-level fns
+    // use; the lifted body is then written back. Hoisted
+    // functions from inside method/impl bodies go directly to
+    // the program-level `hoisted` Vec, same as top-level
+    // closures.
+    let method_blocks_count = program.methods_blocks.len();
+    for mb_idx in 0..method_blocks_count {
+        let method_count = program.methods_blocks[mb_idx].methods.len();
+        for m_idx in 0..method_count {
+            let mut env: std::collections::HashMap<String, crate::ast::Type> =
+                std::collections::HashMap::new();
+            for p in &program.methods_blocks[mb_idx].methods[m_idx].params {
+                env.insert(p.name.clone(), p.ty.clone());
+            }
+            let mut closure_handles: std::collections::HashMap<
+                String,
+                (String, Vec<String>, Vec<String>),
+            > = std::collections::HashMap::new();
+            let mut new_body =
+                std::mem::take(&mut program.methods_blocks[mb_idx].methods[m_idx].body);
+            lift_closures_in_block(
+                &mut new_body,
+                &mut env,
+                &top_level_names,
+                &mut counter,
+                &mut hoisted,
+                &mut hoisted_structs,
+                &mut closure_handles,
+            );
+            if !closure_handles.is_empty() {
+                for s in &mut new_body {
+                    rewrite_closure_calls_in_stmt(s, &closure_handles);
+                }
+            }
+            for s in &mut new_body {
+                lift_stmt_anon_fn(s, &mut counter, &mut hoisted);
+            }
+            program.methods_blocks[mb_idx].methods[m_idx].body = new_body;
+        }
+    }
+    let impls_count = program.impls.len();
+    for i_idx in 0..impls_count {
+        let method_count = program.impls[i_idx].methods.len();
+        for m_idx in 0..method_count {
+            let mut env: std::collections::HashMap<String, crate::ast::Type> =
+                std::collections::HashMap::new();
+            for p in &program.impls[i_idx].methods[m_idx].params {
+                env.insert(p.name.clone(), p.ty.clone());
+            }
+            let mut closure_handles: std::collections::HashMap<
+                String,
+                (String, Vec<String>, Vec<String>),
+            > = std::collections::HashMap::new();
+            let mut new_body =
+                std::mem::take(&mut program.impls[i_idx].methods[m_idx].body);
+            lift_closures_in_block(
+                &mut new_body,
+                &mut env,
+                &top_level_names,
+                &mut counter,
+                &mut hoisted,
+                &mut hoisted_structs,
+                &mut closure_handles,
+            );
+            if !closure_handles.is_empty() {
+                for s in &mut new_body {
+                    rewrite_closure_calls_in_stmt(s, &closure_handles);
+                }
+            }
+            for s in &mut new_body {
+                lift_stmt_anon_fn(s, &mut counter, &mut hoisted);
+            }
+            program.impls[i_idx].methods[m_idx].body = new_body;
+        }
+    }
+
     let original_len = program.functions.len();
     for idx in 0..original_len {
         // Work against a clone to avoid borrowing both the
@@ -3992,6 +4076,21 @@ fn resolve_enum_types_in_program(
     for decl in &mut program.structs {
         for field in &mut decl.fields {
             resolve_enum_types_in_type(&mut field.ty, enums);
+        }
+    }
+    // 2026-06-09: enum-variant payload types must also resolve so
+    // a nested enum (`enum Outer { Wrap(Inner) }`) has its payload
+    // typed as `Type::Enum("Inner")` rather than the parser-stamped
+    // `Type::Struct("Inner")`. Without this, `Outer.Wrap(Inner.A(...))`
+    // rejects with "enum payload must be assignable to Inner, got
+    // Inner" — same name on both sides, different Type variant.
+    // Caught by the adversarial test set (`examples/edge_cases/`
+    // m4_simplest.vani).
+    for decl in &mut program.enums {
+        for variant in &mut decl.variants {
+            for payload_ty in &mut variant.payload {
+                resolve_enum_types_in_type(payload_ty, enums);
+            }
         }
     }
     // Type aliases may reference enums in their target.
