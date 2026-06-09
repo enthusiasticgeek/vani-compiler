@@ -212,7 +212,7 @@ read those before starting.
 | Order | Task | Effort | Notes |
 |---|---|---|---|
 | ~~v3.1 liveness optimization~~ | ✅ SHIPPED 2026-06-08 | — | Shipped via per-state decl + reads analysis in `try_v31_transform`. State-local locals skip the Task struct field + FieldAssign, emit as poll-fn stack `Let` instead. Filters `rename` so `rewrite_vars_to_fields` doesn't replace state-local names. Filters `task_struct.fields` + ctor body. 5 regression tests pin pure state-local / cross-state / mixed / runtime-behavior / OwnedStr-state-local shapes. echo_pool.vani ASan-clean. |
-| **2** | **L4 (B) Phase 1+2 — let-binding refs + scope-escape analyzer** | 8-12h, one session | First half of the lexical-scope-only refs lift. `let r: ref Foo = ref x;` accepted; analyzer rejects returns, struct-stores, captures that outlive the source. The analyzer is the load-bearing piece. |
+| ~~L4 (B) Phase 1+2~~ | ✅ SHIPPED 2026-06-08 | — | Phase 1 (let-binding refs) shipped. Investigation showed Phase 2 (separate scope-escape analyzer) isn't needed yet — the existing type-level rejections (fn return / struct field / Vec element all reject ref types at signature/decl time) already prevent escape. Analyzer becomes necessary when Phases 3+4 lift those receivers. Three regression tests pin: ref let-binding compiles end-to-end, mut ref let-binding works, ref-return still rejected, ref-in-user-struct-field still rejected. |
 | **3** | **L4 (B) Phase 3+4 — ref struct fields + Vec elements** | 5-10h, one session | Smaller gates + tests once the analyzer ships. Lifts ref-rejection at user-struct fields + Vec elements. |
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)

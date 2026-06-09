@@ -8404,7 +8404,20 @@ fn check_one_stmt(
             verify_call_args_in_expr(expr, smt_facts, env, signatures, diagnostics);
             let mut checked = if let Some(annotation) = annotation {
                 validate_array_element_type(annotation, *span, diagnostics);
-                validate_no_ref(annotation, *span, "let annotation", diagnostics);
+                // L4 (B) Phase 1 (2026-06-08): ref types in let
+                // annotations were rejected by validate_no_ref.
+                // Now accepted because every ESCAPE vector
+                // (fn return, struct field, Vec element) still
+                // rejects ref types at the receiver's type
+                // check, so a let-bound ref can't actually leak
+                // beyond its declaring scope. Phases 3+4 would
+                // lift the struct-field + Vec-element receivers;
+                // a real scope-escape analyzer ships then.
+                //
+                // Note: we still reject `let r: ref ref T = ...;`
+                // (ref-of-ref) because the parser's parse_type
+                // disallows nested refs.
+                // validate_no_ref(annotation, *span, "let annotation", diagnostics);
                 // Refines #8: empty `vec()` borrows its element type
                 // from the let-annotation. Intercept before
                 // `check_expr` so the zero-arg call doesn't trigger
@@ -8484,16 +8497,17 @@ fn check_one_stmt(
             }
 
             let var_ty = checked.ty().clone();
-            if var_ty.is_ref() {
-                diagnostics.push(Diagnostic::new(
-                    *span,
-                    format!(
-                        "references cannot be stored in 'let' bindings; pass '&{}' \
-                         directly to a function parameter instead",
-                        name
-                    ),
-                ));
-            }
+            // L4 (B) Phase 1 (2026-06-08): ref-typed let-bindings
+            // are now accepted. See the Let-stmt annotation
+            // comment above for why this is safe under v1's
+            // existing receiver-side ref rejections. The
+            // previous diagnostic stays as a comment for the
+            // historical record:
+            //   "references cannot be stored in 'let' bindings;
+            //    pass '&{}' directly to a function parameter
+            //    instead"
+            // — that workaround is now unnecessary.
+            let _ = var_ty.is_ref();
             let constant = checked.constant().cloned();
             let same_scope_existing = env.current_get(name).cloned();
             let was_shadow = same_scope_existing.is_some();

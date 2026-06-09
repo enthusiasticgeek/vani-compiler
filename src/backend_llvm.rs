@@ -2168,6 +2168,18 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 unreachable!("checker: non-scalar let with type {:?}", ty);
             }
             let value = emit_expr(expr, ctx, out);
+            // L4 (B) Phase 1 (2026-06-08): ref-typed let-bindings
+            // skip the alloca + store. Refs ARE pointers; the
+            // Var-read carve-out at `emit_expr::Var` expects
+            // `ctx.locals[name].addr` to be the pointer value
+            // itself (matching the ref-param convention), not
+            // an alloca holding the pointer. Skipping the alloca
+            // means rebinding via shadowing reuses the standard
+            // Let path's same-scope semantics.
+            if ty.is_any_ref() {
+                ctx.locals.insert(name.clone(), (ty.clone(), value));
+                return;
+            }
             // `llvm_type_string` routes Atomic/Channel/etc.
             // through their parametric per-(T, N) struct names;
             // `llvm_type` would only return the &'static str
@@ -41363,6 +41375,10 @@ fn is_scalar(ty: &Type) -> bool {
         // Arc 5c: Closure is a named struct ({i64, fn-ptr}).
         // Goes through the scalar Let path uniformly.
         || matches!(ty, Type::Closure(_, _))
+        // L4 (B) Phase 1 (2026-06-08): ref-typed let-bindings
+        // are now accepted. A ref is a pointer (T*); single
+        // alloca + store works the same as fn-ptr / closure.
+        || matches!(ty, Type::Ref(_) | Type::RefMut(_))
         // Tuples lower to anonymous LLVM structs. The Let
         // path's `alloca <{T1, T2, …}>` and `store` work
         // uniformly via the scalar path. T1.1.

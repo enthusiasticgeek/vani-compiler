@@ -17684,8 +17684,13 @@ fn c_type_name(ty: &Type) -> String {
         // through `format_declarator` instead so the array
         // declarator form keeps working for locals.
         Type::Array { element, length } => array_return_struct_name(element, *length),
+        // L4 (B) Phase 1 (2026-06-08): refs now appear as let-
+        // binding storage too. Return-position refs are still
+        // rejected at signature-time. format_declarator already
+        // handles the ref → `const T*` / `T*` lowering; reuse it
+        // with an empty name + trim trailing space.
         Type::Ref(_) | Type::RefMut(_) => {
-            unreachable!("reference types do not appear in return positions")
+            format_declarator(ty, "").trim_end().to_string()
         }
         Type::Atomic(element) => c_atomic_storage(element),
         Type::Channel(element, capacity) => c_channel_storage(element, *capacity),

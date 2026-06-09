@@ -9199,23 +9199,84 @@ mod tests {
     }
 
     #[test]
-    fn cannot_let_bind_reference() {
+    fn l4_b_let_bind_mut_ref_compiles() {
+        // mut ref let-bindings work too: the binding's pointer
+        // value is passed to a fn that mutates through it.
         let source = r#"
+            fn push_to(xs: mut ref Vec<i64>, v: i64) -> i64 { return push(xs, v); }
             fn main() -> i64 {
-              let xs: Vec<i64> = vec(1);
-              let r = ref xs;
-              return 0;
+              let xs: Vec<i64> = vec(1, 2);
+              let r: mut ref Vec<i64> = mut ref xs;
+              return push_to(r, 99);
             }
         "#;
+        compile(source).expect("mut ref let-binding compiles");
+        compile_to_c(source).expect("C backend OK");
+        compile_to_llvm(source).expect("LLVM backend OK");
+    }
 
-        let errors = compile(source).expect_err("let-binding a reference should fail");
+    #[test]
+    fn l4_b_ref_let_still_rejects_returning_a_ref() {
+        // Phase 1 alone doesn't punch a safety hole: returning a
+        // ref-typed binding still fails because the fn return
+        // type can't be `ref T` (rejected at signature time).
+        let source = r#"
+            struct Foo { x: i64 }
+            fn escape() -> ref Foo {
+              let f: Foo = Foo { x: 1 };
+              let r: ref Foo = ref f;
+              return r;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("ref return type must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
         assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("cannot be stored in 'let' bindings")),
-            "expected let-ref diagnostic, got: {:?}",
-            errors
+            combined.contains("return type cannot be a reference"),
+            "expected fn-return-ref diagnostic, got: {}",
+            combined
         );
+    }
+
+    #[test]
+    fn l4_b_ref_let_still_rejects_storing_ref_in_struct_field() {
+        // User-declared struct fields still reject ref types
+        // (only synth Task__X structs accept refs today). So
+        // storing a let-bound ref into a struct field hits the
+        // struct decl's own rejection.
+        let source = r#"
+            struct Foo { x: i64 }
+            struct Bag { item: ref Foo }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("user struct ref field must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot be a reference"),
+            "expected struct-field-ref diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn can_let_bind_reference() {
+        // L4 (B) Phase 1 (2026-06-08): refs in let bindings are
+        // now accepted (was: rejected with "cannot be stored in
+        // 'let' bindings"). Safe under v1 because every escape
+        // vector (fn return, struct field, Vec element) still
+        // rejects ref types at the receiver's type check.
+        let source = r#"
+            struct Foo { x: i64 }
+            fn read(f: ref Foo) -> i64 { return f.x; }
+            fn main() -> i64 {
+              let foo: Foo = Foo { x: 42 };
+              let r: ref Foo = ref foo;
+              return read(r);
+            }
+        "#;
+        compile(source).expect("let-binding a ref should now compile");
+        compile_to_c(source).expect("C backend accepts ref let-binding");
+        compile_to_llvm(source).expect("LLVM backend accepts ref let-binding");
     }
 
     #[test]
