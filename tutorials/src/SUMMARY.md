@@ -34,6 +34,7 @@
 - [Affine ownership — deeper pass](intermediate/03b_affine_deeper_primer.md)
 - [Shared ownership without `Rc`/`Arc` — intuition primer](intermediate/03c_shared_ownership_primer.md)
 - [Cyclic references: Rust's `Weak<T>` vs vāṇी's index handles — intuition primer](intermediate/03d_cyclic_references_primer.md)
+- [Lifetimes and reference returns — intuition primer](intermediate/03e_lifetimes_primer.md)
 - [Generics and interfaces](intermediate/04_generics_iface.md)
 - [What's a `dyn Iface`? — intuition primer](intermediate/04a_dyn_iface_primer.md)
 - [Interfaces and static dispatch — intuition primer](intermediate/04b_interfaces_primer.md)

@@ -9295,10 +9295,11 @@ mod tests {
     }
 
     #[test]
-    fn l4_b_ref_let_still_rejects_returning_a_ref() {
-        // Phase 1 alone doesn't punch a safety hole: returning a
-        // ref-typed binding still fails because the fn return
-        // type can't be `ref T` (rejected at signature time).
+    fn l4_c_phase1_ref_return_no_ref_param_still_rejected() {
+        // L4 (C) Phase 1 (2026-06-09): ref return types are now
+        // accepted under the single-ref-parameter elision rule.
+        // But a ref return type with ZERO ref params still
+        // rejects — nothing for the returned ref to borrow from.
         let source = r#"
             struct Foo { x: i64 }
             fn escape() -> ref Foo {
@@ -9308,11 +9309,11 @@ mod tests {
             }
             fn main() -> i64 { return 0; }
         "#;
-        let err = compile(source).expect_err("ref return type must be rejected");
+        let err = compile(source).expect_err("ref return with no ref param must reject");
         let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
         assert!(
-            combined.contains("return type cannot be a reference"),
-            "expected fn-return-ref diagnostic, got: {}",
+            combined.contains("no reference parameter to borrow from"),
+            "expected zero-ref-param diagnostic, got: {}",
             combined
         );
     }
@@ -9386,7 +9387,81 @@ mod tests {
     }
 
     #[test]
-    fn cannot_return_reference() {
+    fn l4_c_phase1_multi_ref_params_return_rejected() {
+        // L4 (C) Phase 3: multi-ref-param return rejects with a
+        // clear "ambiguous" diagnostic suggesting refactoring.
+        let source = r#"
+            fn ambiguous(a: ref i64, b: ref i64) -> ref i64 {
+              return a;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("multi-ref-param return must reject");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("2 reference parameters"),
+            "expected multi-ref-param diagnostic, got: {}",
+            combined
+        );
+        assert!(
+            combined.contains("exactly one ref parameter"),
+            "expected the elision-rule explanation, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn l4_c_phase4_call_site_propagates_lifetime_to_dangle_check() {
+        // L4 (C) Phase 4: when a fn returns a ref under elision,
+        // the call-site bound `r = foo(ref X)` inherits X's
+        // lifetime. Pushing r into an outer-scope Vec from a
+        // deeper block must reject.
+        let source = r#"
+            struct P { x: i64, y: i64 }
+            fn shared(p: ref P) -> ref P { return p; }
+            fn main() -> i64 {
+              let xs: Vec<ref P> = vec();
+              {
+                let inner: P = P { x: 1, y: 2 };
+                let r: ref P = shared(ref inner);
+                let _ = push(mut ref xs, r);
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("inner-scope alias must reject at push");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("inner") && combined.contains("dangle"),
+            "expected dangle diagnostic referencing 'inner', got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn l4_c_phase4_call_site_same_scope_accepts() {
+        // Counterpart: same-scope `inner` & `xs` — push must
+        // accept under the elision rule.
+        let source = r#"
+            struct P { x: i64, y: i64 }
+            fn shared(p: ref P) -> ref P { return p; }
+            fn main() -> i64 {
+              let outer: P = P { x: 1, y: 2 };
+              let xs: Vec<ref P> = vec();
+              let r: ref P = shared(ref outer);
+              let _ = push(mut ref xs, r);
+              return 0;
+            }
+        "#;
+        compile(source).expect("same-scope elision push must accept");
+    }
+
+    #[test]
+    fn l4_c_phase1_single_ref_param_return_accepted() {
+        // L4 (C) Phase 1 (2026-06-09): ref-returning fns with
+        // exactly one ref parameter compile under the elision
+        // rule. The returned ref's lifetime is elided to the
+        // single ref parameter's lifetime.
         let source = r#"
             fn identity(xs: ref Vec<i64>) -> ref Vec<i64> {
               return xs;
@@ -9397,14 +9472,7 @@ mod tests {
             }
         "#;
 
-        let errors = compile(source).expect_err("ref return should fail");
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("cannot be a reference")),
-            "expected no-ref-return diagnostic, got: {:?}",
-            errors
-        );
+        compile(source).expect("ref return with single ref param must compile");
     }
 
     #[test]

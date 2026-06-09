@@ -360,16 +360,23 @@ below.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-09: 2044 lib green** —
+**Test ledger at 2026-06-09: 2056 lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-09 — **L4 (B) Phase 4 closure**: `Vec<ref T>`
-and `Vec<mut ref T>` accepted end-to-end on both backends
-(per-shape typedef + helpers, scope-escape analyzer at
-push call sites, ASan-clean acceptance). With Phases 1+3+4 +
-the partial v3.1 Task-field lift all shipped, L4 (B) is
-**fully closed**; only path-C (returning refs directly) remains
-queued. Other ships on 2026-06-08:
+Latest ship 2026-06-09 — **L4 (C) closure: lifetime elision**.
+Functions can now return `ref T` / `mut ref T` under the
+single-ref-parameter elision rule (Swift/OCaml-style; no `'a`
+syntax). Zero or multi-ref-param returns reject with clear
+"refactor to one ref param" diagnostics. Call sites propagate
+the source's lifetime through binding chains so a `let r =
+foo(ref X); push(mut ref outer_vec, r);` correctly bounds the
+push to X's scope. Combined with **L4 (B) Phase 4 (2026-06-09)
+— `Vec<ref T>` / `Vec<mut ref T>` end-to-end on both backends**:
+L4 (B+C) is now **fully closed**; only path-D (multi-input
+distinct lifetimes, struct lifetime parameters, ref-capturing
+closures) remains deferred indefinitely. Big-O annotation flag
++ step-by-step diagnostic elaboration also shipped 2026-06-09.
+Other ships on 2026-06-08:
 
 - **L2 fully closed**: Box\<T\> Phases 1+2+3+3b on both backends
   (Copy + sized inner types AND `Box<dyn Iface>` heap-owning fat
@@ -978,7 +985,7 @@ pointer-safety and type-punning invariants.
 | **Heap leak** ("forgot to free") | ✅ | Affine ownership. Every heap-owning binding (`Vec`, `OwnedStr`, `Atomic`, `Mutex`, `Guard`, `Channel`, `Task`, struct with heap fields) has exactly one owner. The codegen emits `free` / per-field drop at scope exit deterministically. There is no `forget()` equivalent. |
 | **Double-free** | ✅ | Move tracking. After `let y = x;` (where `x: Vec<i64>`), `x` becomes unreadable; the compiler emits a "value 'x' was moved; cannot use after move" diagnostic at the next reference. Drop fires exactly once on the new owner. User-defined `Drop` is also single-fire. |
 | **Use-after-free** | ✅ | Same affine machinery + scope-escape analyzer for `ref T` / `mut ref T`. References can now appear in `let` bindings (L4 (B) Phase 1) and in user struct fields (L4 (B) Phase 3); the analyzer in `collect_ref_sources_in_expr` rejects every shape that would let the reference outlive its source — returning the ref-holding struct, storing it in a `Vec`, taking `mut ref T` across a suspend point, etc. The borrow can never outlive the owner. |
-| **Dangling reference** | ✅ | Scope-escape analyzer + structural rejects. Functions cannot **return** references (path-C territory, not in v1); references can be **stored in `Vec<T>`** as of L4 (B) Phase 4 (2026-06-09) — the analyzer at `push(mut ref xs, ref X)` rejects when X is at deeper scope than `xs`. References cannot be stored in fixed-size arrays (would dangle on scope-exit copies). A struct field that is a `ref T` cannot be returned, leaked into an outer-scope binding, or otherwise outlive any of its source bindings. Compiler emits "ref to 'x' would dangle when 'x's scope ends" with the exact source location. |
+| **Dangling reference** | ✅ | Scope-escape analyzer + structural rejects + lifetime elision. Functions **can return references** under the single-ref-parameter elision rule (L4 (C), 2026-06-09) — the return ref's lifetime is inferred from the single ref param; zero/multi-ref-param returns reject with a clear diagnostic. References can be stored in `let` bindings, struct fields, and `Vec<T>` as of L4 (B) (Phases 1+3+4, 2026-06-09); the analyzer at every escape site (push, FieldAssign, return) chases ref aliases through `let r = foo(ref X)` chains so the original source's scope bounds every transitive use. Compiler emits "ref to 'x' would dangle when 'x's scope ends" with the exact source location. Only multi-input distinct-lifetime patterns (Rust-style `'a` / `'b`) remain deferred (path-D, indefinite). |
 | **Aliasing mutable + immutable** | ✅ | A `mut ref T` borrow rejects every subsequent shared `ref T` on the same value (and vice-versa) for the scope of the borrow. Diagnostic: "value 'v' is borrowed mutably; cannot also share-borrow". |
 | **Data race in `parallel for`** | ✅ | The effects checker walks the loop body and rejects observable side effects: `print`, calls to impure functions, non-Copy moves into the body, indexed writes on captured arrays / `Vec`s. **As of closure #259**, captured Copy-typed mutations are also caught — `total = total + i;` on a binding declared OUTSIDE the body errors with "mutates captured variable 'total' without declaring it as a reduction" and points the user at `reduce` or `Atomic<T>`. Body-local lets remain free to mutate (per-iteration, not shared). Atomic / Mutex captures must be via `ref`. |
 | **Data race in `task`** | ✅ | `task` captures are Copy-only by default — affine handles (Vec, Atomic, Mutex, Guard, Channel) can't ride into the thread by value. Shared state goes through `Atomic<T>` (lock-free, seq-cst) or `Mutex<T>` + `Guard<T>` (RAII unlock at scope exit). |

@@ -1,0 +1,35 @@
+// L4 (C) lifetime elision — `fn foo(p: ref T) -> ref T` ships.
+// Single-ref-param elision rule: the returned ref's lifetime is
+// inferred to equal the single ref parameter's lifetime. No
+// `'a` syntax; the compiler infers via the signature shape.
+
+struct Point { x: i64, y: i64 }
+
+// Single-ref-param shape: result borrows from `p`.
+fn shared(p: ref Point) -> ref Point {
+  return p;
+}
+
+// Field-ref shape: result borrows from `p` (the field's source).
+fn x_ref(p: ref Point) -> ref i64 {
+  return ref p.x;
+}
+
+// A simple consumer that uses the returned ref through auto-deref.
+fn area(p: ref Point) -> i64 {
+  return p.x * p.y;
+}
+
+fn main() -> i64 {
+  let pt: Point = Point { x: 7, y: 9 };
+
+  // Chained ref-returning calls — the lifetime threads through.
+  let r: ref Point = shared(ref pt);
+  print area(r);  // 63
+
+  // Multi-call chain reads back to the same source.
+  let r2: ref Point = shared(r);
+  print area(r2);  // 63
+
+  return 0;
+}

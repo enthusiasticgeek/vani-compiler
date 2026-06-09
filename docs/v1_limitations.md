@@ -269,7 +269,7 @@ fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
 
 ## Reference + binding limitations
 
-### L4 — `let` annotation cannot be a reference type ✅ FULLY SHIPPED Phases 1+3+4 (B) (2026-06-09)
+### L4 — Reference types in let/struct/Vec/return positions ✅ FULLY SHIPPED Phases 1+3+4 (B) + Path (C) lifetime elision (2026-06-09)
 
 ```vani
 let r: ref Foo = ref some_foo;       // ❌ — let annotation cannot be a reference type
@@ -318,9 +318,21 @@ a "ref to '{X}' would dangle when '{X}'s scope ends" diagnostic.
 Acceptance: `examples/vec_of_ref.vani` (ASan + LSan clean on the
 C backend; cross-backend stdout parity).
 
-**Still rejected**: returning a ref directly (`fn foo() -> ref T`)
-— that's Rust-style lifetime-variable territory (path (C) in
-the design doc). Not blocking any v1 use case.
+**Path (C) shipped 2026-06-09**: `fn foo(p: ref T) -> ref T`
+under the single-ref-parameter elision rule. The returned ref's
+lifetime is inferred to equal the single ref parameter's
+lifetime; no `'a` syntax. Zero-ref-param or two-or-more-ref-param
+returns reject with clear diagnostics suggesting refactoring.
+Call sites propagate the source's lifetime through to subsequent
+escape checks (push/FieldAssign/Return), so a chain of ref-
+returning calls is correctly bound to the original source. See
+[`examples/path_c_ref_returns.vani`](../examples/path_c_ref_returns.vani)
+for the canonical shapes.
+
+**Still rejected** (path-D territory, deferred indefinitely):
+- Multi-input distinct lifetimes (`fn pick<'a, 'b>(a: &'a T, b: &'b T) -> &'a T`).
+- Lifetime-parameterized struct definitions (`struct View<'a>`).
+- Closures capturing refs that outlive the closure declaration.
 
 ### L5 — `let mut x` is not a thing
 

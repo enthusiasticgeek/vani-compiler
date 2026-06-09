@@ -235,6 +235,16 @@ struct Signature {
     /// transitive closure across calls — only direct lock
     /// sites count.
     locks_params: Vec<bool>,
+    /// L4 (C) lifetime elision (2026-06-09): when the function
+    /// returns a `ref T` / `mut ref T`, this records the index
+    /// of the single ref/mut-ref parameter whose lifetime the
+    /// return-position ref inherits. `Some(idx)` for ref-returning
+    /// fns with exactly one ref parameter; `None` for all other
+    /// fns (no ref return, or the signature was rejected at
+    /// collect time). Used at call sites by the scope-escape
+    /// analyzer to thread the input ref's source through the
+    /// call result.
+    elided_ref_source: Option<usize>,
 }
 
 /// Special variable name used inside `ensures` clauses to refer to the
@@ -302,6 +312,20 @@ struct VarInfo {
     /// free doesn't double-free a value that another binding
     /// now owns. T1.2 phase 2b partial-move follow-up.
     moved_fields: std::collections::BTreeMap<String, Span>,
+    /// L4 (C) lifetime elision (2026-06-09): when this binding
+    /// holds a `ref T` / `mut ref T`, the set of root source-
+    /// binding names whose scope its lifetime is bounded by.
+    /// Populated at let-binding time from the initializer:
+    ///   * `let r = ref X;`         → aliases = ["X"]
+    ///   * `let r = foo(ref X);` where `foo` returns ref via
+    ///     elision from its `i`-th ref param          → aliases
+    ///     = [root_var_of(arg_i)]
+    ///   * `let r = some_other_ref_binding;`          → aliases
+    ///     = (that binding's aliases, transitively)
+    /// At ref-escape sites (push / FieldAssign / Return), the
+    /// scope-escape analyzer resolves a Var-typed ref through
+    /// this list to find the depth bound.
+    ref_aliases: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1155,12 +1179,14 @@ fn collect_signatures(
         // `typedef struct { T data[N]; } intent_arr_ret_<N>_<T>;`
         // and the return-stmt / let-from-call emit handle
         // the wrap/unwrap automatically.
-        validate_no_ref(
-            &function.return_type,
-            function.span,
-            "function return type",
-            diagnostics,
-        );
+        //
+        // L4 (C) lifetime elision (2026-06-09): a `ref T` /
+        // `mut ref T` return type is now allowed under the
+        // single-ref-parameter elision rule. Multi-ref + no-ref
+        // cases reject with diagnostics suggesting refactoring.
+        // The elision metadata is stored in the Signature so
+        // call sites can propagate the source's lifetime.
+        validate_return_ref_elision(function, diagnostics);
         if BUILTIN_FUNCTION_NAMES.contains(&function.name.as_str()) {
             diagnostics.push(Diagnostic::new(
                 function.span,
@@ -1182,6 +1208,7 @@ fn collect_signatures(
                     is_pure: function.is_pure,
                     is_extern: function.is_extern,
                     locks_params: compute_locks_params(function),
+                    elided_ref_source: compute_elided_ref_source(function),
                 },
             )
             .is_some()
@@ -7513,6 +7540,7 @@ fn check_function(
                 is_const: true,
                 struct_literal_fields: None,
                 moved_fields: std::collections::BTreeMap::new(),
+                ref_aliases: Vec::new(),
             },
         );
     }
@@ -7561,6 +7589,7 @@ fn check_function(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 },
             );
 
@@ -7608,6 +7637,7 @@ fn check_function(
                 is_const: false,
                 struct_literal_fields: None,
                 moved_fields: std::collections::BTreeMap::new(),
+                ref_aliases: Vec::new(),
             },
         );
         for ens in &function.ensures {
@@ -8617,6 +8647,29 @@ fn check_one_stmt(
                 None
             };
 
+            // L4 (C) Phase 4 (2026-06-09): when this let binds a
+            // ref/mut-ref result, trace its lifetime source(s)
+            // through the RHS expression so later escape checks
+            // can verify the binding doesn't outlive its source.
+            //
+            // Sources we propagate:
+            //   * `let r = ref X;`             → ["X"]
+            //   * `let r = mut ref X;`         → ["X"]
+            //   * `let r = ref t.field;`       → ["t"]
+            //   * `let r = ref xs[i];`         → ["xs"]
+            //   * `let r = foo(ref X, …);` where `foo`'s signature
+            //     has `elided_ref_source = Some(i)` and arg[i]
+            //     is the chosen ref input              → walk
+            //     arg[i] to its root var.
+            //   * `let r = other_ref_binding;` (Var)  → inherit
+            //     that binding's aliases (transitive chain).
+            //   * else → empty (no propagation; the analyzer
+            //     treats this as having no known source).
+            let ref_aliases = if matches!(var_ty, Type::Ref(_) | Type::RefMut(_)) {
+                compute_ref_aliases_from_let_rhs(expr, env, signatures)
+            } else {
+                Vec::new()
+            };
             env.insert_current(
                 name.clone(),
                 VarInfo {
@@ -8631,6 +8684,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases,
                 },
             );
 
@@ -8816,6 +8870,11 @@ fn check_one_stmt(
             // ref field, or a Vec<ref T>.
             let mut ref_sources: Vec<(String, Span)> = Vec::new();
             collect_ref_sources_in_expr(expr, &mut ref_sources);
+            // L4 (C) Phase 4 (2026-06-09): also chase ref-typed Var
+            // bindings through their alias chains. Without this, a
+            // `let r = foo(ref local); return r;` slips past the
+            // direct-ref-construction check.
+            collect_var_ref_aliases(expr, env, &mut ref_sources);
             for (src_name, ref_span) in &ref_sources {
                 let is_param = function.params.iter().any(|p| p.name == *src_name);
                 if !is_param {
@@ -9785,6 +9844,10 @@ fn check_one_stmt(
                 if let Some(obj_depth) = env.lookup_depth(obj_name) {
                     let mut ref_sources: Vec<(String, Span)> = Vec::new();
                     collect_ref_sources_in_expr(value, &mut ref_sources);
+                    // L4 (C) Phase 4: also collect aliases from Var
+                    // ref-types so a let-bound ref's lifetime chain
+                    // is tracked through this FieldAssign.
+                    collect_var_ref_aliases(value, env, &mut ref_sources);
                     for (src_name, ref_span) in &ref_sources {
                         if let Some(src_depth) = env.lookup_depth(src_name) {
                             if src_depth > obj_depth {
@@ -9873,6 +9936,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 },
             );
 
@@ -10217,6 +10281,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 };
             }
             let _ = head_is_ref;  // kept for future codegen refinement
@@ -10310,6 +10375,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 },
             );
 
@@ -10502,6 +10568,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 },
             );
 
@@ -10705,6 +10772,7 @@ fn check_one_stmt(
                     is_const: false,
                     struct_literal_fields: None,
                     moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
                 },
             );
             // For each name, emit a Let binding that reads
@@ -10746,6 +10814,7 @@ fn check_one_stmt(
                         is_const: false,
                         struct_literal_fields: None,
                         moved_fields: std::collections::BTreeMap::new(),
+                        ref_aliases: Vec::new(),
                     },
                 );
             }
@@ -10862,6 +10931,115 @@ fn collect_ref_sources_in_expr(
     out: &mut Vec<(String, Span)>,
 ) {
     collect_ref_sources_in_expr_impl(expr, true, out);
+}
+
+/// L4 (C) Phase 4 (2026-06-09): at a ref-escape site, walk
+/// the expression looking for `Var` nodes whose env entry
+/// has recorded `ref_aliases` (populated by
+/// `compute_ref_aliases_from_let_rhs` at the binding site).
+/// Each alias becomes a `(source_name, span)` entry — the
+/// downstream depth-comparison treats it identically to a
+/// directly-collected `Ref { inner: Var(name) }` source.
+///
+/// This is the bridge that makes `let r = foo(ref X); push(mut
+/// ref xs, r);` correctly trace the `X` source through the
+/// `r` binding to the push site.
+fn collect_var_ref_aliases(
+    expr: &Expr,
+    env: &Env,
+    out: &mut Vec<(String, Span)>,
+) {
+    match &expr.kind {
+        ExprKind::Var(name) => {
+            if let Some(info) = env.lookup(name) {
+                for alias in &info.ref_aliases {
+                    out.push((alias.clone(), expr.span));
+                }
+            }
+        }
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            collect_var_ref_aliases(inner, env, out);
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            collect_var_ref_aliases(object, env, out);
+        }
+        ExprKind::Index { array, index } => {
+            collect_var_ref_aliases(array, env, out);
+            collect_var_ref_aliases(index, env, out);
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_var_ref_aliases(left, env, out);
+            collect_var_ref_aliases(right, env, out);
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => {
+            collect_var_ref_aliases(expr, env, out);
+        }
+        ExprKind::IfExpr { cond, then_value, else_value, .. } => {
+            collect_var_ref_aliases(cond, env, out);
+            collect_var_ref_aliases(then_value, env, out);
+            collect_var_ref_aliases(else_value, env, out);
+        }
+        ExprKind::Try { inner } => collect_var_ref_aliases(inner, env, out),
+        _ => {}
+    }
+}
+
+/// L4 (C) Phase 4 (2026-06-09): compute the ref-alias set
+/// for a `let r: ref T = EXPR;` binding. The returned names
+/// are the root source bindings whose lifetimes bound `r`'s.
+/// See the rules near the call site in the Stmt::Let handler.
+fn compute_ref_aliases_from_let_rhs(
+    expr: &Expr,
+    env: &Env,
+    signatures: &HashMap<String, Signature>,
+) -> Vec<String> {
+    match &expr.kind {
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            // `ref X` / `ref t.f` / `ref xs[i]` — walk to the
+            // root Var name. Returns one alias.
+            root_var_of_expr(inner).map(|n| vec![n]).unwrap_or_default()
+        }
+        ExprKind::Var(name) => {
+            // Aliasing assignment: `let r = other_ref;`. Inherit
+            // the source binding's aliases (transitive chain).
+            env.lookup(name)
+                .map(|info| info.ref_aliases.clone())
+                .unwrap_or_default()
+        }
+        ExprKind::Call { name, args, .. } => {
+            // Ref-returning fn call. If the signature recorded an
+            // elided ref-source index (path-C, single ref-param
+            // rule), the result borrows from the chosen arg's
+            // root binding. Multi-ref or non-elision signatures
+            // return None → no propagation; the analyzer treats
+            // the result as having an unknown lifetime and the
+            // existing return-position rejection (or successful
+            // value-return) handles it.
+            if let Some(sig) = signatures.get(name) {
+                if let Some(idx) = sig.elided_ref_source {
+                    if let Some(arg) = args.get(idx) {
+                        // arg is typically `ref X` / `mut ref X`;
+                        // walk through Ref/RefMut/FieldAccess/
+                        // Index to the root Var.
+                        if let Some(name) = root_var_of_expr(arg) {
+                            return vec![name];
+                        }
+                        // If arg is itself a Var of ref-type
+                        // (e.g. `foo(other_ref_binding)`), pull
+                        // its aliases.
+                        if let ExprKind::Var(n) = &arg.kind {
+                            return env
+                                .lookup(n)
+                                .map(|info| info.ref_aliases.clone())
+                                .unwrap_or_default();
+                        }
+                    }
+                }
+            }
+            Vec::new()
+        }
+        _ => Vec::new(),
+    }
 }
 
 /// Walk through `Ref`, `RefMut`, `FieldAccess`, and `Index`
@@ -10984,11 +11162,11 @@ fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<D
             span,
             format!("{} cannot be a reference type", context),
         );
-        // Attach elaboration for the function-return-type case
-        // (the most common confusion: users expect Rust-style
-        // `-> &T` and run into the path-C explanation). Other
-        // ref-rejection contexts share enough shape with
-        // return-type that the same elaboration applies.
+        // Attach elaboration for contexts that haven't been
+        // lifted yet (HashMap K/V, destructure-let annotation,
+        // discard slot). The function-return-type case routes
+        // through `validate_return_ref_elision` and never hits
+        // this generic-rejection path.
         if context.contains("return") {
             diag = diag.with_elaboration(
                 crate::diagnostic_elaborations::ret_type_is_ref(),
@@ -10996,6 +11174,110 @@ fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<D
         }
         diagnostics.push(diag);
     }
+}
+
+/// L4 (C) lifetime elision (2026-06-09): validate the function's
+/// return type for the ref-return case under the single-parameter
+/// elision rule.
+///
+/// Rules (path C, v1):
+///   * If return type isn't a ref → no-op (existing behavior).
+///   * If return type is a ref AND there are zero ref params →
+///     reject ("nothing for the returned ref to borrow from").
+///   * If return type is a ref AND there's exactly one ref param →
+///     accept; record the source param index for call-site
+///     lifetime propagation.
+///   * If return type is a ref AND there are two or more ref
+///     params → reject ("ambiguous; v1 needs exactly one ref
+///     param to elide from").
+fn validate_return_ref_elision(
+    function: &Function,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let returns_ref = function.return_type.is_ref();
+    if !returns_ref {
+        return;
+    }
+    let ref_param_indices: Vec<usize> = function
+        .params
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| matches!(p.ty, Type::Ref(_) | Type::RefMut(_)))
+        .map(|(i, _)| i)
+        .collect();
+    match ref_param_indices.len() {
+        0 => {
+            diagnostics.push(
+                Diagnostic::new(
+                    function.span,
+                    format!(
+                        "function '{}' returns a reference but has no \
+                         reference parameter to borrow from — the returned \
+                         ref would dangle. Add a `ref T` / `mut ref T` \
+                         parameter, return by value instead, or use `Box<T>` \
+                         for owned heap allocation.",
+                        function.name,
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::ret_type_is_ref(),
+                ),
+            );
+        }
+        1 => {
+            // Accept — `compute_elided_ref_source` will record
+            // the single source-param index on the Signature.
+        }
+        _ => {
+            let names: Vec<String> = ref_param_indices
+                .iter()
+                .map(|i| format!("'{}'", function.params[*i].name))
+                .collect();
+            diagnostics.push(
+                Diagnostic::new(
+                    function.span,
+                    format!(
+                        "function '{}' returns a reference but has {} \
+                         reference parameters ({}) — the elision rule needs \
+                         exactly one ref parameter to borrow from. Either \
+                         drop one borrow (make it a value parameter or \
+                         remove it), or split into two narrower functions, \
+                         one per borrow.",
+                        function.name,
+                        ref_param_indices.len(),
+                        names.join(", "),
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::ret_type_is_ref(),
+                ),
+            );
+        }
+    }
+}
+
+/// L4 (C) lifetime elision (2026-06-09): compute the index of the
+/// single ref parameter whose lifetime the ref-typed return value
+/// inherits. Mirrors the rule in `validate_return_ref_elision` but
+/// returns the index instead of emitting diagnostics — used at
+/// signature-construction time.
+fn compute_elided_ref_source(function: &Function) -> Option<usize> {
+    if !function.return_type.is_ref() {
+        return None;
+    }
+    let mut found: Option<usize> = None;
+    for (i, p) in function.params.iter().enumerate() {
+        if matches!(p.ty, Type::Ref(_) | Type::RefMut(_)) {
+            if found.is_some() {
+                // Multi-ref case — the validator rejected at
+                // collect time; signal "no elision" so the
+                // body-validator path stays conservative.
+                return None;
+            }
+            found = Some(i);
+        }
+    }
+    found
 }
 
 fn validate_param_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diagnostic>) {
@@ -13652,6 +13934,7 @@ fn check_expr(
                         is_const: false,
                         struct_literal_fields: None,
                         moved_fields: std::collections::BTreeMap::new(),
+                        ref_aliases: Vec::new(),
                     });
                     let bc = check_expr(&arm.body, env, signatures, diagnostics);
                     env.pop_scope();
@@ -13830,6 +14113,7 @@ fn check_expr(
                             is_const: false,
                             struct_literal_fields: None,
                             moved_fields: std::collections::BTreeMap::new(),
+                            ref_aliases: Vec::new(),
                         });
                         typed_stmts.push(TypedStmt::Let {
                             name: name.clone(),
@@ -18321,6 +18605,11 @@ fn check_push_builtin(
             if let Some(vec_depth) = env.lookup_depth(&vec_name) {
                 let mut ref_sources: Vec<(String, Span)> = Vec::new();
                 collect_ref_sources_in_expr(&args[1], &mut ref_sources);
+                // L4 (C) Phase 4: also resolve Var args of ref type
+                // through their `ref_aliases` chain so the analyzer
+                // tracks the lifetime threaded through a chain of
+                // ref bindings or a ref-returning function call.
+                collect_var_ref_aliases(&args[1], env, &mut ref_sources);
                 for (src_name, ref_span) in &ref_sources {
                     if let Some(src_depth) = env.lookup_depth(src_name) {
                         if src_depth > vec_depth {
