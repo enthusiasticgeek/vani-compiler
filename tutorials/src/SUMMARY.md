@@ -10,6 +10,7 @@
 - [`if` / `else`](beginner/04_if_else.md)
 - [`while` and `for` loops](beginner/05_loops.md)
 - [Strings (`Str` vs `OwnedStr`)](beginner/06_strings.md)
+- [Pointers and references — intuition primer](beginner/06a_pointers_refs_primer.md)
 - [Arrays and `Vec<T>` basics](beginner/07_vec_arrays.md)
 - [Pattern match on integers + booleans](beginner/08_match.md)
 - [First contract: `assert` / `prove` / `requires`](beginner/09_smt_intro.md)
