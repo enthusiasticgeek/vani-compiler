@@ -32,6 +32,7 @@
 - [Interfaces and static dispatch — intuition primer](intermediate/04b_interfaces_primer.md)
 - [Generics and monomorphization — intuition primer](intermediate/04c_generics_primer.md)
 - [Dynamic dispatch: `dyn Iface` + `Vec<dyn Iface>`](intermediate/05_dyn.md)
+- [Closures and lambda lifting — intuition primer](intermediate/06a_closures_primer.md)
 - [Closures and iterator combinators](intermediate/06_closures.md)
 - [Tuples and tuple destructure](intermediate/07_tuples.md)
 - [Multi-file projects + `vani.toml`](intermediate/08_manifest.md)
@@ -44,6 +45,7 @@
 # Advanced
 
 - [Async / await and the `Task` transform](advanced/01_async.md)
+- [Parallelism and race-freedom — intuition primer](advanced/02a_parallelism_primer.md)
 - [`parallel for` + reductions + race-freedom](advanced/02_parallel.md)
 - [`task` / `join` + atomics / mutexes / channels](advanced/03_concurrency.md)
 - [Embedded targets + `unsafe` + region typing](advanced/04_embedded.md)
