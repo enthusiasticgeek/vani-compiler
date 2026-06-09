@@ -181,6 +181,132 @@ You'd use both:
   to them. Useful when individual elements are expensive to
   move OR when you need pointer-stability per element.
 
+## Variations — what Box wraps in real programs
+
+You've seen `Box<Foo>` for a single user-struct. The shape
+works for far more — and the recursive-drop wiring in vāṇी
+makes the affine combinations work too.
+
+### `Box<Vec<T>>` — heap-pointer to a heap-allocated Vec
+
+```rust
+struct Bag { contents: Box<Vec<i64>> }
+
+let v: Vec<i64> = vec(10, 20, 30);
+let b: Box<Vec<i64>> = box(v);
+let bag: Bag = Bag { contents: box(vec(7, 8, 9)) };
+```
+
+The Box holds a *pointer to the Vec struct*. The Vec struct
+(3-word handle) lives on the heap; the Vec's *data array* is
+on another heap allocation. Two-level heap structure:
+
+```
+Box's location → Vec struct → data buffer (the actual elements)
+```
+
+When `b` goes out of scope, the compiler drops in order:
+1. `intent_vec_int64_t__free(*b)` — free the data buffer.
+2. `free(b)` — free the Vec struct allocation.
+
+This is why vāṇी's recursive-drop wiring matters: BOTH layers
+need cleanup. The compiler emits both calls automatically.
+
+### `Box<OwnedStr>` — heap-pointer to a heap char buffer
+
+```rust
+let s: OwnedStr = "hello" + "!";
+let b: Box<OwnedStr> = box(s);
+```
+
+`OwnedStr` is itself a heap pointer (to char bytes). Wrapping
+it in `Box` adds another level. The drop chain:
+1. `free(*b)` — free the char buffer.
+2. `free(b)` — free the slot holding the char pointer.
+
+Less common in practice than `Box<Vec<T>>`. Useful when you
+need a stable heap address for a single string.
+
+### `Box<dyn Iface>` — heap-allocated value behind an interface
+
+```rust
+struct Drawer { rend: Box<dyn Renderer> }
+
+let circle: Circle = Circle { r: 7 };
+let d: Drawer = Drawer { rend: box(circle) };
+```
+
+This was the load-bearing case. `Box<dyn Renderer>` is the
+16-byte fat pointer struct that owns its heap concrete. The
+heap holds the actual Circle; the fat pointer's `.data` slot
+points at it; `.vtable` slot picks the right `render` method.
+
+When `d` drops:
+1. The dyn fat pointer's vtable picks the concrete's
+   destructor (if any).
+2. `free(.data)` — the heap-allocated Circle.
+
+Phase 1 + 3 + 3b of the L2 lift (described earlier in the
+session ledger) wired this end-to-end on both backends.
+
+### `Box` of a tuple
+
+```rust
+let pair: Box<(i64, OwnedStr)> = box((42, "answer" + ""));
+```
+
+A Box wrapping a tuple. Useful when you have a multi-component
+value you want allocated together on the heap rather than
+inline. Less common than Box<Struct> because tuples don't have
+a name to reference — but the compiler accepts it.
+
+### `Box<Box<T>>` — pointer to a pointer
+
+```rust
+let inner: Box<i64> = box(99);
+let outer: Box<Box<i64>> = box(inner);
+```
+
+Two heap allocations: one for the outer Box's slot (holds the
+inner Box pointer), one for the inner Box's slot (holds the
+99). Rare in idiomatic code; mostly shows up in recursive type
+definitions where one Box layer doesn't add the right
+indirection.
+
+### `Vec<Box<T>>` — sequence of heap-allocated Ts
+
+```rust
+let drawers: Vec<Box<dyn Renderer>> = vec(
+  box(circle as dyn Renderer),
+  box(square as dyn Renderer),
+);
+```
+
+The Vec stores N Box-fat-pointers (16 bytes each for dyn boxes).
+Each element's actual data is its own heap allocation. The
+Vec's buffer is contiguous; the element data points elsewhere.
+
+This is the canonical "heterogeneous collection of trait
+objects" pattern — when you don't know how many shapes you'll
+add or which types, store `Box<dyn Iface>` in a Vec.
+
+### `Option<Box<T>>` — explicit nullable pointer
+
+```rust
+struct Node {
+  value: i64,
+  next: Option<Box<Node>>,
+}
+```
+
+A linked-list node: either points at the next node (`Some(box(...))`)
+or terminates the list (`None`). The `Option` makes the "null
+pointer" case explicit at the type level — you have to match
+on it before dereferencing. No silent nullptr crashes.
+
+This is THE canonical recursive data-structure shape in vāṇी /
+Rust.
+
 ## When NOT to use `Box<T>`
 
 If your value is small and Copy (e.g. `Box<i64>`), you almost

@@ -183,6 +183,122 @@ After the move, `pair.0` is still readable; `pair.1` is not.
   uses a tuple for the state. `fold((0, 0), |(sum, count),
   x| (sum + x, count + 1))`.
 
+## Variations — tuples aren't just `(i64, i64)`
+
+The shape `(T1, T2, T3, ...)` works for ANY types, not just
+primitives. A few non-trivial examples to fix the mental
+model:
+
+### Tuple of structs
+
+```rust
+struct Player { name: OwnedStr, score: i64 }
+struct Enemy  { kind: i64, hp: i64 }
+
+fn next_encounter() -> (Player, Enemy) {
+  return (Player { name: "alice" + "", score: 0 },
+          Enemy  { kind: 7, hp: 100 });
+}
+
+let (me, foe) = next_encounter();
+print "vs", foe.kind, "at", foe.hp, "HP";
+```
+
+The tuple is `(Player, Enemy)`. Each slot is a struct;
+destructuring binds each to its own local. Ownership rules
+apply per-component: `me` owns the Player; `foe` owns the
+Enemy.
+
+### Nested tuples
+
+```rust
+let line: ((i64, i64), (i64, i64)) = ((0, 0), (10, 5));
+let (start, end) = line;
+let (sx, sy) = start;
+let (ex, ey) = end;
+```
+
+A pair of pairs. Destructure in stages: outer first, then
+each inner. Or destructure-deep in one let if you want:
+
+```rust
+let ((sx, sy), (ex, ey)) = line;
+```
+
+### Tuple containing a `Box`
+
+```rust
+struct BigData { ... }   // imagine this is 4 KB
+
+fn make_pair() -> (i64, Box<BigData>) {
+  let id: i64 = 42;
+  let payload: Box<BigData> = box(BigData { ... });
+  return (id, payload);
+}
+```
+
+The i64 lives in the tuple directly (8 bytes). The
+`Box<BigData>` is also in the tuple but is just an 8-byte
+pointer — the 4 KB lives separately on the heap. The whole
+tuple's stack footprint is 16 bytes; the actual data is
+out-of-band.
+
+### Tuple containing a `Vec`
+
+```rust
+fn parse_line(s: Str) -> (Vec<i64>, OwnedStr) {
+  let nums: Vec<i64> = vec();    // imagine parsing
+  let leftover: OwnedStr = "rest" + "";
+  return (nums, leftover);
+}
+```
+
+Two heap-owning values returned as a single tuple. Each owns
+its own heap allocation; when the destructured locals go out
+of scope, BOTH are freed.
+
+### Tuple as a struct field
+
+```rust
+struct Rectangle {
+  top_left: (i64, i64),
+  bottom_right: (i64, i64),
+}
+```
+
+You can use tuples inside structs when you want a quick
+multi-field group without inventing a sub-struct. Compare to
+naming each: `top_left_x`, `top_left_y`, `bottom_right_x`,
+`bottom_right_y` — verbose.
+
+### Tuple inside a Vec
+
+```rust
+let coords: Vec<(i64, i64)> = vec((0, 0), (3, 4), (10, 0));
+for pt in ref coords {
+  let (x, y) = pt;
+  print x, y;
+}
+```
+
+A Vec of pairs — common pattern for storing many (key, value)
+or (timestamp, sample) pairs. Each tuple is its own heap-free
+two-i64 unit; the Vec's heap buffer holds N×16 bytes
+contiguously.
+
+### Mixed types in the same tuple
+
+```rust
+fn snapshot() -> (OwnedStr, i64, bool, Vec<i64>) {
+  return ("snapshot-1" + "", 1234, true, vec(10, 20, 30));
+}
+```
+
+Four-component tuple mixing String + int + bool + Vec. Works
+fine; destructuring + ownership rules apply per-slot. (Reaching
+4 components is around the upper limit where "should I just
+make a struct?" becomes the right question.)
+
 ## When NOT to use a tuple
 
 - **More than 3 fields**. Becomes hard to remember which slot
