@@ -8509,9 +8509,15 @@ mod tests {
         "#;
         compile(source).expect("struct decl + literal + access should compile");
         let c = compile_to_c(source).expect("struct emits C");
+        // 2026-06-09: struct emission changed from anonymous
+        // `typedef struct { ... } Name;` to a forward-typedef
+        // `typedef struct Name Name;` + body `struct Name {
+        // ... };` pair so ordering across struct+enum+Vec deps
+        // resolves. The substring check now matches the forward
+        // typedef line instead.
         assert!(
-            c.contains("typedef struct {") && c.contains("Struct_Point"),
-            "expected per-struct typedef in C:\n{c}"
+            c.contains("typedef struct Struct_Point Struct_Point;"),
+            "expected per-struct forward typedef in C:\n{c}"
         );
     }
 
@@ -11148,12 +11154,38 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn struct_with_enum_field_with_struct_payload_compiles_c_backend() {
+        // Regression: `struct Cell { state: Status }` where
+        // `enum Status { Ok(N) }` and `struct N { ... }` failed
+        // the C backend with "unknown type name 'Enum_Status'"
+        // (later "field 'v_Ok' has incomplete type") because the
+        // C typedef ordering had no topo sort across structs +
+        // payloaded enums.
+        // Fixed 2026-06-09: forward-declare struct names at the
+        // top, then unify the topo loop to emit deferred enums
+        // alongside structs + Vec bundles. Enum waits on its
+        // by-value struct payload deps; struct waits on its
+        // by-value enum field deps.
+        let source = r#"
+            enum Status { Ok(N), Err(i64) }
+            struct N { v: i64 }
+            struct Cell { state: Status }
+            fn main() -> i64 {
+              let c: Cell = Cell { state: Status.Ok(N { v: 42 }) };
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("struct + enum + struct chain must compile on C backend");
+        compile_to_llvm(source).expect("same on LLVM backend (was already passing)");
+    }
+
+    #[test]
     fn unsafe_block_with_return_satisfies_must_return() {
         // Regression: `unsafe(reason = "...") { return X; }` as
         // the function body previously failed the "fn must return
         // T" check because the inner termination flag wasn't
         // propagated up. Fixed 2026-06-09.
-        std::env::set_var("INTENT_TARGET_EMBEDDED", "1");
+        let _guard = EmbeddedTargetGuard::embedded();
         let source = r#"
             fn doit() -> i64 {
               unsafe(reason = "nested in fn") {
@@ -11162,9 +11194,7 @@ fn main() -> i64 {
             }
             fn main() -> i64 { return doit(); }
         "#;
-        let result = compile(source);
-        std::env::remove_var("INTENT_TARGET_EMBEDDED");
-        result.expect("return inside unsafe must satisfy fn-must-return");
+        compile(source).expect("return inside unsafe must satisfy fn-must-return");
     }
 
     #[test]
@@ -32606,18 +32636,20 @@ fn main() -> i64 {
 
         let c = compile_to_c(source)
             .expect("nested struct compiles after topological sort");
-        // The Inner typedef must appear before the Outer
-        // typedef in the emitted C.
-        let inner_typedef = c
-            .find("} Struct_Inner;")
-            .expect("Struct_Inner typedef present");
-        let outer_typedef = c
-            .find("} Struct_Outer;")
-            .expect("Struct_Outer typedef present");
+        // 2026-06-09: struct bodies now emit as `struct Name { ... };`
+        // (the forward typedef `typedef struct Name Name;` lands
+        // earlier). The Inner body must still appear before the
+        // Outer body since Outer references Inner BY VALUE.
+        let inner_body = c
+            .find("struct Struct_Inner {")
+            .expect("Struct_Inner body present");
+        let outer_body = c
+            .find("struct Struct_Outer {")
+            .expect("Struct_Outer body present");
         assert!(
-            inner_typedef < outer_typedef,
-            "Struct_Inner must be declared before Struct_Outer (outer references inner by value):\n{}",
-            c
+            inner_body < outer_body,
+            "Struct_Inner body must precede Struct_Outer body (outer references inner by value):\n{}",
+            c,
         );
     }
 

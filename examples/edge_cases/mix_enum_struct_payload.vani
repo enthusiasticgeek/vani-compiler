@@ -1,0 +1,8 @@
+// ENM + STRT: enum-with-struct-payload + struct-with-enum-field.
+enum Status { Ok(N), Err(i64) }
+struct N { v: i64 }
+struct Cell { state: Status }
+fn main() -> i64 {
+  let c: Cell = Cell { state: Status.Ok(N { v: 42 }) };
+  return 0;
+}

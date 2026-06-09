@@ -1,0 +1,8 @@
+// REF + STR: ref OwnedStr.
+fn read(s: ref OwnedStr) -> i64 {
+  return str_len_bytes(s) as i64;
+}
+fn main() -> i64 {
+  let s: OwnedStr = "hello" + "";
+  return read(ref s);
+}

@@ -1,0 +1,8 @@
+// CLO + STRT: closure capturing a Copy struct field as base.
+struct N { v: i64 }
+fn main() -> i64 {
+  let n: N = N { v: 10 };
+  let base: i64 = n.v;
+  let f = fn(x: i64) -> i64 { return x + base; };
+  return f(5);
+}

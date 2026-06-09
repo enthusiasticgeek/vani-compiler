@@ -1,0 +1,10 @@
+// ASNC + BOX + DYN: async fn handling Box<dyn Iface>.
+interface Tick { fn tick(self: ref Self) -> i64; }
+struct C { v: i64 }
+implement Tick for C {
+  fn tick(self: ref C) -> i64 { return self.v + 1; }
+}
+async fn process(b: ref Box<dyn Tick>) -> i64 {
+  return b.tick();
+}
+fn main() -> i64 { return 0; }

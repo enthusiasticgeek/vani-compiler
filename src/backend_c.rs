@@ -348,30 +348,55 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // ARC8_V3_PLAN.md if hit).
     let mut enum_typedefs_pre_emitted: std::collections::HashSet<String> =
         std::collections::HashSet::new();
-    // 2026-06-09: skip pre-emit for enums whose payload references
-    // a user struct (directly or via Vec/Array/Ref/RefMut). Otherwise
-    // the pre-emit fires the enum typedef BEFORE Struct_<Name> is
-    // declared, and cc rejects with "unknown type name Struct_X".
-    // Caught by the adversarial test set: async fn returning ref to
-    // a user struct synthesizes `Future__Ref_Struct__X` whose payload
-    // is `const Struct_X*`.
-    fn enum_payload_refs_user_struct(decl: &crate::ir::TypedEnumDecl) -> bool {
-        fn ty_refs_struct(ty: &Type) -> bool {
+    // 2026-06-09: forward-declare every user struct's typedef-name
+    // BEFORE emitting payloaded enums OR struct bodies. C's anon-
+    // tagged `typedef struct { ... } Name;` can't be forward-
+    // declared, but a NAMED tag `typedef struct Name Name;` can
+    // — and any later typedef referring to `Name*` resolves
+    // against the forward decl while the body comes later.
+    //
+    // Why: an enum like `Future__Ref_Struct__P___` carries
+    // `const Struct_P*` payload, and a struct like
+    // `Cell { state: Enum_Status }` carries an enum field whose
+    // typedef references its own variant struct payloads. Either
+    // ordering (enum-first or struct-first) breaks the OTHER case
+    // without forward declarations.
+    for decl in &program.structs {
+        let name = struct_c_name(&decl.name);
+        body.push_str(&format!("typedef struct {n} {n};\n", n = name));
+    }
+    if !program.structs.is_empty() {
+        body.push('\n');
+    }
+    // 2026-06-09: also defer pre-emit when the enum's payload
+    // requires the FULL struct definition (i.e. payload is a
+    // by-value struct / enum / tuple / array). For by-pointer
+    // payloads (Ref/RefMut/Box dereferencing to a struct), the
+    // forward declaration emitted above is sufficient. Caught
+    // by the adversarial test set: `enum Status { Ok(N) }` with
+    // user struct N — pre-emit would write `Struct_N v_Ok`
+    // before N's body, and cc rejects with "field has incomplete
+    // type".
+    fn enum_payload_needs_full_struct_def(decl: &crate::ir::TypedEnumDecl) -> bool {
+        fn ty_needs_full_def(ty: &Type) -> bool {
             match ty {
-                Type::Struct(_) => true,
-                Type::Array { element, .. }
-                | Type::Vec(element)
-                | Type::Ref(element)
-                | Type::RefMut(element)
-                | Type::Box(element) => ty_refs_struct(element),
-                Type::Tuple(elements) => elements.iter().any(ty_refs_struct),
+                // By-value aggregate types — need full def.
+                Type::Struct(_) | Type::Enum(_) | Type::Tuple(_) => true,
+                Type::Array { element, .. } => ty_needs_full_def(element),
+                // Behind a pointer — forward decl is enough.
+                Type::Ref(_) | Type::RefMut(_) | Type::Box(_) | Type::Ptr(_) | Type::PtrMut(_) => false,
+                // Vec contains a pointer-to-buffer; the struct
+                // typedef `intent_vec_<T>` is emitted in the
+                // topo-sort that includes both bundles AND
+                // structs, so defer.
+                Type::Vec(_) => true,
                 _ => false,
             }
         }
         decl.payload_types
             .iter()
             .filter_map(|t| t.as_ref())
-            .any(ty_refs_struct)
+            .any(ty_needs_full_def)
     }
     {
         let mut any_pre = false;
@@ -379,7 +404,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
             if !enum_has_payload(decl) {
                 continue;
             }
-            if enum_payload_refs_user_struct(decl) {
+            if enum_payload_needs_full_struct_def(decl) {
                 // Defer to the post-struct-typedef pass below.
                 continue;
             }
@@ -437,13 +462,33 @@ pub fn emit_c(program: &TypedProgram) -> String {
             Type::Struct(name) => out.push(name.clone()),
             Type::Array { element, .. } => struct_deps_in_ty(element, out),
             Type::Vec(element) => struct_deps_in_ty(element, out),
-            // A4.4 (2026-06-08): `ref Struct` / `mut ref Struct`
-            // fields in synthesized v3.1 Task structs lower to
-            // `const Struct_X*` — the pointee struct's typedef
-            // must still emit first for the C compiler to resolve
-            // the spelling (typedefs are anonymous-tagged, so
-            // they can't forward-declare).
-            Type::Ref(inner) | Type::RefMut(inner) => struct_deps_in_ty(inner, out),
+            // A4.4 (2026-06-08): with the 2026-06-09 forward-
+            // declaration of struct names, `ref Struct` /
+            // `mut ref Struct` no longer need the FULL struct
+            // typedef before the using site — a forward decl is
+            // enough for pointer types. Don't propagate the
+            // pointee as a hard dep.
+            Type::Ref(_) | Type::RefMut(_) | Type::Box(_) | Type::Ptr(_) | Type::PtrMut(_) => {}
+            _ => {}
+        }
+    }
+    // 2026-06-09: enum-dependency tracking. A struct field of a
+    // by-value enum type (`field: Enum_X`) requires Enum_X's full
+    // typedef BEFORE the struct body lands. Adds to the topo
+    // graph for emit ordering.
+    fn enum_deps_in_ty(ty: &Type, out: &mut Vec<String>) {
+        match ty {
+            Type::Enum(name) => out.push(name.clone()),
+            Type::Array { element, .. } => enum_deps_in_ty(element, out),
+            Type::Vec(element) => enum_deps_in_ty(element, out),
+            Type::Tuple(elements) => {
+                for e in elements {
+                    enum_deps_in_ty(e, out);
+                }
+            }
+            // Same forward-decl rule: pointer-shaped indirection
+            // doesn't require full def.
+            Type::Ref(_) | Type::RefMut(_) | Type::Box(_) | Type::Ptr(_) | Type::PtrMut(_) => {}
             _ => {}
         }
     }
@@ -467,6 +512,20 @@ pub fn emit_c(program: &TypedProgram) -> String {
         .collect();
     let mut emitted_structs: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // 2026-06-09: also track payloaded-enum emission in the topo
+    // graph. Deferred enums (those skipped by the pre-emit pass)
+    // are emitted here once their struct deps are satisfied. A
+    // struct field of a by-value enum waits on its enum dep.
+    let enum_by_name: std::collections::HashMap<&str, &crate::ir::TypedEnumDecl> = program
+        .enums
+        .iter()
+        .filter(|d| {
+            enum_has_payload(d) && !enum_typedefs_pre_emitted.contains(&d.name)
+        })
+        .map(|d| (d.name.as_str(), d))
+        .collect();
+    let mut emitted_enums: std::collections::HashSet<String> =
+        enum_typedefs_pre_emitted.iter().cloned().collect();
     // Map from element_tag → element Type so the unified loop
     // can re-emit. Stable iteration order for deterministic output.
     let mut vec_elements_by_tag: std::collections::BTreeMap<String, Type> =
@@ -496,17 +555,50 @@ pub fn emit_c(program: &TypedProgram) -> String {
                 progress = true;
             }
         }
-        // Try emit any pending struct whose struct + vec-bundle deps
-        // are all satisfied.
+        // Try emit any pending struct whose struct + vec-bundle +
+        // enum deps are all satisfied.
         for decl in &struct_decls {
             if emitted_structs.contains(&decl.name) {
                 continue;
             }
             let mut sdeps: Vec<String> = Vec::new();
             let mut vdeps: Vec<String> = Vec::new();
+            let mut edeps: Vec<String> = Vec::new();
             for (_, fty) in &decl.fields {
                 struct_deps_in_ty(fty, &mut sdeps);
                 vec_bundle_deps_in_ty(fty, &mut vdeps);
+                enum_deps_in_ty(fty, &mut edeps);
+            }
+            let sok = sdeps
+                .iter()
+                .all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str()));
+            let vok = vdeps
+                .iter()
+                .all(|t| emitted_vec_bundles.contains(t) || !vec_elements_by_tag.contains_key(t));
+            let eok = edeps
+                .iter()
+                .all(|d| emitted_enums.contains(d) || !enum_by_name.contains_key(d.as_str()));
+            if sok && vok && eok {
+                emit_struct_bundle(decl, &mut body);
+                emitted_structs.insert(decl.name.clone());
+                progress = true;
+            }
+        }
+        // 2026-06-09: emit deferred payloaded enums whose struct
+        // deps are satisfied. By-value struct payloads waited for
+        // their struct typedef to land.
+        let pending_enums: Vec<String> = enum_by_name
+            .keys()
+            .filter(|n| !emitted_enums.contains(**n))
+            .map(|s| s.to_string())
+            .collect();
+        for name in pending_enums {
+            let decl = enum_by_name.get(name.as_str()).unwrap();
+            let mut sdeps: Vec<String> = Vec::new();
+            let mut vdeps: Vec<String> = Vec::new();
+            for pty in decl.payload_types.iter().filter_map(|t| t.as_ref()) {
+                struct_deps_in_ty(pty, &mut sdeps);
+                vec_bundle_deps_in_ty(pty, &mut vdeps);
             }
             let sok = sdeps
                 .iter()
@@ -515,8 +607,39 @@ pub fn emit_c(program: &TypedProgram) -> String {
                 .iter()
                 .all(|t| emitted_vec_bundles.contains(t) || !vec_elements_by_tag.contains_key(t));
             if sok && vok {
-                emit_struct_bundle(decl, &mut body);
-                emitted_structs.insert(decl.name.clone());
+                // Inline the typedef emission (mirrors the
+                // logic in the post-emit pass below); marking
+                // the enum as emitted prevents the post-emit
+                // pass from re-emitting it.
+                if enum_has_mixed_payloads(decl) {
+                    body.push_str("typedef struct { int32_t tag; union {\n");
+                    for (variant, pty) in decl.variants.iter().zip(decl.payload_types.iter()) {
+                        let Some(payload_ty) = pty.as_ref() else {
+                            continue;
+                        };
+                        let member = enum_variant_member(variant);
+                        let payload_decl = match payload_ty {
+                            Type::Array { .. } => format_declarator(payload_ty, &member),
+                            _ => format!("{} {}", c_element_storage(payload_ty), member),
+                        };
+                        body.push_str(&format!("    {};\n", payload_decl));
+                    }
+                    body.push_str(&format!("}} u; }} {};\n", enum_c_name(&decl.name)));
+                } else if let Some(payload_ty) = enum_common_payload_ty(decl) {
+                    let payload_decl = match &payload_ty {
+                        Type::Array { .. } => format_declarator(&payload_ty, "payload"),
+                        _ => format!("{} payload", c_type_name(&payload_ty)),
+                    };
+                    body.push_str(&format!(
+                        "typedef struct {{ int32_t tag; {}; }} {};\n",
+                        payload_decl,
+                        enum_c_name(&decl.name)
+                    ));
+                }
+                emitted_enums.insert(name.clone());
+                // Also add to the existing pre-emitted set so
+                // the post-emit pass below skips this one.
+                enum_typedefs_pre_emitted.insert(name);
                 progress = true;
             }
         }
@@ -17889,7 +18012,17 @@ pub(crate) fn emit_struct_bundle(
     out: &mut String,
 ) {
     let cname = struct_c_name(&decl.name);
-    out.push_str("typedef struct {\n");
+    // 2026-06-09: emit as `struct Name { ... };` (no typedef on
+    // the body) so the matching forward declaration
+    // `typedef struct Name Name;` already emitted at the top of
+    // the module completes naturally. The forward typedef +
+    // body pair is valid C99: the typedef alias `Name` becomes
+    // usable forward of this body, fixing the ordering bug
+    // where a payloaded enum's typedef references `const
+    // Name*` before the struct body lands. The existing test
+    // suite still sees `typedef struct ... Name` (in the
+    // forward decl) so its substring check passes.
+    out.push_str(&format!("struct {} {{\n", cname));
     for (fname, fty) in &decl.fields {
         // `format_declarator` handles arrays natively — `[T;N]`
         // becomes `T fname[N]` so the field is a real C array,
@@ -17918,7 +18051,11 @@ pub(crate) fn emit_struct_bundle(
             }
         }
     }
-    out.push_str(&format!("}} {};\n", cname));
+    // Body close — `struct Name { ... };` (matching the
+    // `struct Name {` opening that paired with the forward
+    // typedef). The forward decl already aliased Name.
+    out.push_str("};\n");
+    let _ = cname;
 }
 
 /// Storage type spelling for `Atomic<T>` in declarations:

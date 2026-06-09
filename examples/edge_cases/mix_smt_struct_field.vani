@@ -1,0 +1,13 @@
+// SMT + STRT: ensures clause referring to struct field.
+struct R { lo: i64, hi: i64 }
+fn pick(r: ref R) -> i64
+requires r.lo <= r.hi;
+ensures _return >= r.lo;
+ensures _return <= r.hi;
+{
+  return r.lo;
+}
+fn main() -> i64 {
+  let r: R = R { lo: 0, hi: 10 };
+  return pick(ref r);
+}

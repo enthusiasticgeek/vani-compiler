@@ -1,0 +1,12 @@
+// CONC + STRT: struct field is an Atomic<i64>; passed by ref.
+struct Counter { c: Atomic<i64> }
+fn bump(cell: ref Counter) -> i64 {
+  return atomic_fetch_add(ref cell.c, 1);
+}
+fn main() -> i64 {
+  let counter: Counter = Counter { c: atomic_new(0) };
+  let _ = bump(ref counter);
+  let _ = bump(ref counter);
+  print atomic_load(ref counter.c);
+  return 0;
+}
