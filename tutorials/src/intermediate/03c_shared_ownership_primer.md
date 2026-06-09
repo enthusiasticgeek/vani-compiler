@@ -277,6 +277,11 @@ Rc's expressiveness without the cost.
   — single-owner heap allocation
 - [Intermediate 3b — Affine deeper primer](03b_affine_deeper_primer.md)
   — borrow scopes; many-shared-XOR-one-mutable rule
+- [Intermediate 3d — Cyclic references primer](03d_cyclic_references_primer.md)
+  — worked side-by-side examples (parent↔child tree,
+  doubly-linked list, observer pattern) of the three
+  canonical Rc+Weak shapes translated to vāṇी's
+  index-into-Vec pattern
 - [Advanced 2a — Parallelism + race-freedom primer](../advanced/02a_parallelism_primer.md)
   — channels + mutex as the cross-thread sharing primitives
 - [Advanced 4a — Embedded primer](../advanced/04a_embedded_primer.md)
