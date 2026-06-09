@@ -211,7 +211,7 @@ read those before starting.
 
 | Order | Task | Effort | Notes |
 |---|---|---|---|
-| **1** | **v3.1 liveness optimization** | 6-10h, one session | Detect "state-local" v3.1 locals (declared + read entirely within one state-machine arm) and emit as poll-fn stack locals instead of Task struct fields. Saves ~8-32 bytes per Task instance. Investigation showed the implementation surface clearly: `parser.rs:7890` codegen + filter `rename` + filter Task struct field list. |
+| ~~v3.1 liveness optimization~~ | ✅ SHIPPED 2026-06-08 | — | Shipped via per-state decl + reads analysis in `try_v31_transform`. State-local locals skip the Task struct field + FieldAssign, emit as poll-fn stack `Let` instead. Filters `rename` so `rewrite_vars_to_fields` doesn't replace state-local names. Filters `task_struct.fields` + ctor body. 5 regression tests pin pure state-local / cross-state / mixed / runtime-behavior / OwnedStr-state-local shapes. echo_pool.vani ASan-clean. |
 | **2** | **L4 (B) Phase 1+2 — let-binding refs + scope-escape analyzer** | 8-12h, one session | First half of the lexical-scope-only refs lift. `let r: ref Foo = ref x;` accepted; analyzer rejects returns, struct-stores, captures that outlive the source. The analyzer is the load-bearing piece. |
 | **3** | **L4 (B) Phase 3+4 — ref struct fields + Vec elements** | 5-10h, one session | Smaller gates + tests once the analyzer ships. Lifts ref-rejection at user-struct fields + Vec elements. |
 

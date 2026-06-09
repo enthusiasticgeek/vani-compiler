@@ -21408,6 +21408,120 @@ fn main() -> i64 {
     }
 
     #[test]
+    /// v3.1 caveat #2 polish, part 2 (2026-06-08) — liveness
+    /// optimization. State-local locals (declared + read entirely
+    /// inside one state-machine arm) are emitted as poll-fn stack
+    /// locals instead of Task struct fields. Five tests pin the
+    /// observable behavior. The optimization is purely a struct-
+    /// size reduction; semantics + parity are unchanged.
+    #[test]
+    fn v31_liveness_pure_state_local_omitted_from_task_struct() {
+        // `b` is declared in state 1 (post-suspend) and read only
+        // in the same state's return. It should NOT land as a
+        // Task field; the struct stays at state_tag + fd + n.
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              let b: i64 = n + 1;
+              return b;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("compiles");
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__p")
+            .expect("Task__p must exist");
+        let field_names: Vec<&str> = task.fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(field_names, vec!["state_tag", "fd", "n"],
+            "state-local `b` must be omitted; got fields {:?}", field_names);
+    }
+
+    #[test]
+    fn v31_liveness_cross_state_local_kept_in_task_struct() {
+        // `pre` is declared in state 0 (pre-suspend) and read in
+        // state 1's return. It crosses a suspend → must stay in
+        // the Task struct.
+        let source = r#"
+            async fn p(fd: i64, mode: i64) -> i64 {
+              let pre: i64 = mode * 2;
+              let n: i64 = io_recv_async(fd, pre);
+              return n + pre;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("compiles");
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__p")
+            .expect("Task__p must exist");
+        let field_names: Vec<&str> = task.fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(field_names.contains(&"pre"),
+            "cross-state `pre` must stay in Task; got {:?}", field_names);
+    }
+
+    #[test]
+    fn v31_liveness_mixed_locals_partitioned_correctly() {
+        // `a` crosses the suspend (read after); `b` does not
+        // (only used to compute the suspend's arg). `c` is
+        // state-local in the post-suspend state. Expected
+        // Task struct: state_tag + fd + a + n. b and c omitted.
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let a: i64 = 10;
+              let b: i64 = a + 5;
+              let n: i64 = io_recv_async(fd, b);
+              let c: i64 = n * 2;
+              return a + c;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = crate::compile(source).expect("compiles");
+        let task = checked.ir.structs.iter().find(|s| s.name == "Task__p")
+            .expect("Task__p must exist");
+        let field_names: Vec<&str> = task.fields.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(field_names.contains(&"a"), "cross-state `a` must stay; got {:?}", field_names);
+        assert!(field_names.contains(&"n"), "suspend result `n` must stay; got {:?}", field_names);
+        assert!(!field_names.contains(&"b"), "transient `b` must be omitted; got {:?}", field_names);
+        assert!(!field_names.contains(&"c"), "state-local `c` must be omitted; got {:?}", field_names);
+    }
+
+    #[test]
+    fn v31_liveness_runtime_behavior_unchanged() {
+        // Semantic check: the optimization is purely a struct-
+        // size reduction. Both backends produce identical results.
+        // (Parity sweep covers this for examples; pin a specific
+        // shape here.)
+        let source = r#"
+            async fn p(fd: i64, mode: i64) -> i64 {
+              let pre: i64 = mode + 100;
+              let n: i64 = io_recv_async(fd, 64);
+              let post: i64 = n * 2;
+              return pre + post;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        crate::compile_to_c(source).expect("C backend OK");
+        crate::compile_to_llvm(source).expect("LLVM backend OK");
+    }
+
+    #[test]
+    fn v31_liveness_owned_str_state_local_drops_correctly() {
+        // OwnedStr declared after a suspend, used only in the
+        // same state. State-local → poll-fn stack let.
+        // The OwnedStr Drop fires at the local's scope-exit
+        // (end of the if-arm in the synthesized poll body).
+        // Regression target: the affine-Drop discipline doesn't
+        // break when a heap-owning local becomes state-local.
+        let source = r#"
+            async fn p(fd: i64) -> i64 {
+              let n: i64 = io_recv_async(fd, 64);
+              let s: OwnedStr = "tag" + ":";
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        crate::compile_to_c(source).expect("OwnedStr state-local compiles on C");
+        crate::compile_to_llvm(source).expect("OwnedStr state-local compiles on LLVM");
+    }
+
+    #[test]
     fn v31_snapshot_a44_canceltoken_ref_param_field_is_refmut_struct() {
         // L4 partial lift + A4.4 (2026-06-08): `ref CancelToken`
         // params now flow through v3.1; the synthesized Task
@@ -22731,19 +22845,26 @@ fn main() -> i64 {
         "#;
         let c = compile_to_c(source).expect("Phase 2.2 ANF must compile on C");
         let ll = compile_to_llvm(source).expect("Phase 2.2 ANF must compile on LLVM");
-        // The lifted __anf_0 local should land as a task struct
-        // field.
+        // The lifted __anf_0 local crosses the suspend (its
+        // value is the suspend's result, read in the
+        // following state's `let x = ...` expr) so it lands as
+        // a task struct field.
         assert!(
             c.contains("Task__anf") && c.contains("__anf_0"),
             "C output must include synthesized __anf_0 field; got:\n{}",
             &c[..c.len().min(2000)]
         );
-        // LLVM uses positional struct fields (no field names).
-        // Verify the Task struct has 4 i64 fields (state_tag,
-        // fd, __anf_0, x).
+        // v3.1 caveat #2 polish part 2 (2026-06-08): liveness
+        // optimization. Pre-optimization the Task struct had 4
+        // fields (state_tag + fd + __anf_0 + x); now `x` is
+        // state-local (declared + read entirely in the post-
+        // suspend state's return), so the struct is 3 fields:
+        // state_tag + fd + __anf_0.
         assert!(
-            ll.contains("%Struct_Task__anf = type { i64, i64, i64, i64 }"),
-            "LLVM output must include the 4-field Task struct (state_tag + fd + __anf_0 + x); got:\n{}",
+            ll.contains("%Struct_Task__anf = type { i64, i64, i64 }"),
+            "LLVM output must include the 3-field Task struct after \
+             liveness opt (state_tag + fd + __anf_0; `x` is state-\
+             local); got:\n{}",
             &ll[..ll.len().min(2000)]
         );
     }

@@ -7452,7 +7452,7 @@ pub(crate) fn try_v31_transform(
     // may reference Type::Param(T)) typecheck at template time.
     // Mono later specializes the struct alongside the fn —
     // Task__identity<T> → Task__identity__i64 etc.
-    let task_struct = StructDecl {
+    let mut task_struct = StructDecl {
         name: task_struct_name.clone(),
         name_span: fn_name_span,
         type_params: fn_type_params.to_vec(),
@@ -7843,6 +7843,163 @@ pub(crate) fn try_v31_transform(
     // states allocated defensively after Returns/branches.
     let states: Vec<Vec<Seg>> = state_bodies;
 
+    // v3.1 caveat #2 polish, part 2 (2026-06-08): liveness
+    // optimization. A local is "state-local" iff every read of
+    // it stays inside its declaring state. State-local locals
+    // are emitted as poll-fn stack lets (not Task struct
+    // fields), reducing per-Task heap footprint.
+    //
+    // Conservative rule: if a local is ever read in a different
+    // state than the one declaring it, treat as cross-state.
+    // Conservative is safe — emitting more fields than strictly
+    // needed never breaks correctness, only wastes ~8 bytes
+    // per stale field.
+    //
+    // Reads inside an Expr are found by walking the Expr tree
+    // for `ExprKind::Var(name)` matches. Reads inside Seg
+    // sub-structures (Decision branches, Suspend args, etc.)
+    // are folded into the same state's read-set since the
+    // segment collector already placed them in the right state
+    // group.
+    fn expr_reads_into(expr: &Expr, out: &mut std::collections::HashSet<String>) {
+        match &expr.kind {
+            ExprKind::Var(n) => { out.insert(n.clone()); }
+            ExprKind::Binary { left, right, .. } => {
+                expr_reads_into(left, out);
+                expr_reads_into(right, out);
+            }
+            ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => {
+                expr_reads_into(expr, out);
+            }
+            ExprKind::Index { array, index } => {
+                expr_reads_into(array, out);
+                expr_reads_into(index, out);
+            }
+            ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+                for e in elements { expr_reads_into(e, out); }
+            }
+            ExprKind::TupleAccess { tuple, .. } => expr_reads_into(tuple, out),
+            ExprKind::Len { array } => expr_reads_into(array, out),
+            ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+                expr_reads_into(inner, out);
+            }
+            ExprKind::FieldAccess { object, .. } => expr_reads_into(object, out),
+            ExprKind::StructLit { fields, .. } => {
+                for (_, v) in fields { expr_reads_into(v, out); }
+            }
+            ExprKind::Call { args, .. } => {
+                for a in args { expr_reads_into(a, out); }
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                expr_reads_into(receiver, out);
+                for a in args { expr_reads_into(a, out); }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                expr_reads_into(scrutinee, out);
+                for a in arms { expr_reads_into(&a.body, out); }
+            }
+            ExprKind::IfExpr { cond, then_value, else_value, .. } => {
+                expr_reads_into(cond, out);
+                expr_reads_into(then_value, out);
+                expr_reads_into(else_value, out);
+            }
+            ExprKind::Block { stmts, tail } => {
+                for s in stmts { stmt_reads_into(s, out); }
+                expr_reads_into(tail, out);
+            }
+            ExprKind::Try { inner } => expr_reads_into(inner, out),
+            _ => {}
+        }
+    }
+    fn stmt_reads_into(stmt: &Stmt, out: &mut std::collections::HashSet<String>) {
+        match stmt {
+            Stmt::Let { expr, .. }
+            | Stmt::LetTuple { expr, .. }
+            | Stmt::Return { expr, .. }
+            | Stmt::Assert { expr, .. }
+            | Stmt::Prove { expr, .. }
+            | Stmt::Assign { expr, .. } => expr_reads_into(expr, out),
+            Stmt::Print { items, .. } => {
+                for it in items {
+                    if let crate::ast::PrintItem::Expr(e) = it {
+                        expr_reads_into(e, out);
+                    }
+                }
+            }
+            Stmt::If { cond, then_body, else_body, .. } => {
+                expr_reads_into(cond, out);
+                for s in then_body { stmt_reads_into(s, out); }
+                for s in else_body { stmt_reads_into(s, out); }
+            }
+            Stmt::While { cond, body: w, .. } => {
+                expr_reads_into(cond, out);
+                for s in w { stmt_reads_into(s, out); }
+            }
+            Stmt::IndexAssign { index, value, .. } => {
+                expr_reads_into(index, out);
+                expr_reads_into(value, out);
+            }
+            Stmt::FieldAssign { object, value, .. } => {
+                expr_reads_into(object, out);
+                expr_reads_into(value, out);
+            }
+            _ => {}
+        }
+    }
+    fn seg_reads_into(seg: &Seg, out: &mut std::collections::HashSet<String>) {
+        match seg {
+            Seg::NonSuspendLet { expr, .. } => expr_reads_into(expr, out),
+            Seg::Suspend { args, .. } => {
+                for a in args { expr_reads_into(a, out); }
+            }
+            Seg::Discard { expr, .. } => expr_reads_into(expr, out),
+            Seg::Return { expr, .. } => expr_reads_into(expr, out),
+            Seg::Verbatim(s) => stmt_reads_into(s, out),
+            Seg::Decision { cond, .. } => expr_reads_into(cond, out),
+            Seg::Jump { .. } => {}
+        }
+    }
+    // Per-state declarations + reads.
+    let n_states = states.len();
+    let mut decl_state: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    let mut reads_per_state: Vec<std::collections::HashSet<String>> =
+        (0..n_states).map(|_| std::collections::HashSet::new()).collect();
+    for (k, segs) in states.iter().enumerate() {
+        for seg in segs {
+            if let Seg::NonSuspendLet { name, .. } = seg {
+                // First declaration wins (locals are unique in
+                // v3.1; the validator already guarded shadowing).
+                decl_state.entry(name.clone()).or_insert(k);
+            }
+            seg_reads_into(seg, &mut reads_per_state[k]);
+        }
+    }
+    let mut state_locals: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    for (name, k) in &decl_state {
+        let crossed = (0..n_states).any(|j| j != *k && reads_per_state[j].contains(name));
+        if !crossed {
+            state_locals.insert(name.clone());
+        }
+    }
+    // Filter rename: state-local names refer to poll-fn locals,
+    // not Task struct fields.
+    for n in &state_locals {
+        rename.remove(n);
+    }
+    // Filter the Task struct's fields. `task_struct` was built
+    // earlier (it needs to exist before V31_STRUCT_REGISTRY is
+    // consulted by downstream defaults); patch its `fields`
+    // in place to drop state-local entries.
+    task_struct.fields.retain(|f| !state_locals.contains(&f.name));
+    // Note: the `locals` Vec at the parent scope is still used
+    // for the validator's defaults + the Task struct's initial
+    // ctor body further below. State-local locals stay in
+    // `locals` so the validator (which already returned its
+    // result earlier) is unaffected. The downstream synthesizer
+    // (this block) is the only consumer we need to update.
+
     // Canonicalize alias names at the typed-IR boundary. v3.1
     // poll fn calls the canonical nb variants directly.
     let canonical = |n: &str| -> String {
@@ -7888,30 +8045,51 @@ pub(crate) fn try_v31_transform(
         for seg in state_segs {
             match seg {
                 Seg::NonSuspendLet { name, ty, expr, span } => {
-                    // Emit `let <synth>: <ty> = <rewritten expr>;` then
-                    // assign to t.<name>. Phase 3a — `ty` carries the
-                    // user-written annotation (Type::I64 by default).
+                    // v3.1 caveat #2 polish, part 2 (2026-06-08):
+                    // state-local locals (declared + read entirely
+                    // within ONE state-machine arm) elide the
+                    // FieldAssign and the Task struct field —
+                    // they live as poll-fn stack locals. Reads
+                    // of the name in the same state see the local
+                    // directly because the analysis pass above
+                    // removed the name from `rename`, so the
+                    // rewrite_vars_to_fields call below doesn't
+                    // touch them.
                     let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
-                    let synth_local = format!("__v3_tmp_{}", name);
-                    then_body.push(Stmt::Let {
-                        name: synth_local.clone(),
-                        annotation: Some(ty.clone()),
-                        expr: rewritten_expr,
-                        span: *span,
-                    });
-                    then_body.push(Stmt::FieldAssign {
-                        object: Expr {
-                            kind: ExprKind::Var(t_param_name.clone()),
+                    if state_locals.contains(name) {
+                        // State-local: single Let in the state arm,
+                        // no field assignment.
+                        then_body.push(Stmt::Let {
+                            name: name.clone(),
+                            annotation: Some(ty.clone()),
+                            expr: rewritten_expr,
                             span: *span,
-                        },
-                        field: name.clone(),
-                        field_span: *span,
-                        value: Expr {
-                            kind: ExprKind::Var(synth_local),
+                        });
+                    } else {
+                        // Cross-state: existing two-step emission.
+                        // Phase 3a — `ty` carries the user-written
+                        // annotation (Type::I64 by default).
+                        let synth_local = format!("__v3_tmp_{}", name);
+                        then_body.push(Stmt::Let {
+                            name: synth_local.clone(),
+                            annotation: Some(ty.clone()),
+                            expr: rewritten_expr,
                             span: *span,
-                        },
-                        span: *span,
-                    });
+                        });
+                        then_body.push(Stmt::FieldAssign {
+                            object: Expr {
+                                kind: ExprKind::Var(t_param_name.clone()),
+                                span: *span,
+                            },
+                            field: name.clone(),
+                            field_span: *span,
+                            value: Expr {
+                                kind: ExprKind::Var(synth_local),
+                                span: *span,
+                            },
+                            span: *span,
+                        });
+                    }
                 }
                 Seg::Discard { expr, span } => {
                     // `let _ = EXPR;` — emit as a normal discard with the
@@ -8245,6 +8423,13 @@ pub(crate) fn try_v31_transform(
         ));
     }
     for (name, ty, span) in &locals {
+        // v3.1 caveat #2 polish, part 2 (2026-06-08): skip
+        // state-local locals — they live as poll-fn stack
+        // locals, not Task struct fields, so they don't need
+        // ctor-side default-init either.
+        if state_locals.contains(name) {
+            continue;
+        }
         // Phase 3a — emit type-appropriate default-init so the
         // constructor's StructLit typechecks for non-i64 fields.
         ctor_fields.push((
