@@ -36,6 +36,7 @@
 - [Closures and iterator combinators](intermediate/06_closures.md)
 - [Tuples and tuple destructure](intermediate/07_tuples.md)
 - [Multi-file projects + `vani.toml`](intermediate/08_manifest.md)
+- [FFI — intuition primer](intermediate/09a_ffi_primer.md)
 - [FFI: `extern "C"` + `--link-with`](intermediate/09_ffi.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
@@ -44,6 +45,7 @@
 
 # Advanced
 
+- [Async, await, and Task — intuition primer](advanced/01a_async_primer.md)
 - [Async / await and the `Task` transform](advanced/01_async.md)
 - [Parallelism and race-freedom — intuition primer](advanced/02a_parallelism_primer.md)
 - [`parallel for` + reductions + race-freedom](advanced/02_parallel.md)
