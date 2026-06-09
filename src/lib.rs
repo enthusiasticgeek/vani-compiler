@@ -11127,6 +11127,120 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn big_o_bounded_for_loop_constants_stays_constant() {
+        // L4 (D) refinement: `for i from 0 to 16` is bounded —
+        // the analyzer should NOT bump it to O(n) since the
+        // iteration count is fixed at 16.
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn bounded_loop() -> i64 {
+              let total: i64 = 0;
+              for i from 0 to 16 {
+                let _ = i;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "bounded_loop").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Constant);
+    }
+
+    #[test]
+    fn big_o_cross_fn_propagation_through_nested_call() {
+        // L4 (D) refinement: a fn that calls an O(n log n)
+        // helper inside an O(n) loop ships as O(n² log n).
+        use crate::big_o::{annotate_program, BigOMode};
+        let source = r#"
+            fn helper(xs: Vec<i64>) -> Vec<i64> {
+              let ys: Vec<i64> = xs;
+              let _ = sort(mut ref ys);
+              return ys;
+            }
+            fn caller() -> i64 {
+              let ys: Vec<i64> = vec(3, 1, 2);
+              let n: i64 = len(ys) as i64;
+              let i: i64 = 0;
+              while i < n {
+                let _ = helper(vec(1, 2, 3));
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let annotations = annotate_program(&checked.ir, BigOMode::Force);
+        let caller = annotations.iter()
+            .find(|(n, _)| n == "caller")
+            .expect("caller in annotations");
+        // Without propagation this would report O(n); with
+        // propagation it's at least O(n² log n) since the
+        // n log n helper runs inside an n-loop.
+        let s = format!("{}", caller.1);
+        assert!(
+            s.contains("log n") && (s.contains("n²") || s.contains("n^")),
+            "expected n^? log n classification, got: {}",
+            s,
+        );
+    }
+
+    #[test]
+    fn big_o_mutual_recursion_marks_both_as_recursive() {
+        // L4 (D) refinement: an SCC of size > 1 (mutual
+        // recursion) flags every member as Recursive.
+        use crate::big_o::{annotate_program, BigO, BigOMode};
+        let source = r#"
+            fn a(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return b(n - 1);
+            }
+            fn b(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return a(n - 1);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let annotations = annotate_program(&checked.ir, BigOMode::Force);
+        for name in ["a", "b"] {
+            let entry = annotations.iter()
+                .find(|(n, _)| n == name)
+                .expect(name);
+            assert_eq!(
+                entry.1, BigO::Recursive,
+                "{} should be Recursive (mutual recursion SCC), got {:?}",
+                name, entry.1,
+            );
+        }
+    }
+
+    #[test]
+    fn big_o_array_for_loop_bounded_constant() {
+        // L4 (D) refinement: `for x in ref [T; N]` is bounded —
+        // N is fixed in the type. The analyzer should NOT bump
+        // it to O(n).
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn array_sum() -> i64 {
+              let xs: [i64; 4] = [1, 2, 3, 4];
+              let total: i64 = 0;
+              for v in ref xs {
+                let _ = v;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "array_sum").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Constant);
+    }
+
+    #[test]
     fn big_o_auto_mode_skips_constant_fns_but_force_includes_them() {
         use crate::big_o::{annotate_program, BigOMode};
         let source = r#"
