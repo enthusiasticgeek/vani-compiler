@@ -1,0 +1,482 @@
+# Missing language features and their vāṇी workarounds
+
+> Audience: experienced systems programmers asking "does
+> vāṇी have X?" and what to do when the honest answer is no.
+> Updated 2026-06-09.
+
+vāṇी ships with a deliberately small feature surface — the
+goal is everything that's there is fully verified and
+composable, not everything that exists in Rust or C++.
+This doc enumerates the genuinely-useful features that
+**aren't** in v1, paired with the idiomatic vāṇी substitute
+when one exists.
+
+Sections:
+
+1. [Generics + type system](#generics--type-system)
+2. [Ownership + borrowing](#ownership--borrowing)
+3. [Async + concurrency](#async--concurrency)
+4. [Metaprogramming + reflection](#metaprogramming--reflection)
+5. [Memory management](#memory-management)
+6. [Pattern matching + control flow](#pattern-matching--control-flow)
+7. [Numerics + types](#numerics--types)
+8. [Modules + packages](#modules--packages)
+
+---
+
+## Generics + type system
+
+### Generic trait bounds (`T: Hash + Eq`)
+
+**What Rust has:** `fn lookup<T: Hash + Eq>(...)` — the
+compiler enforces that `T` implements the listed traits at
+each instantiation.
+
+**vāṇी today:** monomorphized generics work (`fn id<T>(x:
+T) -> T`), but there's **no syntactic bound expression**.
+The compiler can require an iface impl indirectly: HashMap
+keys require `Hash for K` via `iface_impl_exists` at use
+sites; other generic call sites trust the user.
+
+**Workaround:** for the common case (HashMap-key-style
+constraints) the compiler does enforce — just call the iface
+method in the body and the implicit constraint surfaces at
+instantiation. For more complex bounds, use **`dyn Iface`
+parameter types** instead of generic bounds:
+
+```rust
+// Rust:  fn process<T: Drawable>(t: T) -> i64
+// vāṇी:  fn process(t: dyn Drawable) -> i64
+```
+
+The vāṇी version pays one indirect call per method; the
+Rust version monomorphizes. Trade.
+
+### Higher-rank polymorphism (`for<'a>`, `Box<dyn for<T> Fn(T)>`)
+
+**Not in vāṇी.** No one's reached for it; v1 closures use
+fixed argument types in their `Closure<T1, T2> -> R` shape.
+
+### Generic associated types (Rust's GATs)
+
+**Not in vāṇी.** Niche even in Rust. No workaround needed —
+the patterns that use GATs (streaming iterators with
+lifetime-parameterized items) don't compose with vāṇी's
+single-param lifetime elision anyway.
+
+### Const generics
+
+**Partial.** `[T; N]` works with a literal `N`. You can't
+write `fn pad<const N: usize>(xs: [i64; N]) -> [i64; N+1]` —
+the `N` in a signature must be a literal at the call site.
+
+**Workaround:** use `Vec<T>` when the size is dynamic.
+For genuinely-static N, write per-shape fns and call the
+right one.
+
+### Type-state via phantom types
+
+**Not in vāṇी.** No `PhantomData<T>`; structs can only carry
+fields whose types are part of the runtime representation.
+
+**Workaround:** enum-tag-based state machines. A `Connection`
+type with `enum Status { Open, Closed }` carries the same
+type-state information at runtime; the compiler's
+exhaustiveness check on match arms gives you compile-time
+verification at every branch.
+
+---
+
+## Ownership + borrowing
+
+### Reference counting (`Rc<T>` / `Arc<T>` / `Weak<T>`)
+
+**Deliberately not in vāṇी.** See
+[Intermediate 3c shared-ownership-without-Rc](../tutorials/src/intermediate/03c_shared_ownership_primer.md)
+and
+[Intermediate 3d cyclic-references](../tutorials/src/intermediate/03d_cyclic_references_primer.md)
+for the full story.
+
+**Workaround (five patterns):** just-borrow, indices-into-Vec,
+arena allocation, channels, Mutex<T>. Covers ~95% of Rc use
+cases; the remaining 5% (third-party plugins, multi-modal
+DOM-like graphs) reach for `unsafe(reason = "...")`.
+
+### Lifetime variables (`'a`, `'b`)
+
+**Not in vāṇी (path-D, deferred indefinitely).** v1 has
+single-param lifetime elision for ref returns (path-C); see
+[Intermediate 3e lifetimes](../tutorials/src/intermediate/03e_lifetimes_primer.md).
+The rejected cases are multi-input distinct lifetimes,
+lifetime-parameterized struct definitions, and ref-capturing
+closures.
+
+**Workaround:**
+- Multi-input distinct lifetimes → split into two narrower fns.
+- Lifetime-parameterized struct → store `Box<T>` or
+  indices into the owner.
+- Ref-capturing closures → restructure to pass refs as
+  closure-fn args, not captures.
+
+### Custom `Drop` impl
+
+**Partial.** `iface Drop` works; the compiler honors
+`fn drop(self: mut ref Self) -> i64` at scope-exit for the
+single-impl case. **Multiple Drop impls on the same type**
+aren't supported (the impl collector takes the first).
+
+**Workaround:** if you need cleanup beyond the default
+field-by-field drop, write one Drop impl that does
+everything.
+
+### Drop ordering control
+
+**Not in vāṇी.** Drop fires in reverse-declaration order
+within a block. No `ManuallyDrop<T>` to opt one binding out
+of the auto-drop pass.
+
+**Workaround:** explicit consumption order. `let _ = take(a);
+let _ = take(b);` ensures `a` is consumed before `b`.
+
+### Custom allocator
+
+**Not in vāṇी.** All allocs go through libc `malloc`/`free`.
+
+**Workaround:** for embedded targets, `region { ... }` blocks
+allocate from a stack buffer (Layer 5 of unsafe.md; planned
+for v2). For now, custom allocation is `unsafe(reason =
+"...")` with manual `*mut T` arithmetic.
+
+---
+
+## Async + concurrency
+
+### `async fn` returning an opaque `impl Future`
+
+**Not in vāṇी.** Async fns lower to a synthesized `Task__X`
+struct + `__poll_X` function (Arc 8 v3.1); the type is
+explicitly named, not opaque. Callers see `Task__X` and
+must call `__poll_X` directly (or use `await` which desugars
+to it).
+
+**Workaround:** the named `Task__X` IS the future — just
+treat the name as the return type.
+
+### `async fn` with generic return types
+
+**Shipped** (Arc 8 v3.1 Phase 4c-broad — `async fn
+identity<T>(...) -> T`). One blocker remaining: see
+[ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md).
+
+### `Stream<T>` (async iterator)
+
+**Not in vāṇी.** No `Stream` trait; no `for await` loop.
+
+**Workaround:** hand-roll a poll loop:
+
+```rust
+async fn next_event() -> Option<Event> { ... }
+
+async fn process_stream() -> i64 {
+  loop {
+    match await next_event() {
+      Some(e) then { process(e); },
+      None then { return 0; },
+    }
+  }
+}
+```
+
+### `select!` over multiple futures
+
+**Not in vāṇी.** Cannot wait on "whichever future completes
+first."
+
+**Workaround:** explicit polling. Call each future's poll fn
+in a round-robin loop and check for `Ready`:
+
+```rust
+let task_a: Task__A = a();
+let task_b: Task__B = b();
+loop {
+  if let Ready(v) = __poll_a(mut ref task_a) { return v; }
+  if let Ready(v) = __poll_b(mut ref task_b) { return v; }
+}
+```
+
+Less ergonomic than `select!` but explicit.
+
+### Async with `Pin<&mut Self>` self-references
+
+**Explicitly not in vāṇी** (🛑 NON-COMPLIANT under affine
+ownership). The state machine vāṇी synthesizes is plain
+struct-with-fields; no self-references in the state struct.
+
+**Workaround:** restructure the async fn so locals don't
+need to alias across `await` points.
+
+### Threads with shared mutable state (no Mutex)
+
+**Not in vāṇी.** Cross-thread state goes through `Atomic<T>`
+(lock-free seq-cst) or `Mutex<T>` + `Guard<T>` (RAII unlock).
+Sharing a raw `Vec<i64>` between threads is rejected.
+
+**Workaround:** `Atomic<T>` for single-value counters /
+flags. `Mutex<Vec<i64>>` is not in v1 (the wrapped type is
+limited to `i64`); for collection-shared-mutate, copy out
+via channel or use the `task` + `join` pattern with
+ownership transfer.
+
+---
+
+## Metaprogramming + reflection
+
+### Procedural macros
+
+**Not in vāṇी.** No source-level code generation.
+
+**Workaround:** code-generate at build time with an external
+script. The `tools/llm_context/bundle.py` script is itself
+an example — drives `vani_translate.py` ALIASES, emits a
+bundle from repo data.
+
+### Declarative macros (`macro_rules!`)
+
+**Not in vāṇी.** No `macro_rules!` equivalent.
+
+**Workaround:** generic functions cover most "abstract over
+type" cases; for repeated boilerplate (e.g. one Drop impl
+per dozen structs), a build-time codegen script.
+
+### Reflection / runtime type introspection
+
+**Not in vāṇी.** No `TypeId`, no `Any`, no field-by-name
+runtime access.
+
+**Workaround:** `dyn Iface` for runtime polymorphism;
+explicit enum-tag dispatch when you'd reach for type-based
+dispatch in another language.
+
+### Attribute macros (`#[derive(Debug)]`)
+
+**Not in vāṇी.** No `derive(Debug)` / `derive(Clone)` etc.
+Print formatting for structs requires a `print` builtin
+extension or hand-written field-by-field code.
+
+**Workaround:** write the print code yourself, or use
+`vanic emit --backend=c` to read the C representation when
+debugging.
+
+---
+
+## Memory management
+
+### Custom allocator per-type
+
+**Not in vāṇी.** Every allocation goes through global libc
+`malloc`/`free`.
+
+**Workaround:** `region { ... }` blocks (v2 / Layer 5) for
+embedded; `Vec<T>` re-use (drain + clear + push) within a
+single owner.
+
+### `Box::leak` / intentionally leaked allocations
+
+**Not in vāṇी.** Affine ownership requires every
+heap-owning value to drop on scope exit.
+
+**Workaround:** if you genuinely need a lifetime-of-the-
+program allocation, declare it in `main` and pass refs
+everywhere. The "leak" becomes "long-lived owner."
+
+### Memory layout control (`#[repr(C)]`, `#[repr(packed)]`)
+
+**Not in vāṇी.** Struct layout is compiler-chosen (field
+order in source = field order in memory; padding follows the
+backend's ABI). No layout pragmas.
+
+**Workaround:** for FFI with C, define the struct in vāṇी
+in the same field order as the C declaration. For bit-packed
+representations (network protocols, hardware registers), use
+explicit `u32` / `u64` bit-manipulation helpers
+(`i64_set_bit`, `i64_test_bit`, etc.) rather than struct
+fields.
+
+---
+
+## Pattern matching + control flow
+
+### Or-patterns (`Some(1) | Some(2) then ...`)
+
+**Not in vāṇी.** Each variant gets its own arm.
+
+**Workaround:** duplicate the body, or extract into a helper
+fn.
+
+### Pattern guards (`Some(n) then n > 0 ...`)
+
+**Not in vāṇी.** Match arms are pattern-only; conditions go
+inside the arm body.
+
+**Workaround:** match on the variant, then if/else in the
+arm body.
+
+### Slice patterns (`[first, .., last]`)
+
+**Not in vāṇी.** Vec/array indexing is positional.
+
+**Workaround:** explicit indexing — `xs[0]` and `xs[len-1]`
+with the appropriate `requires len(xs) >= 2`.
+
+### `if let` / `while let`
+
+**Not in vāṇी.** Pattern binding is `match`-only.
+
+**Workaround:** use `match` with one named arm + a wildcard:
+
+```rust
+match opt {
+  Some(v) then { use(v); }
+  None then {},
+}
+```
+
+### Labeled break / continue
+
+**Not in vāṇी.** `break` / `continue` only target the
+nearest enclosing loop.
+
+**Workaround:** extract the inner loop into a helper fn that
+returns early.
+
+### Try-block / `try { ... }`
+
+**Not in vāṇी.** No try-block construct (the `try EXPR`
+keyword + postfix `?` cover the propagation cases).
+
+**Workaround:** wrap the fallible operations in a helper fn
+that returns `Result<T, E>` and `try` / `?` propagates.
+
+---
+
+## Numerics + types
+
+### Bigint / arbitrary-precision
+
+**Not in vāṇी.** Integers are `i64` / `u64` / smaller.
+Overflow guards fire `abort()` when SMT can't prove safety.
+
+**Workaround:** for cryptographic / arbitrary-precision
+work, use C bigint via FFI (`extern "C"` declarations to
+GMP / mbed-crypto).
+
+### Float bit-twiddling without union
+
+**Partial.** `f64_to_bits(x: f64) -> u64` + `f64_from_bits`
+shipped; works for the common cases.
+
+### `Decimal` / fixed-point
+
+**Not in vāṇी.** Use scaled integers (multiply by 100 for
+2-decimal money math).
+
+### SIMD intrinsics
+
+**Not in vāṇी.** No `__m128i` / `__m256i` equivalent.
+
+**Workaround:** `parallel for` lowers to OpenMP (C backend)
+which the C compiler may auto-vectorize. For explicit SIMD,
+`extern "C"` to a C helper compiled with intrinsics.
+
+---
+
+## Modules + packages
+
+### Re-export with rename
+
+**Partial.** `pub use foo::bar;` works; `pub use foo::bar
+as baz;` is not yet supported.
+
+**Workaround:** define a wrapper fn `pub fn baz(...) -> ...
+{ return bar(...); }`.
+
+### Visibility modifiers beyond `pub` / `pub(kosh)`
+
+**Limited.** v1 has `pub`, `pub(kosh)`, and module-private
+(default). Rust's `pub(crate)`, `pub(super)`, `pub(in path)`
+aren't there.
+
+**Workaround:** the existing `pub(kosh)` covers
+"package-visible"; module-private covers everything else.
+
+### Workspace / multi-crate package
+
+**Not in vāṇी.** Each `vani.toml` is a single crate; no
+workspace concept.
+
+**Workaround:** monorepo with one manifest, or build each
+"crate" separately and link via `--link-with`. The Kosh
+package manager (queued, pending registry-hosting
+decision) will lift this.
+
+### Built-in test runner (`#[test]`)
+
+**Not in vāṇी.** Tests are written in the host language
+(Rust, for the compiler itself); vāṇी programs invoke
+external test runners or assert-based smoke tests.
+
+**Workaround:** assert-based smoke tests in `examples/`
+serve as the de-facto test runner. The cross-backend parity
+test (`run_end_to_end.rs`) runs every example through both
+C and LLVM.
+
+---
+
+## Summary table
+
+| Feature | Status | Workaround |
+|---|---|---|
+| Generic trait bounds | indirect | iface dispatch as `dyn Iface` param |
+| Higher-rank polymorphism | absent | not needed in practice |
+| GATs | absent | not needed in practice |
+| Const generics | partial | `Vec<T>` for dynamic; per-shape fns for static |
+| Phantom types | absent | enum-tag state machines |
+| `Rc<T>` / `Arc<T>` / `Weak<T>` | by design | 5-pattern alternatives (see 03c primer) |
+| Multi-input distinct lifetimes | path-D | split into narrower fns |
+| Lifetime-parameterized structs | path-D | Box / indices |
+| Custom allocator | embedded only | global malloc/free; regions in v2 |
+| Drop ordering | reverse-decl only | explicit consumption order |
+| `async` with `impl Future` | named Task__X | use the synthesized name |
+| `Stream<T>` async iterator | absent | hand-rolled poll loop |
+| `select!` | absent | explicit poll round-robin |
+| Pin<&mut Self> | NOT planned | restructure to avoid self-refs |
+| Mutex<Vec<T>> | i64 only in v1 | channel transfer / task ownership |
+| Proc macros | absent | external build-time codegen script |
+| `macro_rules!` | absent | generic fns + per-call codegen |
+| Reflection | absent | `dyn Iface` / explicit enum dispatch |
+| Custom layout (`#[repr(C)]`) | absent | match field order to C declaration |
+| Or-patterns | absent | duplicate arms or extract helper fn |
+| Pattern guards | absent | match → if/else in body |
+| Slice patterns | absent | positional indexing + `requires` |
+| `if let` / `while let` | absent | `match` with named + wildcard arm |
+| Labeled break/continue | absent | extract inner loop into helper |
+| Bigint | absent | C FFI (GMP) |
+| Decimal / fixed-point | absent | scaled integers |
+| SIMD intrinsics | absent | parallel for + auto-vectorize / FFI |
+| `pub use foo::bar as baz` | partial | wrapper fn |
+| Workspaces | absent | monorepo or `--link-with` |
+| `#[test]` runner | absent | `examples/` + cross-backend parity test |
+
+The deliberate omissions (Rc, multi-lifetime, Pin) are
+philosophical — vāṇी picks structural prevention over
+flexibility. The accidental omissions (or-patterns, slice
+patterns, `if let`, `pub use ... as ...`, workspaces) are
+v1 gaps; some will land in follow-up releases once a real
+use case surfaces.
+
+The honest list: vāṇी covers the **structural** ergonomics
+of Rust (ownership, types, async) and a **subset** of the
+syntactic ergonomics. If you want maximally-concise
+expression of every CS pattern, Rust is the answer. If you
+want a smaller, fully-verified surface that's safe by
+construction on the hosted target, that's what vāṇी ships.

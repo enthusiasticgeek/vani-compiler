@@ -118,31 +118,96 @@ to confirm "yes, this helper IS O(1) by design."
 table as a comment block to the emitted C source, so reviewers
 reading the output also see the complexity contract.
 
-## When the annotation is wrong
+## When the annotation is wrong (or the analyzer gives up)
 
-Two cases where the static analyzer over-reports:
+The analyzer is conservative and local — it can over-report,
+under-report, or honestly admit it can't bound the work.
 
-1. **A loop with a constant bound.** `for i in 0..16 { ... }`
-   is still `O(1)` because the iteration count doesn't grow
-   with input. v1's analyzer treats every loop as growing with
-   `n`, so it'll report `O(n)` here. Read the source for
-   intent.
-2. **A recursive helper with a known recurrence.** Merge sort
-   is `O(n log n)`, not "recursive — couldn't bound it." v1
-   doesn't solve recurrences. A pragma to assert a closed
-   form may ship in a later version.
+### Cases the analyzer handles correctly (refined 2026-06-09)
 
-And one case where it under-reports:
+- **Bounded loops.** `for i from 0 to 16` and `for x in ref
+  arr` where `arr: [T; N]` stay `O(1)` — the iteration count
+  is part of the type or a literal constant.
+- **Cross-fn propagation.** A fn that calls an O(n log n)
+  helper inside an O(n) loop correctly classifies as
+  O(n² log n). Tarjan SCC + topo-walk; callees analyzed first.
+- **Mutual recursion.** SCC of size > 1 → every member is
+  Recursive.
 
-1. **Cross-fn calls.** A fn that calls a user-defined helper
-   gets the helper's BUILTIN-call profile, not the helper's
-   actual complexity. So `outer` calling an `O(n log n)`
-   helper inside a `O(n)` loop may report `O(n)` instead of
-   `O(n² log n)`. v1 deliberately keeps the analysis local
-   per-fn.
+### Cases the analyzer **cannot** compute
 
-The annotation is a **hint**, not a contract. Read the source
-when the complexity matters for correctness.
+Some shapes are genuinely out of reach without a much heavier
+analyzer. The compiler emits `O(?)` (the `BigO::Unknown`
+variant) or falls back to the conservative `O(recursive)` /
+`O(n^k)` upper bound. Read source intent when these appear:
+
+1. **`while` loops with non-trivial termination.** `while
+   tree[node].next != -1 { ... }` walks a linked list whose
+   length the analyzer can't bound. The compiler treats every
+   while loop as `O(n)`. If the loop genuinely runs a constant
+   number of times (e.g. converging a fixed-point in 3
+   iterations), the annotation will over-report.
+2. **Recurrence-driven recursion.** Merge sort
+   (`T(n) = 2T(n/2) + O(n) = O(n log n)`) is honestly
+   `O(recursive)` in vāṇी today — no closed-form recurrence
+   solver in v1.
+3. **Indirect calls via `dyn Iface`.** A method call through
+   a `dyn` trait object dispatches at runtime; the compiler
+   sees the iface name but doesn't know which concrete
+   implementation's complexity will run. Treated as `O(1)`
+   conservatively — accurate when every impl is `O(1)`,
+   under-reporting if any impl is heavier.
+4. **Closures stored in a binding.** `fn(...) -> R` and
+   `Closure<T1, T2>` fat pointers route the same way — the
+   analyzer doesn't follow the closure's body across the call.
+5. **`extern "C"` FFI calls.** Opaque to the analyzer.
+   Treated as `O(1)`; the user's responsibility to know the
+   C function's actual cost.
+6. **HashMap / BTreeMap with user-defined `Hash` impls.**
+   The builtin asymptotic table assumes `O(1)` hashing for
+   HashMap and `O(log n)` for BTreeMap. If the user's `Hash
+   for K` impl is itself non-constant (rare but possible —
+   e.g. hashing a Vec by its full contents), the analyzer
+   doesn't pull through. Slight under-report.
+7. **Calls to user-defined helpers analyzed AFTER the caller.**
+   Theoretically impossible given the topo-walk, but if a fn
+   isn't in the program's function list (e.g. a synthesized
+   v3.1 Task fn or an inlined helper), the lookup returns
+   `BigO::Constant` as default.
+
+### Cases the analyzer over-reports
+
+- **Convergent while loops.** `while delta > epsilon { delta =
+  delta / 2; }` converges in O(log(initial/epsilon)) iterations,
+  not O(n). Analyzer says O(n).
+- **Bounded recursion via SMT.** A function with `requires n
+  < 10` recurses at most 10 times — bounded — but the
+  analyzer doesn't read `requires` clauses to refine. Reports
+  `O(recursive)`.
+
+### Cases the analyzer under-reports
+
+- **Mutating non-passed-in state.** A fn that writes to a
+  global Vec at depth d still classifies by the local body's
+  depth. There's no truly-global state in v1 so this is rare.
+- **HashMap with adversarial hash collisions.** Builtin
+  asymptotic is `O(1)` per op; pathological inputs degrade
+  to `O(n)`. Analyzer doesn't model.
+
+### When to ignore the annotation
+
+The annotation is a **hint**, not a contract. Read the
+source when the complexity matters for correctness:
+- Any while loop whose termination depends on data shape.
+- Any recursive function that doesn't fit a simple
+  decrement-and-recurse pattern.
+- Anything calling through `dyn Iface` or `Closure<...>`.
+- Anything calling out via FFI.
+
+For the cases the analyzer handles, the bound is correct
+within v1's modeling — and the more code you write through
+the bounded paths (arrays, fixed-size loops, simple
+recursion), the more reliable the annotation becomes.
 
 ## A summary you can carry
 

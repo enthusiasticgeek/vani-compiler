@@ -1,0 +1,26 @@
+// Edge case: match on a 64-bit enum with many variants.
+enum Status {
+  V0, V1, V2, V3, V4, V5, V6, V7, V8, V9,
+  V10, V11, V12, V13, V14, V15, V16, V17, V18, V19,
+  V20, V21, V22, V23, V24, V25, V26, V27, V28, V29,
+}
+
+fn classify(s: Status) -> i64 {
+  return match s {
+    Status.V0 then 0, Status.V1 then 1, Status.V2 then 2,
+    Status.V3 then 3, Status.V4 then 4, Status.V5 then 5,
+    Status.V6 then 6, Status.V7 then 7, Status.V8 then 8,
+    Status.V9 then 9, Status.V10 then 10, Status.V11 then 11,
+    Status.V12 then 12, Status.V13 then 13, Status.V14 then 14,
+    Status.V15 then 15, Status.V16 then 16, Status.V17 then 17,
+    Status.V18 then 18, Status.V19 then 19, Status.V20 then 20,
+    Status.V21 then 21, Status.V22 then 22, Status.V23 then 23,
+    Status.V24 then 24, Status.V25 then 25, Status.V26 then 26,
+    Status.V27 then 27, Status.V28 then 28, Status.V29 then 29,
+  };
+}
+
+fn main() -> i64 {
+  print classify(Status.V17);
+  return 0;
+}

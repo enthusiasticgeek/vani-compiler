@@ -1,0 +1,33 @@
+// Edge case: chain of fns each with requires/ensures that
+// SMT must propagate through. Tests cross-fn fact tracking.
+fn double(n: i64) -> i64
+requires n >= 0;
+requires n <= 1000;
+ensures _return >= 0;
+ensures _return == n * 2;
+{
+  return n * 2;
+}
+
+fn quadruple(n: i64) -> i64
+requires n >= 0;
+requires n <= 500;
+ensures _return >= 0;
+ensures _return == n * 4;
+{
+  return double(double(n));
+}
+
+fn octuple(n: i64) -> i64
+requires n >= 0;
+requires n <= 250;
+ensures _return >= 0;
+ensures _return == n * 8;
+{
+  return double(quadruple(n));
+}
+
+fn main() -> i64 {
+  print octuple(10);
+  return 0;
+}

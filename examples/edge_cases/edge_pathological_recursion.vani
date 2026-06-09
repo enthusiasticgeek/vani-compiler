@@ -1,0 +1,17 @@
+// Edge case: Ackermann's function — pathological recursion.
+// vāṇी has no stack-overflow protection at compile time;
+// the recursion depth depends on input. Big-O analyzer
+// should classify as Recursive (it does).
+fn ack(m: i64, n: i64) -> i64
+requires m >= 0;
+requires n >= 0;
+{
+  if m == 0 { return n + 1; }
+  if n == 0 { return ack(m - 1, 1); }
+  return ack(m - 1, ack(m, n - 1));
+}
+
+fn main() -> i64 {
+  print ack(2, 3);  // = 9
+  return 0;
+}

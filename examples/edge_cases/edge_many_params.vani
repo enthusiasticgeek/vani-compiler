@@ -1,0 +1,14 @@
+// Edge case: function with many parameters.
+fn add20(a: i64, b: i64, c: i64, d: i64, e: i64,
+         f: i64, g: i64, h: i64, i: i64, j: i64,
+         k: i64, l: i64, m: i64, n: i64, o: i64,
+         p: i64, q: i64, r: i64, s: i64, t: i64) -> i64 {
+  return a + b + c + d + e + f + g + h + i + j
+       + k + l + m + n + o + p + q + r + s + t;
+}
+
+fn main() -> i64 {
+  print add20(1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+              11, 12, 13, 14, 15, 16, 17, 18, 19, 20);
+  return 0;
+}
