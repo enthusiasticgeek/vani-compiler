@@ -135,6 +135,22 @@ impl Env {
         self.scopes.iter().rev().find_map(|scope| scope.get(name))
     }
 
+    /// L4 (B) Phase 2 — scope-escape analyzer support. Returns
+    /// the source binding's scope-depth (1-indexed; outer-most
+    /// fn body block = 1). A deeper depth means a more-nested
+    /// scope (shorter lifetime). The escape rule: a binding
+    /// holding `ref X` must live in a scope at depth ≥ X's
+    /// depth (i.e., the holder is in the same or inner scope
+    /// as the source).
+    fn lookup_depth(&self, name: &str) -> Option<usize> {
+        for (i, scope) in self.scopes.iter().enumerate().rev() {
+            if scope.contains_key(name) {
+                return Some(i + 1);
+            }
+        }
+        None
+    }
+
     fn lookup_mut(&mut self, name: &str) -> Option<&mut VarInfo> {
         for scope in self.scopes.iter_mut().rev() {
             if scope.contains_key(name) {
@@ -619,24 +635,23 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                 ),
             ));
         }
-        // A4.4 (2026-06-08): synthesized v3.1 Task structs (named
-        // `Task__<fn>`) are allowed to carry `ref Struct` /
-        // `mut ref Struct` fields — they're the storage shape for
-        // a v3.1 async fn's `ref CancelToken` (and similar)
-        // parameter. The reference's lifetime is the caller's
-        // responsibility, same as v1 ref discipline elsewhere.
-        // User-declared structs still get the L4 rejection here.
-        let is_v31_synth = decl.name.starts_with("Task__");
+        // A4.4 (2026-06-08): synthesized v3.1 Task structs
+        // (`Task__<fn>`) accept `ref Struct` / `mut ref Struct`
+        // fields for v3.1 async-fn `ref CancelToken` (and
+        // similar) parameters.
+        //
+        // L4 (B) Phase 3 (2026-06-08): user-declared structs
+        // now ALSO accept ref fields. The escape vector
+        // (returning a struct holding a ref to a local) is
+        // caught by the Stmt::Return scope-escape check, and
+        // assigning a too-narrow-scope ref into the field is
+        // caught by the Stmt::FieldAssign scope-escape check.
+        // No new struct-decl rejection needed.
+        let _is_v31_synth = decl.name.starts_with("Task__");
         for field in &decl.fields {
-            if !is_v31_synth && (field.ty.is_ref() || field.ty.is_ref_mut()) {
-                diagnostics.push(Diagnostic::new(
-                    field.span,
-                    format!(
-                        "struct field '{}::{}' cannot be a reference",
-                        decl.name, field.name
-                    ),
-                ));
-            }
+            // (ref-field rejection lifted 2026-06-08 — see L4 (B)
+            //  Phase 3 + 4 comment above. Both v3.1 synth and
+            //  user-declared structs may now carry ref fields.)
             // T1.2 phase 2b: allow most affine types as struct
             // fields. The Drop emission in both backends walks
             // the owning-field list and frees heap-shaped
@@ -8787,6 +8802,35 @@ fn check_one_stmt(
         }
         Stmt::Return { expr, .. } => {
             verify_call_args_in_expr(expr, smt_facts, env, signatures, diagnostics);
+            // L4 (B) Phase 2 (2026-06-08) — scope-escape check.
+            // Returning a value that internally borrows a non-
+            // parameter binding lets the caller see a stale ref
+            // (the borrowed binding drops at fn-exit). Reject any
+            // `ref X` / `mut ref X` in the return expr whose
+            // source isn't a fn parameter.
+            //
+            // Returning ref types directly is already caught by
+            // the fn-return-type check (`function return type
+            // cannot be a reference`); this catches the indirect
+            // form via Phase 3+4: returning a struct that holds a
+            // ref field, or a Vec<ref T>.
+            let mut ref_sources: Vec<(String, Span)> = Vec::new();
+            collect_ref_sources_in_expr(expr, &mut ref_sources);
+            for (src_name, ref_span) in &ref_sources {
+                let is_param = function.params.iter().any(|p| p.name == *src_name);
+                if !is_param {
+                    diagnostics.push(Diagnostic::new(
+                        *ref_span,
+                        format!(
+                            "ref to local binding '{}' escapes the function via return — \
+                             the binding drops when the function exits, leaving a \
+                             dangling reference. Refs to non-parameter bindings cannot \
+                             leave their declaring function.",
+                            src_name
+                        ),
+                    ));
+                }
+            }
             // Refines #8: `return vec();` from a fn whose
             // return type is `Vec<T>` borrows the element type.
             let checked = if let Some(elaborated) = try_elaborate_empty_vec(
@@ -9720,6 +9764,39 @@ fn check_one_stmt(
             // and double-free the heap now owned by the
             // struct's field. Closure #166.
             consume_if_moved_var(value, &value_coerced, env);
+            // L4 (B) Phase 2 (2026-06-08) — scope-escape check
+            // for FieldAssign. When the RHS contains a `ref X`
+            // (or `mut ref X`), X must outlive the binding being
+            // assigned-to (the `object`'s root Var). Otherwise
+            // the stored ref would dangle when X's scope ends.
+            //
+            // Lookup: find the root Var name of `object` (the
+            // struct binding), get its depth via lookup_depth,
+            // then for each ref source in the RHS verify
+            // source.depth ≤ object.depth.
+            if let ExprKind::Var(obj_name) = &object.kind {
+                if let Some(obj_depth) = env.lookup_depth(obj_name) {
+                    let mut ref_sources: Vec<(String, Span)> = Vec::new();
+                    collect_ref_sources_in_expr(value, &mut ref_sources);
+                    for (src_name, ref_span) in &ref_sources {
+                        if let Some(src_depth) = env.lookup_depth(src_name) {
+                            if src_depth > obj_depth {
+                                diagnostics.push(Diagnostic::new(
+                                    *ref_span,
+                                    format!(
+                                        "ref to '{}' (declared in an inner scope) cannot \
+                                         be stored in '{}'s field — the ref would dangle \
+                                         when '{}'s scope ends. Declare '{}' in the same \
+                                         scope as '{}', or copy the underlying value \
+                                         instead of taking a ref.",
+                                        src_name, obj_name, src_name, src_name, obj_name
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
             let mut val_expr = value_coerced.expr;
             inject_branch_drops(&mut val_expr);  // closure #179
             body.push(TypedStmt::FieldAssign {
@@ -10746,6 +10823,127 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
                 "HashMap K or V cannot be a reference type",
             ));
         }
+    }
+}
+
+/// L4 (B) Phase 2 (2026-06-08) — scope-escape analyzer support.
+/// Walks `expr` collecting every `(source_name, span)` pair that
+/// represents a `ref X` / `mut ref X` expression where `X` is a
+/// plain Var. The downstream checks (return / assign) decide
+/// whether each ref's source outlives the destination.
+///
+/// Non-Var refs (`ref obj.field`, `mut ref vec[i]`) are gated by
+/// existing checks (the `ref` checker rejects non-Var/non-field
+/// sources). Field-borrows (`ref t.x`) ARE walked — they create
+/// a ref whose lifetime is bounded by `t`'s, so the source-name
+/// here is `t` (the outer binding).
+///
+/// `skip_call_args` distinguishes the two call-sites of this
+/// helper:
+/// - Return-escape: skip Call/MethodCall args because the ref
+///   is being consumed by the call (the call returns a non-ref
+///   type — rejected at signature otherwise). Only ref-creations
+///   in the "structural" return value count as escapes.
+/// - FieldAssign-escape: same — refs as call args don't end up
+///   in the assigned slot.
+fn collect_ref_sources_in_expr(
+    expr: &Expr,
+    out: &mut Vec<(String, Span)>,
+) {
+    collect_ref_sources_in_expr_impl(expr, true, out);
+}
+
+fn collect_ref_sources_in_expr_impl(
+    expr: &Expr,
+    skip_call_args: bool,
+    out: &mut Vec<(String, Span)>,
+) {
+    fn handle_inner(inner: &Expr, span: Span, out: &mut Vec<(String, Span)>) {
+        match &inner.kind {
+            ExprKind::Var(name) => out.push((name.clone(), span)),
+            ExprKind::FieldAccess { object, .. } => {
+                if let ExprKind::Var(name) = &object.kind {
+                    out.push((name.clone(), span));
+                }
+            }
+            ExprKind::Index { array, .. } => {
+                if let ExprKind::Var(name) = &array.kind {
+                    out.push((name.clone(), span));
+                }
+            }
+            _ => {}
+        }
+    }
+    match &expr.kind {
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            handle_inner(inner, expr.span, out);
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_ref_sources_in_expr_impl(left, skip_call_args, out);
+            collect_ref_sources_in_expr_impl(right, skip_call_args, out);
+        }
+        ExprKind::Unary { expr, .. } | ExprKind::Cast { expr, .. } => {
+            collect_ref_sources_in_expr_impl(expr, skip_call_args, out);
+        }
+        ExprKind::Index { array, index } => {
+            collect_ref_sources_in_expr_impl(array, skip_call_args, out);
+            collect_ref_sources_in_expr_impl(index, skip_call_args, out);
+        }
+        ExprKind::ArrayLit { elements } | ExprKind::Tuple(elements) => {
+            for e in elements { collect_ref_sources_in_expr_impl(e, skip_call_args, out); }
+        }
+        ExprKind::TupleAccess { tuple, .. } => {
+            collect_ref_sources_in_expr_impl(tuple, skip_call_args, out)
+        }
+        ExprKind::Len { array } => {
+            // Len consumes its arg (returns u64) — refs inside
+            // don't propagate to the enclosing value, same as
+            // Call/MethodCall args.
+            if !skip_call_args {
+                collect_ref_sources_in_expr_impl(array, skip_call_args, out);
+            }
+        }
+        ExprKind::FieldAccess { object, .. } => {
+            collect_ref_sources_in_expr_impl(object, skip_call_args, out)
+        }
+        ExprKind::StructLit { fields, .. } => {
+            for (_, v) in fields {
+                collect_ref_sources_in_expr_impl(v, skip_call_args, out);
+            }
+        }
+        ExprKind::Call { args, .. } => {
+            if !skip_call_args {
+                for a in args {
+                    collect_ref_sources_in_expr_impl(a, skip_call_args, out);
+                }
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            // Walk the receiver (it's the "self" being called on);
+            // for refs INSIDE arg expressions, only when not
+            // skipping call args.
+            collect_ref_sources_in_expr_impl(receiver, skip_call_args, out);
+            if !skip_call_args {
+                for a in args {
+                    collect_ref_sources_in_expr_impl(a, skip_call_args, out);
+                }
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_ref_sources_in_expr_impl(scrutinee, skip_call_args, out);
+            for a in arms {
+                collect_ref_sources_in_expr_impl(&a.body, skip_call_args, out);
+            }
+        }
+        ExprKind::IfExpr { cond, then_value, else_value, .. } => {
+            collect_ref_sources_in_expr_impl(cond, skip_call_args, out);
+            collect_ref_sources_in_expr_impl(then_value, skip_call_args, out);
+            collect_ref_sources_in_expr_impl(else_value, skip_call_args, out);
+        }
+        ExprKind::Try { inner } => {
+            collect_ref_sources_in_expr_impl(inner, skip_call_args, out)
+        }
+        _ => {}
     }
 }
 

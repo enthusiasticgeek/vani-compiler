@@ -269,7 +269,7 @@ fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
 
 ## Reference + binding limitations
 
-### L4 — `let` annotation cannot be a reference type (partial lift for v3.1 Task fields)
+### L4 — `let` annotation cannot be a reference type ✅ MOSTLY SHIPPED (Phase 1 + 3 + scope-escape analyzer)
 
 ```vani
 let r: ref Foo = ref some_foo;       // ❌ — let annotation cannot be a reference type
@@ -284,14 +284,35 @@ doesn't have.
 parameters; bind the value first and take `ref` at the call
 site.
 
-**Partial lift shipped 2026-06-08**: synthesized v3.1 Task
-structs (those named `Task__<fn>`) accept `ref Struct` /
-`mut ref Struct` *parameter* types — the field stores a raw
-pointer (`const Struct_X*` in C); lifetime is the caller's
-discipline. This unlocks `async fn fetch(token: ref
-CancelToken)` flowing through v3.1 + A4.4 CancelToken auto-
-plumbing. User-declared structs and `let` bindings still
-reject ref types.
+**Partial lift shipped 2026-06-08 (early session)**: synthesized
+v3.1 Task structs (`Task__<fn>`) accept `ref Struct` /
+`mut ref Struct` parameter types.
+
+**Phase 1 shipped 2026-06-08**: refs in `let` bindings now
+accept. `let r: ref Foo = ref foo;` compiles end-to-end.
+
+**Phase 3 + scope-escape analyzer shipped 2026-06-08**:
+user-declared struct fields can now hold ref types
+(`struct Bag { item: ref Foo }`). The scope-escape analyzer
+catches the new escape vectors:
+- `return Bag { item: ref local };` — REJECTED (local drops on
+  return, leaving the returned Bag with a dangling ref).
+- `bag.item = ref inner_scope_local;` where `bag` is in an
+  outer scope — REJECTED (inner local drops at scope-exit
+  before bag does).
+
+The walker treats Call/MethodCall/Len/Index args as
+"consuming" positions (refs there don't propagate to the
+enclosing value), so `read_bag(ref b)` and `len(ref xs)` in
+return position still pass.
+
+**Phase 4 deferred (Vec<ref T>)**: needs analysis of fn-call
+sites that mutate a Vec (push/insert) to track whether the
+Vec outlives the ref being stored. Out of scope for v1.
+
+**Still rejected**: returning a ref directly (`fn foo() -> ref T`)
+— that's Rust-style lifetime-variable territory (path (C) in
+the design doc). Not blocking any v1 use case.
 
 ### L5 — `let mut x` is not a thing
 

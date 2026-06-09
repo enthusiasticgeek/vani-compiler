@@ -9239,21 +9239,48 @@ mod tests {
     }
 
     #[test]
-    fn l4_b_ref_let_still_rejects_storing_ref_in_struct_field() {
-        // User-declared struct fields still reject ref types
-        // (only synth Task__X structs accept refs today). So
-        // storing a let-bound ref into a struct field hits the
-        // struct decl's own rejection.
+    fn l4_b_phase3_user_struct_ref_field_now_accepted() {
+        // L4 (B) Phase 3 (2026-06-08): user-declared struct
+        // fields can now hold ref types. The escape vector
+        // (returning a struct holding a ref to a local) is
+        // caught by the Stmt::Return scope-escape check (see
+        // `l4_b_phase3_return_with_local_ref_in_struct_is_rejected`
+        // below).
         let source = r#"
             struct Foo { x: i64 }
             struct Bag { item: ref Foo }
+            fn read_bag(b: ref Bag) -> i64 { return b.item.x; }
+            fn main() -> i64 {
+              let f: Foo = Foo { x: 42 };
+              let b: Bag = Bag { item: ref f };
+              return read_bag(ref b);
+            }
+        "#;
+        compile(source).expect("struct with ref field compiles end-to-end");
+        compile_to_c(source).expect("C backend accepts");
+        compile_to_llvm(source).expect("LLVM backend accepts");
+    }
+
+    #[test]
+    fn l4_b_phase3_return_with_local_ref_in_struct_is_rejected() {
+        // Phase 3's accompanying scope-escape check: a fn that
+        // constructs a struct holding a ref to one of its own
+        // locals, then returns the struct, would leak a stale
+        // ref to the caller. Rejected.
+        let source = r#"
+            struct Foo { x: i64 }
+            struct Bag { item: ref Foo }
+            fn make_bag_escape() -> Bag {
+              let local: Foo = Foo { x: 1 };
+              return Bag { item: ref local };
+            }
             fn main() -> i64 { return 0; }
         "#;
-        let err = compile(source).expect_err("user struct ref field must be rejected");
+        let err = compile(source).expect_err("return with local ref must be rejected");
         let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
         assert!(
-            combined.contains("cannot be a reference"),
-            "expected struct-field-ref diagnostic, got: {}",
+            combined.contains("escapes the function via return"),
+            "expected return-escape diagnostic, got: {}",
             combined
         );
     }
