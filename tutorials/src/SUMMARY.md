@@ -30,6 +30,7 @@
 - [Generics and interfaces](intermediate/04_generics_iface.md)
 - [What's a `dyn Iface`? — intuition primer](intermediate/04a_dyn_iface_primer.md)
 - [Interfaces and static dispatch — intuition primer](intermediate/04b_interfaces_primer.md)
+- [Generics and monomorphization — intuition primer](intermediate/04c_generics_primer.md)
 - [Dynamic dispatch: `dyn Iface` + `Vec<dyn Iface>`](intermediate/05_dyn.md)
 - [Closures and iterator combinators](intermediate/06_closures.md)
 - [Tuples and tuple destructure](intermediate/07_tuples.md)
@@ -37,6 +38,7 @@
 - [FFI: `extern "C"` + `--link-with`](intermediate/09_ffi.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
+- [SMT — `requires` / `ensures` intuition primer](intermediate/12a_smt_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 
 # Advanced
