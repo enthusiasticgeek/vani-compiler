@@ -1,0 +1,259 @@
+# Intermediate 10a — Result, `try`, and `?` (intuition primer)
+
+> **Learning goal**: build a mental model of "errors as
+> values" — the alternative to exceptions that vāṇी (and Rust)
+> use. Why this design choice, and how the `try` keyword + `?`
+> operator make it ergonomic in practice. Reading order:
+> [04a dyn primer](04a_dyn_iface_primer.md) and
+> [02_enums_payloads](02_enums_payloads.md) help if you haven't
+> met payloaded enums yet; then this; then
+> [Intermediate 10 Result + try](10_result_try.md).
+
+This chapter has **no compiler code**. Pure intuition.
+
+## The problem: things go wrong
+
+Programs encounter failure constantly:
+- A file you tried to open doesn't exist.
+- A network request timed out.
+- A parser hit malformed input.
+- A division by zero would happen.
+- A division by an unknown value (the caller's input) MIGHT
+  be zero — you don't know yet.
+
+How does a function signal "I couldn't do my job"? Two
+philosophies have dominated:
+
+### Philosophy 1: exceptions (Python, Java, C++, JavaScript)
+
+A failing function "throws". Control flow jumps to whoever
+"catches" it, possibly several call frames up. The normal
+return path is for success; failure is a different return
+path that unwinds the stack until caught.
+
+Pros:
+- Calling code looks clean. Errors handled "out of band".
+- Stack traces are automatic.
+
+Cons:
+- The control flow is invisible at call sites. `f()` MIGHT
+  return, or MIGHT jump to a catch block 5 frames up. You
+  can't tell from reading.
+- Forgotten exceptions become crashes.
+- Exception types are usually weakly typed (any class can be
+  thrown).
+- Hard to optimize — every call is potentially a non-local
+  jump.
+
+### Philosophy 2: errors as values (vāṇी, Rust, Go, Haskell)
+
+A failing function RETURNS a value indicating failure. There's
+no special "throw". The return type carries either a success
+value or an error value.
+
+Pros:
+- All control flow is visible. `f()` returns. Always. The
+  caller decides what to do with the result.
+- Errors are part of the type system — the compiler enforces
+  you handle them.
+- Easy to optimize — no non-local jumps.
+
+Cons:
+- Calling code has to handle the error case at every call. Can
+  be noisy without language support.
+
+vāṇी picks Philosophy 2 and adds **language support** to make
+it ergonomic.
+
+## The shape: `Result<T, E>`
+
+The standard "did it work?" type:
+
+```rust
+enum Result<T, E> {
+  Ok(T),    // success — wraps a T
+  Err(E),   // failure — wraps an E
+}
+```
+
+A function that might fail returns `Result<the-value-it-would-
+have-returned, the-kind-of-error>`:
+
+```rust
+fn parse_int(s: Str) -> Result<i64, ParseError> { ... }
+```
+
+You can't accidentally use the return value as if it were just
+`i64`. The type system forces you to inspect — was it `Ok(n)`
+or `Err(e)`?
+
+## The naive way (without language support)
+
+You inspect every Result with a match:
+
+```rust
+fn pipeline(s: Str) -> Result<i64, ParseError> {
+  let parsed: Result<i64, ParseError> = parse_int(s);
+  let n: i64 = match parsed {
+    Result.Ok(v) then v,
+    Result.Err(e) then return Result.Err(e),   // bail out
+  };
+  let validated: Result<i64, ParseError> = validate(n);
+  let v: i64 = match validated {
+    Result.Ok(v) then v,
+    Result.Err(e) then return Result.Err(e),
+  };
+  return Result.Ok(v * 2);
+}
+```
+
+This works but is repetitive. Every fallible call has the same
+pattern: "if Ok, continue; if Err, bail out propagating the
+error."
+
+## The `try` keyword — sugar for the same pattern
+
+vāṇी's `try EXPR` does exactly what that match does, but
+written once at the call site:
+
+```rust
+fn pipeline(s: Str) -> Result<i64, ParseError> {
+  let n: i64 = try parse_int(s);       // if Err, return it
+  let v: i64 = try validate(n);        // if Err, return it
+  return Result.Ok(v * 2);
+}
+```
+
+`try parse_int(s)` reads: "call parse_int. If it returned
+`Ok(value)`, give me the value. If it returned `Err(e)`,
+return `Err(e)` from the enclosing function immediately."
+
+You can chain `try` over as many fallible calls as you like.
+The code reads as if it were synchronous + success-only —
+because the error path is the same at every step (bail with
+the error).
+
+## The postfix `?` operator
+
+Same meaning as `try`, written as a suffix:
+
+```rust
+fn pipeline(s: Str) -> Result<i64, ParseError> {
+  let n: i64 = parse_int(s)?;          // same as `try parse_int(s)`
+  let v: i64 = validate(n)?;           // same as `try validate(n)`
+  return Result.Ok(v * 2);
+}
+```
+
+`?` is a thin sugar over `try`. Both forms produce identical
+AST. Pick whichever reads better at the call site.
+
+## "Option<T>" — for "absent" rather than "failed"
+
+Sometimes a function might not have a value to return — not
+because something WENT WRONG, but because there's just nothing
+there. Looking up a key in a map; reading the first element of
+a possibly-empty Vec.
+
+```rust
+enum Option<T> {
+  Some(T),
+  None,
+}
+```
+
+`Option<T>` is the simpler cousin of Result. Both support
+`try` and `?` in vāṇी; they propagate "absence" or "failure"
+respectively up the call chain.
+
+## When NOT to use Result
+
+Some operations genuinely can't fail (or fail only in ways that
+indicate compiler/programmer bugs, not runtime conditions).
+For those, return the value directly:
+
+- `len(xs)` returns `u64`, not `Result<u64, _>`. Length is
+  always known.
+- `string + string` returns `OwnedStr`, not `Result<OwnedStr,
+  _>`. Concat can't fail in a normal flow.
+- `xs[i]` returns `T`. Bounds-checked at compile-time when
+  possible; runtime panic for unprovable cases is a
+  programmer bug, not a return-able error.
+
+Result is for *expected* failures — conditions the caller
+should reasonably anticipate and handle: missing files, bad
+input, network outages.
+
+## Pairing with SMT
+
+Sometimes you can ELIMINATE a Result by proving the failure
+case impossible:
+
+```rust
+fn divide(a: i64, b: i64) -> Result<i64, DivisionError>
+  // returns Err(...) when b == 0
+
+fn divide_unchecked(a: i64, b: i64) -> i64
+  requires b != 0;
+  // no Result needed — compiler proves b != 0
+```
+
+The unchecked version takes a `requires` contract. Callers must
+prove (to the SMT solver) that `b` is non-zero. In return, they
+get a plain `i64` — no Result wrapping, no `try`, just the
+value.
+
+This composes beautifully with the contract system from
+chapter [12a SMT primer](12a_smt_primer.md): use contracts for
+"can't happen if the caller is well-behaved", use Result for
+"might happen at runtime depending on data."
+
+## "Why not just return a sentinel like -1?"
+
+Some C APIs use `-1` to mean "error". Why is Result better?
+
+1. **The type system enforces handling.** You can't
+   accidentally use `-1` as a real result; the compiler makes
+   you destructure the Result first.
+2. **Multiple error types**. `Err(NotFound)` vs `Err(Permission
+   Denied)` vs `Err(Timeout)` — each gets a distinct enum
+   variant. Sentinel values run out fast.
+3. **Composability**. `try`/`?` work over any Result. Sentinel
+   conventions don't compose; every API has its own.
+
+## A summary you can carry
+
+- **Errors as values**: failing functions RETURN a Result.
+  Caller inspects the type, handles success vs failure.
+- **`Result<T, E>`** — `Ok(T)` for success, `Err(E)` for
+  failure.
+- **`Option<T>`** — `Some(T)` for present, `None` for absent.
+- **`try EXPR`** — if Ok, give me the value; if Err, return
+  the Err from the enclosing function. Syntactic sugar for a
+  match-then-bail pattern.
+- **`EXPR?`** — postfix form of the same thing. Identical AST.
+- Use Result for **expected, runtime-dependent failures**.
+- Pair with **SMT contracts** to eliminate Results where the
+  failure case can be proven impossible.
+
+This pattern + the SMT pattern (from 12a) are the two halves
+of vāṇी's "compile-time-proves-correctness" + "runtime-explicit-
+handling" story. Together they cover most error scenarios
+without exceptions OR uncaught crashes.
+
+The next chapter ([Intermediate 10](10_result_try.md)) shows
+the full syntax + worked examples.
+
+## Cross-reference
+
+- [Intermediate 10 — Result + try](10_result_try.md) — actual
+  syntax + worked examples
+- [Intermediate 12a — SMT primer](12a_smt_primer.md) — the
+  "compile-time-prove-it-can't-fail" alternative to Result;
+  use both together
+- [Intermediate 2 — Enums with payloads + match arms](02_enums_payloads.md)
+  — Result and Option are payloaded enums; the matching
+  syntax is shared
+- [Intermediate 4c — Generics primer](04c_generics_primer.md)
+  — `Result<T, E>` is a two-parameter generic enum;
+  monomorphization specializes per (T, E) pair used
