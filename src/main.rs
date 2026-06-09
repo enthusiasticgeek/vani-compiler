@@ -742,6 +742,7 @@ USAGE:
 
 COMMANDS:
     check <path>... [--json] [--no-verify] [--smt-debug]
+        [--big-o[=<auto|force|off>]]
                                           Type-check one or more sources.
                                           Paths may be files or directories
                                           (the latter expand recursively to
@@ -758,10 +759,18 @@ COMMANDS:
                                           and z3 response is dumped to
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
+                                          With --big-o[=mode], print a Big-O
+                                          complexity annotation per fn:
+                                          auto (default) skips O(1); force
+                                          includes every fn; off is no-op.
     emit <file.vani> [--backend=<c|llvm>] [-o out]
+        [--big-o[=<auto|force|off>]]
                                           Emit lowered source for a program.
                                           --backend defaults to 'llvm'. Pass
                                           --backend=c for the legacy C output.
+                                          With --big-o, a per-fn complexity
+                                          comment block is prepended to the
+                                          emitted artifact.
     emit-c <file.vani> [-o out.c]       Legacy alias for 'emit --backend=c'.
                                           Kept for back-compat.
     run <file.vani> [--backend=<c|llvm>]
@@ -933,10 +942,30 @@ fn run() -> Result<ExitCode, String> {
             // single `{"diagnostics": [...]}` object so the schema
             // matches the single-file form.
             let mut json = false;
+            let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
             let mut path_args: Vec<String> = Vec::new();
             for arg in args.iter().skip(2) {
                 match arg.as_str() {
                     "--json" => json = true,
+                    // User-direction item (2026-06-08): static
+                    // Big-O annotation per fn. `--big-o` with no
+                    // value defaults to Auto (annotate fns that
+                    // aren't O(1)); `--big-o=force` annotates
+                    // every fn; `--big-o=off` is no-op so users
+                    // can override a config-file enable.
+                    "--big-o" => big_o_mode = Some(vani::big_o::BigOMode::Auto),
+                    s if s.starts_with("--big-o=") => {
+                        let val = &s["--big-o=".len()..];
+                        match vani::big_o::BigOMode::parse(val) {
+                            Some(m) => big_o_mode = Some(m),
+                            None => {
+                                return Err(format!(
+                                    "unknown --big-o mode '{}'; expected auto|force|off",
+                                    val,
+                                ));
+                            }
+                        }
+                    }
                     "--no-verify" => {
                         // Same effect as VANIC_NO_VERIFY=1 (or the
                         // legacy INTENTC_NO_VERIFY=1) — sets the env
@@ -978,9 +1007,30 @@ fn run() -> Result<ExitCode, String> {
 
             for file in &files {
                 match vani::compile_path(file) {
-                    Ok((_checked, _map)) => {
+                    Ok((checked, _map)) => {
                         if !json && files.len() > 1 {
                             println!("ok: {}", file.display());
+                        }
+                        // User-direction item (2026-06-08):
+                        // emit Big-O annotations for this
+                        // file's fns when the flag is set.
+                        // Auto mode skips O(1); force mode
+                        // includes every fn; off mode is
+                        // already filtered above.
+                        if let Some(mode) = big_o_mode {
+                            if mode != vani::big_o::BigOMode::Off {
+                                let annotations = vani::big_o::annotate_program(
+                                    &checked.ir, mode,
+                                );
+                                if !annotations.is_empty() && !json {
+                                    if files.len() > 1 {
+                                        println!("complexity ({}):", file.display());
+                                    }
+                                    for (name, complexity) in &annotations {
+                                        println!("  fn {}: {}", name, complexity);
+                                    }
+                                }
+                            }
                         }
                     }
                     Err((map, diagnostics)) => {
@@ -1059,11 +1109,52 @@ fn run() -> Result<ExitCode, String> {
             // CLI. The legacy alias pins backend=c regardless of flags.
             let cmd_name = args[1].clone();
             let file = required_file(&args, 2, &cmd_name)?;
-            let (backend_kind, out) = parse_emit_args(&args, 3, &cmd_name)?;
+            let (backend_kind, out, big_o_mode) = parse_emit_args(&args, 3, &cmd_name)?;
             let checked = compile_path_or_report(&file)?;
-            let text = match backend_kind {
+            let body = match backend_kind {
                 BackendKind::C => emit_c_via_ssa(&checked.ir),
                 BackendKind::Llvm => emit_llvm_via_ssa(&checked.ir),
+            };
+            // User-direction item (2026-06-08): Big-O comment
+            // block prepended to the emitted artifact when the
+            // flag is set. C uses `//` comments; LLVM IR uses
+            // `;` comments. Auto mode skips O(1) fns; force
+            // includes everything. `off` is a no-op (no
+            // comment block).
+            let text = if let Some(mode) = big_o_mode {
+                if mode == vani::big_o::BigOMode::Off {
+                    body
+                } else {
+                    let annotations =
+                        vani::big_o::annotate_program(&checked.ir, mode);
+                    if annotations.is_empty() {
+                        body
+                    } else {
+                        let comment_lead = match backend_kind {
+                            BackendKind::C => "//",
+                            BackendKind::Llvm => ";",
+                        };
+                        let mut header = String::new();
+                        header.push_str(&format!(
+                            "{} ─── Big-O complexity annotations ({:?} mode) ───\n",
+                            comment_lead, mode,
+                        ));
+                        for (name, complexity) in &annotations {
+                            header.push_str(&format!(
+                                "{} {}: {}\n",
+                                comment_lead, name, complexity,
+                            ));
+                        }
+                        header.push_str(&format!(
+                            "{} ────────────────────────────────────────────────\n\n",
+                            comment_lead,
+                        ));
+                        header.push_str(&body);
+                        header
+                    }
+                }
+            } else {
+                body
             };
             match out {
                 Some(path) => fs::write(&path, text)
@@ -2055,7 +2146,7 @@ fn parse_emit_args(
     args: &[String],
     from: usize,
     cmd_name: &str,
-) -> Result<(BackendKind, Option<PathBuf>), String> {
+) -> Result<(BackendKind, Option<PathBuf>, Option<vani::big_o::BigOMode>), String> {
     // LLVM is now the default — the project's direction is to move
     // away from the C backend. The `emit-c` legacy alias forces C
     // regardless of this default.
@@ -2065,6 +2156,7 @@ fn parse_emit_args(
         BackendKind::Llvm
     };
     let mut out: Option<PathBuf> = None;
+    let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if let Some(value) = arg.strip_prefix("--backend=") {
@@ -2086,11 +2178,27 @@ fn parse_emit_args(
                 .ok_or_else(|| format!("expected a path after '{}'", arg))?;
             out = Some(PathBuf::from(path));
             idx += 2;
+        } else if arg == "--big-o" {
+            big_o_mode = Some(vani::big_o::BigOMode::Auto);
+            idx += 1;
+        } else if let Some(value) = arg.strip_prefix("--big-o=") {
+            match vani::big_o::BigOMode::parse(value) {
+                Some(m) => {
+                    big_o_mode = Some(m);
+                    idx += 1;
+                }
+                None => {
+                    return Err(format!(
+                        "unknown --big-o mode '{}'; expected auto|force|off",
+                        value,
+                    ));
+                }
+            }
         } else {
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((backend, out))
+    Ok((backend, out, big_o_mode))
 }
 
 fn compile_path_or_report(

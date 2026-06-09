@@ -8,6 +8,7 @@ pub mod deviations;
 pub mod hashmap_bundle;
 pub mod diagnostic;
 pub mod diagnostic_elaborations;
+pub mod big_o;
 pub mod safety;
 pub mod stack_depth;
 pub mod format;
@@ -10958,6 +10959,135 @@ fn main() -> i64 {
             !rendered.contains("originally on line"),
             "byte-offset hack still present, got:\n{rendered}"
         );
+    }
+
+    #[test]
+    fn big_o_classifies_trivial_fn_as_constant() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn trivial(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked
+            .ir
+            .functions
+            .iter()
+            .find(|f| f.name == "trivial")
+            .expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Constant);
+    }
+
+    #[test]
+    fn big_o_classifies_single_loop_as_linear() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn one_loop(xs: Vec<i64>) -> i64 {
+              let n: i64 = len(xs) as i64;
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < n {
+                total = total + xs[i as u64];
+                i = i + 1;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "one_loop").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Linear);
+    }
+
+    #[test]
+    fn big_o_classifies_nested_loops_as_polynomial() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn nested(xs: Vec<i64>) -> i64 {
+              let n: i64 = len(xs) as i64;
+              let i: i64 = 0;
+              let total: i64 = 0;
+              while i < n {
+                let j: i64 = 0;
+                while j < n {
+                  total = total + 1;
+                  j = j + 1;
+                }
+                i = i + 1;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "nested").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Polynomial(2));
+    }
+
+    #[test]
+    fn big_o_classifies_sort_as_n_log_n() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn just_sort(xs: Vec<i64>) -> i64 {
+              let _ = sort(mut ref xs);
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "just_sort").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::NLogN);
+    }
+
+    #[test]
+    fn big_o_classifies_self_recursion_as_recursive() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn fact(n: i64) -> i64 {
+              if n <= 1 { return 1; }
+              return n * fact(n - 1);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "fact").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Recursive);
+    }
+
+    #[test]
+    fn big_o_auto_mode_skips_constant_fns_but_force_includes_them() {
+        use crate::big_o::{annotate_program, BigOMode};
+        let source = r#"
+            fn trivial(x: i64) -> i64 { return x + 1; }
+            fn one_loop(xs: Vec<i64>) -> i64 {
+              let n: i64 = len(xs) as i64;
+              let i: i64 = 0;
+              while i < n { i = i + 1; }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+
+        let auto = annotate_program(&checked.ir, BigOMode::Auto);
+        // Auto skips O(1): only one_loop should be in the list.
+        assert_eq!(auto.len(), 1);
+        assert_eq!(auto[0].0, "one_loop");
+
+        let force = annotate_program(&checked.ir, BigOMode::Force);
+        // Force includes every fn including main + trivial.
+        assert_eq!(force.len(), 3);
+        let names: Vec<&str> = force.iter().map(|p| p.0.as_str()).collect();
+        assert!(names.contains(&"trivial"));
+        assert!(names.contains(&"one_loop"));
+        assert!(names.contains(&"main"));
+
+        let off = annotate_program(&checked.ir, BigOMode::Off);
+        assert!(off.is_empty());
     }
 
     #[test]
