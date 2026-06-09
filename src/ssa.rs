@@ -1940,6 +1940,57 @@ fn lower_expr_to_operand(
             Ok(Operand::Value(v))
         }
         TypedExprKind::Binary { op, left, right, .. } => {
+            // 2026-06-09: short-circuit lowering for `&&` and `||`.
+            // Eagerly evaluating both operands as a single Binary
+            // instruction breaks the short-circuit contract — when
+            // the RHS has UB triggers (`a == 0 || b/a > 0` evaluates
+            // `b/a` unconditionally → SIGFPE; same for `||` ladders
+            // gating Vec index ops). Emit a CFG with a merge block
+            // that picks `true` (||) / `false` (&&) on the skip
+            // path and the RHS value on the eval path.
+            if matches!(*op, crate::ast::BinaryOp::Or | crate::ast::BinaryOp::And) {
+                let is_or = matches!(*op, crate::ast::BinaryOp::Or);
+                let l = lower_expr_to_operand(left, b, locals)?;
+                let eval_rhs_bb = b.new_block();
+                let skip_bb = b.new_block();
+                let merge_bb = b.new_block();
+                // Merge block takes the bool result as a parameter.
+                let result_v = b.fresh_value();
+                b.add_block_param(merge_bb, result_v, Type::Bool);
+                // For ||: skip path triggered when LHS is TRUE.
+                // For &&: skip path triggered when LHS is FALSE.
+                let (then_bb, else_bb) = if is_or {
+                    (skip_bb, eval_rhs_bb)
+                } else {
+                    (eval_rhs_bb, skip_bb)
+                };
+                b.terminate(Terminator::Branch {
+                    cond: l,
+                    then_block: then_bb,
+                    then_args: Vec::new(),
+                    else_block: else_bb,
+                    else_args: Vec::new(),
+                });
+                // skip path: yield the short-circuit constant.
+                b.set_current(skip_bb);
+                let short_value = Operand::Const(Const::Bool(is_or));
+                b.terminate(Terminator::Jump {
+                    target: merge_bb,
+                    args: vec![short_value],
+                });
+                // eval path: actually compute the RHS, then jump
+                // to merge with its value.
+                b.set_current(eval_rhs_bb);
+                let r = lower_expr_to_operand(right, b, locals)?;
+                b.terminate(Terminator::Jump {
+                    target: merge_bb,
+                    args: vec![r],
+                });
+                // Continue lowering in the merge block; the
+                // block's parameter holds the short-circuit result.
+                b.set_current(merge_bb);
+                return Ok(Operand::Value(result_v));
+            }
             let l = lower_expr_to_operand(left, b, locals)?;
             let r = lower_expr_to_operand(right, b, locals)?;
             // Str/OwnedStr `+` concat: tree backends lower
