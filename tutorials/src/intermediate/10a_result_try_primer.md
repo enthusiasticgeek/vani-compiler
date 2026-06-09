@@ -257,3 +257,7 @@ the full syntax + worked examples.
 - [Intermediate 4c — Generics primer](04c_generics_primer.md)
   — `Result<T, E>` is a two-parameter generic enum;
   monomorphization specializes per (T, E) pair used
+- [Intermediate 10b — Runtime errors + panic-free design](10b_runtime_errors_primer.md)
+  — when to reach for Result/? vs. `assert` / contracts;
+  the segfault-free guarantee; what hits `abort` and what
+  doesn't

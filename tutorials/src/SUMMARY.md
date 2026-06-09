@@ -46,6 +46,7 @@
 - [FFI: `extern "C"` + `--link-with`](intermediate/09_ffi.md)
 - [Result, `try`, and `?` — intuition primer](intermediate/10a_result_try_primer.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
+- [Runtime errors, panic-free design, the segfault-free guarantee — intuition primer](intermediate/10b_runtime_errors_primer.md)
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
 - [SMT — `requires` / `ensures` intuition primer](intermediate/12a_smt_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
