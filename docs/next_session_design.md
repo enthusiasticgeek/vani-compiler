@@ -1,15 +1,23 @@
 # Next-session design notes: liveness optimization + L4 (B)
 
-**Status**: scaffolded 2026-06-08, end of multi-arc session. Two
-substantive items queued for a fresh session with cold context.
-Read these notes BEFORE starting either — they capture the
-investigation already done so the fresh session doesn't re-trace
-the same exploration.
+**Status (updated 2026-06-08, late session)**:
+  - Item 1 — liveness optimization → ✅ SHIPPED (commit `2a693fb`)
+  - Item 2 — L4 (B) Phase 1 → ✅ SHIPPED (commit `229852b`).
+    Phases 3+4 still queued; require the scope-escape analyzer
+    that Phase 1 was able to skip.
 
-Both pieces were investigated in detail during the 2026-06-08
-session but deferred because the session was already at 19
-commits / heavy context. The work is well-scoped enough to ship
-cleanly in a fresh session.
+Investigation 2026-06-08 (late session) showed:
+- Phase 1 (let-binding refs) was safer than the design anticipated:
+  every escape vector still had a type-level reject, so Phase 1
+  shipped WITHOUT the analyzer.
+- Phases 3+4 LIFT two of those receiver rejections (struct field +
+  Vec element), so they DO need the analyzer the design originally
+  anticipated for Phase 2.
+
+The remainder of this doc retains the original investigation
+notes for reference. The Item-1 + Item-2-Phase-1 sections are
+"done" markers; the Phase 3+4 + analyzer sketch is still
+load-bearing for the next session.
 
 ---
 
