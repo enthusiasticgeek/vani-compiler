@@ -20,6 +20,83 @@ share an identical AST and runtime model; nothing about the
 Devanagari support changes how the English-default experience
 works.
 
+---
+
+## Table of Contents
+
+This README is organized in eight parts. Read top to bottom for
+a full picture, or jump straight to the part you need.
+
+**Part I — Orientation.** What vāṇी is and why it exists.
+  - Philosophy
+  - Feature set (closure-by-closure ledger, 2026)
+
+**Part II — Quick Language Tour.** Terse reference for everything
+the language can do, before the chapters go deep.
+  - Language Snapshot — translation tables vs Rust/C++,
+    Devanagari notation, mini-tour by feature
+
+**Part III — Memory Safety, Ownership & Concurrency.** What the
+compiler guarantees and what falls inside `unsafe`.
+  - Memory safety & concurrency model — compile-time
+    guarantees, safety net, smart pointers, cyclic data
+    structures, embedded position, examples-the-compiler-
+    rejects, known gaps
+
+**Part IV — Language Reference.** Depth for every primitive and
+construct. Use as a lookup, in order.
+  - Integer rules
+  - Float rules
+  - Casts
+  - Shift and bitwise rules
+  - Numeric literals
+  - Arrays and ownership
+  - Vectors
+  - Strings
+  - References
+  - Control flow + scoping
+  - Mutable references and indexed writes
+  - SMT verification — `requires` / `ensures` / `assert` /
+    `prove` / loop invariants / overflow reasoning / assert
+    messages / discard pattern / multi-file projects
+  - Modules and namespaces
+  - Effects, ownership, and parallelism
+
+**Part V — Tooling.** Commands + editor integration + build
+pipeline.
+  - Commands — build / run / check / emit / fmt / ast / LSP
+  - Build pipeline + linking
+  - Debug subcommands
+  - LSP integration
+  - JSON diagnostics
+
+**Part VI — Design Philosophy & Comparisons.** Why the design is
+the way it is.
+  - Composition over inheritance — `dyn Iface` as escape hatch
+  - `try` as a value-flow shortcut, not an exception system
+  - Data structures + algorithms — affine-first roadmap
+  - Current limitations (cross-link to `docs/v1_limitations.md`)
+  - Why Rust (for the compiler core)
+
+**Part VII — Roadmap & Status.** Where the project is and where
+it's going.
+  - Roadmap — small items, multi-session items
+
+**Part VIII — Community.** How to participate.
+  - Contributing
+  - Language targeting (Indian subcontinent → global)
+  - License + trademark
+
+> Tutorials live under [`tutorials/`](tutorials/). 20+ intuition
+> primers + the formal Beginner / Intermediate / Advanced tracks.
+> Limitations are catalogued at [`docs/v1_limitations.md`](docs/v1_limitations.md).
+> The closure-by-closure ledger lives at [`STATUS.md`](STATUS.md).
+> The active task queue is [`TODO.md`](TODO.md).
+
+---
+
+# Part I — Orientation
+
 ## Philosophy
 
 vāṇī is a small systems language **inspired by Rust and C/C++** in
@@ -309,6 +386,561 @@ on the same day:
 - **Arc 8 v3.1 caveats remaining (of 15)**: only #2 (liveness
   polish) and #15 (test surface polish). The compiler-driven
   async transform is now genuinely feature-complete for v1.
+
+
+
+---
+
+# Part II — Quick Language Tour
+
+## Language Snapshot
+
+```intent
+intent "Compute a value with checked constraints";
+
+fn add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+fn main() -> i64 {
+  let answer = add(40, 2);
+  prove 2 + 2 == 4;
+  assert answer >= 0;
+  print answer;
+  return 0;
+}
+```
+
+Read it aloud: *"function add takes a and b of type int-64, returns int-64;
+return a + b."* The source reads left-to-right at speaking pace.
+
+### Translation from Rust / C++ punctuation
+
+vāṇī keeps the **semantic model** of Rust / C++ (static types, affine
+ownership, monomorphized generics, references with explicit `mut`)
+but replaces the punctuation soup with keywords. Most of the column
+on the left will compile on the right with identical generated code:
+
+| Rust / C++ | vāṇī | Notes |
+|---|---|---|
+| `&xs` (shared borrow) | `ref xs` | second-class, param-only |
+| `&mut xs` (mut borrow) | `mut ref xs` | same semantics |
+| `fn(&self)` | `fn name(self: ref Type)` | receiver is explicit |
+| `Vec::with_capacity(n)` | `vec_with_capacity(n)` | free function — no path |
+| `impl Drop for T` | `implement Drop for T` | auto-called at scope exit |
+| `match Some(x) => …` | `match Opt.Some(x) then …` | `then` instead of `=>` |
+| `xs?` (try operator) | `try expr` *or* `expr?` | both spellings share one AST node |
+| `loop { … }` | `while true { … }` | one looping construct |
+| `for x in &xs` | `for x in ref xs` | borrow at the loop header |
+| `mod foo { … }` | `module foo { … }` | `mod` accepted as alias |
+| `pub(crate) fn …` | `pub(kosh) fn …` | कोश = "treasure / repository" |
+| `pub use foo::bar;` | `pub use foo::bar;` | re-exports through current module |
+| `use foo::*;` (glob) | `use foo::*;` | direct children only, non-transitive |
+| `let x = …` | `let x = …` *or* `assign x = …` | aliases pick tone |
+| `return x` | `return x` / `give x` / `give_back x` / `give back x` | all canonical |
+
+The compiler never silently changes the meaning of source. Aliasing,
+ownership transfer, and pure-vs-effectful boundaries are all visible
+in the words on screen — surface aliases never relax a check.
+
+### Deterministic output, multiple ways to spell it
+
+Every alias resolves to the same `TokenKind` at the lexer boundary,
+so the AST is identical regardless of which spelling the user picked.
+The checker, SMT layer, SSA pass, and backends all see the same IR.
+Two source files that differ only in alias choice produce
+**byte-identical LLVM IR / C** (after `intentc fmt` re-emits to a
+canonical form). The same program in English vs Hindi vs Sanskrit
+runs the same instructions on the same target.
+
+### वाणी (*vāṇī*) — Devanagari notation (Phase 2 shipped)
+
+Devanagari notation lets the source read in the writer's mother tongue.
+The first three languages are **Sanskrit** (*saṁskṛta* — the canonical
+Devanagari language and grammar root), **Hindi** (*hindī*), and **Marathi**
+(*marāṭhī*). They share the script but use slightly different verbs for
+the common keywords. The idea is **alias-based**: every English keyword
+gets one or more Devanagari aliases, and the lexer accepts whichever form
+the source file uses. A single program may mix forms freely; the compiler
+treats them as the same token.
+
+**Phase 1** (closures #235–#237) shipped single-word Devanagari
+aliases for the core control / declaration keywords plus multi-word
+phrases like `नहीं तो` (else), `के लिए` (for), `सिद्ध करो` (prove) —
+fused by a post-lex merger. Per-file script purity (English vs
+Devanagari) is enforced automatically: the first structure keyword
+sets the script, and the lexer rejects mixing thereafter
+([lexer.rs:393–441](src/lexer.rs#L393-L441)). No header opt-in
+required.
+
+**Phase 2** (closures #265–#267) added two ergonomic features:
+
+1. **SOV word order (partial).** Indo-Aryan grammar is verb-final
+   (postpositions follow the noun). The parser accepts the
+   natural shape `i के लिए 0 से 5 तक { … }` (range for) and
+   `X पुनरागम;` / `"x =", x लिखो;` / `cond सुनिश्चित;` /
+   `expr प्रमाण;` (return / print / assert / prove with the
+   verb at the end). The English keyword-first order still works
+   — the SOV detector only fires when the leading token isn't
+   a verb-keyword.
+2. **3-way alias parity.** Sanskrit / Hindi / Marathi each have a
+   viable form for ~41 of 45 structure keywords (else `वरना`,
+   mut `परिवर्तनीय`, continue `अग्रे`, pub `सार्वजनिक`, module
+   `खण्ड` / `मॉड्यूल`, use `उपयोग`, as `यथा`, where `यत्र` /
+   `जहाँ` / `जिथे`, is `अस्ति` / `है` / `आहे`, plus interface
+   / implement / methods / try / task / join / parallel single-
+   word). Sanskrit-root words that work as tatsama (loanwords)
+   in Hindi + Marathi are documented as shared across the three.
+
+> **What "partial" actually means (honest status 2026-06-06)**:
+> SOV is wired for **range `for` + four verb-at-end statements**
+> (`return` / `print` / `assert` / `prove`). Most constructs —
+> `let`, `fn`, `struct`, `enum`, `if`, `while`, `match`, top-level
+> declarations — **still require keyword-first syntax even in
+> Devanagari mode**. A "code as you speak" experience for full
+> programs (verb-final everywhere, postpositions everywhere) is the
+> next milestone, not a shipped one. See [TODO.md](TODO.md)
+> §*Sanskrit-derived SOV completion*.
+
+**Still queued**:
+- Full SOV coverage across the remaining ~10 statement categories
+  (`let`-binding verb-at-end, `if`/`while` cond-at-end with
+  postposition, `fn` declaration with verb-at-end signature, struct
+  / enum decl SOV-shape, match-arm SOV shape).
+- Four English-only keywords gain Devanagari aliases: `extern`,
+  `type`, `intent`, `invariant`.
+- Finer-grained Sanskrit-vs-Hindi-vs-Marathi purity gate (today
+  it's only English-vs-Devanagari at the script level).
+- Grammar-consultant refinement pass — Phase-2 picks are best-
+  effort and welcome dialect-specific revision.
+- **Cross-language `.vani` source translator** (planned tool):
+  one-shot rewrite of a program's keywords between English /
+  Sanskrit / Hindi / Marathi so a user can read someone else's
+  source in their preferred dialect without losing semantics.
+- **Examples reorganization**: each script gets its own subfolder
+  under `examples/language/` (`english/`, `sanskrit/`, `hindi/`,
+  `marathi/`) and every Devanagari example begins with a
+  `श्री।` invocation comment (pūrṇa daṇḍa terminator) per the
+  classical convention.
+
+Romanizations follow **IAST** (International Alphabet of Sanskrit
+Transliteration) for Sanskrit and a Hunterian-style transliteration for
+Hindi / Marathi where IAST conventions diverge from spoken pronunciation
+(e.g. word-final `अ` is dropped in Hindi/Marathi but retained in
+Sanskrit). Where a vowel has both forms, the spoken form is shown.
+
+Conceptual sketch of what the same program might look like in each:
+
+```intent
+// English
+fn add(a: i64, b: i64) -> i64 { return a + b; }
+
+// संस्कृत (saṁskṛta — Sanskrit): verbs from classical Sanskrit grammar
+कार्य add(a: i64, b: i64) -> i64 { पुनरागम a + b; }
+// kārya add(a: i64, b: i64) -> i64 { punarāgama a + b; }
+
+// हिन्दी (hindī — Hindi): common spoken Hindi verbs
+फलन add(a: i64, b: i64) -> i64 { लौटाओ a + b; }
+// phalan add(a: i64, b: i64) -> i64 { lauṭāo a + b; }
+
+// मराठी (marāṭhī — Marathi): Marathi verbs
+कार्य add(a: i64, b: i64) -> i64 { परत a + b; }
+// kārya add(a: i64, b: i64) -> i64 { parat a + b; }
+```
+
+The complete alias table below gives **every English keyword** in
+its Devanagari spelling + romanization for each of the three
+shipped Indo-Aryan dialects. **100% coverage**: 46 of 46 structure
+keywords have at least one Devanagari alias.
+
+> **Reading order**: Romanizations follow IAST (International
+> Alphabet of Sanskrit Transliteration). Read each cell aloud —
+> that's the pronunciation contract.
+
+### Declarations + visibility
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `fn` | `कार्य` *kārya* | `फलन` *phalan* | `कार्य` *kārya* |
+| `let` / `assign` | `माना` *mānā* | `माना` *mānā* | `मान` *māna* |
+| `struct` | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* |
+| `enum` | `विकल्प` *vikalpa* | `गणन` *gaṇan* | `गणन` *gaṇan* |
+| `const` | `स्थिर` *sthira* | `स्थिर` *sthira* | `स्थिर` *sthira* |
+| `type` | `प्रकार` *prakāra* | `प्रकार` *prakāra* | `प्रकार` *prakāra* |
+| `intent` | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* |
+| `extern` | `बाह्य` *bāhya* | `बाह्य` *bāhya* | `बाह्य` *bāhya* |
+| `pub` / `public` | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* |
+| `module` / `mod` | `खण्ड` *khaṇḍa* | `मॉड्यूल` *mōḍyūla* | `मॉड्यूल` *mōḍyūla* |
+| `use` | `उपयोग` *upayog* | `उपयोग` *upayog* | `उपयोग` *upayog* |
+| `as` | `यथा` *yathā* | `यथा` *yathā* | `यथा` *yathā* |
+
+### Control flow
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `return` / `give` / `give_back` | `पुनरागम` *punarāgama* | `लौटाओ` *lauṭāo* | `परत` *parat* |
+| `if` | `यदि` *yadi* | `अगर` *agar* | `जर` *jar* |
+| `else` | `अन्यथा` *anyathā* | `वरना` *varnā* / `नहीं तो` *nahīṁ to* | `नाहीतर` *nāhītar* |
+| `while` | `यावत्` *yāvat* | `जबतक` *jab tak* | `जोपर्यंत` *jopa­ryanta* |
+| `for` | `प्रति` *prati* | `के लिए` *ke liye* | `साठी` *sāṭhī* |
+| `in` | `में` *meṁ* | `में` *meṁ* | `में` *meṁ* |
+| `from` | `से` *se* | `से` *se* | `से` *se* |
+| `to` | `तक` *tak* | `तक` *tak* | `तक` *tak* |
+| `break` | `विराम` *virāma* | `रुको` *ruko* | `थांब` *thāmba* |
+| `continue` | `अग्रे` *agre* | `आगे` *āge* | `पुढे` *puḍhe* |
+| `then` | `तदा` *tadā* | `तो` *to* | `तर` *tar* |
+| `match` | `मेल` *mela* | `मिलान` *milān* | `जुळवा` *juḷvā* |
+
+### References + mutation
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `ref` | `दृष्ट्या` *dṛṣṭyā* | `देखो` *dekho* | `पहा` *pahā* |
+| `mut` | `परिवर्तनीय` *parivartanīya* | `परिवर्तनीय` *parivartanīya* | `बदल` *badla* |
+
+### Verification (SMT-discharged)
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `assert` | `सिद्धम्` *siddham* | `सुनिश्चित` *sunishchit* | `खात्री` *khātrī* |
+| `prove` | `प्रमाण` *pramāṇa* / `सिद्ध` *siddha* | `सिद्ध करो` *siddha karo* / `प्रमाणित` *pramāṇita* | `सिद्ध करा` *siddha karā* / `दाखवा` *dākhvā* |
+| `requires` | `अपेक्षित` *apekṣita* | `चाहिए` *cāhiye* | `पाहिजे` *pāhije* |
+| `ensures` | `सुनिश्चयित` *sunishchayita* | `निश्चित` *nishchit* | `निश्चित` *nishchit* |
+| `invariant` | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* |
+
+### Booleans + I/O
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `true` | `सत्य` *satya* | `सत्य` *satya* / `सही` *sahī* | `सत्य` *satya* / `सही` *sahī* |
+| `false` | `असत्य` *asatya* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* |
+| `print` / `write` | `लिख` *likh* | `लिखो` *likho* | `लिखो` *likho* |
+
+### Concurrency + parallelism
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `pure` | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* |
+| `parallel` | `समानांतर` *samānāntara* / `समान्तर प्रति` *samāntara prati* | `समानांतर` *samānāntara* | `समानांतर` *samānāntara* |
+| `reduce` | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* |
+| `with` | `सह` *saha* | `सह` *saha* | `सह` *saha* |
+| `task` | `नियोग` *niyog* | `नियोग` *niyog* | `नियोग` *niyog* |
+| `join` | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* |
+| `try` | `प्रयास` *prayās* | `प्रयास` *prayās* | `प्रयास` *prayās* |
+
+### Interfaces, generics, embedded
+
+| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
+|---|---|---|---|
+| `interface` / `trait` | `संकेत` *saṅket* / `अंतरापृष्ठ` *antarāpṛṣṭha* | `संकेत` *saṅket* | `संकेत` *saṅket* |
+| `implement` / `impl` | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* |
+| `methods` | `विधि` *vidhi* | `विधि` *vidhi* | `विधि` *vidhi* |
+| `where` | `यत्र` *yatra* | `जहाँ` *jahām̐* | `जिथे` *jithe* |
+| `is` | `अस्ति` *asti* | `है` *hai* | `आहे` *āhe* |
+| `unsafe` | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* |
+| `region` | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* |
+
+### SOV (Subject-Object-Verb) statement shapes
+
+When the user opts into Sanskrit / Hindi / Marathi grammar
+naturally, vāṇी accepts **verb-at-end SOV order** for these
+common shapes alongside the keyword-first English order:
+
+| Construct | Keyword-first | SOV verb-at-end |
+|---|---|---|
+| `let` | `माना x: i64 = 5;` | `x: i64 = 5 माना;` |
+| `return` | `पुनरागम x;` | `x पुनरागम;` |
+| `print` | `लिख x;` | `x लिख;` |
+| `assert` | `सिद्धम् cond;` | `cond सिद्धम्;` |
+| `prove` | `प्रमाण expr;` | `expr प्रमाण;` |
+| range `for` | (no English shape) | `i प्रति 0 से 3 तक { ... }` |
+| `if` / `else` | `यदि cond { ... }` | `cond यदि { ... } अन्यथा { ... }` |
+| `while` | `यावत् cond { ... }` | `cond यावत् { ... }` |
+
+Top-level declarations (`fn` / `struct` / `enum`) read naturally
+keyword-first in Indo-Aryan grammar; SOV reshape there would feel
+forced and is intentionally not supported. `match` SOV is available
+inside SOV-let (`let r: T = scrutinee match { ... } माना;`).
+
+### Per-file dialect purity (opt-in)
+
+Drop a `// vani-lang: <sanskrit|hindi|marathi|english>` comment in
+the first 10 lines of any `.vani` file to enforce single-dialect
+purity. The lexer then rejects any keyword spelling not native to
+the declared dialect. Without the pragma, the existing script-
+level English-vs-Devanagari gate still applies (back-compat).
+
+The pragma also turns on **dialect-aware error rendering**:
+diagnostics emit their `error:` / `note:` labels in the declared
+dialect (Sanskrit `त्रुटिः`, Hindi `त्रुटि`, Marathi `चूक`), and
+the leading prefix of the most common error families translates
+to the dialect (e.g. `unknown variable` → `अज्ञातं चरम्` in
+Sanskrit). The English wording is retained after the dialect
+phrase so search-engine queries and existing documentation still
+match.
+
+### Devanagari numerals, type names, identifiers
+
+Inside a `.vani` source file, every category of token can be
+Devanagari:
+
+- **Numerals**: integer + float literals accept Devanagari digits
+  `०१२३४५६७८९` (U+0966–U+096F). `५ * २` parses as `5 * 2`; `३.१४`
+  parses as the f64 `3.14`. Mixed ASCII / Devanagari digits in
+  the same literal are NOT supported (pick one per number).
+- **Type names**: `पूर्णांक` (i64), `दशांश` (f64), `तर्क` (bool),
+  `सूची` (Vec), `पूर्णांक८/१६/३२/६४` (i8/i16/i32/i64 width-
+  explicit), `अहस्ताक्षरित८/.../६४` (u8..u64 unsigned). All are
+  Sanskrit-root tatsama forms working as loanwords in Hindi +
+  Marathi, so a single Devanagari spelling works across all
+  three dialects.
+- **Identifiers**: user-defined function / variable / struct /
+  field names accept any Devanagari letter. The LLVM backend
+  mangles non-ASCII names to `_uHHHH` per codepoint behind the
+  scenes (e.g. `द्विपदगुणक` → `_u0926...`); the C backend uses
+  the UTF-8 bytes directly (gcc / clang accept UTF-8 in
+  identifiers natively).
+
+A fully-Devanagari program is now possible — see
+[`examples/language/sanskrit/pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani)
+for a complete Pascal's-triangle-row example using Sanskrit
+keywords + Sanskrit identifiers + Sanskrit comments + Devanagari
+numerals + SOV verb-at-end statements + function-level
+`अपेक्षित` (requires) contracts. The reading experience is meant
+to feel like Sanskrit prose with the verb closing each clause —
+not a transliterated English program.
+
+Pronunciation guide for the diacritics used in the romanizations:
+
+| Mark | Roman | Sound | Example |
+|---|---|---|---|
+| ā | long-a | as in *father* | *kārya* = "kaar-yuh" |
+| ī | long-i | as in *machine* | *vāṇī* = "vaa-nee" |
+| ū | long-u | as in *rule* | *mūla* = "moo-luh" |
+| ṛ | retroflex r | rolled tongue tip | *kṛṣṇa* = "krish-nuh" |
+| ṇ | retroflex n | tongue against palate | *vāṇī* = "vaa-NEE" |
+| ṭ / ḍ | retroflex t / d | tongue curled back | *paṭha* = "pa-tha" |
+| ś / ṣ | sh-sounds | as in *shoe* / *bush* | *kṛṣṇa* = "krish-nuh" |
+| ñ | palatal n | as in *canyon* (ny) | *jña* = "gya" |
+| ṁ / ṃ | anusvāra | nasalizes preceding vowel | *saṁskṛta* = "sun-skrit" |
+| ḥ | visarga | soft h-release | *namaḥ* = "nam-ah" |
+
+A short worked example: the project name **वाणी** romanizes to **vāṇī**,
+read as "vaa-NEE" — long-a, retroflex-n, long-i. The acronym **VANI**
+keeps the same three syllables but drops the diacritics for ASCII use.
+
+The actual keyword mapping will be finalized with grammar consultants for
+each language so the verbs feel idiomatic and unambiguous in context.
+Mixing scripts in the same file is supported by design — a student can
+write the keywords in Devanagari and the identifiers in English, or vice
+versa.
+
+Supported today (800 lib + 47 e2e tests passing):
+
+### Types
+- Scalars: `i8`/`i16`/`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `f32`/`f64`, `bool`
+  (all `Copy`).
+- Strings: `Str` (borrowed C-string, `Copy`, `==`/`!=`/`<`/`<=`/`>`/`>=` via
+  strcmp), `OwnedStr` (heap, affine, produced by `+` concat).
+- Fixed-size stack arrays `[T; N]` (affine) with `xs[i]` and `len(xs)`.
+- Heap-allocated `Vec<T>` (affine) with `vec(...)`, `push` / `set` / `clone`,
+  `len`, indexing, `clone_at(ref xs, i)` for non-Copy slot reads. Empty
+  `vec()` is supported. `Vec<Vec<T>>` and `Vec<Struct>` work. `push` has
+  two forms: `push(xs: Vec<T>, v) -> Vec<T>` (consuming) and
+  `push(xs: mut ref Vec<T>, v) -> i64` (in-place, returns the new length —
+  useful through a struct field). See
+  [examples/push_mut.vani](examples/push_mut.vani).
+- Tuples `(T1, T2, ...)` (n in 2..=4) with `.0` / `.1` access; destructure
+  `let (a, b) = expr;`.
+- Structs `struct Point { x: i64, y: i64 }` with up to 64 fields; field access
+  `p.x` and field assign `p.x = v;`.
+- Enums: `enum Color { Red, Green, Blue }`. Payloaded variants `enum Opt
+  { Some(i64), None }` work in both backends — tagged-union codegen lays
+  them out as `{ i32 tag, T payload }`. Match destructure
+  `Opt.Some(v) then …` binds the payload into the arm scope. V1 limits
+  payloads to single Copy fields per variant + uniform payload type
+  across variants. See [examples/option_types.vani](examples/option_types.vani).
+- Type aliases: `type Coord = (i64, i64);`, `type X = i64;`.
+- Constants: `const ANSWER: i64 = 42;` — literal initializers only in v1.
+
+### References (second-class, keyword-first)
+- `ref T` (shared) and `mut ref T` (mutable) — parameter types only;
+  borrow at call sites with `ref xs` / `mut ref xs`. No reference returns,
+  let-bindings, or aggregate elements. Aliasing rejected.
+- Indexed write `xs[i] = v;` works on owned `[T;N]` / `Vec<T>` and through
+  `mut ref` parameters.
+- Auto-deref for indexing and method dispatch.
+
+### Functions, methods, and dispatch
+- Functions `fn add(a: i64, b: i64) -> i64 { … }`; pure-fn marker
+  `pure fn …` for SMT-callable helpers.
+- `methods on T { fn m(self: T) -> R { … } }` blocks. Receivers must be
+  `self: T` / `self: ref T` / `self: mut ref T` (keyword-first; `&self`
+  rejected). Method dispatch via `recv.method(args)` with auto-ref.
+- First-class fn-pointers `fn(T1, ...) -> R` with `FnRef` + indirect call.
+- Discarded call statements: `x.bump();` / `foo();` are sugar for
+  `let _ = …;` (must be a `Call`/`MethodCall`).
+
+### Control flow + expressions
+- `if`/`else`/`else if` chains as statements OR single-expression form
+  `if cond { e1 } else { e2 }` (both branches must unify).
+- `while cond invariant inv1; invariant inv2; { … }`.
+- `for i from lo to hi invariant inv; { … }`, `for x in ref xs { … }`,
+  `for x in xs { … }` (consuming).
+- `break;` / `continue;`, `assert cond[, "msg"]`, `prove`, `print` (multi-item).
+- `match scrutinee { Color.Red then expr, … }` — exhaustive over enum
+  variants; integer-literal patterns, `_` wildcard, and **payloaded variant
+  destructure** `Opt.Some(v) then …` all supported. Bool / Str / float
+  scrutinee patterns are gated.
+- **Block expressions** `let r = { let a = …; let b = …; a + b };` — Let
+  stmts followed by a tail expression. Inner shadows don't leak.
+- **`try EXPR` / `EXPR?`** — Option/Result-like error-propagation sugar.
+  In a function whose return type is a payloaded enum, both
+  `let v: T = try opt;` and `let v: T = opt?;` extract the payload or
+  short-circuit the function with the payload-less variant. The postfix
+  `?` form is pure parse-time sugar — it builds the same `ExprKind::Try`
+  AST node, so narrow-gate restrictions (let-try as first stmt,
+  intermediate lets, return) apply identically. See
+  [examples/language/english/try_keyword.vani](examples/language/english/try_keyword.vani) (keyword form)
+  and [examples/language/english/try_question_op.vani](examples/language/english/try_question_op.vani) (`?` form).
+- Short-circuit `&&` and `||` honor compile-time const folding —
+  `false && (provably-bad)` and `true || (provably-bad)` compile cleanly.
+- Lexical scoping: inner `let x` shadowing of an outer same-name binding
+  is contained to the inner scope (cross-type shadow allowed).
+
+### Generics & interfaces
+- **Generic functions** `fn id<T>(x: T) -> T { return x; }` —
+  monomorphized at compile time. The pre-pass walks call sites, infers
+  T from the first literal argument (v1 restriction), and generates a
+  specialized copy per concrete type (`id__i64`, `id__bool`, …). The
+  original generic template is dropped before codegen sees it. See
+  [examples/generic_functions.vani](examples/generic_functions.vani).
+  V1 limits: single type parameter, body must be type-correct without
+  knowing T (pass-through patterns).
+- **Interfaces** `interface Show { fn show(self: T) -> R; }` + `implement
+  Show for Point { fn show(self: Point) -> R { … } }` — static dispatch
+  via `recv.show()`. The impl hoists to `T_show`; the existing method-
+  dispatch path resolves the call at compile-time based on the receiver's
+  type. V1 limits: static dispatch only (no vtables); each impl must cover
+  every interface method; signatures must match exactly. See
+  [examples/interfaces.vani](examples/interfaces.vani).
+- **Drop interface** `implement Drop for T { fn drop(self: T) -> i64 { … } }`
+  — auto-called at every scope exit where a non-moved binding of T goes
+  out of scope. Users can also call `t.drop()` manually; affine tracking
+  marks the binding as moved so the auto-call won't double-fire. When T
+  has heap-shaped fields (OwnedStr / Vec), the per-field free pass runs
+  instead (the user's drop is then invoked explicitly when richer
+  behavior is needed). See
+  [examples/drop_interface.vani](examples/drop_interface.vani).
+- **Mixed-place assignment** — `xs[i].field = v;` and the deeper
+  `xs[i].a.b = v;` write through an index plus a struct field path in
+  one statement. Works on owned `Vec<T>` and `[T; N]`. Intermediate
+  segments must be Copy structs. The leaf field may be Copy OR a
+  heap-shaped type (`OwnedStr` / `Vec<T>`) — when the leaf is heap-
+  shaped, both backends free the previous slot value before storing
+  the new one, so the old allocation does not leak. See
+  [examples/mixed_place_assign.vani](examples/mixed_place_assign.vani).
+- **Partial-move tracking** — `let taken = bag.contents;` moves a single
+  field out of a struct. The aggregate is still readable for its other
+  fields; scope-exit Drop skips the moved field (no double-free); a
+  second read of the moved field surfaces a use-after-move diagnostic.
+  See [examples/partial_move.vani](examples/partial_move.vani).
+- **User-defined `==` via `implement Eq for T`** — `a == b` and `a != b`
+  on struct or enum bindings desugar to the hoisted `<T>_eq(a, b)` /
+  `!<T>_eq(a, b)` whenever both sides are the same nominal type.
+  Convention is `fn eq(self: T, other: T) -> bool`. See
+  [examples/struct_eq.vani](examples/struct_eq.vani) and
+  [examples/enum_eq.vani](examples/enum_eq.vani).
+- **Tuple auto-equality** — tuples are anonymous, so `==` is
+  compiler-derived: `(a, b) == (c, d)` rewrites to `a == c && b == d`.
+  Each per-element comparison uses the element type's `==` rule
+  (built-in for primitives, `<T>_eq` for nominal element types). See
+  [examples/tuple_eq.vani](examples/tuple_eq.vani).
+- **Field-borrow expressions** — `ref t.f` and `mut ref t.f` take a borrow
+  of a struct field. The result type is `&<field_ty>` / `&mut <field_ty>`;
+  backends GEP into the struct's storage. Unlocks atomic operations
+  through a struct that owns the cell (`atomic_*(ref c.hits)` /
+  `atomic_*(mut ref c.hits)`). Single-level only in v1
+  (no `ref t.a.b`). See
+  [examples/struct_atomic_field.vani](examples/struct_atomic_field.vani).
+- **Enums with affine payloads** — Copy types, `OwnedStr`, `Vec<T>`,
+  `[T; N]` of Copy elements, `Task`, `Atomic<T>`, `Mutex<T>`, and
+  `Channel<T, N>` are all valid as enum payload types in v1; only
+  `Guard<T>` still needs codegen work. Heap payloads (OwnedStr, Vec) get a tag-conditional
+  free at scope exit; stack-shaped payloads (array, Task, Atomic) need
+  no Drop. v1 restriction: destructure-binding patterns (`Some(s)`)
+  require Copy payloads. See
+  [examples/enum_owned_payload.vani](examples/enum_owned_payload.vani),
+  [examples/enum_vec_payload.vani](examples/enum_vec_payload.vani),
+  [examples/enum_arr_payload.vani](examples/enum_arr_payload.vani).
+- **Structs with affine fields** — `OwnedStr`, `Vec<T>`, `[T; N]` of Copy
+  elements, `Task`, `Atomic<T>`, `Mutex<T>`, `Channel<T, N>`, and **nested
+  affine structs** are valid struct field types in v1. Both backends
+  recursively walk struct types at scope-exit Drop time so a `struct
+  Outer { inner: Inner, id: i64 }` where `Inner` has `OwnedStr` /
+  `Vec<T>` fields gets full RAII chains. Only `Guard<T>` is still
+  rejected. See
+  [examples/nested_struct_drop.vani](examples/nested_struct_drop.vani).
+  Heap-shaped fields (OwnedStr, Vec) are freed at scope exit; stack-shaped
+  fields (arrays, Task, Atomic) need no runtime drop. Struct-literal init
+  from a `Var` moves the source binding so a heap value flows `caller →
+  struct field → drop` without a double-free. Field-path indexing
+  (`t.data[i]`) works through both backends. Mutex / Guard / Channel still
+  need explicit wiring. See
+  [examples/struct_owned_field.vani](examples/struct_owned_field.vani),
+  [examples/struct_mixed_fields.vani](examples/struct_mixed_fields.vani).
+
+### Verification & contracts
+- `requires` / `ensures` clauses (terminated with `;`, before the body).
+  `_return` references the return value; inline calls discharged via callee
+  `ensures`.
+- Loop invariants with substitution-based preservation and post-loop facts.
+- Three-layer `prove`: constant fold → structural tautology → SMT (Z3).
+- BitVec overflow-aware integer arithmetic; IEEE-754 floats (NaN/±inf
+  modeled); signed/unsigned compare split; cast-via-extend.
+- Symbolic SMT arrays per Vec/array binding with versioned store axioms.
+- SMT-driven runtime-guard elision (bounds, divisor, shift checks).
+- Compile-time const overflow and divide-by-zero detection.
+- `INTENTC_NO_VERIFY=1` opt-out for fast dev iteration.
+
+### Affine ownership
+- Arrays, `Vec`, `OwnedStr`, `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`
+  are affine — moved on use, dropped at end of scope.
+- Use-after-move is a compile error with related-span notes pointing at the
+  prior move site.
+- `let` shadowing drops or consumes the previous binding.
+- `_` discard binding (`let _ = expr;`) covers drop for Copy results and
+  triggers the affine drop chain for owned ones.
+
+### Concurrency
+- `parallel for` with reductions (`+`, `*`, `&&`, `||`, `&`, `|`, `^`,
+  `min`, `max`). Verifier proves race-freedom; backends emit real threads
+  (libgomp on Linux, CreateThread on Windows).
+- `task <name> { … } / join <name>;` — affine handles, Copy-only captures,
+  real pthread / CreateThread spawn.
+- `Atomic<T>` (i8..i64, u8..u64, bool) — `atomic_new`/`atomic_load`/
+  `atomic_store`/`atomic_fetch_add`/`atomic_compare_exchange`.
+- `Channel<T, N>` — Vyukov MPSC ring buffer (power-of-2 N).
+- `Mutex<T>` + RAII `Guard<T>` — Drepper futex (Linux), WaitOnAddress
+  (Windows), sched_yield/SwitchToThread fallback.
+
+### Tooling
+- `intentc check / emit / emit-c / run / build / test` with `--json`
+  machine-readable diagnostics.
+- `intent-lsp` binary with hover, definition, references, rename,
+  completion, code actions, semantic tokens (7 token types, 2 modifiers).
+- Parser error recovery — multiple errors per compile, not just the first.
+- Diagnostics with related-span notes.
+- Multi-file projects via `use "path.vani";` (transitive, cycle-detected).
+
+### Backends
+- **LLVM** is the default for `emit`/`run`/`build` (AOT via `llc + cc`).
+- **C** (`--backend=c`, legacy/deprecation path).
+- Both have tree-shaped and SSA pipelines; `intentc` tries SSA first and
+  falls back to tree backends on `EmitError`.
+---
+
+# Part III — Memory Safety, Ownership & Concurrency
 
 ## Memory safety & concurrency model
 
@@ -950,551 +1582,19 @@ The first two items are the most interesting research directions
 for the next year. The rest are likely runtime-aborts-with-clean-
 diagnostic forever (which is the same boat as Rust).
 
-## Language Snapshot
 
-```intent
-intent "Compute a value with checked constraints";
+---
 
-fn add(a: i64, b: i64) -> i64 {
-  return a + b;
-}
+# Part IV — Language Reference
 
-fn main() -> i64 {
-  let answer = add(40, 2);
-  prove 2 + 2 == 4;
-  assert answer >= 0;
-  print answer;
-  return 0;
-}
-```
+The chapters in this part are organized as a top-to-bottom
+reference: numeric rules first (foundational), then composite
+types (arrays, vectors, strings, references), then control
+flow + scoping, then verification (SMT), then the higher-level
+constructs (modules, effects + concurrency).
 
-Read it aloud: *"function add takes a and b of type int-64, returns int-64;
-return a + b."* The source reads left-to-right at speaking pace.
-
-### Translation from Rust / C++ punctuation
-
-vāṇī keeps the **semantic model** of Rust / C++ (static types, affine
-ownership, monomorphized generics, references with explicit `mut`)
-but replaces the punctuation soup with keywords. Most of the column
-on the left will compile on the right with identical generated code:
-
-| Rust / C++ | vāṇī | Notes |
-|---|---|---|
-| `&xs` (shared borrow) | `ref xs` | second-class, param-only |
-| `&mut xs` (mut borrow) | `mut ref xs` | same semantics |
-| `fn(&self)` | `fn name(self: ref Type)` | receiver is explicit |
-| `Vec::with_capacity(n)` | `vec_with_capacity(n)` | free function — no path |
-| `impl Drop for T` | `implement Drop for T` | auto-called at scope exit |
-| `match Some(x) => …` | `match Opt.Some(x) then …` | `then` instead of `=>` |
-| `xs?` (try operator) | `try expr` *or* `expr?` | both spellings share one AST node |
-| `loop { … }` | `while true { … }` | one looping construct |
-| `for x in &xs` | `for x in ref xs` | borrow at the loop header |
-| `mod foo { … }` | `module foo { … }` | `mod` accepted as alias |
-| `pub(crate) fn …` | `pub(kosh) fn …` | कोश = "treasure / repository" |
-| `pub use foo::bar;` | `pub use foo::bar;` | re-exports through current module |
-| `use foo::*;` (glob) | `use foo::*;` | direct children only, non-transitive |
-| `let x = …` | `let x = …` *or* `assign x = …` | aliases pick tone |
-| `return x` | `return x` / `give x` / `give_back x` / `give back x` | all canonical |
-
-The compiler never silently changes the meaning of source. Aliasing,
-ownership transfer, and pure-vs-effectful boundaries are all visible
-in the words on screen — surface aliases never relax a check.
-
-### Deterministic output, multiple ways to spell it
-
-Every alias resolves to the same `TokenKind` at the lexer boundary,
-so the AST is identical regardless of which spelling the user picked.
-The checker, SMT layer, SSA pass, and backends all see the same IR.
-Two source files that differ only in alias choice produce
-**byte-identical LLVM IR / C** (after `intentc fmt` re-emits to a
-canonical form). The same program in English vs Hindi vs Sanskrit
-runs the same instructions on the same target.
-
-### वाणी (*vāṇī*) — Devanagari notation (Phase 2 shipped)
-
-Devanagari notation lets the source read in the writer's mother tongue.
-The first three languages are **Sanskrit** (*saṁskṛta* — the canonical
-Devanagari language and grammar root), **Hindi** (*hindī*), and **Marathi**
-(*marāṭhī*). They share the script but use slightly different verbs for
-the common keywords. The idea is **alias-based**: every English keyword
-gets one or more Devanagari aliases, and the lexer accepts whichever form
-the source file uses. A single program may mix forms freely; the compiler
-treats them as the same token.
-
-**Phase 1** (closures #235–#237) shipped single-word Devanagari
-aliases for the core control / declaration keywords plus multi-word
-phrases like `नहीं तो` (else), `के लिए` (for), `सिद्ध करो` (prove) —
-fused by a post-lex merger. Per-file script purity (English vs
-Devanagari) is enforced automatically: the first structure keyword
-sets the script, and the lexer rejects mixing thereafter
-([lexer.rs:393–441](src/lexer.rs#L393-L441)). No header opt-in
-required.
-
-**Phase 2** (closures #265–#267) added two ergonomic features:
-
-1. **SOV word order (partial).** Indo-Aryan grammar is verb-final
-   (postpositions follow the noun). The parser accepts the
-   natural shape `i के लिए 0 से 5 तक { … }` (range for) and
-   `X पुनरागम;` / `"x =", x लिखो;` / `cond सुनिश्चित;` /
-   `expr प्रमाण;` (return / print / assert / prove with the
-   verb at the end). The English keyword-first order still works
-   — the SOV detector only fires when the leading token isn't
-   a verb-keyword.
-2. **3-way alias parity.** Sanskrit / Hindi / Marathi each have a
-   viable form for ~41 of 45 structure keywords (else `वरना`,
-   mut `परिवर्तनीय`, continue `अग्रे`, pub `सार्वजनिक`, module
-   `खण्ड` / `मॉड्यूल`, use `उपयोग`, as `यथा`, where `यत्र` /
-   `जहाँ` / `जिथे`, is `अस्ति` / `है` / `आहे`, plus interface
-   / implement / methods / try / task / join / parallel single-
-   word). Sanskrit-root words that work as tatsama (loanwords)
-   in Hindi + Marathi are documented as shared across the three.
-
-> **What "partial" actually means (honest status 2026-06-06)**:
-> SOV is wired for **range `for` + four verb-at-end statements**
-> (`return` / `print` / `assert` / `prove`). Most constructs —
-> `let`, `fn`, `struct`, `enum`, `if`, `while`, `match`, top-level
-> declarations — **still require keyword-first syntax even in
-> Devanagari mode**. A "code as you speak" experience for full
-> programs (verb-final everywhere, postpositions everywhere) is the
-> next milestone, not a shipped one. See [TODO.md](TODO.md)
-> §*Sanskrit-derived SOV completion*.
-
-**Still queued**:
-- Full SOV coverage across the remaining ~10 statement categories
-  (`let`-binding verb-at-end, `if`/`while` cond-at-end with
-  postposition, `fn` declaration with verb-at-end signature, struct
-  / enum decl SOV-shape, match-arm SOV shape).
-- Four English-only keywords gain Devanagari aliases: `extern`,
-  `type`, `intent`, `invariant`.
-- Finer-grained Sanskrit-vs-Hindi-vs-Marathi purity gate (today
-  it's only English-vs-Devanagari at the script level).
-- Grammar-consultant refinement pass — Phase-2 picks are best-
-  effort and welcome dialect-specific revision.
-- **Cross-language `.vani` source translator** (planned tool):
-  one-shot rewrite of a program's keywords between English /
-  Sanskrit / Hindi / Marathi so a user can read someone else's
-  source in their preferred dialect without losing semantics.
-- **Examples reorganization**: each script gets its own subfolder
-  under `examples/language/` (`english/`, `sanskrit/`, `hindi/`,
-  `marathi/`) and every Devanagari example begins with a
-  `श्री।` invocation comment (pūrṇa daṇḍa terminator) per the
-  classical convention.
-
-Romanizations follow **IAST** (International Alphabet of Sanskrit
-Transliteration) for Sanskrit and a Hunterian-style transliteration for
-Hindi / Marathi where IAST conventions diverge from spoken pronunciation
-(e.g. word-final `अ` is dropped in Hindi/Marathi but retained in
-Sanskrit). Where a vowel has both forms, the spoken form is shown.
-
-Conceptual sketch of what the same program might look like in each:
-
-```intent
-// English
-fn add(a: i64, b: i64) -> i64 { return a + b; }
-
-// संस्कृत (saṁskṛta — Sanskrit): verbs from classical Sanskrit grammar
-कार्य add(a: i64, b: i64) -> i64 { पुनरागम a + b; }
-// kārya add(a: i64, b: i64) -> i64 { punarāgama a + b; }
-
-// हिन्दी (hindī — Hindi): common spoken Hindi verbs
-फलन add(a: i64, b: i64) -> i64 { लौटाओ a + b; }
-// phalan add(a: i64, b: i64) -> i64 { lauṭāo a + b; }
-
-// मराठी (marāṭhī — Marathi): Marathi verbs
-कार्य add(a: i64, b: i64) -> i64 { परत a + b; }
-// kārya add(a: i64, b: i64) -> i64 { parat a + b; }
-```
-
-The complete alias table below gives **every English keyword** in
-its Devanagari spelling + romanization for each of the three
-shipped Indo-Aryan dialects. **100% coverage**: 46 of 46 structure
-keywords have at least one Devanagari alias.
-
-> **Reading order**: Romanizations follow IAST (International
-> Alphabet of Sanskrit Transliteration). Read each cell aloud —
-> that's the pronunciation contract.
-
-### Declarations + visibility
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `fn` | `कार्य` *kārya* | `फलन` *phalan* | `कार्य` *kārya* |
-| `let` / `assign` | `माना` *mānā* | `माना` *mānā* | `मान` *māna* |
-| `struct` | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* |
-| `enum` | `विकल्प` *vikalpa* | `गणन` *gaṇan* | `गणन` *gaṇan* |
-| `const` | `स्थिर` *sthira* | `स्थिर` *sthira* | `स्थिर` *sthira* |
-| `type` | `प्रकार` *prakāra* | `प्रकार` *prakāra* | `प्रकार` *prakāra* |
-| `intent` | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* | `उद्देश्य` *uddeśya* |
-| `extern` | `बाह्य` *bāhya* | `बाह्य` *bāhya* | `बाह्य` *bāhya* |
-| `pub` / `public` | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* |
-| `module` / `mod` | `खण्ड` *khaṇḍa* | `मॉड्यूल` *mōḍyūla* | `मॉड्यूल` *mōḍyūla* |
-| `use` | `उपयोग` *upayog* | `उपयोग` *upayog* | `उपयोग` *upayog* |
-| `as` | `यथा` *yathā* | `यथा` *yathā* | `यथा` *yathā* |
-
-### Control flow
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `return` / `give` / `give_back` | `पुनरागम` *punarāgama* | `लौटाओ` *lauṭāo* | `परत` *parat* |
-| `if` | `यदि` *yadi* | `अगर` *agar* | `जर` *jar* |
-| `else` | `अन्यथा` *anyathā* | `वरना` *varnā* / `नहीं तो` *nahīṁ to* | `नाहीतर` *nāhītar* |
-| `while` | `यावत्` *yāvat* | `जबतक` *jab tak* | `जोपर्यंत` *jopa­ryanta* |
-| `for` | `प्रति` *prati* | `के लिए` *ke liye* | `साठी` *sāṭhī* |
-| `in` | `में` *meṁ* | `में` *meṁ* | `में` *meṁ* |
-| `from` | `से` *se* | `से` *se* | `से` *se* |
-| `to` | `तक` *tak* | `तक` *tak* | `तक` *tak* |
-| `break` | `विराम` *virāma* | `रुको` *ruko* | `थांब` *thāmba* |
-| `continue` | `अग्रे` *agre* | `आगे` *āge* | `पुढे` *puḍhe* |
-| `then` | `तदा` *tadā* | `तो` *to* | `तर` *tar* |
-| `match` | `मेल` *mela* | `मिलान` *milān* | `जुळवा` *juḷvā* |
-
-### References + mutation
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `ref` | `दृष्ट्या` *dṛṣṭyā* | `देखो` *dekho* | `पहा` *pahā* |
-| `mut` | `परिवर्तनीय` *parivartanīya* | `परिवर्तनीय` *parivartanīya* | `बदल` *badla* |
-
-### Verification (SMT-discharged)
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `assert` | `सिद्धम्` *siddham* | `सुनिश्चित` *sunishchit* | `खात्री` *khātrī* |
-| `prove` | `प्रमाण` *pramāṇa* / `सिद्ध` *siddha* | `सिद्ध करो` *siddha karo* / `प्रमाणित` *pramāṇita* | `सिद्ध करा` *siddha karā* / `दाखवा` *dākhvā* |
-| `requires` | `अपेक्षित` *apekṣita* | `चाहिए` *cāhiye* | `पाहिजे` *pāhije* |
-| `ensures` | `सुनिश्चयित` *sunishchayita* | `निश्चित` *nishchit* | `निश्चित` *nishchit* |
-| `invariant` | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` *aparivartanīya* |
-
-### Booleans + I/O
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `true` | `सत्य` *satya* | `सत्य` *satya* / `सही` *sahī* | `सत्य` *satya* / `सही` *sahī* |
-| `false` | `असत्य` *asatya* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* | `असत्य` *asatya* / `अशुद्ध` *aśuddha* |
-| `print` / `write` | `लिख` *likh* | `लिखो` *likho* | `लिखो` *likho* |
-
-### Concurrency + parallelism
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `pure` | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* | `शुद्ध` *śuddha* |
-| `parallel` | `समानांतर` *samānāntara* / `समान्तर प्रति` *samāntara prati* | `समानांतर` *samānāntara* | `समानांतर` *samānāntara* |
-| `reduce` | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* |
-| `with` | `सह` *saha* | `सह` *saha* | `सह` *saha* |
-| `task` | `नियोग` *niyog* | `नियोग` *niyog* | `नियोग` *niyog* |
-| `join` | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* |
-| `try` | `प्रयास` *prayās* | `प्रयास` *prayās* | `प्रयास` *prayās* |
-
-### Interfaces, generics, embedded
-
-| English | संस्कृत (Sanskrit) | हिन्दी (Hindi) | मराठी (Marathi) |
-|---|---|---|---|
-| `interface` / `trait` | `संकेत` *saṅket* / `अंतरापृष्ठ` *antarāpṛṣṭha* | `संकेत` *saṅket* | `संकेत` *saṅket* |
-| `implement` / `impl` | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* |
-| `methods` | `विधि` *vidhi* | `विधि` *vidhi* | `विधि` *vidhi* |
-| `where` | `यत्र` *yatra* | `जहाँ` *jahām̐* | `जिथे` *jithe* |
-| `is` | `अस्ति` *asti* | `है` *hai* | `आहे` *āhe* |
-| `unsafe` | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* | `असुरक्षित` *asurakṣita* |
-| `region` | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* | `क्षेत्र` *kṣetra* |
-
-### SOV (Subject-Object-Verb) statement shapes
-
-When the user opts into Sanskrit / Hindi / Marathi grammar
-naturally, vāṇी accepts **verb-at-end SOV order** for these
-common shapes alongside the keyword-first English order:
-
-| Construct | Keyword-first | SOV verb-at-end |
-|---|---|---|
-| `let` | `माना x: i64 = 5;` | `x: i64 = 5 माना;` |
-| `return` | `पुनरागम x;` | `x पुनरागम;` |
-| `print` | `लिख x;` | `x लिख;` |
-| `assert` | `सिद्धम् cond;` | `cond सिद्धम्;` |
-| `prove` | `प्रमाण expr;` | `expr प्रमाण;` |
-| range `for` | (no English shape) | `i प्रति 0 से 3 तक { ... }` |
-| `if` / `else` | `यदि cond { ... }` | `cond यदि { ... } अन्यथा { ... }` |
-| `while` | `यावत् cond { ... }` | `cond यावत् { ... }` |
-
-Top-level declarations (`fn` / `struct` / `enum`) read naturally
-keyword-first in Indo-Aryan grammar; SOV reshape there would feel
-forced and is intentionally not supported. `match` SOV is available
-inside SOV-let (`let r: T = scrutinee match { ... } माना;`).
-
-### Per-file dialect purity (opt-in)
-
-Drop a `// vani-lang: <sanskrit|hindi|marathi|english>` comment in
-the first 10 lines of any `.vani` file to enforce single-dialect
-purity. The lexer then rejects any keyword spelling not native to
-the declared dialect. Without the pragma, the existing script-
-level English-vs-Devanagari gate still applies (back-compat).
-
-The pragma also turns on **dialect-aware error rendering**:
-diagnostics emit their `error:` / `note:` labels in the declared
-dialect (Sanskrit `त्रुटिः`, Hindi `त्रुटि`, Marathi `चूक`), and
-the leading prefix of the most common error families translates
-to the dialect (e.g. `unknown variable` → `अज्ञातं चरम्` in
-Sanskrit). The English wording is retained after the dialect
-phrase so search-engine queries and existing documentation still
-match.
-
-### Devanagari numerals, type names, identifiers
-
-Inside a `.vani` source file, every category of token can be
-Devanagari:
-
-- **Numerals**: integer + float literals accept Devanagari digits
-  `०१२३४५६७८९` (U+0966–U+096F). `५ * २` parses as `5 * 2`; `३.१४`
-  parses as the f64 `3.14`. Mixed ASCII / Devanagari digits in
-  the same literal are NOT supported (pick one per number).
-- **Type names**: `पूर्णांक` (i64), `दशांश` (f64), `तर्क` (bool),
-  `सूची` (Vec), `पूर्णांक८/१६/३२/६४` (i8/i16/i32/i64 width-
-  explicit), `अहस्ताक्षरित८/.../६४` (u8..u64 unsigned). All are
-  Sanskrit-root tatsama forms working as loanwords in Hindi +
-  Marathi, so a single Devanagari spelling works across all
-  three dialects.
-- **Identifiers**: user-defined function / variable / struct /
-  field names accept any Devanagari letter. The LLVM backend
-  mangles non-ASCII names to `_uHHHH` per codepoint behind the
-  scenes (e.g. `द्विपदगुणक` → `_u0926...`); the C backend uses
-  the UTF-8 bytes directly (gcc / clang accept UTF-8 in
-  identifiers natively).
-
-A fully-Devanagari program is now possible — see
-[`examples/language/sanskrit/pure_devanagari.vani`](examples/language/sanskrit/pure_devanagari.vani)
-for a complete Pascal's-triangle-row example using Sanskrit
-keywords + Sanskrit identifiers + Sanskrit comments + Devanagari
-numerals + SOV verb-at-end statements + function-level
-`अपेक्षित` (requires) contracts. The reading experience is meant
-to feel like Sanskrit prose with the verb closing each clause —
-not a transliterated English program.
-
-Pronunciation guide for the diacritics used in the romanizations:
-
-| Mark | Roman | Sound | Example |
-|---|---|---|---|
-| ā | long-a | as in *father* | *kārya* = "kaar-yuh" |
-| ī | long-i | as in *machine* | *vāṇī* = "vaa-nee" |
-| ū | long-u | as in *rule* | *mūla* = "moo-luh" |
-| ṛ | retroflex r | rolled tongue tip | *kṛṣṇa* = "krish-nuh" |
-| ṇ | retroflex n | tongue against palate | *vāṇī* = "vaa-NEE" |
-| ṭ / ḍ | retroflex t / d | tongue curled back | *paṭha* = "pa-tha" |
-| ś / ṣ | sh-sounds | as in *shoe* / *bush* | *kṛṣṇa* = "krish-nuh" |
-| ñ | palatal n | as in *canyon* (ny) | *jña* = "gya" |
-| ṁ / ṃ | anusvāra | nasalizes preceding vowel | *saṁskṛta* = "sun-skrit" |
-| ḥ | visarga | soft h-release | *namaḥ* = "nam-ah" |
-
-A short worked example: the project name **वाणी** romanizes to **vāṇī**,
-read as "vaa-NEE" — long-a, retroflex-n, long-i. The acronym **VANI**
-keeps the same three syllables but drops the diacritics for ASCII use.
-
-The actual keyword mapping will be finalized with grammar consultants for
-each language so the verbs feel idiomatic and unambiguous in context.
-Mixing scripts in the same file is supported by design — a student can
-write the keywords in Devanagari and the identifiers in English, or vice
-versa.
-
-Supported today (800 lib + 47 e2e tests passing):
-
-### Types
-- Scalars: `i8`/`i16`/`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `f32`/`f64`, `bool`
-  (all `Copy`).
-- Strings: `Str` (borrowed C-string, `Copy`, `==`/`!=`/`<`/`<=`/`>`/`>=` via
-  strcmp), `OwnedStr` (heap, affine, produced by `+` concat).
-- Fixed-size stack arrays `[T; N]` (affine) with `xs[i]` and `len(xs)`.
-- Heap-allocated `Vec<T>` (affine) with `vec(...)`, `push` / `set` / `clone`,
-  `len`, indexing, `clone_at(ref xs, i)` for non-Copy slot reads. Empty
-  `vec()` is supported. `Vec<Vec<T>>` and `Vec<Struct>` work. `push` has
-  two forms: `push(xs: Vec<T>, v) -> Vec<T>` (consuming) and
-  `push(xs: mut ref Vec<T>, v) -> i64` (in-place, returns the new length —
-  useful through a struct field). See
-  [examples/push_mut.vani](examples/push_mut.vani).
-- Tuples `(T1, T2, ...)` (n in 2..=4) with `.0` / `.1` access; destructure
-  `let (a, b) = expr;`.
-- Structs `struct Point { x: i64, y: i64 }` with up to 64 fields; field access
-  `p.x` and field assign `p.x = v;`.
-- Enums: `enum Color { Red, Green, Blue }`. Payloaded variants `enum Opt
-  { Some(i64), None }` work in both backends — tagged-union codegen lays
-  them out as `{ i32 tag, T payload }`. Match destructure
-  `Opt.Some(v) then …` binds the payload into the arm scope. V1 limits
-  payloads to single Copy fields per variant + uniform payload type
-  across variants. See [examples/option_types.vani](examples/option_types.vani).
-- Type aliases: `type Coord = (i64, i64);`, `type X = i64;`.
-- Constants: `const ANSWER: i64 = 42;` — literal initializers only in v1.
-
-### References (second-class, keyword-first)
-- `ref T` (shared) and `mut ref T` (mutable) — parameter types only;
-  borrow at call sites with `ref xs` / `mut ref xs`. No reference returns,
-  let-bindings, or aggregate elements. Aliasing rejected.
-- Indexed write `xs[i] = v;` works on owned `[T;N]` / `Vec<T>` and through
-  `mut ref` parameters.
-- Auto-deref for indexing and method dispatch.
-
-### Functions, methods, and dispatch
-- Functions `fn add(a: i64, b: i64) -> i64 { … }`; pure-fn marker
-  `pure fn …` for SMT-callable helpers.
-- `methods on T { fn m(self: T) -> R { … } }` blocks. Receivers must be
-  `self: T` / `self: ref T` / `self: mut ref T` (keyword-first; `&self`
-  rejected). Method dispatch via `recv.method(args)` with auto-ref.
-- First-class fn-pointers `fn(T1, ...) -> R` with `FnRef` + indirect call.
-- Discarded call statements: `x.bump();` / `foo();` are sugar for
-  `let _ = …;` (must be a `Call`/`MethodCall`).
-
-### Control flow + expressions
-- `if`/`else`/`else if` chains as statements OR single-expression form
-  `if cond { e1 } else { e2 }` (both branches must unify).
-- `while cond invariant inv1; invariant inv2; { … }`.
-- `for i from lo to hi invariant inv; { … }`, `for x in ref xs { … }`,
-  `for x in xs { … }` (consuming).
-- `break;` / `continue;`, `assert cond[, "msg"]`, `prove`, `print` (multi-item).
-- `match scrutinee { Color.Red then expr, … }` — exhaustive over enum
-  variants; integer-literal patterns, `_` wildcard, and **payloaded variant
-  destructure** `Opt.Some(v) then …` all supported. Bool / Str / float
-  scrutinee patterns are gated.
-- **Block expressions** `let r = { let a = …; let b = …; a + b };` — Let
-  stmts followed by a tail expression. Inner shadows don't leak.
-- **`try EXPR` / `EXPR?`** — Option/Result-like error-propagation sugar.
-  In a function whose return type is a payloaded enum, both
-  `let v: T = try opt;` and `let v: T = opt?;` extract the payload or
-  short-circuit the function with the payload-less variant. The postfix
-  `?` form is pure parse-time sugar — it builds the same `ExprKind::Try`
-  AST node, so narrow-gate restrictions (let-try as first stmt,
-  intermediate lets, return) apply identically. See
-  [examples/language/english/try_keyword.vani](examples/language/english/try_keyword.vani) (keyword form)
-  and [examples/language/english/try_question_op.vani](examples/language/english/try_question_op.vani) (`?` form).
-- Short-circuit `&&` and `||` honor compile-time const folding —
-  `false && (provably-bad)` and `true || (provably-bad)` compile cleanly.
-- Lexical scoping: inner `let x` shadowing of an outer same-name binding
-  is contained to the inner scope (cross-type shadow allowed).
-
-### Generics & interfaces
-- **Generic functions** `fn id<T>(x: T) -> T { return x; }` —
-  monomorphized at compile time. The pre-pass walks call sites, infers
-  T from the first literal argument (v1 restriction), and generates a
-  specialized copy per concrete type (`id__i64`, `id__bool`, …). The
-  original generic template is dropped before codegen sees it. See
-  [examples/generic_functions.vani](examples/generic_functions.vani).
-  V1 limits: single type parameter, body must be type-correct without
-  knowing T (pass-through patterns).
-- **Interfaces** `interface Show { fn show(self: T) -> R; }` + `implement
-  Show for Point { fn show(self: Point) -> R { … } }` — static dispatch
-  via `recv.show()`. The impl hoists to `T_show`; the existing method-
-  dispatch path resolves the call at compile-time based on the receiver's
-  type. V1 limits: static dispatch only (no vtables); each impl must cover
-  every interface method; signatures must match exactly. See
-  [examples/interfaces.vani](examples/interfaces.vani).
-- **Drop interface** `implement Drop for T { fn drop(self: T) -> i64 { … } }`
-  — auto-called at every scope exit where a non-moved binding of T goes
-  out of scope. Users can also call `t.drop()` manually; affine tracking
-  marks the binding as moved so the auto-call won't double-fire. When T
-  has heap-shaped fields (OwnedStr / Vec), the per-field free pass runs
-  instead (the user's drop is then invoked explicitly when richer
-  behavior is needed). See
-  [examples/drop_interface.vani](examples/drop_interface.vani).
-- **Mixed-place assignment** — `xs[i].field = v;` and the deeper
-  `xs[i].a.b = v;` write through an index plus a struct field path in
-  one statement. Works on owned `Vec<T>` and `[T; N]`. Intermediate
-  segments must be Copy structs. The leaf field may be Copy OR a
-  heap-shaped type (`OwnedStr` / `Vec<T>`) — when the leaf is heap-
-  shaped, both backends free the previous slot value before storing
-  the new one, so the old allocation does not leak. See
-  [examples/mixed_place_assign.vani](examples/mixed_place_assign.vani).
-- **Partial-move tracking** — `let taken = bag.contents;` moves a single
-  field out of a struct. The aggregate is still readable for its other
-  fields; scope-exit Drop skips the moved field (no double-free); a
-  second read of the moved field surfaces a use-after-move diagnostic.
-  See [examples/partial_move.vani](examples/partial_move.vani).
-- **User-defined `==` via `implement Eq for T`** — `a == b` and `a != b`
-  on struct or enum bindings desugar to the hoisted `<T>_eq(a, b)` /
-  `!<T>_eq(a, b)` whenever both sides are the same nominal type.
-  Convention is `fn eq(self: T, other: T) -> bool`. See
-  [examples/struct_eq.vani](examples/struct_eq.vani) and
-  [examples/enum_eq.vani](examples/enum_eq.vani).
-- **Tuple auto-equality** — tuples are anonymous, so `==` is
-  compiler-derived: `(a, b) == (c, d)` rewrites to `a == c && b == d`.
-  Each per-element comparison uses the element type's `==` rule
-  (built-in for primitives, `<T>_eq` for nominal element types). See
-  [examples/tuple_eq.vani](examples/tuple_eq.vani).
-- **Field-borrow expressions** — `ref t.f` and `mut ref t.f` take a borrow
-  of a struct field. The result type is `&<field_ty>` / `&mut <field_ty>`;
-  backends GEP into the struct's storage. Unlocks atomic operations
-  through a struct that owns the cell (`atomic_*(ref c.hits)` /
-  `atomic_*(mut ref c.hits)`). Single-level only in v1
-  (no `ref t.a.b`). See
-  [examples/struct_atomic_field.vani](examples/struct_atomic_field.vani).
-- **Enums with affine payloads** — Copy types, `OwnedStr`, `Vec<T>`,
-  `[T; N]` of Copy elements, `Task`, `Atomic<T>`, `Mutex<T>`, and
-  `Channel<T, N>` are all valid as enum payload types in v1; only
-  `Guard<T>` still needs codegen work. Heap payloads (OwnedStr, Vec) get a tag-conditional
-  free at scope exit; stack-shaped payloads (array, Task, Atomic) need
-  no Drop. v1 restriction: destructure-binding patterns (`Some(s)`)
-  require Copy payloads. See
-  [examples/enum_owned_payload.vani](examples/enum_owned_payload.vani),
-  [examples/enum_vec_payload.vani](examples/enum_vec_payload.vani),
-  [examples/enum_arr_payload.vani](examples/enum_arr_payload.vani).
-- **Structs with affine fields** — `OwnedStr`, `Vec<T>`, `[T; N]` of Copy
-  elements, `Task`, `Atomic<T>`, `Mutex<T>`, `Channel<T, N>`, and **nested
-  affine structs** are valid struct field types in v1. Both backends
-  recursively walk struct types at scope-exit Drop time so a `struct
-  Outer { inner: Inner, id: i64 }` where `Inner` has `OwnedStr` /
-  `Vec<T>` fields gets full RAII chains. Only `Guard<T>` is still
-  rejected. See
-  [examples/nested_struct_drop.vani](examples/nested_struct_drop.vani).
-  Heap-shaped fields (OwnedStr, Vec) are freed at scope exit; stack-shaped
-  fields (arrays, Task, Atomic) need no runtime drop. Struct-literal init
-  from a `Var` moves the source binding so a heap value flows `caller →
-  struct field → drop` without a double-free. Field-path indexing
-  (`t.data[i]`) works through both backends. Mutex / Guard / Channel still
-  need explicit wiring. See
-  [examples/struct_owned_field.vani](examples/struct_owned_field.vani),
-  [examples/struct_mixed_fields.vani](examples/struct_mixed_fields.vani).
-
-### Verification & contracts
-- `requires` / `ensures` clauses (terminated with `;`, before the body).
-  `_return` references the return value; inline calls discharged via callee
-  `ensures`.
-- Loop invariants with substitution-based preservation and post-loop facts.
-- Three-layer `prove`: constant fold → structural tautology → SMT (Z3).
-- BitVec overflow-aware integer arithmetic; IEEE-754 floats (NaN/±inf
-  modeled); signed/unsigned compare split; cast-via-extend.
-- Symbolic SMT arrays per Vec/array binding with versioned store axioms.
-- SMT-driven runtime-guard elision (bounds, divisor, shift checks).
-- Compile-time const overflow and divide-by-zero detection.
-- `INTENTC_NO_VERIFY=1` opt-out for fast dev iteration.
-
-### Affine ownership
-- Arrays, `Vec`, `OwnedStr`, `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`
-  are affine — moved on use, dropped at end of scope.
-- Use-after-move is a compile error with related-span notes pointing at the
-  prior move site.
-- `let` shadowing drops or consumes the previous binding.
-- `_` discard binding (`let _ = expr;`) covers drop for Copy results and
-  triggers the affine drop chain for owned ones.
-
-### Concurrency
-- `parallel for` with reductions (`+`, `*`, `&&`, `||`, `&`, `|`, `^`,
-  `min`, `max`). Verifier proves race-freedom; backends emit real threads
-  (libgomp on Linux, CreateThread on Windows).
-- `task <name> { … } / join <name>;` — affine handles, Copy-only captures,
-  real pthread / CreateThread spawn.
-- `Atomic<T>` (i8..i64, u8..u64, bool) — `atomic_new`/`atomic_load`/
-  `atomic_store`/`atomic_fetch_add`/`atomic_compare_exchange`.
-- `Channel<T, N>` — Vyukov MPSC ring buffer (power-of-2 N).
-- `Mutex<T>` + RAII `Guard<T>` — Drepper futex (Linux), WaitOnAddress
-  (Windows), sched_yield/SwitchToThread fallback.
-
-### Tooling
-- `intentc check / emit / emit-c / run / build / test` with `--json`
-  machine-readable diagnostics.
-- `intent-lsp` binary with hover, definition, references, rename,
-  completion, code actions, semantic tokens (7 token types, 2 modifiers).
-- Parser error recovery — multiple errors per compile, not just the first.
-- Diagnostics with related-span notes.
-- Multi-file projects via `use "path.vani";` (transitive, cycle-detected).
-
-### Backends
-- **LLVM** is the default for `emit`/`run`/`build` (AOT via `llc + cc`).
-- **C** (`--backend=c`, legacy/deprecation path).
-- Both have tree-shaped and SSA pipelines; `intentc` tries SSA first and
-  falls back to tree backends on `EmitError`.
+Each `##` heading is its own chapter; jump to the one you
+need.
 
 ## Integer Rules
 
@@ -3123,6 +3223,10 @@ backends handle them directly.
 
 See `examples/fn_pointers.vani` for a runnable demonstration.
 
+---
+
+# Part V — Tooling
+
 ## Commands
 
 The compiler has two backends: **LLVM IR (default)** and C (legacy,
@@ -3282,6 +3386,10 @@ through both `--backend=c` and `--backend=llvm` and diffs stdout
 + exit codes. New examples are picked up automatically when wired
 into `check_examples_all_succeed` and a `run_<example>_example`
 test (see `tests/run_end_to_end.rs`).
+
+---
+
+# Part VI — Design Philosophy & Comparisons
 
 ## Design Philosophy & Limitations
 
@@ -3529,6 +3637,10 @@ Python still belongs in the system as:
 - fuzzing and corpus tooling
 - notebook-style design exploration
 
+---
+
+# Part VII — Roadmap & Status
+
 ## Roadmap
 
 The work splits into two queues: **small items** (each independently
@@ -3738,6 +3850,10 @@ biggest ergonomic gaps:
   produce candidate algorithms, constraints, proofs, tests, and
   target-specific optimizations. The compiler verifies the candidates
   before accepting them.
+
+---
+
+# Part VIII — Community
 
 ## Contributing
 
