@@ -306,9 +306,14 @@ The walker treats Call/MethodCall/Len/Index args as
 enclosing value), so `read_bag(ref b)` and `len(ref xs)` in
 return position still pass.
 
-**Phase 4 deferred (Vec<ref T>)**: needs analysis of fn-call
-sites that mutate a Vec (push/insert) to track whether the
-Vec outlives the ref being stored. Out of scope for v1.
+**Phase 4 deferred (Vec<ref T>)**: investigation 2026-06-09
+showed the checker gate is only half the story — both backends
+emit `/* ref */` placeholders for ref-element Vec bundles. Full
+lift needs: (a) per-(ref T) Vec storage typedef + helpers on
+both backends; (b) escape analyzer at Vec-mutator call sites
+(`push(mut ref vec, ref local)` etc.). 6-10h dedicated session
+queued in [TODO.md polish queue](../TODO.md). Out of scope for
+v1.
 
 **Still rejected**: returning a ref directly (`fn foo() -> ref T`)
 — that's Rust-style lifetime-variable territory (path (C) in

@@ -10790,8 +10790,17 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
         // Refines #7: `Vec<T>` accepts non-Copy element types
         // (`Vec<Vec<i64>>`) since the backend now emits
         // element-aware free / set / clone helpers. References
-        // remain rejected — a `Vec<&T>` would dangle the
-        // moment the referent goes out of scope.
+        // remain rejected — a `Vec<&T>` would dangle the moment
+        // the referent goes out of scope.
+        //
+        // L4 (B) Phase 4 investigation (2026-06-09): lifting
+        // the checker gate alone is insufficient — both backends
+        // emit `/* ref */` placeholders for ref-element Vec
+        // bundles. Real codegen work needed: per-element-type
+        // Vec struct for ref elements (data is T**, free walks
+        // the pointer buffer without per-element drop, push
+        // stores the pointer). 6-10h additional work scoped to
+        // a follow-up session; for now the rejection stays.
         if element.is_ref() {
             diagnostics.push(Diagnostic::new(
                 span,
