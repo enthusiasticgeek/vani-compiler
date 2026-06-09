@@ -9,6 +9,15 @@ pub struct Diagnostic {
     /// the ensures clause violated by a return). These are rendered after
     /// the primary diagnostic with the same source-line + underline format.
     pub related: Vec<(Span, String)>,
+    /// Step-by-step elaboration of the diagnostic. When present, rendered
+    /// after the primary message + related notes as a numbered breakdown:
+    ///   1. WHAT went wrong (restating in user-friendly terms).
+    ///   2. WHY the compiler thinks so (the rule or invariant).
+    ///   3. HOW to fix it (concrete refactor or alternative).
+    /// Most diagnostics leave this empty; the most-common confusing ones
+    /// (move-after-use, scope-escape, type-mismatch, etc.) seed the list.
+    /// User-direction item 2026-06-08.
+    pub elaboration: Vec<String>,
 }
 
 /// SOV-S9b (2026-06-06): per-file diagnostic localization. When the
@@ -377,6 +386,14 @@ fn localize_label(level: &str, lang: Option<DiagLang>) -> String {
         ("note", Some(DiagLang::Sanskrit)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Hindi)) => "टिप्पणी (note)".to_string(),
         ("note", Some(DiagLang::Marathi)) => "टीप (note)".to_string(),
+        // User-direction item: step-by-step diagnostic
+        // elaboration. The Sanskrit/Hindi/Marathi labels
+        // localize the leading "help:" prefix on each
+        // numbered step. Other languages fall through to
+        // the English fallback (bare "help" label).
+        ("help", Some(DiagLang::Sanskrit)) => "साहाय्यम् (help)".to_string(),
+        ("help", Some(DiagLang::Hindi)) => "सहायता (help)".to_string(),
+        ("help", Some(DiagLang::Marathi)) => "मदत (help)".to_string(),
         ("note", Some(DiagLang::Bengali)) => "টীকা (note)".to_string(),
         ("note", Some(DiagLang::Tamil)) => "குறிப்பு (note)".to_string(),
         ("note", Some(DiagLang::Telugu)) => "గమనిక (note)".to_string(),
@@ -1054,6 +1071,7 @@ impl Diagnostic {
             span,
             message: message.into(),
             related: Vec::new(),
+            elaboration: Vec::new(),
         }
     }
 
@@ -1061,6 +1079,27 @@ impl Diagnostic {
         self.related.push((span, note.into()));
         self
     }
+
+    /// Attach a step-by-step elaboration to a diagnostic. Each entry
+    /// is one numbered step in the rendered output. Convention:
+    /// step 1 restates WHAT in user-friendly terms, step 2 explains
+    /// WHY the compiler enforces this, step 3 shows HOW to fix it
+    /// concretely. Use the `elaborate!` macro for the call-site.
+    pub fn with_elaboration(mut self, steps: Vec<String>) -> Self {
+        self.elaboration = steps;
+        self
+    }
+}
+
+/// Build a step-by-step elaboration vec for attachment to a
+/// `Diagnostic` via `.with_elaboration(...)`. Each argument becomes
+/// one numbered step in the rendered output. Keeps the call-site
+/// terse so common error sites can opt in with minimal noise.
+#[macro_export]
+macro_rules! elaborate {
+    ($($step:expr),* $(,)?) => {
+        vec![$($step.to_string()),*]
+    };
 }
 
 pub fn format_diagnostics(path: &str, source: &str, diagnostics: &[Diagnostic]) -> String {
@@ -1074,6 +1113,23 @@ pub fn format_diagnostics(path: &str, source: &str, diagnostics: &[Diagnostic]) 
             let nlabel = localize_label("note", lang);
             let nmsg = localize_message(note, lang);
             render_one(&mut output, path, source, *span, &nlabel, &nmsg);
+        }
+        // User-direction item (2026-06-08): step-by-step
+        // elaboration after the primary + related notes.
+        // Rendered as a numbered list with a leading "help:"
+        // prefix on each step. No source-span underline (the
+        // elaboration is general advice, not a source-line
+        // reference).
+        if !diagnostic.elaboration.is_empty() {
+            for (index, step) in diagnostic.elaboration.iter().enumerate() {
+                let step_label = localize_label("help", lang);
+                output.push_str(&format!(
+                    "  {}: {}. {}\n",
+                    step_label,
+                    index + 1,
+                    localize_message(step, lang),
+                ));
+            }
         }
     }
 
@@ -1226,6 +1282,20 @@ pub fn format_diagnostics_with_files(map: &FileMap, diagnostics: &[Diagnostic]) 
             let nmsg = localize_message(note, lang);
             render_with_filemap(&mut output, map, *span, &nlabel, &nmsg);
         }
+        // User-direction item (2026-06-08): step-by-step
+        // elaboration after the primary + related. Same
+        // rendering as in `format_diagnostics` (single-file).
+        if !d.elaboration.is_empty() {
+            for (index, step) in d.elaboration.iter().enumerate() {
+                let step_label = localize_label("help", lang);
+                output.push_str(&format!(
+                    "  {}: {}. {}\n",
+                    step_label,
+                    index + 1,
+                    localize_message(step, lang),
+                ));
+            }
+        }
     }
     output
 }
@@ -1294,6 +1364,16 @@ fn emit_diagnostic_json_with_map(out: &mut String, map: &FileMap, d: &Diagnostic
             out.push_str(",\"span\":");
             emit_span_json_with_map(out, map, *span);
             out.push('}');
+        }
+        out.push(']');
+    }
+    if !d.elaboration.is_empty() {
+        out.push_str(",\"elaboration\":[");
+        for (i, step) in d.elaboration.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_json_string(out, step);
         }
         out.push(']');
     }
@@ -1367,6 +1447,16 @@ fn emit_diagnostic_json(out: &mut String, path: &str, source: &str, d: &Diagnost
             out.push_str(",\"span\":");
             emit_span_json(out, path, source, *span);
             out.push('}');
+        }
+        out.push(']');
+    }
+    if !d.elaboration.is_empty() {
+        out.push_str(",\"elaboration\":[");
+        for (i, step) in d.elaboration.iter().enumerate() {
+            if i > 0 {
+                out.push(',');
+            }
+            push_json_string(out, step);
         }
         out.push(']');
     }

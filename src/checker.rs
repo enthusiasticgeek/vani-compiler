@@ -8819,16 +8819,23 @@ fn check_one_stmt(
             for (src_name, ref_span) in &ref_sources {
                 let is_param = function.params.iter().any(|p| p.name == *src_name);
                 if !is_param {
-                    diagnostics.push(Diagnostic::new(
-                        *ref_span,
-                        format!(
-                            "ref to local binding '{}' escapes the function via return — \
-                             the binding drops when the function exits, leaving a \
-                             dangling reference. Refs to non-parameter bindings cannot \
-                             leave their declaring function.",
-                            src_name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *ref_span,
+                            format!(
+                                "ref to local binding '{}' escapes the function via return — \
+                                 the binding drops when the function exits, leaving a \
+                                 dangling reference. Refs to non-parameter bindings cannot \
+                                 leave their declaring function.",
+                                src_name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::return_escape_local(
+                                src_name,
+                            ),
                         ),
-                    ));
+                    );
                 }
             }
             // Refines #8: `return vec();` from a fn whose
@@ -9781,17 +9788,24 @@ fn check_one_stmt(
                     for (src_name, ref_span) in &ref_sources {
                         if let Some(src_depth) = env.lookup_depth(src_name) {
                             if src_depth > obj_depth {
-                                diagnostics.push(Diagnostic::new(
-                                    *ref_span,
-                                    format!(
-                                        "ref to '{}' (declared in an inner scope) cannot \
-                                         be stored in '{}'s field — the ref would dangle \
-                                         when '{}'s scope ends. Declare '{}' in the same \
-                                         scope as '{}', or copy the underlying value \
-                                         instead of taking a ref.",
-                                        src_name, obj_name, src_name, src_name, obj_name
+                                diagnostics.push(
+                                    Diagnostic::new(
+                                        *ref_span,
+                                        format!(
+                                            "ref to '{}' (declared in an inner scope) cannot \
+                                             be stored in '{}'s field — the ref would dangle \
+                                             when '{}'s scope ends. Declare '{}' in the same \
+                                             scope as '{}', or copy the underlying value \
+                                             instead of taking a ref.",
+                                            src_name, obj_name, src_name, src_name, obj_name
+                                        ),
+                                    )
+                                    .with_elaboration(
+                                        crate::diagnostic_elaborations::scope_escape_deeper(
+                                            src_name,
+                                        ),
                                     ),
-                                ));
+                                );
                             }
                         }
                     }
@@ -10966,10 +10980,21 @@ fn collect_ref_sources_in_expr_impl(
 
 fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<Diagnostic>) {
     if ty.is_ref() {
-        diagnostics.push(Diagnostic::new(
+        let mut diag = Diagnostic::new(
             span,
             format!("{} cannot be a reference type", context),
-        ));
+        );
+        // Attach elaboration for the function-return-type case
+        // (the most common confusion: users expect Rust-style
+        // `-> &T` and run into the path-C explanation). Other
+        // ref-rejection contexts share enough shape with
+        // return-type that the same elaboration applies.
+        if context.contains("return") {
+            diag = diag.with_elaboration(
+                crate::diagnostic_elaborations::ret_type_is_ref(),
+            );
+        }
+        diagnostics.push(diag);
     }
 }
 
@@ -11853,7 +11878,10 @@ fn check_expr(
                         expr.span,
                         format!("value '{}' was moved; cannot use after move", name),
                     )
-                    .with_related(move_span, format!("'{}' was moved here", name));
+                    .with_related(move_span, format!("'{}' was moved here", name))
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(name),
+                    );
                     if let Some(h) = hint {
                         diag = diag.with_related(expr.span, h);
                     }
@@ -14259,10 +14287,15 @@ fn check_ref_mut(
         return CheckedExpr::fallback_integer(span);
     };
     let Some(info) = env.lookup(name) else {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            format!("unknown variable '{}'", name),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!("unknown variable '{}'", name),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::unknown_variable(name),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     };
     if info.moved.is_some() {
@@ -14375,10 +14408,15 @@ fn check_ref(
         return CheckedExpr::fallback_integer(span);
     };
     let Some(info) = env.lookup(name) else {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            format!("unknown variable '{}'", name),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!("unknown variable '{}'", name),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::unknown_variable(name),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     };
     if info.moved.is_some() {
@@ -18228,24 +18266,36 @@ fn check_push_builtin(
         Type::RefMut(inner) => match &**inner {
             Type::Vec(element) => ((**element).clone(), true),
             _ => {
-                diagnostics.push(Diagnostic::new(
-                    args[0].span,
-                    format!(
-                        "push() requires a Vec or mut ref Vec argument, got {}",
-                        xs.ty()
+                let got_str = format!("{}", xs.ty());
+                diagnostics.push(
+                    Diagnostic::new(
+                        args[0].span,
+                        format!(
+                            "push() requires a Vec or mut ref Vec argument, got {}",
+                            got_str,
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::push_wrong_receiver(&got_str),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
             }
         },
         other => {
-            diagnostics.push(Diagnostic::new(
-                args[0].span,
-                format!(
-                    "push() requires a Vec or mut ref Vec argument, got {}",
-                    other
+            let got_str = format!("{}", other);
+            diagnostics.push(
+                Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "push() requires a Vec or mut ref Vec argument, got {}",
+                        got_str,
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::push_wrong_receiver(&got_str),
                 ),
-            ));
+            );
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
     };
@@ -18274,17 +18324,24 @@ fn check_push_builtin(
                 for (src_name, ref_span) in &ref_sources {
                     if let Some(src_depth) = env.lookup_depth(src_name) {
                         if src_depth > vec_depth {
-                            diagnostics.push(Diagnostic::new(
-                                *ref_span,
-                                format!(
-                                    "ref to '{}' (declared in an inner scope) cannot \
-                                     be pushed into '{}' — the pushed pointer would \
-                                     dangle when '{}'s scope ends. Declare '{}' in \
-                                     the same scope as '{}', or push by value with a \
-                                     copy.",
-                                    src_name, vec_name, src_name, src_name, vec_name
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    *ref_span,
+                                    format!(
+                                        "ref to '{}' (declared in an inner scope) cannot \
+                                         be pushed into '{}' — the pushed pointer would \
+                                         dangle when '{}'s scope ends. Declare '{}' in \
+                                         the same scope as '{}', or push by value with a \
+                                         copy.",
+                                        src_name, vec_name, src_name, src_name, vec_name
+                                    ),
+                                )
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::scope_escape_deeper(
+                                        src_name,
+                                    ),
                                 ),
-                            ));
+                            );
                         }
                     }
                 }
@@ -26040,15 +26097,22 @@ fn coerce_checked(
                 return CheckedExpr::fallback(target.clone(), span);
             }
         }
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "{} must be assignable to {}, got {}",
-                context,
-                target,
-                checked.ty()
+        let got_str = format!("{}", checked.ty());
+        let target_str = format!("{}", target);
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "{} must be assignable to {}, got {}",
+                    context, target_str, got_str,
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::type_mismatch(
+                    &target_str, &got_str,
+                ),
             ),
-        ));
+        );
         return CheckedExpr::fallback(target.clone(), span);
     }
 
@@ -26188,13 +26252,22 @@ fn promoted_integer_type(
     match common_integer_type(&left_type, &right_type) {
         Some(ty) => Some(ty),
         None => {
-            diagnostics.push(Diagnostic::new(
-                rhs.expr.span,
-                format!(
-                    "no safe implicit integer promotion for {} and {}; use an explicit cast",
-                    left_type, right_type
+            let left_str = format!("{}", left_type);
+            let right_str = format!("{}", right_type);
+            diagnostics.push(
+                Diagnostic::new(
+                    rhs.expr.span,
+                    format!(
+                        "no safe implicit integer promotion for {} and {}; use an explicit cast",
+                        left_str, right_str,
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::no_implicit_int_promotion(
+                        &left_str, &right_str,
+                    ),
                 ),
-            ));
+            );
             None
         }
     }
