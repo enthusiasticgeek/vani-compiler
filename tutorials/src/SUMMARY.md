@@ -70,6 +70,7 @@
 - [Writing a cross-language translator extension](advanced/08_translator.md)
 - [Adding a new dialect (Tier I rollout)](advanced/09_new_dialect.md)
 - [Compiler internals tour](advanced/10_internals.md)
+- [Using vāṇी with an LLM (Claude / GPT / MCP)](advanced/11_llm_workflows.md)
 
 ---
 

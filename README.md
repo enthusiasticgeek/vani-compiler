@@ -3449,6 +3449,43 @@ through both `--backend=c` and `--backend=llvm` and diffs stdout
 into `check_examples_all_succeed` and a `run_<example>_example`
 test (see `tests/run_end_to_end.rs`).
 
+### AI-assisted code generation (LLM bundle + MCP server)
+
+vāṇी ships two scripts under [`tools/llm_context/`](tools/llm_context/)
+that wire the compiler into off-the-shelf LLM workflows:
+
+- **[`bundle.py`](tools/llm_context/bundle.py)** — a Markdown
+  context bundle (~13K tokens full, trim flags down to ~4K). Pipe
+  to clipboard, paste into Claude / ChatGPT / a local Llama, and
+  the model generates passable vāṇी with zero training.
+  ```bash
+  python3 tools/llm_context/bundle.py | pbcopy           # macOS
+  python3 tools/llm_context/bundle.py | xclip -sel clip  # X11
+  python3 tools/llm_context/bundle.py --no-examples      # ~7K tokens
+  ```
+- **[`mcp_server.py`](tools/llm_context/mcp_server.py)** — exposes
+  the same content as an [MCP](https://modelcontextprotocol.io/)
+  server. 8 addressable resources (`vani://aliases`, `vani://patterns`,
+  …) + 5 callable tools (`vani_check`, `vani_run`, `vani_emit_c`,
+  `list_patterns`, `get_pattern`). Works with Claude Desktop /
+  Claude Code / Cursor and any MCP-speaking host. The agent pulls
+  just the section it needs AND can verify its own output before
+  showing it to you — closing the write-verify-iterate loop.
+
+The compiler's SMT-discharged diagnostics + step-by-step `help:`
+elaborations were designed to be readable by both humans AND
+LLMs. The same shape of feedback that helps a newcomer fix a
+move-after-use also helps an LLM iterate toward a verified
+solution. See the dedicated tutorial chapter
+[Advanced 11 — Using vāṇी with an LLM](tutorials/src/advanced/11_llm_workflows.md)
+for the full write-verify loop walkthrough + Claude Desktop
+config.
+
+A LoRA fine-tune of a small open-weights model (Phase ML-3) and
+hosted inference (Phase ML-4) are queued but **not shipped** —
+both gate on user demand. The bundle + MCP cover the 80% case
+today.
+
 ---
 
 # Part VI — Design Philosophy & Comparisons
