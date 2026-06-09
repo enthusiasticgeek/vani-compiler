@@ -78,6 +78,18 @@ src/
 tests/
   run_end_to_end.rs   Integration: invoke the binary on real .vani files
 examples/             User-facing .vani sample programs
+tools/
+  vani_translate.py   English ↔ Sanskrit ↔ Hindi ↔ Marathi translator
+                      (round-trip parity tested on 8 examples)
+  llm_context/        AI-assisted codegen layer (Phase ML-1 + ML-2)
+    bundle.py           Static Markdown context bundle for one-shot
+                        LLM use (paste into Claude / GPT / local)
+    mcp_server.py       MCP server: same bundle as resources + the
+                        `vani_check` / `vani_run` / `vani_emit_c`
+                        tools so agents can write-verify-iterate
+                        without leaving the conversation
+    README.md           Setup + usage; mirrored in tutorials/src/
+                        advanced/11_llm_workflows.md for users
 README.md             Language reference (user-facing)
 docs/namespaces_design.md  Design rationale for the namespaces feature
                             (modules, use, kosh).
@@ -124,6 +136,8 @@ docs/namespaces_design.md  Design rationale for the namespaces feature
 | Recognize a region (parallel-for / task) | `ssa_backend_c.rs::recognize_*` (shared with SSA-LLVM) |
 | Add a CLI subcommand or flag | `main.rs` (HELP + `parse_emit_args`) |
 | Add an example program | `examples/<name>.vani` + wire into both `check_examples_all_succeed` and a `run_*` test in `tests/run_end_to_end.rs` |
+| Extend the LLM context bundle (Phase ML-1) | `tools/llm_context/bundle.py`; sections auto-source from repo files — usually it's the underlying file (e.g. `tools/vani_translate.py::ALIASES`) that should change, not the bundle script |
+| Add an MCP resource or tool (Phase ML-2) | `tools/llm_context/mcp_server.py`; resources mirror bundle sections, tools shell out to `$VANI_BIN` |
 
 ## Conventions
 

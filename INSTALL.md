@@ -185,6 +185,30 @@ You should see the output `42`.
 
 ---
 
+## Optional: MCP server for AI-assisted code generation
+
+vāṇी ships an [MCP](https://modelcontextprotocol.io/) server at
+`tools/llm_context/mcp_server.py` so AI agents (Claude Desktop,
+Claude Code, Cursor) can pull language context AND call
+`vanic check` / `vanic run` / `vanic emit-c` on their own
+generated source. The static-bundle paste workflow
+(`tools/llm_context/bundle.py`) needs nothing beyond Python 3;
+the MCP server needs one extra package and the `VANI_BIN` env
+var pointing at the compiler binary.
+
+```bash
+pip install mcp                                           # MCP SDK
+export VANI_BIN=$(realpath target/release/vanic)          # for the server to find vanic
+```
+
+Then wire `tools/llm_context/mcp_server.py` into your client's
+MCP config (see [Advanced 11 — LLM workflows](tutorials/src/advanced/11_llm_workflows.md)
+in the tutorials for full Claude Desktop / Cursor config blocks).
+None of this is required for using `vanic` directly — skip if
+you're not running an MCP-speaking host.
+
+---
+
 ## Troubleshooting
 
 ### `error: linker 'cc' not found`
