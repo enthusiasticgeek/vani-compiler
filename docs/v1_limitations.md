@@ -269,7 +269,7 @@ fn unwrap_or(r: ref Result, def: i64) -> i64 {       // ✅ now works
 
 ## Reference + binding limitations
 
-### L4 — `let` annotation cannot be a reference type ✅ MOSTLY SHIPPED (Phase 1 + 3 + scope-escape analyzer)
+### L4 — `let` annotation cannot be a reference type ✅ FULLY SHIPPED Phases 1+3+4 (B) (2026-06-09)
 
 ```vani
 let r: ref Foo = ref some_foo;       // ❌ — let annotation cannot be a reference type
@@ -306,14 +306,17 @@ The walker treats Call/MethodCall/Len/Index args as
 enclosing value), so `read_bag(ref b)` and `len(ref xs)` in
 return position still pass.
 
-**Phase 4 deferred (Vec<ref T>)**: investigation 2026-06-09
-showed the checker gate is only half the story — both backends
-emit `/* ref */` placeholders for ref-element Vec bundles. Full
-lift needs: (a) per-(ref T) Vec storage typedef + helpers on
-both backends; (b) escape analyzer at Vec-mutator call sites
-(`push(mut ref vec, ref local)` etc.). 6-10h dedicated session
-queued in [TODO.md polish queue](../TODO.md). Out of scope for
-v1.
+**Phase 4 shipped 2026-06-09**: `Vec<ref T>` and `Vec<mut ref T>`
+are now first-class element types. Both backends emit per-shape
+typedef + helpers (`intent_vec_ref_<inner_tag>` / `intent_vec_refmut_<inner_tag>`);
+`element_tag` and `vec_struct_tag` route `Type::Ref(_)` /
+`Type::RefMut(_)` to identifier-safe suffixes. Since refs are
+Copy, `__free` skips per-element drop. The scope-escape analyzer
+extends to `push(mut ref vec, ref X)`: when X's binding sits at
+a deeper scope than the Vec receiver, the analyzer rejects with
+a "ref to '{X}' would dangle when '{X}'s scope ends" diagnostic.
+Acceptance: `examples/vec_of_ref.vani` (ASan + LSan clean on the
+C backend; cross-backend stdout parity).
 
 **Still rejected**: returning a ref directly (`fn foo() -> ref T`)
 — that's Rust-style lifetime-variable territory (path (C) in

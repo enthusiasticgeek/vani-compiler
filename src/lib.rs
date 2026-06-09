@@ -886,21 +886,98 @@ mod tests {
     }
 
     #[test]
-    fn vec_of_ref_still_rejected() {
-        // References aren't allowed as Vec element types
-        // (they'd outlive their referent and dangle).
+    fn vec_of_ref_phase4_accepts_same_scope_refs() {
+        // L4 (B) Phase 4 (2026-06-09): `Vec<ref T>` is now
+        // accepted when every ref element points at a binding
+        // at the same-or-outer scope as the Vec itself. Refs
+        // are Copy, so the literal's slot-fills are plain
+        // pointer copies; the runtime buffer is `const T**`.
         let source = r#"
             fn helper(x: ref i64) -> i64 { return 1; }
             fn main() -> i64 {
-              let v: i64 = 0;
+              let v: i64 = 7;
               let xs: Vec<ref i64> = vec(ref v);
               return 0;
             }
         "#;
-        let errors = compile(source).expect_err("Vec<&T> should fail");
+        compile(source).expect("Vec<ref i64> should compile in Phase 4");
+    }
+
+    #[test]
+    fn vec_of_ref_phase4_push_accepts_same_scope_source() {
+        // L4 (B) Phase 4 accept-case for push: both the Vec
+        // and the ref source are in the same lexical scope,
+        // so the pushed pointer is safe.
+        let source = r#"
+            fn main() -> i64 {
+              let f: i64 = 42;
+              let xs: Vec<ref i64> = vec();
+              let _ = push(mut ref xs, ref f);
+              return 0;
+            }
+        "#;
+        compile(source).expect("same-scope push of ref must accept");
+    }
+
+    #[test]
+    fn vec_of_refmut_phase4_accepts_same_scope_refs() {
+        // L4 (B) Phase 4: `Vec<mut ref T>` storage variant.
+        // The bundle's `.data` is `T**` (no const) so callers
+        // can mutate through the stored pointers.
+        let source = r#"
+            struct P { x: i64, y: i64 }
+            fn main() -> i64 {
+              let a: P = P { x: 1, y: 2 };
+              let b: P = P { x: 3, y: 4 };
+              let xs: Vec<mut ref P> = vec(mut ref a, mut ref b);
+              return 0;
+            }
+        "#;
+        compile(source).expect("Vec<mut ref P> with same-scope sources must compile");
+    }
+
+    #[test]
+    fn vec_of_ref_phase4_struct_field_compiles() {
+        // L4 (B) Phase 3 + Phase 4 interplay: a struct field of
+        // `Vec<ref T>` is accepted; the scope-escape analyzer on
+        // the FieldAssign side keeps things safe.
+        let source = r#"
+            struct P { v: i64 }
+            struct Bag { items: Vec<ref P> }
+            fn main() -> i64 {
+              let a: P = P { v: 10 };
+              let b: P = P { v: 20 };
+              let bag: Bag = Bag { items: vec(ref a, ref b) };
+              return 0;
+            }
+        "#;
+        compile(source).expect("struct field of Vec<ref P> must compile (Phase 3+4)");
+    }
+
+    #[test]
+    fn vec_of_ref_phase4_rejects_deeper_scope_source() {
+        // L4 (B) Phase 4 (2026-06-09): the scope-escape analyzer
+        // at the Vec literal rejects when a `ref X` argument's
+        // source `X` is at a deeper scope than the Vec receiver
+        // — the pointer would outlive the referent.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<ref i64> = vec();
+              {
+                let v: i64 = 7;
+                push(mut ref xs, ref v);
+              }
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err(
+            "pushing a ref to a deeper-scope local must reject",
+        );
         assert!(
-            errors.iter().any(|e| e.message.contains("reference")),
-            "expected reference diagnostic, got: {:?}",
+            errors.iter().any(|e| e.message.contains("escape")
+                || e.message.contains("scope")
+                || e.message.contains("outlive")),
+            "expected escape/scope diagnostic, got: {:?}",
             errors
         );
     }

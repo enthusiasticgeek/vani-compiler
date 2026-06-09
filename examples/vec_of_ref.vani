@@ -1,0 +1,19 @@
+// L4 (B) Phase 4: Vec<ref T> end-to-end acceptance.
+// Stores shared refs to struct values into a Vec, reads
+// them back via auto-deref through field access. Refs are
+// Copy at the type level (plain pointers), so the literal
+// `vec(ref a, ref b, ref c)` is three pointer-copies.
+
+struct Point { x: i64, y: i64 }
+
+fn area(p: ref Point) -> i64 { return p.x * p.y; }
+
+fn main() -> i64 {
+  let a: Point = Point { x: 3, y: 4 };
+  let b: Point = Point { x: 5, y: 6 };
+  let c: Point = Point { x: 7, y: 8 };
+  let xs: Vec<ref Point> = vec(ref a, ref b, ref c);
+  let total: i64 = area(xs[0]) + area(xs[1]) + area(xs[2]);
+  print total;  // expect 12 + 30 + 56 = 98
+  return 0;
+}

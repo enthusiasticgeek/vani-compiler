@@ -9678,6 +9678,15 @@ pub(crate) fn element_tag(element: &Type) -> String {
         // per-Iface fat-pointer typedef `intent_dyn_<Iface>`
         // emitted by `emit_dyn_iface_typedefs`. Closes L8.
         Type::Object(iface_name) => format!("dyn_{}", iface_name),
+        // L4 (B) Phase 4: `Vec<ref T>` / `Vec<mut ref T>` per-shape
+        // typedef name. c_leaf_type returns "/* ref */" which is not
+        // a valid C identifier; spell as `ref_<inner_tag>` (and
+        // `refmut_<inner_tag>` for mutable refs) so distinct inner
+        // types get distinct typedef names. The bundle below emits
+        // a `const T**` (resp. `T**`) data buffer; the affine layer
+        // ensures the pointers don't outlive their referents.
+        Type::Ref(inner) => format!("ref_{}", element_tag(inner)),
+        Type::RefMut(inner) => format!("refmut_{}", element_tag(inner)),
         _ => c_leaf_type(element).replace(' ', "_"),
     }
 }
@@ -10789,6 +10798,26 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
             Type::Object(iface) => format!("intent_dyn_{}", iface),
             _ => format!("{}*", format_declarator(inner, "").trim()),
         },
+        // L4 (B) Phase 4 (2026-06-09): ref-element storage for
+        // `Vec<ref T>` / `Vec<mut ref T>`. The Vec's `.data` slot
+        // holds an array of pointers — `const T**` for shared refs
+        // (the reads are read-only) and `T**` for mut refs. The
+        // bundle's element-storage spelling is the per-pointer
+        // type (so `{ct}*` interpolation gives `const T**`).
+        // c_leaf_type would otherwise return "/* ref */" which is
+        // invalid C. The `const` prefix is dropped at this level
+        // to avoid duplicate-const warnings when `emit_vec_bundle`
+        // wraps the spelling in `const {ct}* init` for the
+        // `__from` parameter; the helper applies the const-cast
+        // appropriately at use sites instead.
+        Type::Ref(inner) => {
+            let inner_storage = c_element_storage(inner);
+            format!("{}*", inner_storage)
+        }
+        Type::RefMut(inner) => {
+            let inner_storage = c_element_storage(inner);
+            format!("{}*", inner_storage)
+        }
         _ => c_leaf_type(ty).to_string(),
     }
 }

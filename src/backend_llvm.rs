@@ -39906,6 +39906,12 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
             let parts: Vec<String> = elements.iter().map(vec_struct_tag).collect();
             format!("tuple_{}", parts.join("_"))
         }
+        // L4 (B) Phase 4 (2026-06-09): `Vec<ref T>` / `Vec<mut ref T>`
+        // element tag. The C backend uses `ref_<inner_tag>` /
+        // `refmut_<inner_tag>`; mirror that here. Without this arm
+        // `llvm_type(Ref(_))` would panic on the aggregate fallback.
+        Type::Ref(inner) => format!("ref_{}", vec_struct_tag(inner)),
+        Type::RefMut(inner) => format!("refmut_{}", vec_struct_tag(inner)),
         // Note: Type::Vec(_) and Type::Array { .. } are handled
         // by the leading arms of this match (lines 38416-38418) —
         // earlier-arm shadowing made the trailing duplicates

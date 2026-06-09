@@ -10786,27 +10786,15 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
             ));
         }
     }
-    if let Type::Vec(element) = ty {
-        // Refines #7: `Vec<T>` accepts non-Copy element types
-        // (`Vec<Vec<i64>>`) since the backend now emits
-        // element-aware free / set / clone helpers. References
-        // remain rejected — a `Vec<&T>` would dangle the moment
-        // the referent goes out of scope.
-        //
-        // L4 (B) Phase 4 investigation (2026-06-09): lifting
-        // the checker gate alone is insufficient — both backends
-        // emit `/* ref */` placeholders for ref-element Vec
-        // bundles. Real codegen work needed: per-element-type
-        // Vec struct for ref elements (data is T**, free walks
-        // the pointer buffer without per-element drop, push
-        // stores the pointer). 6-10h additional work scoped to
-        // a follow-up session; for now the rejection stays.
-        if element.is_ref() {
-            diagnostics.push(Diagnostic::new(
-                span,
-                format!("Vec element type cannot be a reference, got {}", element),
-            ));
-        }
+    if let Type::Vec(_element) = ty {
+        // L4 (B) Phase 4 (2026-06-09): `Vec<ref T>` / `Vec<mut ref T>`
+        // is now accepted at the type-validator level. The backend
+        // emits a per-shape typedef (`intent_vec_ref_<TAG>`) whose
+        // `.data` is a `const T**` (or `T**`) buffer; refs are
+        // Copy, so `__free` skips per-element drop. Dangle-prevention
+        // is handled at the Vec-mutator call sites (push / insert /
+        // set / swap_remove): when a ref arg's source is at deeper
+        // scope than the Vec receiver, the analyzer rejects.
     }
     // ARC 1.2: when K of `HashMap<K, V>` is a user-defined struct,
     // require an `implement Hash for K` impl in scope. The other
@@ -10860,6 +10848,26 @@ fn collect_ref_sources_in_expr(
     out: &mut Vec<(String, Span)>,
 ) {
     collect_ref_sources_in_expr_impl(expr, true, out);
+}
+
+/// Walk through `Ref`, `RefMut`, `FieldAccess`, and `Index`
+/// wrappers to find the root `Var` binding the expression
+/// ultimately reads from. Used by the L4 (B) Phase 4 scope-
+/// escape analyzer at Vec-mutator call sites to identify the
+/// Vec binding whose scope-depth bounds the allowed depth of
+/// any ref-element source. Returns `None` for expressions
+/// without an obvious root Var (e.g. a temporary from a
+/// function call).
+fn root_var_of_expr(expr: &Expr) -> Option<String> {
+    match &expr.kind {
+        ExprKind::Var(name) => Some(name.clone()),
+        ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
+            root_var_of_expr(inner)
+        }
+        ExprKind::FieldAccess { object, .. } => root_var_of_expr(object),
+        ExprKind::Index { array, .. } => root_var_of_expr(array),
+        _ => None,
+    }
 }
 
 fn collect_ref_sources_in_expr_impl(
@@ -17617,7 +17625,7 @@ fn check_condvar_builtin(
 fn try_elaborate_empty_vec(
     expr: &Expr,
     expected: &Type,
-    diagnostics: &mut Vec<Diagnostic>,
+    _diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<CheckedExpr> {
     let ExprKind::Call { name, args, .. } = &expr.kind else {
         return None;
@@ -17629,15 +17637,10 @@ fn try_elaborate_empty_vec(
         return None;
     };
     let element_ty = (**element_box).clone();
-    if matches!(element_ty, Type::Ref(_) | Type::RefMut(_)) {
-        diagnostics.push(Diagnostic::new(
-            expr.span,
-            format!(
-                "Vec element type cannot be a reference, got {}",
-                element_ty
-            ),
-        ));
-    }
+    // L4 (B) Phase 4 (2026-06-09): empty `vec()` accepting a
+    // `Vec<ref T>` annotation. The Vec starts empty, so no refs
+    // are stored yet; subsequent push/insert call sites enforce
+    // the scope-escape rule.
     Some(CheckedExpr::new(
         TypedExprKind::Call {
             name: "vec".to_string(),
@@ -18045,15 +18048,13 @@ fn check_vec_builtin(
     // dangle). Fixed-size arrays as Vec elements are tracked
     // as #7 phase 2b — gate clearly until per-shape typedef
     // + memcpy push/set lands.
-    if matches!(element_type, Type::Ref(_) | Type::RefMut(_)) {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "Vec element type cannot be a reference, got {}",
-                element_type
-            ),
-        ));
-    }
+    // L4 (B) Phase 4 (2026-06-09): non-empty `vec(ref a, ref b, ...)`
+    // accepting a `Vec<ref T>` element type. Refs are Copy at
+    // the type level, so the literal slot-fill is just a
+    // pointer copy. Scope-escape at the literal site is
+    // enforced separately: each `ref a` argument must reference
+    // a binding at the same-or-outer scope as the Vec's binding.
+    // The check fires below in `check_vec_ref_args_dont_escape`.
 
     // Vtables Phase 4b: when element types are not all
     // identical but every element implements a single
@@ -18257,6 +18258,39 @@ fn check_push_builtin(
         "push value",
         diagnostics,
     );
+
+    // L4 (B) Phase 4 (2026-06-09): scope-escape check for
+    // `push(mut ref xs: Vec<ref T>, ref X)`. The Vec's element
+    // type is `ref T` (or `mut ref T`); the pushed `ref X` must
+    // reference a binding at the same-or-outer scope as the Vec
+    // receiver — otherwise X drops while `xs` still holds a
+    // pointer into its storage, leaving a dangle on the next
+    // Vec access.
+    if matches!(element_type, Type::Ref(_) | Type::RefMut(_)) {
+        if let Some(vec_name) = root_var_of_expr(&args[0]) {
+            if let Some(vec_depth) = env.lookup_depth(&vec_name) {
+                let mut ref_sources: Vec<(String, Span)> = Vec::new();
+                collect_ref_sources_in_expr(&args[1], &mut ref_sources);
+                for (src_name, ref_span) in &ref_sources {
+                    if let Some(src_depth) = env.lookup_depth(src_name) {
+                        if src_depth > vec_depth {
+                            diagnostics.push(Diagnostic::new(
+                                *ref_span,
+                                format!(
+                                    "ref to '{}' (declared in an inner scope) cannot \
+                                     be pushed into '{}' — the pushed pointer would \
+                                     dangle when '{}'s scope ends. Declare '{}' in \
+                                     the same scope as '{}', or push by value with a \
+                                     copy.",
+                                    src_name, vec_name, src_name, src_name, vec_name
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Consuming form moves the source binding; in-place form
     // leaves it borrowed (the existing `RefMut`/`RefMutField`

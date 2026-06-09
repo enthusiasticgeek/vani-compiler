@@ -1,10 +1,17 @@
 # Next-session design notes: liveness optimization + L4 (B)
 
-**Status (updated 2026-06-08, late session)**:
+**Status (updated 2026-06-09)**:
   - Item 1 — liveness optimization → ✅ SHIPPED (commit `2a693fb`)
   - Item 2 — L4 (B) Phase 1 → ✅ SHIPPED (commit `229852b`).
-    Phases 3+4 still queued; require the scope-escape analyzer
-    that Phase 1 was able to skip.
+  - Item 2 — L4 (B) Phase 3 + scope-escape analyzer → ✅ SHIPPED
+    (commit `3c14dce`).
+  - Item 2 — L4 (B) Phase 4 (`Vec<ref T>`) → ✅ SHIPPED 2026-06-09.
+    Per-shape Vec typedef + helpers on both backends; element_tag /
+    vec_struct_tag handle Ref/RefMut; push-site scope-escape
+    analyzer. Acceptance: `examples/vec_of_ref.vani` cross-backend
+    parity-green and ASan-clean. **L4 (B) is now fully closed.**
+    Only path-C (returning refs directly via lifetime elision)
+    remains queued — separate research-scale arc.
 
 Investigation 2026-06-08 (late session) showed:
 - Phase 1 (let-binding refs) was safer than the design anticipated:
