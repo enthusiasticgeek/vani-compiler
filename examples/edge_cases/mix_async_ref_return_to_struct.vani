@@ -1,0 +1,4 @@
+// async fn returning ref — Path C should kick in.
+struct P { x: i64 }
+async fn pass(p: ref P) -> ref P { return p; }
+fn main() -> i64 { return 0; }

@@ -1,0 +1,6 @@
+fn doit() -> i64 {
+  unsafe(reason = "nested in fn") {
+    return 1;
+  }
+}
+fn main() -> i64 { return doit(); }

@@ -136,6 +136,34 @@ pass runs.
 Regression tests: `closure_inside_iface_impl_method_lifts_correctly`
 + `closure_inside_methods_block_method_lifts_correctly`.
 
+### Bug 5 — `return` inside `unsafe { ... }` (FIXED)
+
+A function whose only `return` was inside an
+`unsafe(reason = "...") { return X; }` block failed the
+"function must return T" check. The unsafe-block handler in
+the checker captured the inner-body's termination flag but
+discarded it (`let _terminated = check_stmt_list(...)`),
+always returning `false`. Fixed by propagating
+`inner_terminated` as the unsafe-block's return value (also
+skip the redundant scope-exit drop emission when inner
+already returned). Regression:
+`unsafe_block_with_return_satisfies_must_return`.
+
+### Bug 6 — async fn returning `ref T` (FIXED, C backend)
+
+An async fn `async fn pass(p: ref T) -> ref T` synthesizes
+a payloaded enum `Future__Ref_Struct__T` whose payload is
+`const Struct_T*`. The C backend's enum-typedef pre-emit
+pass (which runs BEFORE struct typedefs) emitted this
+typedef before `Struct_T` was declared, so cc rejected
+with "unknown type name 'Struct_T'". LLVM compiled fine.
+Fixed by deferring the pre-emit when an enum's payload
+references a user struct (directly or via Vec / Array /
+Ref / RefMut / Box / Tuple). The post-struct-typedef pass
+already runs for these — letting it pick them up resolves
+the ordering. Regression:
+`async_fn_returning_ref_to_user_struct_compiles_on_c_backend`.
+
 ### Bug 4 — `Vec<Box<T>>` panicked both backends (FIXED, partial)
 
 `Vec<Box<T>>` previously panicked both backends with placeholder-

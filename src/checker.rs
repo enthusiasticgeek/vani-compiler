@@ -10779,7 +10779,7 @@ fn check_one_stmt(
             env.push_scope();
             let mut typed_body: Vec<TypedStmt> = Vec::new();
             let mut inner_facts = smt_facts.clone();
-            let _terminated = check_stmt_list(
+            let inner_terminated = check_stmt_list(
                 inner_body,
                 env,
                 signatures,
@@ -10789,14 +10789,23 @@ fn check_one_stmt(
                 &mut typed_body,
                 diagnostics,
             );
-            emit_current_scope_drops(env, &mut typed_body, diagnostics);
+            // Skip the scope-exit drops when the inner body has
+            // already terminated via return — the return path
+            // already emitted them. Otherwise emit normally.
+            // 2026-06-09: also propagate `inner_terminated` to
+            // the outer caller so a `return` inside an
+            // `unsafe(reason="...")` block satisfies the
+            // function-must-return check.
+            if !inner_terminated {
+                emit_current_scope_drops(env, &mut typed_body, diagnostics);
+            }
             env.pop_scope();
 
             body.push(TypedStmt::UnsafeBlock {
                 reason: reason.clone(),
                 body: typed_body,
             });
-            false
+            inner_terminated
         }
         Stmt::LetTuple {
             names,

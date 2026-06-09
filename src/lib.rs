@@ -11148,6 +11148,46 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn unsafe_block_with_return_satisfies_must_return() {
+        // Regression: `unsafe(reason = "...") { return X; }` as
+        // the function body previously failed the "fn must return
+        // T" check because the inner termination flag wasn't
+        // propagated up. Fixed 2026-06-09.
+        std::env::set_var("INTENT_TARGET_EMBEDDED", "1");
+        let source = r#"
+            fn doit() -> i64 {
+              unsafe(reason = "nested in fn") {
+                return 1;
+              }
+            }
+            fn main() -> i64 { return doit(); }
+        "#;
+        let result = compile(source);
+        std::env::remove_var("INTENT_TARGET_EMBEDDED");
+        result.expect("return inside unsafe must satisfy fn-must-return");
+    }
+
+    #[test]
+    fn async_fn_returning_ref_to_user_struct_compiles_on_c_backend() {
+        // Regression: an async fn returning `ref T` where T is a
+        // user-defined struct synthesizes `Future__Ref_Struct__T`
+        // whose payload is `const Struct_T*`. The C backend's
+        // pre-emit pass for payloaded enums emitted that typedef
+        // BEFORE Struct_T was declared (cc: "unknown type name
+        // 'Struct_T'"). LLVM compiled cleanly. Fixed 2026-06-09
+        // by deferring the pre-emit for enums whose payload
+        // references a user struct (directly or via Vec / Array /
+        // Ref / RefMut / Box / Tuple).
+        let source = r#"
+            struct P { x: i64 }
+            async fn pass(p: ref P) -> ref P { return p; }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("async ref-return must compile on C backend");
+        compile_to_llvm(source).expect("async ref-return must compile on LLVM backend");
+    }
+
+    #[test]
     fn vec_of_box_compiles_on_both_backends() {
         // Regression: `Vec<Box<T>>` previously panicked both
         // backends. C: `intent_vec_/*_Box<T>_*/__from(...)`

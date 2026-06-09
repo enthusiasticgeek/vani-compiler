@@ -348,10 +348,39 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // ARC8_V3_PLAN.md if hit).
     let mut enum_typedefs_pre_emitted: std::collections::HashSet<String> =
         std::collections::HashSet::new();
+    // 2026-06-09: skip pre-emit for enums whose payload references
+    // a user struct (directly or via Vec/Array/Ref/RefMut). Otherwise
+    // the pre-emit fires the enum typedef BEFORE Struct_<Name> is
+    // declared, and cc rejects with "unknown type name Struct_X".
+    // Caught by the adversarial test set: async fn returning ref to
+    // a user struct synthesizes `Future__Ref_Struct__X` whose payload
+    // is `const Struct_X*`.
+    fn enum_payload_refs_user_struct(decl: &crate::ir::TypedEnumDecl) -> bool {
+        fn ty_refs_struct(ty: &Type) -> bool {
+            match ty {
+                Type::Struct(_) => true,
+                Type::Array { element, .. }
+                | Type::Vec(element)
+                | Type::Ref(element)
+                | Type::RefMut(element)
+                | Type::Box(element) => ty_refs_struct(element),
+                Type::Tuple(elements) => elements.iter().any(ty_refs_struct),
+                _ => false,
+            }
+        }
+        decl.payload_types
+            .iter()
+            .filter_map(|t| t.as_ref())
+            .any(ty_refs_struct)
+    }
     {
         let mut any_pre = false;
         for decl in &program.enums {
             if !enum_has_payload(decl) {
+                continue;
+            }
+            if enum_payload_refs_user_struct(decl) {
+                // Defer to the post-struct-typedef pass below.
                 continue;
             }
             if enum_has_mixed_payloads(decl) {
