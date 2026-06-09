@@ -314,7 +314,12 @@ def main() -> int:
         action="store_true",
         help="prepend the Sanskrit `// श्री।` invocation header AND "
              "the SOV-S8 `// vani-lang: <lang>` purity pragma when "
-             "translating to a Devanagari-script language (sanskrit / hindi / marathi)",
+             "translating to a Devanagari Indo-Aryan language "
+             "(sanskrit / hindi / marathi / nepali / maithili / konkani). "
+             "Other targets (mandarin, japanese, latin-script dialects, "
+             "etc.) ignore this flag — the header is culturally specific "
+             "to the Indian subcontinent and shouldn't appear in non-IA "
+             "files. Header-policy correction 2026-06-09.",
     )
     args = parser.parse_args()
     if not args.input.exists():
@@ -322,7 +327,16 @@ def main() -> int:
         return 1
     source = args.input.read_text(encoding="utf-8")
     translated = translate(source, args.target_lang)
-    if args.add_sri_header and args.target_lang in ("sanskrit", "hindi", "marathi"):
+    # Header-policy correction (2026-06-09): the `// श्री।`
+    # auspicious-beginning marker is a Hindu / Sanskrit-tradition
+    # convention culturally specific to the Indian subcontinent.
+    # Only Devanagari Indo-Aryan targets receive it. Other
+    # targets (Mandarin / Japanese / Korean / Latin-script /
+    # Cyrillic / etc.) ignore --add-sri-header even when set.
+    if args.add_sri_header and args.target_lang in (
+        "sanskrit", "hindi", "marathi",
+        "nepali", "maithili", "konkani",
+    ):
         if not translated.lstrip().startswith("// श्री।"):
             translated = (
                 f"// श्री।\n"

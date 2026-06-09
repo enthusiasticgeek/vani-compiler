@@ -216,6 +216,17 @@ read those before starting.
 | ~~L4 (B) Phase 3 + scope-escape analyzer~~ | ✅ SHIPPED 2026-06-08 | — | User-declared struct fields can now hold ref types. Scope-escape analyzer (`collect_ref_sources_in_expr`) catches Return-escapes (`return Bag { item: ref local };`) and cross-scope FieldAssign-escapes (`bag.item = ref inner_local;`). Call/MethodCall/Len/Index args treated as "consuming" so refs there don't propagate. Two new regression tests + one updated. |
 | **Phase 4 — Vec<ref T>** | 6-10h dedicated session | Investigation 2026-06-09: lifting the checker gate alone is INSUFFICIENT. Both backends emit `/* ref */` placeholders for ref-element Vec bundles — there's no codegen for the per-element-type Vec storage of refs. Real work required: (a) `element_tag(Type::Ref(_))` → valid identifier suffix (e.g. `ref_Struct_Foo`); (b) per-shape Vec struct typedef `intent_vec_ref_Struct_Foo` with `const Struct_Foo** data` + len + capacity; (c) per-shape helpers (`__free` frees data buffer with no per-element drop since refs don't own; `__from`, `push`, `set`, etc.); (d) LLVM mirror. PLUS the scope-escape analyzer at Vec-mutator call sites (push / set / insert) — when arg 1 is a ref to an inner-scope local, reject. The existing Vec-element-cannot-be-ref rejection stays until the codegen lands. Not blocking any v1 use case. |
 
+### 🎯 Fresh-session queue (added 2026-06-09)
+
+Two L4-completion items the user explicitly queued for a fresh
+session — both have clear scope and load-bearing investigation
+already done.
+
+| Task | Effort | Scope |
+|---|---|---|
+| **L4 (B) Phase 4 — `Vec<ref T>`** | 6-10h, one fresh session | Investigation 2026-06-09 (commit 8960383) showed lifting the checker gate alone is insufficient — both backends emit `/* ref */` placeholders for ref-element Vec bundles. Real work: (a) `element_tag(Type::Ref(_))` → valid identifier suffix (e.g. `ref_Struct_Foo`); (b) per-shape Vec struct typedef on both backends with `const T**` data; (c) per-shape helpers (`__from`, `__free` [data-only, no per-element drop], `push`, `set`, `swap_remove`, `insert`, `clear`); (d) LLVM mirror; (e) scope-escape analyzer at Vec-mutator call sites (push/set/insert) — when arg 1 is a ref to a deeper-scope local than the Vec receiver, reject. Existing `collect_ref_sources_in_expr` is the reusable scaffolding. |
+| **L4 (C) — Returning refs directly (`fn foo() -> ref T`)** | 4-6 weeks dedicated arc | Rust-style lifetime variables territory. Lift the existing "function return type cannot be a reference type" rejection. The simplest model: **lifetime elision** (Swift / OCaml style — compiler infers; syntax never mentions lifetimes). One single-parameter rule: if a fn has exactly one ref parameter, the return type's ref takes that parameter's lifetime. Multi-ref or no-ref cases reject with a clear diagnostic suggesting refactoring. More complex cases (multiple refs, struct fields holding refs in return types) are explicit-lifetime territory (path D, deferred indefinitely). Real research-scale work. Both backends already lower ref params as `T*`; return-position refs would just be `T*` return types — codegen is the easy part. The hard part: the analyzer's lifetime-equivalence-class tracking. |
+
 ### 📋 User-direction items (added 2026-06-08, end-of-session)
 
 Three feature requests from the user. Each is a substantive
