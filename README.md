@@ -470,6 +470,35 @@ runs the same instructions on the same target.
 
 ### वाणी (*vāṇī*) — Devanagari + the 62-dialect family
 
+> **⚠️ Caveat — natural language support is provisional.**
+> The vāṇी authors read and write **English** fluently and have
+> **first-hand familiarity with the Devanagari Indo-Aryan family**
+> (Sanskrit / Hindi / Marathi as primary, Nepali / Maithili /
+> Konkani as close relatives). Every other dialect's keyword
+> table — Bengali, Tamil, Telugu, Gujarati, Punjabi, Kannada,
+> Malayalam, Odia, Assamese, Sinhala, Urdu, Sindhi, Persian,
+> Pashto, Mandarin Chinese, Japanese, Korean, Arabic, Hebrew,
+> Greek, Russian, Thai, Khmer, Burmese, Amharic, Tibetan,
+> Mongolian, Armenian, Georgian, Cherokee, Lao, Spanish, French,
+> German, Italian, Portuguese, Polish, Turkish, Vietnamese,
+> Romanian, Dutch, Hungarian, Czech, Slovak, Swedish, Norwegian,
+> Danish, Finnish, Catalan, Yoruba, Hausa, Swahili, Indonesian,
+> Malay, Filipino, Khmer (and more) — was drafted from
+> reference grammars, tatsama / loan-word patterns, and CS-
+> vocabulary conventions, **but has NOT been validated by a
+> native speaker**. The chosen verbs and idioms may sound
+> wrong, formal, or archaic to fluent users. The lexer +
+> parser pipeline is correct; the *vocabulary curation* is
+> what needs review.
+>
+> **A grammar-consultant pass — native-speaker review across
+> the shipped dialects — is queued as an ongoing external item
+> in [TODO.md](TODO.md)**. If you read any of these languages
+> natively and find a keyword that's wrong, please open an
+> issue or PR; the lexer table is one file and the change is
+> mechanical. Treat the non-Devanagari-Indo-Aryan dialects as
+> *technical proofs-of-concept* until that pass lands.
+
 Devanagari notation lets the source read in the writer's mother tongue.
 The first three languages are **Sanskrit** (*saṁskṛta* — the canonical
 Devanagari language and grammar root), **Hindi** (*hindī*), and **Marathi**
@@ -3922,6 +3951,30 @@ example programs are all welcome.
 > and won't change. This section covers the natural-language
 > rollout queued on top of it. Skip if you only care about the
 > English surface.
+
+> **⚠️ Caveat — every dialect's keyword table needs native-
+> speaker review.** The vāṇī authors are fluent in English and
+> have first-hand familiarity with the Devanagari Indo-Aryan
+> family (Sanskrit / Hindi / Marathi as primary; Nepali /
+> Maithili / Konkani-Devanagari as close relatives). Every
+> other dialect listed below (Bengali, Tamil, Telugu, Gujarati,
+> Punjabi, Kannada, Malayalam, Odia, Assamese, Sinhala, Urdu,
+> Sindhi, Persian, Pashto, Mandarin, Japanese, Korean, Arabic,
+> Hebrew, Greek, Russian, Thai, Khmer, Burmese, Amharic,
+> Tibetan, Mongolian, Armenian, Georgian, Cherokee, Lao,
+> Spanish, French, German, Italian, Portuguese, Polish,
+> Turkish, Vietnamese, Romanian, Dutch, Hungarian, Czech,
+> Slovak, Swedish, Norwegian, Danish, Finnish, Catalan,
+> Yoruba, Hausa, Swahili, Indonesian, Malay, Filipino) was
+> drafted from reference grammars + tatsama/loan-word patterns
+> + CS-vocabulary conventions, but has **NOT been validated
+> by a native speaker**. The keyword choices may sound wrong,
+> overly formal, or archaic to fluent users. **If you read
+> any of these languages natively, please open an issue or
+> PR — the lexer table is one file and corrections are
+> mechanical to merge.** Treat the non-Devanagari-Indo-Aryan
+> dialects as *technical proofs-of-concept* until the grammar-
+> consultant pass (queued in [TODO.md](TODO.md)) lands.
 
 vāṇी treats human-spoken languages as a first-class concern in
 addition to its English default. The adoption order is **Indian

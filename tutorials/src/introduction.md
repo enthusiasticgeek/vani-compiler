@@ -9,6 +9,22 @@ Sanskrit, Hindi, or Marathi. The name (Sanskrit for *"speech"*)
 expands to *Verbose Alternative Natural Interface* — the design
 goal is **code that reads like speech, not punctuation**.
 
+> **⚠️ Note on natural-language dialects.** vāṇी ships keyword
+> tables for 62 dialects across 26 scripts, but only **English**
+> and the **Devanagari Indo-Aryan family** (Sanskrit / Hindi /
+> Marathi as primary; Nepali / Maithili / Konkani as close
+> relatives) have been native-speaker-verified by the authors.
+> Every other dialect's vocabulary — Bengali, Tamil, Mandarin,
+> Japanese, Korean, Arabic, Russian, Spanish, and the rest —
+> was drafted from reference grammars + loan-word patterns and
+> may sound wrong, formal, or archaic to fluent users. A
+> grammar-consultant pass for native-speaker review is queued
+> in [TODO.md](https://github.com/.../TODO.md). If you read any
+> of these languages natively and find a keyword that's off,
+> please open an issue or PR. Until that pass lands, treat the
+> non-Devanagari-Indo-Aryan dialects as *technical proofs-of-
+> concept*. The English path is unaffected.
+
 These tutorials walk you through the language progressively.
 The 155 English examples and 22 GoF design-pattern examples
 that live in [`examples/language/english/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english)
