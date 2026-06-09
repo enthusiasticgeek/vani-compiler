@@ -1,0 +1,7 @@
+fn main() -> i64 {
+  let n: i64 = 5;
+  let r: i64 = if n > 0 {
+    if n > 10 { 1 } else { 2 }
+  } else { 3 };
+  return r;
+}

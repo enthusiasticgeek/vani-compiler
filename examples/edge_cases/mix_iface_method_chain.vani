@@ -1,0 +1,19 @@
+interface Builder {
+  fn add(self: mut ref Self, n: i64) -> i64;
+  fn total(self: ref Self) -> i64;
+}
+struct Sum { acc: i64 }
+implement Builder for Sum {
+  fn add(self: mut ref Sum, n: i64) -> i64 {
+    self.acc = self.acc + n;
+    return self.acc;
+  }
+  fn total(self: ref Sum) -> i64 { return self.acc; }
+}
+fn main() -> i64 {
+  let s: Sum = Sum { acc: 0 };
+  let _ = s.add(1);
+  let _ = s.add(2);
+  let _ = s.add(3);
+  return s.total();
+}

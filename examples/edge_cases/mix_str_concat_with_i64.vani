@@ -1,0 +1,6 @@
+fn main() -> i64 {
+  let n: i64 = 42;
+  let s: OwnedStr = "n=" + i64_to_str(n);
+  print s;
+  return 0;
+}

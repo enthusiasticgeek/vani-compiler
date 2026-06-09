@@ -1,0 +1,10 @@
+enum E { A, B }
+struct R { which: i64 }
+fn main() -> i64 {
+  let e: E = E.B;
+  let r: R = R { which: match e {
+    E.A then 1,
+    E.B then 2,
+  } };
+  return r.which;
+}

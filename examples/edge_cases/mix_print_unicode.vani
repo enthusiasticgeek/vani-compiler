@@ -1,0 +1,5 @@
+fn main() -> i64 {
+  let s: Str = "हेलो — 你好 — مرحبا — 🌍";
+  print s;
+  return 0;
+}

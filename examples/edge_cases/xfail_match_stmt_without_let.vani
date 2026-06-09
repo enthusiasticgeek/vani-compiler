@@ -1,0 +1,9 @@
+enum E { A, B }
+fn pick(e: E) -> i64 {
+  match e {
+    E.A then { return 1; },
+    E.B then { return 2; },
+  };
+  return 0;  // unreachable but accepted?
+}
+fn main() -> i64 { return pick(E.A); }

@@ -57,28 +57,32 @@ fn run_one(name: &str, backend: &str) {
     if requires_embedded(name) {
         cmd.env("INTENT_TARGET_EMBEDDED", "1");
     }
-    // xfail_*.vani files are pinned-rejection cases: the compiler
-    // MUST reject them (cleanly, no panic). Don't try to compile-
-    // run them through the executor; just verify the check fails
-    // without a panic.
+    // xfail_*.vani files are pinned-failure cases: the compiler
+    // must reject them somewhere in the pipeline (check / emit /
+    // backend codegen), but the failure mode must NOT be a panic
+    // or internal-error sentinel. Run the full pipeline through
+    // `vanic run` and assert the process exited non-zero AND
+    // stderr is panic-free.
     if name.starts_with("xfail_") {
-        let mut check = Command::new(vanic_bin());
-        check.args(["check", path.to_str().unwrap()]);
-        if requires_embedded(name) {
-            check.env("INTENT_TARGET_EMBEDDED", "1");
-        }
-        let out = check.output().expect("vanic check must execute");
+        let out = cmd.output().expect("vanic run must execute");
         let stderr = String::from_utf8_lossy(&out.stderr);
         assert!(
             !stderr.contains("panicked at"),
-            "{} on backend={} panicked the compiler during the xfail check:\n{}",
+            "{} on backend={} panicked the compiler (xfail must reject cleanly):\n{}",
+            name,
+            backend,
+            stderr,
+        );
+        assert!(
+            !stderr.contains("compiler bug"),
+            "{} on backend={} hit an internal-error path:\n{}",
             name,
             backend,
             stderr,
         );
         assert!(
             !out.status.success(),
-            "{} should have been rejected but check succeeded",
+            "{} should have been rejected somewhere in the pipeline but exited 0",
             name,
         );
         return;
@@ -165,8 +169,8 @@ fn edge_cases_all_compile_and_run_on_llvm_backend() {
 fn edge_cases_count_is_at_least_pinned_minimum() {
     let files = all_edge_case_files();
     assert!(
-        files.len() >= 25,
-        "edge_cases set shrunk below pinned minimum (25); current: {}",
+        files.len() >= 34,
+        "edge_cases set shrunk below pinned minimum (34); current: {}",
         files.len(),
     );
 }

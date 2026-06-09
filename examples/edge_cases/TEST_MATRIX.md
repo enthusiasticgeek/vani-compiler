@@ -43,6 +43,23 @@ cell value is the test filename.
 | `edge_pathological_recursion.vani` | SMT | Ackermann (multi-arg recursion + ensures) |
 | `edge_mutual_async.vani` | ASNC | Mutually-recursive async fns |
 
+## Out-of-the-box adversarial shapes
+
+Tests added during a "think outside the box" round. Each
+probes a non-obvious feature interaction or boundary value.
+
+| File | Probe | Verified |
+|---|---|---|
+| `mix_str_concat_with_i64.vani` | OwnedStr + i64 conversion + concat | runs; prints `n=42` |
+| `mix_print_unicode.vani` | Unicode (Hindi + Chinese + Arabic + emoji) in print | runs; emits all glyphs |
+| `mix_iface_method_chain.vani` | Iface method-chain through builder pattern | runs; sum = 6 |
+| `mix_methods_on_enum.vani` | `methods on Enum` block | runs; returns 1 |
+| `mix_match_in_struct_lit.vani` | `match` as a struct field initializer expression | runs |
+| `mix_nested_if_expr.vani` | Nested if-as-expression | runs |
+| `xfail_closure_in_block_expr.vani` | Closure inside a block expression (mistyped as `void*`) — KNOWN BUG | rejects at codegen |
+| `xfail_vec_tree_empty_init.vani` | `vec()` of a recursive struct without type-flow inference | rejects with annotation diagnostic |
+| `xfail_match_stmt_without_let.vani` | `match` as standalone statement (no `let` capturing) | rejects with parser diagnostic |
+
 ## Two-feature combinations (the workhorse mid-tier)
 
 | File | Combo | What it tests |

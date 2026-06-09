@@ -1,0 +1,6 @@
+// Via Vec — Vec is heap-allocated so the size is bounded.
+struct Tree { value: i64, children: Vec<Tree> }
+fn main() -> i64 {
+  let leaf: Tree = Tree { value: 1, children: vec() };
+  return 0;
+}
