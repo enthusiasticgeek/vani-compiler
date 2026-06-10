@@ -74,4 +74,5 @@
 
 ---
 
+[Glossary](glossary.md)
 [Contributing to the tutorials](contributing.md)
