@@ -1,4 +1,4 @@
-# vāṇī (वाणी) — VANI
+# vāṇī (वाणी) — the vāṇी compiler & programming language
 
 <p align="center">
   <img src="vani_logo1.png" alt="vāṇī logo1" width="480">
@@ -9,6 +9,18 @@
 Pronounced **vaa-NEE** (Sanskrit *vāṇī* — long-a, retroflex-n, long-i;
 stress on the second syllable). वाणी is the Sanskrit word for *speech*,
 *voice*, or *language itself*.
+
+> **Naming & disambiguation.** This repository is **the vāṇी compiler**
+> (वाणी संकलक, *vāṇī saṃkalaka*) and the implementation of
+> **the vāṇी programming language** (वाणी कार्यक्रमण भाषा,
+> *vāṇī kāryakramaṇa bhāṣā*). Each component carries a Sanskrit
+> qualifier to keep the two distinguishable in writing and search:
+> *saṃkalaka* (compiler — literally "assembler / collector") and
+> *kāryakramaṇa bhāṣā* (programming language — literally
+> "operation-procedure language"). The CLI binary is named
+> **`vanic`** — a contraction of *vāṇी* + *saṃkalaka*. Other
+> GitHub projects that happen to be called "vani" are unrelated to
+> this work.
 
 vāṇī is a working systems language. The default surface is
 English-keyword + ASCII identifiers and reads like a tightened
@@ -1717,6 +1729,14 @@ Implicit casts are inserted only when the checker considers them safe for this
 prototype. Explicit casts are represented in the typed IR and emitted as C casts,
 so generated code makes conversions visible instead of relying on C defaults.
 
+`as` between integer widths is **two-complement truncation** — it wraps,
+not saturates, and never errors at compile time on overflow. `200 as i8`
+folds to `-56` (the low 8 bits sign-extended), `-1 as u64` folds to
+`u64::MAX`, etc. The user opted in to the cast by writing `as`, so the
+compile-time fold matches what the emitted code does at runtime. Implicit
+coercion (e.g. `let y: i8 = 200;` without `as`) still range-checks and
+rejects — only explicit `as` wraps.
+
 ## Shift and bitwise rules
 
 `<<` and `>>` work on integers. The left operand determines the result type:
@@ -2923,9 +2943,16 @@ walks the typed IR and rejects observable side effects:
   - `xs[i] = v` (IndexAssign — mutates a mutable buffer).
   - Reassignment over a non-`Copy` value (`Vec<T>` / `OwnedStr` drop).
   - Consuming a Vec via `for x in xs` (move-and-drop).
-  - Calling a non-`pure` function. Vec mutators (`vec`, `push`,
-    `set`, `clone`) and `+` on strings (heap allocation) are also
-    rejected — they're observable through the allocator.
+  - Calling a non-`pure` function. Heap-allocating builtins are
+    also rejected — they're observable through the allocator:
+    Vec mutators (`vec`, `push`, `set`, `clone`), `box(...)` (and
+    its lowered form `__box_new`), and `+` on strings.
+  - RNG family (`rand_i64`, `rand_in_range`, `rand_in_range_f64`,
+    `rand_f64`, `rand_bool`, `rand_choice`, `rand_normal`,
+    `seed_rng`) — non-deterministic by design; a `pure fn`'s
+    output must be a function of its inputs, and IEC 62304
+    Class C / DO-178C Level A / ISO 26262 ASIL D all forbid
+    non-deterministic calls on safety-critical paths.
 
 A `pure fn` body must satisfy every rule above. A `parallel for`
 body is held to exactly the same rules — that's how the verifier
@@ -3651,8 +3678,13 @@ The honest list, grouped by which work item closes them:
 **Type system**
 
 - Tuples are Copy-only — no `OwnedStr` / `Vec<T>` in a tuple element.
-- Generic monomorphization supports first-arg literal inference and
-  one type parameter per fn (`<T>`, not `<T, U>`).
+- Generic monomorphization supports one type parameter per fn (`<T>`,
+  not `<T, U>`) and infers T from the first T-bearing argument's type.
+  The inference walks the param-type pattern and the arg-type in
+  lockstep — peeling matching `Box / Vec / Ref / RefMut / Atomic /
+  Mutex / Guard / Array` wrappers — so `keep<T>(b: Box<T>)` called
+  with `Box<i64>` binds T to `i64`, not to `Box<i64>`. Falls back to
+  the legacy whole-arg binding when the shapes don't match.
 - No closures — only top-level `fn` pointers via the `fn` keyword.
 - No `bool ↔ int` cast (deliberate — forces explicit branching).
 - `Mutex<T>` restricted to `Mutex<i64>` (other widths waiting on a
