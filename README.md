@@ -3685,7 +3685,12 @@ The honest list, grouped by which work item closes them:
   Mutex / Guard / Array` wrappers — so `keep<T>(b: Box<T>)` called
   with `Box<i64>` binds T to `i64`, not to `Box<i64>`. Falls back to
   the legacy whole-arg binding when the shapes don't match.
-- No closures — only top-level `fn` pointers via the `fn` keyword.
+- No closures with **lexical capture**. Inline anonymous `fn`
+  literals work as higher-order arguments (e.g.
+  `vec_map(ref xs, fn(x: i64) -> i64 { return x * 2; })`) and
+  named-fn pointers travel by value, but neither form captures
+  bindings from the enclosing scope — every value the body
+  references must be a parameter or a top-level item.
 - No `bool ↔ int` cast (deliberate — forces explicit branching).
 - `Mutex<T>` restricted to `Mutex<i64>` (other widths waiting on a
   parametric runtime helper).
