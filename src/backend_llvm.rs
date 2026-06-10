@@ -4198,11 +4198,18 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 BinaryOp::Div => "fdiv",
                 BinaryOp::Rem => "frem",
                 BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
-                    // Ordered comparisons (NaN → false). Matches the
-                    // C backend's IEEE 754 semantics.
+                    // IEEE 754 + C semantics for float compares:
+                    //   - `==` returns false when either is NaN  → `oeq`
+                    //   - `!=` returns true  when either is NaN  → `une`
+                    //   - `<` / `<=` / `>` / `>=` return false   → ordered
+                    // The previous emit used `one` for `Ne`, which is
+                    // ORDERED-not-equal: it returns FALSE when either is
+                    // NaN, so `NaN != NaN` evaluated to 0 on LLVM while
+                    // the C backend (using `!=`) returned 1. Use `une`
+                    // (Unordered Not Equal) so both backends agree.
                     let cond = match op {
                         BinaryOp::Eq => "oeq",
-                        BinaryOp::Ne => "one",
+                        BinaryOp::Ne => "une",
                         BinaryOp::Lt => "olt",
                         BinaryOp::Le => "ole",
                         BinaryOp::Gt => "ogt",

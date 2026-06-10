@@ -4916,9 +4916,14 @@ fn emit_binary(
         BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge => {
             // Comparison.
             let (pred, prefix) = if is_float {
+                // `Ne` uses Unordered Not Equal (`une`) so that
+                // `NaN != NaN` evaluates to TRUE, matching IEEE
+                // 754 + C's `!=`. The other comparisons stay
+                // ordered (NaN → false). See backend_llvm.rs for
+                // the parallel fix on the tree path.
                 let p = match op {
                     BinaryOp::Eq => "oeq",
-                    BinaryOp::Ne => "one",
+                    BinaryOp::Ne => "une",
                     BinaryOp::Lt => "olt",
                     BinaryOp::Le => "ole",
                     BinaryOp::Gt => "ogt",
