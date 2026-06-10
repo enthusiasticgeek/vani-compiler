@@ -1,0 +1,12 @@
+// श्री।
+// Twin of mix_generic_box_pass_through.vani for Vec<T>. Pre-fix:
+// `first<T>(xs: Vec<T>) -> T` called with `vec(7,8,9)` (a
+// Vec<i64>) inferred T=Vec<i64>, double-wrapped to Vec<Vec<i64>>
+// in the substituted body, and rejected the call as type
+// mismatch. Fix: structural unify peels matching `Vec<_>` on
+// both sides so T binds to i64.
+fn first<T>(xs: Vec<T>) -> T { return xs[0]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(7, 8, 9);
+  return first(xs);
+}

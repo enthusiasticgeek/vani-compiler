@@ -5942,7 +5942,8 @@ fn infer_concrete_type_for_call(
         fn ty_has_param(ty: &Type) -> bool {
             match ty {
                 Type::Param(_) => true,
-                Type::Ref(t) | Type::RefMut(t) | Type::Vec(t) => ty_has_param(t),
+                Type::Ref(t) | Type::RefMut(t) | Type::Vec(t)
+                | Type::Box(t) => ty_has_param(t),
                 Type::Array { element, .. } => ty_has_param(element),
                 Type::Apply { args, .. } => args.iter().any(ty_has_param),
                 Type::Tuple(es) => es.iter().any(ty_has_param),
@@ -5950,6 +5951,31 @@ fn infer_concrete_type_for_call(
             }
         }
         params.iter().position(|p| ty_has_param(&p.ty))
+    }
+    /// Structural unification: walk the param-type pattern and
+    /// the arg-type in lockstep, returning the concrete type
+    /// bound to the unique `Type::Param` slot. For `param =
+    /// Box<T>`, `arg = Box<i64>` → returns `i64`. Peels matching
+    /// `Ref/RefMut/Vec/Box/Array/Apply(_, [..])` wrappers.
+    /// Returns None on shape mismatch so the caller can fall
+    /// back to the legacy "T = whole arg type" inference.
+    fn unify_param_to_arg(param_ty: &Type, arg_ty: &Type) -> Option<Type> {
+        match (param_ty, arg_ty) {
+            (Type::Param(_), _) => Some(arg_ty.clone()),
+            (Type::Ref(p), Type::Ref(a))
+            | (Type::RefMut(p), Type::RefMut(a))
+            | (Type::Vec(p), Type::Vec(a))
+            | (Type::Box(p), Type::Box(a))
+            | (Type::Atomic(p), Type::Atomic(a))
+            | (Type::Mutex(p), Type::Mutex(a))
+            | (Type::Guard(p), Type::Guard(a)) => {
+                unify_param_to_arg(p, a)
+            }
+            (Type::Array { element: p, .. }, Type::Array { element: a, .. }) => {
+                unify_param_to_arg(p, a)
+            }
+            _ => None,
+        }
     }
     // v3.1 structural-unwrap helper. Peels Ref/RefMut at the
     // type level, then peels a single-arg Type::Apply. Also
@@ -6039,7 +6065,20 @@ fn infer_concrete_type_for_call(
     // compat with existing non-generic-shaped templates).
     let t_idx = first_param_idx_with_t(params).unwrap_or(0);
     let arg = args.get(t_idx)?;
-    resolve_arg(arg, scope, diagnostics)
+    let raw = resolve_arg(arg, scope, diagnostics)?;
+    // Structural unify if the param type is a wrapper around T
+    // (e.g. `Box<T>`, `Vec<T>`, `Ref<T>`). Peels the wrappers
+    // in lockstep with the arg type so T binds to the INNER
+    // element, not the whole `Box<i64>` / `Vec<i64>`. Falls
+    // back to the legacy whole-arg-type binding on mismatch.
+    if !is_v31_poll {
+        if let Some(param) = params.get(t_idx) {
+            if let Some(inferred) = unify_param_to_arg(&param.ty, &raw) {
+                return Some(inferred);
+            }
+        }
+    }
+    Some(raw)
 }
 
 /// Rewrite `Call { name: generic_fn, args }` to use the
@@ -6972,7 +7011,8 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
             *ty = concrete.clone();
         }
         Type::Vec(inner) | Type::Ref(inner) | Type::RefMut(inner)
-        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner) => {
+        | Type::Atomic(inner) | Type::Mutex(inner) | Type::Guard(inner)
+        | Type::Box(inner) => {
             substitute_type_param(inner, t_name, concrete);
         }
         Type::Array { element, .. } => substitute_type_param(element, t_name, concrete),
@@ -7001,7 +7041,7 @@ fn substitute_type_param(ty: &mut Type, t_name: &str, concrete: &Type) {
                     Type::Param(_) => false,
                     Type::Vec(t) | Type::Ref(t) | Type::RefMut(t)
                     | Type::Atomic(t) | Type::Mutex(t) | Type::Guard(t)
-                    | Type::Channel(t, _) => is_concrete(t),
+                    | Type::Channel(t, _) | Type::Box(t) => is_concrete(t),
                     Type::Array { element, .. } => is_concrete(element),
                     Type::Tuple(elements) => elements.iter().all(is_concrete),
                     Type::FnPtr(params, ret) => params.iter().all(is_concrete) && is_concrete(ret),

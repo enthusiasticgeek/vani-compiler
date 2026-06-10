@@ -1,0 +1,13 @@
+// श्री।
+// Regression for bug #11: generic-fn inference treated `Box<T>`
+// (and other wrappers) at the param position by binding T to the
+// WHOLE arg type, so `keep<T>(b: Box<T>)` called with `Box<i64>`
+// inferred T=Box<i64> and substituted to `Box<Box<i64>>` — the
+// caller then got a "must be assignable to Box<Box<i64>>, got
+// Box<i64>" diagnostic. Fix peels matching wrappers in lockstep.
+fn keep<T>(b: Box<T>) -> Box<T> { return b; }
+fn main() -> i64 {
+  let b: Box<i64> = box(7);
+  let c: Box<i64> = keep(b);
+  return 0;
+}
