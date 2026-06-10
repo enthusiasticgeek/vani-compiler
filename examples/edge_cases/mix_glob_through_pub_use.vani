@@ -1,0 +1,24 @@
+// श्री।
+// Regression for bug #20: a `use facade::*;` glob skipped any
+// item the facade exposes via `pub use inner::item;` because
+// the glob iterated `all_top_level_names` only — and those
+// re-export entries don't materialize as their own top-level
+// decls (only the implementation in `inner` does). Items
+// imported via `use facade::item;` worked (bug #19); only the
+// `*` glob form was still broken.
+//
+// Fix extends the glob iteration to also walk re_exports map
+// keys with the matching `<module>__` prefix, mapping each to
+// its already-transitively-resolved implementation name.
+module inner {
+  pub fn alpha() -> i64 { return 1; }
+  pub fn beta() -> i64 { return 2; }
+}
+module outer {
+  pub use inner::alpha;
+  pub use inner::beta;
+}
+use outer::*;
+fn main() -> i64 {
+  return alpha() + beta();   // 3
+}

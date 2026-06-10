@@ -3824,11 +3824,33 @@ fn flatten_modules_in_program(
             // `up.module__priv__<leaf>` and are filtered out
             // by the `__priv__` test.
             let prefix = format!("{}__", up.module);
-            for top in &all_top_level_names {
-                if !top.starts_with(&prefix) {
-                    continue;
-                }
-                let suffix = &top[prefix.len()..];
+            // Build the candidate set: real top-level items
+            // whose name starts with `<module>__`, PLUS the
+            // keys of `re_exports` that share the same prefix.
+            // The latter covers `pub use inner::alpha;` inside
+            // `module outer { … }` — `outer__alpha` isn't a
+            // real top-level item (only `inner__alpha` is),
+            // but the re-export map records the rewrite, and a
+            // `use outer::*;` should pick `alpha` up via that
+            // entry. The value side of `re_exports` already
+            // resolves transitively to the implementation, so
+            // the alias points straight at it.
+            let mut seen_suffix: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            let candidates: Vec<(String, String)> = all_top_level_names
+                .iter()
+                .filter(|n| n.starts_with(&prefix))
+                .map(|n| (n.clone(), n.clone()))
+                .chain(re_exports.iter().filter_map(|(k, v)| {
+                    if k.starts_with(&prefix) {
+                        Some((k.clone(), v.clone()))
+                    } else {
+                        None
+                    }
+                }))
+                .collect();
+            for (key, target) in candidates {
+                let suffix = &key[prefix.len()..];
                 // Skip private items.
                 if suffix.starts_with("priv__") {
                     continue;
@@ -3837,6 +3859,13 @@ fn flatten_modules_in_program(
                 // pull direct children (matches Rust's
                 // `use foo::*;` semantics).
                 if suffix.contains("__") {
+                    continue;
+                }
+                // De-dup if the same suffix shows up both as a
+                // real top-level item and as a re-export entry
+                // (shouldn't happen with well-formed programs
+                // but is cheap to guard).
+                if !seen_suffix.insert(suffix.to_string()) {
                     continue;
                 }
                 // Glob collision: a prior explicit `use` (or a
@@ -3860,7 +3889,7 @@ fn flatten_modules_in_program(
                     ));
                     continue;
                 }
-                use_aliases.insert(suffix.to_string(), top.clone());
+                use_aliases.insert(suffix.to_string(), target);
                 alias_origin.insert(
                     suffix.to_string(),
                     (up.module.clone(), suffix.to_string()),
