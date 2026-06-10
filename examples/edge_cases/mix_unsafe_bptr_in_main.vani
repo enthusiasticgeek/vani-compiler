@@ -1,0 +1,20 @@
+// श्री।
+// Regression for bug #15: `walk_stmt_kids` (used by the
+// Option-auto-register pre-pass) didn't recurse into
+// `Stmt::UnsafeBlock` bodies. So calls to `bptr_get` /
+// `pool_get` inside `unsafe(reason = "…") { … }` blocks never
+// registered the `Option<i64>` need, and:
+//   - the C bundle emitted `intent_bptr_i64_get` returning
+//     `Enum_Option__i64` with no typedef in scope → cc rejected
+//     with "unknown type name 'Enum_Option__i64'"
+//   - the SSA-LLVM bundle declared `%Enum_Option__i64 = type {}`
+//     (empty) and the helper's `insertvalue` produced
+//     "invalid indices for insertvalue" → lli aborted
+// Fix adds the missing `Stmt::UnsafeBlock` case to walk_stmt_kids.
+fn main() -> i64 {
+  unsafe(reason = "bptr exercise in main") {
+    let p: *mut i64 = unsafe_alloc(3);
+    let bp: BoundedPtr<i64> = bptr_new(p, 3, 3);
+    return option_unwrap_or(bptr_get(ref bp, 0), -1);
+  }
+}

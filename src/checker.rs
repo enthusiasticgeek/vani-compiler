@@ -6523,6 +6523,16 @@ fn monomorphize_type_decls_in_program(
             Stmt::ForIter { body, .. } => {
                 for s in body { walk_stmt_kids(s, f); }
             }
+            // 2026-06-10: walk into `unsafe(reason = "...") { ... }`
+            // blocks too. Without this, `bptr_get` / `pool_get`
+            // calls inside an unsafe block didn't trigger the
+            // `Option<i64>` auto-register pre-pass, so the C bundle
+            // referenced `Enum_Option__i64` with no typedef
+            // emitted (and LLVM produced `insertvalue` against an
+            // empty `%Enum_Option__i64` declared via the bundle).
+            Stmt::UnsafeBlock { body, .. } => {
+                for s in body { walk_stmt_kids(s, f); }
+            }
             _ => {}
         }
     }
