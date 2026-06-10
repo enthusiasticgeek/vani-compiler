@@ -169,6 +169,86 @@ orchestration, and testing, but Rust is the better default for a
 compiler that must be fast, memory-safe, deterministic, and close to
 ABI / native code generation.
 
+## Use Cases
+
+vāṇī targets any domain where **safety, verifiability, and predictable
+cost** matter more than runtime dynamism. The ten primary application
+areas below are ordered from most to least proven at this compiler
+revision.
+
+### 1. Systems Programming & OS Kernels
+Affine ownership eliminates double-free and use-after-free at compile
+time. Direct LLVM / C codegen produces deterministic, GC-free output
+suitable for kernel modules, bootloaders, and embedded operating
+systems. The Arc 8 async state machine compiles to a zero-allocation
+poll loop compatible with bare-metal schedulers.
+
+### 2. Embedded & Bare-Metal Systems
+The four-layer unsafe model (L1–L4) plus `requires` / `ensures`
+annotations maps directly onto MISRA C 2012, ISO 26262 ASIL-D,
+DO-178C (DAL A), and IEC 62304 Class C requirements. C backend output
+is readable, portable, and linkable against an existing embedded BSP
+without a Rust toolchain on the target.
+
+### 3. Formal Verification & Proof-Assisted Programming
+Z3 SMT integration discharges `requires`, `ensures`, `prove`, and
+loop `invariant` clauses at compile time. The three-stage pipeline
+(constant-fold → structural tautology → full Z3 solve) makes most
+arithmetic contracts free; Z3 is only invoked when the simpler passes
+cannot decide. Suitable for financial arithmetic, cryptographic
+protocol correctness, and safety-interlock logic.
+
+### 4. Concurrent & Parallel Systems
+The effects checker statically verifies race-freedom in `parallel for`
+reductions and rejects impure closures at the call site. Task
+handles are affine — forgetting to `join` a task is a compile error,
+not a runtime thread leak. Mutex / Guard RAII and Channel queues cover
+the classic producer-consumer patterns.
+
+### 5. Networking & I/O-Bound Services
+Arc 8 async/await compiles to cooperative state machines with
+epoll (Linux), kqueue (macOS), and IOCP (Windows) backends. CancelToken
+auto-plumbing provides graceful shutdown without manual flag threading.
+TCP echo, connection-pool, and multi-client examples ship in
+`examples/language/english/`.
+
+### 6. High-Performance Data Processing
+Monomorphized generics, a hand-rolled standard library (Vec,
+HashMap, BTreeMap, BinaryHeap, Graph, SkipList, Union-Find), and
+verified parallel reductions (+, *, min, max, &&, ||) enable
+pipeline-style batch processing with no GC pause jitter.
+
+### 7. Real-Time & Safety-Critical Control Systems
+Deterministic drop order, no allocator surprises, and SMT-verified
+loop bounds make vāṇī suitable for PLC-like control loops, motor
+controllers, and avionics flight software where timing jitter and
+memory corruption are unacceptable.
+
+### 8. Multilingual & Localised Software
+62 dialects across 26 scripts (Devanagari, Bengali, Tamil, Arabic,
+Japanese, Mandarin, and more) let teams write source that reads in
+their native language. Per-file dialect purity rejects out-of-language
+identifiers, keeping a codebase coherent across multilingual
+contributors. Particularly suited to educational software and
+government/public-sector tooling targeting the Indian subcontinent.
+
+### 9. FFI & C Interoperability
+Full SysV ABI / Win64 / AArch64 struct-return lowering (Arc 7) lets
+vāṇī modules be called from C or call into libc, OpenSSL, SQLite, and
+similar libraries. `extern "C"` declarations and `--link-with` handle
+the link step; the C backend produces `.c` suitable for integration
+into legacy build systems without LLVM on the host.
+
+### 10. Data Structures & Algorithm Libraries
+The standard library ships affine-first containers across four
+complexity tiers. All containers are composable (`Vec<Box<dyn Iface>>`,
+`HashMap<OwnedStr, Vec<T>>`, etc.) and drop correctly under the affine
+ownership model. Suitable for competitive programming scaffolds,
+reference implementations, and algorithm correctness benchmarks backed
+by Z3 proofs.
+
+---
+
 ## Feature set (closures #1–#604)
 
 vāṇī today is a working systems language with the following shipped
