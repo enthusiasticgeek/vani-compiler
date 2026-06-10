@@ -39415,6 +39415,95 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                     }
                 }
             }
+            Type::Box(inner) => {
+                // Per-element Box<T> drop in Vec<Box<T>>__free.
+                // L2 follow-up: this arm was missing, causing heap
+                // leaks for every Vec<Box<T>> drop on the LLVM backend.
+                needs_loop = true;
+                match &**inner {
+                    // Box<dyn Iface>: element IS the inline fat-ptr struct
+                    // (%intent_dyn_<Iface>); extract the .data field (index 1)
+                    // and free it. The struct bytes live in the Vec buffer and
+                    // are freed with the buffer.
+                    Type::Object(iface_name) => {
+                        let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                        let fat = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load {}, {}* %elt_p\n",
+                            fat, dyn_ty, dyn_ty
+                        ));
+                        let data_ptr = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1\n",
+                            data_ptr, dyn_ty, fat
+                        ));
+                        body.push_str(&format!("  call void @free(i8* {})\n", data_ptr));
+                    }
+                    // Box<Vec<U>>: element is Vec_U* in the buffer;
+                    // load pointer, free the Vec contents, then free the Vec_U* itself.
+                    Type::Vec(element) => {
+                        let v_s = vec_struct_name(element);
+                        let v_free = format!("@intent_vec_{}__free", vec_struct_tag(element));
+                        let box_ptr = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load {}*, {}** %elt_p\n",
+                            box_ptr, v_s, v_s
+                        ));
+                        let vec_val = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load {}, {}* {}\n",
+                            vec_val, v_s, v_s, box_ptr
+                        ));
+                        body.push_str(&format!(
+                            "  call void {}({} {})\n",
+                            v_free, v_s, vec_val
+                        ));
+                        let raw = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = bitcast {}* {} to i8*\n",
+                            raw, v_s, box_ptr
+                        ));
+                        body.push_str(&format!("  call void @free(i8* {})\n", raw));
+                    }
+                    // Box<OwnedStr>: element is i8** in the buffer;
+                    // load the string pointer, free it, then free the i8** itself.
+                    Type::OwnedStr => {
+                        let box_ptr = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load i8**, i8*** %elt_p\n",
+                            box_ptr
+                        ));
+                        let str_ptr = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load i8*, i8** {}\n",
+                            str_ptr, box_ptr
+                        ));
+                        body.push_str(&format!("  call void @free(i8* {})\n", str_ptr));
+                        let raw = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = bitcast i8** {} to i8*\n",
+                            raw, box_ptr
+                        ));
+                        body.push_str(&format!("  call void @free(i8* {})\n", raw));
+                    }
+                    // Box<T> where T is Copy (i64, bool, f64, …):
+                    // element is T* in the buffer; load and free.
+                    _ => {
+                        let inner_ty = llvm_type_string(inner);
+                        let box_ptr = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = load {}*, {}** %elt_p\n",
+                            box_ptr, inner_ty, inner_ty
+                        ));
+                        let raw = next_tmp(&mut tmp_counter);
+                        body.push_str(&format!(
+                            "  {} = bitcast {}* {} to i8*\n",
+                            raw, inner_ty, box_ptr
+                        ));
+                        body.push_str(&format!("  call void @free(i8* {})\n", raw));
+                    }
+                }
+            }
             _ => {}
         }
         if needs_loop {

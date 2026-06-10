@@ -11271,6 +11271,32 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_of_box_llvm_emits_per_element_free_loop() {
+        // Regression: LLVM backend's Vec<Box<T>>__free was missing
+        // the Box arm, so Box-element heap allocations were leaked
+        // on every Vec drop. Fixed 2026-06-10: Type::Box arm added
+        // to emit_vec_helpers. Verify the __free function contains
+        // a loop (fr_check label) and a @free call for the Box pointer.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<Box<i64>> = vec(box(1), box(2), box(3));
+              return len(xs) as i64;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Vec<Box<i64>> LLVM compile");
+        assert!(
+            ll.contains("fr_check:"),
+            "expected per-element free loop (fr_check label) in Vec<Box<i64>>__free:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        assert!(
+            ll.contains("call void @free"),
+            "expected @free call inside Vec<Box<i64>>__free loop:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`
         // closure inside an `implement Iface for T { fn m(...) }`
