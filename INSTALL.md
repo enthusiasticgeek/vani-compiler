@@ -168,7 +168,7 @@ cc --version           # C compiler (gcc or clang)
 Then build vāṇी itself:
 
 ```bash
-git clone https://github.com/ptamb3/vani.git
+git clone https://github.com/enthusiasticgeek/vani-compiler.git
 cd vani
 cargo build --release   # builds target/release/vanic + target/release/intentc (legacy alias)
 cargo test              # 1894 lib + 54 parity tests; ~90s on a modern laptop
