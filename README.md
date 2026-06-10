@@ -3751,6 +3751,146 @@ The honest list, grouped by which work item closes them:
   aliases land, multi-word aliases + script-aware diagnostics
   deferred.
 
+### Working around the limitations
+
+Every documented limit has a checked-in workaround that
+type-checks today. The patterns below are short and copy-
+pasteable; pick the one that fits your call site.
+
+**Tuples Copy-only → use a struct.** A struct with named fields
+is the affine equivalent of a tuple of mixed-ownership
+elements, with the bonus of named accessors.
+
+```intent
+// Want:  let t: (i64, OwnedStr) = (1, "hi" + "");   // rejected
+struct Pair { id: i64, name: OwnedStr }              // works
+let p: Pair = Pair { id: 1, name: "hi" + "" };
+print p.name;
+```
+
+**Two type params → specialize at the concrete types.** When
+you genuinely need two unrelated types in one signature, write
+a concrete monomorphic helper per pair you need — `fn add_i64(
+a: i64, b: i64) -> i64`, `fn label_str(s: OwnedStr) -> i64` —
+and call the specific one. The single-type-param `<T>` form
+covers the common identity-style cases; for everything else
+specialize by hand.
+
+```intent
+// Want:  fn pair<A, B>(a: A, b: B) -> A   // rejected (2 type params)
+// Specialize:
+fn first_int(a: i64, _b: i64) -> i64 { return a; }
+fn first_bool(a: bool, _b: bool) -> bool { return a; }
+```
+
+**No lexical capture → pass the value as an argument.** Inline
+anonymous fns are the higher-order form vāṇी actually supports;
+turn captures into explicit parameters.
+
+```intent
+// Want:  let base = 100; let f = |x| x + base;   // rejected
+fn add_base(x: i64, base: i64) -> i64 {           // works
+  return x + base;
+}
+// call sites just pass `base` themselves:
+let r: i64 = add_base(5, 100);
+```
+
+**No bool ↔ int cast → use if-as-expression.** vāṇी's `if`
+returns a value, so the explicit branch is one short line.
+
+```intent
+// Want:  let n: i64 = b as i64;          // rejected
+let n: i64 = if b { 1 } else { 0 };       // works
+```
+
+**`Mutex<T>` is i64-only → pack the value as i64.** Booleans
+and any integer ≤ 64 bits fit through this; for richer types
+keep the data outside the Mutex and gate just the index /
+generation counter.
+
+```intent
+let m: Mutex<i64> = mutex_new(42 as i64);   // value-by-value
+let g: Guard<i64> = mutex_lock(ref m);
+let v: i64 = guard_get(ref g);
+```
+
+**No recursive type aliases → write the struct directly.** The
+restriction is on `type` aliases; nominal structs can recurse
+through `Vec<Self>` (or `Box<Self>` when that lands) naturally.
+
+```intent
+// Want:  type Tree = Vec<Tree>;                  // rejected
+struct TreeNode {                                 // works
+  value: i64,
+  children: Vec<TreeNode>,
+}
+```
+
+**Nested partial moves → hoist the intermediate binding.** The
+compiler tracks moves one field deep; do the inner level in two
+steps so each step is a one-field move.
+
+```intent
+// Want:  let s: OwnedStr = o.inner.s;            // rejected
+let inner: Inner = o.inner;                       // works
+let s: OwnedStr = inner.s;
+```
+
+**`while` between `try` and `return` → hoist the loop into a
+helper fn.** A separate function gives the `while` its own
+return path, freeing the caller's `try`-rewriter to operate on
+a flat statement list.
+
+```intent
+fn warm_cache() -> i64 {        // hoisted out of the try body
+  let i: i64 = 0;
+  while i < 5 { let _: i64 = i; }
+  return 0;
+}
+fn run(o: Option<i64>) -> Option<i64> {
+  let v: i64 = try o;
+  let _: i64 = warm_cache();    // ordinary call site
+  return Option.Some(v);
+}
+```
+
+**Block-expression inner control flow → use if-as-expression.**
+The block expression admits `let`/`print`/assignments only, but
+`if … else …` is itself an expression and slots in directly.
+
+```intent
+// Want:  let r = { if cond { a } else { b } };   // rejected
+let r: i64 = if cond { a } else { b };            // works
+```
+
+**No Rc / Arc for shared state → `Atomic<T>` or `Mutex<T>`.**
+For lock-free counters / flags use `Atomic`; for compound
+state use `Mutex<i64>` with the packing recipe above.
+
+```intent
+let shared: Atomic<i64> = atomic_new(0);
+parallel for i from 0 to 10 {
+  let _: i64 = atomic_fetch_add(ref shared, 1);
+}
+let total: i64 = atomic_load(ref shared);   // 10
+```
+
+**No exceptions → `Option<T>` / `Result<T, E>` + `try` / `?`.**
+The desugar gives the same one-line happy-path as Rust's `?`,
+without an unwinder or `try`/`catch` machinery.
+
+```intent
+fn divide(a: i64, b: i64) -> Option<i64> {
+  if b == 0 { return Option.None; }
+  return Option.Some(a / b);
+}
+fn run() -> Option<i64> {
+  let r: i64 = divide(10, 2)?;   // propagates None
+  return Option.Some(r);
+}
+```
+
 What *does* work well (so the limitation list reads in context):
 all 58 examples are leak-clean under `gcc -fsanitize=address,leak`,
 UBSan-clean, LLVM `opt -verify` clean, cross-backend stdout-parity
