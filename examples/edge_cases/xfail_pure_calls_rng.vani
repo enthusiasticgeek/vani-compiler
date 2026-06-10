@@ -1,0 +1,12 @@
+// श्री।
+// Regression for bug #16 (companion): the same pure-fn impurity
+// list also missed the `rand_*` / `seed_rng` family. RNG calls
+// are non-deterministic — IEC 62304 Class C, DO-178C Level A,
+// and ISO 26262 ASIL D all forbid them in deterministic paths
+// because the output is no longer a function of the inputs.
+//
+// Must reject — `xfail_*` prefix asserts the compiler errors out.
+pure fn pick() -> i64 {
+  return rand_i64();
+}
+fn main() -> i64 { return 0; }

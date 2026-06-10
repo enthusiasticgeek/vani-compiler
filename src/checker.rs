@@ -28049,6 +28049,44 @@ fn verify_pure_body(
                             context, name
                         ),
                     ));
+                } else if matches!(name.as_str(), "box" | "__box_new") {
+                    // `box(v)` heap-allocates a single slot for v.
+                    // The check sees the lowered name `__box_new`
+                    // (check_box_builtin rewrites the Call), so
+                    // match both forms to be safe. Same impurity
+                    // class as `vec()`/`push()` — the previous
+                    // omission was a real gap (DO-178C Level A
+                    // forbids dynamic alloc in pure paths).
+                    diagnostics.push(Diagnostic::new(
+                        expr.span,
+                        format!(
+                            "{} cannot call 'box' (heap-allocating Box builtin is impure)",
+                            context
+                        ),
+                    ));
+                } else if matches!(
+                    name.as_str(),
+                    "rand_i64"
+                        | "rand_in_range"
+                        | "rand_in_range_f64"
+                        | "rand_f64"
+                        | "rand_bool"
+                        | "rand_choice"
+                        | "rand_normal"
+                        | "seed_rng"
+                ) {
+                    // RNG family — non-deterministic by design. A
+                    // pure fn must be a mathematical function from
+                    // its inputs to its outputs; randomness breaks
+                    // referential transparency and is forbidden in
+                    // IEC 62304 Class C / DO-178C Level A code paths.
+                    diagnostics.push(Diagnostic::new(
+                        expr.span,
+                        format!(
+                            "{} cannot call '{}' (RNG builtins are non-deterministic and impure)",
+                            context, name
+                        ),
+                    ));
                 } else if let Some(sig) = signatures.get(name) {
                     if !sig.is_pure {
                         let marker = if sig.is_extern { "pure extern" } else { "pure fn" };

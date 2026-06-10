@@ -1,0 +1,13 @@
+// श्री।
+// Regression for bug #16: `pure fn` impurity-check listed
+// `vec | push | set | clone` but missed `box` (and `__box_new`,
+// which is the lowered form). DO-178C Level A / IEC 62304 Class C
+// both forbid dynamic alloc inside deterministic / safety-critical
+// paths; `box(v)` heap-allocates and so must be rejected the same
+// way `vec()` already was.
+//
+// Must reject — `xfail_*` prefix asserts the compiler errors out.
+pure fn build(n: i64) -> Box<i64> {
+  return box(n);
+}
+fn main() -> i64 { return 0; }
