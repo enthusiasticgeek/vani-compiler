@@ -3872,6 +3872,17 @@ fn flatten_modules_in_program(
         // local name is the alias if present, else the item.
         let local = up.alias.clone().unwrap_or_else(|| up.item.clone());
         let mangled = format!("{}__{}", up.module, up.item);
+        // 2026-06-10: when `up.module` is itself a re-exporting
+        // facade (`module outer { pub use inner::helper; }`),
+        // the mangled name `outer__helper` doesn't point at a
+        // real top-level item — the re-export map records
+        // `outer__helper -> inner__helper`. Resolve through it
+        // here so the alias stored in use_aliases points at the
+        // implementation, not the re-export ghost. Without this,
+        // a top-level `use outer::helper;` rewrites every body
+        // reference to `outer__helper`, which the type-check
+        // then can't find.
+        let mangled = re_exports.get(&mangled).cloned().unwrap_or(mangled);
         if let Some((prev_module, prev_item)) = alias_origin.get(&local) {
             diagnostics.push(Diagnostic::new(
                 up.span,

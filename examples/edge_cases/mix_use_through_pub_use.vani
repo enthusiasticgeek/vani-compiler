@@ -1,0 +1,31 @@
+// श्री।
+// Regression for bug #19: a top-level `use facade::item;` that
+// resolves through a `pub use` re-export was rejected at the
+// call site with "unknown function 'facade__item'".
+//
+// The re-export rewrite pass replaces in-body references to
+// `facade__item` with `inner__item`, but it runs before the
+// `use_paths` pass that materializes the local alias. That
+// pass mangled `facade::item` → `facade__item` and stored
+// `item → facade__item` in `use_aliases`, then rewrote every
+// body reference to `facade__item`. Since the earlier
+// re-export pass had already finished walking, those
+// alias-rewritten references never got resolved through the
+// re-export map.
+//
+// Inline `facade::item(args)` already worked (the path-rewrite
+// pass handles it); the bug was specific to top-level
+// `use facade::item;` followed by bare `item(args)` calls.
+//
+// Fix: when constructing the alias, resolve the mangled rhs
+// through the re-export map before stashing it.
+module inner {
+  pub fn helper(n: i64) -> i64 { return n + 1; }
+}
+module outer {
+  pub use inner::helper;
+}
+use outer::helper;
+fn main() -> i64 {
+  return helper(5);   // 6
+}
