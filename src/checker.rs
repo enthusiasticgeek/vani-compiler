@@ -83,7 +83,17 @@ impl Env {
     }
 
     fn lookup_struct(&self, name: &str) -> Option<&StructInfo> {
-        self.structs.get(name)
+        if let Some(s) = self.structs.get(name) {
+            return Some(s);
+        }
+        // Mirror the enum-name resolver: a `StructLit` written with
+        // the bare generic name (`Holder { val: 42 }`) when the
+        // program has a single monomorphic instantiation should
+        // pick that one up automatically. Without this, monomorph
+        // generates `struct Holder__i64` and drops the template
+        // — the StructLit's bare `Holder` reference falls through
+        // to "unknown struct type 'Holder'".
+        self.resolve_struct_name(name).and_then(|n| self.structs.get(&n))
     }
 
     fn lookup_enum(&self, name: &str) -> Option<&EnumInfo> {
@@ -108,6 +118,28 @@ impl Env {
         let prefix = format!("{}__", name);
         let candidates: Vec<String> = self
             .enums
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        if candidates.len() == 1 {
+            return Some(candidates.into_iter().next().unwrap());
+        }
+        None
+    }
+
+    // 2026-06-10: struct analog of resolve_enum_name. After
+    // `monomorphize_type_decls_in_program` drops generic struct
+    // templates, a `StructLit { type_name: "Holder" }` written
+    // by the user can't find `Holder` directly. If exactly one
+    // monomorphic instantiation exists (`Holder__i64`), use it.
+    fn resolve_struct_name(&self, name: &str) -> Option<String> {
+        if self.structs.contains_key(name) {
+            return Some(name.to_string());
+        }
+        let prefix = format!("{}__", name);
+        let candidates: Vec<String> = self
+            .structs
             .keys()
             .filter(|k| k.starts_with(&prefix))
             .cloned()
@@ -13639,12 +13671,22 @@ fn check_expr(
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             }
+            // Resolve the struct name to its monomorphic form
+            // before stamping it onto the typed expression — a
+            // bare-generic name like `Holder` (when only
+            // `Holder__i64` is in scope) must surface as
+            // `Holder__i64` to backends; otherwise the C / LLVM
+            // emit would reference a non-existent `struct Holder`
+            // typedef.
+            let resolved_struct = env
+                .resolve_struct_name(type_name)
+                .unwrap_or_else(|| type_name.clone());
             CheckedExpr::new(
                 TypedExprKind::StructLit {
-                    type_name: type_name.clone(),
+                    type_name: resolved_struct.clone(),
                     fields: typed_fields,
                 },
-                Type::Struct(type_name.clone()),
+                Type::Struct(resolved_struct),
                 None,
                 expr.span,
             )

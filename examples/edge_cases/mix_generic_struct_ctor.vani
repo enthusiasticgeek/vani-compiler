@@ -1,0 +1,18 @@
+// श्री।
+// Regression for bug #18: user-defined generic struct
+// construction was rejected at use sites. The monomorph pass
+// generates `struct Holder__i64 { val: i64 }` and drops the
+// generic template; the user's `StructLit { type_name:
+// "Holder" }` then fell through `env.lookup_struct` because
+// only the mangled name was in the registry.
+//
+// `lookup_enum` already had a `resolve_enum_name` helper for
+// the exact analog (single-instantiation generic enum); the
+// fix adds `resolve_struct_name` and routes `lookup_struct`
+// through it, then stamps the resolved name into the typed
+// StructLit so backends see the mangled form.
+struct Holder<T> { val: T }
+fn main() -> i64 {
+  let h: Holder<i64> = Holder { val: 42 };
+  return h.val;
+}
