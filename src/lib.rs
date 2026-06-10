@@ -21749,6 +21749,7 @@ fn main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn sleep_ms_emits_helper_in_llvm() {
         let source = r#"
             fn main() -> i64 {
@@ -21823,6 +21824,7 @@ fn main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn tcp_emits_helpers_in_llvm() {
         let source = r#"
             fn main() -> i64 {
@@ -21914,6 +21916,7 @@ fn main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn epoll_emits_helpers_in_llvm() {
         let source = r#"
             fn main() -> i64 { let _ = epoll_new(); return 0; }
@@ -21967,6 +21970,7 @@ fn main() -> i64 {
     /// true; the panic path is exercised manually on macOS /
     /// Windows hosts (or by future CI gating).
     #[test]
+    #[cfg(target_os = "linux")]
     fn host_is_linux_helper_present() {
         assert!(
             crate::backend_llvm::host_is_linux(),
@@ -23975,6 +23979,7 @@ fn main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn sleep_ms_async_emits_timerfd_declares_in_llvm() {
         let source = r#"
             fn main() -> i64 { let _ = sleep_ms_async(0); return 0; }
@@ -24006,6 +24011,7 @@ fn main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn sleep_ms_finish_emits_read_declare_in_llvm() {
         // sleep_ms_finish uses @read; verify the declare lands.
         let source = r#"
@@ -24390,7 +24396,8 @@ fn main() -> i64 {
         // ctx struct definition lives in the outlined fn
         // signature.
         assert!(
-            llvm.contains("define internal void @__intent_par_"),
+            llvm.contains("define internal void @__intent_par_")
+                || llvm.contains("define internal i8* @__intent_par_"),
             "expected outlined parallel-for fn:\n{llvm}"
         );
         assert!(

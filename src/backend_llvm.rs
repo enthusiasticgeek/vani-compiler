@@ -42759,7 +42759,7 @@ mod tests {
         // struct instead of calling `omp_get_*`. GOMP/omp_get_*
         // declarations are absent.
         let source = r#"
-            fn square(x: i64) -> i64 {
+            pure fn square(x: i64) -> i64 {
               return x * x;
             }
             fn main() -> i64 {
@@ -42911,7 +42911,8 @@ mod tests {
                     "sequential-fallback comment should be gone:\n{ll}"
                 );
                 assert!(
-                    ll.contains("define internal void @__intent_par_"),
+                    ll.contains("define internal void @__intent_par_")
+                        || ll.contains("define internal i8* @__intent_par_"),
                     "expected outlined parallel-for function:\n{ll}"
                 );
             })

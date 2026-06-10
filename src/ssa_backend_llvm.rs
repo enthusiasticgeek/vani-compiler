@@ -5607,7 +5607,7 @@ mod tests {
         // instead of via `omp_get_*`. Returns `i8*` to match
         // the CreateThread start-routine ABI.
         let src = r#"
-            fn square(x: i64) -> i64 { return x * x; }
+            pure fn square(x: i64) -> i64 { return x * x; }
             fn main() -> i64 {
               parallel for i from 0 to 8 { let _ = square(i); }
               return 0;
