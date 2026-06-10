@@ -1272,9 +1272,16 @@ fn emit_outlined_task(
                 "  %v_{} = add {} 0, {}\n",
                 cap_v.0, cap_ty_str, cap_loaded
             ),
+            // Aggregate / pointer fall-through. LLVM rejects
+            // self-bitcasts on aggregate types (e.g. struct
+            // value to the same struct value), so use a
+            // `select i1 true, <ty> v, <ty> v` to materialize a
+            // fresh SSA name aliased to the loaded value. The
+            // optimizer folds it; lli accepts it as a valid
+            // no-op even with no opts.
             _ => format!(
-                "  %v_{} = bitcast {} {} to {}\n",
-                cap_v.0, cap_ty_str, cap_loaded, cap_ty_str
+                "  %v_{} = select i1 true, {} {}, {} {}\n",
+                cap_v.0, cap_ty_str, cap_loaded, cap_ty_str, cap_loaded
             ),
         };
         out.push_str(&alias_emit);
@@ -2455,9 +2462,16 @@ fn emit_outlined_parallel_for(
                 "  %v_{} = add {} 0, {}\n",
                 cap_v.0, cap_ty_str, cap_loaded
             ),
+            // Aggregate / pointer fall-through. LLVM rejects
+            // self-bitcasts on aggregate types (e.g. struct
+            // value to the same struct value), so use a
+            // `select i1 true, <ty> v, <ty> v` to materialize a
+            // fresh SSA name aliased to the loaded value. The
+            // optimizer folds it; lli accepts it as a valid
+            // no-op even with no opts.
             _ => format!(
-                "  %v_{} = bitcast {} {} to {}\n",
-                cap_v.0, cap_ty_str, cap_loaded, cap_ty_str
+                "  %v_{} = select i1 true, {} {}, {} {}\n",
+                cap_v.0, cap_ty_str, cap_loaded, cap_ty_str, cap_loaded
             ),
         };
         out.push_str(&alias_emit);

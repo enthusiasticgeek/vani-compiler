@@ -1,0 +1,18 @@
+// श्री।
+// Regression for bug #13: SSA-LLVM emitted a self-bitcast
+// (`%v_X = bitcast %intent_vec_i64 %cap_0 to %intent_vec_i64`)
+// when aliasing aggregate-typed captures into the parallel-for
+// outline's body SSA namespace. LLVM rejects self-bitcasts on
+// aggregate types — `lli` aborted with "invalid cast opcode".
+// The fix uses `select i1 true, V, V` for aggregates instead.
+pure fn double(n: i64) -> i64 { return n * 2; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+  let total: i64 = 0;
+  parallel for i from 0 to 5
+  reduce total with +;
+  {
+    total = total + double(xs[i]);
+  }
+  return total;
+}
