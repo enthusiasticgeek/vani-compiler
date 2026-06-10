@@ -1,0 +1,9 @@
+struct N { v: i64 }
+methods on N {
+  fn double(self: ref N) -> i64 { return self.v * 2; }
+}
+struct W { inner: N }
+fn main() -> i64 {
+  let w: W = W { inner: N { v: 21 } };
+  return (ref w.inner).double();
+}

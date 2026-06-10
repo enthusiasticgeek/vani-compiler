@@ -11254,11 +11254,20 @@ fn collect_ref_sources_in_expr_impl(
             }
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            // Walk the receiver (it's the "self" being called on);
-            // for refs INSIDE arg expressions, only when not
-            // skipping call args.
-            collect_ref_sources_in_expr_impl(receiver, skip_call_args, out);
+            // 2026-06-09: the receiver is the "self" argument —
+            // refs inside it are consumed by the method call,
+            // same as refs inside other call args. Skip when
+            // we're in the consuming context (return-escape /
+            // FieldAssign analysis), walk only when actively
+            // looking for refs that DO propagate (e.g.
+            // sub-expression scope-escape checks).
+            //
+            // Without this gate, `return (ref w.inner).double()`
+            // reported "ref to local 'w' escapes via return"
+            // even though the method's return type is `i64` and
+            // the ref is genuinely consumed.
             if !skip_call_args {
+                collect_ref_sources_in_expr_impl(receiver, skip_call_args, out);
                 for a in args {
                     collect_ref_sources_in_expr_impl(a, skip_call_args, out);
                 }
