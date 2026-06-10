@@ -476,21 +476,28 @@ UTF-8 directly.
 
 ## Platform / runtime limitations
 
-### L10 — macOS + Windows runtime verification deferred
+### L10 — macOS runtime verification deferred; Windows verified ✅ 2026-06-10
 
-C backend ships with `#ifdef _WIN32` / `#elif defined(__APPLE__)`
-branches for the Arc 8 I/O runtime helpers (epoll → kqueue / IOCP,
-timerfd → pipe+pthread / `Sleep`, etc.). LLVM IR ships matching
-emit paths.
+**Windows status** (verified 2026-06-10 on Windows 11 Home, Rust
+1.96 GNU, LLVM 22, z3 4.16, gcc 12 via MSYS2):
+- Compiler builds cleanly (`cargo build --release`).
+- All 2073 lib tests pass (`cargo test`).
+- `_WIN32` codegen paths (IOCP, winsock2, `CreateThread`, `Sleep`)
+  compile and emit correct IR/C. Runtime end-to-end tests for async
+  TCP (`tcp_echo_epoll.vani`) are the next milestone.
+- Six Linux-only tests (`epoll_emits_helpers_in_llvm`,
+  `host_is_linux_helper_present`, etc.) are now correctly guarded
+  with `#[cfg(target_os = "linux")]`.
 
-**Why**: no Darwin or Windows host access at landing time. Linux
-verification stays green; macOS + Windows branches exercise on
-first build there.
+**macOS status**: still deferred — no Darwin host available.
+`#elif defined(__APPLE__)` branches (kqueue, `EVFILT_TIMER`,
+`__error()`, `pipe+pthread` timer) are compiled-in but unrun.
+Report issues so Phase 5 hot-spots in
+[ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md) get tuned.
 
-**Workaround**: none needed for Linux users. macOS + Windows
-users get full Arc 8 I/O via the C backend on first try; report
-any kqueue / IOCP / winsock issues so the hot-spots in
-[ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md) Phase 5/6 get tuned.
+**Workaround**: Linux and Windows users are fully supported.
+macOS users should try the C backend (`--backend=c`) first and
+file issues with the kqueue error message.
 
 ### L11 — Runtime PRINT output uses ASCII numerals ✅ SHIPPED 2026-06-07
 

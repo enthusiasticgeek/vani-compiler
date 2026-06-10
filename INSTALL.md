@@ -103,12 +103,17 @@ See [docs/v1_limitations.md L10](docs/v1_limitations.md).
 
 ## Windows
 
-### Option 1: WSL2 (recommended, easiest)
+> **Status (2026-06-10)**: Native Windows builds are verified. The
+> compiler builds and all 2073 lib tests pass on Windows 11 with the
+> GNU toolchain. The `_WIN32` I/O runtime (IOCP, winsock2, `Sleep`)
+> compiles cleanly; runtime end-to-end tests for async TCP/epoll are
+> the next verification milestone.
 
-The smoothest path is WSL2 with a Linux distribution — follow the
-Debian/Ubuntu instructions above. WSL2 gives you a real Linux
-runtime including `epoll`, `nanosleep`, and `__errno_location()`,
-which means you stay on the Linux-verified code path.
+### Option 1: WSL2 (recommended for Linux parity)
+
+WSL2 gives you a real Linux runtime including `epoll`, `nanosleep`,
+and `__errno_location()`, keeping you on the fully-verified Linux
+code path.
 
 ```powershell
 # In an Administrator PowerShell:
@@ -117,44 +122,115 @@ wsl --install
 wsl --set-default-version 2
 ```
 
-Then in your WSL2 shell, follow the Linux install steps.
+Then in your WSL2 shell follow the Linux install steps above.
 
-### Option 2: Native Windows (no WSL)
+### Option 2: Native Windows (verified on Windows 11)
 
-Native Windows builds use the `_WIN32` branch of vāṇी's runtime
-(IOCP for epoll, winsock2 for TCP, `Sleep` for timers).
-**Verification of this path is deferred** at landing time — see
-[docs/v1_limitations.md L10](docs/v1_limitations.md). The
-following install path should work but expect to find rough
-edges:
+Native builds use the `_WIN32` runtime (IOCP, winsock2, `Sleep`).
+All compiler tests pass. Follow these steps exactly — order matters.
+
+#### Step 1 — Rust toolchain (winget)
 
 ```powershell
-# Install Chocolatey first (https://chocolatey.org/install)
-# Then:
-choco install -y rustup.install
-choco install -y llvm
-choco install -y visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
-choco install -y mingw  # optional, if you prefer gcc over MSVC for the C backend
+winget install Rustlang.Rustup --accept-package-agreements --accept-source-agreements
 ```
 
-For z3 on Windows, the easiest path is to download a prebuilt
-release from <https://github.com/Z3Prover/z3/releases> and add
-the extracted `bin\` directory to your `PATH`. Verify with
-`z3 --version`.
+After installation **open a new PowerShell window** so `rustup` and
+`cargo` are on `PATH`, then add the GNU target:
 
-`rustup-init.exe` from <https://rustup.rs> works equivalently if
-you prefer not to use Chocolatey.
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-gnu
+rustup default stable-x86_64-pc-windows-gnu
+```
 
-> **Windows LLVM TCP IR**: the LLVM backend's Windows TCP helpers
-> were added late (commit `cedf20d`); they declare i64 SOCKET +
-> winsock2 + WSAStartup once-init. See
-> [docs/v1_limitations.md L10](docs/v1_limitations.md) for the
-> hot-spots to verify on a Windows host.
+> **Why GNU, not MSVC?** The MSVC target requires `link.exe` from
+> Visual Studio Build Tools. The GNU target uses `gcc` from MSYS2
+> (installed below) and has no extra dependency. If you already have
+> VS 2017 or later installed, the MSVC default (`stable-x86_64-pc-windows-msvc`)
+> works and you can skip this switch.
+
+#### Step 2 — GCC via MSYS2
+
+If MSYS2 is not already installed, download the installer from
+<https://www.msys2.org> and run it. Then add the mingw64 `bin`
+directory to your system `PATH`:
+
+```
+C:\msys64\mingw64\bin
+```
+
+Verify: `gcc --version` in a new PowerShell window.
+
+#### Step 3 — LLVM tools (`lli`, `llc`, `opt`)
+
+The `winget install LLVM.LLVM` package ships Clang but **not**
+`lli`, `llc`, or `opt`. Install the full LLVM toolset via MSYS2:
+
+```powershell
+C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-llvm --noconfirm
+```
+
+This places `lli.exe`, `llc.exe`, and `opt.exe` under
+`C:\msys64\mingw64\bin` which is already on `PATH` from Step 2.
+
+> If pacman mirrors are unreachable, the Clang front-end alone is
+> sufficient to build the compiler and run `cargo test`. The LLVM
+> backend emission tests (`vanic run --backend=llvm`) additionally
+> need `lli`; the C backend (`--backend=c`, the default) needs only
+> `gcc` or `clang`.
+
+#### Step 4 — z3 SMT solver
+
+Download the latest Windows 64-bit release from
+<https://github.com/Z3Prover/z3/releases>, extract it anywhere
+(e.g. `C:\z3`), and add the `bin\` subdirectory to your system `PATH`:
+
+```powershell
+# One-liner that downloads z3 4.16.0 and extracts to C:\z3:
+Invoke-WebRequest -Uri "https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-win.zip" `
+    -OutFile "$env:TEMP\z3.zip"
+Expand-Archive -Path "$env:TEMP\z3.zip" -DestinationPath "C:\z3" -Force
+```
+
+Then add `C:\z3\z3-4.16.0-x64-win\bin` to your system `PATH`
+(System Properties → Environment Variables → Path → New).
+
+Verify: `z3 --version` should print `Z3 version 4.16.0`.
+
+#### Step 5 — Verify all tools
+
+Open a **new** PowerShell window (so updated `PATH` takes effect):
+
+```powershell
+rustc --version      # rustc 1.96.0 or later
+cargo --version
+gcc --version        # from C:\msys64\mingw64\bin
+z3 --version         # Z3 version 4.x
+lli --version        # LLVM JIT (if MSYS2 LLVM installed)
+llc --version        # LLVM static compiler
+```
+
+#### Step 6 — Build and test
+
+```powershell
+git clone https://github.com/enthusiasticgeek/vani-compiler.git
+cd vani-compiler
+cargo build --release
+cargo test
+```
+
+Expected output: `test result: ok. 2073 passed; 0 failed`
+
+> **Note on `cargo test` stack size**: the test suite sets
+> `RUST_MIN_STACK=33554432` via `.cargo/config.toml`. If you run
+> test binaries directly (not via `cargo test`), set this manually:
+> `$env:RUST_MIN_STACK = "33554432"` before running.
 
 ---
 
 ## Verify your install
 
+**Linux / macOS / WSL2:**
 ```bash
 cargo --version
 rustc --version
@@ -165,20 +241,45 @@ opt --version          # LLVM IR optimizer
 cc --version           # C compiler (gcc or clang)
 ```
 
-Then build vāṇी itself:
-
-```bash
-git clone https://github.com/enthusiasticgeek/vani-compiler.git
-cd vani
-cargo build --release   # builds target/release/vanic + target/release/intentc (legacy alias)
-cargo test              # 1894 lib + 54 parity tests; ~90s on a modern laptop
+**Native Windows (PowerShell):**
+```powershell
+cargo --version
+rustc --version
+z3 --version
+gcc --version          # from MSYS2 mingw64
+lli --version          # from MSYS2 mingw64-llvm (if installed)
+llc --version
 ```
 
-A successful build leaves `target/release/vanic` ready to run.
-Try a Hello World:
+Then build vāṇी itself:
 
+**Linux / macOS / WSL2:**
+```bash
+git clone https://github.com/enthusiasticgeek/vani-compiler.git
+cd vani-compiler
+cargo build --release   # builds target/release/vanic + target/release/intentc (legacy alias)
+cargo test              # 2073 lib tests; ~90s on a modern laptop
+```
+
+**Native Windows (PowerShell):**
+```powershell
+git clone https://github.com/enthusiasticgeek/vani-compiler.git
+cd vani-compiler
+cargo build --release
+cargo test              # 2073 passed; 0 failed
+```
+
+A successful build leaves `target/release/vanic` (Linux/macOS) or
+`target\release\vanic.exe` (Windows) ready to run. Try a Hello World:
+
+**Linux / macOS / WSL2:**
 ```bash
 ./target/release/vanic run examples/language/english/basics.vani
+```
+
+**Windows:**
+```powershell
+.\target\release\vanic.exe run examples\language\english\basics.vani
 ```
 
 You should see the output `42`.
@@ -213,39 +314,82 @@ you're not running an MCP-speaking host.
 
 ### `error: linker 'cc' not found`
 
-Install your platform's C compiler (`build-essential` on Debian,
-`gcc` on Fedora, Xcode Command Line Tools on macOS via
-`xcode-select --install`).
+**Linux**: install `build-essential` (Debian) or `gcc` (Fedora).
+**macOS**: run `xcode-select --install`.
+**Windows**: you are likely on the MSVC target without VS Build
+Tools. Switch to the GNU target:
+```powershell
+rustup toolchain install stable-x86_64-pc-windows-gnu
+rustup default stable-x86_64-pc-windows-gnu
+```
+Then ensure `C:\msys64\mingw64\bin` is on `PATH`.
+
+### `error: linker 'link.exe' not found` (Windows)
+
+Same as above — the default `stable-x86_64-pc-windows-msvc`
+toolchain needs `link.exe` from VS Build Tools. Switch to the
+GNU target (see above) or install Visual Studio 2017+ with the
+"C++ build tools" workload from <https://visualstudio.microsoft.com/downloads/>.
 
 ### `lli: command not found`
 
-LLVM tools aren't on `PATH`. On macOS with Homebrew, the
-`llvm` formula is keg-only — re-run the `brew --prefix llvm` PATH
-export from the macOS section above.
+**Linux/macOS**: LLVM tools aren't on `PATH`. On macOS with
+Homebrew the `llvm` formula is keg-only — re-run the
+`brew --prefix llvm` PATH export from the macOS section above.
+
+**Windows**: `winget install LLVM.LLVM` installs Clang but **not**
+`lli`/`llc`/`opt`. Install the full LLVM via MSYS2:
+```powershell
+C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-llvm --noconfirm
+```
+If MSYS2 mirrors are slow, note that `lli`/`llc`/`opt` are only
+needed for `vanic run --backend=llvm`. The C backend
+(`--backend=c`, the default) works without them.
 
 ### z3 missing or wrong version
 
-The Z3 versions vāṇī tests against are 4.8+ (anything modern
-will work). If `z3 --version` errors with "command not found",
-the binary isn't on `PATH`. On Windows, double-check that the
-Z3 release `bin\` directory is in `PATH`.
+Z3 4.8 or later works. If `z3 --version` gives "command not found",
+the binary isn't on `PATH`.
+
+**Windows**: confirm the extracted z3 `bin\` directory (e.g.
+`C:\z3\z3-4.16.0-x64-win\bin`) is in your system `PATH`, not just
+the session `PATH`. Open System Properties → Environment Variables
+→ Path → New, then restart your terminal.
 
 ### Tests fail with stack overflow
 
-The `.cargo/config.toml` in the repo sets
-`RUST_MIN_STACK=33554432` (32MB) for `cargo test`. If you're
-running test binaries directly (not via `cargo test`), set the
-env var manually:
+The `.cargo/config.toml` sets `RUST_MIN_STACK=33554432` (32 MB)
+for `cargo test`. If running test binaries directly, set it first:
 
 ```bash
+# Linux / macOS / WSL2
 RUST_MIN_STACK=33554432 ./target/debug/deps/vani-*
 ```
 
-### Linux + LLVM 17 vs LLVM 18 differences
+```powershell
+# Windows PowerShell
+$env:RUST_MIN_STACK = "33554432"
+.\target\debug\deps\vani-*.exe
+```
 
-vāṇी has been tested against LLVM 14–18. If you hit a backend
-error with a specific LLVM major version, file an issue with
-the `lli --version` output.
+### LLVM 17 vs 18 vs 22 differences
+
+vāṇī has been tested against LLVM 14–18 on Linux. LLVM 22 (the
+current `winget` release) is supported on Windows for C-backend
+builds and `cargo test`. If you hit an IR-emit error with a
+specific LLVM version, file an issue including the `lli --version`
+output.
+
+### Windows: `pacman` mirrors unreachable or signature errors
+
+MSYS2's package database can be stale on older installations.
+Update the keyring and retry:
+```powershell
+C:\msys64\usr\bin\pacman.exe -Sy msys2-keyring --noconfirm
+C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-llvm --noconfirm
+```
+If mirrors remain unreachable, use a VPN or try again later —
+the mirrors are community-hosted and occasionally go offline.
 
 ---
 
