@@ -256,6 +256,18 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i32 @strcmp(i8*, i8*)\n");
     out.push_str("declare i64 @strlen(i8*)\n");
+    // Bounds-check helper used by Index / IndexAssign emit when
+    // the SSA elision pass couldn't prove in-bounds. Centralizing
+    // the branch in a helper avoids splitting the caller's basic
+    // block at every check site.
+    out.push_str(
+        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) {\n\
+         entry:\n  \
+           %ok = icmp ult i64 %idx, %len\n  \
+           br i1 %ok, label %cont, label %oob\n\
+         cont:\n  ret void\n\
+         oob:\n  call void @abort()\n  unreachable\n}\n",
+    );
     // Empty string global used by the per-element Vec
     // clone helper (closure #152) and the payloaded-enum
     // payload clone path to round-trip an OwnedStr
@@ -4406,8 +4418,15 @@ fn emit_instr(
                 ));
             }
         }
-        InstrKind::Index { array, index, .. } => {
+        InstrKind::Index { array, index, checked } => {
             // Vec or Array? Dispatch on source operand type.
+            //
+            // When `checked` is true, the SSA elision pass
+            // couldn't prove in-bounds; emit a call to the
+            // shared `@__intent_bounds_check(idx, len)` helper
+            // before the load. Helper aborts on `idx >= len`
+            // using unsigned comparison so negative indices
+            // trap too.
             let elt_ty = llvm_type(&instr.ty)?;
             let array_ty = operand_type(array, value_types);
             match array_ty.as_ref().map(|t| t.deref().clone()) {
@@ -4420,6 +4439,18 @@ fn emit_instr(
                     let agg = vec_aggregate_operand(
                         array, value_types, &struct_ty, "agg", instr.result, out,
                     );
+                    if *checked {
+                        let len_v = format!("%v_{}.bc_len", instr.result.0);
+                        out.push_str(&format!(
+                            "  {} = extractvalue {} {}, 1\n",
+                            len_v, struct_ty, agg
+                        ));
+                        let idx_v = ssa_index_as_i64(index, value_types, instr.result, "bc_idx", out)?;
+                        out.push_str(&format!(
+                            "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                            idx_v, len_v
+                        ));
+                    }
                     let data_p = format!("%v_{}.dp", instr.result.0);
                     out.push_str(&format!(
                         "  {} = extractvalue {} {}, 0\n",
@@ -4443,6 +4474,19 @@ fn emit_instr(
                     // Fixed-size array. If the source is
                     // Ref([T; N]) (param case), load the array
                     // pointer through the double-pointer first.
+                    if *checked {
+                        let static_len = match array_ty.as_ref().map(|t| t.deref()) {
+                            Some(Type::Array { length, .. }) => Some(*length),
+                            _ => None,
+                        };
+                        if let Some(n) = static_len {
+                            let idx_v = ssa_index_as_i64(index, value_types, instr.result, "bc_idx", out)?;
+                            out.push_str(&format!(
+                                "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                                idx_v, n
+                            ));
+                        }
+                    }
                     let array_ty_str = array_operand_pointee(array, value_types)?;
                     let arr_ptr = array_pointer_operand(
                         array,
@@ -4468,7 +4512,7 @@ fn emit_instr(
                 }
             }
         }
-        InstrKind::IndexAssign { array, index, value, .. } => {
+        InstrKind::IndexAssign { array, index, value, checked, .. } => {
             // GEP into the array, store. The instruction
             // produces no useful SSA value at the source
             // level; we still need an SSA name (forward-
@@ -4478,6 +4522,30 @@ fn emit_instr(
             // base_ty has the array shape we need for the
             // GEP-into type; fall back via the value's
             // operand type otherwise.
+            //
+            // When `checked` is true, emit the same bounds
+            // guard as Index. For arrays the length is
+            // statically known via base_ty; Vec writes don't
+            // pass through IndexAssign on this path (the
+            // SSA lowerer routes them differently) — guard
+            // only the array case here.
+            if *checked {
+                let static_len = if let InstrKind::IndexAssign { base_ty, .. } = &instr.kind {
+                    match base_ty {
+                        Type::Array { length, .. } => Some(*length),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(n) = static_len {
+                    let idx_v = ssa_index_as_i64(index, value_types, instr.result, "bc_idx", out)?;
+                    out.push_str(&format!(
+                        "  call void @__intent_bounds_check(i64 {}, i64 {})\n",
+                        idx_v, n
+                    ));
+                }
+            }
             let array_ty_str = array_operand_pointee(array, value_types)?;
             let elt_ty = match operand_type(value, value_types) {
                 Some(t) => llvm_type_string(&t)?,
@@ -5331,6 +5399,32 @@ fn index_typed(
 ) -> Result<String, EmitError> {
     let ty = operand_type(op, value_types).unwrap_or(Type::I64);
     Ok(format!("{} {}", llvm_type(&ty)?, operand_str(op)))
+}
+
+/// Materialize an index operand as an i64 value, zero-extending
+/// from i32/i16/i8 if necessary. Returns the LLVM operand text
+/// (e.g. `%v_5.bc_idx` or `42` for a constant). Used by the
+/// bounds-check emit so the helper signature stays i64-only.
+fn ssa_index_as_i64(
+    op: &Operand,
+    value_types: &BTreeMap<ValueId, Type>,
+    result: ValueId,
+    suffix: &str,
+    out: &mut String,
+) -> Result<String, EmitError> {
+    let ty = operand_type(op, value_types).unwrap_or(Type::I64);
+    let llvm_ty = llvm_type(&ty)?;
+    if llvm_ty == "i64" {
+        return Ok(operand_str(op));
+    }
+    let dest = format!("%v_{}.{}", result.0, suffix);
+    out.push_str(&format!(
+        "  {} = zext {} {} to i64\n",
+        dest,
+        llvm_ty,
+        operand_str(op)
+    ));
+    Ok(dest)
 }
 
 fn llvm_type(ty: &Type) -> Result<&'static str, EmitError> {

@@ -1,0 +1,14 @@
+// श्री।
+// Regression for bug #10: SSA-C and SSA-LLVM dropped the
+// `InstrKind::Index { checked }` flag on the floor and emitted
+// raw `data[i]` / GEP+load with no guard. A function-hidden
+// Vec length defeats the SSA elider (`xs[i]` stays checked).
+// Both backends now route through a runtime guard.
+fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40, 50);
+  let a: i64 = read(ref xs, 0);
+  let b: i64 = read(ref xs, 2);
+  let c: i64 = read(ref xs, 4);
+  return a + b + c;
+}

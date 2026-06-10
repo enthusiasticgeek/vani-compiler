@@ -27548,6 +27548,68 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn ssa_c_emits_bounds_check_on_unprovable_vec_index() {
+        // The SSA-C backend used to discard the
+        // `InstrKind::Index { checked, .. }` flag entirely and
+        // emit a raw `data[i]` access with no guard, even when
+        // the SSA elision pass had marked the index as needing
+        // a runtime check. With an empty Vec that meant reading
+        // 1 byte past the heap-allocated `data` buffer's bounds
+        // (UB), so the index in an OOB read returned garbage
+        // and the program silently exited 0.
+        //
+        // Force a runtime check by hiding the Vec's length
+        // behind a function boundary — the SSA elider can't see
+        // through the call, so the Index instr retains
+        // `checked: true`.
+        let source = r#"
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              return read(ref xs, 1);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let c = crate::ssa_backend_c::emit(&module).expect("SSA-C emit");
+        assert!(
+            c.contains("index out of bounds")
+                && c.contains("(uint64_t)") && c.contains("len)) "),
+            "expected SSA-C bounds guard before Vec index load, got:\n{c}"
+        );
+    }
+
+    #[test]
+    fn ssa_llvm_emits_bounds_check_helper_call_on_unprovable_vec_index() {
+        // Counterpart of `ssa_c_emits_bounds_check_on_unprovable_vec_index`
+        // for the SSA-LLVM backend. Pre-fix: same UB (raw load
+        // through GEP, no guard) when the SSA elider couldn't
+        // prove in-bounds. Fix routes through a shared module-
+        // level helper `@__intent_bounds_check` so each call
+        // site stays single-block (no mid-BB split).
+        let source = r#"
+            fn read(xs: ref Vec<i64>, i: u64) -> i64 { return xs[i]; }
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              return read(ref xs, 1);
+            }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let (module, errs) = crate::ssa::lower_program(&checked.ir);
+        assert!(errs.is_empty(), "SSA lowering errors: {:?}", errs);
+        let ll = crate::ssa_backend_llvm::emit(&module).expect("SSA-LLVM emit");
+        assert!(
+            ll.contains("define internal void @__intent_bounds_check"),
+            "expected module-level bounds-check helper, got:\n{ll}"
+        );
+        assert!(
+            ll.contains("call void @__intent_bounds_check(i64 "),
+            "expected call to bounds-check helper at the Index site, got:\n{ll}"
+        );
+    }
+
+    #[test]
     fn ssa_llvm_identity_cast_uses_bitcast_for_ptr_types() {
         // Closure #263: SSA-LLVM `emit_cast` previously emitted
         // `add T 0, x` for any case where `from_llvm == to_llvm`

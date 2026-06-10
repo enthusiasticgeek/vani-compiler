@@ -2422,10 +2422,16 @@ fn emit_instr(
                 .unwrap();
             }
         }
-        InstrKind::Index { array, index, .. } => {
+        InstrKind::Index { array, index, checked } => {
             // Dispatch on the array operand's source type.
             // Arrays / array refs index naturally; Vec needs
             // a `.data` indirection; Vec refs need `->data`.
+            //
+            // When `checked` is true, the SSA elision pass
+            // couldn't prove in-bounds, so emit a runtime
+            // guard. Cast the index to uint64_t for the
+            // comparison so negative i64 indices fail the
+            // check (they wrap to huge values).
             let array_op_str = c_operand(array);
             let idx_str = c_operand(index);
             let array_ty = operand_type(array, value_types);
@@ -2442,6 +2448,14 @@ fn emit_instr(
                     } else {
                         "."
                     };
+                    if *checked {
+                        writeln!(
+                            out,
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                            idx_str, array_op_str, dot,
+                        )
+                        .unwrap();
+                    }
                     writeln!(
                         out,
                         "  v_{} = {}{}data[{}];",
@@ -2452,7 +2466,23 @@ fn emit_instr(
                 _ => {
                     // Array / array-ref / unknown — use
                     // pointer-decayed index syntax which
-                    // works for both.
+                    // works for both. If the source is a
+                    // fixed array we have a static length;
+                    // use it for the guard.
+                    if *checked {
+                        let static_len = match array_ty.as_ref().map(|t| t.deref()) {
+                            Some(Type::Array { length, .. }) => Some(*length),
+                            _ => None,
+                        };
+                        if let Some(n) = static_len {
+                            writeln!(
+                                out,
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                                idx_str, n,
+                            )
+                            .unwrap();
+                        }
+                    }
                     writeln!(
                         out,
                         "  v_{} = {}[{}];",
@@ -2497,10 +2527,14 @@ fn emit_instr(
                 }
             }
         }
-        InstrKind::IndexAssign { array, index, value, .. } => {
+        InstrKind::IndexAssign { array, index, value, checked, .. } => {
             // Dispatch on operand type. Vec write goes
             // through `.data`; arrays/refs write through the
             // pointer-decayed name.
+            //
+            // Same `checked` contract as InstrKind::Index:
+            // emit a runtime bounds guard whenever the SSA
+            // elision pass left it on.
             let array_ty = operand_type(array, value_types);
             match array_ty.as_ref().map(|t| t.deref().clone()) {
                 Some(Type::Vec(element)) => {
@@ -2512,6 +2546,16 @@ fn emit_instr(
                     } else {
                         "."
                     };
+                    if *checked {
+                        writeln!(
+                            out,
+                            "  if ((uint64_t)({}) >= (uint64_t)({}{}len)) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                            c_operand(index),
+                            c_operand(array),
+                            dot,
+                        )
+                        .unwrap();
+                    }
                     // Closure #150 (SSA-C): when the element
                     // type is heap-shaped, free the OLD slot
                     // before storing the new value. Same
@@ -2541,6 +2585,21 @@ fn emit_instr(
                     writeln!(out, "  {} = {};", lv, c_operand(value)).unwrap();
                 }
                 _ => {
+                    if *checked {
+                        let static_len = match array_ty.as_ref().map(|t| t.deref()) {
+                            Some(Type::Array { length, .. }) => Some(*length),
+                            _ => None,
+                        };
+                        if let Some(n) = static_len {
+                            writeln!(
+                                out,
+                                "  if ((uint64_t)({}) >= (uint64_t){}ULL) {{ fprintf(stderr, \"index out of bounds\\n\"); abort(); }}",
+                                c_operand(index),
+                                n,
+                            )
+                            .unwrap();
+                        }
+                    }
                     writeln!(
                         out,
                         "  {}[{}] = {};",
