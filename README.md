@@ -3881,9 +3881,16 @@ parallel for i from 0 to 10 {
 let total: i64 = atomic_load(ref shared);   // 10
 ```
 
-**No exceptions → `Option<T>` / `Result<T, E>` + `try` / `?`.**
-The desugar gives the same one-line happy-path as Rust's `?`,
-without an unwinder or `try`/`catch` machinery.
+**No exceptions → `Option<T>` + `try` / `?`.** The desugar
+gives the same one-line happy-path as Rust's `?`, without an
+unwinder or `try`/`catch` machinery. v1's `try` requires the
+enclosing enum to have exactly **one payloaded** + **one
+payload-less** variant — `Option<T>` (Some/None) fits, but
+`Result<T, E>` (Ok/Err, both payloaded) does NOT, and you'll
+hit "requires the enum to have exactly one payloaded variant
+and one payload-less variant; got 2 payloaded and 0
+payload-less". For Result-shaped flows, write the match by
+hand, or define your own enum that matches the 1+1 shape.
 
 ```intent
 fn divide(a: i64, b: i64) -> Option<i64> {
