@@ -5487,8 +5487,29 @@ fn try_rewrite_at_top(
         ))
         .map(|s| s.span())
         .unwrap_or_else(crate::span::Span::default);
+    // The try desugar runs BEFORE generic-decl monomorphization,
+    // so `fn run(...) -> Option<i64>` arrives with return_type
+    // `Type::Apply { name: "Option", args: [I64] }` rather than
+    // `Type::Enum("Option__i64")`. Accept the Apply form for the
+    // standard short-circuit carriers `Option` and `Result` so
+    // user code can write `try opt_call()` / `try result_call()`
+    // when the enclosing fn returns the generic form. Variant
+    // references the rewriter emits (`Option.Some(t)`,
+    // `Option.None`) carry through the later monomorphization
+    // pass and get mangled in lockstep with everything else.
+    //
+    // Future<T> / Poll<T> are deliberately excluded — those are
+    // async-sugar synthetic return types (the user wrote
+    // `async fn f() -> i64`, sugar rewrites to `-> Future<i64>`),
+    // and `try X` is rejected there per v3.1 design.
     let return_enum_name = match return_type {
         Type::Enum(n) => n.clone(),
+        Type::Apply { name, .. }
+            if (name == "Option" || name == "Result")
+                && enum_by_name.contains_key(name) =>
+        {
+            name.clone()
+        }
         _ => {
             diagnostics.push(Diagnostic::new(
                 first_try_span,

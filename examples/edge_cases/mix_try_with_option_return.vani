@@ -1,0 +1,26 @@
+// श्री।
+// Regression for bug #17: the `try` desugar runs before generic-
+// decl monomorphization, so `fn run(...) -> Option<i64>` arrives
+// at the desugar with return_type `Type::Apply { name: "Option",
+// args: [I64] }`. The eligibility check only accepted
+// `Type::Enum(_)`, so any function whose return type was an
+// un-instantiated generic enum (`Option<i64>`, `Result<i64, E>`)
+// was rejected with "try requires the enclosing function's
+// return type to be an enum" — even though those ARE enums.
+//
+// Fix accepts `Type::Apply { name: "Option" | "Result", .. }`
+// at the entry check; rewriter emits `Option.Some(t)` /
+// `Option.None` references which the later monomorphization
+// pass mangles in lockstep. `Future<T>` / `Poll<T>` are
+// deliberately excluded — they're async-sugar synthetic return
+// types where try-with-non-enum-source must stay rejected.
+fn parse_pos(s: Str) -> Option<i64> {
+  return parse_int(s);
+}
+fn double(s: Str) -> Option<i64> {
+  let n: i64 = parse_pos(s)?;
+  return Option.Some(n * 2);
+}
+fn main() -> i64 {
+  return option_unwrap_or(double("21"), -1);   // 42
+}
