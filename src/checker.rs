@@ -26438,9 +26438,12 @@ fn explicit_cast(
         return CheckedExpr::fallback(target.clone(), span);
     }
 
+    // Explicit `as` cast: int-to-int wraps (two-complement);
+    // float casts stay range-checked. See eval_as_cast_constant
+    // for the contract.
     let constant = checked
         .constant()
-        .and_then(|constant| eval_cast_constant(constant, target, span, diagnostics));
+        .and_then(|constant| eval_as_cast_constant(constant, target));
     cast_expr(checked, target.clone(), constant, span)
 }
 
@@ -27033,6 +27036,45 @@ fn eval_cast_constant(
             ));
             None
         }
+    }
+}
+
+/// Constant fold an explicit `as` cast. Unlike implicit
+/// coercion, an `as` cast is the user's intentional
+/// truncation / sign-bit reinterpretation request — int-to-int
+/// folds with two-complement wrap (`200_i64 as i8 == -56_i8`)
+/// instead of erroring on overflow. Float-to-int still
+/// requires an in-range, finite value (no defined wrap for
+/// NaN/Inf or out-of-range floats); on out-of-range it returns
+/// None so the const-folder declines and the runtime cast
+/// fires (which the backends already handle).
+///
+/// Pre-fix: `cast_checked` used `eval_cast_constant`, so
+/// `let y: i8 = (x as i8);` with x=200 was rejected at compile
+/// time even though `as` is supposed to truncate at the user's
+/// explicit request.
+fn eval_as_cast_constant(constant: &TypedConst, target: &Type) -> Option<TypedConst> {
+    match (constant, target) {
+        (TypedConst::Int(value), ty) if ty.is_integer() => {
+            let (min, max) = (ty.min_value()?, ty.max_value()?);
+            let span = max as i128 - min as i128 + 1;
+            // Reduce modulo `span` into [min, max]. For symmetric
+            // signed ranges this is equivalent to a two-complement
+            // truncate; for unsigned types min=0 so it's a plain
+            // modulo wrap.
+            let mut wrapped = ((*value - min) % span + span) % span + min;
+            // Avoid the off-by-one case where modulo over a
+            // signed range collapses min and max — explicit clamp.
+            if wrapped > max {
+                wrapped = min;
+            }
+            Some(TypedConst::Int(wrapped))
+        }
+        // Float-to-int / int-to-float / float-to-float — defer
+        // to the range-checked path. `as` between floats has no
+        // wrap semantics; out-of-range floats stay an error here
+        // so the user gets a diagnostic.
+        _ => eval_cast_constant_no_diagnostic(constant, target),
     }
 }
 

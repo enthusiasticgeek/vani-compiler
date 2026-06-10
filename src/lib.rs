@@ -4948,11 +4948,13 @@ mod tests {
     }
 
     #[test]
-    fn cast_i8_to_u8_const_overflow_rejected() {
-        // `-1 as u8` at compile time — the checker's const
-        // fold recognizes the impossible representation and
-        // rejects. (At runtime, the cast would wrap to 255,
-        // but the constexpr path stops it earlier.)
+    fn cast_i8_to_u8_const_wraps() {
+        // `-1 as u8` is an EXPLICIT cast — the user opted in to
+        // two-complement truncation. Pre-bug-#12 the const-fold
+        // path rejected this with "cannot be represented as u8"
+        // even though the runtime cast would have wrapped to 255.
+        // The fix matches Rust/C semantics: `as` between integer
+        // types wraps at compile time too.
         let source = r#"
             fn main() -> i64 {
               let x: i8 = -1;
@@ -4960,15 +4962,7 @@ mod tests {
               return y as i64;
             }
         "#;
-        let errors = compile(source)
-            .expect_err("i8(-1) as u8 const-fold is rejected");
-        assert!(
-            errors
-                .iter()
-                .any(|e| e.message.contains("cannot be represented as u8")),
-            "expected u8-representation diagnostic, got: {:?}",
-            errors
-        );
+        compile(source).expect("i8(-1) as u8 const-fold should wrap, not reject");
     }
 
     #[test]
