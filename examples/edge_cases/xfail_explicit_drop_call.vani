@@ -1,0 +1,14 @@
+interface Drop { fn drop(self: mut ref Self) -> i64; }
+struct R { v: i64 }
+implement Drop for R {
+  fn drop(self: mut ref R) -> i64 {
+    print self.v;
+    return 0;
+  }
+}
+fn main() -> i64 {
+  let r: R = R { v: 42 };
+  let _ = r.drop();
+  let _ = r.drop();  // call again — explicit double-drop
+  return 0;
+}

@@ -13263,6 +13263,35 @@ fn check_expr(
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
+            // 2026-06-09: reject explicit `.drop()` calls on
+            // types implementing the Drop iface. Without this
+            // guard, `r.drop()` runs the user-defined destructor
+            // AND scope-exit auto-Drop still fires — leading to
+            // a double-drop (potential double-free if the body
+            // mutates heap state). Matches Rust's
+            // `std::mem::drop(v)` which consumes v by-value;
+            // direct `v.drop()` calls there are also rejected.
+            // Users who want explicit cleanup before scope-exit
+            // should `let _ = take(v);` or restructure to consume
+            // v through a different fn.
+            if method == "drop" && crate::ast::iface_impl_exists("Drop", &type_name) {
+                diagnostics.push(Diagnostic::new(
+                    *method_span,
+                    format!(
+                        "explicit `.drop()` calls on a `Drop`-implementing type are \
+                         rejected — the destructor fires automatically at scope exit. \
+                         Calling it manually would cause a double-drop (the auto-call \
+                         still runs on scope exit). To end the binding's lifetime \
+                         early, restructure to move it out of scope (e.g. \
+                         `let _ = consume({});`).",
+                        match &receiver.kind {
+                            ExprKind::Var(n) => n.clone(),
+                            _ => type_name.clone(),
+                        },
+                    ),
+                ));
+                return CheckedExpr::fallback_integer(expr.span);
+            }
             let mangled = format!("{}_{}", type_name, method);
             let sig = match signatures.get(&mangled) {
                 Some(s) => s,

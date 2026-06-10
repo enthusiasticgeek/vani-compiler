@@ -1783,8 +1783,15 @@ mod tests {
     fn drop_interface_with_valid_signature_compiles() {
         // T2.7 phase 1: `implement Drop for T` is recognized
         // as a special interface contract. The auto-call at
-        // scope exit lands with #3 RAII work; until then,
-        // users declare the impl + call `t.drop()` manually.
+        // scope exit fires automatically; explicit `t.drop()`
+        // calls are now REJECTED (2026-06-09) to prevent
+        // double-drop (the original test pre-dated the auto-
+        // drop wiring and explicit calls were the only way to
+        // run the destructor — but the auto-call landed in
+        // a later commit without updating this test, so
+        // explicit + auto = double-call). New shape: define
+        // the Drop impl but rely on scope-exit; don't call
+        // it manually.
         let source = r#"
             struct Resource { id: i64 }
             interface Drop {
@@ -1795,7 +1802,7 @@ mod tests {
             }
             fn main() -> i64 {
               let r: Resource = Resource { id: 42 };
-              return r.drop();
+              return r.id;
             }
         "#;
         compile(source).expect("Drop impl with valid sig should compile");
@@ -11151,6 +11158,35 @@ fn main() -> i64 {
             }
         "#;
         compile(source).expect("nested-enum payload must accept");
+    }
+
+    #[test]
+    fn explicit_drop_call_rejects_to_prevent_double_drop() {
+        // Regression: explicit `r.drop()` previously compiled
+        // alongside the auto-scope-exit drop, leading to a
+        // double (or triple) call to the destructor — a
+        // double-free in any Drop impl that touches heap state.
+        // Fixed 2026-06-09 by rejecting the explicit form with
+        // a "calling it manually would cause a double-drop"
+        // diagnostic.
+        let source = r#"
+            interface Drop { fn drop(self: mut ref Self) -> i64; }
+            struct R { v: i64 }
+            implement Drop for R {
+              fn drop(self: mut ref R) -> i64 { return self.v; }
+            }
+            fn main() -> i64 {
+              let r: R = R { v: 42 };
+              let _ = r.drop();
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("explicit r.drop() must reject");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("double-drop"),
+            "expected double-drop diagnostic, got:\n{combined}",
+        );
     }
 
     #[test]
