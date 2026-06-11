@@ -57,6 +57,7 @@ All go in `src/lib.rs` as `#[test]` unless noted.
 
 | Feature | Effort | Notes |
 |---|---|---|
+| **volatile_read / volatile_write built-ins** | 4–6h | Embedded MMIO. NOT a type qualifier — access-level unsafe built-ins only. Parse as built-in calls; checker: require unsafe + embedded triple, reject on hosted with clear diagnostic; LLVM: `load/store volatile`; C: `*(volatile T*)` cast. Docs: recommend `MmioReg<T>` wrapper struct. 3 lib tests + examples/embedded/mmio_blink.vani. Full rationale in TODO.md user-direction items. |
 | Error-message elaboration | 8–15h | src/checker.rs + src/diagnostic.rs — add elaboration vec, seed 20–30 families |
 | Big-O annotation (--big-o flag) | 12–20h | New src/big_o.rs; hook into vanic check output; v1: loop-nesting + builtin asymptotics |
 | Tutorials rewrite for non-CS readers | 20–40h | tutorials/src/beginner/ + intermediate/ — analogy chapters before formal definitions |
