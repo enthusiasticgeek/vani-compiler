@@ -186,36 +186,68 @@ This places `lli.exe`, `llc.exe`, and `opt.exe` under
 
 #### Step 4 — z3 SMT solver
 
-Download the latest Windows 64-bit release from
-<https://github.com/Z3Prover/z3/releases>, extract it anywhere
-(e.g. `C:\z3`), and add the `bin\` subdirectory to your system `PATH`:
+**Option A — via MSYS2 (recommended, no extra PATH entry needed):**
+
+MSYS2 already manages LLVM (Step 3) and GCC (Step 2); z3 lives in
+the same bucket. One command, z3 lands in `C:\msys64\mingw64\bin`
+which is already on your `PATH`:
 
 ```powershell
-# One-liner that downloads z3 4.16.0 and extracts to C:\z3:
+C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-z3 --noconfirm
+```
+
+Verify: `z3 --version` should print `Z3 version 4.x`.
+
+**Option B — standalone GitHub download (fixed version):**
+
+Download the Windows 64-bit release from
+<https://github.com/Z3Prover/z3/releases>, extract it anywhere
+(e.g. `C:\z3`), and add the `bin\` subdirectory to your **system**
+`PATH` (System Properties → Environment Variables → Path → New):
+
+```powershell
 Invoke-WebRequest -Uri "https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/z3-4.16.0-x64-win.zip" `
     -OutFile "$env:TEMP\z3.zip"
 Expand-Archive -Path "$env:TEMP\z3.zip" -DestinationPath "C:\z3" -Force
+# Then add C:\z3\z3-4.16.0-x64-win\bin to system PATH manually.
 ```
 
-Then add `C:\z3\z3-4.16.0-x64-win\bin` to your system `PATH`
-(System Properties → Environment Variables → Path → New).
+Verify: `z3 --version` should print `Z3 version 4.8` or later.
 
-Verify: `z3 --version` should print `Z3 version 4.16.0`.
+#### Step 5 — PATH reference (what goes where)
 
-#### Step 5 — Verify all tools
+After completing Steps 1–4 your `PATH` should contain these two
+directories. Nothing else is required.
+
+| Directory | Added by | Contains |
+|---|---|---|
+| `C:\msys64\mingw64\bin` | MSYS2 installer (Step 2) | `gcc`, `lli`, `llc`, `opt`, `z3` (if Option A) |
+| `C:\Users\<you>\.cargo\bin` | Rustup installer (Step 1) | `cargo`, `rustc`, `rustup` |
+
+> **System PATH vs User PATH**: MSYS2 adds `C:\msys64\mingw64\bin`
+> to the **system** PATH (all users). Rustup adds
+> `C:\Users\<you>\.cargo\bin` to your **user** PATH. Both show up
+> in a normal terminal window but some tools (VS Code integrated
+> terminal, scheduled tasks, CI agents) only inherit system PATH —
+> if `cargo` is not found, add `C:\Users\<you>\.cargo\bin` to the
+> system PATH as well (System Properties → Environment Variables →
+> System variables → Path → New).
+
+#### Step 6 — Verify all tools
 
 Open a **new** PowerShell window (so updated `PATH` takes effect):
 
 ```powershell
-rustc --version      # rustc 1.96.0 or later
+rustc --version      # rustc 1.80.0 or later
 cargo --version
 gcc --version        # from C:\msys64\mingw64\bin
-z3 --version         # Z3 version 4.x
-lli --version        # LLVM JIT (if MSYS2 LLVM installed)
+z3 --version         # Z3 version 4.8 or later
+lli --version        # LLVM JIT — from C:\msys64\mingw64\bin
 llc --version        # LLVM static compiler
+opt --version        # LLVM IR optimizer
 ```
 
-#### Step 6 — Build and test
+#### Step 7 — Build and test
 
 ```powershell
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
@@ -226,10 +258,10 @@ cargo test
 
 Expected output: `test result: ok. 2089 passed; 0 failed`
 
-> **Note on `cargo test` stack size**: the test suite sets
-> `RUST_MIN_STACK=33554432` via `.cargo/config.toml`. If you run
-> test binaries directly (not via `cargo test`), set this manually:
-> `$env:RUST_MIN_STACK = "33554432"` before running.
+> **Stack size**: the repo's `.cargo/config.toml` sets
+> `RUST_MIN_STACK=33554432` (32 MB) automatically for all `cargo test`
+> runs. If you run a test binary directly (outside `cargo test`), set
+> it manually first: `$env:RUST_MIN_STACK = "33554432"`.
 
 ---
 
@@ -356,10 +388,25 @@ needed for `vanic run --backend=llvm`. The C backend
 Z3 4.8 or later works. If `z3 --version` gives "command not found",
 the binary isn't on `PATH`.
 
-**Windows**: confirm the extracted z3 `bin\` directory (e.g.
-`C:\z3\z3-4.16.0-x64-win\bin`) is in your system `PATH`, not just
-the session `PATH`. Open System Properties → Environment Variables
-→ Path → New, then restart your terminal.
+**Windows (MSYS2 install)**: z3 lives in `C:\msys64\mingw64\bin`
+alongside gcc and lli. If it's missing, install it:
+```powershell
+C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-z3 --noconfirm
+```
+
+**Windows (standalone download)**: confirm the extracted z3 `bin\`
+directory is in your **system** `PATH` (not just the session `PATH`).
+Open System Properties → Environment Variables → Path → New, then
+restart your terminal.
+
+### `cargo: command not found` (Windows)
+
+Rustup adds `C:\Users\<you>\.cargo\bin` to your **user** `PATH`.
+Some environments (VS Code integrated terminal on first launch,
+CI runners, scheduled tasks) only inherit the **system** `PATH`
+and miss it. Fix: add `C:\Users\<you>\.cargo\bin` to the system
+PATH via System Properties → Environment Variables → System
+variables → Path → New. Then restart the terminal.
 
 ### Tests fail with stack overflow
 
