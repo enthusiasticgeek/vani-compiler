@@ -903,6 +903,26 @@ GLOBAL OPTIONS:
 ";
 
 fn main() -> ExitCode {
+    // Windows default stack is 1 MB; Linux/macOS default is 8 MB.
+    // The compiler's recursive descent through large programs can exceed
+    // 1 MB, so on Windows we run the real work on a 64 MB thread.
+    #[cfg(target_os = "windows")]
+    {
+        let result = std::thread::Builder::new()
+            .stack_size(64 * 1024 * 1024)
+            .spawn(run)
+            .expect("failed to spawn worker thread")
+            .join()
+            .expect("worker thread panicked");
+        return match result {
+            Ok(code) => code,
+            Err(message) => {
+                eprintln!("{}", message);
+                ExitCode::from(1)
+            }
+        };
+    }
+    #[cfg(not(target_os = "windows"))]
     match run() {
         Ok(code) => code,
         Err(message) => {
@@ -2266,6 +2286,10 @@ fn run_program(path: &Path, link_args: &[String]) -> Result<ExitCode, String> {
         cmd.arg("-lm");
     } else {
         cmd.arg("-lsynchronization");
+        // Winsock2 for socket / bind / listen / accept / recv / send
+        // / closesocket. On Windows the pragma comment(lib,...) in
+        // the emitted C is MSVC-only; MinGW/gcc needs an explicit flag.
+        cmd.arg("-lws2_32");
     }
     if openmp_ok {
         cmd.arg("-fopenmp");
@@ -2602,6 +2626,7 @@ fn build_program_llvm(
     link_cmd.arg(&obj_path);
     if cfg!(target_os = "windows") {
         link_cmd.arg("-lsynchronization");
+        link_cmd.arg("-lws2_32");
     } else {
         link_cmd.arg("-fopenmp");
     }

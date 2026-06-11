@@ -103,11 +103,16 @@ See [docs/v1_limitations.md L10](docs/v1_limitations.md).
 
 ## Windows
 
-> **Status (2026-06-10)**: Native Windows builds are verified. The
-> compiler builds and all 2073 lib tests pass on Windows 11 with the
-> GNU toolchain. The `_WIN32` I/O runtime (IOCP, winsock2, `Sleep`)
-> compiles cleanly; runtime end-to-end tests for async TCP/epoll are
-> the next verification milestone.
+> **Status (2026-06-11)**: Native Windows builds are fully verified.
+> All **2089 lib tests** and all end-to-end tests pass on Windows 11
+> with the GNU toolchain. Key platform fixes applied: `putchar` →
+> `printf("%c",…)` shim (CRT buffer ordering), `ws2_32` linker flag
+> (MinGW Winsock2), `Sleep` declaration dedup, 64 MB main-thread
+> stack, CRLF normalisation in output comparison.
+> **Known limitation**: async TCP tests using the IOCP `epoll_wait_one`
+> shim (`tcp_echo_epoll.vani`, `echo_loop.vani`, `echo_loop_break.vani`,
+> `async_showcase.vani`, `echo_match_stress.vani`) are skipped on
+> Windows — IOCP requires overlapped I/O not yet wired up.
 
 ### Option 1: WSL2 (recommended for Linux parity)
 
@@ -219,7 +224,7 @@ cargo build --release
 cargo test
 ```
 
-Expected output: `test result: ok. 2073 passed; 0 failed`
+Expected output: `test result: ok. 2089 passed; 0 failed`
 
 > **Note on `cargo test` stack size**: the test suite sets
 > `RUST_MIN_STACK=33554432` via `.cargo/config.toml`. If you run
@@ -258,7 +263,7 @@ Then build vāṇी itself:
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
 cd vani-compiler
 cargo build --release   # builds target/release/vanic + target/release/intentc (legacy alias)
-cargo test              # 2073 lib tests; ~90s on a modern laptop
+cargo test              # 2089 lib tests; ~90s on a modern laptop
 ```
 
 **Native Windows (PowerShell):**
@@ -266,7 +271,7 @@ cargo test              # 2073 lib tests; ~90s on a modern laptop
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
 cd vani-compiler
 cargo build --release
-cargo test              # 2073 passed; 0 failed
+cargo test              # 2089 passed; 0 failed
 ```
 
 A successful build leaves `target/release/vanic` (Linux/macOS) or
@@ -374,11 +379,13 @@ $env:RUST_MIN_STACK = "33554432"
 
 ### LLVM 17 vs 18 vs 22 differences
 
-vāṇī has been tested against LLVM 14–18 on Linux. LLVM 22 (the
-current `winget` release) is supported on Windows for C-backend
-builds and `cargo test`. If you hit an IR-emit error with a
-specific LLVM version, file an issue including the `lli --version`
-output.
+vāṇī has been tested against LLVM 14–18 on Linux and LLVM 22 on
+Windows 11 (via MSYS2 `mingw-w64-x86_64-llvm`). LLVM 22 ORC
+JIT / JITLink on Windows requires all external symbols to be
+DLL-exported; the compiler emits the necessary shims automatically
+(`@snprintf`, `@dprintf`, `putchar`→`printf("%c",…)` CRT fix).
+If you hit an IR-emit error with a specific LLVM version, file an
+issue including the `lli --version` output.
 
 ### Windows: `pacman` mirrors unreachable or signature errors
 

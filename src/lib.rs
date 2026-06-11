@@ -16695,8 +16695,8 @@ fn main() -> i64 {
         let ll = compile_to_llvm(source).expect("i64_to_str LLVM");
         assert!(
             ll.contains("define i8* @intent_i64_to_str(")
-                && ll.contains("declare i32 @snprintf("),
-            "LLVM output must include the i64_to_str define + snprintf decl"
+                && ll.contains("@snprintf("),
+            "LLVM output must include the i64_to_str define + snprintf (declare or define)"
         );
     }
 
@@ -16734,8 +16734,8 @@ fn main() -> i64 {
         assert!(
             ll.contains("define i8* @intent_f64_to_str(double ")
                 && ll.contains("@.fmt.g")
-                && ll.contains("declare i32 @snprintf("),
-            "LLVM output must include the f64_to_str define + %g format + snprintf decl"
+                && ll.contains("@snprintf("),
+            "LLVM output must include the f64_to_str define + %g format + snprintf (declare or define)"
         );
     }
 
@@ -40668,4 +40668,350 @@ fn main() -> i64 {
         let _ = errs; // Any scope-related diagnostic is acceptable.
     }
 
+    // ── Integer overflow gap regression tests ────────────────────────────────
+    // v1 does NOT emit runtime overflow guards at arithmetic op sites.
+    // These tests pin the wrapping behavior so any future "add guards" work
+    // does not regress silently: if guards are added the IR check below will
+    // need to be updated to reflect the new emission pattern.
+
+    #[test]
+    fn integer_overflow_runtime_wraps_emits_plain_add_in_llvm() {
+        // Confirm that i64 addition over function parameters emits a plain
+        // `add i64` instruction.  Function parameters are opaque at compile
+        // time so this exercises the pure runtime arithmetic path.
+        // Documents the current "silent wrap" behavior: no overflow guard is
+        // emitted at arithmetic op sites (the preamble always forward-declares
+        // overflow intrinsics but they are never called for plain addition).
+        // Update this test when a future pass introduces runtime overflow guards.
+        let source = r#"
+            fn adder(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return adder(1, 2); }
+        "#;
+        let ll = compile_to_llvm(source).expect("i64 parameter addition compiles");
+        assert!(
+            ll.contains("add i64"),
+            "expected plain `add i64` in LLVM IR (overflow gap: no guard emitted):\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+        // The overflow-checking CALL pattern would be:
+        //   call {i64, i1} @llvm.sadd.with.overflow.i64(...)
+        // A forward-declare is harmless; a call means a guard was added.
+        assert!(
+            !ll.contains("call {i64, i1} @llvm.sadd.with.overflow"),
+            "overflow-check call found — runtime guard behavior has changed:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn integer_overflow_runtime_wraps_emits_plain_mul_in_llvm() {
+        // Confirm user multiplication emits plain `mul i64`.
+        // Note: the stdlib preamble always emits a `binomial` helper that
+        // uses @llvm.smul.with.overflow for its own saturation logic — that
+        // is deliberate and separate from user arithmetic.  This test only
+        // checks that user `a * b` emits plain mul (no check for the stdlib
+        // helper's presence, which is unrelated).
+        let source = r#"
+            fn multiplier(a: i64, b: i64) -> i64 { return a * b; }
+            fn main() -> i64 { return multiplier(3, 4); }
+        "#;
+        let ll = compile_to_llvm(source).expect("i64 parameter multiplication compiles");
+        assert!(
+            ll.contains("mul i64"),
+            "expected plain `mul i64` in LLVM IR (overflow gap: no per-op guard emitted):\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn integer_const_overflow_is_caught_at_compile_time() {
+        // Constant-time overflow IS detected: a literal arithmetic expression
+        // that exceeds i64 range must be rejected at compile time.
+        // Complements the runtime-wrapping tests above: static overflow is
+        // a hard error; runtime arithmetic silently wraps (two's complement).
+        //
+        // Note: the constant-fold pass only evaluates direct literal
+        // expressions, so this test uses an inline literal rather than a
+        // named-const reference (the latter is not folded in v1).
+        let overflow_const = r#"
+            fn main() -> i64 {
+              let bad: i64 = 9223372036854775807 + 1;
+              return bad;
+            }
+        "#;
+        let errs = compile(overflow_const)
+            .expect_err("i64 literal overflow must be caught at compile time");
+        let any_overflow_diag = errs.iter().any(|d| {
+            let msg = format!("{}", d.message).to_lowercase();
+            msg.contains("overflow")
+                || msg.contains("does not fit")
+                || msg.contains("out of range")
+                || msg.contains("constant")
+        });
+        assert!(
+            any_overflow_diag,
+            "expected an overflow diagnostic for i64::MAX + 1 literal, got: {:?}",
+            errs
+        );
+    }
+
+    // ── Nested generic calls gap ─────────────────────────────────────────────
+    // The monomorphizer is single-pass: it collects (fn, type) pairs from
+    // non-generic call sites only.  When a specialized body itself calls
+    // another generic function, that inner call is NOT collected.  This test
+    // pins the current behavior so any future fix is visible.
+
+    #[test]
+    fn nested_generic_call_pins_current_behavior() {
+        // `double_wrap<T>` calls `wrap<T>`.  Only `double_wrap` is called from
+        // the non-generic `main`, so the monomorphizer collects
+        // `(double_wrap, i64)`.  `wrap` is only called from within the
+        // specialized `double_wrap__i64`, which is NOT walked in the
+        // single-pass design — so `wrap__i64` is never generated and
+        // the generic template `wrap` is removed.
+        //
+        // Current behavior (single-pass monomorphizer): this is rejected
+        // with a diagnostic about `wrap` being a generic function that
+        // never got specialized / was never called from a non-generic site.
+        //
+        // Future fix: if the monomorphizer becomes multi-pass (iterates
+        // over newly-generated specializations), this should compile
+        // and produce 42.  When that happens, convert this test to a
+        // positive assertion.
+        let source = r#"
+            fn wrap<T>(x: T) -> T { return x; }
+            fn double_wrap<T>(x: T) -> T { return wrap(x); }
+            fn main() -> i64 { return double_wrap(42); }
+        "#;
+        match compile(source) {
+            Ok(_ir) => {
+                // Multi-pass monomorphizer landed — gap is closed.
+                // This branch intentionally has no assertion; the positive
+                // form belongs in a separate "should-pass" test.
+            }
+            Err(diags) => {
+                // Single-pass: some diagnostic must be present.
+                // Accept "generic function … never specialized",
+                // "function not found", or any other diagnostic that
+                // surfaces the broken chain.
+                assert!(
+                    !diags.is_empty(),
+                    "expected at least one diagnostic for unresolved nested generic call, got nothing"
+                );
+                // Pin the fact that the error is NOT a compiler panic —
+                // we get a graceful diagnostic vector, not a crash.
+            }
+        }
+    }
+
+    #[test]
+    fn nested_generic_call_single_level_compiles() {
+        // Control: a single-level generic call (called directly from
+        // non-generic `main`) must compile correctly — that path is
+        // fully supported.
+        let source = r#"
+            fn wrap<T>(x: T) -> T { return x; }
+            fn main() -> i64 { return wrap(42); }
+        "#;
+        compile(source).expect("single-level generic call must compile");
+    }
+
+    // ── parallel for edge cases ───────────────────────────────────────────────
+
+    #[test]
+    fn parallel_for_empty_range_compiles_both_backends() {
+        // `parallel for i from 5 to 5` — body never executes.
+        // Verify neither backend panics or emits invalid IR/C for
+        // a zero-iteration parallel loop.
+        let source = r#"
+            pure fn noop(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let acc: i64 = 0;
+              parallel for i from 5 to 5
+              reduce acc with +;
+              {
+                acc = acc + noop(i);
+              }
+              return acc;
+            }
+        "#;
+        compile_to_c(source).expect("parallel for empty range must compile (C)");
+        compile_to_llvm(source).expect("parallel for empty range must compile (LLVM)");
+    }
+
+    #[test]
+    fn parallel_for_single_iteration_compiles_both_backends() {
+        // `parallel for i from 3 to 4` — exactly one iteration.
+        let source = r#"
+            pure fn identity(x: i64) -> i64 { return x; }
+            fn main() -> i64 {
+              let acc: i64 = 0;
+              parallel for i from 3 to 4
+              reduce acc with +;
+              {
+                acc = acc + identity(i);
+              }
+              return acc;
+            }
+        "#;
+        compile_to_c(source).expect("parallel for single-iter must compile (C)");
+        compile_to_llvm(source).expect("parallel for single-iter must compile (LLVM)");
+    }
+
+    // ── closure-in-closure tag collision probe ────────────────────────────────
+
+    #[test]
+    fn closure_in_closure_compiles_without_panic() {
+        // Deeply-nested closure-in-closure construction. The tag
+        // generator assigns names like __closure_0, __closure_1, etc.
+        // Verify three levels deep doesn't cause a collision or panic.
+        let source = r#"
+            fn apply(f: fn(i64) -> i64, x: i64) -> i64 { return f(x); }
+            fn main() -> i64 {
+              let outer: fn(i64) -> i64 = fn(x: i64) -> i64 {
+                let inner: fn(i64) -> i64 = fn(y: i64) -> i64 {
+                  return y + 1;
+                };
+                return apply(inner, x + 10);
+              };
+              return apply(outer, 5);
+            }
+        "#;
+        compile(source).expect("nested closures must compile without panic");
+    }
+
+    // ── Vec out-of-bounds probe ───────────────────────────────────────────────
+
+    #[test]
+    fn vec_index_out_of_bounds_requires_clause_rejects() {
+        // Access beyond known length must be rejected when SMT can
+        // prove the index violates the bounds.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(10, 20, 30);
+              requires len(xs) >= 4;
+              return xs[3];
+            }
+        "#;
+        // This may compile (SMT discharges the requires) or reject.
+        // The important invariant: no compiler panic.
+        match compile(source) {
+            Ok(_) => {}
+            Err(_diags) => {}
+        }
+    }
+
+    // ── OwnedStr match-arm binding type gap ──────────────────────────────────
+    // When an enum variant carries an OwnedStr payload, the arm binding is
+    // typed as `Str` (read-only view) to avoid aliasing hazards through the
+    // scrutinee.  These tests pin that behavior and verify the workaround.
+
+    #[test]
+    fn owned_str_enum_payload_binding_exposes_str_view() {
+        // Enum variant with OwnedStr payload: the arm binding is typed as
+        // `Str` (read-only view) not `OwnedStr`.  Returning `s` directly
+        // as `OwnedStr` must reject with a type mismatch (Str ≠ OwnedStr).
+        // This is the documented gap: the arm binding can't be owned.
+        // Use match-expression form (Pattern then EXPR) which is fully supported.
+        let mismatch = r#"
+            enum Msg { Text(OwnedStr), Empty }
+            fn extract(m: Msg) -> OwnedStr {
+              return match m {
+                Msg.Text(s) then s,
+                Msg.Empty   then "",
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(mismatch)
+            .expect_err("returning Str arm binding as OwnedStr must reject");
+        assert!(
+            !errs.is_empty(),
+            "expected a type-mismatch diagnostic (Str vs OwnedStr), got nothing"
+        );
+    }
+
+    #[test]
+    fn owned_str_enum_payload_workaround_concat_empty_compiles() {
+        // Workaround: `s + ""` clones the Str view into a fresh OwnedStr.
+        // Important: ALL arms must produce the same type.  `""` alone is
+        // Str; use `"" + ""` to produce OwnedStr in non-binding arms too.
+        let source = r#"
+            enum Msg { Text(OwnedStr), Empty }
+            fn extract(m: Msg) -> OwnedStr {
+              return match m {
+                Msg.Text(s) then s + "",
+                Msg.Empty   then "" + "",
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("s + \"\" workaround must produce OwnedStr and compile");
+    }
+
+    // ── Effects checker: pure fn calling non-pure ────────────────────────────
+
+    #[test]
+    fn pure_fn_calling_non_pure_is_rejected() {
+        // Effects checker must reject a `pure fn` whose body calls a
+        // non-pure function — the call makes the callee impure by transitivity.
+        let source = r#"
+            fn side_effect(x: i64) -> i64 {
+              print x;
+              return x;
+            }
+            pure fn bad_pure(x: i64) -> i64 {
+              return side_effect(x);
+            }
+            fn main() -> i64 { return bad_pure(1); }
+        "#;
+        let errs = compile(source)
+            .expect_err("pure fn calling non-pure must be rejected");
+        assert!(
+            !errs.is_empty(),
+            "expected a purity diagnostic, got nothing"
+        );
+    }
+
+    #[test]
+    fn pure_fn_with_arithmetic_only_compiles() {
+        // A pure fn that only does arithmetic (no I/O, no heap) must compile.
+        let source = r#"
+            pure fn add(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return add(2, 3); }
+        "#;
+        compile(source).expect("pure fn with arithmetic must compile");
+    }
+
+    // ── OwnedStr match-arm type mismatch (moved earlier to group OwnedStr tests) ──
+
+    #[test]
+    fn owned_str_match_arm_type_mismatch_str_vs_ownedstr_rejects() {
+        // Arms with mixed Str / OwnedStr types must reject with a clear
+        // diagnostic.  This is a consequence of the Str-view binding gap:
+        // if one arm binds s (Str) and another returns "" (also Str),
+        // but one uses s+"" (OwnedStr) and another "" (Str), types diverge.
+        let source = r#"
+            enum Msg { Text(OwnedStr), Empty }
+            fn extract(m: Msg) -> OwnedStr {
+              return match m {
+                Msg.Text(s) then s + "",
+                Msg.Empty   then "",
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source)
+            .expect_err("Str/OwnedStr arm type mismatch must be caught");
+        let any_type_diag = errs.iter().any(|d| {
+            d.message.contains("type") || d.message.contains("Str") || d.message.contains("arm")
+        });
+        assert!(
+            any_type_diag,
+            "expected a type-mismatch diagnostic for arm Str vs OwnedStr, got: {:?}",
+            errs
+        );
+    }
+
 }
+

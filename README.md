@@ -454,13 +454,16 @@ below.
   - **v2 epoll + non-blocking I/O** (commit `92864de`): 7-builtin epoll + nb family. [tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani) — 3 concurrent clients multiplexed on ONE OS thread.
   - **v3 async aliases + state-machine pattern** (commit `f7743a1`): 3 async-flavored builtin aliases (`io_recv_async` / `io_send_async` / `io_accept_async`) + [tcp_echo_state_machine.vani](examples/tcp_echo_state_machine.vani) showing the hand-rolled state-machine pattern (struct + poll fn + driver loop).
   - **Arc 8 v3.1 sugar — FEATURE-COMPLETE 2026-06-08** for typical user code (postfix `?`, multi-task scheduling, ref CancelToken + A4.4 auto-plumbing all shipped same day; full ledger above): the parser-level compiler transform auto-rewrites `async fn` bodies into state-machine struct/poll/constructor triples that users previously wrote by hand. **All phases shipped**: Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow + **4c-broad (full generic async fns)**. Covers linear bodies + non-suspending control flow + suspend-in-branch state-splitting + fall-through merge + nested ifs + ANF lifting + loops + break/continue + **match-with-suspends for every literal + enum pattern shape** (Int / Bool / Str / Float / Variant / VariantWithBinding / Wildcard) + **`try EXPR` keyword for Result propagation** + **non-i64 types across the entire async-fn boundary** (params + locals + returns: bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array `[T; N]`) + **nested async** (`let sub: Task__inner = inner(args); let r = __poll_inner(mut ref sub);` as `await sub`) + **multi-task scheduling** (multiple concurrent sub-tasks in one async fn) + **generic async fns** (`async fn identity<T>(...) -> T`). 28 acceptance examples + generic-async smoke all cross-backend parity-green. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
-  - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS + Windows verification is **deferred** at landing time (no host access) with the hot-spots documented in [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) Phase 5/6. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
+  - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS verification deferred (no host). **Windows fully verified (2026-06-11)**: all 2089 lib tests + all e2e tests pass on Windows 11 GNU toolchain after applying `putchar`→`printf("%c",…)` CRT shim, `ws2_32` MinGW linker flag, `Sleep` IR dedup, 64 MB stack, and CRLF normalisation. IOCP async-TCP tests (`tcp_echo_epoll`, `echo_loop`, `async_showcase`) remain skipped pending overlapped-I/O wiring. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
 
-**Test ledger at 2026-06-09: 2056 lib green** —
+**Test ledger at 2026-06-11: 2089 lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-09 — **L4 (C) closure: lifetime elision**.
+Latest ship 2026-06-11 — **Windows full e2e parity** (all lib +
+e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
+deferred). Previous notable ship 2026-06-09 — **L4 (C) closure:
+lifetime elision**.
 Functions can now return `ref T` / `mut ref T` under the
 single-ref-parameter elision rule (Swift/OCaml-style; no `'a`
 syntax). Zero or multi-ref-param returns reject with clear
@@ -1736,6 +1739,24 @@ time** — listed honestly so users can plan around them:
   prove the divisor non-zero, the elision pass leaves the runtime
   guard in (abort on zero). Compile time catches the *provable*
   cases; runtime catches the rest. Same for shift amount validity.
+- **Integer arithmetic wrapping (runtime).** `i64::MAX + 1`,
+  `i64::MIN - 1`, and `i64::MIN * -1` silently wrap (two's
+  complement) on both backends — no overflow guard is emitted at
+  arithmetic op sites. *Compile-time* constant overflow IS caught
+  (`const N: i64 = 9223372036854775807 + 1` is a type error).
+  For runtime safety, constrain operand ranges with `requires`
+  clauses so the SMT pass can statically prove they can't wrap.
+  Treat all unbounded runtime `i64`/`u64` arithmetic as wrapping
+  until runtime guards land in a future pass.
+
+- **Generic function calling another generic function.** The
+  monomorphizer is single-pass: it only collects specialization
+  requests from non-generic call sites. When a specialized
+  `g__i64` body calls another generic `f<T>`, `f__i64` is never
+  generated and the build fails with a diagnostic. Workaround:
+  ensure every generic function is called directly from a
+  non-generic function (flatten the generic call chain). See
+  `docs/missing_features.md` for the detailed pattern.
 
 The first two items are the most interesting research directions
 for the next year. The rest are likely runtime-aborts-with-clean-

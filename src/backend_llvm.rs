@@ -551,10 +551,14 @@ fn emit_brahmi_print_helper_ll(
     if !active {
         return;
     }
+    // Use printf("%c", b) instead of putchar(b) so all output goes
+    // through the same CRT stream on Windows (avoids JITLink buffer
+    // reordering between putchar and printf).
     let mut prefix_emit = String::new();
     for (i, &b) in prefix_bytes.iter().enumerate() {
         prefix_emit.push_str(&format!(
-            "        \x20 %rpfx{i} = call i32 @putchar(i32 {b})\n",
+            "        \x20 %rpfx{i}fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+             \x20 %rpfx{i} = call i32 (i8*, ...) @printf(i8* %rpfx{i}fmt, i32 {b})\n",
             i = i,
             b = b,
         ));
@@ -579,14 +583,16 @@ fn emit_brahmi_print_helper_ll(
         \x20 %is_neg = icmp eq i8 %c, 45\n\
         \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
          emit_minus:\n\
-        \x20 %r1 = call i32 @putchar(i32 45)\n\
+        \x20 %r1fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+        \x20 %r1 = call i32 (i8*, ...) @printf(i8* %r1fmt, i32 45)\n\
         \x20 br label %loop_end\n\
          emit_digit:\n\
         \x20 %c_i32 = zext i8 %c to i32\n\
         \x20 %d = sub i32 %c_i32, 48\n\
 {prefix_emit}\
         \x20 %b_last = add i32 {base_byte}, %d\n\
-        \x20 %r4 = call i32 @putchar(i32 %b_last)\n\
+        \x20 %r4fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+        \x20 %r4 = call i32 (i8*, ...) @printf(i8* %r4fmt, i32 %b_last)\n\
         \x20 br label %loop_end\n\
          loop_end:\n\
         \x20 %i_next = add i32 %i, 1\n\
@@ -698,8 +704,44 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
 
 
     out.push_str("declare i32 @printf(i8*, ...)\n");
-    out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
-    out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
+    // On Windows, `snprintf` and `dprintf` are not exported from any DLL
+    // (MinGW inlines `snprintf` to `__mingw_snprintf`; `dprintf` is POSIX-only).
+    // Emit IR shims backed by `vsnprintf` / `_write` so ORC JIT can resolve them.
+    #[cfg(target_os = "windows")]
+    {
+        out.push_str("declare i32 @vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @_write(i32, i8*, i32)\n");
+        out.push_str("declare void @llvm.va_start(i8*)\n");
+        out.push_str("declare void @llvm.va_end(i8*)\n");
+        // snprintf shim: collect varargs into a va_list, forward to vsnprintf.
+        out.push_str("define i32 @snprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, ...) {\n");
+        out.push_str("  %_snp_ap = alloca i8*, align 8\n");
+        out.push_str("  %_snp_ap_i8 = bitcast i8** %_snp_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_snp_ap_i8)\n");
+        out.push_str("  %_snp_ap_v = load i8*, i8** %_snp_ap\n");
+        out.push_str("  %_snp_r = call i32 @vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_snp_ap_i8)\n");
+        out.push_str("  ret i32 %_snp_r\n");
+        out.push_str("}\n");
+        // dprintf shim: format via vsnprintf into a stack buffer, write with _write.
+        out.push_str("define i32 @dprintf(i32 %_dpr_fd, i8* %_dpr_fmt, ...) {\n");
+        out.push_str("  %_dpr_buf = alloca [256 x i8], align 1\n");
+        out.push_str("  %_dpr_bufp = getelementptr [256 x i8], [256 x i8]* %_dpr_buf, i64 0, i64 0\n");
+        out.push_str("  %_dpr_ap = alloca i8*, align 8\n");
+        out.push_str("  %_dpr_ap_i8 = bitcast i8** %_dpr_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_dpr_ap_i8)\n");
+        out.push_str("  %_dpr_ap_v = load i8*, i8** %_dpr_ap\n");
+        out.push_str("  %_dpr_n = call i32 @vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_dpr_ap_i8)\n");
+        out.push_str("  %_dpr_r = call i32 @_write(i32 %_dpr_fd, i8* %_dpr_bufp, i32 %_dpr_n)\n");
+        out.push_str("  ret i32 %_dpr_r\n");
+        out.push_str("}\n");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
+        out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
+    }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare i8* @malloc(i64)\n");
@@ -829,6 +871,9 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         out.push_str("declare i32 @WaitOnAddress(i8*, i8*, i64, i32)\n");
         out.push_str("declare void @WakeByAddressSingle(i8*)\n");
         out.push_str("declare void @WakeByAddressAll(i8*)\n");
+        // Sleep is used by both the IOCP async-timer helper and the
+        // sleep_ms builtin; declare it once here to avoid redefinition.
+        out.push_str("declare void @Sleep(i32)\n");
     } else {
         // sched_yield(): POSIX system call that returns the
         // current thread's time slice to the scheduler. Kept
@@ -1047,6 +1092,11 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("@.fmt.llu = private constant [5 x i8] c\"%llu\\00\"\n");
     out.push_str("@.fmt.g = private constant [3 x i8] c\"%g\\00\"\n");
     out.push_str("@.fmt.s = private constant [3 x i8] c\"%s\\00\"\n");
+    // Single-char printf format; used by the print-statement lowering
+    // on Windows where printf and putchar write to separate CRT buffers
+    // (JITLink resolves them independently), causing output reordering.
+    // Using printf for ALL print output keeps everything in one stream.
+    out.push_str("@.fmt.c = private constant [3 x i8] c\"%c\\00\"\n");
     out.push_str("@.fmt.true = private constant [5 x i8] c\"true\\00\"\n");
     out.push_str("@.fmt.false = private constant [6 x i8] c\"false\\00\"\n");
     // Empty string used by `Vec<OwnedStr>__clone` and the
@@ -14919,10 +14969,24 @@ fn emit_print_items(
             TypedPrintItem::Expr(expr) => emit_print_expr_no_newline(expr, ctx, out),
         }
         if i + 1 < items.len() {
-            out.push_str("  call i32 @putchar(i32 32)\n");
+            // Use printf("%c", 32) not putchar(32): on Windows, JITLink
+            // resolves printf and putchar to separate CRT buffer chains,
+            // causing putchar output to appear after all printf output.
+            // Routing through printf keeps all print output in one stream.
+            let sp = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n",
+                sp
+            ));
+            out.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i32 32)\n", sp));
         }
     }
-    out.push_str("  call i32 @putchar(i32 10)\n");
+    let nl = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n",
+        nl
+    ));
+    out.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i32 10)\n", nl));
 }
 
 fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) {
@@ -24053,20 +24117,16 @@ fn emit_intent_epoll_helpers_llvm_darwin(out: &mut String) {
 /// reader for this key" event. For production-grade Windows
 /// I/O a Win32-native `iocp_*` family is the long-term path.
 fn emit_intent_epoll_helpers_llvm_windows(out: &mut String) {
+    // @CloseHandle, @CreateThread, @malloc, @free are already declared
+    // in the Win32 threading preamble. @WSAGetLastError, @recv, @accept
+    // are already declared in the TCP helper. Omit them to avoid LLVM
+    // "invalid redefinition" errors.
     out.push_str(
         "declare i8* @CreateIoCompletionPort(i8*, i8*, i64, i32)\n\
          declare i32 @GetQueuedCompletionStatus(i8*, i32*, i64*, i8**, i32)\n\
          declare i32 @PostQueuedCompletionStatus(i8*, i32, i64, i8*)\n\
-         declare i32 @CloseHandle(i8*)\n\
          declare i32 @GetLastError()\n\
-         declare i32 @WSAGetLastError()\n\
          declare i32 @ioctlsocket(i64, i32, i32*)\n\
-         declare i8* @CreateThread(i8*, i64, i32 (i8*)*, i8*, i32, i32*)\n\
-         declare void @Sleep(i32)\n\
-         declare i8* @malloc(i64)\n\
-         declare void @free(i8*)\n\
-         declare i64 @recv(i64, i8*, i32, i32)\n\
-         declare i64 @accept(i64, i8*, i32*)\n\
          define i64 @intent_epoll_new() {\n\
          entry:\n\
          \x20 %h = call i8* @CreateIoCompletionPort(i8* inttoptr (i64 -1 to i8*), i8* null, i64 0, i32 0)\n\
@@ -24231,8 +24291,7 @@ fn emit_intent_sleep_ms_helper_llvm(out: &mut String) {
     // for Windows — no host access in current dev environment.
     if host_is_windows() {
         out.push_str(
-            "declare void @Sleep(i32)\n\
-             define i64 @intent_sleep_ms(i64 %ms) {\n\
+            "define i64 @intent_sleep_ms(i64 %ms) {\n\
              entry:\n\
              \x20 %neg = icmp sle i64 %ms, 0\n\
              \x20 br i1 %neg, label %ret_zero, label %do_sleep\n\
@@ -42243,8 +42302,8 @@ mod tests {
         // `safe_div` requires b > 0. Pass b through `id()` which has
         // no ensures, so the verifier can't prove the precondition
         // and the runtime guard must catch it. Process should be
-        // killed by SIGABRT (exit code 128+6=134) — `run_lli`
-        // returns -1 when status.code() is None.
+        // killed by SIGABRT (exit code 128+6=134 on Linux, or a
+        // Windows exception code like 0xC0000409 on Windows).
         let source = r#"
             fn safe_div(a: i64, b: i64) -> i64
             requires b > 0;
@@ -42258,7 +42317,7 @@ mod tests {
         "#;
         let exit = run_lli_full(source);
         assert!(
-            exit.is_none() || exit == Some(134),
+            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
             "expected abort signal, got code {:?}",
             exit
         );
@@ -42279,7 +42338,7 @@ mod tests {
         "#;
         let exit = run_lli_full(source);
         assert!(
-            exit.is_none() || exit == Some(134),
+            exit.is_none() || exit == Some(134) || exit.map_or(false, |c| c < 0),
             "expected abort signal on div by zero, got {:?}",
             exit
         );

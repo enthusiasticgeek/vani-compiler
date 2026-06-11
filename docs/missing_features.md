@@ -84,6 +84,45 @@ the `N` in a signature must be a literal at the call site.
 For genuinely-static N, write per-shape fns and call the
 right one.
 
+### Generic functions calling other generic functions (nested monomorphization)
+
+**vāṇī today:** the monomorphizer is **single-pass** — it walks only the
+non-generic call sites in the original source, collects the
+`(fn, concrete-type)` pairs, and generates specializations.  If a
+*specialized* body itself calls another generic function, that inner
+generic call is **not collected**: the inner function is never
+specialized, its generic template is then removed from the program,
+and the call becomes a dangling reference that produces a compile error.
+
+```rust
+// Works:
+fn wrap<T>(x: T) -> T { return x; }
+fn main() -> i64 { return wrap(42); }  // direct generic call → OK
+
+// Fails (single-pass gap):
+fn wrap<T>(x: T) -> T { return x; }
+fn double_wrap<T>(x: T) -> T { return wrap(x); }  // generic calling generic
+fn main() -> i64 { return double_wrap(42); }
+// Error: wrap is never called from a non-generic site, so wrap__i64
+// is never generated.  double_wrap__i64's body calls the removed template.
+```
+
+**Workaround:** flatten the call chain so every generic function is
+called **directly from a non-generic function**:
+
+```rust
+fn wrap<T>(x: T) -> T { return x; }
+fn double_wrap(x: i64) -> i64 { return wrap(x); }  // non-generic wrapper
+fn main() -> i64 { return double_wrap(42); }
+```
+
+Or inline the inner generic call at each specialized call site.
+
+**When it will be fixed:** when the monomorphizer becomes multi-pass
+(iterates over newly-generated specializations until the `needed` set
+is stable).  Tracked via the `nested_generic_call_pins_current_behavior`
+regression test in `src/lib.rs`.
+
 ### Type-state via phantom types
 
 **Not in vāṇी.** No `PhantomData<T>`; structs can only carry
@@ -374,7 +413,10 @@ that returns `Result<T, E>` and `try` / `?` propagates.
 ### Bigint / arbitrary-precision
 
 **Not in vāṇी.** Integers are `i64` / `u64` / smaller.
-Overflow guards fire `abort()` when SMT can't prove safety.
+Constant-time overflow is caught at compile time; runtime
+arithmetic silently wraps (two's complement) — no guards
+are emitted at arithmetic op sites. See the **Integer
+overflow runtime guards** row in Mixed-feature gaps below.
 
 **Workaround:** for cryptographic / arbitrary-precision
 work, use C bigint via FFI (`extern "C"` declarations to
@@ -447,6 +489,7 @@ C and LLVM.
 | Feature | Status | Workaround |
 |---|---|---|
 | Generic trait bounds | indirect | iface dispatch as `dyn Iface` param |
+| Generic fn calling generic fn (nested mono) | single-pass gap | flatten: make the inner generic call from a non-generic wrapper |
 | Higher-rank polymorphism | absent | not needed in practice |
 | GATs | absent | not needed in practice |
 | Const generics | partial | `Vec<T>` for dynamic; per-shape fns for static |
@@ -471,6 +514,7 @@ C and LLVM.
 | `if let` / `while let` | absent | `match` with named + wildcard arm |
 | Labeled break/continue | absent | extract inner loop into helper |
 | Bigint | absent | C FFI (GMP) |
+| Runtime integer overflow guards | absent (wraps) | `requires` on operand bounds; const-time overflow IS caught |
 | Decimal / fixed-point | absent | scaled integers |
 | SIMD intrinsics | absent | parallel for + auto-vectorize / FFI |
 | `pub use foo::bar as baz` | partial | wrapper fn |
@@ -510,7 +554,7 @@ checking these as the compiler evolves.
 | Anonymous fn called inline from a Vec slot (`fs[0](10)`) | Rejected — "only named functions can be called". | Assign to a `let` first, then call. |
 | Generic fn `<T>` inferred from complex argument types (e.g. `Vec<T>` with Vec-typed arg) | Rejected — v1 inference supports literal / Var / (v3.1 only) Ref(Var) at the T-position. | Pre-extract the arg into a Var, or restructure the fn to not be generic over composite types. |
 | Turbofish syntax (`f::<i64>(arg)`) | Not supported in v1. | Rely on inference (which is limited; see above). |
-| OwnedStr payload bound in match arm returned as OwnedStr | Match-arm binding exposes the payload as `Str` (read-only view), not the owned form. Returning the binding produces a Str-typed arm body. | Wrap the bound `s` as `s + ""` to clone into OwnedStr. |
+| OwnedStr payload bound in match arm returned as OwnedStr | Match-arm binding exposes the payload as `Str` (read-only view), not the owned form. Returning the binding produces a Str-typed arm body. | Wrap the bound arm as `s + ""` to clone into OwnedStr, AND use `"" + ""` for all other literal-string arms so every arm produces OwnedStr (arm types must agree). |
 | **Integer overflow runtime guards** | **NOT emitted in v1** despite the README's aspirational claim. `i64::MAX + 1` silently wraps to `i64::MIN` on both backends. This is a real safety gap — the elision pass aspires to keep guards by default and elide via SMT discharge, but the guards aren't actually generated at the arithmetic op sites today. | Reach for `requires` clauses to constrain operand ranges; the SMT pass at least flags overflows when both bounds are known. Treat unbounded i64 arithmetic as wrapping for now. |
 | Two refs to the same Vec at once (read + write) | Aliasing rule: many shared XOR one mut. | End one borrow before taking the other; or split the operation into two passes. |
 | Generic fn with multiple lifetime-distinct ref params returning a ref | Path-D territory; v1 only does single-ref-param elision. | Split into two narrower fns, each with one ref param. |

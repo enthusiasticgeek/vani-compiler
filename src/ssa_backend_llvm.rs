@@ -104,10 +104,15 @@ fn emit_brahmi_print_helper_ssa_ll(
     if !active {
         return;
     }
+    // Emit prefix bytes as printf("%c", b) calls to keep all output in
+    // the same CRT stream as printf on Windows (avoids JITLink buffer
+    // reordering between putchar and printf that caused Brahmi numerals
+    // to appear after all label text).
     let mut prefix_emit = String::new();
     for (i, &b) in prefix_bytes.iter().enumerate() {
         prefix_emit.push_str(&format!(
-            "        \x20 %rpfx{i} = call i32 @putchar(i32 {b})\n",
+            "        \x20 %rpfx{i}fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+             \x20 %rpfx{i} = call i32 (i8*, ...) @printf(i8* %rpfx{i}fmt, i32 {b})\n",
             i = i,
             b = b,
         ));
@@ -133,14 +138,16 @@ fn emit_brahmi_print_helper_ssa_ll(
         \x20 %is_neg = icmp eq i8 %c, 45\n\
         \x20 br i1 %is_neg, label %emit_minus, label %emit_digit\n\
          emit_minus:\n\
-        \x20 %r1 = call i32 @putchar(i32 45)\n\
+        \x20 %r1fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+        \x20 %r1 = call i32 (i8*, ...) @printf(i8* %r1fmt, i32 45)\n\
         \x20 br label %loop_end\n\
          emit_digit:\n\
         \x20 %c_i32 = zext i8 %c to i32\n\
         \x20 %d = sub i32 %c_i32, 48\n\
 {prefix_emit}\
         \x20 %b_last = add i32 {base_byte}, %d\n\
-        \x20 %r4 = call i32 @putchar(i32 %b_last)\n\
+        \x20 %r4fmt = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n\
+        \x20 %r4 = call i32 (i8*, ...) @printf(i8* %r4fmt, i32 %b_last)\n\
         \x20 br label %loop_end\n\
          loop_end:\n\
         \x20 %i_next = add i32 %i, 1\n\
@@ -245,8 +252,39 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // ones that do (printing, free, etc.) need them resolved
     // at link time via `lli` or `llc + cc`.
     out.push_str("declare i32 @printf(i8*, ...)\n");
-    out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
-    out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
+    #[cfg(target_os = "windows")]
+    {
+        out.push_str("declare i32 @vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @_write(i32, i8*, i32)\n");
+        out.push_str("declare void @llvm.va_start(i8*)\n");
+        out.push_str("declare void @llvm.va_end(i8*)\n");
+        out.push_str("define i32 @snprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, ...) {\n");
+        out.push_str("  %_snp_ap = alloca i8*, align 8\n");
+        out.push_str("  %_snp_ap_i8 = bitcast i8** %_snp_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_snp_ap_i8)\n");
+        out.push_str("  %_snp_ap_v = load i8*, i8** %_snp_ap\n");
+        out.push_str("  %_snp_r = call i32 @vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_snp_ap_i8)\n");
+        out.push_str("  ret i32 %_snp_r\n");
+        out.push_str("}\n");
+        out.push_str("define i32 @dprintf(i32 %_dpr_fd, i8* %_dpr_fmt, ...) {\n");
+        out.push_str("  %_dpr_buf = alloca [256 x i8], align 1\n");
+        out.push_str("  %_dpr_bufp = getelementptr [256 x i8], [256 x i8]* %_dpr_buf, i64 0, i64 0\n");
+        out.push_str("  %_dpr_ap = alloca i8*, align 8\n");
+        out.push_str("  %_dpr_ap_i8 = bitcast i8** %_dpr_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_dpr_ap_i8)\n");
+        out.push_str("  %_dpr_ap_v = load i8*, i8** %_dpr_ap\n");
+        out.push_str("  %_dpr_n = call i32 @vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_dpr_ap_i8)\n");
+        out.push_str("  %_dpr_r = call i32 @_write(i32 %_dpr_fd, i8* %_dpr_bufp, i32 %_dpr_n)\n");
+        out.push_str("  ret i32 %_dpr_r\n");
+        out.push_str("}\n");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
+        out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
+    }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare i8* @malloc(i64)\n");
@@ -274,6 +312,10 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // through `intent_str_concat` with a zero-length right
     // operand — gives a strdup-like deep copy.
     out.push_str("@.empty_str_clone = private constant [1 x i8] c\"\\00\"\n");
+    // Single-char printf format; used by intent_print_putc to keep all
+    // print output in the same CRT stream as printf (avoids Windows
+    // JITLink buffer-reordering between printf and putchar).
+    out.push_str("@.fmt.c = private constant [3 x i8] c\"%c\\00\"\n");
 
     // Phase 1.1 + 5b + 6: per-Brahmi-script numeral print
     // helpers. Each `emit_brahmi_print_helper_ssa_ll` is a no-op
@@ -314,6 +356,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         out.push_str("declare i8* @CreateThread(i8*, i64, i8* (i8*)*, i8*, i32, i32*)\n");
         out.push_str("declare i32 @WaitForSingleObject(i8*, i32)\n");
         out.push_str("declare i32 @CloseHandle(i8*)\n");
+        out.push_str("declare void @Sleep(i32)\n");
     } else {
         out.push_str("declare i32 @pthread_create(i64*, i8*, i8* (i8*)*, i8*)\n");
         out.push_str("declare i32 @pthread_join(i64, i8**)\n");
@@ -3187,19 +3230,24 @@ fn emit_instr(
                 let arg = args.first().ok_or_else(|| EmitError {
                     message: "intent_print_putc expects one argument".to_string(),
                 })?;
-                // The arg is an i64 const at the SSA layer
-                // (32 for space, 10 for newline); putchar
-                // takes i32. Materialize the truncation
-                // inline.
+                // Use printf("%c", char) instead of putchar(char): on Windows,
+                // JITLink resolves printf and putchar to separate CRT buffer
+                // chains, causing putchar output to appear after all printf
+                // output. Routing through printf keeps everything in one stream.
                 let c_str = operand_str(arg);
                 let conv = format!("%v_{}.putc", instr.result.0);
+                let fmtp = format!("%v_{}.putcfmt", instr.result.0);
                 out.push_str(&format!(
                     "  {} = trunc i64 {} to i32\n",
                     conv, c_str
                 ));
                 out.push_str(&format!(
-                    "  call i32 @putchar(i32 {})\n",
-                    conv
+                    "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n",
+                    fmtp
+                ));
+                out.push_str(&format!(
+                    "  call i32 (i8*, ...) @printf(i8* {}, i32 {})\n",
+                    fmtp, conv
                 ));
                 return Ok(());
             }
