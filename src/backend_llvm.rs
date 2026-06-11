@@ -39719,6 +39719,15 @@ pub(crate) fn vec_element_byte_size(element: &Type) -> u64 {
         // Vtables Phase 4b: `dyn Iface` is a fat pointer
         // (vtable pointer + data pointer) — 16 bytes.
         Type::Object(_) => 16,
+        // Box<dyn Iface> stores the fat-ptr struct VALUE inline
+        // (16 bytes). Box<T> for any other T stores a T* pointer
+        // (8 bytes). Without this case the _ arm's bits() fallback
+        // returns 8 for both, under-allocating Vec<Box<dyn Iface>>
+        // buffers and corrupting heap on every push.
+        Type::Box(inner) => match &**inner {
+            Type::Object(_) => 16,
+            _ => 8,
+        },
         _ => (element.bits().unwrap_or(64) / 8) as u64,
     }
 }

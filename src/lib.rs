@@ -11297,6 +11297,44 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_of_box_dyn_iface_llvm_uses_correct_element_size() {
+        // Regression: vec_element_byte_size returned 8 for ALL Box<T>,
+        // but Box<dyn Iface> stores a 16-byte fat-pointer struct inline.
+        // This caused Vec<Box<dyn Iface>> to allocate 8-byte slots and
+        // corrupt heap on every push. Fixed 2026-06-10 by adding a
+        // Box(Object) => 16 arm to vec_element_byte_size.
+        let source = r#"
+            struct Circle { r: i64 }
+            interface Renderer { fn render(self: Circle) -> i64; }
+            implement Renderer for Circle {
+              fn render(self: Circle) -> i64 { return self.r * 2; }
+            }
+            fn main() -> i64 {
+              let xs: Vec<Box<dyn Renderer>> = vec(box(Circle { r: 1 } as dyn Renderer));
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Vec<Box<dyn Renderer>> compiles");
+        // Buffer must allocate 16 bytes per slot (not 8)
+        assert!(
+            ll.contains("mul i64 %new_cap_g, 16") || ll.contains("mul i64 %new_cap_gm, 16"),
+            "Vec<Box<dyn Iface>> push must allocate 16 bytes/slot (fat-ptr size):\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        // The __free must loop and free each element's .data field
+        assert!(
+            ll.contains("fr_check:"),
+            "Vec<Box<dyn Iface>>__free must contain per-element drop loop:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        assert!(
+            ll.contains("extractvalue %intent_dyn_Renderer"),
+            "Vec<Box<dyn Iface>>__free must extractvalue from fat-ptr element:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
     fn closure_inside_iface_impl_method_lifts_correctly() {
         // Regression: an inline `fn(x: i64) -> i64 { ... }`
         // closure inside an `implement Iface for T { fn m(...) }`
