@@ -1,3 +1,5 @@
+- [Next session handoff](project_vani_next_session.md) — open work + edge test cases to add; pick up here after 2026-06-11 pause (full detail in STATUS.md NEXT SESSION block)
+- [vāṇī Windows e2e parity fixes](project_vani_windows_fixes.md) — all Windows patches committed (fd53c9e/6255af8): putchar→printf shim, ws2_32, Sleep dedup, 64MB stack, CRLF norm; IOCP async-TCP still deferred
 - [vāṇī backend state](project_vani_backend.md) — pipeline, backends, verifier, language surface, current closures landed (refreshed #1-#291 + Arcs 1-9 thru 2026-06-04: closure-as-value, async fn / await / Future / Poll / CancelToken at parser+prelude layer, full SysV float-class FFI)
 - [vāṇī STATUS.md update protocol](project_vani_status_file.md) — single-page feature set + TODOs + known issues file; update on every commit that changes any of those three
 - [vāṇī design philosophy](feedback_vani_design_philosophy.md) — composition > inheritance, vtables = original intent only, build data structures from Vec, keep language minimal

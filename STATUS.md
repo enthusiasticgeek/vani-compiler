@@ -10,6 +10,82 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-06-11
+
+**State**: All Tier 1 + Tier 2 items shipped. Windows full e2e parity achieved (commit `6255af8`).
+2089 lib tests + all e2e tests pass on Windows 11 GNU toolchain.
+
+### Pick up in this order
+
+#### 1. Add edge test cases (low effort, high value — do first)
+
+These are concrete gaps in test coverage identified 2026-06-11.
+Each should be a `#[test]` in `src/lib.rs` unless noted.
+
+**Windows CRT / JIT regression tests** — prevent regressions in the fixes just landed:
+- `windows_brahmi_numeral_output_no_crt_reorder` — run `../sanskrit/sov_demo.vani` via LLVM backend on Windows; assert label text and Brahmi numerals interleave correctly (not all labels then all numerals). Currently covered by the parity test; add a standalone assertion for the specific ordering.
+- `windows_snprintf_dprintf_shim_roundtrip` — emit a program that calls `snprintf`/`dprintf` via FFI and check output matches expected; ensures shim stays wired if symbol resolution changes.
+- `windows_deep_recursion_no_stack_overflow` — compile + run a vāṇी program with ≥ 800 nested recursive calls; should complete without a stack overflow on Windows (64 MB thread). Use the `fib` or `ackermann` shape.
+- `windows_tcp_echo_blocking_three_clients` — `tcp_echo.vani` runs to completion with 3 sequential clients on Windows via both backends (ws2_32 fix). Currently only covered by parity test; add an explicit Windows-only assertion.
+
+**Integer overflow edge cases** (documents wrapping, prevents accidental "fixes" that break the known behavior):
+- `i64_max_plus_one_wraps_to_min` — `9223372036854775807 + 1` at runtime → `-9223372036854775808`; both backends must agree.
+- `i64_min_minus_one_wraps_to_max` — `-9223372036854775808 - 1` → `9223372036854775807`.
+- `i64_min_times_neg_one_wraps_to_min` — `-9223372036854775808 * -1` → `-9223372036854775808` (wraps, not positive).
+- `u64_max_plus_one_wraps_to_zero` — `18446744073709551615u64 + 1` → `0`.
+- `const_overflow_is_a_type_error` — `const N: i64 = 9223372036854775807 + 1;` must be rejected at compile time (contrast with the runtime wrapping tests above).
+
+**Generic monomorphization edge cases:**
+- `nested_generic_three_level_chain_fails` — `h<T>` calls `g<T>` calls `f<T>`; only `h<i64>` called from non-generic; expect compile error mentioning `f` or `g` never specialized. (2-level already tested; add 3-level.)
+- `nested_generic_nongeneric_bridge_works` — `h<T>` calls non-generic `bridge_i64()` which calls `f<i64>`; should compile and run, because `f<i64>` IS called from a non-generic site.
+- `nested_generic_same_type_two_call_sites` — `f<i64>` called from both `main()` (non-generic) and `g<T>` (generic); should compile since the non-generic call site provides the specialization.
+
+**OwnedStr / match arm edge cases:**
+- `ownedstr_all_arms_must_produce_same_type` — variant with `String` payload: the "found" arm does `s + ""` (→ OwnedStr), the "not found" arm must also produce OwnedStr (`"" + ""` not `""`); mixing types across arms must be a type error.
+- `ownedstr_nested_match_concat_workaround` — nested match where inner match produces OwnedStr; outer arms must all agree on OwnedStr, not mix Str literals.
+
+**Ref / lifetime edge cases:**
+- `ref_return_three_ref_params_rejects` — fn with three ref params trying to return a ref; the single-ref-param elision rule must reject (extend existing 2-param test).
+- `vec_ref_push_after_source_borrow_ends` — borrow of `x` as `ref T`, push into vec, borrow ends; then re-borrow `x` as `mut ref T` and mutate; should compile since first borrow is over.
+- `struct_field_ref_lifetime_survives_method_call` — struct holding `ref T` field; call a method that reads the field; struct must stay valid for the ref's scope.
+
+**Async state machine (Windows mismatch — investigate before skipping forever):**
+- `echo_loop_windows_byte_count_matches_c` — currently skipped on Windows with `#[cfg(not(target_os = "windows"))]`. Add a `#[cfg(target_os = "windows")]` variant that at minimum documents the mismatch: run both backends, print expected vs actual, then `#[ignore]` the assertion until IOCP is fixed. This prevents the mismatch from being silently forgotten.
+
+#### 2. User-queued features (pick any one per session)
+
+| Feature | Effort | Entry point |
+|---|---|---|
+| **Error-message elaboration** | 8–15h | `src/checker.rs` + `src/diagnostic.rs` — add elaboration vec to DiagnosticError; seed 20–30 most common families |
+| **Big-O annotation** (`--big-o` flag) | 12–20h | New `src/big_o.rs` pass; hook into `vanic check` output; v1 scope: loop-nesting depth + known builtin asymptotics |
+| **Tutorials rewrite for non-CS readers** | 20–40h | `tutorials/src/beginner/` + `tutorials/src/intermediate/` — add analogy chapters before formal definitions |
+
+#### 3. Windows IOCP (larger arc — D.1 in TODO.md)
+
+Currently skipped: `tcp_echo_epoll.vani`, `echo_loop.vani`, `echo_loop_break.vani`,
+`async_showcase.vani`, `echo_match_stress.vani`.
+
+Root cause: `epoll_wait_one` IOCP shim uses blocking `GetQueuedCompletionStatus` but the
+sockets are opened in blocking mode — IOCP requires sockets to be opened with
+`WSA_FLAG_OVERLAPPED` and all I/O submitted via `WSASend`/`WSARecv` with OVERLAPPED structs.
+Entry: `src/backend_llvm.rs` `emit_intent_epoll_helpers_llvm_windows` +
+`examples/tcp_echo_epoll.vani`.
+
+#### 4. Tier 3 / deferred (touch only if asked)
+
+- Grammar consultant pass — native-speaker review of 62 dialects
+- macOS empirical verification — needs Darwin host
+- Arc 9 Kosh package manager — pending registry choice
+- CI / GH-Actions (Tier 4) — last
+
+### Key numbers
+- **Lib tests**: 2089 passing (Windows + Linux)
+- **E2e tests**: all pass (5 async-TCP tests skipped on Windows)
+- **Dialects**: 62 across 26 scripts
+- **Last commit**: `6255af8` — Windows full e2e parity
+
+---
+
 ## 🟢 Session 2026-06-08 (cont.) — Tier 2 #6: Mandarin Chinese (Phase 10.2)
 
 Mandarin Chinese (中文) ships as the 62nd dialect, closing the
