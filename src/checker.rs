@@ -14919,10 +14919,15 @@ fn check_ref_mut(
                 return CheckedExpr::fallback_integer(span);
             };
             let Some(struct_info) = env.lookup_struct(struct_name) else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!("unknown struct type '{}'", struct_name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!("unknown struct type '{}'", struct_name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_struct_type(struct_name),
+                    ),
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Some((field_index, (_, field_ty))) = struct_info
@@ -14931,13 +14936,18 @@ fn check_ref_mut(
                 .enumerate()
                 .find(|(_, (n, _))| n == field)
             else {
-                diagnostics.push(Diagnostic::new(
-                    inner.span,
-                    format!(
-                        "struct '{}' has no field named '{}'",
-                        struct_name, field
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "struct '{}' has no field named '{}'",
+                            struct_name, field
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::field_not_found(field, struct_name),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             if info.moved.is_some() {
@@ -14995,10 +15005,15 @@ fn check_ref_mut(
         return CheckedExpr::fallback_integer(span);
     };
     if info.moved.is_some() {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            format!("cannot mutably borrow '{}' after it was moved", name),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!("cannot mutably borrow '{}' after it was moved", name),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::move_out_of_borrowed(name),
+            ),
+        );
     }
     if info.ty.is_ref() {
         diagnostics.push(
@@ -15055,10 +15070,15 @@ fn check_ref(
                 return CheckedExpr::fallback_integer(span);
             };
             let Some(struct_info) = env.lookup_struct(struct_name) else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!("unknown struct type '{}'", struct_name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!("unknown struct type '{}'", struct_name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_struct_type(struct_name),
+                    ),
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Some((field_index, (_, field_ty))) = struct_info
@@ -15067,13 +15087,18 @@ fn check_ref(
                 .enumerate()
                 .find(|(_, (n, _))| n == field)
             else {
-                diagnostics.push(Diagnostic::new(
-                    inner.span,
-                    format!(
-                        "struct '{}' has no field named '{}'",
-                        struct_name, field
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "struct '{}' has no field named '{}'",
+                            struct_name, field
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::field_not_found(field, struct_name),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             if info.moved.is_some() {
@@ -15121,10 +15146,15 @@ fn check_ref(
         return CheckedExpr::fallback_integer(span);
     };
     if info.moved.is_some() {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            format!("cannot borrow '{}' after it was moved", name),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                format!("cannot borrow '{}' after it was moved", name),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::move_after_use(name),
+            ),
+        );
     }
     if info.ty.is_ref() {
         diagnostics.push(Diagnostic::new(
