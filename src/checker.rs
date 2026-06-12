@@ -16831,6 +16831,16 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
+        // T2.2 — `volatile_read(ptr: ref i64) -> i64` and
+        // `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
+        // Ref-based volatile access for embedded MMIO registers.
+        // Gated to INTENT_TARGET_EMBEDDED=1; rejected on hosted
+        // with a clear diagnostic pointing to Atomic<T>.
+        "volatile_read" | "volatile_write" => {
+            return check_volatile_rw_builtin(
+                name, args, env, signatures, span, diagnostics,
+            );
+        }
         // Arc 8 step 8e — `sleep_ms(ms: i64) -> i64`. Blocking
         // millisecond sleep, primary building block for the
         // async runtime's timer primitives until the real
@@ -24603,6 +24613,111 @@ fn check_mmio_builtin(
             name: "mmio_write_u32".to_string(),
             name_span: span,
             args: vec![addr.expr, v.expr],
+        },
+        Type::I64,
+        None,
+        span,
+    )
+}
+
+/// T2.2 — `volatile_read(ptr: ref i64) -> i64` and
+/// `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
+///
+/// Ref-based volatile MMIO access. The caller passes a reference
+/// to a stack-allocated variable whose address is the register
+/// address (for embedded, typically a fixed linker symbol or a
+/// `let mmio: i64 = 0x4000_0000;`). Using `ref` keeps ownership
+/// clear: the pointer is borrowed for the duration of the call;
+/// the caller retains ownership.
+///
+/// **Why not a C-style `volatile` storage qualifier?**
+/// A type-level qualifier would infect every type that mentions
+/// the register — `Vec<volatile i64>` would be meaningless, and
+/// the qualifier would silently disappear in generic parameters.
+/// Keeping volatility at the *access* level (these two builtins)
+/// instead of the *storage* level keeps the type system clean.
+/// The `MmioReg<T>` wrapper pattern in docs/embedded.md is the
+/// recommended ergonomic layer on top.
+///
+/// Both builtins are gated by `INTENT_TARGET_EMBEDDED=1`;
+/// on hosted builds the diagnostic steers the user toward
+/// `Atomic<T>` instead.
+fn check_volatile_rw_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if std::env::var("INTENT_TARGET_EMBEDDED").ok().as_deref() != Some("1") {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "`{}` is only available on embedded build targets \
+                 (set INTENT_TARGET_EMBEDDED=1). \
+                 For thread-safe shared state on hosted targets, \
+                 use Atomic<T> instead.",
+                name
+            ),
+        ));
+        return CheckedExpr::fallback(Type::I64, span);
+    }
+    let want_args = if name == "volatile_read" { 1 } else { 2 };
+    if args.len() != want_args {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "{}() expects {} argument(s), got {}",
+                name, want_args, args.len()
+            ),
+        ));
+        return CheckedExpr::fallback(Type::I64, span);
+    }
+    let ptr_raw = check_expr(&args[0], env, signatures, diagnostics);
+    // Expect ref i64 (read) or mut ref i64 (write).
+    let expected_ptr_ty = if name == "volatile_read" {
+        Type::Ref(Box::new(Type::I64))
+    } else {
+        Type::RefMut(Box::new(Type::I64))
+    };
+    let ptr = coerce_checked(
+        ptr_raw,
+        &expected_ptr_ty,
+        args[0].span,
+        if name == "volatile_read" {
+            "volatile_read ptr (ref i64)"
+        } else {
+            "volatile_write ptr (mut ref i64)"
+        },
+        diagnostics,
+    );
+    if name == "volatile_read" {
+        return CheckedExpr::new(
+            TypedExprKind::Call {
+                name: "volatile_read".to_string(),
+                name_span: span,
+                args: vec![ptr.expr],
+            },
+            Type::I64,
+            None,
+            span,
+        );
+    }
+    // volatile_write: check second arg (the value to store).
+    let val_raw = check_expr(&args[1], env, signatures, diagnostics);
+    let val = coerce_checked(
+        val_raw,
+        &Type::I64,
+        args[1].span,
+        "volatile_write value (i64)",
+        diagnostics,
+    );
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "volatile_write".to_string(),
+            name_span: span,
+            args: vec![ptr.expr, val.expr],
         },
         Type::I64,
         None,

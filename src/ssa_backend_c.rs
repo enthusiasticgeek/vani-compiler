@@ -2319,6 +2319,39 @@ fn emit_instr(
                 .unwrap();
                 return Ok(());
             }
+            // T2.2 — volatile_read / volatile_write (ref-based).
+            // `ref i64` operand is `const int64_t*`; cast to
+            // `volatile int64_t*` for the load or store.
+            if name == "volatile_read" {
+                let ptr = args.first().ok_or_else(|| EmitError {
+                    message: "volatile_read expects 1 arg".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = (*(volatile int64_t*)({}));",
+                    instr.result.0,
+                    c_operand(ptr)
+                )
+                .unwrap();
+                return Ok(());
+            }
+            if name == "volatile_write" {
+                let ptr = args.first().ok_or_else(|| EmitError {
+                    message: "volatile_write expects 2 args".to_string(),
+                })?;
+                let val = args.get(1).ok_or_else(|| EmitError {
+                    message: "volatile_write expects 2 args".to_string(),
+                })?;
+                writeln!(
+                    out,
+                    "  v_{} = ((*(volatile int64_t*)({})) = ({}), (int64_t)0);",
+                    instr.result.0,
+                    c_operand(ptr),
+                    c_operand(val)
+                )
+                .unwrap();
+                return Ok(());
+            }
             // Closure #269: extern "C" fns call with the bare
             // C-ABI name (no `fn_` prefix).
             let is_extern = crate::backend_c::C_EXTERN_FN_REGISTRY

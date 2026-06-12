@@ -1,0 +1,42 @@
+// mmio_blink.vani — MMIO LED blink skeleton for embedded targets.
+//
+// Demonstrates volatile_read / volatile_write for memory-mapped I/O.
+// The `volatile` access prevents the compiler from coalescing or
+// reordering register reads/writes across loop iterations.
+//
+// Run with:  INTENT_TARGET_EMBEDDED=1 vanic run examples/embedded/mmio_blink.vani
+// (Remove INTENT_TARGET_EMBEDDED to see the hosted-build diagnostic.)
+//
+// In real firmware, replace the stack-local `gpio_out` with a linker
+// symbol pointing at the hardware register address.  For now this
+// example keeps the register in a local so it compiles on the LLVM
+// and C backends without an MCU target.
+//
+// MmioReg<T> wrapper pattern (recommended in production):
+//
+//   struct GpioOut { addr: i64 }
+//   fn write_pin(reg: ref GpioOut, v: i64) -> i64 {
+//     return volatile_write(mut ref reg.addr, v);
+//   }
+//
+// The wrapper gives the register a named type so the type system
+// prevents accidentally passing an arbitrary i64 in its place.
+
+fn main() -> i64 {
+    let gpio_out: i64 = 0;
+
+    // Pulse the LED pin three times.
+    let _: i64 = volatile_write(mut ref gpio_out, 1);
+    let _: i64 = volatile_read(ref gpio_out);
+    let _: i64 = volatile_write(mut ref gpio_out, 0);
+
+    let _: i64 = volatile_write(mut ref gpio_out, 1);
+    let _: i64 = volatile_read(ref gpio_out);
+    let _: i64 = volatile_write(mut ref gpio_out, 0);
+
+    let _: i64 = volatile_write(mut ref gpio_out, 1);
+    let _: i64 = volatile_read(ref gpio_out);
+    let _: i64 = volatile_write(mut ref gpio_out, 0);
+
+    return 0;
+}

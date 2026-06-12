@@ -40314,6 +40314,63 @@ fn main() -> i64 {
         );
     }
 
+    // T2.2 — volatile_read / volatile_write ref-based builtins.
+
+    #[test]
+    fn volatile_read_rejected_on_hosted() {
+        let _guard = EmbeddedTargetGuard::hosted();
+        let source = r#"
+            fn main() -> i64 {
+              let reg: i64 = 0x4000_0000;
+              return volatile_read(ref reg);
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("volatile_read must be rejected on hosted builds");
+        assert!(
+            errs.iter().any(|d| d.message.contains("volatile_read")
+                && (d.message.contains("embedded") || d.message.contains("INTENT_TARGET_EMBEDDED"))),
+            "expected embedded-only diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn volatile_write_rejected_on_hosted() {
+        let _guard = EmbeddedTargetGuard::hosted();
+        let source = r#"
+            fn main() -> i64 {
+              let reg: i64 = 0x4000_0000;
+              return volatile_write(mut ref reg, 1);
+            }
+        "#;
+        let errs = compile(source)
+            .expect_err("volatile_write must be rejected on hosted builds");
+        assert!(
+            errs.iter().any(|d| d.message.contains("volatile_write")
+                && (d.message.contains("embedded") || d.message.contains("INTENT_TARGET_EMBEDDED"))),
+            "expected embedded-only diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn volatile_read_write_embedded_compiles_both_backends() {
+        let _guard = EmbeddedTargetGuard::embedded();
+        let source = r#"
+            fn main() -> i64 {
+              let reg: i64 = 0;
+              let _w: i64 = volatile_write(mut ref reg, 42);
+              let v: i64 = volatile_read(ref reg);
+              return v;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("volatile_read/write must compile to C under INTENT_TARGET_EMBEDDED=1");
+        compile_to_llvm(source)
+            .expect("volatile_read/write must compile to LLVM under INTENT_TARGET_EMBEDDED=1");
+    }
+
     #[test]
     fn taint_wraps_i64_in_tainted_i64() {
         let source = r#"

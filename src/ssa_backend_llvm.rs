@@ -4380,6 +4380,30 @@ fn emit_instr(
                 ));
                 return Ok(());
             }
+            // T2.2 — volatile_read / volatile_write (ref-based).
+            // `ref i64` arg is already an i64* pointer in SSA;
+            // emit load/store volatile directly.
+            if name == "volatile_read" {
+                let ptr = operand_str(&args[0]);
+                out.push_str(&format!(
+                    "  %v_{} = load volatile i64, i64* {}, align 8\n",
+                    instr.result.0, ptr
+                ));
+                return Ok(());
+            }
+            if name == "volatile_write" {
+                let ptr = operand_str(&args[0]);
+                let v = operand_str(&args[1]);
+                out.push_str(&format!(
+                    "  store volatile i64 {}, i64* {}, align 8\n",
+                    v, ptr
+                ));
+                out.push_str(&format!(
+                    "  %v_{} = add i64 0, 0\n",
+                    instr.result.0
+                ));
+                return Ok(());
+            }
             // Vec builtins call through the shared runtime
             // helpers emitted in the module preamble.
             if matches!(name.as_str(), "vec" | "push" | "set" | "clone") {

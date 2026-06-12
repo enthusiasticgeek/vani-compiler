@@ -8949,6 +8949,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return "0".to_string();
             }
+            // T2.2 — volatile_read / volatile_write.
+            // The `ref i64` arg emits as the alloca pointer
+            // (i64*), so load/store volatile straight through it.
+            if name == "volatile_read" {
+                let ptr = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load volatile i64, i64* {}, align 8\n",
+                    dest, ptr
+                ));
+                return dest;
+            }
+            if name == "volatile_write" {
+                let ptr = emit_expr(&args[0], ctx, out);
+                let val = emit_expr(&args[1], ctx, out);
+                out.push_str(&format!(
+                    "  store volatile i64 {}, i64* {}, align 8\n",
+                    val, ptr
+                ));
+                return "0".to_string();
+            }
             // Layer 2 of `unsafe.md` — Pool<i64> / Handle<i64>
             // builtins. Call outlined helpers emitted at module
             // scope by `emit_intent_pool_i64_helpers_llvm`.

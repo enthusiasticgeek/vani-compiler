@@ -15831,6 +15831,19 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        // T2.2 — `volatile_read(ptr: ref i64) -> i64` and
+        // `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
+        // The `ref` arg emits as the address of the local (`&v_x`),
+        // so we cast directly through `volatile int64_t*`.
+        "volatile_read" => format!(
+            "(*(volatile int64_t*)({}))",
+            emit_expr(&args[0])
+        ),
+        "volatile_write" => format!(
+            "((*(volatile int64_t*)({})) = ({}), (int64_t)0)",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
+        ),
         // Layer 3.1 of `unsafe.md` — canary-protected heap
         // allocation. Routes through `intent_unsafe_alloc` /
         // `intent_unsafe_free` helpers emitted by
