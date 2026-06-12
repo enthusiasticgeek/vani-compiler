@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 39 most-common
+//! Step-by-step elaboration strings for the 40 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is
@@ -804,6 +804,27 @@ pub fn pure_fn_calls_non_pure(callee: &str, context_kind: &str) -> Vec<String> {
              `pure` qualifier from the calling function if it \
              legitimately needs the side effect.",
             callee,
+        ),
+    ]
+}
+
+/// Duplicate top-level declaration (struct, enum, function, const).
+pub fn duplicate_declaration(kind: &str, name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "A {} named `{}` is already declared in this program.",
+            kind, name,
+        ),
+        "vāṇी resolves all names globally at compile time. Two \
+         top-level declarations with the same name are ambiguous — \
+         the compiler cannot know which one a call site refers to."
+            .to_string(),
+        format!(
+            "Either rename one of the `{}` declarations, or \
+             remove the duplicate. If this is intentional \
+             (e.g. two files define the same helper), move the \
+             shared declaration to a single `include`d file.",
+            name,
         ),
     ]
 }

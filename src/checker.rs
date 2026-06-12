@@ -771,10 +771,15 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
             }
         }
         if struct_registry.contains_key(&decl.name) {
-            diagnostics.push(Diagnostic::new(
-                decl.name_span,
-                format!("struct '{}' already declared", decl.name),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    decl.name_span,
+                    format!("struct '{}' already declared", decl.name),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::duplicate_declaration("struct", &decl.name),
+                ),
+            );
         }
         struct_registry.insert(
             decl.name.clone(),
@@ -972,10 +977,15 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
             }
         }
         if enum_registry.contains_key(&decl.name) {
-            diagnostics.push(Diagnostic::new(
-                decl.name_span,
-                format!("enum '{}' already declared", decl.name),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    decl.name_span,
+                    format!("enum '{}' already declared", decl.name),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::duplicate_declaration("enum", &decl.name),
+                ),
+            );
         }
         if struct_registry.contains_key(&decl.name) {
             diagnostics.push(Diagnostic::new(
@@ -1245,10 +1255,18 @@ fn collect_signatures(
             )
             .is_some()
         {
-            diagnostics.push(Diagnostic::new(
-                function.span,
-                format!("function '{}' is already defined", function.name),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    function.span,
+                    format!("function '{}' is already defined", function.name),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::duplicate_declaration(
+                        "function",
+                        &function.name,
+                    ),
+                ),
+            );
         }
     }
 

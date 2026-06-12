@@ -41590,5 +41590,27 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_duplicate_function_mentions_rename() {
+        // Defining the same function name twice should produce an
+        // elaboration that mentions renaming or removing the duplicate.
+        let source = r#"
+            fn helper(x: i64) -> i64 { return x; }
+            fn helper(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 { return helper(0); }
+        "#;
+        let errs = compile(source).expect_err("duplicate function must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("helper") || s.contains("rename") || s.contains("duplicate")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention duplicate / rename, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 
