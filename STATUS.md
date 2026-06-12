@@ -12,16 +12,31 @@
 
 ## 📋 NEXT SESSION HANDOFF — 2026-06-12
 
-**State**: `volatile_read`/`volatile_write` shipped (commit `2cea04a`).
-2100 lib tests + all e2e tests pass on Windows 11 GNU toolchain.
+**State**: Edge tests + `volatile_read`/`volatile_write` shipped.
+2108 lib tests + all e2e tests pass on Windows 11 GNU toolchain.
 
 ### Shipped this session (2026-06-12)
 
-- `volatile_read(ptr: ref i64) -> i64` — access-level volatile load; LLVM: `load volatile i64, i64* ptr`; C: `*(volatile int64_t*)ptr`. All 4 backends.
+**`volatile_read`/`volatile_write` built-ins** (commit `2cea04a`):
+- `volatile_read(ptr: ref i64) -> i64` — LLVM: `load volatile i64, i64*`; C: `*(volatile int64_t*)`. All 4 backends.
 - `volatile_write(ptr: mut ref i64, val: i64) -> i64` — volatile store; returns 0. All 4 backends.
-- Both gated by `INTENT_TARGET_EMBEDDED=1`; hosted builds get a clear diagnostic pointing to `Atomic<T>`.
-- 3 lib tests (reject-on-hosted ×2, compile-on-embedded ×1).
-- `examples/embedded/mmio_blink.vani` smoke example with `MmioReg<T>` pattern in comments.
+- Gated by `INTENT_TARGET_EMBEDDED=1`; hosted diagnostic points to `Atomic<T>`.
+- `examples/embedded/mmio_blink.vani` smoke example.
+
+**Edge test batch** (commit `826cf18`, 2100→2108 lib tests):
+- `runtime_i64_max_plus_one_emits_no_overflow_guard` — verifies no `add nsw i64` / `__builtin_add_overflow`
+- `runtime_i64_min_minus_one_emits_no_overflow_guard`
+- `runtime_i64_min_times_neg_one_emits_no_overflow_guard`
+- `runtime_u64_max_plus_one_compiles_both_backends`
+- `vec_ref_push_after_source_borrow_ends_compiles`
+- `struct_ref_field_survives_method_call_compiles`
+- `windows_deep_recursion_no_stack_overflow` / `non_windows_deep_recursion_no_stack_overflow`
+- `windows_llvm_print_uses_printf_not_putchar`
+
+**Edge tests still pending** (low priority, require e2e infra):
+- `windows_brahmi_numeral_output_no_crt_reorder` — needs binary execution
+- `windows_tcp_echo_blocking_three_clients` — needs live TCP server
+- `windows_snprintf_dprintf_shim_roundtrip` — needs binary execution
 
 ---
 

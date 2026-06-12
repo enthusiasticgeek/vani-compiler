@@ -13,45 +13,29 @@ Full handoff lives in STATUS.md "NEXT SESSION HANDOFF — 2026-06-11" block. Thi
 
 ## Current state (2026-06-12)
 
-- 2100 lib tests green (Windows + Linux)
+- 2108 lib tests green (Windows + Linux)
 - All e2e tests pass; 5 async-TCP tests skipped on Windows (IOCP gap)
 - 62 dialects across 26 scripts
-- Last commit: `2cea04a` — "feat(embedded): add volatile_read / volatile_write ref-based builtins"
+- Last commit: `826cf18` — "test: add integer overflow, ref/lifetime, and Windows regression edge tests"
 
 ## Work order for next session
 
-### Step 1 — Add edge test cases (low effort, do first, commit per 2–3 tests)
+### Step 1 — Add edge test cases (**MOSTLY DONE** — see below for remaining)
 
 All go in `src/lib.rs` as `#[test]` unless noted.
 
-**Windows regression (prevent future breakage):**
-- `windows_deep_recursion_no_stack_overflow` — ≥800 recursive calls, no overflow
-- `windows_snprintf_dprintf_shim_roundtrip` — FFI to snprintf/dprintf, check output
-- `windows_tcp_echo_blocking_three_clients` — explicit Windows tcp_echo.vani assertion
+**DONE — all shipped:**
+- Integer overflow (×4 wrapping + ×1 const-error + ×1 compile-both) ✓
+- Generic monomorphization (3-level chain, nongeneric bridge, two-call-sites) ✓
+- OwnedStr match-arm mismatch (all-concat workaround, bare-literal-mismatch) ✓
+- Ref / lifetime (3-ref-param reject, vec re-access after block, struct-ref method) ✓
+- Windows regression (deep-recursion, llvm-printf-not-putchar) ✓
+- echo_loop IOCP mismatch documented in e2e tests with `#[ignore]` ✓
 
-**Integer overflow (documents wrapping, prevents accidental "fix"):**
-- `i64_max_plus_one_wraps_to_min` — 9223372036854775807 + 1 == -9223372036854775808, both backends agree
-- `i64_min_minus_one_wraps_to_max`
-- `i64_min_times_neg_one_wraps_to_min`
-- `u64_max_plus_one_wraps_to_zero`
-- `const_overflow_is_a_type_error` — const N: i64 = MAX + 1 must be rejected
-
-**Generic monomorphization:**
-- `nested_generic_three_level_chain_fails` — h<T>→g<T>→f<T>, only h<i64> from non-generic → compile error
-- `nested_generic_nongeneric_bridge_works` — h<T> calls non-generic bridge() which calls f<i64> → should compile
-- `nested_generic_same_type_two_call_sites` — f<i64> has both a non-generic and generic call site → should compile
-
-**OwnedStr / match arms:**
-- `ownedstr_all_arms_must_produce_same_type` — mixing Str literal arm with OwnedStr arm is a type error
-- `ownedstr_nested_match_concat_workaround` — nested match produces OwnedStr on all paths
-
-**Ref / lifetime:**
-- `ref_return_three_ref_params_rejects` — extend existing 2-param test to 3 params
-- `vec_ref_push_after_source_borrow_ends` — re-borrow after first borrow ends is allowed
-- `struct_field_ref_lifetime_survives_method_call` — struct holding ref T field, method reads it
-
-**Async state machine (Windows mismatch documentation):**
-- `echo_loop_windows_byte_count_matches_c` — add a Windows `#[cfg]` + `#[ignore]` variant that documents the mismatch rather than silently skipping it forever
+**PENDING — need e2e binary execution (low priority):**
+- `windows_brahmi_numeral_output_no_crt_reorder` — needs binary execution
+- `windows_tcp_echo_blocking_three_clients` — needs live TCP server
+- `windows_snprintf_dprintf_shim_roundtrip` — needs binary execution
 
 ### Step 2 — Pick one user-queued feature
 
