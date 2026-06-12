@@ -2705,3 +2705,45 @@ fn run_strings_example_prints_each_greeting() {
         "expected `len: 5` from len(\"hello\"), got: {stdout}"
     );
 }
+
+// ── Windows IOCP async mismatch documentation ─────────────────────────────
+//
+// echo_loop.vani and related async-state-machine examples are skipped from
+// the C vs LLVM parity sweep on Windows (see llvm_backend_run_produces_same_output_as_c).
+// Root cause: the IOCP shim for io_recv_async in the LLVM backend returns a
+// packed 64-bit value (0x200000002) instead of the byte count (4), causing
+// output divergence between C and LLVM backends.
+//
+// The test below is #[ignore]d so it never blocks CI, but keeping it as an
+// explicit test (rather than a comment) means `cargo test -- --ignored` will
+// reproduce the failure on Windows and confirm the mismatch is still present.
+// When IOCP overlapped IO is wired up (TODO.md D.1), remove the #[ignore] and
+// the #[cfg(not(...))] guard from the parity test instead.
+
+#[test]
+#[cfg(target_os = "windows")]
+#[ignore = "IOCP async mismatch: LLVM io_recv_async returns packed 0x200000002 instead of byte count; fix tracked in TODO.md D.1"]
+fn echo_loop_llvm_matches_c_on_windows() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!("{}/examples/echo_loop.vani", manifest_dir);
+
+    let c_out = Command::new(binary)
+        .args(["run", "--backend=c", &example])
+        .output()
+        .expect("intentc run --backend=c should execute");
+    let llvm_out = Command::new(binary)
+        .args(["run", "--backend=llvm", &example])
+        .output()
+        .expect("intentc run --backend=llvm should execute");
+
+    let c_stdout = String::from_utf8_lossy(&c_out.stdout).replace("\r\n", "\n");
+    let llvm_stdout = String::from_utf8_lossy(&llvm_out.stdout).replace("\r\n", "\n");
+    assert_eq!(
+        c_stdout, llvm_stdout,
+        "echo_loop.vani stdout diverges between C and LLVM on Windows\n\
+         known mismatch: LLVM returns 0x200000002 where C returns 4\n\
+         C:    {c_stdout:?}\n\
+         LLVM: {llvm_stdout:?}"
+    );
+}
