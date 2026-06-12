@@ -9034,10 +9034,15 @@ fn check_one_stmt(
             };
             let coerced = if let Some(elab) = empty_vec_elab {
                 let Some(existing) = env.lookup(name).cloned() else {
-                    diagnostics.push(Diagnostic::new(
-                        *span,
-                        format!("cannot assign to unknown variable '{}'", name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!("cannot assign to unknown variable '{}'", name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::assign_to_unknown_variable(name),
+                        ),
+                    );
                     return false;
                 };
                 coerce_checked(
@@ -9050,10 +9055,15 @@ fn check_one_stmt(
             } else {
                 let checked = check_expr(expr, env, signatures, diagnostics);
                 let Some(existing) = env.lookup(name).cloned() else {
-                    diagnostics.push(Diagnostic::new(
-                        *span,
-                        format!("cannot assign to unknown variable '{}'", name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!("cannot assign to unknown variable '{}'", name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::assign_to_unknown_variable(name),
+                        ),
+                    );
                     return false;
                 };
                 coerce_checked(
@@ -9065,10 +9075,15 @@ fn check_one_stmt(
                 )
             };
             let Some(existing) = env.lookup(name).cloned() else {
-                diagnostics.push(Diagnostic::new(
-                    *span,
-                    format!("cannot assign to unknown variable '{}'", name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        *span,
+                        format!("cannot assign to unknown variable '{}'", name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::assign_to_unknown_variable(name),
+                    ),
+                );
                 return false;
             };
             diagnose_partial_then_whole_move(expr, &coerced, env, diagnostics);
@@ -10549,13 +10564,19 @@ fn check_one_stmt(
                 Type::Array { element, .. } => (**element).clone(),
                 Type::Vec(element) => (**element).clone(),
                 other => {
-                    diagnostics.push(Diagnostic::new(
-                        *span,
-                        format!(
-                            "'for x in &xs' requires an array or Vec; '{}' has type {}",
-                            collection, other
+                    let other_str = format!("{}", other);
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!(
+                                "'for x in &xs' requires an array or Vec; '{}' has type {}",
+                                collection, other_str
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::for_over_non_iterable(&other_str),
                         ),
-                    ));
+                    );
                     return false;
                 }
             };
@@ -13448,14 +13469,21 @@ fn check_expr(
             let sig = match signatures.get(&mangled) {
                 Some(s) => s,
                 None => {
-                    diagnostics.push(Diagnostic::new(
-                        *method_span,
-                        format!(
-                            "no method '{}' on type '{}'; expected a `methods on {}` \
-                             block declaring `fn {}(self: {}, …)`",
-                            method, type_name, type_name, method, type_name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *method_span,
+                            format!(
+                                "no method '{}' on type '{}'; expected a `methods on {}` \
+                                 block declaring `fn {}(self: {}, …)`",
+                                method, type_name, type_name, method, type_name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::method_not_found(
+                                method, &type_name,
+                            ),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
@@ -13630,6 +13658,7 @@ fn check_expr(
                 // lookup-missing name has a corresponding
                 // private mangling.
                 let private_msg = crate::ast::lookup_private_item(type_name);
+                let is_unknown = private_msg.is_none();
                 let msg = match private_msg {
                     Some(src_path) => format!(
                         "struct '{}' is private to its module — \
@@ -13638,7 +13667,13 @@ fn check_expr(
                     ),
                     None => format!("unknown struct type '{}'", type_name),
                 };
-                diagnostics.push(Diagnostic::new(*type_name_span, msg));
+                let mut diag = Diagnostic::new(*type_name_span, msg);
+                if is_unknown {
+                    diag = diag.with_elaboration(
+                        crate::diagnostic_elaborations::unknown_struct_type(type_name),
+                    );
+                }
+                diagnostics.push(diag);
                 return CheckedExpr::fallback_integer(expr.span);
             };
             // Build name → declared type map for lookup.
@@ -13662,13 +13697,20 @@ fn check_expr(
             let mut typed_fields: Vec<(String, TypedExpr)> = Vec::with_capacity(decl_fields.len());
             for (fname, fty) in &decl_fields {
                 let Some(found) = fields.iter().find(|(n, _)| n == fname) else {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "struct '{}' literal missing field '{}'",
-                            type_name, fname
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "struct '{}' literal missing field '{}'",
+                                type_name, fname
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::struct_literal_missing_field(
+                                type_name, fname,
+                            ),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback_integer(expr.span);
                 };
                 let checked_v = check_expr(&found.1, env, signatures, diagnostics);

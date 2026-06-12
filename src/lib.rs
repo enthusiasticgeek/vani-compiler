@@ -41420,5 +41420,68 @@ fn main() -> i64 {
             .expect("deep recursion (800 frames) must compile to LLVM");
     }
 
+    // ── Error-message elaboration (diagnostic_elaborations.rs) ───────────────
+
+    #[test]
+    fn elaboration_struct_literal_missing_field_mentions_field_and_type() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let p: Point = Point { x: 1 };
+              return p.x;
+            }
+        "#;
+        let errs = compile(source).expect_err("struct literal missing y must fail");
+        let combined = errs.iter()
+            .flat_map(|d| d.elaboration.iter().map(|s| s.as_str()))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            combined.contains("y") || combined.contains("Point"),
+            "elaboration should mention the missing field or struct type, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn elaboration_method_not_found_mentions_methods_on_block() {
+        let source = r#"
+            struct Dog { age: i64 }
+            fn main() -> i64 {
+              let d: Dog = Dog { age: 3 };
+              return d.bark();
+            }
+        "#;
+        let errs = compile(source).expect_err("method bark not found must fail");
+        let combined = errs.iter()
+            .flat_map(|d| std::iter::once(d.message.as_str()).chain(d.elaboration.iter().map(|s| s.as_str())))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            combined.contains("bark") || combined.contains("methods on"),
+            "error should mention method name or 'methods on' block, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn elaboration_assign_unknown_variable_mentions_let_declaration() {
+        let source = r#"
+            fn main() -> i64 {
+              x = 42;
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("assign to undeclared x must fail");
+        let has_let_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| s.contains("let") || s.contains("declared"))
+        });
+        assert!(
+            has_let_hint,
+            "elaboration should hint about 'let' declaration, got: {:?}",
+            errs.iter().map(|d| &d.elaboration).collect::<Vec<_>>()
+        );
+    }
+
 }
 

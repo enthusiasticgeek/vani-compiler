@@ -649,3 +649,115 @@ pub fn closure_captures_affine(name: &str) -> Vec<String> {
         ),
     ]
 }
+
+/// Struct literal missing a required field.
+pub fn struct_literal_missing_field(ty: &str, field: &str) -> Vec<String> {
+    vec![
+        format!(
+            "The `{}` literal does not initialize field `{}`, \
+             which is required.",
+            ty, field,
+        ),
+        "vāṇी has no default field values and no partial \
+         construction — every field must be set at the literal \
+         site so the compiler can guarantee the struct is fully \
+         initialized on every path."
+            .to_string(),
+        format!(
+            "Add `{}: <value>` to the literal. To see all \
+             required fields, find the `struct {}` declaration \
+             in the source (or use `vanic check` — it lists \
+             every missing field in one pass).",
+            field, ty,
+        ),
+    ]
+}
+
+/// Method call on a type that has no such method.
+pub fn method_not_found(method: &str, ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Type `{}` does not have a method named `{}`.",
+            ty, method,
+        ),
+        "Methods in vāṇी must be declared explicitly — either \
+         in a `methods on T { ... }` block or via \
+         `implement <Iface> for T { ... }`. There is no \
+         implicit method inheritance or duck-typed dispatch."
+            .to_string(),
+        format!(
+            "Either (a) add `methods on {} {{ fn {}(self: ref \
+             {}, …) -> … {{ … }} }}` to declare it, (b) check \
+             for a typo against the declared method names, or \
+             (c) check that the correct `implement` block is in \
+             scope for the type.",
+            ty, method, ty,
+        ),
+    ]
+}
+
+/// Reference to an undeclared struct type.
+pub fn unknown_struct_type(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No struct named `{}` is in scope at this point.",
+            name,
+        ),
+        "vāṇी resolves every type name at compile time. The \
+         type must be declared (with `struct {}`) before any \
+         use — forward references aren't supported in v1, and \
+         there's no implicit import."
+            .to_string(),
+        format!(
+            "Either (a) typo — compare against the `struct` \
+             declaration name, (b) the struct is in another \
+             file — add `include \"path.vani\";` at the top, \
+             or (c) the struct hasn't been declared yet — add \
+             `struct {} {{ … }}` above this use.",
+            name,
+        ),
+    ]
+}
+
+/// Assignment / reassignment to a variable that was never declared.
+pub fn assign_to_unknown_variable(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "`{}` has not been declared with `let` in this \
+             scope, so assigning to it is rejected.",
+            name,
+        ),
+        "vāṇी requires an explicit `let name: Type = value;` \
+         declaration before a binding can be used or mutated. \
+         There is no implicit variable creation on assignment \
+         (unlike Python / JavaScript)."
+            .to_string(),
+        format!(
+            "Add `let {}: <Type> = <initial_value>;` before \
+             this assignment. If `{}` IS declared but in an \
+             outer or sibling block, move the `let` up so it's \
+             in scope here.",
+            name, name,
+        ),
+    ]
+}
+
+/// Iterate over a non-Vec / non-range type with `for`.
+pub fn for_over_non_iterable(ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "`for` can only iterate over `Vec<T>` or an integer \
+             range (`a .. b`). The expression here has type `{}`.",
+            ty,
+        ),
+        "vāṇी's `for` statement is not polymorphic — there is \
+         no `Iterator` trait in v1. Only the two built-in \
+         iterable shapes are supported."
+            .to_string(),
+        "Either (a) collect results into a `Vec<T>` and iterate \
+         over that, (b) convert the expression to a range \
+         `0 .. n`, or (c) use a `while` loop with an explicit \
+         index for more complex iteration patterns."
+            .to_string(),
+    ]
+}
