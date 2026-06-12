@@ -40949,6 +40949,47 @@ fn main() -> i64 {
         compile(source).expect("s + \"\" workaround must produce OwnedStr and compile");
     }
 
+    // ── Integer overflow: const vs runtime behaviour ─────────────────────────
+
+    #[test]
+    fn const_i64_max_plus_one_is_a_type_error() {
+        // Constant-fold overflow on i64 must be caught at compile time.
+        // 9223372036854775807 + 1 = 9223372036854775808, which cannot be
+        // represented as i64. The constant-folding pass should reject this
+        // with an overflow diagnostic.
+        let source = r#"
+            const N: i64 = 9223372036854775807 + 1;
+            fn main() -> i64 { return N; }
+        "#;
+        let errs = compile(source)
+            .expect_err("constant i64 overflow must be caught at compile time");
+        assert!(
+            !errs.is_empty(),
+            "expected at least one diagnostic for const i64 overflow, got none"
+        );
+    }
+
+    #[test]
+    fn runtime_i64_overflow_compiles_both_backends() {
+        // Runtime i64 arithmetic that would overflow COMPILES without error —
+        // vāṇī v1 silently wraps (two's complement) at runtime.
+        // This test documents the known behaviour: no runtime guard is emitted
+        // at the arithmetic site. To prevent overflow, use `requires` clauses
+        // so the SMT pass can statically prove operands are in range.
+        let source = r#"
+            fn get_max() -> i64 { return 9223372036854775807; }
+            fn main() -> i64 {
+              let x: i64 = get_max();
+              let y: i64 = x + 1;
+              return y;
+            }
+        "#;
+        compile_to_c(source)
+            .expect("runtime i64 overflow must compile on C backend (wraps silently)");
+        compile_to_llvm(source)
+            .expect("runtime i64 overflow must compile on LLVM backend (wraps silently)");
+    }
+
     // ── Effects checker: pure fn calling non-pure ────────────────────────────
 
     #[test]
