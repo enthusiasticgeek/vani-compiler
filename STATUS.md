@@ -10,7 +10,22 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 📋 NEXT SESSION HANDOFF — 2026-06-11
+## 📋 NEXT SESSION HANDOFF — 2026-06-12
+
+**State**: `volatile_read`/`volatile_write` shipped (commit `2cea04a`).
+2100 lib tests + all e2e tests pass on Windows 11 GNU toolchain.
+
+### Shipped this session (2026-06-12)
+
+- `volatile_read(ptr: ref i64) -> i64` — access-level volatile load; LLVM: `load volatile i64, i64* ptr`; C: `*(volatile int64_t*)ptr`. All 4 backends.
+- `volatile_write(ptr: mut ref i64, val: i64) -> i64` — volatile store; returns 0. All 4 backends.
+- Both gated by `INTENT_TARGET_EMBEDDED=1`; hosted builds get a clear diagnostic pointing to `Atomic<T>`.
+- 3 lib tests (reject-on-hosted ×2, compile-on-embedded ×1).
+- `examples/embedded/mmio_blink.vani` smoke example with `MmioReg<T>` pattern in comments.
+
+---
+
+## 📋 PREV SESSION HANDOFF — 2026-06-11
 
 **State**: All Tier 1 + Tier 2 items shipped. Windows full e2e parity achieved (commit `6255af8`).
 2089 lib tests + all e2e tests pass on Windows 11 GNU toolchain.

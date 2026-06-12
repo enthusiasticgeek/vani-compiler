@@ -11,12 +11,12 @@ Full handoff lives in STATUS.md "NEXT SESSION HANDOFF — 2026-06-11" block. Thi
 
 **How to apply:** Read this at session start, then open STATUS.md for the detailed task descriptions and test names.
 
-## Current state (2026-06-11)
+## Current state (2026-06-12)
 
-- 2089 lib tests green (Windows + Linux)
+- 2100 lib tests green (Windows + Linux)
 - All e2e tests pass; 5 async-TCP tests skipped on Windows (IOCP gap)
 - 62 dialects across 26 scripts
-- Last commit: `6255af8` — "fix(windows): full e2e test parity on Windows 11 GNU toolchain"
+- Last commit: `2cea04a` — "feat(embedded): add volatile_read / volatile_write ref-based builtins"
 
 ## Work order for next session
 
@@ -57,7 +57,7 @@ All go in `src/lib.rs` as `#[test]` unless noted.
 
 | Feature | Effort | Notes |
 |---|---|---|
-| **volatile_read / volatile_write built-ins** | 4–6h | Embedded MMIO. NOT a type qualifier — access-level unsafe built-ins only. Parse as built-in calls; checker: require unsafe + embedded triple, reject on hosted with clear diagnostic; LLVM: `load/store volatile`; C: `*(volatile T*)` cast. Docs: recommend `MmioReg<T>` wrapper struct. 3 lib tests + examples/embedded/mmio_blink.vani. Full rationale in TODO.md user-direction items. |
+| **volatile_read / volatile_write built-ins** | ~~4–6h~~ | **SHIPPED 2026-06-12** (commit `2cea04a`). 3 lib tests + examples/embedded/mmio_blink.vani. All 4 backends (AST C, AST LLVM, SSA C, SSA LLVM). |
 | Error-message elaboration | 8–15h | src/checker.rs + src/diagnostic.rs — add elaboration vec, seed 20–30 families |
 | Big-O annotation (--big-o flag) | 12–20h | New src/big_o.rs; hook into vanic check output; v1: loop-nesting + builtin asymptotics |
 | Tutorials rewrite for non-CS readers | 20–40h | tutorials/src/beginner/ + intermediate/ — analogy chapters before formal definitions |
