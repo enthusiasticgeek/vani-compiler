@@ -7857,10 +7857,15 @@ fn check_function(
         .map(|param| {
             validate_param_type(&param.ty, param.span, diagnostics);
             if env.current_has(&param.name) {
-                diagnostics.push(Diagnostic::new(
-                    param.span,
-                    format!("parameter '{}' is already defined", param.name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        param.span,
+                        format!("parameter '{}' is already defined", param.name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::duplicate_parameter(&param.name),
+                    ),
+                );
             }
             // Inside a hoisted `<T>_drop` impl, the `self`
             // parameter must NOT trigger another auto-Drop at
@@ -12163,14 +12168,22 @@ fn check_match_str(
                 wildcard_body = Some(body_checked.expr);
             }
             _ => {
-                diagnostics.push(Diagnostic::new(
-                    arm.pattern_span,
-                    format!(
-                        "match scrutinee is {}, but pattern is not a string \
-                         literal — use `\"text\" then …` or `_ then …`",
-                        scrut_ty
+                let scrut_s = format!("{}", scrut_ty);
+                diagnostics.push(
+                    Diagnostic::new(
+                        arm.pattern_span,
+                        format!(
+                            "match scrutinee is {}, but pattern is not a string \
+                             literal — use `\"text\" then …` or `_ then …`",
+                            scrut_s
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::match_wrong_pattern_type(
+                            &scrut_s, "string",
+                        ),
                     ),
-                ));
+                );
                 continue;
             }
         }
@@ -12405,14 +12418,22 @@ fn check_match_float(
                 wildcard_body = Some(body_checked.expr);
             }
             _ => {
-                diagnostics.push(Diagnostic::new(
-                    arm.pattern_span,
-                    format!(
-                        "match scrutinee is {}, but pattern is not a float \
-                         literal — use `3.14 then …` or `_ then …`",
-                        scrut_ty
+                let scrut_s = format!("{}", scrut_ty);
+                diagnostics.push(
+                    Diagnostic::new(
+                        arm.pattern_span,
+                        format!(
+                            "match scrutinee is {}, but pattern is not a float \
+                             literal — use `3.14 then …` or `_ then …`",
+                            scrut_s
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::match_wrong_pattern_type(
+                            &scrut_s, "float",
+                        ),
                     ),
-                ));
+                );
                 continue;
             }
         }

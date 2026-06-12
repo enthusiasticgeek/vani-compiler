@@ -41612,5 +41612,79 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_duplicate_param_mentions_rename() {
+        // Two parameters with the same name should produce an
+        // elaboration that explains they must be unique.
+        let source = r#"
+            fn add(x: i64, x: i64) -> i64 { return x; }
+            fn main() -> i64 { return add(1, 2); }
+        "#;
+        let errs = compile(source).expect_err("duplicate param must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("x") || s.contains("rename") || s.contains("parameter")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention renaming the parameter, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_match_wrong_pattern_string_scrutinee() {
+        // Using an integer literal pattern in a string-scrutinee match
+        // should produce an elaboration explaining pattern kinds.
+        let source = r#"
+            fn classify(s: Str) -> i64 {
+                return match s {
+                    42 then 1,
+                    _ then 0,
+                };
+            }
+            fn main() -> i64 { return classify("hi"); }
+        "#;
+        let errs = compile(source).expect_err("wrong pattern type for string scrutinee must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("string") || s.contains("literal") || s.contains("pattern")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should explain string pattern form, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_reduce_unknown_var_mentions_let() {
+        // A `reduce` clause naming a variable not declared before the
+        // parallel for should produce an elaboration mentioning `let`.
+        let source = r#"
+            fn main() -> i64 {
+                parallel for i from 0 to 4
+                reduce ghost_total with +;
+                {
+                    ghost_total = ghost_total + i;
+                }
+                return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("undeclared reduce var must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("ghost_total") || s.contains("let") || s.contains("scope")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention let declaration for reduce var, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 

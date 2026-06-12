@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 40 most-common
+//! Step-by-step elaboration strings for the 42 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is
@@ -804,6 +804,53 @@ pub fn pure_fn_calls_non_pure(callee: &str, context_kind: &str) -> Vec<String> {
              `pure` qualifier from the calling function if it \
              legitimately needs the side effect.",
             callee,
+        ),
+    ]
+}
+
+/// Two parameters in the same function share a name.
+pub fn duplicate_parameter(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Parameter `{}` appears more than once in this function's \
+             parameter list.",
+            name,
+        ),
+        "Each parameter name must be unique within a function \
+         signature — the compiler uses the name to bind the \
+         argument at the call site, so duplicates are ambiguous."
+            .to_string(),
+        format!(
+            "Rename one of the `{}` parameters to a distinct \
+             name, e.g. `{}_2` or a more descriptive identifier \
+             that reflects its different role.",
+            name, name,
+        ),
+    ]
+}
+
+/// Wrong-kind pattern for a match scrutinee (e.g. integer literal
+/// used in a string-scrutinee match).
+pub fn match_wrong_pattern_type(scrut_ty: &str, expected_form: &str) -> Vec<String> {
+    vec![
+        format!(
+            "The match scrutinee has type `{}`, but this arm's \
+             pattern is not a {} literal.",
+            scrut_ty, expected_form,
+        ),
+        "Every arm in a match block must use a pattern literal \
+         that is the same kind as the scrutinee. vāṇी does not \
+         coerce pattern literals — an integer pattern cannot match \
+         a string scrutinee, and vice versa."
+            .to_string(),
+        format!(
+            "Change the pattern to a {} literal (e.g. {} literal \
+             form) or use a wildcard `_ then …` arm to catch any \
+             value the other arms don't cover.",
+            expected_form,
+            if expected_form == "string" { "\"text\"" }
+            else if expected_form == "float" { "3.14" }
+            else { "matching" },
         ),
     ]
 }
