@@ -12078,14 +12078,20 @@ fn check_match_str(
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body type mismatch: expected {}, got {}",
-                                prev,
-                                body_checked.ty()
+                        let prev_s = format!("{}", prev);
+                        let got_s = format!("{}", body_checked.ty());
+                        diagnostics.push(
+                            Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body type mismatch: expected {}, got {}",
+                                    prev_s, got_s,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::type_mismatch(&prev_s, &got_s),
                             ),
-                        ));
+                        );
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
@@ -12097,14 +12103,20 @@ fn check_match_str(
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body type mismatch: expected {}, got {}",
-                                prev,
-                                body_checked.ty()
+                        let prev_s = format!("{}", prev);
+                        let got_s = format!("{}", body_checked.ty());
+                        diagnostics.push(
+                            Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body type mismatch: expected {}, got {}",
+                                    prev_s, got_s,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::type_mismatch(&prev_s, &got_s),
                             ),
-                        ));
+                        );
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
@@ -12308,14 +12320,20 @@ fn check_match_float(
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body type mismatch: expected {}, got {}",
-                                prev,
-                                body_checked.ty()
+                        let prev_s = format!("{}", prev);
+                        let got_s = format!("{}", body_checked.ty());
+                        diagnostics.push(
+                            Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body type mismatch: expected {}, got {}",
+                                    prev_s, got_s,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::type_mismatch(&prev_s, &got_s),
                             ),
-                        ));
+                        );
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
@@ -12327,14 +12345,20 @@ fn check_match_float(
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 if let Some(prev) = &result_ty {
                     if body_checked.ty() != prev {
-                        diagnostics.push(Diagnostic::new(
-                            arm.body.span,
-                            format!(
-                                "match arm body type mismatch: expected {}, got {}",
-                                prev,
-                                body_checked.ty()
+                        let prev_s = format!("{}", prev);
+                        let got_s = format!("{}", body_checked.ty());
+                        diagnostics.push(
+                            Diagnostic::new(
+                                arm.body.span,
+                                format!(
+                                    "match arm body type mismatch: expected {}, got {}",
+                                    prev_s, got_s,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::type_mismatch(&prev_s, &got_s),
                             ),
-                        ));
+                        );
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
