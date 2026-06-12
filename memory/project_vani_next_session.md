@@ -13,10 +13,10 @@ Full handoff lives in STATUS.md "NEXT SESSION HANDOFF — 2026-06-11" block. Thi
 
 ## Current state (2026-06-12)
 
-- 2108 lib tests green (Windows + Linux)
+- 2113 lib tests green (Windows + Linux)
 - All e2e tests pass; 5 async-TCP tests skipped on Windows (IOCP gap)
 - 62 dialects across 26 scripts
-- Last commit: `826cf18` — "test: add integer overflow, ref/lifetime, and Windows regression edge tests"
+- Last commit: `29db5fa` — "feat(diagnostics): wire elaboration to 7 more checker.rs sites"
 
 ## Work order for next session
 
@@ -41,7 +41,8 @@ All go in `src/lib.rs` as `#[test]` unless noted.
 
 | Feature | Effort | Notes |
 |---|---|---|
-| **volatile_read / volatile_write built-ins** | ~~4–6h~~ | **SHIPPED 2026-06-12** (commit `2cea04a`). 3 lib tests + examples/embedded/mmio_blink.vani. All 4 backends (AST C, AST LLVM, SSA C, SSA LLVM). |
+| **volatile_read / volatile_write built-ins** | ~~4–6h~~ | **SHIPPED 2026-06-12** (commit `2cea04a`). 3 lib tests + examples/embedded/mmio_blink.vani. All 4 backends. |
+| **Error-message elaboration** | ~~8–15h~~ | **PARTIALLY SHIPPED 2026-06-12** (commits `6cde30d`–`29db5fa`). 34 families, 48 wired sites (was 25/32). 13 elaboration tests. Remaining: wire remaining ~500 sites, or declare done at current coverage. |
 | Error-message elaboration | 8–15h | src/checker.rs + src/diagnostic.rs — add elaboration vec, seed 20–30 families |
 | Big-O annotation (--big-o flag) | 12–20h | New src/big_o.rs; hook into vanic check output; v1: loop-nesting + builtin asymptotics |
 | Tutorials rewrite for non-CS readers | 20–40h | tutorials/src/beginner/ + intermediate/ — analogy chapters before formal definitions |

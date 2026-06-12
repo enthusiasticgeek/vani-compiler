@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 25 most-common
+//! Step-by-step elaboration strings for the 34 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is

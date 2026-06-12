@@ -38,6 +38,14 @@
 - `windows_tcp_echo_blocking_three_clients` — needs live TCP server
 - `windows_snprintf_dprintf_shim_roundtrip` — needs binary execution
 
+**Error-message elaboration** (commits `6cde30d`, `52004c6`, `29db5fa`):
+- 9 new families: `struct_literal_missing_field`, `method_not_found`, `unknown_struct_type`,
+  `assign_to_unknown_variable`, `for_over_non_iterable`, `iface_impl_missing_method`,
+  `pure_fn_calls_non_pure` + 2 more wired from existing families.
+- 48 checker.rs sites now have elaboration (was 32). 34 families total (was 25).
+- 5 elaboration coverage tests added (13 total in the elaboration suite).
+- 2111→2113 lib tests; all pass.
+
 ---
 
 ## 📋 PREV SESSION HANDOFF — 2026-06-11
