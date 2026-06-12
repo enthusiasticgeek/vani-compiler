@@ -1230,13 +1230,21 @@ fn collect_signatures(
         // call sites can propagate the source's lifetime.
         validate_return_ref_elision(function, diagnostics);
         if BUILTIN_FUNCTION_NAMES.contains(&function.name.as_str()) {
-            diagnostics.push(Diagnostic::new(
-                function.span,
-                format!(
-                    "function '{}' is a built-in name and cannot be redefined",
-                    function.name
+            diagnostics.push(
+                Diagnostic::new(
+                    function.span,
+                    format!(
+                        "function '{}' is a built-in name and cannot be redefined",
+                        function.name
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::duplicate_declaration(
+                        "built-in function",
+                        &function.name,
+                    ),
                 ),
-            ));
+            );
         }
         if signatures
             .insert(
@@ -4456,10 +4464,18 @@ fn resolve_type_aliases(
     let mut by_name: BTreeMap<String, &crate::ast::TypeAlias> = BTreeMap::new();
     for alias in &program.type_aliases {
         if by_name.contains_key(&alias.name) {
-            diagnostics.push(Diagnostic::new(
-                alias.name_span,
-                format!("type alias '{}' is already declared", alias.name),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    alias.name_span,
+                    format!("type alias '{}' is already declared", alias.name),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::duplicate_declaration(
+                        "type alias",
+                        &alias.name,
+                    ),
+                ),
+            );
             return None;
         }
         // Reject collisions with struct/enum/function names
@@ -10423,13 +10439,18 @@ fn check_one_stmt(
                 std::collections::HashSet::new();
             for r in reductions {
                 let Some(info) = pre_env.lookup(&r.var) else {
-                    diagnostics.push(Diagnostic::new(
-                        r.span,
-                        format!(
-                            "'reduce {}': name is not declared in scope",
-                            r.var
+                    diagnostics.push(
+                        Diagnostic::new(
+                            r.span,
+                            format!(
+                                "'reduce {}': name is not declared in scope",
+                                r.var
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::unknown_variable(&r.var),
                         ),
-                    ));
+                    );
                     continue;
                 };
                 // Type rule per reduction op:
