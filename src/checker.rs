@@ -1446,18 +1446,28 @@ fn validate_main(
         .unwrap_or_else(Span::default);
 
     let Some(main) = signatures.get("main") else {
-        diagnostics.push(Diagnostic::new(
-            main_span,
-            "program must define fn main() -> i64",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                main_span,
+                "program must define fn main() -> i64",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::missing_main_function(),
+            ),
+        );
         return;
     };
 
     if !main.params.is_empty() || main.return_type != Type::I64 {
-        diagnostics.push(Diagnostic::new(
-            main_span,
-            "main must have signature fn main() -> i64",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                main_span,
+                "main must have signature fn main() -> i64",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::main_wrong_signature(),
+            ),
+        );
     }
 }
 
@@ -9756,10 +9766,15 @@ fn check_one_stmt(
                     return false;
                 };
                 let Some(decl) = env.lookup_struct(struct_name) else {
-                    diagnostics.push(Diagnostic::new(
-                        *span,
-                        format!("struct '{}' is not declared", struct_name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!("struct '{}' is not declared", struct_name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::struct_not_declared(struct_name),
+                        ),
+                    );
                     return false;
                 };
                 let Some((idx, (_, field_ty))) = decl
@@ -10067,10 +10082,15 @@ fn check_one_stmt(
             let info = match env.lookup_struct(&struct_name).cloned() {
                 Some(s) => s,
                 None => {
-                    diagnostics.push(Diagnostic::new(
-                        *span,
-                        format!("struct '{}' is not declared", struct_name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            *span,
+                            format!("struct '{}' is not declared", struct_name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::struct_not_declared(&struct_name),
+                        ),
+                    );
                     return false;
                 }
             };
@@ -13829,10 +13849,15 @@ fn check_expr(
             let (struct_name, field_ty, field_index) = match &underlying {
                 Type::Struct(name) => {
                     let Some(decl) = env.lookup_struct(name) else {
-                        diagnostics.push(Diagnostic::new(
-                            object.span,
-                            format!("struct '{}' is not declared", name),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                object.span,
+                                format!("struct '{}' is not declared", name),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::struct_not_declared(name),
+                            ),
+                        );
                         return CheckedExpr::fallback_integer(expr.span);
                     };
                     let Some(idx) = decl.fields.iter().position(|(n, _)| n == field) else {
@@ -13946,10 +13971,15 @@ fn check_expr(
             let enum_decl_opt: Option<EnumInfo> = match &scrut_ty {
                 Type::Enum(name) => {
                     let Some(d) = env.lookup_enum(name).cloned() else {
-                        diagnostics.push(Diagnostic::new(
-                            scrutinee.span,
-                            format!("enum '{}' is not declared", name),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                scrutinee.span,
+                                format!("enum '{}' is not declared", name),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::enum_not_declared(name),
+                            ),
+                        );
                         return CheckedExpr::fallback_integer(expr.span);
                     };
                     Some(d)
@@ -17159,15 +17189,26 @@ fn check_call(
         // a clear visibility diagnostic instead of the cryptic
         // "unknown function".
         let private_msg = crate::ast::lookup_private_item(name);
-        let msg = match private_msg {
-            Some(src_path) => format!(
-                "function '{}' is private to its module — \
-                 mark it `pub` to allow access from outside",
-                src_path
-            ),
-            None => format!("unknown function '{}'", name),
-        };
-        diagnostics.push(Diagnostic::new(span, msg));
+        match private_msg {
+            Some(src_path) => {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "function '{}' is private to its module — \
+                         mark it `pub` to allow access from outside",
+                        src_path
+                    ),
+                ));
+            }
+            None => {
+                diagnostics.push(
+                    Diagnostic::new(span, format!("unknown function '{}'", name))
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::unknown_function(name),
+                        ),
+                );
+            }
+        }
         return CheckedExpr::fallback_integer(span);
     };
 

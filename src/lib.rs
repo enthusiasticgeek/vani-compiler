@@ -41525,5 +41525,70 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_missing_main_mentions_entry_point() {
+        // A file with no main at all should produce a diagnostic
+        // whose elaboration tells the user what to add.
+        let source = r#"
+            fn helper(x: i64) -> i64 { return x; }
+        "#;
+        let errs = compile(source).expect_err("missing main must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("main") || s.contains("entry point")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention entry point, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_unknown_function_mentions_declare_or_include() {
+        // Calling a function that doesn't exist should produce
+        // an elaboration mentioning declaration or include.
+        let source = r#"
+            fn main() -> i64 {
+                return no_such_fn(42);
+            }
+        "#;
+        let errs = compile(source).expect_err("unknown function must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("no_such_fn") || s.contains("include") || s.contains("declare")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention declaring or including the function, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_struct_not_declared_mentions_struct_block() {
+        // Using an undeclared struct in a field access context should
+        // produce an elaboration mentioning the struct declaration syntax.
+        let source = r#"
+            fn main() -> i64 {
+                let p: Phantom = Phantom { x: 1 };
+                return p.x;
+            }
+        "#;
+        let errs = compile(source).expect_err("undeclared struct must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("Phantom") || s.contains("struct") || s.contains("include")
+            })
+        });
+        assert!(
+            has_hint,
+            "elaboration should mention struct declaration, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 

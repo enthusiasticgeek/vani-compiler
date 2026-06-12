@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 34 most-common
+//! Step-by-step elaboration strings for the 39 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is
@@ -804,6 +804,119 @@ pub fn pure_fn_calls_non_pure(callee: &str, context_kind: &str) -> Vec<String> {
              `pure` qualifier from the calling function if it \
              legitimately needs the side effect.",
             callee,
+        ),
+    ]
+}
+
+/// No `fn main()` entry point found in the program.
+pub fn missing_main_function() -> Vec<String> {
+    vec![
+        "Every vāṇī program needs exactly one `fn main() -> i64` \
+         to be the entry point."
+            .to_string(),
+        "The compiler looks for a top-level function named `main` \
+         with no parameters and an `i64` return type. Without it, \
+         the linker cannot find the entry point and the binary \
+         cannot be produced."
+            .to_string(),
+        "Add a top-level entry point:\n\
+         \n\
+         fn main() -> i64 {\n\
+         \treturn 0;\n\
+         }"
+            .to_string(),
+    ]
+}
+
+/// `main` is present but has the wrong signature.
+pub fn main_wrong_signature() -> Vec<String> {
+    vec![
+        "`main` must have exactly the signature `fn main() -> i64` \
+         — no parameters, return type `i64`."
+            .to_string(),
+        "The OS entry-point convention passes command-line \
+         arguments via the C runtime (accessible via `argc` / \
+         `argv` FFI if needed), so vāṇī's `main` takes no \
+         parameters. The `i64` return becomes the process exit \
+         code (zero = success)."
+            .to_string(),
+        "Fix the signature to `fn main() -> i64 { ... }`. If you \
+         need command-line arguments, call the C `argc`/`argv` \
+         API via `extern` declarations."
+            .to_string(),
+    ]
+}
+
+/// Call to a function that has not been declared.
+pub fn unknown_function(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No function named `{}` is visible at this call site.",
+            name,
+        ),
+        "vāṇī resolves all function names at compile time from \
+         the top-level declarations in the current file (and any \
+         files pulled in via `include`). There is no dynamic \
+         dispatch at the call site — the name must resolve \
+         statically."
+            .to_string(),
+        format!(
+            "Either (a) check for a typo in `{}`, (b) make sure \
+             the file that declares `{}` is included with \
+             `include \"path.vani\";`, or (c) add the function \
+             declaration above this call:\n\
+             \n\
+             fn {}(…) -> i64 {{ … }}",
+            name, name, name,
+        ),
+    ]
+}
+
+/// Reference to a struct type that has never been declared.
+pub fn struct_not_declared(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No `struct {}` declaration is in scope here.",
+            name,
+        ),
+        "vāṇी resolves every type name at compile time. The \
+         struct must be declared with a `struct` block before it \
+         can be used as a type, in a pattern, or in a literal — \
+         forward references and implicit imports are not supported \
+         in v1."
+            .to_string(),
+        format!(
+            "Either (a) check for a typo (compare against the \
+             `struct` declaration), (b) add `include \"path.vani\";` \
+             for the file that defines `{}`, or (c) declare the \
+             struct above this use:\n\
+             \n\
+             struct {} {{ field: i64 }}",
+            name, name,
+        ),
+    ]
+}
+
+/// Reference to an enum type that has never been declared.
+pub fn enum_not_declared(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No `enum {}` declaration is in scope here.",
+            name,
+        ),
+        "vāṇी resolves every type name at compile time. The \
+         enum must be declared with an `enum` block before it \
+         can appear in a pattern or as a match scrutinee — \
+         forward references are not supported in v1."
+            .to_string(),
+        format!(
+            "Either (a) check for a typo (compare against the \
+             `enum` declaration name), (b) add `include \"path.vani\";` \
+             for the file that defines `{}`, or (c) declare the \
+             enum above this use:\n\
+             \n\
+             enum {} {{ Variant1, Variant2 }}",
+            name, name,
         ),
     ]
 }
