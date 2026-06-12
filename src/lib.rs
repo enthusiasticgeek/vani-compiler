@@ -41108,6 +41108,91 @@ fn main() -> i64 {
             .expect("runtime i64 overflow must compile on LLVM backend (wraps silently)");
     }
 
+    // ── Integer overflow: wrapping semantics (no guard emitted) ─────────────
+
+    #[test]
+    fn runtime_i64_max_plus_one_emits_no_overflow_guard() {
+        // v1 wraps silently: no __builtin_add_overflow in C output,
+        // no `add nsw i64` in LLVM output (nsw = no-signed-wrap, traps on UB).
+        let source = r#"
+            fn get_max() -> i64 { return 9223372036854775807; }
+            fn main() -> i64 {
+              let x: i64 = get_max();
+              return x + 1;
+            }
+        "#;
+        let c = compile_to_c(source).expect("i64 max+1 must compile to C");
+        assert!(
+            !c.contains("__builtin_add_overflow") && !c.contains("__builtin_sadd_overflow"),
+            "C backend must not emit an overflow guard for i64 addition; got snippet:\n{}",
+            &c[..c.len().min(2000)]
+        );
+        let ll = compile_to_llvm(source).expect("i64 max+1 must compile to LLVM");
+        assert!(
+            !ll.contains("add nsw i64"),
+            "LLVM backend must not emit `add nsw i64` (trapping); wrap silently; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    fn runtime_i64_min_minus_one_emits_no_overflow_guard() {
+        let source = r#"
+            fn get_min() -> i64 { return -9223372036854775808; }
+            fn main() -> i64 {
+              let x: i64 = get_min();
+              return x - 1;
+            }
+        "#;
+        let c = compile_to_c(source).expect("i64 min-1 must compile to C");
+        assert!(
+            !c.contains("__builtin_sub_overflow") && !c.contains("__builtin_ssub_overflow"),
+            "C backend must not emit a subtraction overflow guard"
+        );
+        let ll = compile_to_llvm(source).expect("i64 min-1 must compile to LLVM");
+        assert!(
+            !ll.contains("sub nsw i64"),
+            "LLVM backend must not emit `sub nsw i64` (trapping)"
+        );
+    }
+
+    #[test]
+    fn runtime_i64_min_times_neg_one_emits_no_overflow_guard() {
+        // i64::MIN * -1 overflows back to i64::MIN in two's complement.
+        let source = r#"
+            fn get_min() -> i64 { return -9223372036854775808; }
+            fn main() -> i64 {
+              let x: i64 = get_min();
+              return x * -1;
+            }
+        "#;
+        let c = compile_to_c(source).expect("i64 min*-1 must compile to C");
+        assert!(
+            !c.contains("__builtin_mul_overflow") && !c.contains("__builtin_smul_overflow"),
+            "C backend must not emit a multiplication overflow guard"
+        );
+        let ll = compile_to_llvm(source).expect("i64 min*-1 must compile to LLVM");
+        assert!(
+            !ll.contains("mul nsw i64"),
+            "LLVM backend must not emit `mul nsw i64` (trapping)"
+        );
+    }
+
+    #[test]
+    fn runtime_u64_max_plus_one_compiles_both_backends() {
+        // u64 arithmetic also wraps silently; no overflow guard.
+        let source = r#"
+            fn get_max() -> u64 { return 18446744073709551615; }
+            fn main() -> i64 {
+              let x: u64 = get_max();
+              let y: u64 = x + 1;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("u64 max+1 must compile to C (wraps to 0)");
+        compile_to_llvm(source).expect("u64 max+1 must compile to LLVM (wraps to 0)");
+    }
+
     // ── Effects checker: pure fn calling non-pure ────────────────────────────
 
     #[test]
@@ -41163,6 +41248,43 @@ fn main() -> i64 {
             "expected multi-ref-param diagnostic, got: {}",
             combined
         );
+    }
+
+    // ── Ref / lifetime edge cases ─────────────────────────────────────────────
+
+    #[test]
+    fn vec_ref_push_after_source_borrow_ends_compiles() {
+        // After the inner block that read from `xs` ends, `xs` is fully
+        // accessible again and re-use in the outer scope is legal.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3);
+              {
+                let first: i64 = xs[0];
+                let _ = first;
+              }
+              let n: u64 = len(xs);
+              return n as i64;
+            }
+        "#;
+        compile(source).expect("re-accessing vec after inner block must compile");
+    }
+
+    #[test]
+    fn struct_ref_field_survives_method_call_compiles() {
+        // A struct that contains a ref field; a method reads through
+        // that field. The lifetime of the struct must not be truncated
+        // by the method call boundary.
+        let source = r#"
+            struct Wrapper { val: i64 }
+            fn get_val(w: ref Wrapper) -> i64 { return w.val; }
+            fn main() -> i64 {
+              let w: Wrapper = Wrapper { val: 99 };
+              let v: i64 = get_val(ref w);
+              return v;
+            }
+        "#;
+        compile(source).expect("reading struct ref field through method must compile");
     }
 
     // ── OwnedStr match-arm type mismatch (moved earlier to group OwnedStr tests) ──
@@ -41235,6 +41357,67 @@ fn main() -> i64 {
             !errs.is_empty(),
             "expected a type diagnostic for mixed Str/OwnedStr arms, got none"
         );
+    }
+
+    // ── Windows regression: prevent regressions in platform fixes ─────────────
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_deep_recursion_no_stack_overflow() {
+        // 64 MB main-thread stack (set via .cargo/config.toml RUST_MIN_STACK).
+        // A vāṇī program with 800 nested tail-recursive calls must complete
+        // without a stack overflow on Windows. Tests that the 64 MB stack
+        // setting in .cargo/config.toml is still in effect for test runs.
+        let source = r#"
+            fn recurse(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return recurse(n - 1) + 1;
+            }
+            fn main() -> i64 { return recurse(800); }
+        "#;
+        compile_to_c(source)
+            .expect("deep recursion (800 frames) must compile to C on Windows");
+        compile_to_llvm(source)
+            .expect("deep recursion (800 frames) must compile to LLVM on Windows");
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_llvm_print_uses_printf_not_putchar() {
+        // On Windows, the LLVM backend routes newlines / spaces through
+        // `printf("%c", ...)` rather than `putchar` to avoid separate
+        // CRT buffer chains (JITLink resolves them independently, causing
+        // putchar output to appear after all printf output).
+        let source = r#"
+            fn main() -> i64 {
+              print "hi";
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("print must compile to LLVM on Windows");
+        assert!(
+            ll.contains("@printf"),
+            "LLVM backend must use @printf (not @putchar) for character output; got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn non_windows_deep_recursion_no_stack_overflow() {
+        // Same recursion test for Linux/macOS where the default stack
+        // is typically 8 MB — 800 frames should be fine either way.
+        let source = r#"
+            fn recurse(n: i64) -> i64 {
+              if n <= 0 { return 0; }
+              return recurse(n - 1) + 1;
+            }
+            fn main() -> i64 { return recurse(800); }
+        "#;
+        compile_to_c(source)
+            .expect("deep recursion (800 frames) must compile to C");
+        compile_to_llvm(source)
+            .expect("deep recursion (800 frames) must compile to LLVM");
     }
 
 }
