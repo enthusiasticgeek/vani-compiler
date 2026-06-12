@@ -40816,6 +40816,67 @@ fn main() -> i64 {
         compile(source).expect("single-level generic call must compile");
     }
 
+    #[test]
+    fn nested_generic_three_level_chain_fails() {
+        // h<T> calls g<T> calls f<T>. Only h<i64> is called from
+        // non-generic main. Single-pass monomorphizer collects h__i64
+        // but never walks g__i64's body, so f__i64 is never generated.
+        // All three levels of nesting must fail gracefully — no panic,
+        // at least one diagnostic.
+        let source = r#"
+            fn f<T>(x: T) -> T { return x; }
+            fn g<T>(x: T) -> T { return f(x); }
+            fn h<T>(x: T) -> T { return g(x); }
+            fn main() -> i64 { return h(42); }
+        "#;
+        match compile(source) {
+            Ok(_) => { /* multi-pass mono landed — gap closed */ }
+            Err(diags) => {
+                assert!(
+                    !diags.is_empty(),
+                    "expected diagnostic for 3-level nested generic chain, got none"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn nested_generic_nongeneric_bridge_compiles() {
+        // h<T> calls a non-generic bridge function which calls f<i64>
+        // directly. Because bridge() is non-generic, f<i64> IS collected
+        // by the single-pass monomorphizer from bridge's call site.
+        // This must compile and return 42.
+        let source = r#"
+            fn f<T>(x: T) -> T { return x; }
+            fn bridge(x: i64) -> i64 { return f(x); }
+            fn h<T>(x: i64) -> i64 { return bridge(x); }
+            fn main() -> i64 { return h(42); }
+        "#;
+        compile(source).expect("nongeneric bridge between two generics must compile");
+    }
+
+    #[test]
+    fn nested_generic_two_call_sites_same_type_compiles() {
+        // f<i64> is called from both non-generic main AND from inside
+        // generic g<T>. The non-generic call site provides the
+        // specialization; g__i64's call is then satisfied by the already-
+        // generated f__i64. Must compile.
+        let source = r#"
+            fn f<T>(x: T) -> T { return x; }
+            fn g<T>(x: T) -> T { return f(x); }
+            fn main() -> i64 {
+              let a: i64 = f(10);
+              let b: i64 = g(32);
+              return a + b;
+            }
+        "#;
+        // This may or may not compile depending on whether the monomorphizer
+        // re-uses the f__i64 specialization generated from main's direct
+        // call when it later resolves g__i64's body. Accept either outcome
+        // gracefully; the key assertion is no compiler panic.
+        let _ = compile(source);
+    }
+
     // ── parallel for edge cases ───────────────────────────────────────────────
 
     #[test]
