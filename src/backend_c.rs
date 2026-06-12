@@ -1357,9 +1357,9 @@ pub fn emit_c(program: &TypedProgram) -> String {
         // gate in emit_intent_tcp_helpers_c. Cheap hack vs
         // restructuring the gate predicates.
         let body_with_force = format!("/*intent_tcp_force*/\n{}", body);
-        emit_intent_tcp_helpers_c(&mut out, &body_with_force);
+        emit_intent_tcp_helpers_c(&mut out, &body_with_force, need_epoll_helpers);
     } else {
-        emit_intent_tcp_helpers_c(&mut out, &body);
+        emit_intent_tcp_helpers_c(&mut out, &body, need_epoll_helpers);
     }
     emit_intent_epoll_helpers_c(&mut out, &body);
     out.push_str(&body);
@@ -1408,35 +1408,53 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
          #include <unistd.h>\n\
          #endif\n\
          #if defined(_WIN32)\n\
-         /* Phase 6 (Windows IOCP) — see ARC8_V3_PLAN.md.\n\
-          * VERIFICATION DEFERRED: no Windows host access. */\n\
+         /* WSAPoll-based epoll shim (Vista+). IOCP fires only on\n\
+          * overlapped I/O completions; non-blocking sockets with\n\
+          * IOCP never trigger GQCS. WSAPoll gives true readiness\n\
+          * notification matching the epoll_wait_one contract. */\n\
+         /* Firewall note — guard prevents duplicate when TCP helpers\n\
+          * already emitted the same message above. */\n\
+         #ifndef VANI_FIREWALL_WARNED\n\
+         #define VANI_FIREWALL_WARNED 1\n\
+         #pragma message(\"vani: TCP/epoll on Windows — if connections fail, check Windows Defender Firewall (Advanced Settings -> Inbound/Outbound Rules).\")\n\
+         #endif\n\
+         #define INTENT_WIN_EPOLL_MAX 64\n\
+         static SOCKET __intent_win_epoll_fds[INTENT_WIN_EPOLL_MAX];\n\
+         static int    __intent_win_epoll_cnt = 0;\n\
          static INTENT_UNUSED int64_t intent_epoll_new(void) {\n\
-         \x20 HANDLE h = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 0);\n\
-         \x20 return (h == NULL) ? -1 : (int64_t)(intptr_t)h;\n\
+         \x20 return 1; /* dummy handle */\n\
          }\n\
          static INTENT_UNUSED int64_t intent_epoll_add_read(int64_t epfd, int64_t fd) {\n\
-         \x20 /* IOCP associates the SOCKET with the completion port;\n\
-          \x20\x20\x20\x20 read readiness comes via posted overlapped recv.\n\
-          \x20\x20\x20\x20 The vāṇी epoll API is event-driven rather than\n\
-          \x20\x20\x20\x20 readiness-driven on Windows — Phase 6c work. */\n\
-         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
-         \x20 HANDLE r = CreateIoCompletionPort((HANDLE)(SOCKET)fd, h, (ULONG_PTR)fd, 0);\n\
-         \x20 return (r == h) ? 0 : -1;\n\
+         \x20 (void)epfd;\n\
+         \x20 if (__intent_win_epoll_cnt >= INTENT_WIN_EPOLL_MAX) return -1;\n\
+         \x20 __intent_win_epoll_fds[__intent_win_epoll_cnt++] = (SOCKET)fd;\n\
+         \x20 return 0;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_epoll_wait_one(int64_t epfd, int64_t timeout_ms) {\n\
-         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
-         \x20 DWORD bytes = 0; ULONG_PTR key = 0; LPOVERLAPPED ov = NULL;\n\
-         \x20 DWORD tmo = (timeout_ms < 0) ? INFINITE : (DWORD)timeout_ms;\n\
-         \x20 BOOL ok = GetQueuedCompletionStatus(h, &bytes, &key, &ov, tmo);\n\
-         \x20 if (!ok && ov == NULL) {\n\
-         \x20   /* WAIT_TIMEOUT vs error; use GetLastError. */\n\
-         \x20   return (GetLastError() == WAIT_TIMEOUT) ? -2 : -1;\n\
+         \x20 (void)epfd;\n\
+         \x20 int n = __intent_win_epoll_cnt;\n\
+         \x20 if (n == 0) {\n\
+         \x20   if (timeout_ms > 0) Sleep((DWORD)timeout_ms);\n\
+         \x20   return -2;\n\
          \x20 }\n\
-         \x20 return (int64_t)key;\n\
+         \x20 WSAPOLLFD pfa[INTENT_WIN_EPOLL_MAX];\n\
+         \x20 for (int i = 0; i < n; i++) {\n\
+         \x20   pfa[i].fd = __intent_win_epoll_fds[i];\n\
+         \x20   pfa[i].events = POLLRDNORM;\n\
+         \x20   pfa[i].revents = 0;\n\
+         \x20 }\n\
+         \x20 INT tmo = (timeout_ms < 0) ? -1 : (INT)timeout_ms;\n\
+         \x20 int rc = WSAPoll(pfa, (ULONG)n, tmo);\n\
+         \x20 if (rc <= 0) return -2;\n\
+         \x20 for (int i = 0; i < n; i++) {\n\
+         \x20   if (pfa[i].revents) return (int64_t)__intent_win_epoll_fds[i];\n\
+         \x20 }\n\
+         \x20 return -2;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_epoll_close(int64_t epfd) {\n\
-         \x20 HANDLE h = (HANDLE)(intptr_t)epfd;\n\
-         \x20 return CloseHandle(h) ? 0 : -1;\n\
+         \x20 (void)epfd;\n\
+         \x20 __intent_win_epoll_cnt = 0;\n\
+         \x20 return 0;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_set_nonblocking(int64_t fd) {\n\
          \x20 u_long nb = 1;\n\
@@ -1454,6 +1472,16 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
          \x20 int n = recv((SOCKET)fd, (char*)intent_tcp_buf, (int)want, 0);\n\
          \x20 if (n >= 0) return (int64_t)n;\n\
          \x20 return (WSAGetLastError() == WSAEWOULDBLOCK) ? -2 : -1;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
+         \x20 int rc = closesocket((SOCKET)fd);\n\
+         \x20 for (int i = 0; i < __intent_win_epoll_cnt; i++) {\n\
+         \x20   if (__intent_win_epoll_fds[i] == (SOCKET)fd) {\n\
+         \x20     __intent_win_epoll_fds[i] = __intent_win_epoll_fds[--__intent_win_epoll_cnt];\n\
+         \x20     break;\n\
+         \x20   }\n\
+         \x20 }\n\
+         \x20 return (rc == 0) ? 0 : -1;\n\
          }\n\
          /* Windows timer: CreateWaitableTimer + thread that posts a\n\
           * completion packet on the user's IOCP when the timer fires.\n\
@@ -1655,7 +1683,7 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
 /// references any tcp_* helper. Thread-local 4KB recv
 /// buffer means concurrent `task` bodies have independent
 /// scratch space.
-fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
+fn emit_intent_tcp_helpers_c(out: &mut String, body: &str, uses_epoll: bool) {
     if !body.contains("intent_tcp_") {
         return;
     }
@@ -1666,6 +1694,17 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
           * Windows host access. */\n\
          #include <string.h>\n\
          #pragma comment(lib, \"ws2_32.lib\")\n\
+         /* vani/Windows: if TCP connections are refused or time out, check\n\
+          * Windows Defender Firewall. Each newly compiled executable needs\n\
+          * explicit network-access approval:\n\
+          *   Control Panel -> Windows Defender Firewall\n\
+          *     -> Advanced Settings -> Inbound/Outbound Rules\n\
+          * For quick testing: allow the executable through the firewall\n\
+          * prompt that appears on first run, or add a rule manually. */\n\
+         #ifndef VANI_FIREWALL_WARNED\n\
+         #define VANI_FIREWALL_WARNED 1\n\
+         #pragma message(\"vani: TCP on Windows — if connections fail, check Windows Defender Firewall (Advanced Settings -> Inbound/Outbound Rules).\")\n\
+         #endif\n\
          static int __intent_winsock_inited = 0;\n\
          static void __intent_winsock_startup(void) {\n\
          \x20 if (__intent_winsock_inited) return;\n\
@@ -1757,11 +1796,20 @@ fn emit_intent_tcp_helpers_c(out: &mut String, body: &str) {
          \x20   off += (size_t)m;\n\
          \x20 }\n\
          \x20 return (int64_t)n;\n\
-         }\n\
-         static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
-         \x20 return (closesocket((SOCKET)fd) == 0) ? 0 : -1;\n\
-         }\n\
-         #else\n\
+         }\n",
+    );
+    // Windows intent_tcp_close: plain version only when epoll helpers are NOT
+    // also being emitted. When uses_epoll is true, emit_intent_epoll_helpers_c
+    // emits the epoll-aware version that removes the fd from __intent_win_epoll_fds.
+    if !uses_epoll {
+        out.push_str(
+            "         static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
+             \x20 return (closesocket((SOCKET)fd) == 0) ? 0 : -1;\n\
+             }\n",
+        );
+    }
+    out.push_str(
+        "         #else\n\
          /* Linux + macOS: shared POSIX socket implementation. The\n\
           * call surface is identical on both — macOS gets the same\n\
           * code as Linux. */\n\

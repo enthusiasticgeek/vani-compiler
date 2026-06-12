@@ -832,12 +832,8 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "async_io.vani",
         "tcp_echo.vani",
         "tcp_multi_echo.vani",
-        // tcp_echo_epoll.vani uses epoll_wait_one which maps to IOCP on
-        // Windows. IOCP requires OVERLAPPED IO and the current shim only
-        // handles non-blocking sockets differently — the epoll_wait_one
-        // loop never unblocks and the process hangs. Skip on Windows until
-        // the IOCP path is made fully functional.
-        #[cfg(not(target_os = "windows"))]
+        // epoll_wait_one now backed by WSAPoll on Windows (true readiness
+        // notification) instead of IOCP — hang fixed, runs on all platforms.
         "tcp_echo_epoll.vani",
         "tcp_echo_state_machine.vani",
         "tcp_echo_async.vani",

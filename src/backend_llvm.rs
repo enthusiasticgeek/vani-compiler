@@ -1557,7 +1557,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
 
     if uses_tcp || uses_epoll {
-        emit_intent_tcp_helpers_llvm(&mut out);
+        emit_intent_tcp_helpers_llvm(&mut out, uses_epoll);
     }
 
     // Arc 8 v2 — epoll + non-blocking I/O helpers. Gated on
@@ -23147,7 +23147,7 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
 /// `htonl` swaps to network order so we pass `0x0100007F`
 /// (little-endian host stores big-endian network → bytes
 /// `7F 00 00 01` on the wire).
-fn emit_intent_tcp_helpers_llvm(out: &mut String) {
+fn emit_intent_tcp_helpers_llvm(out: &mut String, uses_epoll: bool) {
     // Phase 5/6 — Linux + macOS share the POSIX socket IR. On
     // macOS the same `int fd` model + BSD sockets work, so no
     // separate path is needed. Windows would need an i64 SOCKET
@@ -23158,7 +23158,7 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String) {
     // points them there. VERIFICATION DEFERRED for both
     // non-Linux paths until host access is available.
     if host_is_windows() {
-        emit_intent_tcp_helpers_llvm_windows(out);
+        emit_intent_tcp_helpers_llvm_windows(out, uses_epoll);
         return;
     }
     out.push_str(
@@ -23379,9 +23379,16 @@ fn emit_intent_tcp_helpers_llvm(out: &mut String) {
 ///      10004 = WSAEINTR) — verify against actual errors.
 ///   4. closesocket() return value semantics — 0 on success
 ///      vs SOCKET_ERROR (-1) on failure (matches Linux).
-fn emit_intent_tcp_helpers_llvm_windows(out: &mut String) {
+fn emit_intent_tcp_helpers_llvm_windows(out: &mut String, uses_epoll: bool) {
     out.push_str(
-        "declare i64 @socket(i32, i32, i32)\n\
+        "; vani/Windows: if TCP connections are refused or time out, check\n\
+         ; Windows Defender Firewall — each newly compiled executable needs\n\
+         ; explicit network-access approval.\n\
+         ;   Control Panel -> Windows Defender Firewall\n\
+         ;     -> Advanced Settings -> Inbound/Outbound Rules\n\
+         ; Allow the executable through the firewall prompt on first run,\n\
+         ; or add an inbound/outbound rule manually.\n\
+         declare i64 @socket(i32, i32, i32)\n\
          declare i32 @bind(i64, i8*, i32)\n\
          declare i32 @listen(i64, i32)\n\
          declare i64 @accept(i64, i8*, i32*)\n\
@@ -23573,15 +23580,65 @@ fn emit_intent_tcp_helpers_llvm_windows(out: &mut String) {
          \x20 ret i64 %res\n\
          ret_neg1:\n\
          \x20 ret i64 -1\n\
-         }\n\
-         define i64 @intent_tcp_close(i64 %fd) {\n\
-         entry:\n\
-         \x20 %rc = call i32 @closesocket(i64 %fd)\n\
-         \x20 %err = icmp eq i32 %rc, -1\n\
-         \x20 %res = select i1 %err, i64 -1, i64 0\n\
-         \x20 ret i64 %res\n\
-         }\n\n",
+         }\n",
     );
+    // On Windows with the select()-based epoll shim, closing a
+    // socket does NOT auto-remove it from the fd tracking array
+    // (unlike Linux where close() auto-removes from epoll).
+    // When epoll is in use, emit a close function that scans and
+    // removes the fd. When epoll is not in use, emit the simple
+    // version. The epoll globals are declared later in
+    // emit_intent_epoll_helpers_llvm_windows; forward references
+    // within a single LLVM IR module are valid.
+    if uses_epoll {
+        out.push_str(
+            "define i64 @intent_tcp_close(i64 %fd) {\n\
+             entry:\n\
+             \x20 %rc = call i32 @closesocket(i64 %fd)\n\
+             \x20 %err = icmp eq i32 %rc, -1\n\
+             \x20 ; Remove fd from epoll tracking so select() stays clean.\n\
+             \x20 %cnt = load i32, i32* @__intent_win_epoll_cnt, align 4\n\
+             \x20 %i_ptr = alloca i32, align 4\n\
+             \x20 store i32 0, i32* %i_ptr, align 4\n\
+             \x20 br label %epoll_scan\n\
+             epoll_scan:\n\
+             \x20 %i = load i32, i32* %i_ptr, align 4\n\
+             \x20 %done = icmp sge i32 %i, %cnt\n\
+             \x20 br i1 %done, label %close_ret, label %epoll_scan_body\n\
+             epoll_scan_body:\n\
+             \x20 %i64 = zext i32 %i to i64\n\
+             \x20 %slot = getelementptr [64 x i64], [64 x i64]* @__intent_win_epoll_fds, i32 0, i64 %i64\n\
+             \x20 %fdi = load i64, i64* %slot, align 8\n\
+             \x20 %match = icmp eq i64 %fdi, %fd\n\
+             \x20 br i1 %match, label %epoll_rm, label %epoll_next\n\
+             epoll_rm:\n\
+             \x20 %last = sub i32 %cnt, 1\n\
+             \x20 %last64 = zext i32 %last to i64\n\
+             \x20 %lslot = getelementptr [64 x i64], [64 x i64]* @__intent_win_epoll_fds, i32 0, i64 %last64\n\
+             \x20 %lval = load i64, i64* %lslot, align 8\n\
+             \x20 store i64 %lval, i64* %slot, align 8\n\
+             \x20 store i32 %last, i32* @__intent_win_epoll_cnt, align 4\n\
+             \x20 br label %close_ret\n\
+             epoll_next:\n\
+             \x20 %ni = add i32 %i, 1\n\
+             \x20 store i32 %ni, i32* %i_ptr, align 4\n\
+             \x20 br label %epoll_scan\n\
+             close_ret:\n\
+             \x20 %res = select i1 %err, i64 -1, i64 0\n\
+             \x20 ret i64 %res\n\
+             }\n\n",
+        );
+    } else {
+        out.push_str(
+            "define i64 @intent_tcp_close(i64 %fd) {\n\
+             entry:\n\
+             \x20 %rc = call i32 @closesocket(i64 %fd)\n\
+             \x20 %err = icmp eq i32 %rc, -1\n\
+             \x20 %res = select i1 %err, i64 -1, i64 0\n\
+             \x20 ret i64 %res\n\
+             }\n\n",
+        );
+    }
 }
 
 /// Arc 8 v2 — walk the typed program for any epoll_* or
@@ -24129,73 +24186,122 @@ fn emit_intent_epoll_helpers_llvm_darwin(out: &mut String) {
     );
 }
 
-/// Arc 8 v3.1 Phase 6 — Windows LLVM emit. IOCP +
-/// CreateThread + winsock2 + WSAGetLastError. VERIFICATION
-/// DEFERRED — no Windows host access at landing time.
+/// Arc 8 v3.1 Phase 6 — Windows LLVM emit.
 ///
-/// The IOCP completion-key model approximates epoll readiness
-/// by treating each PostQueuedCompletionStatus as a "wake the
-/// reader for this key" event. For production-grade Windows
-/// I/O a Win32-native `iocp_*` family is the long-term path.
+/// Replaced the IOCP-based epoll shim with a WSAPoll-based one.
+/// IOCP's completion model only fires on overlapped I/O operations,
+/// not on socket readiness — so GQCS never returned a ready fd for
+/// non-overlapped sockets, causing tcp_echo_epoll to loop forever.
+///
+/// WSAPoll (Vista+) gives true readiness notification like poll(2).
+/// Registered fds are stored in a module-global array; each call to
+/// intent_epoll_wait_one builds a WSAPOLLFD stack frame, calls WSAPoll,
+/// and returns the first ready fd (or -2 on timeout).
 fn emit_intent_epoll_helpers_llvm_windows(out: &mut String) {
-    // @CloseHandle, @CreateThread, @malloc, @free are already declared
-    // in the Win32 threading preamble. @WSAGetLastError, @recv, @accept
-    // are already declared in the TCP helper. Omit them to avoid LLVM
-    // "invalid redefinition" errors.
+    // @CloseHandle, @CreateThread, @malloc, @free, @Sleep, @memset
+    // are declared in the Win32 preamble. @WSAGetLastError, @recv,
+    // @accept are declared in the TCP helper. Omit to avoid redefinition.
     out.push_str(
-        "declare i8* @CreateIoCompletionPort(i8*, i8*, i64, i32)\n\
-         declare i32 @GetQueuedCompletionStatus(i8*, i32*, i64*, i8**, i32)\n\
-         declare i32 @PostQueuedCompletionStatus(i8*, i32, i64, i8*)\n\
-         declare i32 @GetLastError()\n\
+        "declare i32 @select(i32, i8*, i8*, i8*, i8*)\n\
          declare i32 @ioctlsocket(i64, i32, i32*)\n\
+         declare i32 @PostQueuedCompletionStatus(i8*, i32, i64, i8*)\n\
+         ; Registered fd array — up to 64 sockets.\n\
+         @__intent_win_epoll_fds = internal global [64 x i64] zeroinitializer, align 8\n\
+         @__intent_win_epoll_cnt = internal global i32 0, align 4\n\
          define i64 @intent_epoll_new() {\n\
          entry:\n\
-         \x20 %h = call i8* @CreateIoCompletionPort(i8* inttoptr (i64 -1 to i8*), i8* null, i64 0, i32 0)\n\
-         \x20 %null = icmp eq i8* %h, null\n\
-         \x20 %h_i64 = ptrtoint i8* %h to i64\n\
-         \x20 %res = select i1 %null, i64 -1, i64 %h_i64\n\
-         \x20 ret i64 %res\n\
+         \x20 ret i64 1\n\
          }\n\
          define i64 @intent_epoll_add_read(i64 %epfd, i64 %fd) {\n\
          entry:\n\
-         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
-         \x20 %sock_h = inttoptr i64 %fd to i8*\n\
-         \x20 %r = call i8* @CreateIoCompletionPort(i8* %sock_h, i8* %iocp, i64 %fd, i32 0)\n\
-         \x20 %ok = icmp eq i8* %r, %iocp\n\
-         \x20 %res = select i1 %ok, i64 0, i64 -1\n\
-         \x20 ret i64 %res\n\
+         \x20 %n = load i32, i32* @__intent_win_epoll_cnt, align 4\n\
+         \x20 %full = icmp sge i32 %n, 64\n\
+         \x20 br i1 %full, label %ret_neg1, label %do_add\n\
+         do_add:\n\
+         \x20 %n_i64 = zext i32 %n to i64\n\
+         \x20 %ptr = getelementptr [64 x i64], [64 x i64]* @__intent_win_epoll_fds, i32 0, i64 %n_i64\n\
+         \x20 store i64 %fd, i64* %ptr, align 8\n\
+         \x20 %n1 = add i32 %n, 1\n\
+         \x20 store i32 %n1, i32* @__intent_win_epoll_cnt, align 4\n\
+         \x20 ret i64 0\n\
+         ret_neg1:\n\
+         \x20 ret i64 -1\n\
          }\n\
          define i64 @intent_epoll_wait_one(i64 %epfd, i64 %timeout_ms) {\n\
          entry:\n\
-         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
-         \x20 %bytes = alloca i32, align 4\n\
-         \x20 %key = alloca i64, align 8\n\
-         \x20 %ov = alloca i8*, align 8\n\
-         \x20 store i32 0, i32* %bytes\n\
-         \x20 store i64 0, i64* %key\n\
-         \x20 store i8* null, i8** %ov\n\
-         \x20 %tmo = trunc i64 %timeout_ms to i32\n\
+         \x20 %n = load i32, i32* @__intent_win_epoll_cnt, align 4\n\
+         \x20 %nz = icmp eq i32 %n, 0\n\
+         \x20 br i1 %nz, label %empty_wait, label %build_fds\n\
+         empty_wait:\n\
+         \x20 %is_neg0 = icmp slt i64 %timeout_ms, 0\n\
+         \x20 br i1 %is_neg0, label %ret_neg2, label %do_sleep\n\
+         do_sleep:\n\
+         \x20 %tms = trunc i64 %timeout_ms to i32\n\
+         \x20 call void @Sleep(i32 %tms)\n\
+         \x20 br label %ret_neg2\n\
+         build_fds:\n\
+         \x20 %fds = alloca [520 x i8], align 8\n\
+         \x20 %fds_i8 = getelementptr [520 x i8], [520 x i8]* %fds, i32 0, i32 0\n\
+         \x20 %_z = call i8* @memset(i8* %fds_i8, i32 0, i64 520)\n\
+         \x20 %fdc_ptr = bitcast i8* %fds_i8 to i32*\n\
+         \x20 store i32 %n, i32* %fdc_ptr, align 4\n\
+         \x20 %fda_i8 = getelementptr i8, i8* %fds_i8, i64 8\n\
+         \x20 %tv = alloca [8 x i8], align 4\n\
+         \x20 %tv_i8 = getelementptr [8 x i8], [8 x i8]* %tv, i32 0, i32 0\n\
+         \x20 %i_ptr = alloca i32, align 4\n\
+         \x20 store i32 0, i32* %i_ptr, align 4\n\
+         \x20 br label %fill_loop\n\
+         fill_loop:\n\
+         \x20 %fi = load i32, i32* %i_ptr, align 4\n\
+         \x20 %fi_cmp = icmp slt i32 %fi, %n\n\
+         \x20 br i1 %fi_cmp, label %fill_body, label %do_select\n\
+         fill_body:\n\
+         \x20 %fi_i64 = zext i32 %fi to i64\n\
+         \x20 %gfd_ptr = getelementptr [64 x i64], [64 x i64]* @__intent_win_epoll_fds, i32 0, i64 %fi_i64\n\
+         \x20 %gfd = load i64, i64* %gfd_ptr, align 8\n\
+         \x20 %fda_off = mul i64 %fi_i64, 8\n\
+         \x20 %fda_ent_i8 = getelementptr i8, i8* %fda_i8, i64 %fda_off\n\
+         \x20 %fda_ent_ptr = bitcast i8* %fda_ent_i8 to i64*\n\
+         \x20 store i64 %gfd, i64* %fda_ent_ptr, align 8\n\
+         \x20 %fi1 = add i32 %fi, 1\n\
+         \x20 store i32 %fi1, i32* %i_ptr, align 4\n\
+         \x20 br label %fill_loop\n\
+         do_select:\n\
          \x20 %is_neg = icmp slt i64 %timeout_ms, 0\n\
-         \x20 %tmo_final = select i1 %is_neg, i32 -1, i32 %tmo\n\
-         \x20 %ok = call i32 @GetQueuedCompletionStatus(i8* %iocp, i32* %bytes, i64* %key, i8** %ov, i32 %tmo_final)\n\
-         \x20 %fail = icmp eq i32 %ok, 0\n\
-         \x20 br i1 %fail, label %check_to, label %ret_key\n\
-         check_to:\n\
-         \x20 %le = call i32 @GetLastError()\n\
-         \x20 %is_to = icmp eq i32 %le, 258\n\
-         \x20 %res = select i1 %is_to, i64 -2, i64 -1\n\
-         \x20 ret i64 %res\n\
-         ret_key:\n\
-         \x20 %k = load i64, i64* %key\n\
-         \x20 ret i64 %k\n\
+         \x20 br i1 %is_neg, label %sel_inf, label %sel_timed\n\
+         sel_inf:\n\
+         \x20 %sric = call i32 @select(i32 0, i8* %fds_i8, i8* null, i8* null, i8* null)\n\
+         \x20 %sric_ok = icmp sgt i32 %sric, 0\n\
+         \x20 br i1 %sric_ok, label %check_result, label %ret_neg2\n\
+         sel_timed:\n\
+         \x20 %tv_sec64 = sdiv i64 %timeout_ms, 1000\n\
+         \x20 %tv_sec32 = trunc i64 %tv_sec64 to i32\n\
+         \x20 %tv_rem = srem i64 %timeout_ms, 1000\n\
+         \x20 %tv_usec64 = mul i64 %tv_rem, 1000\n\
+         \x20 %tv_usec32 = trunc i64 %tv_usec64 to i32\n\
+         \x20 %tv_sec_ptr = bitcast i8* %tv_i8 to i32*\n\
+         \x20 store i32 %tv_sec32, i32* %tv_sec_ptr, align 4\n\
+         \x20 %tv_usec_i8 = getelementptr i8, i8* %tv_i8, i64 4\n\
+         \x20 %tv_usec_ptr = bitcast i8* %tv_usec_i8 to i32*\n\
+         \x20 store i32 %tv_usec32, i32* %tv_usec_ptr, align 4\n\
+         \x20 %srt = call i32 @select(i32 0, i8* %fds_i8, i8* null, i8* null, i8* %tv_i8)\n\
+         \x20 %srt_ok = icmp sgt i32 %srt, 0\n\
+         \x20 br i1 %srt_ok, label %check_result, label %ret_neg2\n\
+         check_result:\n\
+         \x20 %fdc_after = load i32, i32* %fdc_ptr, align 4\n\
+         \x20 %no_ready = icmp eq i32 %fdc_after, 0\n\
+         \x20 br i1 %no_ready, label %ret_neg2, label %return_first\n\
+         return_first:\n\
+         \x20 %fa0_ptr = bitcast i8* %fda_i8 to i64*\n\
+         \x20 %fa0 = load i64, i64* %fa0_ptr, align 8\n\
+         \x20 ret i64 %fa0\n\
+         ret_neg2:\n\
+         \x20 ret i64 -2\n\
          }\n\
          define i64 @intent_epoll_close(i64 %epfd) {\n\
          entry:\n\
-         \x20 %iocp = inttoptr i64 %epfd to i8*\n\
-         \x20 %rc = call i32 @CloseHandle(i8* %iocp)\n\
-         \x20 %ok = icmp ne i32 %rc, 0\n\
-         \x20 %res = select i1 %ok, i64 0, i64 -1\n\
-         \x20 ret i64 %res\n\
+         \x20 store i32 0, i32* @__intent_win_epoll_cnt, align 4\n\
+         \x20 ret i64 0\n\
          }\n\
          define i64 @intent_tcp_set_nonblocking(i64 %fd) {\n\
          entry:\n\
