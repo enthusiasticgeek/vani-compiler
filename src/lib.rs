@@ -41085,6 +41085,29 @@ fn main() -> i64 {
         compile(source).expect("pure fn with arithmetic must compile");
     }
 
+    // ── Ref return: three-parameter rejection ────────────────────────────────
+
+    #[test]
+    fn ref_return_three_ref_params_rejects() {
+        // Single-ref-param elision rule: when three ref params are present
+        // the compiler cannot infer which one the returned ref borrows from.
+        // Must reject with the same "N reference parameters" diagnostic as
+        // the two-param case (l4_c_phase1_multi_ref_params_return_rejected).
+        let source = r#"
+            fn pick(a: ref i64, b: ref i64, c: ref i64) -> ref i64 {
+              return a;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("3-ref-param return must reject");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("3 reference parameters") || combined.contains("reference parameter"),
+            "expected multi-ref-param diagnostic, got: {}",
+            combined
+        );
+    }
+
     // ── OwnedStr match-arm type mismatch (moved earlier to group OwnedStr tests) ──
 
     #[test]
@@ -41112,6 +41135,48 @@ fn main() -> i64 {
             any_type_diag,
             "expected a type-mismatch diagnostic for arm Str vs OwnedStr, got: {:?}",
             errs
+        );
+    }
+
+    #[test]
+    fn ownedstr_three_arm_match_all_concat_workaround_compiles() {
+        // Three-arm match: every arm must produce OwnedStr, not Str.
+        // The workaround is `literal + ""` on plain-string arms and
+        // `s + ""` on binding arms. Mixing even one bare `""` arm
+        // causes a Str/OwnedStr mismatch.
+        let source = r#"
+            enum Status { Ok(OwnedStr), Warn(OwnedStr), Err }
+            fn describe(s: Status) -> OwnedStr {
+              return match s {
+                Status.Ok(msg)   then msg + "",
+                Status.Warn(msg) then "warning: " + msg,
+                Status.Err       then "error" + "",
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("3-arm match with all-OwnedStr arms must compile");
+    }
+
+    #[test]
+    fn ownedstr_bare_literal_arm_causes_type_mismatch_when_other_arm_is_ownedstr() {
+        // If any arm produces OwnedStr (e.g. via `+ ""`), then a bare
+        // string literal arm (`""`) produces Str and must be rejected.
+        let source = r#"
+            enum Tag { A, B }
+            fn label(t: Tag) -> OwnedStr {
+              return match t {
+                Tag.A then "alpha" + "",
+                Tag.B then "beta",
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source)
+            .expect_err("bare string literal arm must cause Str/OwnedStr mismatch");
+        assert!(
+            !errs.is_empty(),
+            "expected a type diagnostic for mixed Str/OwnedStr arms, got none"
         );
     }
 
