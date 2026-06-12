@@ -24229,11 +24229,12 @@ fn emit_intent_epoll_helpers_llvm_windows(out: &mut String) {
          \x20 %want = select i1 %too_big, i64 4096, i64 %max\n\
          \x20 %want_i32 = trunc i64 %want to i32\n\
          \x20 %buf_ptr = getelementptr [4096 x i8], [4096 x i8]* @intent_tcp_buf, i32 0, i32 0\n\
-         \x20 %n = call i64 @recv(i64 %fd, i8* %buf_ptr, i32 %want_i32, i32 0)\n\
-         \x20 %neg_n = icmp slt i64 %n, 0\n\
-         \x20 br i1 %neg_n, label %check_wb, label %ret_n\n\
+         \x20 %n_i32 = call i32 @recv(i64 %fd, i8* %buf_ptr, i32 %want_i32, i32 0)\n\
+         \x20 %n_i64 = sext i32 %n_i32 to i64\n\
+         \x20 %err = icmp eq i32 %n_i32, -1\n\
+         \x20 br i1 %err, label %check_wb, label %ret_n\n\
          ret_n:\n\
-         \x20 ret i64 %n\n\
+         \x20 ret i64 %n_i64\n\
          check_wb:\n\
          \x20 %le = call i32 @WSAGetLastError()\n\
          \x20 %is_wb = icmp eq i32 %le, 10035\n\

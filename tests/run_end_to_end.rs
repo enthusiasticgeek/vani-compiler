@@ -845,26 +845,14 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "echo_fall_through.vani",
         "echo_nested_if.vani",
         "echo_anf_lift.vani",
-        // echo_loop and echo_loop_break use the async state-machine with
-        // epoll_wait_one. On Windows the IOCP shim for io_recv_async
-        // produces wrong byte-counts in the LLVM path (returns 0x200000002
-        // instead of 4). Skip until the Windows async-IO lowering is fixed.
-        #[cfg(not(target_os = "windows"))]
         "echo_loop.vani",
-        #[cfg(not(target_os = "windows"))]
         "echo_loop_break.vani",
-        // async_showcase combines multiple async patterns; the LLVM path
-        // diverges from C on Windows for the same IOCP reasons.
-        #[cfg(not(target_os = "windows"))]
         "async_showcase.vani",
         "echo_match.vani",
         "echo_match_suspend.vani",
         "echo_match_b_s_f.vani",
         "echo_match_variant.vani",
         "echo_match_binding.vani",
-        // echo_match_stress exercises the full state-machine stress
-        // pattern with epoll_wait_one; LLVM diverges from C on Windows.
-        #[cfg(not(target_os = "windows"))]
         "echo_match_stress.vani",
         "echo_p3a_nonint_locals.vani",
         "echo_p3b_str_local.vani",
@@ -2706,27 +2694,22 @@ fn run_strings_example_prints_each_greeting() {
     );
 }
 
-// ── Windows IOCP async mismatch documentation ─────────────────────────────
+// ── Windows IOCP recv ABI fix (2026-06-12) ────────────────────────────────
 //
-// echo_loop.vani and related async-state-machine examples are skipped from
-// the C vs LLVM parity sweep on Windows (see llvm_backend_run_produces_same_output_as_c).
-// Root cause: the IOCP shim for io_recv_async in the LLVM backend returns a
-// packed 64-bit value (0x200000002) instead of the byte count (4), causing
-// output divergence between C and LLVM backends.
+// Root cause of the former mismatch: emit_intent_epoll_helpers_llvm_windows
+// called @recv as `call i64 @recv(...)` but @recv is declared `i32` on
+// Windows. The ABI mismatch left garbage in the high 32 bits of rax,
+// producing 0x200000002 instead of 4. Fixed by using `call i32 @recv` +
+// `sext i32 to i64` in the IOCP recv_nb helper.
 //
-// The test below is #[ignore]d so it never blocks CI, but keeping it as an
-// explicit test (rather than a comment) means `cargo test -- --ignored` will
-// reproduce the failure on Windows and confirm the mismatch is still present.
-// When IOCP overlapped IO is wired up (TODO.md D.1), remove the #[ignore] and
-// the #[cfg(not(...))] guard from the parity test instead.
+// The tests below confirm C and LLVM produce identical output on Windows.
 
 #[test]
 #[cfg(target_os = "windows")]
-#[ignore = "IOCP async mismatch: LLVM io_recv_async returns packed 0x200000002 instead of byte count; fix tracked in TODO.md D.1"]
 fn echo_loop_llvm_matches_c_on_windows() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let example = format!("{}/examples/echo_loop.vani", manifest_dir);
+    let example = format!("{}/examples/language/english/echo_loop.vani", manifest_dir); // path confirmed correct
 
     let c_out = Command::new(binary)
         .args(["run", "--backend=c", &example])
@@ -2742,7 +2725,6 @@ fn echo_loop_llvm_matches_c_on_windows() {
     assert_eq!(
         c_stdout, llvm_stdout,
         "echo_loop.vani stdout diverges between C and LLVM on Windows\n\
-         known mismatch: LLVM returns 0x200000002 where C returns 4\n\
          C:    {c_stdout:?}\n\
          LLVM: {llvm_stdout:?}"
     );
