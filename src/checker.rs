@@ -5167,13 +5167,22 @@ fn hoist_impls_into_functions(
         // Validate exhaustive coverage.
         for iface_method in &iface.methods {
             if !covered.contains(&iface_method.name) {
-                diagnostics.push(Diagnostic::new(
-                    imp.span,
-                    format!(
-                        "`implement {} for {}` is missing the interface method '{}'",
-                        imp.interface_name, type_name, iface_method.name
+                diagnostics.push(
+                    Diagnostic::new(
+                        imp.span,
+                        format!(
+                            "`implement {} for {}` is missing the interface method '{}'",
+                            imp.interface_name, type_name, iface_method.name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::iface_impl_missing_method(
+                            &iface_method.name,
+                            &imp.interface_name,
+                            &type_name,
+                        ),
                     ),
-                ));
+                );
             }
         }
     }
@@ -14540,13 +14549,20 @@ fn check_expr(
                         // mutation between `let v = try X;` and
                         // the final return.
                         let Some(info) = env.lookup(rname).cloned() else {
-                            diagnostics.push(Diagnostic::new(
-                                s.span(),
-                                format!(
-                                    "reassignment to unknown binding '{}'",
-                                    rname
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    s.span(),
+                                    format!(
+                                        "reassignment to unknown binding '{}'",
+                                        rname
+                                    ),
+                                )
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::assign_to_unknown_variable(
+                                        rname,
+                                    ),
                                 ),
-                            ));
+                            );
                             continue;
                         };
                         let raw = check_expr(rhs, env, signatures, diagnostics);
@@ -28350,13 +28366,20 @@ fn verify_pure_body(
                 } else if let Some(sig) = signatures.get(name) {
                     if !sig.is_pure {
                         let marker = if sig.is_extern { "pure extern" } else { "pure fn" };
-                        diagnostics.push(Diagnostic::new(
-                            expr.span,
-                            format!(
-                                "{} cannot call non-pure function '{}'; mark it `{}` or remove the call",
-                                context, name, marker
+                        diagnostics.push(
+                            Diagnostic::new(
+                                expr.span,
+                                format!(
+                                    "{} cannot call non-pure function '{}'; mark it `{}` or remove the call",
+                                    context, name, marker
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::pure_fn_calls_non_pure(
+                                    name, context,
+                                ),
                             ),
-                        ));
+                        );
                     }
                 }
                 for a in args {

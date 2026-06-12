@@ -41483,5 +41483,47 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_iface_impl_missing_method_mentions_implement_block() {
+        let source = r#"
+            interface Greet { fn hello(self: ref Self) -> i64; }
+            struct Cat { }
+            implement Greet for Cat { }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("missing method hello must fail");
+        let has_impl_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| s.contains("implement") || s.contains("hello"))
+        });
+        assert!(
+            has_impl_hint,
+            "elaboration should mention 'implement' block or method name, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_pure_fn_calls_non_pure_mentions_pure_qualifier() {
+        let source = r#"
+            fn side_effect_fn(x: i64) -> i64 {
+              print x;
+              return x;
+            }
+            pure fn compute(x: i64) -> i64 {
+              return side_effect_fn(x);
+            }
+            fn main() -> i64 { return compute(1); }
+        "#;
+        let errs = compile(source).expect_err("pure fn calling non-pure must fail");
+        let has_pure_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| s.contains("pure") || s.contains("side effect"))
+        });
+        assert!(
+            has_pure_hint,
+            "elaboration should explain pure fn constraint, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 

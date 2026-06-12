@@ -761,3 +761,49 @@ pub fn for_over_non_iterable(ty: &str) -> Vec<String> {
             .to_string(),
     ]
 }
+
+/// `implement Iface for T` is missing a required interface method.
+pub fn iface_impl_missing_method(method: &str, iface: &str, ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "The `implement {} for {}` block does not provide \
+             a body for method `{}`.",
+            iface, ty, method,
+        ),
+        "Every method listed in the `interface` definition must \
+         have a concrete body in the `implement` block — there \
+         are no default implementations in v1."
+            .to_string(),
+        format!(
+            "Add `fn {}(self: ref {}, …) -> … {{ … }}` inside \
+             the `implement {} for {}` block. The signature must \
+             match the interface declaration exactly (parameter \
+             types, return type).",
+            method, ty, iface, ty,
+        ),
+    ]
+}
+
+/// `pure fn` or `pure extern` calling a non-pure function.
+pub fn pure_fn_calls_non_pure(callee: &str, context_kind: &str) -> Vec<String> {
+    vec![
+        format!(
+            "`{}` calls `{}`, which is not declared `pure`.",
+            context_kind, callee,
+        ),
+        "A `pure fn` may only call other `pure fn`s. Calling a \
+         non-pure function would introduce hidden side effects, \
+         breaking the guarantees that let vāṇī use `pure fn` \
+         inside `requires` / `ensures` clauses and parallel-for \
+         bodies."
+            .to_string(),
+        format!(
+            "Either (a) mark `{}` as `pure fn` if it genuinely \
+             has no side effects, (b) remove the call and \
+             compute the value another way, or (c) remove the \
+             `pure` qualifier from the calling function if it \
+             legitimately needs the side effect.",
+            callee,
+        ),
+    ]
+}
