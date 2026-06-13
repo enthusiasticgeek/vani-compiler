@@ -11558,6 +11558,144 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn big_o_binary_search_is_log_n() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn just_bsearch(xs: Vec<i64>, key: i64) -> i64 {
+              let result: Option<i64> = binary_search(ref xs, key);
+              return match result {
+                Option.Some(i) then i,
+                Option.None then 0,
+              };
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "just_bsearch").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Logarithmic);
+    }
+
+    #[test]
+    fn big_o_binary_search_in_loop_is_n_log_n() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn search_in_loop(key: i64) -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let n: i64 = len(xs) as i64;
+              let i: i64 = 0;
+              while i < n {
+                let _ = binary_search(ref xs, key);
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "search_in_loop").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::NLogN);
+    }
+
+    #[test]
+    fn big_o_sort_in_loop_is_n_squared_log_n() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn sort_in_loop(n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                let ys: Vec<i64> = vec(3, 1, 2);
+                let _ = sort(mut ref ys);
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "sort_in_loop").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::PolynomialLog(2));
+    }
+
+    #[test]
+    fn big_o_three_nested_loops_is_cubic() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn triple(n: i64) -> i64 {
+              let i: i64 = 0;
+              while i < n {
+                let j: i64 = 0;
+                while j < n {
+                  let k: i64 = 0;
+                  while k < n {
+                    k = k + 1;
+                  }
+                  j = j + 1;
+                }
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "triple").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Polynomial(3));
+    }
+
+    #[test]
+    fn big_o_foriter_over_vec_is_linear() {
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn accumulate(xs: Vec<i64>) -> i64 {
+              let total: i64 = 0;
+              for x in xs {
+                total = total + x;
+              }
+              return total;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "accumulate").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::Linear);
+    }
+
+    #[test]
+    fn big_o_cross_fn_logn_callee_in_loop_is_n_log_n() {
+        use crate::big_o::{annotate_program, BigO, BigOMode};
+        let source = r#"
+            fn log_helper(xs: Vec<i64>, key: i64) -> Option<i64> {
+              return binary_search(ref xs, key);
+            }
+            fn search_scanner(key: i64) -> i64 {
+              let n: i64 = 100;
+              let i: i64 = 0;
+              while i < n {
+                let _ = log_helper(vec(1, 2, 3), key);
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let annotations = annotate_program(&checked.ir, BigOMode::Force);
+        let scanner = annotations.iter()
+            .find(|(n, _)| n == "search_scanner")
+            .expect("search_scanner in annotations");
+        assert_eq!(
+            scanner.1, BigO::NLogN,
+            "O(log n) callee in O(n) loop must propagate to O(n log n), got: {}",
+            scanner.1,
+        );
+    }
+
+    #[test]
     fn elaboration_renders_after_move_after_use_diagnostic() {
         // User-direction item (2026-06-08): the move-after-use
         // diagnostic carries a 3-step elaboration explaining
