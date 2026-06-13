@@ -12,43 +12,25 @@
 
 ## 📋 NEXT SESSION HANDOFF — 2026-06-13
 
-**State**: Error-message elaboration complete — 597/597 `Diagnostic::new` sites in
-`src/checker.rs` now carry `.with_elaboration(...)` WHAT/WHY/HOW guidance.
-60+ families in `src/diagnostic_elaborations.rs`. Clean build; all tests pass.
-Last commit: `326ccad`.
+**State**: Edge tests + elaboration JSON integration tests complete.
+597/597 elaboration sites; all 5 JSON elaboration CLI tests pass. Last commit: `8eb597b`.
 
 ### Pick up in this order
 
-#### 1. Edge tests (low effort, ~2–4h, no dependencies — do first)
+#### ~~1. Edge tests~~ ✅ DONE (commit b265ace)
 
-Each is a `#[test]` in `src/lib.rs` unless noted. These document known-good
-behaviour and prevent silent regressions.
+All edge tests written: generic monomorphization (3), OwnedStr match-arm type
+uniformity (3), ref/lifetime (3), Windows IOCP `#[ignore]` stub in
+`tests/run_end_to_end.rs`.
 
-**Generic monomorphization edge cases:**
-- `nested_generic_three_level_chain_fails` — `h<T>` → `g<T>` → `f<T>`; only `h<i64>` called from non-generic; expect compile error mentioning the un-specialized inner fn. (2-level already tested; add 3-level.)
-- `nested_generic_nongeneric_bridge_works` — `h<T>` calls non-generic `bridge_i64()` which calls `f<i64>`; should compile and run, the non-generic bridge provides the specialization.
-- `nested_generic_same_type_two_call_sites` — `f<i64>` called from both `main()` and `g<T>`; should compile because the non-generic call site provides the specialization.
+#### ~~2. Elaboration integration tests~~ ✅ DONE (commit 8eb597b)
 
-**OwnedStr / match-arm type uniformity:**
-- `ownedstr_all_arms_must_produce_same_type` — one arm produces OwnedStr (`s + ""`), other produces Str literal; must be a type error.
-- `ownedstr_nested_match_concat_workaround` — nested match where inner match produces OwnedStr; outer arms must all agree on OwnedStr.
-
-**Ref / lifetime edge cases:**
-- `ref_return_three_ref_params_rejects` — fn with three ref params trying to return a ref; single-ref-param elision rule must reject.
-- `vec_ref_push_after_source_borrow_ends` — borrow `x` as `ref T`, push into vec, borrow ends; then `mut ref x` + mutate; should compile.
-- `struct_field_ref_lifetime_survives_method_call` — struct holding `ref T` field; call a method reading the field; struct stays valid for ref's scope.
-
-**Async-TCP Windows documentation stub:**
-- Add a `#[cfg(target_os = "windows")]` `#[ignore]` test variant for `echo_loop_windows_byte_count_matches_c` that documents the IOCP mismatch so it isn't silently forgotten.
-
-#### 2. Elaboration integration tests (~1–2h, no dependencies)
-
-The 597 elaboration sites have no integration-level tests verifying that
-elaboration text actually appears in `vanic check --json` output. Add
-5–10 `#[test]` cases in `src/lib.rs` (or `tests/`) that compile a
-short snippet that must fail, then assert `.elaboration` is non-empty
-in the JSON diagnostic. Good first targets: `type_mismatch`,
-`unknown_variable`, `move_after_use`, `wrong_arity`, `iface_not_impl`.
+5 CLI JSON integration tests in `tests/run_end_to_end.rs`:
+`json_elaboration_type_mismatch_appears_in_output`,
+`json_elaboration_unknown_variable_appears_in_output`,
+`json_elaboration_wrong_arity_appears_in_output`,
+`json_elaboration_iface_not_impl_appears_in_output`,
+`json_elaboration_pure_fn_effect_appears_in_output`. All pass.
 
 #### 3. TUT-5 — GitHub Pages deploy (~4–6h, depends on nothing)
 
