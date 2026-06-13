@@ -19,7 +19,7 @@ goal is **code that reads like speech, not punctuation**.
 > was drafted from reference grammars + loan-word patterns and
 > may sound wrong, formal, or archaic to fluent users. A
 > grammar-consultant pass for native-speaker review is queued
-> in [TODO.md](https://github.com/.../TODO.md). If you read any
+> in [TODO.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md). If you read any
 > of these languages natively and find a keyword that's off,
 > please open an issue or PR. Until that pass lands, treat the
 > non-Devanagari-Indo-Aryan dialects as *technical proofs-of-
@@ -27,7 +27,7 @@ goal is **code that reads like speech, not punctuation**.
 
 These tutorials walk you through the language progressively.
 The 155 English examples and 22 GoF design-pattern examples
-that live in [`examples/language/english/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english)
+that live in [`examples/language/english/`](https://github.com/enthusiasticgeek/vani-compiler/tree/main/examples/language/english)
 are great reference, but they don't teach progressively — they
 assume you already know the surface. The lessons here funnel
 you from `Hello, World` through structs, generics, SMT proofs,
@@ -47,9 +47,9 @@ Each lesson has:
    limitations, where relevant).
 5. **A challenge** — a small extension to write yourself.
 
-You'll want vāṇी installed locally. See
-[INSTALL.md](https://github.com/anthropics/claude-code/blob/main/INSTALL.md)
-for per-platform instructions (Linux / macOS / Windows + WSL2).
+You'll want vāṇी installed locally. See the
+**[Installation page](installation.md)**
+for step-by-step instructions (Linux / macOS / Windows + WSL2).
 
 ## Tracks
 
