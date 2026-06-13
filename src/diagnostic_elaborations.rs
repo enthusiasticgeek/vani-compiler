@@ -1204,3 +1204,239 @@ pub fn enum_not_declared(name: &str) -> Vec<String> {
         ),
     ]
 }
+
+pub fn struct_field_error(struct_name: &str, field_name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "A field in struct '{}' violates a v1 layout restriction.",
+            struct_name,
+        ),
+        "vāṇी v1 enforces field-type constraints on struct declarations to \
+         ensure deterministic drop semantics. Non-Copy types that lack a \
+         generated drop path, duplicate field names, or too many fields all \
+         trigger this diagnostic."
+            .to_string(),
+        format!(
+            "Check the field '{}' and the struct layout rules in the docs. \
+             Use only supported field types (Copy scalars, OwnedStr, \
+             Vec<T>, [T; N] of Copy, Task, Atomic<T>, Mutex<T>, \
+             Channel<T, N>, Box<T>). Rename or remove duplicates.",
+            field_name,
+        ),
+    ]
+}
+
+pub fn reserved_type_name(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "'{}' is a built-in type name reserved by the vāṇी runtime.",
+            name,
+        ),
+        "The compiler hard-codes this identifier as a built-in type; \
+         any struct, enum, or alias with the same name would shadow the \
+         built-in in confusing ways. The type checker rejects the \
+         conflict early to prevent hard-to-diagnose downstream errors."
+            .to_string(),
+        format!(
+            "Rename the declaration to something that doesn't clash with \
+             the built-in name '{}'. For example, append a domain qualifier: \
+             `My{}`, `App{}`, or a more specific name.",
+            name, name, name,
+        ),
+    ]
+}
+
+pub fn non_generic_where_clause(fn_name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Function '{}' has a `where` clause but no type parameters.",
+            fn_name,
+        ),
+        "`where T is Iface` bounds constrain generic type parameters — \
+         they have no meaning when the function is not generic. \
+         vāṇी rejects spurious where-clauses to prevent silent \
+         over-specification."
+            .to_string(),
+        format!(
+            "Either add type parameters to '{}' (e.g. `fn {}[T](...)`) \
+             and keep the where-clause, or remove the where-clause entirely \
+             if the function is meant to be concrete.",
+            fn_name, fn_name,
+        ),
+    ]
+}
+
+pub fn proof_failed() -> Vec<String> {
+    vec![
+        "A `prove` statement could not be verified — the expression is always false or the SMT solver found a counterexample.".to_string(),
+        "vāṇī's `prove` statement is a compile-time assertion that an expression holds for \
+         all inputs satisfying the current `requires` preconditions. The compiler uses an \
+         SMT solver to verify this; if the expression evaluates to a constant `false` or \
+         the solver returns UNSAT, the proof fails."
+            .to_string(),
+        "Check the boolean expression in the `prove` statement and your `requires` \
+         preconditions. Ensure the expression can be true under the preconditions. \
+         If you need to prove something conditional, add the missing precondition to \
+         `requires`, or break the proof into smaller steps with intermediate `assert` \
+         statements."
+            .to_string(),
+    ]
+}
+
+pub fn move_nested_field() -> Vec<String> {
+    vec![
+        "Moving a non-Copy value out of a nested field path (`obj.inner.field`) is not yet supported.".to_string(),
+        "vāṇī v1 tracks moved fields one level deep. A nested move like `obj.inner.field` \
+         would require tracking that `obj.inner` is partially moved, which is not \
+         implemented yet. Allowing it would risk a double-free at the outer struct's drop."
+            .to_string(),
+        "Move the intermediate struct out first: `let inner = obj.inner;` then \
+         `let field = inner.field;`. This two-step sequence is fully supported and \
+         keeps the ownership chain explicit."
+            .to_string(),
+    ]
+}
+
+pub fn raw_ptr_escape() -> Vec<String> {
+    vec![
+        "A raw pointer or ArenaRef derived from a stack-local cannot escape the current function frame.".to_string(),
+        "vāṇī's Layer 1 safety analysis tracks raw pointers and ArenaRefs that originate \
+         from stack-local storage. When such a pointer is returned, stored into a heap \
+         container (Vec slot, struct field), or passed in a way that outlives the frame, \
+         the pointed-to storage is already freed — creating a dangling pointer. The \
+         compiler rejects these patterns at compile time."
+            .to_string(),
+        "Pass the value downward to a function that only borrows it and doesn't store it \
+         beyond the call. For long-lived references, use `Handle<T>` obtained from a \
+         `Pool<T>` allocation (Layer 2 of `unsafe.md`). Alternatively, heap-allocate the \
+         value with `Box<T>` so its lifetime is not tied to the frame."
+            .to_string(),
+    ]
+}
+
+pub fn task_affine(task_name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Task handle '{}' violates the affine (use-exactly-once) ownership rule.",
+            task_name,
+        ),
+        "Every `task` handle spawned in a block must be consumed by exactly one \
+         `join` in the same block, after the spawn. Spawning twice, joining without \
+         spawning, joining twice, or leaving a handle unjoined all break the affine \
+         discipline that ensures every task completes before the enclosing scope exits."
+            .to_string(),
+        format!(
+            "Ensure '{}' is spawned exactly once and joined exactly once, in block order. \
+             Cross-block joins are not supported in v1 — the spawn and join must appear \
+             in the same statement list. Remove duplicate spawns or joins as appropriate.",
+            task_name,
+        ),
+    ]
+}
+
+pub fn move_in_loop(var: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Variable '{}' has a different move/ownership state at loop entry versus loop exit.",
+            var,
+        ),
+        "vāṇī's ownership checker requires that non-Copy bindings have the same move state on \
+         every path through a loop body. If the variable is moved on one iteration, it would be \
+         unavailable on the next, making the loop unsound."
+            .to_string(),
+        format!(
+            "Either consume '{}' consistently on every path through the loop (rebind or move \
+             it the same way on both the taken and not-taken branches), or move it out of the \
+             loop entirely. If you need a fresh value each iteration, rebind it with `let` \
+             inside the loop body.",
+            var,
+        ),
+    ]
+}
+
+pub fn contract_unsatisfiable(fn_name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Function '{}' has contradictory `requires` clauses — the preconditions can never all be true simultaneously.",
+            fn_name,
+        ),
+        "vāṇī's SMT verifier checks that the conjunction of all `requires` conditions is \
+         satisfiable. If the solver returns UNSAT, no valid input can reach the function \
+         body — every proof inside it is vacuously true and the call site is unreachable. \
+         This is almost always a logic error in the contracts."
+            .to_string(),
+        format!(
+            "Review the `requires` clauses on '{}' and remove contradictory conditions. \
+             For example, `requires x > 0` and `requires x < 0` are mutually exclusive. \
+             Use a single clause that expresses the true precondition.",
+            fn_name,
+        ),
+    ]
+}
+
+pub fn extern_ffi_type() -> Vec<String> {
+    vec![
+        "An `extern` function parameter or return type is not supported by the FFI ABI."
+            .to_string(),
+        "vāṇī's v1 FFI bridge supports only scalar types (i64, f64, bool), `Str`, and \
+         reference/pointer types as `extern fn` parameters and return values. Passing \
+         structs, tuples, `Vec<T>`, or `OwnedStr` by value does not match the \
+         System V x86-64 calling convention and would silently corrupt register state."
+            .to_string(),
+        "Use a reference (`ref T` or `mut ref T`) for struct/aggregate parameters, or \
+         restructure the FFI boundary so only scalar and pointer types cross. Refer to \
+         the vāṇī FFI guide for the full list of supported ABI types."
+            .to_string(),
+    ]
+}
+
+pub fn generic_infer_failure() -> Vec<String> {
+    vec![
+        "The monomorphizer could not infer the concrete type for a generic type parameter."
+            .to_string(),
+        "vāṇī v1 monomorphizes generic functions by inspecting call-site argument types at \
+         a pre-type-check pass. It can only resolve type parameters from literal values \
+         (integer, float, bool), directly-named variables whose types are declared by a \
+         `let`-annotation or function parameter, or (v3.1 only) `ref`/`mut ref` of such \
+         a variable. Arbitrary sub-expressions, function-call results, and struct-field \
+         accesses are not yet supported."
+            .to_string(),
+        "Ensure the first generic-typed argument at the call site is either a literal or \
+         a named variable with a type annotation (e.g. `let x: i64 = ...;`). If the value \
+         comes from a complex expression, bind it to an annotated variable first, then \
+         pass that variable to the generic function."
+            .to_string(),
+    ]
+}
+
+pub fn try_desugar_restricted() -> Vec<String> {
+    vec![
+        "The `try` expression cannot be used in this position or with this return type."
+            .to_string(),
+        "`try` in vāṇī v1 is a limited desugar: the enclosing function must return an \
+         enum with exactly one payloaded variant (the Ok/Some arm) and one payload-less \
+         variant (the Err/None arm). Between the `try`-let and the final `return`, only \
+         `let`, `print`, and simple reassignments are permitted — control-flow statements \
+         like `if`, `while`, and `for` are not yet supported (T2.6 phase 2)."
+            .to_string(),
+        "Ensure the function returns `Option<T>` or a two-variant enum that matches the \
+         required shape. Move any conditional logic around the `try` expression outside \
+         the restricted zone, or refactor to use explicit match arms instead of `try`."
+            .to_string(),
+    ]
+}
+
+pub fn const_expr_overflow() -> Vec<String> {
+    vec![
+        "A constant sub-expression overflowed its result type at compile time.".to_string(),
+        "vāṇी evaluates constant expressions at compile time to fold literals and \
+         detect definite errors early. Overflow, division by zero, or a value \
+         that does not fit in the declared type all make the expression \
+         non-representable."
+            .to_string(),
+        "Check the operands and make sure they stay within the range of the result \
+         type. Use an explicit cast (e.g. `as i64`) if you need a wider type, \
+         or guard division/remainder with a non-zero denominator check."
+            .to_string(),
+    ]
+}

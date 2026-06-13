@@ -539,7 +539,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                      where-bounds apply only to generic type parameters",
                     func.name, clause.type_param, clause.interface_name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::non_generic_where_clause(&func.name)));
         }
     }
 
@@ -568,7 +568,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                      different name",
                     decl.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::reserved_type_name(&decl.name)));
         }
     }
     for decl in &program.enums {
@@ -580,7 +580,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                      different name",
                     decl.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::reserved_type_name(&decl.name)));
         }
     }
     for alias in &program.type_aliases {
@@ -592,7 +592,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                      different name",
                     alias.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::reserved_type_name(&alias.name)));
         }
     }
 
@@ -689,7 +689,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                     decl.name,
                     decl.fields.len()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, "fields")));
         }
         // A4.4 (2026-06-08): synthesized v3.1 Task structs
         // (`Task__<fn>`) accept `ref Struct` / `mut ref Struct`
@@ -753,7 +753,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                          fields; Guard<T> still needs explicit wiring",
                         decl.name, field.name, field.ty
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &field.name)));
             }
         }
         // Reject duplicate field names.
@@ -766,7 +766,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                             "struct '{}' has duplicate field '{}'",
                             decl.name, decl.fields[j].name
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("field", &decl.fields[j].name)));
                 }
             }
         }
@@ -869,7 +869,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                          use `ref T` / `Vec<T>` to break the cycle via the heap",
                         decl.name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, "recursive field")));
             }
         }
     }
@@ -886,7 +886,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                     decl.name,
                     decl.variants.len()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, "variants")));
         }
         for i in 0..decl.variants.len() {
             // T1.3 phase 2b — payloaded variants are now
@@ -910,7 +910,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                         decl.variants[i].name,
                         decl.variants[i].payload.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &decl.variants[i].name)));
             }
             if let Some(payload_ty) = decl.variants[i].payload.first() {
                 // T1.2 phase 2 struct RAII landed in closures
@@ -949,7 +949,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                             decl.variants[i].name,
                             payload_ty
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(&decl.name, &decl.variants[i].name)));
                 }
             }
         }
@@ -972,7 +972,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                             "enum '{}' has duplicate variant '{}'",
                             decl.name, decl.variants[j].name
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("variant", &decl.variants[j].name)));
                 }
             }
         }
@@ -994,7 +994,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                     "enum '{}' collides with a struct of the same name",
                     decl.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("enum", &decl.name)));
         }
         enum_registry.insert(
             decl.name.clone(),
@@ -1036,7 +1036,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                     "const '{}' collides with an existing type or function",
                     decl.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("const", &decl.name)));
             continue;
         }
         // v1: type must be a Copy scalar (no Vec, struct,
@@ -3396,7 +3396,7 @@ fn flatten_modules_in_program(
                          give one a different local name with `use … as …;`",
                         local, mod_name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("import", &local)));
                 continue;
             }
             // Closure #257: `pub use foo::bar;` re-export.
@@ -3419,7 +3419,7 @@ fn flatten_modules_in_program(
                             prev.replace("__", "::"),
                             mangled.replace("__", "::")
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("re-export", &local)));
                 } else {
                     re_exports.insert(exported_name, mangled.clone());
                 }
@@ -3922,7 +3922,7 @@ fn flatten_modules_in_program(
                             prev_module.replace("__", "::"),
                             prev_item
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("import", suffix)));
                     continue;
                 }
                 use_aliases.insert(suffix.to_string(), target);
@@ -3958,7 +3958,7 @@ fn flatten_modules_in_program(
                     prev_module.replace("__", "::"),
                     prev_item
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("import", &local)));
             continue;
         }
         use_aliases.insert(local.clone(), mangled);
@@ -4487,7 +4487,7 @@ fn resolve_type_aliases(
                     "type alias '{}' collides with a struct of the same name",
                     alias.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("type alias", &alias.name)));
             return None;
         }
         if program.enums.iter().any(|e| e.name == alias.name) {
@@ -4497,7 +4497,7 @@ fn resolve_type_aliases(
                     "type alias '{}' collides with an enum of the same name",
                     alias.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("type alias", &alias.name)));
             return None;
         }
         by_name.insert(alias.name.clone(), alias);
@@ -4508,7 +4508,8 @@ fn resolve_type_aliases(
         match resolve_alias_chain(name, &by_name, &mut resolved, &mut stack) {
             Ok(()) => {}
             Err((span, msg)) => {
-                diagnostics.push(Diagnostic::new(span, msg));
+                diagnostics.push(Diagnostic::new(span, msg)
+                    .with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("type alias", "")));
                 return None;
             }
         }
@@ -4848,7 +4849,7 @@ fn hoist_methods_into_functions(
                          got {}",
                         other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 continue;
             }
         };
@@ -4862,7 +4863,7 @@ fn hoist_methods_into_functions(
                         "method '{}::{}' is declared twice in this methods block",
                         type_name, method.name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("method", &method.name)));
                 continue;
             }
             // Self-less methods are accepted — they become
@@ -4883,7 +4884,7 @@ fn hoist_methods_into_functions(
                          existing function — pick a different method name",
                         type_name, method.name, mangled
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("method", &method.name)));
                 continue;
             }
             let mut renamed = method.clone();
@@ -4972,7 +4973,7 @@ fn hoist_impls_into_functions(
                      Move the impl into one of those modules.",
                     imp.interface_name, imp.for_type, where_impl, iface_loc, type_loc
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::iface_not_impl(&imp.interface_name, &format!("{}", imp.for_type))));
         }
     }
 
@@ -5064,7 +5065,7 @@ fn hoist_impls_into_functions(
                          named `drop` (T2.7)",
                         imp.for_type
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::iface_impl_missing_method("drop", "Drop", &format!("{}", imp.for_type))));
             } else {
                 let m = &imp.methods[0];
                 // Epic C: accept either by-value `self: T` or
@@ -5087,7 +5088,7 @@ fn hoist_impls_into_functions(
                              return type {}",
                             type_name, type_name, type_name, m.params.len(), m.return_type
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::iface_impl_missing_method("drop", "Drop", &type_name)));
                 } else {
                     // Track the by-ref form so backends can
                     // emit the right call shape AND skip the
@@ -5120,7 +5121,7 @@ fn hoist_impls_into_functions(
                         "`implement {} for {}` references unknown interface '{}'",
                         imp.interface_name, imp.for_type, imp.interface_name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::unknown_function(&imp.interface_name)));
                 continue;
             }
         };
@@ -5135,7 +5136,7 @@ fn hoist_impls_into_functions(
                          (got {})",
                         imp.interface_name, imp.for_type, other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 continue;
             }
         };
@@ -5157,7 +5158,7 @@ fn hoist_impls_into_functions(
                              a method not in the interface",
                             imp.interface_name, method.name
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::iface_impl_missing_method(&method.name, &imp.interface_name, &type_name)));
                     continue;
                 }
             };
@@ -5171,7 +5172,7 @@ fn hoist_impls_into_functions(
                         type_name, method.name, method.params.len(),
                         iface_method.params.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(iface_method.params.len(), method.params.len())));
                 continue;
             }
             if method.return_type != iface_method.return_type {
@@ -5182,7 +5183,7 @@ fn hoist_impls_into_functions(
                         type_name, method.name, method.return_type,
                         iface_method.return_type
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&format!("{}", iface_method.return_type), &format!("{}", method.return_type))));
                 continue;
             }
             covered.insert(method.name.clone());
@@ -5201,7 +5202,7 @@ fn hoist_impls_into_functions(
                          both define the same method",
                         type_name, method.name, mangled
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("method", &method.name)));
                 continue;
             }
             let mut renamed = method.clone();
@@ -5599,7 +5600,7 @@ fn try_rewrite_at_top(
              reassignment statements between the `try`-let and the final \
              `return`; control flow (if/while/for) isn't supported yet \
              (T2.6 phase 2 follow-up)",
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::try_desugar_restricted()));
         return;
     }
     // Resolve the early-return enum's variants.
@@ -5643,7 +5644,7 @@ fn try_rewrite_at_top(
                      to be an enum; got {}",
                     return_type
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::try_desugar_restricted()));
             return;
         }
     };
@@ -5672,7 +5673,7 @@ fn try_rewrite_at_top(
                 payloaded.len(),
                 payloadless.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::try_desugar_restricted()));
         return;
     }
     let some_variant = payloaded[0].name.clone();
@@ -5896,7 +5897,7 @@ fn monomorphize_generics_in_program(
                         clause.interface_name,
                         concrete_ty
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::iface_not_impl(&clause.interface_name, &concrete_ty.to_string())));
                 bound_violation = true;
             }
         }
@@ -5912,7 +5913,7 @@ fn monomorphize_generics_in_program(
                     fn_name,
                     template.type_params.len()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::non_generic_where_clause(fn_name)));
             continue;
         }
         let t_name = &template.type_params[0];
@@ -5966,7 +5967,7 @@ fn monomorphize_generics_in_program(
                      declaration.",
                     name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::unknown_function(name)));
         }
     }
     // Remove original generics; append specializations.
@@ -6172,7 +6173,7 @@ fn infer_concrete_type_for_call(
                          parameter at the call site",
                         name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                 None
             }),
             // Phase 4c-broad blocker 3: peel expr-level Ref/RefMut.
@@ -6186,7 +6187,7 @@ fn infer_concrete_type_for_call(
                                  inside a Ref/RefMut at the call site",
                                 name
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                         None
                     })
                 } else {
@@ -6200,7 +6201,7 @@ fn infer_concrete_type_for_call(
                      (integer / float / bool), Var, or (v3.1 only) Ref/RefMut(Var) \
                      at the T-position. More complex argument expressions need \
                      full type-checking context.",
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                 None
             }
         };
@@ -6784,7 +6785,7 @@ fn monomorphize_type_decls_in_program(
                     "generic struct '{}' expects {} type arguments, got {}",
                     name, template.type_params.len(), args.len()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
             continue;
         }
         let mangled = mangle_generic_decl(name, args);
@@ -6819,7 +6820,7 @@ fn monomorphize_type_decls_in_program(
                     "generic enum '{}' expects {} type arguments, got {}",
                     name, template.type_params.len(), args.len()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(template.type_params.len(), args.len())));
             continue;
         }
         let mangled = mangle_generic_decl(name, args);
@@ -7724,7 +7725,7 @@ fn check_function(
                  from a non-generic call site or remove the declaration.",
                 function.name
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::unknown_function(&function.name)));
         return TypedFunction {
             name: function.name.clone(),
             params: Vec::new(),
@@ -7768,7 +7769,7 @@ fn check_function(
                         "extern fn '{}' parameter '{}' has unsupported FFI type {}; {}",
                         function.name, p.name, p.ty, hint
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::extern_ffi_type()));
             }
         }
         if let Some(hint) = extern_return_rejection_hint(&function.return_type, structs) {
@@ -7778,7 +7779,7 @@ fn check_function(
                     "extern fn '{}' return type {} is unsupported; {}",
                     function.name, function.return_type, hint
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::extern_ffi_type()));
         }
         let mut typed_params: Vec<crate::ir::TypedParam> = Vec::new();
         for p in &function.params {
@@ -7974,7 +7975,7 @@ fn check_function(
                      unreachable",
                     function.name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::contract_unsatisfiable(&function.name)));
         }
     }
 
@@ -8133,7 +8134,7 @@ fn validate_loop_balance(
                      consume or rebind it consistently before this point",
                     context, name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::move_in_loop(name)));
         }
     }
 }
@@ -8561,7 +8562,7 @@ fn check_escapes(
                              long-lived reference (Layer 2 of `unsafe.md`).",
                             kind
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
                 }
             }
             TypedStmt::IndexAssign { value, .. } => {
@@ -8576,7 +8577,7 @@ fn check_escapes(
                          outlive it. Use a `Handle<T>` from a `Pool<T>` for \
                          stored references (Layer 2 of `unsafe.md`)."
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
                 }
             }
             TypedStmt::FieldAssign { value, .. } => {
@@ -8591,7 +8592,7 @@ fn check_escapes(
                          a `Handle<T>` from a `Pool<T>` for stored references \
                          (Layer 2 of `unsafe.md`)."
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
                 }
             }
             TypedStmt::Reassign { name, expr, ty, .. } => {
@@ -8653,7 +8654,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                                 "task '{}' was spawned twice in the same block",
                                 name
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                     }
                     walk(body, diagnostics);
                 }
@@ -8665,7 +8666,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                                 "join: task '{}' was not spawned in this block (cross-block joins aren't supported in v1)",
                                 name
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                     }
                     if !joined.insert(name.clone()) {
                         diagnostics.push(Diagnostic::new(
@@ -8674,7 +8675,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                                 "join: task '{}' was joined twice in the same block",
                                 name
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                     }
                 }
                 TypedStmt::If { then_body, else_body, .. } => {
@@ -8698,7 +8699,7 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                      each `task` handle must be joined exactly once",
                     name, name
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
         }
     }
     walk(body, diagnostics);
@@ -8822,7 +8823,7 @@ fn check_one_stmt(
                     "nested field move (`o.inner.s`) on a non-Copy field is \
                      not supported yet — move the inner struct out first \
                      (`let inner = o.inner;` then `let s = inner.s;`)",
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::move_nested_field()));
             }
 
             consume_if_moved_var(expr, &checked, env);
@@ -8843,7 +8844,7 @@ fn check_one_stmt(
                         "references cannot appear in a 'let _' discard; \
                          the value would dangle immediately"
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
                 }
                 body.push(TypedStmt::Discard { expr: checked.expr });
                 return false;
@@ -8884,7 +8885,8 @@ fn check_one_stmt(
                                 name, old.ty, var_ty
                             ),
                         )
-                        .with_related(old.decl_span, format!("'{}' was previously declared here as {}", name, old.ty)),
+                        .with_related(old.decl_span, format!("'{}' was previously declared here as {}", name, old.ty))
+                        .with_elaboration(crate::diagnostic_elaborations::type_mismatch(&old.ty.to_string(), &var_ty.to_string())),
                     );
                 }
                 let drop_old = !old.ty.is_copy() && old.moved.is_none();
@@ -9333,7 +9335,7 @@ fn check_one_stmt(
                 Some(TypedConst::Bool(false)) => diagnostics.push(Diagnostic::new(
                     expr.span,
                     "proof failed: expression is always false",
-                )),
+                ).with_elaboration(crate::diagnostic_elaborations::proof_failed())),
                 _ => {
                     if !is_structurally_true(expr) {
                         try_smt_prove(expr, smt_facts, env, signatures, diagnostics);
@@ -9737,7 +9739,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     format!("cannot index-assign to '{}' after it was moved", name),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::move_after_use(name)));
             }
 
             // The base must be either an owned array/Vec or a &mut to one.
@@ -9756,7 +9758,7 @@ fn check_one_stmt(
                         diagnostics.push(Diagnostic::new(
                             *span,
                             format!("cannot index-assign through reference to {}", other),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                         return false;
                     }
                 },
@@ -9768,14 +9770,14 @@ fn check_one_stmt(
                              use '&mut T' in the parameter to allow writes",
                             name
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::assign_to_immutable(name)));
                     return false;
                 }
                 other => {
                     diagnostics.push(Diagnostic::new(
                         *span,
                         format!("'{}' has type {} which is not indexable for assignment", name, other),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     return false;
                 }
             };
@@ -9787,7 +9789,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     index.span,
                     format!("index must be an integer, got {}", index_checked.ty()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
 
             // Resolve field_path against the element type.
@@ -9806,7 +9808,7 @@ fn check_one_stmt(
                              type {}",
                             segment, target_ty
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::field_not_found(segment, &target_ty.to_string())));
                     return false;
                 };
                 let Some(decl) = env.lookup_struct(struct_name) else {
@@ -9858,7 +9860,7 @@ fn check_one_stmt(
                              be OwnedStr or Vec<T>",
                             struct_name, segment, field_ty
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::struct_field_error(struct_name, segment)));
                     return false;
                 }
                 resolved_path.push((segment.clone(), idx as u32));
@@ -9883,7 +9885,7 @@ fn check_one_stmt(
                         diagnostics.push(Diagnostic::new(
                             index.span,
                             format!("array index {} is negative; length is {}", k, length),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::index_oob_not_proven(name)));
                         return false;
                     }
                     if (*k as u128) >= length as u128 {
@@ -9893,7 +9895,7 @@ fn check_one_stmt(
                                 "array index {} is out of range for length {}",
                                 k, length
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::index_oob_not_proven(name)));
                         return false;
                     }
                     false
@@ -10098,7 +10100,7 @@ fn check_one_stmt(
                                  support field assignment in v1",
                                 other
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                         return false;
                     }
                 },
@@ -10108,7 +10110,7 @@ fn check_one_stmt(
                         "cannot field-assign through an immutable `ref` — use \
                          `mut ref T` on the binding"
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::assign_to_immutable("")));
                     return false;
                 }
                 other => {
@@ -10119,7 +10121,7 @@ fn check_one_stmt(
                              field assignment in v1",
                             other
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     return false;
                 }
             };
@@ -10246,7 +10248,7 @@ fn check_one_stmt(
                         start_checked.ty(),
                         end_checked.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::for_over_non_iterable(&start_checked.ty().to_string())));
                 return false;
             }
 
@@ -10497,7 +10499,7 @@ fn check_one_stmt(
                             expected,
                             info.ty
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     continue;
                 }
                 reduction_set.insert(r.var.clone());
@@ -10589,7 +10591,7 @@ fn check_one_stmt(
                                 "cannot iterate over field '{}' of '{}': not on a struct (got {})",
                                 field_name, head_name, other
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::for_over_non_iterable(&other.to_string())));
                         return false;
                     }
                 };
@@ -10597,7 +10599,7 @@ fn check_one_stmt(
                     diagnostics.push(Diagnostic::new(
                         *span,
                         format!("unknown struct '{}'", struct_name),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::struct_not_declared(&struct_name)));
                     return false;
                 };
                 let Some((_, fty)) =
@@ -10609,7 +10611,7 @@ fn check_one_stmt(
                             "no field '{}' on struct '{}'",
                             field_name, struct_name
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::field_not_found(field_name, &struct_name)));
                     return false;
                 };
                 // Use the field's plain type at the checker
@@ -10640,7 +10642,7 @@ fn check_one_stmt(
                         "cannot iterate over '{}' after it was moved",
                         collection
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::move_after_use(collection)));
             }
             let underlying = info.ty.deref();
             let element_ty = match underlying {
@@ -10675,7 +10677,7 @@ fn check_one_stmt(
                         "cannot move '{}' for iteration: it is a borrow; use '&{}' to iterate",
                         collection, collection
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::move_out_of_borrowed(collection)));
             }
 
             // Phase 11 (2026-06-07): consuming a dotted-path
@@ -10691,7 +10693,7 @@ fn check_one_stmt(
                         head_name,
                         collection,
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::move_nested_field()));
             }
             // If consuming, mark the source as moved up-front so the body
             // can't reference it; if borrowing, leave it live.
@@ -10833,7 +10835,7 @@ fn check_one_stmt(
                         "task '{}' shadows an existing binding declared in the same scope",
                         name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("task", name)));
             }
 
             // Type-check the body in a pushed scope. Bindings inside
@@ -10943,7 +10945,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     format!("join: no task named '{}' in scope", name),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                 return false;
             };
             if !matches!(info.ty, Type::Task) {
@@ -10953,7 +10955,7 @@ fn check_one_stmt(
                         "join: '{}' has type {}, expected Task",
                         name, info.ty
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                 return false;
             }
             if let Some(prev) = info.moved {
@@ -10963,7 +10965,7 @@ fn check_one_stmt(
                         "join: task '{}' was already joined at byte {}..{}",
                         name, prev.start, prev.end
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                 return false;
             }
             if let Some(info_mut) = env.lookup_mut(name) {
@@ -11079,7 +11081,7 @@ fn check_one_stmt(
                                     "destructure-let annotation must be a tuple type, got {}",
                                     other
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("tuple", &other.to_string())));
                             return false;
                         }
                     }
@@ -11092,7 +11094,7 @@ fn check_one_stmt(
                             "destructure-let RHS must be a tuple, got {}",
                             other
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("tuple", &other.to_string())));
                     return false;
                 }
             };
@@ -11104,7 +11106,7 @@ fn check_one_stmt(
                         elem_types.len(),
                         names.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(elem_types.len(), names.len())));
                 return false;
             }
             // Reject duplicate names (basic shadowing safety).
@@ -11117,7 +11119,7 @@ fn check_one_stmt(
                                 "destructure-let names must be distinct; '{}' used twice",
                                 names[i]
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::duplicate_parameter(&names[i])));
                         return false;
                     }
                 }
@@ -11239,7 +11241,7 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("array element type cannot be a reference, got {}", element),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
         }
     }
     if let Type::Vec(_element) = ty {
@@ -11267,14 +11269,14 @@ fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diag
                          in the same module as either `Hash` or `{}`.",
                         name, name, name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::iface_not_impl("Hash", name)));
             }
         }
         if k.is_ref() || v.is_ref() {
             diagnostics.push(Diagnostic::new(
                 span,
                 "HashMap K or V cannot be a reference type",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
         }
     }
 }
@@ -11544,14 +11546,13 @@ fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<D
             span,
             format!("{} cannot be a reference type", context),
         );
-        // Attach elaboration for contexts that haven't been
-        // lifted yet (HashMap K/V, destructure-let annotation,
-        // discard slot). The function-return-type case routes
-        // through `validate_return_ref_elision` and never hits
-        // this generic-rejection path.
         if context.contains("return") {
             diag = diag.with_elaboration(
                 crate::diagnostic_elaborations::ret_type_is_ref(),
+            );
+        } else {
+            diag = diag.with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
             );
         }
         diagnostics.push(diag);
@@ -11669,7 +11670,7 @@ fn validate_param_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diagnostic>)
             diagnostics.push(Diagnostic::new(
                 span,
                 "parameter cannot be a reference to a reference",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::raw_ptr_escape()));
         }
     }
     validate_array_element_type(ty, span, diagnostics);
@@ -11769,7 +11770,8 @@ fn diagnose_partial_then_whole_move(
                     .with_related(
                         move_span,
                         format!("'{}.{}' was moved here", name, field),
-                    ),
+                    )
+                    .with_elaboration(crate::diagnostic_elaborations::move_after_use(name)),
                 );
             }
         }
@@ -12125,7 +12127,7 @@ fn check_match_str(
                             "match arm for string pattern \"{}\" appears twice",
                             s
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                     continue;
                 }
                 seen_strs.push(s.clone());
@@ -12204,7 +12206,7 @@ fn check_match_str(
             "non-exhaustive match: string scrutinees require a wildcard \
              `_ then …` arm to cover values not explicitly listed"
                 .to_string(),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
     }
     let unified = result_ty.unwrap_or(Type::I64);
     let default_body = wildcard_body.unwrap_or_else(|| TypedExpr {
@@ -12365,7 +12367,7 @@ fn check_match_float(
                             "match arm for float pattern '{}' appears twice",
                             f
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                     continue;
                 }
                 if f.is_nan() {
@@ -12375,7 +12377,7 @@ fn check_match_float(
                          — use a guard like `if x.is_nan() { … }` or fall \
                          through to the wildcard arm"
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
                     continue;
                 }
                 seen_bits.push(bits);
@@ -12455,7 +12457,7 @@ fn check_match_float(
              `_ then …` arm to cover values not explicitly listed (and \
              NaN, which never compares equal to any literal)"
                 .to_string(),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
     }
     let unified = result_ty.unwrap_or(scrut_ty.clone());
     let default_body = wildcard_body.unwrap_or_else(|| TypedExpr {
@@ -12533,7 +12535,7 @@ fn check_expr(
                 diagnostics.push(Diagnostic::new(
                     expr.span,
                     format!("integer literal '{}' does not fit in u64", value),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
             }
 
             let mut checked = CheckedExpr::new(
@@ -12712,7 +12714,7 @@ fn check_expr(
                                         "enum constructor '{}.{}' expects 1 payload argument, got {}",
                                         enum_name, method, args.len()
                                     ),
-                                ));
+                                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                                 return CheckedExpr::fallback_integer(expr.span);
                             }
                             let raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -12815,7 +12817,7 @@ fn check_expr(
                                     "`.collect()` on a borrowed `Vec<T>` needs an explicit clone — \
                                      use `clone(xs).collect()` or drop the borrow first; \
                                      `collect()` doesn't clone in v1.",
-                                ));
+                                ).with_elaboration(crate::diagnostic_elaborations::move_out_of_borrowed("")));
                                 return check_expr(receiver, env, signatures, diagnostics);
                             }
                             _ => {}
@@ -13367,7 +13369,7 @@ fn check_expr(
                                     sig.params.len(),
                                     args.len()
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(sig.params.len(), args.len())));
                             return CheckedExpr::fallback_integer(expr.span);
                         }
                         // Type-check each arg against the
@@ -13457,7 +13459,7 @@ fn check_expr(
                             "interface '{}' has no method '{}'",
                             iface_name, method
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::iface_impl_missing_method(method, iface_name, "")));
                     return CheckedExpr::fallback_integer(expr.span);
                 };
                 // Interface methods declare `self` as the
@@ -13472,7 +13474,7 @@ fn check_expr(
                              receiver in v1",
                             iface_name, method
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::iface_impl_missing_method(method, iface_name, "")));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
                 let expected_arg_tys: &[Type] = &iface_params[1..];
@@ -13486,7 +13488,7 @@ fn check_expr(
                             expected_arg_tys.len(),
                             args.len()
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(expected_arg_tys.len(), args.len())));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
                 let mut typed_args: Vec<TypedExpr> = Vec::with_capacity(args.len());
@@ -13548,7 +13550,7 @@ fn check_expr(
                                  attached to struct/enum types only in v1",
                                 method, other
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::method_not_found(method, &other.to_string())));
                         return CheckedExpr::fallback_integer(expr.span);
                     }
                 },
@@ -13560,7 +13562,7 @@ fn check_expr(
                              attached to struct/enum types only in v1",
                             method, other
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::method_not_found(method, &other.to_string())));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
@@ -13590,7 +13592,7 @@ fn check_expr(
                             _ => type_name.clone(),
                         },
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::duplicate_drop_impl(&type_name)));
                 return CheckedExpr::fallback_integer(expr.span);
             }
             let mangled = format!("{}_{}", type_name, method);
@@ -13649,7 +13651,7 @@ fn check_expr(
                              by reconstructing the struct literal before calling",
                             method, expected, recv, underlying, underlying
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &recv.to_string())));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             }
@@ -13715,7 +13717,7 @@ fn check_expr(
                         "tuple must have 2..=4 elements; got {}",
                         elements.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, elements.len())));
                 return CheckedExpr::fallback_integer(expr.span);
             }
             let typed: Vec<CheckedExpr> = elements
@@ -13730,7 +13732,7 @@ fn check_expr(
                             "tuple element {} has non-Copy type {} — v1 tuples are Copy-only",
                             i, ce.ty()
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 }
             }
             let elem_types: Vec<Type> = typed.iter().map(|c| c.ty().clone()).collect();
@@ -13754,7 +13756,7 @@ fn check_expr(
                                 index,
                                 elements.len()
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::index_oob_not_proven("")));
                         return CheckedExpr::fallback_integer(expr.span);
                     }
                     elements[*index as usize].clone()
@@ -13763,7 +13765,7 @@ fn check_expr(
                     diagnostics.push(Diagnostic::new(
                         tuple.span,
                         format!("tuple access on non-tuple type {}", other),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("tuple", &other.to_string())));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
@@ -13816,7 +13818,7 @@ fn check_expr(
                         decl_fields.len(),
                         fields.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(decl_fields.len(), fields.len())));
                 return CheckedExpr::fallback_integer(expr.span);
             }
             // Type-check each literal field; reorder into
@@ -13937,7 +13939,7 @@ fn check_expr(
                             "enum '{}' has no variant named '{}'",
                             name, field
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::field_not_found(field, name)));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             }
@@ -13978,7 +13980,7 @@ fn check_expr(
                             "field access on non-struct type {}",
                             other
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::field_not_found("field", &other.to_string())));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
@@ -14000,7 +14002,8 @@ fn check_expr(
                             .with_related(
                                 move_span,
                                 format!("'{}.{}' was moved here", obj_name, field),
-                            ),
+                            )
+                            .with_elaboration(crate::diagnostic_elaborations::move_after_use(obj_name)),
                         );
                     }
                 }
@@ -14092,7 +14095,7 @@ fn check_expr(
                             "match scrutinee must be an enum, integer, or bool type, got {}",
                             other
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type(&other.to_string(), "enum/integer/bool")));
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
@@ -14144,7 +14147,7 @@ fn check_expr(
                                      enum type {}",
                                     enum_name_opt.as_deref().unwrap_or("?"),
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("integer", "enum")));
                             continue;
                         }
                         if !value_fits_type(*v, &scrut_ty) {
@@ -14155,14 +14158,14 @@ fn check_expr(
                                      type {}",
                                     v, scrut_ty
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
                             continue;
                         }
                         if seen_ints.contains(v) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!("match arm for integer pattern '{}' appears twice", v),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
                         seen_ints.push(*v);
@@ -14176,14 +14179,14 @@ fn check_expr(
                                     "bool pattern in match arm but scrutinee is of type {}",
                                     scrut_ty
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("bool", &scrut_ty.to_string())));
                             continue;
                         }
                         if seen_bools.contains(b) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!("match arm for bool pattern '{}' appears twice", b),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
                         seen_bools.push(*b);
@@ -14197,7 +14200,7 @@ fn check_expr(
                             arm.pattern_span,
                             "string literal match patterns are not yet supported \
                              in v1 — use if/else chains with `==` on Str/OwnedStr",
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("string", &scrut_ty.to_string())));
                         continue;
                     }
                     crate::ast::Pattern::Float(_) => {
@@ -14212,7 +14215,7 @@ fn check_expr(
                                  type {}",
                                 scrut_ty
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("float", &scrut_ty.to_string())));
                         continue;
                     }
                     crate::ast::Pattern::Variant {
@@ -14227,7 +14230,7 @@ fn check_expr(
                                      is of integer type {}",
                                     pat_enum, pat_variant, scrut_ty
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("variant", &scrut_ty.to_string())));
                             continue;
                         }
                         let enum_name = enum_name_opt.as_deref().unwrap_or("");
@@ -14249,7 +14252,7 @@ fn check_expr(
                                      is of enum '{}'",
                                     pat_enum, enum_name
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type(pat_enum, enum_name)));
                             continue;
                         }
                         let Some((tag, _)) = enum_decl
@@ -14264,7 +14267,7 @@ fn check_expr(
                                     "enum '{}' has no variant '{}'",
                                     enum_name, pat_variant
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::field_not_found(pat_variant, enum_name)));
                             continue;
                         };
                         if seen_variants.contains(&pat_variant.as_str()) {
@@ -14274,7 +14277,7 @@ fn check_expr(
                                     "match arm for '{}.{}' appears twice",
                                     enum_name, pat_variant
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
                         seen_variants.push(pat_variant);
@@ -14298,7 +14301,7 @@ fn check_expr(
                                      but scrutinee is of integer type {}",
                                     pat_enum, pat_variant, scrut_ty
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("variant", &scrut_ty.to_string())));
                             continue;
                         }
                         let enum_name = enum_name_opt.as_deref().unwrap_or("");
@@ -14313,7 +14316,7 @@ fn check_expr(
                                      is of enum '{}'",
                                     pat_enum, enum_name
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type(pat_enum, enum_name)));
                             continue;
                         }
                         let enum_decl = enum_decl_opt
@@ -14331,7 +14334,7 @@ fn check_expr(
                                     "enum '{}' has no variant '{}'",
                                     enum_name, pat_variant
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::field_not_found(pat_variant, enum_name)));
                             continue;
                         };
                         // Variant must have a payload to bind.
@@ -14348,7 +14351,7 @@ fn check_expr(
                                     "match arm for '{}.{}' appears twice",
                                     enum_name, pat_variant
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
                         seen_variants.push(pat_variant);
@@ -14425,7 +14428,7 @@ fn check_expr(
                                  binding (`Variant(_)`) to ignore the payload.",
                                 bty,
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::move_out_of_borrowed("")));
                     }
                 }
                 let body_checked = if let Some((bname, bty)) = &arm_binding {
@@ -14469,7 +14472,7 @@ fn check_expr(
                                 body_checked.ty(),
                                 expected
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&expected.to_string(), &body_checked.ty().to_string())));
                     }
                 } else {
                     result_ty = Some(body_checked.ty().clone());
@@ -14498,7 +14501,7 @@ fn check_expr(
                         "non-exhaustive match: integer scrutinees require a wildcard \
                          `_ then …` arm to cover values not explicitly listed"
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
                 } else if is_bool_dispatch {
                     // Bool exhaustiveness: need both `true`
                     // and `false` arms, or a wildcard.
@@ -14732,7 +14735,7 @@ fn check_expr(
                                     "while condition must be bool, got {}",
                                     cond_checked.ty()
                                 ),
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("bool", &cond_checked.ty().to_string())));
                         }
                         let mut body_typed: Vec<TypedStmt> = Vec::new();
                         for inner in while_body {
@@ -14792,7 +14795,7 @@ fn check_expr(
                                          supports only assignments and prints in v1 \
                                          (closure #238); hoist nested control flow \
                                          outside the block",
-                                    ));
+                                    ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("block-expr while body")));
                                 }
                             }
                         }
@@ -14805,7 +14808,7 @@ fn check_expr(
                         diagnostics.push(Diagnostic::new(
                             s.span(),
                             "block expressions in v1 only allow `let` bindings, `print` statements, reassignments, and `while` loops before the tail expression — hoist `if`/`for` / other constructs outside the block",
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("block-expr statement")));
                     }
                 }
             }
@@ -14879,7 +14882,7 @@ fn check_expr(
                  match-with-early-return is still in progress (T2.6 Phase 2). \
                  Write the pattern manually: `match opt { Opt.Some(v) then v, \
                  Opt.None then return Opt.None };`",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::try_desugar_restricted()));
             CheckedExpr::fallback_integer(expr.span)
         }
         ExprKind::IfExpr { cond, then_value, else_value } => {
@@ -14897,7 +14900,7 @@ fn check_expr(
                         "if-expression condition must be bool, got {}",
                         cond_checked.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch("bool", &cond_checked.ty().to_string())));
             }
             let then_checked = check_expr(then_value, env, signatures, diagnostics);
             let else_checked = check_expr(else_value, env, signatures, diagnostics);
@@ -14911,7 +14914,7 @@ fn check_expr(
                         then_checked.ty(),
                         else_checked.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&then_checked.ty().to_string(), &else_checked.ty().to_string())));
                 then_checked.ty().clone()
             };
             // Constant-fold: if cond's constant is a known bool,
@@ -14945,11 +14948,16 @@ fn check_expr(
             // AnonFn means the lift pass missed an expression
             // context — surface a clear diagnostic rather than
             // panic so users get an actionable bug report.
-            diagnostics.push(Diagnostic::new(
-                expr.span,
-                "internal: anonymous fn expression survived the lambda-lift \
-                 pass. This is a vāṇी compiler bug — please report.".to_string(),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    expr.span,
+                    "internal: anonymous fn expression survived the lambda-lift \
+                     pass. This is a vāṇी compiler bug — please report.".to_string(),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::unknown_function("__anon_fn"),
+                ),
+            );
             CheckedExpr::fallback_integer(expr.span)
         }
     }
@@ -14990,37 +14998,52 @@ fn check_ref_mut(
                     // Var/FieldAccess error paths below. The
                     // user probably wanted `mut ref Var` and
                     // accidentally indexed.
-                    diagnostics.push(Diagnostic::new(
-                        array.span,
-                        format!(
-                            "`mut ref {}[…]` requires '{}' to be a Vec; got {}",
-                            vec_name, vec_name, info.ty
+                    diagnostics.push(
+                        Diagnostic::new(
+                            array.span,
+                            format!(
+                                "`mut ref {}[…]` requires '{}' to be a Vec; got {}",
+                                vec_name, vec_name, info.ty
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback_integer(span);
                 }
             };
             if info.moved.is_some() {
-                diagnostics.push(Diagnostic::new(
-                    array.span,
-                    format!(
-                        "cannot mutably borrow element of '{}' after it was moved",
-                        vec_name
+                diagnostics.push(
+                    Diagnostic::new(
+                        array.span,
+                        format!(
+                            "cannot mutably borrow element of '{}' after it was moved",
+                            vec_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(vec_name),
                     ),
-                ));
+                );
             }
             let checked_idx = check_expr(index, env, signatures, diagnostics);
             // Index must be an integer. coerce_checked would be
             // overkill — Vec indexing already requires i64 in
             // check_index.
             if !matches!(checked_idx.ty(), Type::I64) {
-                diagnostics.push(Diagnostic::new(
-                    index.span,
-                    format!(
-                        "vec index must be i64, got {}",
-                        checked_idx.ty()
+                diagnostics.push(
+                    Diagnostic::new(
+                        index.span,
+                        format!(
+                            "vec index must be i64, got {}",
+                            checked_idx.ty()
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                     ),
-                ));
+                );
             }
             let ref_ty = Type::RefMut(Box::new(element_ty.clone()));
             return CheckedExpr::new(
@@ -15053,13 +15076,18 @@ fn check_ref_mut(
                 return CheckedExpr::fallback_integer(span);
             };
             let Type::Struct(struct_name) = info.ty.deref() else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!(
-                        "field-borrow base '{}' must be a struct binding (got {})",
-                        obj_name, info.ty
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!(
+                            "field-borrow base '{}' must be a struct binding (got {})",
+                            obj_name, info.ty
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Some(struct_info) = env.lookup_struct(struct_name) else {
@@ -15095,23 +15123,33 @@ fn check_ref_mut(
                 return CheckedExpr::fallback_integer(span);
             };
             if info.moved.is_some() {
-                diagnostics.push(Diagnostic::new(
-                    inner.span,
-                    format!(
-                        "cannot mutably borrow field of '{}' after it was moved",
-                        obj_name
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "cannot mutably borrow field of '{}' after it was moved",
+                            obj_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(obj_name),
                     ),
-                ));
+                );
             }
             if info.ty.is_ref() {
-                diagnostics.push(Diagnostic::new(
-                    inner.span,
-                    format!(
-                        "cannot take 'mut ref' on a field of '{}' because the base \
-                         is borrowed immutably (&T)",
-                        obj_name
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "cannot take 'mut ref' on a field of '{}' because the base \
+                             is borrowed immutably (&T)",
+                            obj_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::alias_mut_with_shared(obj_name),
                     ),
-                ));
+                );
             }
             let ref_ty = Type::RefMut(Box::new(field_ty.clone()));
             let object_ty = info.ty.clone();
@@ -15129,11 +15167,16 @@ fn check_ref_mut(
         }
     }
     let ExprKind::Var(name) = &inner.kind else {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            "'mut ref' can only borrow a named variable or a struct field; \
-             e.g. `mut ref xs` or `mut ref t.field`",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                "'mut ref' can only borrow a named variable or a struct field; \
+                 e.g. `mut ref xs` or `mut ref t.field`",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     };
     let Some(info) = env.lookup(name) else {
@@ -15209,13 +15252,18 @@ fn check_ref(
                 return CheckedExpr::fallback_integer(span);
             };
             let Type::Struct(struct_name) = info.ty.deref() else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!(
-                        "field-borrow base '{}' must be a struct binding (got {})",
-                        obj_name, info.ty
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!(
+                            "field-borrow base '{}' must be a struct binding (got {})",
+                            obj_name, info.ty
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Some(struct_info) = env.lookup_struct(struct_name) else {
@@ -15251,13 +15299,18 @@ fn check_ref(
                 return CheckedExpr::fallback_integer(span);
             };
             if info.moved.is_some() {
-                diagnostics.push(Diagnostic::new(
-                    inner.span,
-                    format!(
-                        "cannot borrow field of '{}' after it was moved",
-                        obj_name
+                diagnostics.push(
+                    Diagnostic::new(
+                        inner.span,
+                        format!(
+                            "cannot borrow field of '{}' after it was moved",
+                            obj_name
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::move_after_use(obj_name),
                     ),
-                ));
+                );
             }
             let ref_ty = Type::Ref(Box::new(field_ty.clone()));
             let object_ty = info.ty.clone();
@@ -15275,11 +15328,16 @@ fn check_ref(
         }
     }
     let ExprKind::Var(name) = &inner.kind else {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            "'ref' can only borrow a named variable or a struct field; \
-             e.g. `ref xs` or `ref t.field`",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                "'ref' can only borrow a named variable or a struct field; \
+                 e.g. `ref xs` or `ref t.field`",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     };
     let Some(info) = env.lookup(name) else {
@@ -15306,10 +15364,15 @@ fn check_ref(
         );
     }
     if info.ty.is_ref() {
-        diagnostics.push(Diagnostic::new(
-            inner.span,
-            "cannot create a reference to a reference",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                inner.span,
+                "cannot create a reference to a reference",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
+            ),
+        );
     }
     let ref_ty = Type::Ref(Box::new(info.ty.clone()));
     let decl_span = info.decl_span;
@@ -15331,10 +15394,15 @@ fn check_array_literal(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if elements.is_empty() {
-        diagnostics.push(Diagnostic::new(
-            span,
-            "empty array literals are not supported; explicit element type is required",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                "empty array literals are not supported; explicit element type is required",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::builtin_wrong_arg_type(),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     }
 
@@ -15349,13 +15417,18 @@ fn check_array_literal(
     // marked as moved on the source binding). References as
     // elements remain rejected (dangling-pointer risk).
     if matches!(element_type, Type::Ref(_) | Type::RefMut(_)) {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "array element type cannot be a reference, got {}",
-                element_type
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "array element type cannot be a reference, got {}",
+                    element_type
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
             ),
-        ));
+        );
     }
 
     let mut coerced = Vec::with_capacity(typed_elements.len());
@@ -15410,10 +15483,15 @@ fn check_index(
         }
         Type::Vec(element) => ((**element).clone(), IndexableKind::Vec),
         other => {
-            diagnostics.push(Diagnostic::new(
-                array.span,
-                format!("cannot index into non-array type {}", other),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    array.span,
+                    format!("cannot index into non-array type {}", other),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::builtin_wrong_arg_type(),
+                ),
+            );
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -15454,13 +15532,18 @@ fn check_index(
     }
 
     if !index_checked.ty().is_integer() {
-        diagnostics.push(Diagnostic::new(
-            index.span,
-            format!(
-                "array index must be an integer, got {}",
-                index_checked.ty()
+        diagnostics.push(
+            Diagnostic::new(
+                index.span,
+                format!(
+                    "array index must be an integer, got {}",
+                    index_checked.ty()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::builtin_wrong_arg_type(),
             ),
-        ));
+        );
         return CheckedExpr::fallback(element_type, span);
     }
 
@@ -15469,23 +15552,33 @@ fn check_index(
             let mut needs_check = true;
             if let Some(TypedConst::Int(value)) = index_checked.constant() {
                 if *value < 0 {
-                    diagnostics.push(Diagnostic::new(
-                        index.span,
-                        format!(
-                            "array index {} is negative; length is {}",
-                            value, length
+                    diagnostics.push(
+                        Diagnostic::new(
+                            index.span,
+                            format!(
+                                "array index {} is negative; length is {}",
+                                value, length
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::index_oob_not_proven(""),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback(element_type, span);
                 }
                 if (*value as u128) >= length as u128 {
-                    diagnostics.push(Diagnostic::new(
-                        index.span,
-                        format!(
-                            "array index {} is out of range for length {}",
-                            value, length
+                    diagnostics.push(
+                        Diagnostic::new(
+                            index.span,
+                            format!(
+                                "array index {} is out of range for length {}",
+                                value, length
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::index_oob_not_proven(""),
                         ),
-                    ));
+                    );
                     return CheckedExpr::fallback(element_type, span);
                 }
                 needs_check = false;
@@ -15553,10 +15646,15 @@ fn check_len(
             span,
         ),
         other => {
-            diagnostics.push(Diagnostic::new(
-                array.span,
-                format!("len() requires an array, Vec, or Str argument, got {}", other),
-            ));
+            diagnostics.push(
+                Diagnostic::new(
+                    array.span,
+                    format!("len() requires an array, Vec, or Str argument, got {}", other),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::builtin_wrong_arg_type(),
+                ),
+            );
             CheckedExpr::fallback(Type::U64, span)
         }
     }
@@ -15571,20 +15669,30 @@ fn check_unary(
     match op {
         UnaryOp::Neg => {
             if !checked.ty().is_numeric() {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    format!("unary '-' requires a numeric operand, got {}", checked.ty()),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        span,
+                        format!("unary '-' requires a numeric operand, got {}", checked.ty()),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::type_mismatch("numeric", &checked.ty().to_string()),
+                    ),
+                );
                 return CheckedExpr::fallback_integer(span);
             }
             if checked.ty().is_unsigned_integer() && !checked.flexible_integer {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    format!(
-                        "unary '-' cannot be applied to unsigned type {}",
-                        checked.ty()
+                diagnostics.push(
+                    Diagnostic::new(
+                        span,
+                        format!(
+                            "unary '-' cannot be applied to unsigned type {}",
+                            checked.ty()
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::type_mismatch("signed numeric", &checked.ty().to_string()),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback_integer(span);
             }
 
@@ -15595,17 +15703,27 @@ fn check_unary(
                         Some(TypedConst::Int(negative))
                     }
                     Some(_) => {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            "negative integer literal does not fit in i64",
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                "negative integer literal does not fit in i64",
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::const_expr_overflow(),
+                            ),
+                        );
                         None
                     }
                     None => {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            "integer negation overflows in constant expression",
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                "integer negation overflows in constant expression",
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::const_expr_overflow(),
+                            ),
+                        );
                         None
                     }
                 },
@@ -15614,10 +15732,15 @@ fn check_unary(
                     if finite_float_value(negative, &operand_ty) {
                         Some(TypedConst::Float(negative))
                     } else {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            format!("float negation is not finite in {}", operand_ty),
-                        ));
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                format!("float negation is not finite in {}", operand_ty),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::const_expr_overflow(),
+                            ),
+                        );
                         None
                     }
                 }
@@ -15738,18 +15861,23 @@ fn check_binary(
         } else {
             "right operand"
         };
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "pointer arithmetic on raw pointer ({} is a `*const T` / \
-                 `*mut T`) — MISRA C 2012 Rule 18.4 forbids `+`/`-` / shift / \
-                 bitwise on pointer types. Use indices into a `Vec<T>` or wrap \
-                 the pointer in `BoundedPtr<T>` (Layer 3.2 of `unsafe.md`) \
-                 and use `bptr_get(bp, i)` / `bptr_set(bp, i, v)` for \
-                 bounds-checked indexed access.",
-                kind
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "pointer arithmetic on raw pointer ({} is a `*const T` / \
+                     `*mut T`) — MISRA C 2012 Rule 18.4 forbids `+`/`-` / shift / \
+                     bitwise on pointer types. Use indices into a `Vec<T>` or wrap \
+                     the pointer in `BoundedPtr<T>` (Layer 3.2 of `unsafe.md`) \
+                     and use `bptr_get(bp, i)` / `bptr_set(bp, i, v)` for \
+                     bounds-checked indexed access.",
+                    kind
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
             ),
-        ));
+        );
         // Fall through; the generic checker will reject too,
         // but we want OUR diagnostic to fire first so it's
         // the prominent one in the report.
@@ -15818,14 +15946,19 @@ fn check_numeric_binary(
     let lhs = coerce_numeric_operand(lhs, &result_type);
     let rhs = coerce_numeric_operand(rhs, &result_type);
     let constant = if is_known_zero(&rhs) && op == BinaryOp::Div {
-        diagnostics.push(Diagnostic::new(
-            rhs.expr.span,
-            if result_type.is_float() {
-                "floating-point division by zero in constant expression"
-            } else {
-                "division by zero in constant expression"
-            },
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                rhs.expr.span,
+                if result_type.is_float() {
+                    "floating-point division by zero in constant expression"
+                } else {
+                    "division by zero in constant expression"
+                },
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::const_expr_overflow(),
+            ),
+        );
         None
     } else if result_type.is_float() {
         match (lhs.constant(), rhs.constant()) {
@@ -15869,10 +16002,15 @@ fn check_integer_remainder(
     let lhs = coerce_numeric_operand(lhs, &result_type);
     let rhs = coerce_numeric_operand(rhs, &result_type);
     let constant = if is_known_zero(&rhs) {
-        diagnostics.push(Diagnostic::new(
-            rhs.expr.span,
-            "remainder by zero in constant expression",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                rhs.expr.span,
+                "remainder by zero in constant expression",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::const_expr_overflow(),
+            ),
+        );
         None
     } else {
         match (lhs.constant(), rhs.constant()) {
@@ -15952,17 +16090,27 @@ fn check_shift(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if !lhs.ty().is_integer() {
-        diagnostics.push(Diagnostic::new(
-            lhs.expr.span,
-            format!("shift left operand must be an integer, got {}", lhs.ty()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                lhs.expr.span,
+                format!("shift left operand must be an integer, got {}", lhs.ty()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::type_mismatch("integer", &lhs.ty().to_string()),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     }
     if !rhs.ty().is_integer() {
-        diagnostics.push(Diagnostic::new(
-            rhs.expr.span,
-            format!("shift count must be an integer, got {}", rhs.ty()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                rhs.expr.span,
+                format!("shift count must be an integer, got {}", rhs.ty()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::type_mismatch("integer", &rhs.ty().to_string()),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     }
 
@@ -15972,16 +16120,26 @@ fn check_shift(
         Some(TypedConst::Int(value)) => {
             let value = *value;
             if value < 0 {
-                diagnostics.push(Diagnostic::new(
-                    rhs.expr.span,
-                    "shift count cannot be negative",
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        rhs.expr.span,
+                        "shift count cannot be negative",
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::const_expr_overflow(),
+                    ),
+                );
             }
             if value >= bits {
-                diagnostics.push(Diagnostic::new(
-                    rhs.expr.span,
-                    format!("shift count must be less than {} for {}", bits, result_type),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        rhs.expr.span,
+                        format!("shift count must be less than {} for {}", bits, result_type),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::const_expr_overflow(),
+                    ),
+                );
             }
             Some(value)
         }
@@ -15991,10 +16149,15 @@ fn check_shift(
     if op == BinaryOp::Shl && result_type.is_signed_integer() {
         if let Some(TypedConst::Int(value)) = lhs.constant() {
             if *value < 0 {
-                diagnostics.push(Diagnostic::new(
-                    lhs.expr.span,
-                    "left shift of a negative signed value is not allowed",
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        lhs.expr.span,
+                        "left shift of a negative signed value is not allowed",
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::const_expr_overflow(),
+                    ),
+                );
             }
         }
     }
@@ -16129,14 +16292,19 @@ fn check_equality(
 ) -> CheckedExpr {
     if *lhs.ty() == Type::Bool || *rhs.ty() == Type::Bool {
         if *lhs.ty() != Type::Bool || *rhs.ty() != Type::Bool {
-            diagnostics.push(Diagnostic::new(
-                rhs.expr.span,
-                format!(
-                    "equality operands must both be bool or both be numeric, got {} and {}",
-                    lhs.ty(),
-                    rhs.ty()
+            diagnostics.push(
+                Diagnostic::new(
+                    rhs.expr.span,
+                    format!(
+                        "equality operands must both be bool or both be numeric, got {} and {}",
+                        lhs.ty(),
+                        rhs.ty()
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::type_mismatch(&lhs.ty().to_string(), &rhs.ty().to_string()),
                 ),
-            ));
+            );
         }
         let constant = match (lhs.constant(), rhs.constant()) {
             (Some(TypedConst::Bool(a)), Some(TypedConst::Bool(b))) => {
@@ -16170,14 +16338,19 @@ fn check_equality(
     let rhs_strish = matches!(*rhs.ty(), Type::Str | Type::OwnedStr);
     if lhs_strish || rhs_strish {
         if !lhs_strish || !rhs_strish {
-            diagnostics.push(Diagnostic::new(
-                rhs.expr.span,
-                format!(
-                    "equality operands must both be Str or OwnedStr, got {} and {}",
-                    lhs.ty(),
-                    rhs.ty()
+            diagnostics.push(
+                Diagnostic::new(
+                    rhs.expr.span,
+                    format!(
+                        "equality operands must both be Str or OwnedStr, got {} and {}",
+                        lhs.ty(),
+                        rhs.ty()
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::type_mismatch(&lhs.ty().to_string(), &rhs.ty().to_string()),
                 ),
-            ));
+            );
         }
         return CheckedExpr::new(
             TypedExprKind::Binary {
@@ -16265,15 +16438,20 @@ fn check_equality(
                                     }
                                 }
                                 _ => {
-                                    diagnostics.push(Diagnostic::new(
-                                        span,
-                                        format!(
-                                            "tuple `==` element at index {} has \
-                                             type {}, but no `implement Eq for {}` \
-                                             is in scope",
-                                            idx, elem_ty, name
+                                    diagnostics.push(
+                                        Diagnostic::new(
+                                            span,
+                                            format!(
+                                                "tuple `==` element at index {} has \
+                                                 type {}, but no `implement Eq for {}` \
+                                                 is in scope",
+                                                idx, elem_ty, name
+                                            ),
+                                        )
+                                        .with_elaboration(
+                                            crate::diagnostic_elaborations::iface_not_impl("Eq", name),
                                         ),
-                                    ));
+                                    );
                                     return CheckedExpr::new(
                                         TypedExprKind::Bool(false),
                                         Type::Bool,
@@ -16405,16 +16583,21 @@ fn check_equality(
                             span,
                         );
                     } else {
-                        diagnostics.push(Diagnostic::new(
-                            span,
-                            format!(
-                                "implement Eq for '{}' declares a borrowed param \
-                                 (`ref {}` / `mut ref {}`); auto-borrow only works \
-                                 when the operand is a let-bound variable. \
-                                 Let-bind both operands before comparing.",
-                                name, name, name
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                format!(
+                                    "implement Eq for '{}' declares a borrowed param \
+                                     (`ref {}` / `mut ref {}`); auto-borrow only works \
+                                     when the operand is a let-bound variable. \
+                                     Let-bind both operands before comparing.",
+                                    name, name, name
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::iface_impl_missing_method("eq", "Eq", &name),
                             ),
-                        ));
+                        );
                         return CheckedExpr::new(
                             TypedExprKind::Bool(false),
                             Type::Bool,
@@ -16444,7 +16627,17 @@ fn check_equality(
             ),
             _ => unreachable!("guarded by lhs_is_aggregate || rhs_is_aggregate"),
         };
-        diagnostics.push(Diagnostic::new(span, hint));
+        let eq_type_name = match (lhs.ty(), rhs.ty()) {
+            (Type::Struct(n), _) | (_, Type::Struct(n)) => n.clone(),
+            (Type::Enum(n), _) | (_, Type::Enum(n)) => n.clone(),
+            _ => String::new(),
+        };
+        diagnostics.push(
+            Diagnostic::new(span, hint)
+            .with_elaboration(
+                crate::diagnostic_elaborations::iface_not_impl("Eq", &eq_type_name),
+            ),
+        );
         return CheckedExpr::new(TypedExprKind::Bool(false), Type::Bool, None, span);
     }
 
@@ -16548,15 +16741,20 @@ fn check_indirect_call(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != param_types.len() {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "fn-ptr '{}' expects {} argument(s), got {}",
-                name,
-                param_types.len(),
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "fn-ptr '{}' expects {} argument(s), got {}",
+                    name,
+                    param_types.len(),
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(param_types.len(), args.len()),
             ),
-        ));
+        );
     }
     let mut typed_args = Vec::with_capacity(args.len());
     for (idx, arg) in args.iter().enumerate() {
@@ -17310,14 +17508,19 @@ fn check_call(
         let private_msg = crate::ast::lookup_private_item(name);
         match private_msg {
             Some(src_path) => {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    format!(
-                        "function '{}' is private to its module — \
-                         mark it `pub` to allow access from outside",
-                        src_path
+                diagnostics.push(
+                    Diagnostic::new(
+                        span,
+                        format!(
+                            "function '{}' is private to its module — \
+                             mark it `pub` to allow access from outside",
+                            src_path
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_function(&src_path),
                     ),
-                ));
+                );
             }
             None => {
                 diagnostics.push(
@@ -17377,13 +17580,18 @@ fn check_call(
                         .unwrap_or(false)
             });
         if already_held {
-            diagnostics.push(Diagnostic::new(
-                arg.span,
-                format!(
-                    "cross-function double acquisition: '{}' would call `mutex_lock` on '{}', but a Guard for '{}' is still live in this scope",
-                    name, target, target
+            diagnostics.push(
+                Diagnostic::new(
+                    arg.span,
+                    format!(
+                        "cross-function double acquisition: '{}' would call `mutex_lock` on '{}', but a Guard for '{}' is still live in this scope",
+                        name, target, target
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::task_affine(&target),
                 ),
-            ));
+            );
         }
     }
 
@@ -17477,24 +17685,34 @@ fn check_arg_aliasing(
         let mut_count = kinds.iter().filter(|k| **k == ArgKind::RefMut).count();
         let move_count = kinds.iter().filter(|k| **k == ArgKind::Move).count();
         if mut_count > 0 && kinds.len() > 1 {
-            diagnostics.push(Diagnostic::new(
-                span,
-                format!(
-                    "argument list aliases '{}': an '&mut' borrow cannot coexist \
-                     with another use of the same variable in the same call",
-                    target
+            diagnostics.push(
+                Diagnostic::new(
+                    span,
+                    format!(
+                        "argument list aliases '{}': an '&mut' borrow cannot coexist \
+                         with another use of the same variable in the same call",
+                        target
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::alias_mut_with_shared(target),
                 ),
-            ));
+            );
         }
         if move_count > 0 && kinds.len() > 1 {
-            diagnostics.push(Diagnostic::new(
-                span,
-                format!(
-                    "argument list aliases '{}': moving it cannot coexist with \
-                     a borrow of the same variable in the same call",
-                    target
+            diagnostics.push(
+                Diagnostic::new(
+                    span,
+                    format!(
+                        "argument list aliases '{}': moving it cannot coexist with \
+                         a borrow of the same variable in the same call",
+                        target
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::move_after_use(target),
                 ),
-            ));
+            );
         }
     }
 }
@@ -17519,7 +17737,7 @@ fn check_min_max_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("'{}' takes exactly 2 arguments, got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let lhs = check_expr(&args[0], env, signatures, diagnostics);
@@ -17558,7 +17776,7 @@ fn check_clamp_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("'clamp' takes exactly 3 arguments, got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let x = check_expr(&args[0], env, signatures, diagnostics);
@@ -17618,7 +17836,7 @@ fn check_atomic_builtin(
                         "'atomic_new' takes exactly 1 argument (initial value), got {}",
                         args.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(Type::Atomic(Box::new(Type::I64)), span);
             }
             let initial = check_expr(&args[0], env, signatures, diagnostics);
@@ -17643,7 +17861,7 @@ fn check_atomic_builtin(
                         "'atomic_new' element type must be an integer width or bool, got {}",
                         element
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(Type::Atomic(Box::new(Type::I64)), span);
             }
             let initial = coerce_checked(
@@ -17728,7 +17946,7 @@ fn check_atomic_cas(
                 "'atomic_compare_exchange' takes exactly 3 arguments (&cell, expected, new), got {}",
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
         return CheckedExpr::fallback(Type::Bool, span);
     }
     let cell = check_expr(&args[0], env, signatures, diagnostics);
@@ -17740,7 +17958,7 @@ fn check_atomic_cas(
                 name,
                 cell.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         Type::I64
     });
     let expected = check_expr(&args[1], env, signatures, diagnostics);
@@ -17784,7 +18002,7 @@ fn check_atomic_unary_ref(
         diagnostics.push(Diagnostic::new(
             span,
             format!("'{}' takes exactly 1 argument, got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let arg = check_expr(&args[0], env, signatures, diagnostics);
@@ -17796,7 +18014,7 @@ fn check_atomic_unary_ref(
                 name,
                 arg.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         Type::I64
     });
     CheckedExpr::new(
@@ -17826,7 +18044,7 @@ fn check_atomic_binary_ref(
         diagnostics.push(Diagnostic::new(
             span,
             format!("'{}' takes exactly 2 arguments, got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let cell = check_expr(&args[0], env, signatures, diagnostics);
@@ -17838,7 +18056,7 @@ fn check_atomic_binary_ref(
                 name,
                 cell.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         Type::I64
     });
     // `atomic_fetch_add` is an arithmetic op — reject it on
@@ -17849,7 +18067,7 @@ fn check_atomic_binary_ref(
             args[0].span,
             "'atomic_fetch_add' requires an integer element; bool atomics have no addition"
                 .to_string(),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let value = check_expr(&args[1], env, signatures, diagnostics);
     let value = coerce_checked(
@@ -17903,7 +18121,7 @@ fn check_channel_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'channel_new' takes 0 arguments, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(0, args.len())));
             }
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -17921,7 +18139,7 @@ fn check_channel_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'channel_send' takes 2 arguments, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
                 return CheckedExpr::fallback(Type::I64, span);
             }
             let ch = check_expr(&args[0], env, signatures, diagnostics);
@@ -17934,7 +18152,7 @@ fn check_channel_builtin(
                             "'channel_send' requires a reference to Channel<T, N>, got {}",
                             ch.ty()
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     Type::I64
                 }
             };
@@ -17962,7 +18180,7 @@ fn check_channel_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'channel_recv' takes 1 argument, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(Type::I64, span);
             }
             let ch = check_expr(&args[0], env, signatures, diagnostics);
@@ -17975,7 +18193,7 @@ fn check_channel_builtin(
                             "'channel_recv' requires a reference to Channel<T, N>, got {}",
                             ch.ty()
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                     Type::I64
                 }
             };
@@ -18068,7 +18286,7 @@ fn check_mutex_builtin(
                         "'mutex_new' takes exactly 1 argument (initial value), got {}",
                         args.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(mutex_ty, span);
             }
             let initial = check_expr(&args[0], env, signatures, diagnostics);
@@ -18095,7 +18313,7 @@ fn check_mutex_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'mutex_lock' takes 1 argument, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(guard_ty, span);
             }
             let m = check_expr(&args[0], env, signatures, diagnostics);
@@ -18107,7 +18325,7 @@ fn check_mutex_builtin(
                         element,
                         m.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             // Static double-acquire check. When the
             // `mutex_lock` argument is a syntactic &Var(name)
@@ -18132,14 +18350,19 @@ fn check_mutex_builtin(
                                 .unwrap_or(false)
                     });
                 if already_held {
-                    diagnostics.push(Diagnostic::new(
-                        span,
-                        format!(
-                            "double acquisition: mutex '{}' is already locked by a live Guard in this scope; \
-                             let the existing guard drop before re-locking",
-                            target
+                    diagnostics.push(
+                        Diagnostic::new(
+                            span,
+                            format!(
+                                "double acquisition: mutex '{}' is already locked by a live Guard in this scope; \
+                                 let the existing guard drop before re-locking",
+                                target
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::task_affine(&target),
                         ),
-                    ));
+                    );
                 }
             }
             CheckedExpr::new(
@@ -18158,7 +18381,7 @@ fn check_mutex_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'guard_get' takes 1 argument, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(element.clone(), span);
             }
             let g = check_expr(&args[0], env, signatures, diagnostics);
@@ -18170,7 +18393,7 @@ fn check_mutex_builtin(
                         element,
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -18188,7 +18411,7 @@ fn check_mutex_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'guard_set' takes 2 arguments, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
                 return CheckedExpr::fallback(element.clone(), span);
             }
             let g = check_expr(&args[0], env, signatures, diagnostics);
@@ -18200,7 +18423,7 @@ fn check_mutex_builtin(
                         element,
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             let v = check_expr(&args[1], env, signatures, diagnostics);
             let v = coerce_checked(
@@ -18427,7 +18650,7 @@ fn check_condvar_builtin(
                 diagnostics.push(Diagnostic::new(
                     span,
                     format!("'condvar_new' takes no arguments, got {}", args.len()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(0, args.len())));
             }
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -18448,7 +18671,7 @@ fn check_condvar_builtin(
                         "'condvar_wait' takes 2 arguments (&cv, &mut guard), got {}",
                         args.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
                 return CheckedExpr::fallback(Type::I64, span);
             }
             let cv = check_expr(&args[0], env, signatures, diagnostics);
@@ -18459,7 +18682,7 @@ fn check_condvar_builtin(
                         "'condvar_wait' first argument must be `ref Condvar`, got {}",
                         cv.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             let g = check_expr(&args[1], env, signatures, diagnostics);
             if !is_guard_ref_mut(g.ty(), &guard_element) {
@@ -18470,7 +18693,7 @@ fn check_condvar_builtin(
                         guard_element,
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -18491,7 +18714,7 @@ fn check_condvar_builtin(
                         "'condvar_wait_timeout' takes 3 arguments (&cv, &mut guard, timeout_ms), got {}",
                         args.len()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
                 return CheckedExpr::fallback(Type::Bool, span);
             }
             let cv = check_expr(&args[0], env, signatures, diagnostics);
@@ -18502,7 +18725,7 @@ fn check_condvar_builtin(
                         "'condvar_wait_timeout' first argument must be `ref Condvar`, got {}",
                         cv.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             let g = check_expr(&args[1], env, signatures, diagnostics);
             if !is_guard_ref_mut(g.ty(), &guard_element) {
@@ -18513,7 +18736,7 @@ fn check_condvar_builtin(
                         guard_element,
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             let ms = check_expr(&args[2], env, signatures, diagnostics);
             let ms = coerce_checked(
@@ -18536,22 +18759,32 @@ fn check_condvar_builtin(
         }
         "condvar_notify_one" | "condvar_notify_all" => {
             if args.len() != 1 {
-                diagnostics.push(Diagnostic::new(
-                    span,
-                    format!("'{}' takes 1 argument (&cv), got {}", name, args.len()),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        span,
+                        format!("'{}' takes 1 argument (&cv), got {}", name, args.len()),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::wrong_arity(1, args.len()),
+                    ),
+                );
                 return CheckedExpr::fallback(Type::I64, span);
             }
             let cv = check_expr(&args[0], env, signatures, diagnostics);
             if !is_condvar_ref(cv.ty()) {
-                diagnostics.push(Diagnostic::new(
-                    args[0].span,
-                    format!(
-                        "'{}' argument must be `ref Condvar`, got {}",
-                        name,
-                        cv.ty()
+                diagnostics.push(
+                    Diagnostic::new(
+                        args[0].span,
+                        format!(
+                            "'{}' argument must be `ref Condvar`, got {}",
+                            name,
+                            cv.ty()
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                     ),
-                ));
+                );
             }
             CheckedExpr::new(
                 TypedExprKind::Call {
@@ -18636,10 +18869,15 @@ fn try_elaborate_empty_hashmap(
     if matches!(k_ty, Type::Ref(_) | Type::RefMut(_))
         || matches!(v_ty, Type::Ref(_) | Type::RefMut(_))
     {
-        diagnostics.push(Diagnostic::new(
-            expr.span,
-            "HashMap K or V cannot be a reference type",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                expr.span,
+                "HashMap K or V cannot be a reference type",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::raw_ptr_escape(),
+            ),
+        );
     }
     Some(CheckedExpr::new(
         TypedExprKind::Call {
@@ -18769,13 +19007,18 @@ fn check_try_vec_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 1 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "try_vec(n) takes 1 argument (the capacity, u64), got {}",
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "try_vec(n) takes 1 argument (the capacity, u64), got {}",
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(1, args.len()),
             ),
-        ));
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     let arg_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -18820,13 +19063,18 @@ fn check_box_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 1 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "box(expr) takes exactly 1 argument; got {}. Use `let b: Box<T> = box(value);`",
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "box(expr) takes exactly 1 argument; got {}. Use `let b: Box<T> = box(value);`",
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(1, args.len()),
             ),
-        ));
+        );
         return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
     }
     let inner = check_expr(&args[0], env, signatures, diagnostics);
@@ -18863,15 +19111,20 @@ fn check_box_builtin(
         _ => false,
     };
     if !is_supported {
-        diagnostics.push(Diagnostic::new(
-            args[0].span,
-            format!(
-                "box() v1 supports Copy + sized element types (primitives, Copy structs), \
-                 `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. Other owning inner \
-                 types (Box<Box<T>>, Box<HashMap<…>>, etc.) remain a follow-up.",
-                inner_ty
+        diagnostics.push(
+            Diagnostic::new(
+                args[0].span,
+                format!(
+                    "box() v1 supports Copy + sized element types (primitives, Copy structs), \
+                     `dyn Iface`, `Vec<T>`, and `OwnedStr`; got `{}`. Other owning inner \
+                     types (Box<Box<T>>, Box<HashMap<…>>, etc.) remain a follow-up.",
+                    inner_ty
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::builtin_wrong_arg_type(),
             ),
-        ));
+        );
         return CheckedExpr::fallback(Type::Box(Box::new(Type::I64)), span);
     }
     // L2 follow-up: for non-Copy inner (Vec, OwnedStr), the
@@ -18912,13 +19165,18 @@ fn check_unbox_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 1 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "unbox(b) takes exactly 1 argument (a `ref Box<T>`); got {}",
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "unbox(b) takes exactly 1 argument (a `ref Box<T>`); got {}",
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(1, args.len()),
             ),
-        ));
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     let checked = check_expr(&args[0], env, signatures, diagnostics);
@@ -18926,25 +19184,35 @@ fn check_unbox_builtin(
         Type::Ref(inner) | Type::RefMut(inner) => match &**inner {
             Type::Box(boxed) => (**boxed).clone(),
             _ => {
-                diagnostics.push(Diagnostic::new(
-                    args[0].span,
-                    format!(
-                        "unbox() needs a `ref Box<T>` argument, got `{}`",
-                        checked.ty()
+                diagnostics.push(
+                    Diagnostic::new(
+                        args[0].span,
+                        format!(
+                            "unbox() needs a `ref Box<T>` argument, got `{}`",
+                            checked.ty()
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                     ),
-                ));
+                );
                 return CheckedExpr::fallback(Type::I64, span);
             }
         },
         _ => {
-            diagnostics.push(Diagnostic::new(
-                args[0].span,
-                format!(
-                    "unbox() needs a `ref Box<T>` argument, got `{}` — \
-                     take a reference: `unbox(ref b)`",
-                    checked.ty()
+            diagnostics.push(
+                Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "unbox() needs a `ref Box<T>` argument, got `{}` — \
+                         take a reference: `unbox(ref b)`",
+                        checked.ty()
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::builtin_wrong_arg_type(),
                 ),
-            ));
+            );
             return CheckedExpr::fallback(Type::I64, span);
         }
     };
@@ -18956,16 +19224,21 @@ fn check_unbox_builtin(
     // on scope exit. Pass the box by ref to a function, or
     // store it as a struct field, to use non-Copy inner.
     if !inner_ty.is_copy() && !matches!(inner_ty, Type::Object(_)) {
-        diagnostics.push(Diagnostic::new(
-            args[0].span,
-            format!(
-                "unbox(ref b) where the boxed type `{}` is non-Copy would \
-                 alias the heap slot (returning by value copies pointer-state \
-                 the box still owns). Pass `ref b` to a function instead, \
-                 or store the box in a struct field.",
-                inner_ty
+        diagnostics.push(
+            Diagnostic::new(
+                args[0].span,
+                format!(
+                    "unbox(ref b) where the boxed type `{}` is non-Copy would \
+                     alias the heap slot (returning by value copies pointer-state \
+                     the box still owns). Pass `ref b` to a function instead, \
+                     or store the box in a struct field.",
+                    inner_ty
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::move_out_of_borrowed(""),
             ),
-        ));
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     CheckedExpr::new(
@@ -18988,12 +19261,17 @@ fn check_vec_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.is_empty() {
-        diagnostics.push(Diagnostic::new(
-            span,
-            "vec() needs either at least one element or a type annotation \
-             (e.g. `let xs: Vec<i64> = vec();`) so the element type can be \
-             inferred",
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                "vec() needs either at least one element or a type annotation \
+                 (e.g. `let xs: Vec<i64> = vec();`) so the element type can be \
+                 inferred",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::builtin_wrong_arg_type(),
+            ),
+        );
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
 
@@ -19174,10 +19452,15 @@ fn check_push_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 2 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("push(xs, v) expects 2 arguments, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("push(xs, v) expects 2 arguments, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(2, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
 
@@ -19337,10 +19620,15 @@ fn check_pop_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 1 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("pop(xs) expects 1 argument, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("pop(xs) expects 1 argument, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(1, args.len()),
+            ),
+        );
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19409,21 +19697,26 @@ fn check_sort_builtin(
     // helper that sorts in descending order.
     let want_args: usize = if name == "sort_by" { 2 } else { 1 };
     if args.len() != want_args {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!(
-                "{}({}) expects {} argument{}, got {}",
-                name,
-                if name == "sort_by" {
-                    "mut ref xs, cmp"
-                } else {
-                    "mut ref xs"
-                },
-                want_args,
-                if want_args == 1 { "" } else { "s" },
-                args.len()
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "{}({}) expects {} argument{}, got {}",
+                    name,
+                    if name == "sort_by" {
+                        "mut ref xs, cmp"
+                    } else {
+                        "mut ref xs"
+                    },
+                    want_args,
+                    if want_args == 1 { "" } else { "s" },
+                    args.len()
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(want_args, args.len()),
             ),
-        ));
+        );
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19473,7 +19766,7 @@ fn check_sort_builtin(
                 "{}() only supports `{}` in v1, got element type {}",
                 name, container, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback_integer(span);
     }
     let mut typed_args = vec![xs.expr];
@@ -19495,7 +19788,7 @@ fn check_sort_builtin(
                     "sort_by comparator must be `fn(i64, i64) -> i64`, got {}",
                     cmp.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         typed_args.push(cmp.expr);
     }
@@ -19589,7 +19882,7 @@ fn check_vec_map_fold_builtin(
                 "{}() only supports `Vec<i64>` in v1, got element type {}",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let mut typed_args = vec![xs.expr];
@@ -19604,7 +19897,7 @@ fn check_vec_map_fold_builtin(
                         "vec_map mapper must be `fn(i64) -> i64`, got {}",
                         f.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(f.expr);
         }
@@ -19618,7 +19911,7 @@ fn check_vec_map_fold_builtin(
                         "vec_filter predicate must be `fn(i64) -> bool`, got {}",
                         p.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(p.expr);
         }
@@ -19644,7 +19937,7 @@ fn check_vec_map_fold_builtin(
                         "vec_fold combiner must be `fn(i64, i64) -> i64`, got {}",
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(g.expr);
         }
@@ -19673,10 +19966,15 @@ fn check_vec_replace_all_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 3 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("vec_replace_all() expects 3 arguments, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("vec_replace_all() expects 3 arguments, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(3, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19691,7 +19989,7 @@ fn check_vec_replace_all_builtin(
                 "vec_replace_all() arg 0 must be `mut ref Vec<i64>`, got {}",
                 xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let old_raw = check_expr(&args[1], env, signatures, diagnostics);
     let old = coerce_checked(
@@ -19728,10 +20026,15 @@ fn check_vec_swap_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 3 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("vec_swap() expects 3 arguments, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("vec_swap() expects 3 arguments, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(3, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19746,7 +20049,7 @@ fn check_vec_swap_builtin(
                 "vec_swap() arg 0 must be `mut ref Vec<i64>`, got {}",
                 xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let i_raw = check_expr(&args[1], env, signatures, diagnostics);
     let i = coerce_checked(
@@ -19783,10 +20086,15 @@ fn check_vec_remove_at_builtin(
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
     if args.len() != 2 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("vec_remove_at() expects 2 arguments, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("vec_remove_at() expects 2 arguments, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(2, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(Type::I64, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19801,7 +20109,7 @@ fn check_vec_remove_at_builtin(
                 "vec_remove_at() arg 0 must be `mut ref Vec<i64>`, got {}",
                 xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let i_raw = check_expr(&args[1], env, signatures, diagnostics);
     let i = coerce_checked(
@@ -19832,10 +20140,15 @@ fn check_vec_zip_with_builtin(
 ) -> CheckedExpr {
     let ret_ty = Type::Vec(Box::new(Type::I64));
     if args.len() != 3 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("vec_zip_with() expects 3 arguments, got {}", args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("vec_zip_with() expects 3 arguments, got {}", args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(3, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(ret_ty, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19853,7 +20166,7 @@ fn check_vec_zip_with_builtin(
             format!(
                 "vec_zip_with() arg 0 must be `ref Vec<i64>`, got {}", xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !ok(&ys.ty()) {
         diagnostics.push(Diagnostic::new(
@@ -19861,7 +20174,7 @@ fn check_vec_zip_with_builtin(
             format!(
                 "vec_zip_with() arg 1 must be `ref Vec<i64>`, got {}", ys.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let f = check_expr(&args[2], env, signatures, diagnostics);
     let expected = Type::FnPtr(
@@ -19875,7 +20188,7 @@ fn check_vec_zip_with_builtin(
                 "vec_zip_with fn must be `fn(i64, i64) -> i64`, got {}",
                 f.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -19903,10 +20216,15 @@ fn check_vec_max_min_by_builtin(
 ) -> CheckedExpr {
     let ret_ty = Type::Enum(mangle_generic_decl("Option", &[Type::I64]));
     if args.len() != 2 {
-        diagnostics.push(Diagnostic::new(
-            span,
-            format!("{}() expects 2 arguments, got {}", name, args.len()),
-        ));
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("{}() expects 2 arguments, got {}", name, args.len()),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::wrong_arity(2, args.len()),
+            ),
+        );
         return CheckedExpr::fallback(ret_ty, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19933,7 +20251,7 @@ fn check_vec_max_min_by_builtin(
                 "{} key fn must be `fn(i64) -> i64`, got {}",
                 name, k.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -19997,7 +20315,7 @@ fn check_vec_count_if_builtin(
                 "vec_count_if() only supports `Vec<i64>` in v1, got element type {}",
                 element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let p = check_expr(&args[1], env, signatures, diagnostics);
@@ -20009,7 +20327,7 @@ fn check_vec_count_if_builtin(
                 "vec_count_if predicate must be `fn(i64) -> bool`, got {}",
                 p.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -20039,7 +20357,7 @@ fn check_vec_position_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("vec_position() expects 2 arguments, got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(ret_ty, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20075,7 +20393,7 @@ fn check_vec_position_builtin(
                 "vec_position() only supports `Vec<i64>` in v1, got element type {}",
                 element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty, span);
     }
     let p = check_expr(&args[1], env, signatures, diagnostics);
@@ -20087,7 +20405,7 @@ fn check_vec_position_builtin(
                 "vec_position predicate must be `fn(i64) -> bool`, got {}",
                 p.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -20192,7 +20510,7 @@ fn check_vec_utility_builtin(
                     "{}() arg 0 must be `ref Vec<i64>`, got {}",
                     name, a0_raw.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         return CheckedExpr::new(
             TypedExprKind::Call {
@@ -20218,7 +20536,7 @@ fn check_vec_utility_builtin(
                     "{}() arg 0 must be `ref Vec<i64>`, got {}",
                     name, a0_raw.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         return CheckedExpr::new(
             TypedExprKind::Call {
@@ -20247,7 +20565,7 @@ fn check_vec_utility_builtin(
                     "{}() arg 0 must be `ref Vec<i64>`, got {}",
                     name, a0_raw.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         return CheckedExpr::new(
             TypedExprKind::Call {
@@ -20290,7 +20608,7 @@ fn check_vec_utility_builtin(
                         "vec_extend() arg 0 must be `mut ref Vec<i64>`, got {}",
                         a0_raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             if !a1_ok {
                 diagnostics.push(Diagnostic::new(
@@ -20299,7 +20617,7 @@ fn check_vec_utility_builtin(
                         "vec_extend() arg 1 must be `ref Vec<i64>` or `mut ref Vec<i64>`, got {}",
                         a1_raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             vec![a0_raw.expr, a1_raw.expr]
         }
@@ -20322,7 +20640,7 @@ fn check_vec_utility_builtin(
                         "{}() arg 0 must be `ref Vec<i64>`, got {}",
                         name, a0_raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             if !ok(&a1_raw.ty()) {
                 diagnostics.push(Diagnostic::new(
@@ -20331,7 +20649,7 @@ fn check_vec_utility_builtin(
                         "{}() arg 1 must be `ref Vec<i64>`, got {}",
                         name, a1_raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             vec![a0_raw.expr, a1_raw.expr]
         }
@@ -20560,7 +20878,7 @@ fn check_vec_take_drop_builtin(
                 name,
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20597,7 +20915,7 @@ fn check_vec_take_drop_builtin(
                 "{}() only supports `Vec<i64>` in v1, got element type {}",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
     let n_raw = check_expr(&args[1], env, signatures, diagnostics);
@@ -20638,7 +20956,7 @@ fn check_vec_clamp_scalar_builtin(
                 "{}() expects 3 arguments (ref xs, lo, hi), got {}",
                 name, args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20694,7 +21012,7 @@ fn check_vec_take_drop_while_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects 2 arguments (ref xs, pred), got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20721,7 +21039,7 @@ fn check_vec_take_drop_while_builtin(
                 "{} predicate must be `fn(i64) -> bool`, got {}",
                 name, p.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -20759,7 +21077,7 @@ fn check_vec_map_fold_fused_builtin(
                 "vec_map_fold() expects 4 arguments (ref xs, init, f, g), got {}",
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(4, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20773,7 +21091,7 @@ fn check_vec_map_fold_fused_builtin(
                         "vec_map_fold() requires a `ref Vec<i64>` argument, got {}",
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback_integer(span);
             }
         },
@@ -20784,7 +21102,7 @@ fn check_vec_map_fold_fused_builtin(
                     "vec_map_fold() requires a `ref Vec<i64>` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -20795,7 +21113,7 @@ fn check_vec_map_fold_fused_builtin(
                 "vec_map_fold() only supports `Vec<i64>` in v1, got element type {}",
                 element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback_integer(span);
     }
     let init_raw = check_expr(&args[1], env, signatures, diagnostics);
@@ -20815,7 +21133,7 @@ fn check_vec_map_fold_fused_builtin(
                 "vec_map_fold mapper must be `fn(i64) -> i64`, got {}",
                 f.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let g = check_expr(&args[3], env, signatures, diagnostics);
     let want_g = Type::FnPtr(vec![Type::I64, Type::I64], Box::new(Type::I64));
@@ -20826,7 +21144,7 @@ fn check_vec_map_fold_fused_builtin(
                 "vec_map_fold combiner must be `fn(i64, i64) -> i64`, got {}",
                 g.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     CheckedExpr::new(
         TypedExprKind::Call {
@@ -20882,7 +21200,7 @@ fn check_vec_fused_family_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects {} arguments, got {}", name, want_args, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -20912,7 +21230,7 @@ fn check_vec_fused_family_builtin(
                 "{}() only supports `Vec<i64>` in v1, got element type {}",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     // Per-builtin arg slots: signatures + arg positions vary.
@@ -20938,7 +21256,7 @@ fn check_vec_fused_family_builtin(
                         "vec_filter_fold predicate must be `fn(i64) -> bool`, got {}",
                         p.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(p.expr);
             let g = check_expr(&args[3], env, signatures, diagnostics);
@@ -20949,7 +21267,7 @@ fn check_vec_fused_family_builtin(
                         "vec_filter_fold combiner must be `fn(i64, i64) -> i64`, got {}",
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(g.expr);
         }
@@ -20963,7 +21281,7 @@ fn check_vec_fused_family_builtin(
                         "vec_map_filter mapper must be `fn(i64) -> i64`, got {}",
                         f.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(f.expr);
             let p = check_expr(&args[2], env, signatures, diagnostics);
@@ -20974,7 +21292,7 @@ fn check_vec_fused_family_builtin(
                         "vec_map_filter predicate must be `fn(i64) -> bool`, got {}",
                         p.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(p.expr);
         }
@@ -20995,7 +21313,7 @@ fn check_vec_fused_family_builtin(
                         "vec_map_filter_fold mapper must be `fn(i64) -> i64`, got {}",
                         f.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(f.expr);
             let p = check_expr(&args[3], env, signatures, diagnostics);
@@ -21006,7 +21324,7 @@ fn check_vec_fused_family_builtin(
                         "vec_map_filter_fold predicate must be `fn(i64) -> bool`, got {}",
                         p.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(p.expr);
             let g = check_expr(&args[4], env, signatures, diagnostics);
@@ -21017,7 +21335,7 @@ fn check_vec_fused_family_builtin(
                         "vec_map_filter_fold combiner must be `fn(i64, i64) -> i64`, got {}",
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(g.expr);
         }
@@ -21115,7 +21433,7 @@ fn check_vec_reduction_builtin(
                 "{}() only supports `Vec<i64>` in v1, got element type {}",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let mut typed_args = vec![xs.expr];
@@ -21154,7 +21472,7 @@ fn check_vec_reduction_builtin(
                 diagnostics.push(Diagnostic::new(
                     args[1].span,
                     format!("{} predicate must be `fn(i64) -> bool`, got {}", name, p.ty()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(p.expr);
         }
@@ -21190,7 +21508,7 @@ fn check_vec_chain_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("vec_chain() expects 2 arguments (ref xs, ref ys), got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21207,7 +21525,7 @@ fn check_vec_chain_builtin(
             diagnostics.push(Diagnostic::new(
                 args[i].span,
                 format!("vec_chain() arg #{} must be `ref Vec<i64>`, got {}", i + 1, arg.ty()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         };
         if !matches!(et, Type::I64) {
@@ -21217,7 +21535,7 @@ fn check_vec_chain_builtin(
                     "vec_chain() only supports `Vec<i64>` in v1, got element type {}",
                     et
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -21255,7 +21573,7 @@ fn check_vec_pairwise_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects 2 arguments (ref xs, ref ys), got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21272,7 +21590,7 @@ fn check_vec_pairwise_builtin(
             diagnostics.push(Diagnostic::new(
                 args[i].span,
                 format!("{}() arg #{} must be `ref Vec<i64>`, got {}", name, i + 1, arg.ty()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         };
         if !matches!(et, Type::I64) {
@@ -21282,7 +21600,7 @@ fn check_vec_pairwise_builtin(
                     "{}() only supports `Vec<i64>` in v1, got element type {}",
                     name, et
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -21316,7 +21634,7 @@ fn check_vec_dual_predicate_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects 2 arguments (ref xs, ref ys), got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(Type::Bool, span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21333,7 +21651,7 @@ fn check_vec_dual_predicate_builtin(
             diagnostics.push(Diagnostic::new(
                 args[i].span,
                 format!("{}() arg #{} must be `ref Vec<i64>`, got {}", name, i + 1, arg.ty()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Bool, span);
         };
         if !matches!(et, Type::I64) {
@@ -21343,7 +21661,7 @@ fn check_vec_dual_predicate_builtin(
                     "{}() only supports `Vec<i64>` in v1, got element type {}",
                     name, et
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Bool, span);
         }
     }
@@ -21376,7 +21694,7 @@ fn check_vec_chunks_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects 2 arguments (ref xs, k), got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21423,7 +21741,7 @@ fn check_vec_group_by_value_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("vec_group_by_value() expects 1 argument (ref xs), got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21464,7 +21782,7 @@ fn check_vec_flatten_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("vec_flatten() expects 1 argument (ref xss), got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xss = check_expr(&args[0], env, signatures, diagnostics);
@@ -21715,7 +22033,7 @@ fn check_binary_heap_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         h.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         },
@@ -21749,7 +22067,7 @@ fn check_binary_heap_builtin(
                 "{}() only supports `BinaryHeap<i64>` in v1, got BinaryHeap<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![h.expr];
     if name == "binary_heap_push" {
@@ -21858,7 +22176,7 @@ fn check_bloom_filter_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         bf.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         }
@@ -21980,7 +22298,7 @@ fn check_bst_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         bst.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         },
@@ -22014,7 +22332,7 @@ fn check_bst_builtin(
                 "{}() only supports `Bst<i64>` in v1, got Bst<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![bst.expr];
     if matches!(name, "bst_insert" | "bst_contains" | "bst_remove") {
@@ -22141,7 +22459,7 @@ fn check_graph_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         g.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         }
@@ -22200,7 +22518,7 @@ fn check_graph_builtin(
                         if want_mut_vec { "mut ref " } else { "ref " },
                         raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             if want_mut_vec && matches!(raw.ty(), Type::Ref(_)) {
                 diagnostics.push(Diagnostic::new(
@@ -22211,7 +22529,7 @@ fn check_graph_builtin(
                         i,
                         raw.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
             typed_args.push(raw.expr);
         } else {
@@ -22499,7 +22817,7 @@ fn check_reverse_dedup_builtin(
                 name,
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -22524,7 +22842,7 @@ fn check_reverse_dedup_builtin(
                         },
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback_integer(span);
             }
         },
@@ -22541,7 +22859,7 @@ fn check_reverse_dedup_builtin(
                     },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -22556,7 +22874,7 @@ fn check_reverse_dedup_builtin(
                 "dedup() only supports `Vec<i64>` in v1, got Vec<{}>",
                 element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback_integer(span);
     }
     if name == "reverse" && !element_type.is_copy() {
@@ -22566,7 +22884,7 @@ fn check_reverse_dedup_builtin(
                 "reverse() requires a Vec<T> or [T; N] with Copy element type in v1, got element {}",
                 element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback_integer(span);
     }
     CheckedExpr::new(
@@ -22612,7 +22930,7 @@ fn check_search_builtin(
                 name,
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         let ret_ty = if name == "contains" {
             Type::Bool
         } else {
@@ -22652,7 +22970,7 @@ fn check_search_builtin(
                     "{}() requires a `ref Vec<i64>` or `ref [i64; N]` argument, got {}",
                     name, other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = if name == "contains" {
                 Type::Bool
             } else {
@@ -22673,7 +22991,7 @@ fn check_search_builtin(
                 "{}() only supports `{}` in v1, got element type {}",
                 name, container, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let needle_raw = check_expr(&args[1], env, signatures, diagnostics);
     let needle = coerce_checked(
@@ -22927,7 +23245,7 @@ fn check_math_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("f64_remap() expects 5 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(5, args.len())));
             return CheckedExpr::fallback(Type::F64, span);
         }
         let mut typed_args = Vec::new();
@@ -22959,7 +23277,7 @@ fn check_math_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("f64_round_to() expects 2 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::F64, span);
         }
         let x_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -23089,7 +23407,7 @@ fn check_math_builtin(
                         "abs() expects a signed integer or float argument, got {}",
                         other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 Type::I64
             }
         };
@@ -23551,7 +23869,7 @@ fn check_heap_builtin(
                         },
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = if name == "heap_pop" || name == "heap_peek" {
                     Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
                 } else {
@@ -23573,7 +23891,7 @@ fn check_heap_builtin(
                     },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = if name == "heap_pop" || name == "heap_peek" {
                 Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
             } else {
@@ -23592,7 +23910,7 @@ fn check_heap_builtin(
                 name,
                 xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -23601,7 +23919,7 @@ fn check_heap_builtin(
                 "{}() only supports `Vec<i64>` in v1, got Vec<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![xs.expr];
     if name == "heap_push" {
@@ -23764,7 +24082,7 @@ fn check_deque_builtin(
                 "{}() only supports `Deque<i64>` in v1, got Deque<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![d.expr];
     if matches!(name, "deque_push_back" | "deque_push_front") {
@@ -23908,7 +24226,7 @@ fn check_hashset_builtin(
                 "{}() only supports `HashSet<i64>` in v1, got HashSet<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![s.expr];
     if matches!(name, "hashset_insert" | "hashset_contains" | "hashset_remove") {
@@ -24054,7 +24372,7 @@ fn check_pool_builtin(
                 "{}() only supports `Pool<i64>` in v1, got Pool<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     // Second arg: i64 value for pool_alloc, Handle<i64> for
     // pool_get / pool_free.
@@ -24073,7 +24391,7 @@ fn check_pool_builtin(
                         name,
                         second.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 CheckedExpr::fallback(expected, args[1].span)
             }
         }
@@ -24123,7 +24441,7 @@ fn check_tainted_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() takes 1 argument, got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         let fallback = if name == "taint" {
             Type::Tainted(Box::new(Type::I64))
         } else {
@@ -24255,7 +24573,7 @@ fn check_raw_load_store_builtin(
                          would violate const-correctness), got {}",
                         other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(Type::I64, span);
             }
         }
@@ -24268,7 +24586,7 @@ fn check_raw_load_store_builtin(
                 "{}() only supports `i64` pointee in v1, got {}",
                 name, pointee
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if name == "raw_load" {
         return CheckedExpr::new(
@@ -24335,7 +24653,7 @@ fn check_unsafe_alloc_free_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() takes 1 argument, got {}", name, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         let fallback = if name == "unsafe_alloc" {
             Type::PtrMut(Box::new(Type::I64))
         } else {
@@ -24436,7 +24754,7 @@ fn check_bptr_builtin(
                 "{}() expects {} argument(s), got {}",
                 name, want_args, args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(fallback_ty(name), span);
     }
     if name == "bptr_new" {
@@ -24451,7 +24769,7 @@ fn check_bptr_builtin(
                         "bptr_new() first argument must be `*mut i64`, got {}",
                         other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
         }
         let len_raw = check_expr(&args[1], env, signatures, diagnostics);
@@ -24530,7 +24848,7 @@ fn check_bptr_builtin(
                 "{}() only supports `BoundedPtr<i64>` in v1, got BoundedPtr<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if name == "bptr_len" {
         return CheckedExpr::new(
@@ -24633,7 +24951,7 @@ fn check_region_builtin(
                 "{}() expects {} argument(s), got {}",
                 name, want_args, args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(fallback_ty(name), span);
     }
     if name == "region_new" {
@@ -24663,7 +24981,7 @@ fn check_region_builtin(
                 if is_mut_op { "mut ref " } else { "ref " },
                 r.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(fallback_ty(name), span);
     }
     if is_mut_op && !matches!(r.ty(), Type::RefMut(_)) {
@@ -24674,7 +24992,7 @@ fn check_region_builtin(
                 name,
                 r.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if name == "region_len" {
         return CheckedExpr::new(
@@ -24749,7 +25067,7 @@ fn check_aref_builtin(
                 name,
                 aref.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(Type::I64, span);
     }
     if name == "aref_load" {
@@ -24823,7 +25141,7 @@ fn check_mmio_builtin(
                 "{}() expects {} argument(s), got {}",
                 name, want_args, args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let fallback = if name == "mmio_read_u32" { Type::U32 } else { Type::I64 };
         return CheckedExpr::fallback(fallback, span);
     }
@@ -24908,7 +25226,7 @@ fn check_volatile_rw_builtin(
                  use Atomic<T> instead.",
                 name
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let want_args = if name == "volatile_read" { 1 } else { 2 };
@@ -24919,7 +25237,7 @@ fn check_volatile_rw_builtin(
                 "{}() expects {} argument(s), got {}",
                 name, want_args, args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let ptr_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25001,7 +25319,7 @@ fn check_sleep_ms_builtin(
                 "sleep_ms() expects 1 argument, got {}",
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let ms_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25409,7 +25727,7 @@ fn check_hashmap_builtin(
                  `Hash` and `Eq`; got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     } else if !v_is_scalar {
         diagnostics.push(Diagnostic::new(
             args[0].span,
@@ -25417,7 +25735,7 @@ fn check_hashmap_builtin(
                 "{}() supports scalar V in v1, got HashMap<{}, {}>",
                 name, k_ty, v_ty
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![m.expr];
     if matches!(
@@ -25570,7 +25888,7 @@ fn check_btreeset_builtin(
                 "{}() only supports `BTreeSet<i64>` in v1, got BTreeSet<{}>",
                 name, element_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![s.expr];
     if matches!(
@@ -25762,7 +26080,7 @@ fn check_btreemap_builtin(
                 "{}() only supports `BTreeMap<i64, i64>` in v1, got BTreeMap<{}, {}>",
                 name, k_ty, v_ty
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![m.expr];
     if matches!(
@@ -25861,7 +26179,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("i64_to_str() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25887,7 +26205,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("f64_to_str() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25914,7 +26232,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_repeat() expects 2 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25946,7 +26264,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_byte_at() expects 2 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::I64, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -25977,7 +26295,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 1 argument, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(
                 Type::Enum(mangle_generic_decl("Option", &[Type::I64])),
                 span,
@@ -26007,7 +26325,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 2 arguments, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(
                 Type::Enum(mangle_generic_decl("Option", &[Type::I64])),
                 span,
@@ -26048,7 +26366,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 1 argument, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::I64, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26074,7 +26392,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_byte_count() expects 2 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::I64, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26105,7 +26423,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 2 arguments, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::Bool, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26138,7 +26456,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 1 argument, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::Bool, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26163,7 +26481,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_len_bytes() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::I64, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26190,7 +26508,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_join() expects 2 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -26206,7 +26524,7 @@ fn check_str_builtin(
                     "str_join() arg 0 must be `ref Vec<OwnedStr>`, got {}",
                     xs.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         let sep_raw = check_expr(&args[1], env, signatures, diagnostics);
         let sep = coerce_checked(
@@ -26235,7 +26553,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("{}() expects 3 arguments, got {}", name, args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26273,7 +26591,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_chars() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26300,7 +26618,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_reverse() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26327,7 +26645,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("str_lines() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::OwnedStr)), span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26356,7 +26674,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("substring() expects 3 arguments, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let s_raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26393,7 +26711,7 @@ fn check_str_builtin(
             diagnostics.push(Diagnostic::new(
                 span,
                 format!("bool_to_str() expects 1 argument, got {}", args.len()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
             return CheckedExpr::fallback(Type::OwnedStr, span);
         }
         let raw = check_expr(&args[0], env, signatures, diagnostics);
@@ -26433,7 +26751,7 @@ fn check_str_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "parse_int" => {
                 Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
@@ -26564,7 +26882,7 @@ fn check_mutator_builtin(
                 want_args,
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -26601,7 +26919,7 @@ fn check_mutator_builtin(
                 "{}() does not support Vec<[T; N]> in v1; defer to a follow-up",
                 name
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback_integer(span);
     }
     let result_ty = match name {
@@ -26657,7 +26975,7 @@ fn check_set_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("set(xs, i, v) expects 3 arguments, got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(3, args.len())));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
 
@@ -26678,7 +26996,7 @@ fn check_set_builtin(
         diagnostics.push(Diagnostic::new(
             args[1].span,
             format!("set index must be an integer, got {}", index.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
 
     let value = check_expr(&args[2], env, signatures, diagnostics);
@@ -26727,7 +27045,7 @@ fn check_clone_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("clone(xs) expects 1 argument, got {}", args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
 
@@ -26738,7 +27056,7 @@ fn check_clone_builtin(
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!("clone() requires a Vec argument, got {}", other),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
     };
@@ -26778,7 +27096,7 @@ fn check_clone_at_builtin(
                 "clone_at(xs, i) expects 2 arguments, got {}",
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
         return CheckedExpr::fallback_integer(span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -26795,7 +27113,7 @@ fn check_clone_at_builtin(
                     "clone_at() requires a Vec / array / &Vec / &Array argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -26807,7 +27125,7 @@ fn check_clone_at_builtin(
                 "clone_at index must be an integer, got {}",
                 index.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     // clone_at deliberately does NOT consume its first
     // argument — same convention as `clone`. The result is
@@ -27100,7 +27418,7 @@ fn coerce_checked(
                         "Channel element type must be an integer width or bool, got {}",
                         tgt_elem
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(target.clone(), span);
             }
             if !channel_capacity_is_pow2(*tgt_cap) {
@@ -27110,7 +27428,7 @@ fn coerce_checked(
                         "Channel capacity must be a power of 2 ≥ 1, got {}",
                         tgt_cap
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(target.clone(), span);
             }
             let mut promoted = checked.expr.clone();
@@ -27135,7 +27453,7 @@ fn coerce_checked(
                         const_display(constant),
                         target
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::cast_unsupported(context, &format!("{}", target))));
                 return CheckedExpr::fallback(target.clone(), span);
             }
         }
@@ -27224,14 +27542,14 @@ fn promoted_numeric_type(
         diagnostics.push(Diagnostic::new(
             lhs.expr.span,
             format!("left operand must be numeric, got {}", lhs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return None;
     }
     if !rhs.ty().is_numeric() {
         diagnostics.push(Diagnostic::new(
             rhs.expr.span,
             format!("right operand must be numeric, got {}", rhs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return None;
     }
 
@@ -27275,7 +27593,7 @@ fn promoted_integer_type(
         diagnostics.push(Diagnostic::new(
             lhs.expr.span,
             format!("left operand must be an integer, got {}", lhs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return None;
     }
 
@@ -27283,7 +27601,7 @@ fn promoted_integer_type(
         diagnostics.push(Diagnostic::new(
             rhs.expr.span,
             format!("right operand must be an integer, got {}", rhs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return None;
     }
 
@@ -27379,7 +27697,7 @@ fn eval_integer_binary(
             diagnostics.push(Diagnostic::new(
                 span,
                 "division by zero in constant expression",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
             None
         }
         BinaryOp::Div => a.checked_div(b),
@@ -27387,7 +27705,7 @@ fn eval_integer_binary(
             diagnostics.push(Diagnostic::new(
                 span,
                 "remainder by zero in constant expression",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
             None
         }
         BinaryOp::Rem => a.checked_rem(b),
@@ -27401,7 +27719,7 @@ fn eval_integer_binary(
         diagnostics.push(Diagnostic::new(
             span,
             format!("constant expression overflows {}", result_type),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
         return None;
     };
 
@@ -27412,7 +27730,7 @@ fn eval_integer_binary(
                 "constant expression value {} does not fit in {}",
                 value, result_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
         return None;
     }
 
@@ -27437,7 +27755,7 @@ fn eval_float_binary(
             diagnostics.push(Diagnostic::new(
                 span,
                 "floating-point division by zero in constant expression",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
             return None;
         }
         BinaryOp::Div => a / b,
@@ -27451,7 +27769,7 @@ fn eval_float_binary(
                 "floating-point constant expression is not finite in {}",
                 result_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
         return None;
     }
 
@@ -27476,7 +27794,7 @@ fn eval_shift(
         diagnostics.push(Diagnostic::new(
             span,
             "shift overflows in constant expression",
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
         return None;
     };
 
@@ -27487,7 +27805,7 @@ fn eval_shift(
                 "shift result value {} does not fit in {}",
                 shifted, result_type
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
         return None;
     }
 
@@ -27510,7 +27828,7 @@ fn eval_cast_constant(
                     const_display(constant),
                     target
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
             None
         }
     }
@@ -27716,7 +28034,7 @@ fn require_type(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{} must be {}, got {}", context, expected, actual),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::type_mismatch(&format!("{}", expected), &format!("{}", actual))));
     }
 }
 
@@ -28123,13 +28441,18 @@ fn strip_reduction_uses(
                                 name, sym, sym, name
                             ),
                         };
-                        diagnostics.push(Diagnostic::new(
-                            expr.span,
-                            format!(
-                                "{} reduction variable '{}' must be updated only as `{}`",
-                                context, name, shape,
+                        diagnostics.push(
+                            Diagnostic::new(
+                                expr.span,
+                                format!(
+                                    "{} reduction variable '{}' must be updated only as `{}`",
+                                    context, name, shape,
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::parallel_for_mutates_capture(name),
                             ),
-                        ));
+                        );
                     }
                 }
                 TypedStmt::If { cond, then_body, else_body } => {
@@ -28293,13 +28616,18 @@ fn flag_read(
         .map(|n| format!("'{}'", n))
         .collect::<Vec<_>>()
         .join(", ");
-    diagnostics.push(Diagnostic::new(
-        span,
-        format!(
-            "{} cannot read reduction variable(s) {} outside the named update — partial values would leak",
-            context, label
+    diagnostics.push(
+        Diagnostic::new(
+            span,
+            format!(
+                "{} cannot read reduction variable(s) {} outside the named update — partial values would leak",
+                context, label
+            ),
+        )
+        .with_elaboration(
+            crate::diagnostic_elaborations::pure_fn_has_effect(context),
         ),
-    ));
+    );
 }
 
 /// Yield every TypedExpr embedded in a TypedStmt. Used by the
@@ -28680,14 +29008,19 @@ fn verify_pure_body(
                 // no signature to check. Conservatively reject
                 // indirect calls in pure contexts; the user
                 // can refactor to a direct call.
-                diagnostics.push(Diagnostic::new(
-                    expr.span,
-                    format!(
-                        "{} cannot use indirect calls (fn-ptr) — \
-                         the purity gate sees only direct calls",
-                        context
+                diagnostics.push(
+                    Diagnostic::new(
+                        expr.span,
+                        format!(
+                            "{} cannot use indirect calls (fn-ptr) — \
+                             the purity gate sees only direct calls",
+                            context
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::pure_fn_has_effect(context),
                     ),
-                ));
+                );
                 walk_expr(callee, signatures, context, diagnostics);
                 for a in args {
                     walk_expr(a, signatures, context, diagnostics);
@@ -29164,33 +29497,53 @@ fn verify_loop_invariants_with_havoc(
                         failure_phrase
                     ),
                 };
-                diagnostics.push(Diagnostic::new(inv.span, detail));
+                diagnostics.push(
+                    Diagnostic::new(inv.span, detail)
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::proof_failed(),
+                    ),
+                );
             }
-            Verdict::Unknown => diagnostics.push(Diagnostic::new(
-                inv.span,
-                format!(
-                    "cannot verify loop invariant: SMT returned 'unknown' ({})",
-                    failure_phrase
+            Verdict::Unknown => diagnostics.push(
+                Diagnostic::new(
+                    inv.span,
+                    format!(
+                        "cannot verify loop invariant: SMT returned 'unknown' ({})",
+                        failure_phrase
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::proof_failed(),
                 ),
-            )),
+            ),
             Verdict::SkippedUnsupported(reason) => {
                 let hint = if reason.starts_with("function call") {
                     " — add an 'ensures' clause to the callee"
                 } else {
                     ""
                 };
-                diagnostics.push(Diagnostic::new(
-                    inv.span,
-                    format!(
-                        "cannot verify loop invariant: {} (uses features outside the SMT v1 encoder{})",
-                        reason, hint
+                diagnostics.push(
+                    Diagnostic::new(
+                        inv.span,
+                        format!(
+                            "cannot verify loop invariant: {} (uses features outside the SMT v1 encoder{})",
+                            reason, hint
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::proof_failed(),
                     ),
-                ));
+                );
             }
-            Verdict::Unavailable => diagnostics.push(Diagnostic::new(
-                inv.span,
-                "cannot verify loop invariant: no SMT solver available (install z3)",
-            )),
+            Verdict::Unavailable => diagnostics.push(
+                Diagnostic::new(
+                    inv.span,
+                    "cannot verify loop invariant: no SMT solver available (install z3)",
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::proof_failed(),
+                ),
+            ),
         }
     }
 }
@@ -30682,19 +31035,29 @@ fn try_smt_prove(
             } else {
                 ""
             };
-            diagnostics.push(Diagnostic::new(
-                prove_expr.span,
-                format!(
-                    "cannot prove expression: SMT encoder skipped this query ({}){}. \
-                     v1 supports integer/bool arithmetic and comparison only.",
-                    reason, hint
+            diagnostics.push(
+                Diagnostic::new(
+                    prove_expr.span,
+                    format!(
+                        "cannot prove expression: SMT encoder skipped this query ({}){}. \
+                         v1 supports integer/bool arithmetic and comparison only.",
+                        reason, hint
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::proof_failed(),
                 ),
-            ));
+            );
         }
-        Verdict::Unavailable => diagnostics.push(Diagnostic::new(
-            prove_expr.span,
-            "cannot prove expression: no SMT solver available (install z3 in $PATH or set $Z3 to its path)",
-        )),
+        Verdict::Unavailable => diagnostics.push(
+            Diagnostic::new(
+                prove_expr.span,
+                "cannot prove expression: no SMT solver available (install z3 in $PATH or set $Z3 to its path)",
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::proof_failed(),
+            ),
+        ),
     }
 }
 
