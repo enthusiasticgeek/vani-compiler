@@ -1,58 +1,62 @@
 ---
 name: project-vani-next-session
-description: Next-session handoff for vani-compiler — open work, pick-up order, and edge test cases to add (current as of 2026-06-11)
+description: Next-session handoff for vani-compiler — open work, pick-up order, and edge test cases to add (current as of 2026-06-12)
 metadata:
   type: project
 ---
 
-Full handoff lives in STATUS.md "NEXT SESSION HANDOFF — 2026-06-11" block. This file is the quick-load version.
+Full handoff lives in STATUS.md "NEXT SESSION HANDOFF — 2026-06-12" block. This file is the quick-load version.
 
-**Why:** Session paused 2026-06-11 after Windows full e2e parity landed (commit 6255af8). All Tier 1 + Tier 2 work shipped. Picking up here next time avoids re-deriving what's open.
+**Why:** Session paused 2026-06-12 after error-message elaboration arc. All Tier 1 + Tier 2 work shipped. Picking up here next time avoids re-deriving what's open.
 
 **How to apply:** Read this at session start, then open STATUS.md for the detailed task descriptions and test names.
 
-## Current state (2026-06-12)
+## Current state (2026-06-12, end of session 3)
 
-- 2113 lib tests green (Windows + Linux)
+- 2117 lib tests green (Windows + Linux)
 - All e2e tests pass; 5 async-TCP tests skipped on Windows (IOCP gap)
 - 62 dialects across 26 scripts
-- Last commit: `29db5fa` — "feat(diagnostics): wire elaboration to 7 more checker.rs sites"
+- Last commit: `de91e1d` — "feat(diagnostics): add duplicate_declaration family, wire 3 sites + 4 match-arm type_mismatch"
+- Elaboration: **40 families**, **63 wired sites**, **16 elaboration tests**
 
 ## Work order for next session
 
-### Step 1 — Add edge test cases (**MOSTLY DONE** — see below for remaining)
+### Step 1 — Continue error-message elaboration (IN PROGRESS)
 
-All go in `src/lib.rs` as `#[test]` unless noted.
+Stats at session end: 40 families / 63 wired sites / 597 total diagnostic sites.
 
-**DONE — all shipped:**
-- Integer overflow (×4 wrapping + ×1 const-error + ×1 compile-both) ✓
-- Generic monomorphization (3-level chain, nongeneric bridge, two-call-sites) ✓
-- OwnedStr match-arm mismatch (all-concat workaround, bare-literal-mismatch) ✓
-- Ref / lifetime (3-ref-param reject, vec re-access after block, struct-ref method) ✓
-- Windows regression (deep-recursion, llvm-printf-not-putchar) ✓
-- echo_loop IOCP mismatch documented in e2e tests with `#[ignore]` ✓
+**High-value remaining targets in checker.rs (un-elaborated):**
 
-**PENDING — need e2e binary execution (low priority):**
-- `windows_brahmi_numeral_output_no_crt_reorder` — needs binary execution
-- `windows_tcp_echo_blocking_three_clients` — needs live TCP server
-- `windows_snprintf_dprintf_shim_roundtrip` — needs binary execution
-
-### Step 2 — Pick one user-queued feature
-
-| Feature | Effort | Notes |
+| Site | Message | Suggested family |
 |---|---|---|
-| **volatile_read / volatile_write built-ins** | ~~4–6h~~ | **SHIPPED 2026-06-12** (commit `2cea04a`). 3 lib tests + examples/embedded/mmio_blink.vani. All 4 backends. |
-| **Error-message elaboration** | ~~8–15h~~ | **PARTIALLY SHIPPED 2026-06-12** (commits `6cde30d`–`29db5fa`). 34 families, 48 wired sites (was 25/32). 13 elaboration tests. Remaining: wire remaining ~500 sites, or declare done at current coverage. |
-| Error-message elaboration | 8–15h | src/checker.rs + src/diagnostic.rs — add elaboration vec, seed 20–30 families |
-| Big-O annotation (--big-o flag) | 12–20h | New src/big_o.rs; hook into vanic check output; v1: loop-nesting + builtin asymptotics |
-| Tutorials rewrite for non-CS readers | 20–40h | tutorials/src/beginner/ + intermediate/ — analogy chapters before formal definitions |
+| ~1226 | `"function '{}' is a built-in name and cannot be redefined"` | `duplicate_declaration` already exists |
+| ~4443 | `"type alias '{}' is already declared"` | `duplicate_declaration` already exists |
+| ~7828 | `"parameter '{}' is already defined"` | new `duplicate_parameter` |
+| ~10411 | `"'reduce {}': name is not declared in scope"` | `unknown_variable` already exists |
+| ~12121, ~12363 | `"match scrutinee is {}, but pattern is not a string/float literal"` | new `match_wrong_pattern_type` |
+| Various | Struct literal field type mismatches beyond `struct_literal_missing_field` | `type_mismatch` already exists |
 
-### Step 3 — Windows IOCP (larger arc, D.1 in TODO.md)
+**Already shipped this session:**
+- `missing_main_function`, `main_wrong_signature` ✓
+- `unknown_function` ✓
+- `struct_not_declared`, `enum_not_declared` ✓
+- `duplicate_declaration` (struct/enum/function, 3 sites) ✓
+- `type_mismatch` wired to all 4 match-arm body mismatch sites ✓
+- 4 new elaboration families added (total: 40)
+
+### Step 2 — Windows IOCP (larger arc, D.1 in TODO.md)
 
 Root cause of skipped tests: sockets need `WSA_FLAG_OVERLAPPED` + `WSASend`/`WSARecv` with OVERLAPPED structs.
 Entry points:
 - `src/backend_llvm.rs` `emit_intent_epoll_helpers_llvm_windows`
 - `examples/tcp_echo_epoll.vani`
+
+### Step 3 — Pick one user-queued feature
+
+| Feature | Effort | Notes |
+|---|---|---|
+| Big-O annotation (--big-o flag) | 12–20h | New src/big_o.rs; hook into vanic check output; v1: loop-nesting + builtin asymptotics |
+| Tutorials rewrite for non-CS readers | 20–40h | tutorials/src/beginner/ + intermediate/ — analogy chapters before formal definitions |
 
 ### Deferred (do not touch unless asked)
 
@@ -60,6 +64,12 @@ Entry points:
 - Arc 9 Kosh package manager (pending registry choice)
 - CI / GH-Actions (Tier 4 — last)
 - Grammar consultant pass (ongoing/external)
+
+### Pending e2e-only edge tests (low priority)
+
+- `windows_brahmi_numeral_output_no_crt_reorder` — needs binary execution
+- `windows_tcp_echo_blocking_three_clients` — needs live TCP server
+- `windows_snprintf_dprintf_shim_roundtrip` — needs binary execution
 
 ## Commit cadence reminder
 
