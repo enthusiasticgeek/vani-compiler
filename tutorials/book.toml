@@ -10,9 +10,6 @@ description = "Beginner → intermediate → advanced tutorials for the vāṇ�
 language = "en"
 src = "src"
 
-[rust]
-edition = "2024"
-
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "navy"
