@@ -2967,3 +2967,50 @@ fn check_big_o_flag_annotates_sort_example() {
         "off mode: no complexity annotations expected:\n{off_stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Windows IOCP byte-count parity (documented mismatch — kept #[ignore])
+//
+// echo_loop.vani runs through a C-backend and an LLVM-backend binary.
+// On Windows the LLVM backend's CRT buffering (non-IOCP path) can produce
+// a different number of output bytes than the C backend's MSVCRT path.
+// This test is intentionally #[ignore]d so normal CI skips the assertion;
+// it exists so the mismatch is not silently forgotten and can be re-enabled
+// once Windows IOCP plumbing (STATUS.md item 6) is complete.
+// ---------------------------------------------------------------------------
+
+#[test]
+#[cfg(target_os = "windows")]
+#[ignore = "IOCP byte-count parity not yet achieved — re-enable after STATUS.md item 6"]
+fn echo_loop_windows_byte_count_matches_c() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!("{}/examples/language/english/echo_loop.vani", manifest_dir);
+
+    let c_out = Command::new(binary)
+        .args(["run", "--backend=c", &example])
+        .output()
+        .expect("intentc run --backend=c should execute");
+    let llvm_out = Command::new(binary)
+        .args(["run", "--backend=llvm", &example])
+        .output()
+        .expect("intentc run --backend=llvm should execute");
+
+    let c_bytes = c_out.stdout.len();
+    let llvm_bytes = llvm_out.stdout.len();
+
+    // Print diagnostics even on failure so CI logs are informative.
+    eprintln!(
+        "echo_loop byte counts — C backend: {c_bytes}, LLVM backend: {llvm_bytes}\n\
+         C stdout:    {:?}\n\
+         LLVM stdout: {:?}",
+        String::from_utf8_lossy(&c_out.stdout),
+        String::from_utf8_lossy(&llvm_out.stdout),
+    );
+
+    assert_eq!(
+        c_bytes, llvm_bytes,
+        "echo_loop byte-count diverges: C={c_bytes} LLVM={llvm_bytes} — \
+         IOCP parity not yet achieved (see STATUS.md item 6)"
+    );
+}
