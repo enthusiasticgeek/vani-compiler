@@ -22,6 +22,14 @@ Thumbs.db
 *.o
 *.s
 a.out
+*_out.c
+*_out.ll
+
+# Compiled Windows binaries dropped in the repo root during debugging
+*.exe
+
+# Hand-written C diagnostics from debugging sessions
+diag_*.c
 
 # Logs / debug dumps
 *.log
