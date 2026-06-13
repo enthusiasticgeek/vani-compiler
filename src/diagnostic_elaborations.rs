@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 42 most-common
+//! Step-by-step elaboration strings for the 50 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is
@@ -962,6 +962,178 @@ pub fn struct_not_declared(name: &str) -> Vec<String> {
              struct {} {{ field: i64 }}",
             name, name,
         ),
+    ]
+}
+
+/// `break` or `continue` used outside a loop body.
+pub fn loop_control_outside_loop(keyword: &str) -> Vec<String> {
+    vec![
+        format!(
+            "`{}` is only meaningful inside a loop body — there \
+             is no loop to {} here.",
+            keyword, keyword,
+        ),
+        "vāṇी's `break` exits the nearest enclosing `while` loop; \
+         `continue` skips to its next iteration. Both are \
+         rejected at the top level or inside an `if` / `match` \
+         arm that isn't nested inside a loop."
+            .to_string(),
+        format!(
+            "Move the `{}` inside a `while` loop body, or \
+             restructure with a boolean flag if you need to stop \
+             iteration from outside the loop.",
+            keyword,
+        ),
+    ]
+}
+
+/// `print` on a composite type that has no text representation.
+pub fn cannot_print_type(ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Type `{}` cannot be printed directly with `print`.",
+            ty,
+        ),
+        "vāṇी's `print` statement accepts scalar values (i64, \
+         f64, bool, Str, OwnedStr) — composite types (arrays, \
+         Vec, structs, tuples, enums) don't have a canonical \
+         text representation, so the compiler rejects them to \
+         avoid silent truncation."
+            .to_string(),
+        "Extract the scalar you want to display: index an array \
+         or Vec (`xs[i]`), access a struct field (`p.x`), access \
+         a tuple element (`t.0`), or use `match` to turn an enum \
+         variant into a string or integer before printing."
+            .to_string(),
+    ]
+}
+
+/// Statement or condition that can never execute (dead code).
+pub fn unreachable_code(reason: &str) -> Vec<String> {
+    vec![
+        format!("This code is unreachable: {}.", reason),
+        "vāṇी's control-flow analysis tracks every exit point \
+         (return, break, continue) and constant-folds boolean \
+         conditions. Code that follows an unconditional exit, or \
+         sits inside a branch whose condition is always false, \
+         can never run — the compiler rejects it rather than \
+         silently compiling dead code."
+            .to_string(),
+        "Either remove the dead statement/branch, or fix the \
+         preceding control-flow (e.g. add a `return` only on \
+         specific paths, or correct the constant condition)."
+            .to_string(),
+    ]
+}
+
+/// `const` name is already used by another const in scope.
+pub fn const_already_declared(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "A constant named `{}` is already declared in this \
+             program.",
+            name,
+        ),
+        "vāṇी resolves all constant names globally at compile time. \
+         Two `const` declarations with the same name are ambiguous."
+            .to_string(),
+        format!(
+            "Rename one of the `const {}` declarations to a \
+             distinct identifier.",
+            name,
+        ),
+    ]
+}
+
+/// `const` type is not a Copy scalar.
+pub fn const_type_not_scalar(name: &str, ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Constant `{}` has type `{}`, which is not a Copy \
+             scalar — only `i64`, `i32`, `i16`, `i8`, `u64`, \
+             `u32`, `u16`, `u8`, `f64`, `f32`, and `bool` are \
+             supported as const types in v1.",
+            name, ty,
+        ),
+        "Constants in v1 are folded into every use site at \
+         compile time. Heap-owning types (Vec, OwnedStr, struct) \
+         can't be duplicated this way — they'd need per-use-site \
+         allocation. Copy scalars have no heap and can be freely \
+         substituted."
+            .to_string(),
+        format!(
+            "Either change `{}` to a Copy scalar type, or store \
+             the value in a `let` binding inside `main()` where \
+             heap allocation is allowed.",
+            name,
+        ),
+    ]
+}
+
+/// `const` initializer is not a literal value.
+pub fn const_literal_required(name: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Constant `{}` must be initialized with a literal \
+             value (e.g. `42`, `-1`, `3.14`, `true`). Arithmetic \
+             expressions and function calls are not supported in \
+             const initializers in v1.",
+            name,
+        ),
+        "v1 const-folding uses a simple literal evaluator — it \
+         handles negated integer/float literals but not general \
+         expressions. Full const-expression evaluation (like \
+         Rust's `const fn`) is planned for a future release."
+            .to_string(),
+        format!(
+            "Replace the expression with a pre-computed literal. \
+             If the value is derived from arithmetic, compute it \
+             by hand and write the result directly as `const {}: \
+             <T> = <literal>;`.",
+            name,
+        ),
+    ]
+}
+
+/// `const` integer literal doesn't fit in the declared type.
+pub fn const_value_out_of_range(name: &str, ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "The literal value for constant `{}` doesn't fit in \
+             type `{}`.",
+            name, ty,
+        ),
+        "vāṇी range-checks integer constants at compile time so \
+         the truncation that would happen in C (e.g. `const int8 \
+         X = 200;` silently wrapping to -56) is caught before \
+         codegen."
+            .to_string(),
+        format!(
+            "Either choose a smaller literal that fits in `{}`, \
+             or widen the type (e.g. change `{}` to `i64`).",
+            ty, ty,
+        ),
+    ]
+}
+
+/// Type cast that the compiler cannot lower.
+pub fn cast_unsupported(from_ty: &str, to_ty: &str) -> Vec<String> {
+    vec![
+        format!(
+            "Cannot cast from `{}` to `{}`.", from_ty, to_ty,
+        ),
+        "vāṇी's `as` cast supports numeric conversions between \
+         integer widths and between integer and float types. \
+         Casts between unrelated types (string ↔ integer, struct \
+         ↔ integer, bool ↔ float, etc.) are rejected because they \
+         have no well-defined portable meaning."
+            .to_string(),
+        "Use an explicit conversion function instead: \
+         `i64_to_str(n)` to format a number as a string, \
+         `if b { 1 } else { 0 }` to turn a bool into an integer, \
+         or a field accessor to extract a numeric value from a \
+         struct."
+            .to_string(),
     ]
 }
 

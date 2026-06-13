@@ -1023,7 +1023,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
             diagnostics.push(Diagnostic::new(
                 decl.name_span,
                 format!("const '{}' is already declared", decl.name),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_already_declared(&decl.name)));
             continue;
         }
         if struct_registry.contains_key(&decl.name)
@@ -1050,7 +1050,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                      (i64/i32/.../f64/bool); got {}",
                     decl.name, decl.ty
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::const_type_not_scalar(&decl.name, &decl.ty.to_string())));
             continue;
         }
         // v1: initializer must be a literal. Unary minus
@@ -1066,7 +1066,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                          land in a later phase",
                         decl.name
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::const_literal_required(&decl.name)));
                 continue;
             }
         };
@@ -1081,7 +1081,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                         "const '{}': literal {} does not fit in {}",
                         decl.name, v, decl.ty
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::const_value_out_of_range(&decl.name, &decl.ty.to_string())));
                 continue;
             }
         }
@@ -8099,7 +8099,7 @@ fn check_stmt_list(
             diagnostics.push(Diagnostic::new(
                 stmt.span(),
                 "unreachable statement after a control-flow exit",
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("statement after a control-flow exit")));
             break;
         }
         if check_one_stmt(stmt, env, signatures, function, loops, smt_facts, body, diagnostics) {
@@ -9360,22 +9360,22 @@ fn check_one_stmt(
                             diagnostics.push(Diagnostic::new(
                                 e.span,
                                 "cannot print an array or Vec directly; index it first",
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         } else if matches!(ty, Type::Struct(_)) {
                             diagnostics.push(Diagnostic::new(
                                 e.span,
                                 "cannot print a struct directly; print individual fields instead",
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         } else if matches!(ty, Type::Tuple(_)) {
                             diagnostics.push(Diagnostic::new(
                                 e.span,
                                 "cannot print a tuple directly; print individual elements via `.0` / `.1`",
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         } else if matches!(ty, Type::Enum(_)) {
                             diagnostics.push(Diagnostic::new(
                                 e.span,
                                 "cannot print an enum directly; use `match` to convert to an integer or string",
-                            ));
+                            ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         }
                         let mut t = checked.expr;
                         try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures);
@@ -9415,13 +9415,13 @@ fn check_one_stmt(
                     diagnostics.push(Diagnostic::new(
                         cond.span,
                         "condition is always false; the 'if' body is unreachable",
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("condition is always false")));
                 }
                 ExprKind::Bool(true) if !else_body.is_empty() => {
                     diagnostics.push(Diagnostic::new(
                         cond.span,
                         "condition is always true; the 'else' body is unreachable",
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("condition is always true")));
                 }
                 _ => {}
             }
@@ -9590,7 +9590,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     cond.span,
                     "loop condition is always false; the body never executes",
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::unreachable_code("loop condition is always false")));
             }
 
             // Type-check each invariant (Bool, vars resolve in current env).
@@ -9722,10 +9722,15 @@ fn check_one_stmt(
             span,
         } => {
             let Some(info) = env.lookup(name).cloned() else {
-                diagnostics.push(Diagnostic::new(
-                    *span,
-                    format!("cannot index-assign to unknown variable '{}'", name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        *span,
+                        format!("cannot index-assign to unknown variable '{}'", name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_variable(name),
+                    ),
+                );
                 return false;
             };
             if info.moved.is_some() {
@@ -10554,10 +10559,15 @@ fn check_one_stmt(
                     }
                 };
             let Some(head_info) = env.lookup(head_name).cloned() else {
-                diagnostics.push(Diagnostic::new(
-                    *span,
-                    format!("unknown variable '{}'", head_name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        *span,
+                        format!("unknown variable '{}'", head_name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_variable(head_name),
+                    ),
+                );
                 return false;
             };
             // Walk field accesses. Each step: the current type
@@ -10779,7 +10789,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     "'break' is only valid inside a 'while' loop",
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("break")));
                 return false;
             };
             emit_drops_through_loop(env, frame.body_scope_depth, body);
@@ -10798,7 +10808,7 @@ fn check_one_stmt(
                 diagnostics.push(Diagnostic::new(
                     *span,
                     "'continue' is only valid inside a 'while' loop",
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("continue")));
                 return false;
             };
             emit_drops_through_loop(env, frame.body_scope_depth, body);
@@ -12634,10 +12644,15 @@ fn check_expr(
                         expr.span,
                     )
                 } else {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!("unknown variable '{}'", name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!("unknown variable '{}'", name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::unknown_variable(name),
+                        ),
+                    );
                     CheckedExpr::fallback_integer(expr.span)
                 }
             }
@@ -14724,13 +14739,18 @@ fn check_expr(
                             match inner {
                                 Stmt::Assign { name: aname, expr: rhs, .. } => {
                                     let Some(info) = env.lookup(aname).cloned() else {
-                                        diagnostics.push(Diagnostic::new(
-                                            inner.span(),
-                                            format!(
-                                                "reassignment to unknown binding '{}'",
-                                                aname
+                                        diagnostics.push(
+                                            Diagnostic::new(
+                                                inner.span(),
+                                                format!(
+                                                    "reassignment to unknown binding '{}'",
+                                                    aname
+                                                ),
+                                            )
+                                            .with_elaboration(
+                                                crate::diagnostic_elaborations::assign_to_unknown_variable(aname),
                                             ),
-                                        ));
+                                        );
                                         continue;
                                     };
                                     let raw = check_expr(rhs, env, signatures, diagnostics);
@@ -14951,10 +14971,15 @@ fn check_ref_mut(
             let info = match env.lookup(vec_name) {
                 Some(info) => info.clone(),
                 None => {
-                    diagnostics.push(Diagnostic::new(
-                        array.span,
-                        format!("unknown variable '{}'", vec_name),
-                    ));
+                    diagnostics.push(
+                        Diagnostic::new(
+                            array.span,
+                            format!("unknown variable '{}'", vec_name),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::unknown_variable(vec_name),
+                        ),
+                    );
                     return CheckedExpr::fallback_integer(span);
                 }
             };
@@ -15016,10 +15041,15 @@ fn check_ref_mut(
     if let ExprKind::FieldAccess { object, field, .. } = &inner.kind {
         if let ExprKind::Var(obj_name) = &object.kind {
             let Some(info) = env.lookup(obj_name) else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!("unknown variable '{}'", obj_name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!("unknown variable '{}'", obj_name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_variable(obj_name),
+                    ),
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Type::Struct(struct_name) = info.ty.deref() else {
@@ -15167,10 +15197,15 @@ fn check_ref(
     if let ExprKind::FieldAccess { object, field, .. } = &inner.kind {
         if let ExprKind::Var(obj_name) = &object.kind {
             let Some(info) = env.lookup(obj_name) else {
-                diagnostics.push(Diagnostic::new(
-                    object.span,
-                    format!("unknown variable '{}'", obj_name),
-                ));
+                diagnostics.push(
+                    Diagnostic::new(
+                        object.span,
+                        format!("unknown variable '{}'", obj_name),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_variable(obj_name),
+                    ),
+                );
                 return CheckedExpr::fallback_integer(span);
             };
             let Type::Struct(struct_name) = info.ty.deref() else {
@@ -26872,10 +26907,11 @@ fn explicit_cast(
     }
 
     if !checked.ty().is_numeric() || !target.is_numeric() {
+        let (from_ty_str, to_ty_str) = (checked.ty().to_string(), target.to_string());
         diagnostics.push(Diagnostic::new(
             span,
-            format!("cannot cast {} to {}", checked.ty(), target),
-        ));
+            format!("cannot cast {} to {}", from_ty_str, to_ty_str),
+        ).with_elaboration(crate::diagnostic_elaborations::cast_unsupported(&from_ty_str, &to_ty_str)));
         return CheckedExpr::fallback(target.clone(), span);
     }
 
@@ -28342,40 +28378,60 @@ fn verify_pure_body(
                     // without messages are still allowed (they're
                     // pure proofs at compile time after SMT
                     // discharge).
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot contain `assert ..., \"msg\"` (runtime abort with message is a side effect)",
-                            context
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot contain `assert ..., \"msg\"` (runtime abort with message is a side effect)",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 TypedStmt::IndexAssign { name, index, .. } => {
-                    diagnostics.push(Diagnostic::new(
-                        index.span,
-                        format!(
-                            "{} cannot mutate '{}[i] = …' (indexed write is a side effect)",
-                            context, name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            index.span,
+                            format!(
+                                "{} cannot mutate '{}[i] = …' (indexed write is a side effect)",
+                                context, name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 TypedStmt::FieldAssign { object, field, .. } => {
-                    diagnostics.push(Diagnostic::new(
-                        object.span,
-                        format!(
-                            "{} cannot mutate '.{}' (field write is a side effect)",
-                            context, field
+                    diagnostics.push(
+                        Diagnostic::new(
+                            object.span,
+                            format!(
+                                "{} cannot mutate '.{}' (field write is a side effect)",
+                                context, field
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 TypedStmt::Reassign { drop_old: true, name, expr, .. } => {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot reassign '{}' over a non-Copy value (drop has observable effects)",
-                            context, name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot reassign '{}' over a non-Copy value (drop has observable effects)",
+                                context, name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 TypedStmt::Discard { expr } => {
                     walk_expr(expr, signatures, context, diagnostics);
@@ -28404,13 +28460,18 @@ fn verify_pure_body(
                 TypedStmt::ForIter { body, consumes, collection, .. } => {
                     if *consumes {
                         // No good span on ForIter; emit at default.
-                        diagnostics.push(Diagnostic::new(
-                            crate::span::Span::default(),
-                            format!(
-                                "{} cannot consume '{}' via `for x in {0}` (move-and-drop has observable effects)",
-                                context, collection
+                        diagnostics.push(
+                            Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "{} cannot consume '{}' via `for x in {0}` (move-and-drop has observable effects)",
+                                    context, collection
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::pure_fn_has_effect(context),
                             ),
-                        ));
+                        );
                     }
                     walk(body, signatures, context, diagnostics);
                 }
@@ -28438,13 +28499,18 @@ fn verify_pure_body(
                     // are fine. `continue` is allowed in both
                     // OpenMP and pure contexts. Closure #190.
                     if context.contains("'parallel for'") {
-                        diagnostics.push(Diagnostic::new(
-                            crate::span::Span::default(),
-                            format!(
-                                "{} cannot use `break` — OpenMP `parallel for` doesn't allow early exit from worker iterations. Use a Mutex<bool>-guarded flag if you need to short-circuit",
-                                context
+                        diagnostics.push(
+                            Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "{} cannot use `break` — OpenMP `parallel for` doesn't allow early exit from worker iterations. Use a Mutex<bool>-guarded flag if you need to short-circuit",
+                                    context
+                                ),
+                            )
+                            .with_elaboration(
+                                crate::diagnostic_elaborations::pure_fn_has_effect(context),
                             ),
-                        ));
+                        );
                     }
                 }
                 TypedStmt::UnsafeBlock { body, .. } => {
@@ -28473,13 +28539,18 @@ fn verify_pure_body(
                     name.as_str(),
                     "vec" | "push" | "set" | "clone"
                 ) {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot call '{}' (heap-allocating Vec builtin is impure)",
-                            context, name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot call '{}' (heap-allocating Vec builtin is impure)",
+                                context, name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 } else if matches!(name.as_str(), "box" | "__box_new") {
                     // `box(v)` heap-allocates a single slot for v.
                     // The check sees the lowered name `__box_new`
@@ -28488,13 +28559,18 @@ fn verify_pure_body(
                     // class as `vec()`/`push()` — the previous
                     // omission was a real gap (DO-178C Level A
                     // forbids dynamic alloc in pure paths).
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot call 'box' (heap-allocating Box builtin is impure)",
-                            context
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot call 'box' (heap-allocating Box builtin is impure)",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 } else if matches!(
                     name.as_str(),
                     "rand_i64"
@@ -28511,13 +28587,18 @@ fn verify_pure_body(
                     // its inputs to its outputs; randomness breaks
                     // referential transparency and is forbidden in
                     // IEC 62304 Class C / DO-178C Level A code paths.
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot call '{}' (RNG builtins are non-deterministic and impure)",
-                            context, name
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot call '{}' (RNG builtins are non-deterministic and impure)",
+                                context, name
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 } else if let Some(sig) = signatures.get(name) {
                     if !sig.is_pure {
                         let marker = if sig.is_extern { "pure extern" } else { "pure fn" };
@@ -28551,13 +28632,18 @@ fn verify_pure_body(
                 if matches!(left.ty, Type::Str | Type::OwnedStr)
                     && matches!(right.ty, Type::Str | Type::OwnedStr)
                 {
-                    diagnostics.push(Diagnostic::new(
-                        expr.span,
-                        format!(
-                            "{} cannot use `+` on strings (heap allocation is impure)",
-                            context
+                    diagnostics.push(
+                        Diagnostic::new(
+                            expr.span,
+                            format!(
+                                "{} cannot use `+` on strings (heap allocation is impure)",
+                                context
+                            ),
+                        )
+                        .with_elaboration(
+                            crate::diagnostic_elaborations::pure_fn_has_effect(context),
                         ),
-                    ));
+                    );
                 }
                 walk_expr(left, signatures, context, diagnostics);
                 walk_expr(right, signatures, context, diagnostics);

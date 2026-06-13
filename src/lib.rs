@@ -41849,5 +41849,153 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_break_outside_loop_mentions_while() {
+        let source = r#"
+            fn main() -> i64 {
+                break;
+                return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("break outside loop must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("break") &&
+            d.elaboration.iter().any(|s| s.contains("while") || s.contains("loop"))
+        });
+        assert!(
+            has_hint,
+            "break elaboration should mention while/loop, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_continue_outside_loop_mentions_while() {
+        let source = r#"
+            fn main() -> i64 {
+                continue;
+                return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("continue outside loop must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("continue") &&
+            d.elaboration.iter().any(|s| s.contains("while") || s.contains("loop"))
+        });
+        assert!(
+            has_hint,
+            "continue elaboration should mention while/loop, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_unreachable_after_return_mentions_exit() {
+        let source = r#"
+            fn main() -> i64 {
+                return 1;
+                let x: i64 = 2;
+                return x;
+            }
+        "#;
+        let errs = compile(source).expect_err("unreachable after return must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("unreachable") &&
+            d.elaboration.iter().any(|s| {
+                s.contains("exit") || s.contains("return") || s.contains("dead")
+            })
+        });
+        assert!(
+            has_hint,
+            "unreachable elaboration should mention exit/return/dead, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_unreachable_always_false_if_mentions_condition() {
+        let source = r#"
+            fn main() -> i64 {
+                if false {
+                    return 99;
+                }
+                return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("always-false if must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("always false") &&
+            d.elaboration.iter().any(|s| {
+                s.contains("condition") || s.contains("dead") || s.contains("unreachable")
+            })
+        });
+        assert!(
+            has_hint,
+            "always-false elaboration should mention condition/dead/unreachable, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_const_duplicate_mentions_name() {
+        let source = r#"
+            const LIMIT: i64 = 10;
+            const LIMIT: i64 = 20;
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("duplicate const must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("already declared") &&
+            d.elaboration.iter().any(|s| s.contains("LIMIT") || s.contains("const"))
+        });
+        assert!(
+            has_hint,
+            "const duplicate elaboration should mention name, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_const_value_out_of_range_mentions_type() {
+        let source = r#"
+            const SMALL: i8 = 200;
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("const overflow must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("does not fit") &&
+            d.elaboration.iter().any(|s| s.contains("i8") || s.contains("range") || s.contains("overflow"))
+        });
+        assert!(
+            has_hint,
+            "const overflow elaboration should mention type/range, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_cast_unsupported_mentions_types() {
+        let source = r#"
+            struct Foo { x: i64 }
+            fn main() -> i64 {
+                let f: Foo = Foo { x: 1 };
+                let n: i64 = f as i64;
+                return n;
+            }
+        "#;
+        let errs = compile(source).expect_err("bad cast must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("cannot cast") &&
+            d.elaboration.iter().any(|s| {
+                s.contains("Foo") || s.contains("i64") || s.contains("numeric") || s.contains("cast")
+            })
+        });
+        assert!(
+            has_hint,
+            "cast elaboration should mention types/numeric, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 
