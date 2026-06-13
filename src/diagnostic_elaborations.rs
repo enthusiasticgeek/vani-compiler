@@ -1,4 +1,4 @@
-//! Step-by-step elaboration strings for the 50 most-common
+//! Step-by-step elaboration strings for the 52 most-common
 //! diagnostic families.
 //!
 //! User-direction item (added 2026-06-08): when an error is
@@ -1133,6 +1133,50 @@ pub fn cast_unsupported(from_ty: &str, to_ty: &str) -> Vec<String> {
          `if b { 1 } else { 0 }` to turn a bool into an integer, \
          or a field accessor to extract a numeric value from a \
          struct."
+            .to_string(),
+    ]
+}
+
+/// A built-in function received an argument of the wrong type.
+pub fn builtin_wrong_arg_type() -> Vec<String> {
+    vec![
+        "The argument type does not match what this built-in \
+         function expects."
+            .to_string(),
+        "vāṇी's built-in collection and utility functions are \
+         monomorphized for specific concrete types in v1 (e.g. \
+         `Vec<i64>`, `ref Vec<i64>`, `mut ref Vec<i64>`). There \
+         is no implicit coercion or type widening."
+            .to_string(),
+        "Check the expected argument type in the error message \
+         and adjust the call. Common fixes:\n\
+         \n\
+         • If the function needs a reference, pass `ref xs` \
+           instead of `xs`.\n\
+         • If it needs a mutable reference, pass `mut ref xs`.\n\
+         • If the element type is wrong, make sure the Vec or \
+           collection was declared with `i64` elements."
+            .to_string(),
+    ]
+}
+
+/// A match arm is unreachable because a wildcard `_` arm already
+/// appeared above it and covers every remaining case.
+pub fn match_arm_after_wildcard() -> Vec<String> {
+    vec![
+        "This arm can never be reached: an earlier `_ then …` \
+         wildcard arm already matches every value not handled by \
+         the preceding arms."
+            .to_string(),
+        "In vāṇी a `match` expression evaluates arms top-to-bottom \
+         and stops at the first match. Once a wildcard is placed, \
+         no arm below it can ever fire — the compiler rejects this \
+         to prevent confusion."
+            .to_string(),
+        "Either (a) remove this arm if it is truly redundant, \
+         (b) move it above the wildcard if it should take priority, \
+         or (c) replace the wildcard with explicit patterns that do \
+         not cover this arm's value."
             .to_string(),
     ]
 }

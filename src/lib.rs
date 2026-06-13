@@ -41997,5 +41997,78 @@ fn main() -> i64 {
         );
     }
 
+    #[test]
+    fn elaboration_builtin_wrong_arg_type_mentions_reference() {
+        // Passing a bare Vec where `ref Vec<i64>` is expected should
+        // produce an elaboration about references and monomorphization.
+        let source = r#"
+            fn main() -> i64 {
+                let xs: Vec<i64> = vec(0, 5);
+                let n: i64 = vec_sum(xs);
+                return n;
+            }
+        "#;
+        let errs = compile(source).expect_err("wrong arg type must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.elaboration.iter().any(|s| {
+                s.contains("ref") || s.contains("monomorphized") || s.contains("coercion")
+            })
+        });
+        assert!(
+            has_hint,
+            "builtin_wrong_arg_type elaboration should mention ref/monomorphized, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_match_arm_after_wildcard_mentions_wildcard() {
+        let source = r#"
+            fn main() -> i64 {
+                let x: i64 = 3;
+                return match x {
+                    1 then 10,
+                    _ then 0,
+                    2 then 20,
+                };
+            }
+        "#;
+        let errs = compile(source).expect_err("arm after wildcard must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("unreachable") &&
+            d.elaboration.iter().any(|s| {
+                s.contains("wildcard") || s.contains("_") || s.contains("arm")
+            })
+        });
+        assert!(
+            has_hint,
+            "match_arm_after_wildcard elaboration should mention wildcard/arm, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn elaboration_struct_field_not_found_mentions_field() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+                let p: Point = Point { x: 1, y: 2 };
+                return p.z;
+            }
+        "#;
+        let errs = compile(source).expect_err("unknown field must fail");
+        let has_hint = errs.iter().any(|d| {
+            d.message.contains("no field named") &&
+            d.elaboration.iter().any(|s| {
+                s.contains("z") || s.contains("Point") || s.contains("field")
+            })
+        });
+        assert!(
+            has_hint,
+            "field_not_found elaboration should mention field/type, got: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>()
+        );
+    }
+
 }
 

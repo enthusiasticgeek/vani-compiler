@@ -9833,7 +9833,7 @@ fn check_one_stmt(
                             "struct '{}' has no field named '{}'",
                             struct_name, segment
                         ),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::field_not_found(segment, struct_name)));
                     return false;
                 };
                 // Per-segment Copy check, with a leaf
@@ -10150,7 +10150,7 @@ fn check_one_stmt(
                         "struct '{}' has no field named '{}'",
                         struct_name, field
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::field_not_found(field, &struct_name)));
                 return false;
             };
             let value_checked = check_expr(value, env, signatures, diagnostics);
@@ -12113,7 +12113,7 @@ fn check_match_str(
                 "match arm is unreachable: a wildcard `_` arm above already \
                  covers every remaining case"
                     .to_string(),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
             continue;
         }
         match &arm.pattern {
@@ -12352,7 +12352,7 @@ fn check_match_float(
                 "match arm is unreachable: a wildcard `_` arm above already \
                  covers every remaining case"
                     .to_string(),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
             continue;
         }
         match &arm.pattern {
@@ -13966,7 +13966,7 @@ fn check_expr(
                                 "struct '{}' has no field named '{}'",
                                 name, field
                             ),
-                        ));
+                        ).with_elaboration(crate::diagnostic_elaborations::field_not_found(field, name)));
                         return CheckedExpr::fallback_integer(expr.span);
                     };
                     (name.clone(), decl.fields[idx].1.clone(), idx as u32)
@@ -14122,7 +14122,7 @@ fn check_expr(
                         "match arm is unreachable: a wildcard `_` arm above already \
                          covers every remaining case"
                             .to_string(),
-                    ));
+                    ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                     continue;
                 }
                 let (tag_opt, variant_name_opt, int_opt): (
@@ -19354,7 +19354,7 @@ fn check_pop_builtin(
                         "pop() requires a `mut ref Vec<T>` argument, got {}",
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback_integer(span);
             }
         },
@@ -19365,7 +19365,7 @@ fn check_pop_builtin(
                     "pop() requires a `mut ref Vec<T>` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -19442,7 +19442,7 @@ fn check_sort_builtin(
                         name,
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback_integer(span);
             }
         },
@@ -19453,7 +19453,7 @@ fn check_sort_builtin(
                     "{}() requires a `mut ref Vec<i64>` or `mut ref [i64; N]` argument, got {}",
                     name, other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -19552,7 +19552,7 @@ fn check_vec_map_fold_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -19567,7 +19567,7 @@ fn check_vec_map_fold_builtin(
                         name,
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         },
@@ -19578,7 +19578,7 @@ fn check_vec_map_fold_builtin(
                     "{}() requires a `ref Vec<i64>` argument, got {}",
                     name, other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -19922,7 +19922,7 @@ fn check_vec_max_min_by_builtin(
                 "{}() requires a `ref Vec<i64>` argument, got {}",
                 name, xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let k = check_expr(&args[1], env, signatures, diagnostics);
     let expected = Type::FnPtr(vec![Type::I64], Box::new(Type::I64));
@@ -19975,7 +19975,7 @@ fn check_vec_count_if_builtin(
                         "vec_count_if() requires a `ref Vec<i64>` argument, got {}",
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(Type::I64, span);
             }
         },
@@ -19986,7 +19986,7 @@ fn check_vec_count_if_builtin(
                     "vec_count_if() requires a `ref Vec<i64>` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::I64, span);
         }
     };
@@ -20053,7 +20053,7 @@ fn check_vec_position_builtin(
                         "vec_position() requires a `ref Vec<i64>` argument, got {}",
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty, span);
             }
         },
@@ -20064,7 +20064,7 @@ fn check_vec_position_builtin(
                     "vec_position() requires a `ref Vec<i64>` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty, span);
         }
     };
@@ -20154,7 +20154,7 @@ fn check_vec_utility_builtin(
                 name, want_args,
                 if want_args == 1 { "" } else { "s" },
                 args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "vec_extend" => Type::I64,
             _ => Type::Vec(Box::new(Type::I64)),
@@ -20396,7 +20396,7 @@ fn check_option_i64_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty, span);
     }
     let expected_opt = Type::Enum(mangle_generic_decl("Option", &[Type::I64]));
@@ -20514,7 +20514,7 @@ fn check_option_f64_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty, span);
     }
     let expected_opt = Type::Enum(mangle_generic_decl("Option", &[Type::F64]));
@@ -20575,7 +20575,7 @@ fn check_vec_take_drop_builtin(
                         name,
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
             }
         },
@@ -20586,7 +20586,7 @@ fn check_vec_take_drop_builtin(
                     "{}() requires a `ref Vec<i64>` argument, got {}",
                     name, other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
     };
@@ -20653,7 +20653,7 @@ fn check_vec_clamp_scalar_builtin(
                 "{}() requires a `ref Vec<i64>` argument, got {}",
                 name, xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
     }
     let lo_raw = check_expr(&args[1], env, signatures, diagnostics);
@@ -20710,7 +20710,7 @@ fn check_vec_take_drop_while_builtin(
                 "{}() requires a `ref Vec<i64>` argument, got {}",
                 name, xs.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let p = check_expr(&args[1], env, signatures, diagnostics);
     let expected = Type::FnPtr(vec![Type::I64], Box::new(Type::Bool));
@@ -20893,7 +20893,7 @@ fn check_vec_fused_family_builtin(
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!("{}() requires a `ref Vec<i64>` argument, got {}", name, xs.ty()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         },
@@ -20901,7 +20901,7 @@ fn check_vec_fused_family_builtin(
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!("{}() requires a `ref Vec<i64>` argument, got {}", name, other),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -21085,7 +21085,7 @@ fn check_vec_reduction_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
@@ -21096,7 +21096,7 @@ fn check_vec_reduction_builtin(
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!("{}() requires a `ref Vec<i64>` argument, got {}", name, xs.ty()),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         },
@@ -21104,7 +21104,7 @@ fn check_vec_reduction_builtin(
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!("{}() requires a `ref Vec<i64>` argument, got {}", name, other),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -21388,7 +21388,7 @@ fn check_vec_chunks_builtin(
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!("{}() requires a `ref Vec<i64>` argument, got {}", name, xs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     let k_raw = check_expr(&args[1], env, signatures, diagnostics);
@@ -21435,7 +21435,7 @@ fn check_vec_group_by_value_builtin(
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!("vec_group_by_value() requires a `ref Vec<i64>` argument, got {}", xs.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     CheckedExpr::new(
@@ -21483,7 +21483,7 @@ fn check_vec_flatten_builtin(
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!("vec_flatten() requires a `ref Vec<Vec<i64>>` argument, got {}", xss.ty()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     CheckedExpr::new(
@@ -21549,7 +21549,7 @@ fn check_union_find_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "union_find_new" {
@@ -21586,7 +21586,7 @@ fn check_union_find_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         uf.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         }
@@ -21599,7 +21599,7 @@ fn check_union_find_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -21611,7 +21611,7 @@ fn check_union_find_builtin(
                 name,
                 uf.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![uf.expr];
     // union/connected take (uf, a, b); find takes (uf, x); count takes (uf).
@@ -21686,7 +21686,7 @@ fn check_binary_heap_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "binary_heap_new" {
@@ -21728,7 +21728,7 @@ fn check_binary_heap_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -21740,7 +21740,7 @@ fn check_binary_heap_builtin(
                 name,
                 h.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -21820,7 +21820,7 @@ fn check_bloom_filter_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "bloom_filter_new" {
@@ -21871,7 +21871,7 @@ fn check_bloom_filter_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -21883,7 +21883,7 @@ fn check_bloom_filter_builtin(
                 name,
                 bf.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![bf.expr];
     if matches!(name, "bloom_filter_insert" | "bloom_filter_contains") {
@@ -21951,7 +21951,7 @@ fn check_bst_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "bst_new" {
@@ -21993,7 +21993,7 @@ fn check_bst_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     };
@@ -22005,7 +22005,7 @@ fn check_bst_builtin(
                 name,
                 bst.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -22108,7 +22108,7 @@ fn check_graph_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "graph_new" {
@@ -22154,7 +22154,7 @@ fn check_graph_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -22166,7 +22166,7 @@ fn check_graph_builtin(
                 name,
                 g.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![g.expr];
     for (i, arg) in args.iter().enumerate().skip(1) {
@@ -22279,7 +22279,7 @@ fn check_trie_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "trie_new" {
@@ -22307,7 +22307,7 @@ fn check_trie_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         t.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         }
@@ -22320,7 +22320,7 @@ fn check_trie_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -22332,7 +22332,7 @@ fn check_trie_builtin(
                 name,
                 t.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![t.expr];
     if matches!(name, "trie_insert" | "trie_contains" | "trie_starts_with" | "trie_delete") {
@@ -22400,7 +22400,7 @@ fn check_skiplist_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty(), span);
     }
     if name == "skiplist_new" {
@@ -22428,7 +22428,7 @@ fn check_skiplist_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         sl.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(ret_ty(), span);
             }
         }
@@ -22441,7 +22441,7 @@ fn check_skiplist_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(ret_ty(), span);
         }
     }
@@ -22453,7 +22453,7 @@ fn check_skiplist_builtin(
                 name,
                 sl.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     let mut typed_args = vec![sl.expr];
     if matches!(name, "skiplist_insert" | "skiplist_contains" | "skiplist_remove") {
@@ -22636,7 +22636,7 @@ fn check_search_builtin(
                         name,
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = if name == "contains" {
                     Type::Bool
                 } else {
@@ -22809,7 +22809,7 @@ fn check_math_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::F64, span);
     }
     // Closure #367: zero-arg math constants. Short-circuit
@@ -23203,7 +23203,7 @@ fn check_rng_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(ret_ty, span);
     }
     let mut typed_args = Vec::new();
@@ -23259,7 +23259,7 @@ fn check_rng_builtin(
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!("rand_choice() requires a `ref Vec<i64>` argument, got {}", xs_raw.ty()),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         typed_args.push(xs_raw.expr);
     }
@@ -23317,7 +23317,7 @@ fn check_hash_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::U64, span);
     }
     let mut typed_args = Vec::new();
@@ -23525,7 +23525,7 @@ fn check_heap_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = if name == "heap_pop" || name == "heap_peek" {
             Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
         } else {
@@ -23669,7 +23669,7 @@ fn check_deque_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "deque_new" => Type::Deque(Box::new(Type::I64)),
             "deque_pop_back"
@@ -23712,7 +23712,7 @@ fn check_deque_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         d.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = match name {
                     "deque_pop_back"
                     | "deque_pop_front"
@@ -23734,7 +23734,7 @@ fn check_deque_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = match name {
                 "deque_pop_back"
                 | "deque_pop_front"
@@ -23755,7 +23755,7 @@ fn check_deque_builtin(
                 name,
                 d.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -23832,7 +23832,7 @@ fn check_hashset_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "hashset_new" => Type::HashSet(Box::new(Type::I64)),
             "hashset_insert" | "hashset_contains" | "hashset_remove" => Type::Bool,
@@ -23866,7 +23866,7 @@ fn check_hashset_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         s.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = match name {
                     "hashset_insert" | "hashset_contains" | "hashset_remove" => Type::Bool,
                     _ => Type::I64,
@@ -23883,7 +23883,7 @@ fn check_hashset_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = match name {
                 "hashset_insert" | "hashset_contains" | "hashset_remove" => Type::Bool,
                 _ => Type::I64,
@@ -23899,7 +23899,7 @@ fn check_hashset_builtin(
                 name,
                 s.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -23987,7 +23987,7 @@ fn check_pool_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(fallback_ty(name), span);
     }
     if name == "pool_new" {
@@ -24020,7 +24020,7 @@ fn check_pool_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         p.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(fallback_ty(name), span);
             }
         },
@@ -24033,7 +24033,7 @@ fn check_pool_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(fallback_ty(name), span);
         }
     };
@@ -24045,7 +24045,7 @@ fn check_pool_builtin(
                 name,
                 p.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -24178,7 +24178,7 @@ fn check_tainted_builtin(
                     "assert_safe() requires a `Tainted<T>` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             CheckedExpr::fallback(Type::I64, span)
         }
     }
@@ -24221,7 +24221,7 @@ fn check_raw_load_store_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects {} argument(s), got {}", name, want_args, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let fallback = if name == "raw_load" {
             Type::Tainted(Box::new(Type::I64))
         } else {
@@ -24240,7 +24240,7 @@ fn check_raw_load_store_builtin(
                         "raw_load() requires a `*const T` or `*mut T` argument, got {}",
                         other
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(Type::Tainted(Box::new(Type::I64)), span);
             }
         }
@@ -24383,7 +24383,7 @@ fn check_unsafe_alloc_free_builtin(
                     "unsafe_free() requires a `*mut i64` argument, got {}",
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             CheckedExpr::fallback(Type::I64, span)
         }
     }
@@ -24496,7 +24496,7 @@ fn check_bptr_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         bp.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback(fallback_ty(name), span);
             }
         },
@@ -24509,7 +24509,7 @@ fn check_bptr_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(fallback_ty(name), span);
         }
     };
@@ -24521,7 +24521,7 @@ fn check_bptr_builtin(
                 name,
                 bp.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -24736,7 +24736,7 @@ fn check_aref_builtin(
         diagnostics.push(Diagnostic::new(
             span,
             format!("{}() expects {} argument(s), got {}", name, want_args, args.len()),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let aref = check_expr(&args[0], env, signatures, diagnostics);
@@ -25083,7 +25083,7 @@ fn check_tcp_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
 
@@ -25181,7 +25181,7 @@ fn check_epoll_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         return CheckedExpr::fallback(Type::I64, span);
     }
     let mut typed_args = Vec::new();
@@ -25257,7 +25257,7 @@ fn check_hashmap_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "hashmap_new" => {
                 Type::HashMap(Box::new(Type::I64), Box::new(Type::I64))
@@ -25296,7 +25296,7 @@ fn check_hashmap_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         m.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = match name {
                     "hashmap_insert" | "hashmap_get" | "hashmap_remove" => {
                         Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
@@ -25316,7 +25316,7 @@ fn check_hashmap_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = match name {
                 "hashmap_insert" | "hashmap_get" | "hashmap_remove" => {
                     Type::Enum(mangle_generic_decl("Option", &[Type::I64]))
@@ -25335,7 +25335,7 @@ fn check_hashmap_builtin(
                 name,
                 m.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     // ARC 1.4b: relax from (i64, i64)-only to (i64, V) where V
     // is any scalar integer type. Wider K (u64, struct, OwnedStr)
@@ -25491,7 +25491,7 @@ fn check_btreeset_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "btreeset_new" => Type::BTreeSet(Box::new(Type::I64)),
             "btreeset_insert" | "btreeset_contains" | "btreeset_remove" => Type::Bool,
@@ -25528,7 +25528,7 @@ fn check_btreeset_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         s.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = match name {
                     "btreeset_insert" | "btreeset_contains" | "btreeset_remove" => Type::Bool,
                     _ => Type::I64,
@@ -25545,7 +25545,7 @@ fn check_btreeset_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = match name {
                 "btreeset_insert" | "btreeset_contains" | "btreeset_remove" => Type::Bool,
                 _ => Type::I64,
@@ -25561,7 +25561,7 @@ fn check_btreeset_builtin(
                 name,
                 s.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(element_type, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -25605,7 +25605,7 @@ fn check_btreeset_builtin(
                     "btreeset_range() requires a `mut ref Vec<i64>` output argument, got {}",
                     out_raw.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         typed_args.push(lo.expr);
         typed_args.push(hi.expr);
@@ -25672,7 +25672,7 @@ fn check_btreemap_builtin(
                 if want_args == 1 { "" } else { "s" },
                 args.len()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
             "btreemap_new" => {
                 Type::BTreeMap(Box::new(Type::I64), Box::new(Type::I64))
@@ -25712,7 +25712,7 @@ fn check_btreemap_builtin(
                         if is_mut_op { "mut ref " } else { "ref " },
                         m.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 let ret_ty = match name {
                     "btreemap_insert" | "btreemap_get" | "btreemap_remove"
                     | "btreemap_min_key" | "btreemap_max_key" => {
@@ -25733,7 +25733,7 @@ fn check_btreemap_builtin(
                     if is_mut_op { "mut ref " } else { "ref " },
                     other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             let ret_ty = match name {
                 "btreemap_insert" | "btreemap_get" | "btreemap_remove"
                 | "btreemap_min_key" | "btreemap_max_key" => {
@@ -25753,7 +25753,7 @@ fn check_btreemap_builtin(
                 name,
                 m.ty()
             ),
-        ));
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }
     if !matches!(k_ty, Type::I64) || !matches!(v_ty, Type::I64) {
         diagnostics.push(Diagnostic::new(
@@ -25809,7 +25809,7 @@ fn check_btreemap_builtin(
                     name,
                     out_raw.ty()
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
         typed_args.push(lo.expr);
         typed_args.push(hi.expr);
@@ -26579,7 +26579,7 @@ fn check_mutator_builtin(
                         name,
                         xs.ty()
                     ),
-                ));
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
                 return CheckedExpr::fallback_integer(span);
             }
         },
@@ -26590,7 +26590,7 @@ fn check_mutator_builtin(
                     "{}() requires a `mut ref Vec<T>` argument, got {}",
                     name, other
                 ),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback_integer(span);
         }
     };
@@ -26668,7 +26668,7 @@ fn check_set_builtin(
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!("set() requires a Vec argument, got {}", other),
-            ));
+            ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
     };
