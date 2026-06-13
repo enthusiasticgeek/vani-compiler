@@ -32,12 +32,16 @@ uniformity (3), ref/lifetime (3), Windows IOCP `#[ignore]` stub in
 `json_elaboration_iface_not_impl_appears_in_output`,
 `json_elaboration_pure_fn_effect_appears_in_output`. All pass.
 
-#### 3. TUT-5 — GitHub Pages deploy (~4–6h, depends on nothing)
+#### ~~3. TUT-5 — GitHub Pages deploy~~ ✅ DONE (commit 2bf83ed)
 
-Wire the existing mdBook tutorials to publish via GitHub Actions on push
-to `main`. Entry: `.github/workflows/deploy-tutorials.yml`; build with
-`mdbook build tutorials/`; deploy to `gh-pages` branch. Verify the
-deployed site renders correctly.
+`.github/workflows/deploy-tutorials.yml` added; builds with mdBook v0.4.40
+and deploys to GitHub Pages on push to main (paths: `tutorials/**`).
+Local build verified clean. `tutorials/book.toml` repo URLs fixed.
+
+**One manual step required**: go to
+`https://github.com/enthusiasticgeek/vani-compiler/settings/pages`
+→ Source → select **"GitHub Actions"**. The workflow will then auto-trigger
+on the next push that touches `tutorials/`.
 
 #### 4. Phase 6 — Brahmi-derived language batch (~30h, pick one per session)
 
