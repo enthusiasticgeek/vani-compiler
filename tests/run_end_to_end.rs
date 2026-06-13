@@ -2725,3 +2725,172 @@ fn echo_loop_llvm_matches_c_on_windows() {
          LLVM: {llvm_stdout:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Windows-specific spot tests
+// ---------------------------------------------------------------------------
+
+/// Brahmi/Devanagari numeral output must not be garbled on Windows.
+///
+/// The LLVM brahmi print helper emits one `putchar` per UTF-8 byte of each
+/// numeral glyph. On Windows the CRT stdout is buffered and (in text mode)
+/// performs CR/LF translation — verify the bytes arrive in order and the
+/// two backends agree byte-for-byte.
+#[test]
+fn windows_brahmi_numeral_output_no_crt_reorder() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/sanskrit/pure_devanagari.vani",
+        manifest_dir
+    );
+
+    let c_out = Command::new(binary)
+        .args(["run", "--backend=c", &example])
+        .output()
+        .expect("intentc run --backend=c");
+    let ll_out = Command::new(binary)
+        .args(["run", "--backend=llvm", &example])
+        .output()
+        .expect("intentc run --backend=llvm");
+
+    assert!(c_out.status.success(), "C backend failed: {}", String::from_utf8_lossy(&c_out.stderr));
+    assert!(ll_out.status.success(), "LLVM backend failed: {}", String::from_utf8_lossy(&ll_out.stderr));
+
+    let c_stdout  = String::from_utf8_lossy(&c_out.stdout).replace("\r\n", "\n");
+    let ll_stdout = String::from_utf8_lossy(&ll_out.stdout).replace("\r\n", "\n");
+
+    assert_eq!(
+        c_stdout, ll_stdout,
+        "Brahmi numeral output diverges between C and LLVM\n\
+         C:    {c_stdout:?}\n\
+         LLVM: {ll_stdout:?}"
+    );
+
+    // Devanagari digit ONE (U+0967) encodes as E0 A5 A7 in UTF-8.
+    // The output should contain it — proves the brahmi helper ran and
+    // all three bytes arrived in the correct order (no CRT reordering).
+    assert!(
+        c_out.stdout.windows(3).any(|w| w == [0xE0, 0xA5, 0xA7]),
+        "Expected Devanagari digit १ (U+0967, E0 A5 A7) in output — brahmi helper may not have run"
+    );
+}
+
+/// Blocking TCP echo with three sequential clients produces "echoed bytes: 12"
+/// on both backends (aaa=3 + bbbb=4 + ccccc=5). Guards against Windows-specific
+/// socket teardown races in the blocking accept/recv path.
+#[test]
+fn windows_tcp_echo_blocking_three_clients() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/tcp_multi_echo.vani",
+        manifest_dir
+    );
+
+    let c_out = Command::new(binary)
+        .args(["run", "--backend=c", &example])
+        .output()
+        .expect("intentc run --backend=c");
+    let ll_out = Command::new(binary)
+        .args(["run", "--backend=llvm", &example])
+        .output()
+        .expect("intentc run --backend=llvm");
+
+    assert!(c_out.status.success(),  "C backend failed: {}",    String::from_utf8_lossy(&c_out.stderr));
+    assert!(ll_out.status.success(), "LLVM backend failed: {}", String::from_utf8_lossy(&ll_out.stderr));
+
+    let c_stdout  = String::from_utf8_lossy(&c_out.stdout).replace("\r\n", "\n");
+    let ll_stdout = String::from_utf8_lossy(&ll_out.stdout).replace("\r\n", "\n");
+
+    assert_eq!(
+        c_stdout, ll_stdout,
+        "tcp_multi_echo stdout diverges between C and LLVM\n\
+         C:    {c_stdout:?}\n\
+         LLVM: {ll_stdout:?}"
+    );
+    assert!(
+        c_stdout.contains("echoed bytes: 12"),
+        "Expected 'echoed bytes: 12' (3+4+5), got: {c_stdout:?}"
+    );
+}
+
+/// Windows snprintf/dprintf shim roundtrip.
+///
+/// On Windows the ORC JIT cannot resolve `snprintf` or `dprintf` from any
+/// DLL — `snprintf` is inlined by MinGW and `dprintf` is POSIX-only. The
+/// compiler emits IR shims backed by `vsnprintf`+`_write`. This test verifies:
+///   1. snprintf shim: i64_to_str produces the correct decimal string
+///      (exercises the varargs → vsnprintf path).
+///   2. dprintf shim: a failing assert with a custom message writes the
+///      expected text to stderr (exercises the vsnprintf+_write path).
+#[test]
+fn windows_snprintf_dprintf_shim_roundtrip() {
+    use std::fs;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+
+    // --- Part 1: snprintf shim via i64_to_str ---
+    // echo_p3b_str_local.vani converts integers to strings internally;
+    // the LLVM path goes through @snprintf. Both backends must agree.
+    let str_example = format!(
+        "{}/examples/language/english/echo_p3b_str_local.vani",
+        manifest_dir
+    );
+    let c_out = Command::new(binary)
+        .args(["run", "--backend=c", &str_example])
+        .output()
+        .expect("intentc run --backend=c (snprintf path)");
+    let ll_out = Command::new(binary)
+        .args(["run", "--backend=llvm", &str_example])
+        .output()
+        .expect("intentc run --backend=llvm (snprintf path)");
+
+    assert!(c_out.status.success(),  "C backend failed (snprintf): {}",    String::from_utf8_lossy(&c_out.stderr));
+    assert!(ll_out.status.success(), "LLVM backend failed (snprintf): {}", String::from_utf8_lossy(&ll_out.stderr));
+
+    let c_stdout  = String::from_utf8_lossy(&c_out.stdout).replace("\r\n", "\n");
+    let ll_stdout = String::from_utf8_lossy(&ll_out.stdout).replace("\r\n", "\n");
+    assert_eq!(
+        c_stdout, ll_stdout,
+        "snprintf shim: stdout diverges between C and LLVM\nC: {c_stdout:?}\nLLVM: {ll_stdout:?}"
+    );
+    // "111" appears in mode=1 output — a concrete decimal-formatting check.
+    assert!(ll_stdout.contains("111"), "snprintf shim: expected '111' in output, got: {ll_stdout:?}");
+
+    // --- Part 2: dprintf shim via assert failure to stderr ---
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-snprintf-dprintf-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+    let src = dir.join("dprintf_check.vani");
+    fs::write(
+        &src,
+        "fn main() -> i64 {\n  let x: i64 = 0;\n  assert x == 1, \"snprintf-dprintf-shim-ok\";\n  return 0;\n}\n",
+    )
+    .expect("write dprintf_check.vani");
+
+    let assert_out = Command::new(binary)
+        .args(["run", src.to_str().unwrap()])   // LLVM backend (default)
+        .output()
+        .expect("intentc run (dprintf path)");
+
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(
+        !assert_out.status.success(),
+        "expected non-zero exit from failing assert; stderr: {}",
+        String::from_utf8_lossy(&assert_out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&assert_out.stderr);
+    assert!(
+        stderr.contains("snprintf-dprintf-shim-ok"),
+        "dprintf shim: expected custom message in stderr, got: {stderr:?}"
+    );
+}
