@@ -1325,6 +1325,127 @@ fn json_check_outputs_structured_diagnostics_on_failure() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Elaboration integration tests — verify .elaboration survives to JSON output
+// ---------------------------------------------------------------------------
+
+fn write_tmp_vani(stem: &str, code: &str) -> std::path::PathBuf {
+    use std::fs;
+    let dir = std::env::temp_dir().join(format!(
+        "intentc-elab-{}-{}-{}",
+        stem,
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir elab tmp");
+    let path = dir.join(format!("{stem}.vani"));
+    fs::write(&path, code).expect("write elab tmp");
+    path
+}
+
+#[test]
+fn json_elaboration_type_mismatch_appears_in_output() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "elab_type_mismatch",
+        "fn main() -> i64 {\n  let x: i64 = true;\n  return x;\n}\n",
+    );
+    let out = Command::new(binary)
+        .args(["check", src.to_str().unwrap(), "--json"])
+        .output()
+        .expect("intentc check --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    assert!(!out.status.success(), "type mismatch must fail");
+    assert!(
+        stdout.contains("\"elaboration\":[\""),
+        "elaboration must appear in JSON output for type_mismatch, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn json_elaboration_unknown_variable_appears_in_output() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "elab_unknown_var",
+        "fn main() -> i64 {\n  return ghost_var;\n}\n",
+    );
+    let out = Command::new(binary)
+        .args(["check", src.to_str().unwrap(), "--json"])
+        .output()
+        .expect("intentc check --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    assert!(!out.status.success(), "unknown variable must fail");
+    assert!(
+        stdout.contains("\"elaboration\":[\""),
+        "elaboration must appear in JSON output for unknown_variable, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn json_elaboration_wrong_arity_appears_in_output() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "elab_wrong_arity",
+        "fn add(a: i64, b: i64) -> i64 { return a + b; }\nfn main() -> i64 { return add(1); }\n",
+    );
+    let out = Command::new(binary)
+        .args(["check", src.to_str().unwrap(), "--json"])
+        .output()
+        .expect("intentc check --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    assert!(!out.status.success(), "wrong arity must fail");
+    assert!(
+        stdout.contains("\"elaboration\":[\""),
+        "elaboration must appear in JSON output for wrong_arity, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn json_elaboration_iface_not_impl_appears_in_output() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "elab_iface_not_impl",
+        "interface Printable { fn show(self: ref Self) -> i64; }\nstruct Box { val: i64 }\nfn show_it(p: ref Printable) -> i64 { return p.show(); }\nfn main() -> i64 {\n  let b: Box = Box { val: 5 };\n  return show_it(ref b);\n}\n",
+    );
+    let out = Command::new(binary)
+        .args(["check", src.to_str().unwrap(), "--json"])
+        .output()
+        .expect("intentc check --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    assert!(!out.status.success(), "iface not impl must fail");
+    assert!(
+        stdout.contains("\"elaboration\":[\""),
+        "elaboration must appear in JSON output for iface_not_impl, got:\n{stdout}"
+    );
+}
+
+#[test]
+fn json_elaboration_pure_fn_effect_appears_in_output() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let src = write_tmp_vani(
+        "elab_pure_effect",
+        "fn impure(x: i64) -> i64 { print x; return x; }\npure fn compute(x: i64) -> i64 { return impure(x); }\nfn main() -> i64 { return compute(1); }\n",
+    );
+    let out = Command::new(binary)
+        .args(["check", src.to_str().unwrap(), "--json"])
+        .output()
+        .expect("intentc check --json");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let _ = std::fs::remove_dir_all(src.parent().unwrap());
+    assert!(!out.status.success(), "pure fn calling impure must fail");
+    assert!(
+        stdout.contains("\"elaboration\":[\""),
+        "elaboration must appear in JSON output for pure_fn_has_effect, got:\n{stdout}"
+    );
+}
+
 #[test]
 fn assert_with_message_emits_custom_runtime_diagnostic() {
     use std::fs;
