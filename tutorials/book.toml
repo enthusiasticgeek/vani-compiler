@@ -8,7 +8,6 @@ title = "vāṇी (वाणी) — Tutorials"
 authors = ["vāṇी contributors"]
 description = "Beginner → intermediate → advanced tutorials for the vāṇी language. Code as you speak."
 language = "en"
-multilingual = false
 src = "src"
 
 [rust]
@@ -17,8 +16,8 @@ edition = "2024"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "navy"
-git-repository-url = "https://github.com/anthropics/claude-code"
-edit-url-template = "https://github.com/anthropics/claude-code/edit/main/tutorials/{path}"
+git-repository-url = "https://github.com/enthusiasticgeek/vani-compiler"
+edit-url-template = "https://github.com/enthusiasticgeek/vani-compiler/edit/main/tutorials/{path}"
 no-section-label = false
 # Search is built-in for mdBook; surface it prominently.
 [output.html.search]
