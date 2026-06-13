@@ -408,14 +408,18 @@ fn classify(s: Summary) -> BigO {
             }
         }
         1 => {
-            // Single loop. The body's content multiplies the
-            // n iterations:
-            //   - sort inside: O(n × n log n) = O(n² log n)
-            //   - binary_search inside: O(n log n)
-            //   - everything else: O(n)
+            // Single loop. Dominant term wins:
+            //   - sort inside loop:  O(n × n log n) = O(n² log n)
+            //   - logn inside loop:  O(n log n) from loop body
+            //   - sort outside loop: O(n log n + n) = O(n log n)
+            //   - everything else:   O(n)
             if s.has_sort_inside_loop {
                 BigO::PolynomialLog(2)
             } else if s.has_logn_inside_loop {
+                BigO::NLogN
+            } else if s.has_sort_at_top {
+                // A sort outside the loop costs O(n log n);
+                // the loop costs O(n). Together: O(n log n).
                 BigO::NLogN
             } else {
                 BigO::Linear

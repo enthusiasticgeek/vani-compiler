@@ -11666,6 +11666,31 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn big_o_sort_outside_loop_dominates_loop() {
+        // Regression: a fn that calls sort at the top level then
+        // has a while loop was classified O(n) instead of O(n log n)
+        // because the classifier ignored has_sort_at_top when
+        // max_depth >= 1. O(n log n + n) = O(n log n).
+        use crate::big_o::{analyze_function, BigO};
+        let source = r#"
+            fn sort_then_scan(xs: Vec<i64>) -> i64 {
+              let _ = sort(mut ref xs);
+              let n: i64 = len(xs) as i64;
+              let i: i64 = 0;
+              while i < n {
+                i = i + 1;
+              }
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let func = checked.ir.functions.iter()
+            .find(|f| f.name == "sort_then_scan").expect("fn present");
+        assert_eq!(analyze_function(func), BigO::NLogN);
+    }
+
+    #[test]
     fn big_o_cross_fn_logn_callee_in_loop_is_n_log_n() {
         use crate::big_o::{annotate_program, BigO, BigOMode};
         let source = r#"
