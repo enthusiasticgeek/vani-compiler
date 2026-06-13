@@ -4,7 +4,7 @@
   <img src="vani_logo1.png" alt="vāṇī logo1" width="480">
 </p>
 
-**Verbose Alternative Natural Interface — code like you speak.**
+**Verbose Alternative Natural Interface (VANI) — code like you speak.**
 
 Pronounced **vaa-NEE** (Sanskrit *vāṇī* — long-a, retroflex-n, long-i;
 stress on the second syllable). वाणी is the Sanskrit word for *speech*,
