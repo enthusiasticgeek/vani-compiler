@@ -1,0 +1,40 @@
+// ॐ
+// vani-lang: gujarati
+//
+// build & run:
+//   vanic run examples/language/gujarati/vec_invariants.vani              # LLVM
+//   vanic run examples/language/gujarati/vec_invariants.vani --backend=c  # C
+
+ઉદ્દેશ "Loop invariants over Vec length, end-to-end";
+
+// `અચળ` = invariant ("unchanging"), `પ્રમાણ` = prove
+
+// Builds a Vec by pushing one element per iteration.
+// The invariant `len(xs) == (i as u64)` is preserved by the body.
+// At loop exit the verifier knows !(i < 5) plus the invariants,
+// so `i == 5` and `len(xs) == 5` are both dischargeable.
+
+કાર્ય main() -> i64 {
+  માનો xs: Vec<i64> = vec(0);
+  માનો i: i64 = 1;
+
+  જ્યારે i < 5
+  અચળ len(xs) == (i તરીકે u64);
+  અચળ i >= 1;
+  અચળ i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  પ્રમાણ i == 5;
+  પ્રમાણ len(xs) == 5;
+
+  લખો xs[0];
+  લખો xs[1];
+  લખો xs[2];
+  લખો xs[3];
+  લખો xs[4];
+
+  પાછા 0;
+}

@@ -638,7 +638,7 @@ fn gujarati_keyword(text: &str) -> Option<TokenKind> {
         "પાછા" => TokenKind::Return,               // paachhaa (back)
         "જો" => TokenKind::If,                     // jo (if)
         "નહીંતર" => TokenKind::Else,               // naheentar (else)
-        "જ્યાં સુધી" => TokenKind::While,         // jyaan sudhi (while/until — TBD multi-word)
+        "જ્યારે" => TokenKind::While,             // jyaare (while/when — single-word form)
         "પ્રતિ" => TokenKind::For,                 // prati (for each — tatsama)
         "માં" => TokenKind::In,                    // maan (in)
         "થી" => TokenKind::From,                   // thee (from)
@@ -659,6 +659,7 @@ fn gujarati_keyword(text: &str) -> Option<TokenKind> {
         "છાપો" => TokenKind::Print,                // chhaapo (print)
         "ઉદ્દેશ" => TokenKind::Intent,             // uddhesh (intent — tatsama)
         "પ્રકાર" => TokenKind::Type,               // prakaar (type — tatsama)
+        "અચળ" => TokenKind::Invariant,             // achal (invariant — "unchanging", tatsama)
         _ => return None,
     };
     Some(kind)

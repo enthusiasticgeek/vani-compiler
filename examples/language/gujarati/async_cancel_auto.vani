@@ -1,0 +1,27 @@
+// ॐ
+// vani-lang: gujarati
+//
+// build & run:
+//   vanic run examples/language/gujarati/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/gujarati/async_cancel_auto.vani --backend=c  # C
+//
+// Gujarati smoke of the async/await dialect lift.
+// `async` and `await` use the English spellings here —
+// both are recognised in all dialect modes.
+
+ઉદ્દેશ "Gujarati async/await smoke";
+
+async કાર્ય delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  પાછા v;
+}
+
+કાર્ય main() -> i64 {
+  માનો a: i64 = await(delay(5, 42));
+  માનો b: i64 = await(delay(10, 7));
+
+  નિશ્ચિત a == 42;
+  નિશ્ચિત b == 7;
+  લખો "delays:", a, b;
+  પાછા 0;
+}

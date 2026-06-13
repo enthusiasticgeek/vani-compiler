@@ -28997,6 +28997,111 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn gujarati_while_single_word_compiles() {
+        // `જ્યારે` (jyaare) is the single-word while keyword added in
+        // Phase 6 — replaces the broken multi-word `jyaan sudhi`.
+        let source = r#"
+// vani-lang: gujarati
+ઉદ્દેશ "while loop test";
+કાર્ય main() -> i64 {
+  માનો i: i64 = 0;
+  જ્યારે i < 3 {
+    i = i + 1;
+  }
+  નિશ્ચિત i == 3;
+  પાછા 0;
+}
+"#;
+        compile(source).expect("Gujarati jyaare while must compile");
+    }
+
+    #[test]
+    fn gujarati_invariant_keyword_compiles() {
+        // `અચળ` (achal — "unchanging") added as the Gujarati invariant keyword.
+        // Use `assert` (runtime) rather than `prove` (static SMT) so the
+        // test focuses on keyword parsing, not solver discharge.
+        let source = r#"
+// vani-lang: gujarati
+ઉદ્દેશ "invariant test";
+કાર્ય main() -> i64 {
+  માનો i: i64 = 0;
+  જ્યારે i < 3
+  અચળ i >= 0;
+  અચળ i <= 3;
+  {
+    i = i + 1;
+  }
+  નિશ્ચિત i == 3;
+  પાછા 0;
+}
+"#;
+        compile(source).expect("Gujarati achal invariant must compile");
+    }
+
+    #[test]
+    fn gujarati_for_range_compiles() {
+        let source = r#"
+// vani-lang: gujarati
+ઉદ્દેશ "for range test";
+કાર્ય main() -> i64 {
+  માનો total: i64 = 0;
+  પ્રતિ i થી 1 સુધી 5 {
+    total = total + i;
+  }
+  નિશ્ચિત total == 10;
+  પાછા 0;
+}
+"#;
+        compile(source).expect("Gujarati prati-thi-sudhi for-range must compile");
+    }
+
+    #[test]
+    fn gujarati_match_enum_compiles() {
+        let source = r#"
+// vani-lang: gujarati
+ઉદ્દેશ "enum match test";
+ગણના Opt { Some(i64), None }
+કાર્ય unwrap(o: Opt) -> i64 {
+  પાછા મેળવો o {
+    Opt.Some(v) પછી v,
+    Opt.None    પછી 0,
+  };
+}
+કાર્ય main() -> i64 {
+  નિશ્ચિત unwrap(Opt.Some(7)) == 7;
+  નિશ્ચિત unwrap(Opt.None) == 0;
+  પાછા 0;
+}
+"#;
+        compile(source).expect("Gujarati ganana/melavo/pachhi must compile");
+    }
+
+    #[test]
+    fn gujarati_requires_proves_compiles() {
+        // Use clamp_low pattern (same as verified.vani) — the SMT solver
+        // can prove lo == return value when x < lo without overflow risk.
+        let source = r#"
+// vani-lang: gujarati
+ઉદ્દેશ "requires/proves test";
+કાર્ય clamp_low(x: i64, lo: i64) -> i64
+જરૂરી lo >= 0;
+{
+  જો x < lo {
+    પાછા lo;
+  } નહીંતર {
+    પાછા x;
+  }
+}
+કાર્ય main() -> i64 {
+  નિશ્ચિત clamp_low(0 - 5, 0) == 0;
+  નિશ્ચિત clamp_low(10, 3) == 10;
+  પાછા 0;
+}
+"#;
+        compile(source).expect("Gujarati jaruri/praman must compile");
+    }
+
+    #[test]
     fn punjabi_pragma_compiles_and_emits_punjabi_print() {
         let source = "// vani-lang: punjabi\n\
                       ਉਦੇਸ਼ \"t\";\n\

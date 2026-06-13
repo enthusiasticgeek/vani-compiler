@@ -1,0 +1,41 @@
+// ॐ
+// vani-lang: gujarati
+//
+// build & run:
+//   vanic run examples/language/gujarati/control_flow.vani              # LLVM
+//   vanic run examples/language/gujarati/control_flow.vani --backend=c  # C
+
+ઉદ્દેશ "if/else and while loops with Vec mutation";
+
+કાર્ય sum(xs: જુઓ Vec<i64>) -> i64 {
+  માનો total: i64 = 0;
+  માનો i: u64 = 0;
+  માનો n: u64 = len(xs);
+  જ્યારે i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  પાછા total;
+}
+
+કાર્ય build_range(n: i64) -> Vec<i64> {
+  માનો xs: Vec<i64> = vec(0);
+  માનો i: i64 = 1;
+  જ્યારે i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  પાછા xs;
+}
+
+કાર્ય main() -> i64 {
+  માનો xs: Vec<i64> = build_range(5);
+  માનો total: i64 = sum(જુઓ xs);
+  જો total > 5 {
+    નિશ્ચિત total == 10;
+  } નહીંતર {
+    નિશ્ચિત total <= 5;
+  }
+  લખો total;
+  પાછા 0;
+}

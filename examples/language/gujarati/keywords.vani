@@ -1,0 +1,31 @@
+// ॐ
+// vani-lang: gujarati
+//
+// build & run:
+//   vanic run examples/language/gujarati/keywords.vani              # LLVM
+//   vanic run examples/language/gujarati/keywords.vani --backend=c  # C
+
+// ગુજરાતી (Gujarati) — keyword showcase.
+// `કાર્ય` = fn, `માનો` = let, `પાછા` = return,
+// `જો` / `નહીંતર` = if / else, `નિશ્ચિત` = assert.
+
+ઉદ્દેશ "Gujarati keyword showcase — factorial with if/else";
+
+કાર્ય factorial(n: i64) -> i64 {
+  જો n <= 1 {
+    પાછા 1;
+  } નહીંતર {
+    પાછા n * factorial(n - 1);
+  }
+}
+
+કાર્ય main() -> i64 {
+  માનો a: i64 = factorial(5);
+  માનો b: i64 = factorial(6);
+
+  નિશ્ચિત a == 120;
+  નિશ્ચિત b == 720;
+
+  લખો "5! =", a, " 6! =", b;
+  પાછા 0;
+}
