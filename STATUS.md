@@ -10,7 +10,122 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 📋 NEXT SESSION HANDOFF — 2026-06-12
+## 📋 NEXT SESSION HANDOFF — 2026-06-13
+
+**State**: Error-message elaboration complete — 597/597 `Diagnostic::new` sites in
+`src/checker.rs` now carry `.with_elaboration(...)` WHAT/WHY/HOW guidance.
+60+ families in `src/diagnostic_elaborations.rs`. Clean build; all tests pass.
+Last commit: `326ccad`.
+
+### Pick up in this order
+
+#### 1. Edge tests (low effort, ~2–4h, no dependencies — do first)
+
+Each is a `#[test]` in `src/lib.rs` unless noted. These document known-good
+behaviour and prevent silent regressions.
+
+**Generic monomorphization edge cases:**
+- `nested_generic_three_level_chain_fails` — `h<T>` → `g<T>` → `f<T>`; only `h<i64>` called from non-generic; expect compile error mentioning the un-specialized inner fn. (2-level already tested; add 3-level.)
+- `nested_generic_nongeneric_bridge_works` — `h<T>` calls non-generic `bridge_i64()` which calls `f<i64>`; should compile and run, the non-generic bridge provides the specialization.
+- `nested_generic_same_type_two_call_sites` — `f<i64>` called from both `main()` and `g<T>`; should compile because the non-generic call site provides the specialization.
+
+**OwnedStr / match-arm type uniformity:**
+- `ownedstr_all_arms_must_produce_same_type` — one arm produces OwnedStr (`s + ""`), other produces Str literal; must be a type error.
+- `ownedstr_nested_match_concat_workaround` — nested match where inner match produces OwnedStr; outer arms must all agree on OwnedStr.
+
+**Ref / lifetime edge cases:**
+- `ref_return_three_ref_params_rejects` — fn with three ref params trying to return a ref; single-ref-param elision rule must reject.
+- `vec_ref_push_after_source_borrow_ends` — borrow `x` as `ref T`, push into vec, borrow ends; then `mut ref x` + mutate; should compile.
+- `struct_field_ref_lifetime_survives_method_call` — struct holding `ref T` field; call a method reading the field; struct stays valid for ref's scope.
+
+**Async-TCP Windows documentation stub:**
+- Add a `#[cfg(target_os = "windows")]` `#[ignore]` test variant for `echo_loop_windows_byte_count_matches_c` that documents the IOCP mismatch so it isn't silently forgotten.
+
+#### 2. Elaboration integration tests (~1–2h, no dependencies)
+
+The 597 elaboration sites have no integration-level tests verifying that
+elaboration text actually appears in `vanic check --json` output. Add
+5–10 `#[test]` cases in `src/lib.rs` (or `tests/`) that compile a
+short snippet that must fail, then assert `.elaboration` is non-empty
+in the JSON diagnostic. Good first targets: `type_mismatch`,
+`unknown_variable`, `move_after_use`, `wrong_arity`, `iface_not_impl`.
+
+#### 3. TUT-5 — GitHub Pages deploy (~4–6h, depends on nothing)
+
+Wire the existing mdBook tutorials to publish via GitHub Actions on push
+to `main`. Entry: `.github/workflows/deploy-tutorials.yml`; build with
+`mdbook build tutorials/`; deploy to `gh-pages` branch. Verify the
+deployed site renders correctly.
+
+#### 4. Phase 6 — Brahmi-derived language batch (~30h, pick one per session)
+
+Each is independent of the others. Start with whichever feels most
+tractable; they share the same pipeline structure as the shipped dialects.
+
+| Dialect | Script | Effort | Notes |
+|---|---|---|---|
+| **Gujarati** | Gujarati | 6–8h | Closest to Marathi grammar; good first pick |
+| **Punjabi-Gurmukhi** | Gurmukhi | 8–10h | Sikh/Indian; distinct script |
+| **Odia** | Odia | 6–8h | Brahmi-derived, moderate |
+| **Assamese** | Bengali-adjacent | 5–8h | Lexical overlap with Bengali pipeline |
+
+#### 5. Phase 8b — European openers (~13h total, independent of Phase 6)
+
+Three languages, each self-contained and buildable in a single session.
+Good for variety between the script-heavy batches above.
+
+| Dialect | Effort | Notes |
+|---|---|---|
+| **Spanish** | 5h | Latin SVO, easiest entry point into European langs |
+| **Russian** | 5h | Cyrillic SVO; reuse Latin tokenizer with new Unicode range |
+| **French** | 3h | Trivial after Spanish; mostly keyword table |
+
+#### 6. Windows IOCP (~20–30h, larger arc — dedicate a fresh session)
+
+5 async-socket tests still skipped on Windows. Root cause: sockets must
+be opened with `WSA_FLAG_OVERLAPPED` and all I/O submitted via
+`WSASend`/`WSARecv` with OVERLAPPED structs; the current shim uses
+blocking `GetQueuedCompletionStatus`.
+
+Entry points:
+- `src/backend_llvm.rs` → `emit_intent_epoll_helpers_llvm_windows`
+- `examples/tcp_echo_epoll.vani`, `examples/echo_loop.vani`
+
+Blocked tests: `tcp_echo_epoll.vani`, `echo_loop.vani`,
+`echo_loop_break.vani`, `async_showcase.vani`, `echo_match_stress.vani`.
+
+#### 7. Type-system cleanup (Phase 11 — pick one per fresh session)
+
+Each item is independent and can be done in any order.
+
+| Item | Effort | Notes |
+|---|---|---|
+| **L3: match-by-ref scrutinee** | 10h | Match on `ref T` without consuming |
+| **L1: enum destructure on affine payloads** | 15–20h | Move out of enum arm |
+| **L12: SMT prove across function calls** | 25–30h | Inline `ensures` at call sites |
+
+#### 8. Deferred / long tail (touch only when asked)
+
+- **Phase 8a** — Dravidian batch: Tamil, Telugu, Kannada, Malayalam (~50h; grammar consultant gating)
+- **Phase 9b** — Japanese 3-script lexer: Kanji + Hiragana + Katakana (~12h)
+- **Phase 9a** — ML-3 LoRA fine-tune (~25h + ~$200 GPU)
+- **Phase 12** — Perso-Arabic RTL: bidi parser + Urdu + Punjabi-Shahmukhi + Sindhi (~100h)
+- **Phase 13** — Browser WASM playground (50h+), Arabic, Korean, etc.
+- Grammar consultant pass on 62 dialects
+- CI / GH-Actions deploy (Tier 4 — last)
+
+---
+
+### Key numbers (2026-06-13)
+- **Lib tests**: 2108 passing
+- **E2e tests**: all pass (5 async-TCP tests skipped on Windows)
+- **Elaboration coverage**: 597/597 (100%)
+- **Dialects**: 62 across 26 scripts
+- **Last commit**: `326ccad` — 100% elaboration coverage
+
+---
+
+## 📋 PREV SESSION HANDOFF — 2026-06-12
 
 **State**: Edge tests + `volatile_read`/`volatile_write` shipped.
 2108 lib tests + all e2e tests pass on Windows 11 GNU toolchain.
