@@ -2894,3 +2894,76 @@ fn windows_snprintf_dprintf_shim_roundtrip() {
         "dprintf shim: expected custom message in stderr, got: {stderr:?}"
     );
 }
+
+/// `vanic check --big-o` pins the annotation output format and verifies
+/// the classifier is correct on a real example file:
+///   - `print_vec` has a while loop → O(n)
+///   - `main` calls sort + has while loops → O(n log n)
+///   - trivial helpers (descending, etc.) are O(1) and suppressed in auto mode
+///   - `--big-o=force` includes the O(1) helpers
+#[test]
+fn check_big_o_flag_annotates_sort_example() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!("{}/examples/language/english/sort.vani", manifest_dir);
+
+    // --- auto mode (default) ---
+    let auto_out = Command::new(binary)
+        .args(["check", "--big-o", &example])
+        .output()
+        .expect("intentc check --big-o");
+    assert!(
+        auto_out.status.success(),
+        "check --big-o failed: {}",
+        String::from_utf8_lossy(&auto_out.stderr)
+    );
+    let auto_stdout = String::from_utf8_lossy(&auto_out.stdout);
+    // Auto mode: only non-O(1) fns appear
+    assert!(
+        auto_stdout.contains("fn print_vec:"),
+        "auto: expected fn print_vec in output:\n{auto_stdout}"
+    );
+    assert!(
+        auto_stdout.contains("fn main:"),
+        "auto: expected fn main in output:\n{auto_stdout}"
+    );
+    // main calls sort + has loops → O(n log n)
+    assert!(
+        auto_stdout.contains("fn main: O(n log n)"),
+        "auto: expected main classified O(n log n):\n{auto_stdout}"
+    );
+    // trivial O(1) helpers must be suppressed in auto mode
+    assert!(
+        !auto_stdout.contains("fn descending:"),
+        "auto: O(1) fn descending should be suppressed:\n{auto_stdout}"
+    );
+
+    // --- force mode ---
+    let force_out = Command::new(binary)
+        .args(["check", "--big-o=force", &example])
+        .output()
+        .expect("intentc check --big-o=force");
+    assert!(force_out.status.success());
+    let force_stdout = String::from_utf8_lossy(&force_out.stdout);
+    // Force includes O(1) helpers
+    assert!(
+        force_stdout.contains("fn descending: O(1)"),
+        "force: expected fn descending: O(1) in output:\n{force_stdout}"
+    );
+    assert!(
+        force_stdout.contains("fn main: O(n log n)"),
+        "force: expected fn main: O(n log n):\n{force_stdout}"
+    );
+
+    // --- off mode ---
+    let off_out = Command::new(binary)
+        .args(["check", "--big-o=off", &example])
+        .output()
+        .expect("intentc check --big-o=off");
+    assert!(off_out.status.success());
+    let off_stdout = String::from_utf8_lossy(&off_out.stdout);
+    assert!(
+        !off_stdout.contains("O("),
+        "off mode: no complexity annotations expected:\n{off_stdout}"
+    );
+}
