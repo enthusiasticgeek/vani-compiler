@@ -104,7 +104,37 @@ Each item is independent and can be done in any order.
 | **L1: enum destructure on affine payloads** | 15–20h | Move out of enum arm |
 | **L12: SMT prove across function calls** | 25–30h | Inline `ensures` at call sites |
 
-#### 8. Deferred / long tail (touch only when asked)
+#### 8. Installers — Windows + Linux (~8–12h, independent, high user-facing value)
+
+Make `vanic` installable without a Rust toolchain. Both targets are
+independent and can be done in the same session or split.
+
+**Windows installer** (`installers/windows/`):
+- Build a self-contained `.msi` or NSIS `.exe` that bundles the
+  `vanic.exe` binary (pre-built for `x86_64-pc-windows-gnu`), places
+  it in `%ProgramFiles%\vanic\bin`, and updates `%PATH%` via the
+  registry. Alternatively a simple `install.ps1` that downloads the
+  GitHub release asset and adds to `$env:PATH` in the user profile.
+- Smoke test: fresh machine can run `vanic --version` after install.
+
+**Linux installer** (`installers/linux/`):
+- Shell script `install.sh` that detects the distro, fetches the
+  correct pre-built binary from GitHub Releases
+  (`x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`), copies
+  to `/usr/local/bin/vanic`, and sets executable bit.
+- Optional: `.deb` and `.rpm` packages for `apt`/`dnf` managed
+  installs. Use `cargo-deb` / `cargo-generate-rpm` if already
+  cross-compiling. Entry: `Cargo.toml` `[package.metadata.deb]`
+  section.
+- Smoke test: `vanic check examples/basics.vani` exits 0 on a clean
+  Ubuntu 22.04 container.
+
+**Shared prerequisites** (do first, ~1h):
+- Add a GitHub Actions workflow (`.github/workflows/release.yml`) that
+  builds the binaries for both targets on tag push and uploads them as
+  release assets. The installer scripts can then curl those URLs.
+
+#### 9. Deferred / long tail (touch only when asked)
 
 - **Phase 8a** — Dravidian batch: Tamil, Telugu, Kannada, Malayalam (~50h; grammar consultant gating)
 - **Phase 9b** — Japanese 3-script lexer: Kanji + Hiragana + Katakana (~12h)
