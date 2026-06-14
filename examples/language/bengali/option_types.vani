@@ -1,0 +1,42 @@
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/bengali/option_types.vani              # LLVM
+
+উদ্দেশ্য "Payloaded enums via Option<i64>";
+
+// `গণনা` = enum, `মেলে` = match, `তবে` = then
+
+গণনা Opt { Some(i64), None }
+
+কাজ unwrap_or(o: Opt, def: i64) -> i64 {
+  ফেরত মেলে o {
+    Opt.Some(v) তবে v,
+    Opt.None    তবে def,
+  };
+}
+
+কাজ is_some(o: Opt) -> i64 {
+  ফেরত মেলে o {
+    Opt.Some(v) তবে 1,
+    Opt.None    তবে 0,
+  };
+}
+
+কাজ main() -> i64 {
+  মান a: Opt = Opt.Some(42);
+  মান b: Opt = Opt.None;
+
+  মান x: i64 = unwrap_or(a, 0);
+  মান y: i64 = unwrap_or(b, 100);
+
+  নিশ্চিত x == 42;
+  নিশ্চিত y == 100;
+  নিশ্চিত is_some(a) == 1;
+  নিশ্চিত is_some(b) == 0;
+
+  লেখ "Some(42) unwrapped =", x;
+  লেখ "None with default 100 =", y;
+  ফেরত 0;
+}

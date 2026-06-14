@@ -1,0 +1,34 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/vec_invariants.vani              # LLVM
+//   vanic run examples/language/kannada/vec_invariants.vani --backend=c  # C
+
+ಉದ್ದೇಶ "Loop invariants over Vec length, end-to-end";
+
+// `ಅಚಲ` = invariant ("unchanging"), `ಸಾಬೀತುಪಡಿಸಿ` = prove
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ xs: Vec<i64> = vec(0);
+  ಊಹಿಸಿ i: i64 = 1;
+
+  ತನಕ i < 5
+  ಅಚಲ len(xs) == (i ಆಗಿ u64);
+  ಅಚಲ i >= 1;
+  ಅಚಲ i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  ಸಾಬೀತುಪಡಿಸಿ i == 5;
+  ಸಾಬೀತುಪಡಿಸಿ len(xs) == 5;
+
+  ಬರೆ xs[0];
+  ಬರೆ xs[1];
+  ಬರೆ xs[2];
+  ಬರೆ xs[3];
+  ಬರೆ xs[4];
+
+  ಮರಳಿ 0;
+}

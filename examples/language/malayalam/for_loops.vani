@@ -1,0 +1,41 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/for_loops.vani              # LLVM
+//   vanic run examples/language/malayalam/for_loops.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "for-loops over integer ranges";
+
+// `ഓരോ` = for, `നിന്ന്` = from, `വരെക്കും` = to, `നിർത്തുക` = break
+
+കാര്യം sum_squares(n: i64) -> i64 {
+  കരുതുക total: i64 = 0;
+  ഓരോ i നിന്ന് 1 വരെക്കും n {
+    total = total + i * i;
+  }
+  തിരികെ total;
+}
+
+കാര്യം find_first_zero(xs: നോക്കുക [i64; 5]) -> i64 {
+  കരുതുക result: i64 = 0 - 1;
+  ഓരോ i നിന്ന് 0 വരെക്കും len(xs) {
+    എങ്കിൽ xs[i] == 0 {
+      result = i ആയി i64;
+      നിർത്തുക;
+    }
+  }
+  തിരികെ result;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക s: i64 = sum_squares(5);
+  ഉറപ്പിക്കുക s == 30;
+
+  കരുതുക xs: [i64; 5] = [3, 7, 0, 9, 1];
+  കരുതുക idx: i64 = find_first_zero(നോക്കുക xs);
+  ഉറപ്പിക്കുക idx == 2;
+
+  എഴുതുക s;
+  എഴുതുക idx;
+  തിരികെ 0;
+}

@@ -1,0 +1,64 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/iterate.vani              # LLVM
+//   vanic run examples/language/malayalam/iterate.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `ഓരോ` = for, `ഇൽ` = in, `നോക്കുക` = ref
+
+കാര്യം sum_vec(xs: നോക്കുക Vec<i64>) -> i64 {
+  കരുതുക total: i64 = 0;
+  ഓരോ x ഇൽ നോക്കുക xs {
+    total = total + x;
+  }
+  തിരികെ total;
+}
+
+കാര്യം max_in_array(xs: നോക്കുക [i64; 5]) -> i64 {
+  കരുതുക best: i64 = xs[0];
+  ഓരോ x ഇൽ നോക്കുക xs {
+    എങ്കിൽ x > best {
+      best = x;
+    }
+  }
+  തിരികെ best;
+}
+
+കാര്യം count_positives(xs: നോക്കുക Vec<i64>) -> i64 {
+  കരുതുക count: i64 = 0;
+  ഓരോ x ഇൽ നോക്കുക xs {
+    എങ്കിൽ x > 0 {
+      count = count + 1;
+    }
+  }
+  തിരികെ count;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  കരുതുക total: i64 = sum_vec(നോക്കുക nums);
+  ഉറപ്പിക്കുക total == 15;
+
+  കരുതുക arr: [i64; 5] = [3, 7, 1, 9, 4];
+  കരുതുക m: i64 = max_in_array(നോക്കുക arr);
+  ഉറപ്പിക്കുക m == 9;
+
+  കരുതുക mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  കരുതുക p: i64 = count_positives(നോക്കുക mixed);
+  ഉറപ്പിക്കുക p == 3;
+
+  കരുതുക owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  കരുതുക owned_total: i64 = 0;
+  ഓരോ s ഇൽ owned {
+    owned_total = owned_total + (len(s) ആയി i64);
+  }
+  ഉറപ്പിക്കുക owned_total == 6;
+
+  എഴുതുക total;
+  എഴുതുക m;
+  എഴുതുക p;
+  എഴുതുക owned_total;
+  തിരികെ 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/keywords.vani              # LLVM
+//   vanic run examples/language/bengali/keywords.vani --backend=c  # C
+
+// বাংলা (Bengali) — keyword showcase.
+// `কাজ` = fn, `মান` = let, `ফেরত` = return,
+// `যদি` / `নাহলে` = if / else, `নিশ্চিত` = assert.
+
+উদ্দেশ্য "Bengali keyword showcase — factorial with if/else";
+
+কাজ factorial(n: i64) -> i64 {
+  যদি n <= 1 {
+    ফেরত 1;
+  } নাহলে {
+    ফেরত n * factorial(n - 1);
+  }
+}
+
+কাজ main() -> i64 {
+  মান a: i64 = factorial(5);
+  মান b: i64 = factorial(6);
+
+  নিশ্চিত a == 120;
+  নিশ্চিত b == 720;
+
+  লেখ "5! =", a, " 6! =", b;
+  ফেরত 0;
+}

@@ -1,0 +1,42 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/control_flow.vani              # LLVM
+//   vanic run examples/language/telugu/control_flow.vani --backend=c  # C
+
+ఉద్దేశం "if/else and while loops with Vec mutation";
+
+// `వరకు` = while, `చూడు` = ref
+
+పని sum(xs: చూడు Vec<i64>) -> i64 {
+  అనుకో total: i64 = 0;
+  అనుకో i: u64 = 0;
+  అనుకో n: u64 = len(xs);
+  వరకు i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  తిరిగి total;
+}
+
+పని build_range(n: i64) -> Vec<i64> {
+  అనుకో xs: Vec<i64> = vec(0);
+  అనుకో i: i64 = 1;
+  వరకు i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  తిరిగి xs;
+}
+
+పని main() -> i64 {
+  అనుకో xs: Vec<i64> = build_range(5);
+  అనుకో total: i64 = sum(చూడు xs);
+  అయితే total > 5 {
+    నిర్ధారించు total == 10;
+  } లేకపోతే {
+    నిర్ధారించు total <= 5;
+  }
+  రాయి total;
+  తిరిగి 0;
+}

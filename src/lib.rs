@@ -28949,6 +28949,104 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn bengali_invariant_keyword_compiles() {
+        let source = r#"
+// vani-lang: bengali
+উদ্দেশ্য "invariant test";
+কাজ main() -> i64 {
+  মান i: i64 = 0;
+  যতক্ষণ i < 3
+  অপরিবর্তনীয় i >= 0;
+  অপরিবর্তনীয় i <= 3;
+  {
+    i = i + 1;
+  }
+  নিশ্চিত i == 3;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Bengali aparibartaniya invariant must compile");
+    }
+
+    #[test]
+    fn bengali_while_compiles() {
+        let source = r#"
+// vani-lang: bengali
+উদ্দেশ্য "while test";
+কাজ main() -> i64 {
+  মান i: i64 = 0;
+  যতক্ষণ i < 3 {
+    i = i + 1;
+  }
+  নিশ্চিত i == 3;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Bengali jatakshan while must compile");
+    }
+
+    #[test]
+    fn bengali_for_range_compiles() {
+        let source = r#"
+// vani-lang: bengali
+উদ্দেশ্য "for range test";
+কাজ main() -> i64 {
+  মান total: i64 = 0;
+  প্রতি i থেকে 1 পর্যন্ত 5 {
+    total = total + i;
+  }
+  নিশ্চিত total == 10;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Bengali prati-theke-paryanta for-range must compile");
+    }
+
+    #[test]
+    fn bengali_match_enum_compiles() {
+        let source = r#"
+// vani-lang: bengali
+উদ্দেশ্য "enum match test";
+গণনা Opt { Some(i64), None }
+কাজ unwrap(o: Opt) -> i64 {
+  ফেরত মেলে o {
+    Opt.Some(v) তবে v,
+    Opt.None    তবে 0,
+  };
+}
+কাজ main() -> i64 {
+  নিশ্চিত unwrap(Opt.Some(7)) == 7;
+  নিশ্চিত unwrap(Opt.None) == 0;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Bengali ganana/mele/tobe must compile");
+    }
+
+    #[test]
+    fn bengali_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: bengali
+উদ্দেশ্য "requires/proves test";
+কাজ clamp_low(x: i64, lo: i64) -> i64
+প্রয়োজনীয় lo >= 0;
+{
+  যদি x < lo {
+    ফেরত lo;
+  } নাহলে {
+    ফেরত x;
+  }
+}
+কাজ main() -> i64 {
+  নিশ্চিত clamp_low(0 - 5, 0) == 0;
+  নিশ্চিত clamp_low(10, 3) == 10;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Bengali proyojaniya/praman must compile");
+    }
+
+    #[test]
     fn tamil_pragma_compiles_and_emits_tamil_print() {
         // Phase 6 (2026-06-07): Tamil — first Dravidian dialect.
         // Non-Indo-Aryan so tatsama vocabulary doesn't apply;
@@ -28969,6 +29067,105 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn tamil_invariant_keyword_compiles() {
+        // `மாறிலா` (maarilaa — "without change") is the Tamil invariant keyword.
+        let source = r#"
+// vani-lang: tamil
+நோக்கம் "invariant test";
+செயல்பாடு main() -> i64 {
+  கொள் i: i64 = 0;
+  வரை i < 3
+  மாறிலா i >= 0;
+  மாறிலா i <= 3;
+  {
+    i = i + 1;
+  }
+  உறுதி i == 3;
+  திருப்பு 0;
+}
+"#;
+        compile(source).expect("Tamil maarilaa invariant must compile");
+    }
+
+    #[test]
+    fn tamil_while_compiles() {
+        let source = r#"
+// vani-lang: tamil
+நோக்கம் "while test";
+செயல்பாடு main() -> i64 {
+  கொள் i: i64 = 0;
+  வரை i < 3 {
+    i = i + 1;
+  }
+  உறுதி i == 3;
+  திருப்பு 0;
+}
+"#;
+        compile(source).expect("Tamil varai while must compile");
+    }
+
+    #[test]
+    fn tamil_for_range_compiles() {
+        let source = r#"
+// vani-lang: tamil
+நோக்கம் "for range test";
+செயல்பாடு main() -> i64 {
+  கொள் total: i64 = 0;
+  ஒவ்வொரு i இருந்து 1 வரைக்கும் 5 {
+    total = total + i;
+  }
+  உறுதி total == 10;
+  திருப்பு 0;
+}
+"#;
+        compile(source).expect("Tamil ovvoru-irundhu-varaikkum for-range must compile");
+    }
+
+    #[test]
+    fn tamil_match_enum_compiles() {
+        let source = r#"
+// vani-lang: tamil
+நோக்கம் "enum match test";
+எண்ணுப்பெயர் Opt { Some(i64), None }
+செயல்பாடு unwrap(o: Opt) -> i64 {
+  திருப்பு பொருந்து o {
+    Opt.Some(v) அப்போது v,
+    Opt.None    அப்போது 0,
+  };
+}
+செயல்பாடு main() -> i64 {
+  உறுதி unwrap(Opt.Some(7)) == 7;
+  உறுதி unwrap(Opt.None) == 0;
+  திருப்பு 0;
+}
+"#;
+        compile(source).expect("Tamil ennuppeyar/poruthu/appothu must compile");
+    }
+
+    #[test]
+    fn tamil_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: tamil
+நோக்கம் "requires/proves test";
+செயல்பாடு clamp_low(x: i64, lo: i64) -> i64
+தேவை lo >= 0;
+{
+  என்றால் x < lo {
+    திருப்பு lo;
+  } இல்லாவிட்டால் {
+    திருப்பு x;
+  }
+}
+செயல்பாடு main() -> i64 {
+  உறுதி clamp_low(0 - 5, 0) == 0;
+  உறுதி clamp_low(10, 3) == 10;
+  திருப்பு 0;
+}
+"#;
+        compile(source).expect("Tamil thaevai/niroopi must compile");
+    }
+
+    #[test]
     fn telugu_pragma_compiles_and_emits_telugu_print() {
         let source = "// vani-lang: telugu\n\
                       ఉద్దేశం \"t\";\n\
@@ -28980,6 +29177,105 @@ fn main() -> i64 {
         let c = compile_to_c(source).expect("Telugu program compiles to C");
         assert!(c.contains("intent_print_int_tel"),
             "Telugu must route through tel helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn telugu_invariant_keyword_compiles() {
+        // `మారని` (maarani — "not changing") is the Telugu invariant keyword.
+        let source = r#"
+// vani-lang: telugu
+ఉద్దేశం "invariant test";
+పని main() -> i64 {
+  అనుకో i: i64 = 0;
+  వరకు i < 3
+  మారని i >= 0;
+  మారని i <= 3;
+  {
+    i = i + 1;
+  }
+  నిర్ధారించు i == 3;
+  తిరిగి 0;
+}
+"#;
+        compile(source).expect("Telugu maarani invariant must compile");
+    }
+
+    #[test]
+    fn telugu_while_compiles() {
+        let source = r#"
+// vani-lang: telugu
+ఉద్దేశం "while test";
+పని main() -> i64 {
+  అనుకో i: i64 = 0;
+  వరకు i < 3 {
+    i = i + 1;
+  }
+  నిర్ధారించు i == 3;
+  తిరిగి 0;
+}
+"#;
+        compile(source).expect("Telugu varaku while must compile");
+    }
+
+    #[test]
+    fn telugu_for_range_compiles() {
+        let source = r#"
+// vani-lang: telugu
+ఉద్దేశం "for range test";
+పని main() -> i64 {
+  అనుకో total: i64 = 0;
+  ప్రతి i నుండి 1 వరకూ 5 {
+    total = total + i;
+  }
+  నిర్ధారించు total == 10;
+  తిరిగి 0;
+}
+"#;
+        compile(source).expect("Telugu prati-nundi-varakuu for-range must compile");
+    }
+
+    #[test]
+    fn telugu_match_enum_compiles() {
+        let source = r#"
+// vani-lang: telugu
+ఉద్దేశం "enum match test";
+గణన Opt { Some(i64), None }
+పని unwrap(o: Opt) -> i64 {
+  తిరిగి సరిపోలు o {
+    Opt.Some(v) అప్పుడు v,
+    Opt.None    అప్పుడు 0,
+  };
+}
+పని main() -> i64 {
+  నిర్ధారించు unwrap(Opt.Some(7)) == 7;
+  నిర్ధారించు unwrap(Opt.None) == 0;
+  తిరిగి 0;
+}
+"#;
+        compile(source).expect("Telugu gana/saripolu/appudu must compile");
+    }
+
+    #[test]
+    fn telugu_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: telugu
+ఉద్దేశం "requires/proves test";
+పని clamp_low(x: i64, lo: i64) -> i64
+అవసరం lo >= 0;
+{
+  అయితే x < lo {
+    తిరిగి lo;
+  } లేకపోతే {
+    తిరిగి x;
+  }
+}
+పని main() -> i64 {
+  నిర్ధారించు clamp_low(0 - 5, 0) == 0;
+  నిర్ధారించు clamp_low(10, 3) == 10;
+  తిరిగి 0;
+}
+"#;
+        compile(source).expect("Telugu avasaram/niroopinchu must compile");
     }
 
     #[test]
@@ -29251,6 +29547,105 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn kannada_invariant_keyword_compiles() {
+        // `ಅಚಲ` (achala — "unchanging", tatsama) is the Kannada invariant keyword.
+        let source = r#"
+// vani-lang: kannada
+ಉದ್ದೇಶ "invariant test";
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ i: i64 = 0;
+  ತನಕ i < 3
+  ಅಚಲ i >= 0;
+  ಅಚಲ i <= 3;
+  {
+    i = i + 1;
+  }
+  ಖಚಿತಪಡಿಸಿ i == 3;
+  ಮರಳಿ 0;
+}
+"#;
+        compile(source).expect("Kannada achala invariant must compile");
+    }
+
+    #[test]
+    fn kannada_while_compiles() {
+        let source = r#"
+// vani-lang: kannada
+ಉದ್ದೇಶ "while test";
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ i: i64 = 0;
+  ತನಕ i < 3 {
+    i = i + 1;
+  }
+  ಖಚಿತಪಡಿಸಿ i == 3;
+  ಮರಳಿ 0;
+}
+"#;
+        compile(source).expect("Kannada tanaka while must compile");
+    }
+
+    #[test]
+    fn kannada_for_range_compiles() {
+        let source = r#"
+// vani-lang: kannada
+ಉದ್ದೇಶ "for range test";
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ total: i64 = 0;
+  ಪ್ರತಿ i ಇಂದ 1 ಗೆ 5 {
+    total = total + i;
+  }
+  ಖಚಿತಪಡಿಸಿ total == 10;
+  ಮರಳಿ 0;
+}
+"#;
+        compile(source).expect("Kannada prati-inda-ge for-range must compile");
+    }
+
+    #[test]
+    fn kannada_match_enum_compiles() {
+        let source = r#"
+// vani-lang: kannada
+ಉದ್ದೇಶ "enum match test";
+ಎಣಿಕೆ Opt { Some(i64), None }
+ಕಾರ್ಯ unwrap(o: Opt) -> i64 {
+  ಮರಳಿ ಹೊಂದಾಣಿಕೆ o {
+    Opt.Some(v) ನಂತರ v,
+    Opt.None    ನಂತರ 0,
+  };
+}
+ಕಾರ್ಯ main() -> i64 {
+  ಖಚಿತಪಡಿಸಿ unwrap(Opt.Some(7)) == 7;
+  ಖಚಿತಪಡಿಸಿ unwrap(Opt.None) == 0;
+  ಮರಳಿ 0;
+}
+"#;
+        compile(source).expect("Kannada enike/hondanike/nantara must compile");
+    }
+
+    #[test]
+    fn kannada_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: kannada
+ಉದ್ದೇಶ "requires/proves test";
+ಕಾರ್ಯ clamp_low(x: i64, lo: i64) -> i64
+ಅಗತ್ಯ lo >= 0;
+{
+  ಆದರೆ x < lo {
+    ಮರಳಿ lo;
+  } ಇಲ್ಲದಿದ್ದರೆ {
+    ಮರಳಿ x;
+  }
+}
+ಕಾರ್ಯ main() -> i64 {
+  ಖಚಿತಪಡಿಸಿ clamp_low(0 - 5, 0) == 0;
+  ಖಚಿತಪಡಿಸಿ clamp_low(10, 3) == 10;
+  ಮರಳಿ 0;
+}
+"#;
+        compile(source).expect("Kannada agatya/saabeetupadisi must compile");
+    }
+
+    #[test]
     fn malayalam_pragma_compiles_and_emits_malayalam_print() {
         let source = "// vani-lang: malayalam\n\
                       ഉദ്ദേശ്യം \"t\";\n\
@@ -29262,6 +29657,105 @@ fn main() -> i64 {
         let c = compile_to_c(source).expect("Malayalam program compiles");
         assert!(c.contains("intent_print_int_mal"),
             "Malayalam must route through mal helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn malayalam_invariant_keyword_compiles() {
+        // `അചലം` (achalam — "unchanging", tatsama) is the Malayalam invariant keyword.
+        let source = r#"
+// vani-lang: malayalam
+ഉദ്ദേശ്യം "invariant test";
+കാര്യം main() -> i64 {
+  കരുതുക i: i64 = 0;
+  വരെ i < 3
+  അചലം i >= 0;
+  അചലം i <= 3;
+  {
+    i = i + 1;
+  }
+  ഉറപ്പിക്കുക i == 3;
+  തിരികെ 0;
+}
+"#;
+        compile(source).expect("Malayalam achalam invariant must compile");
+    }
+
+    #[test]
+    fn malayalam_while_compiles() {
+        let source = r#"
+// vani-lang: malayalam
+ഉദ്ദേശ്യം "while test";
+കാര്യം main() -> i64 {
+  കരുതുക i: i64 = 0;
+  വരെ i < 3 {
+    i = i + 1;
+  }
+  ഉറപ്പിക്കുക i == 3;
+  തിരികെ 0;
+}
+"#;
+        compile(source).expect("Malayalam vare while must compile");
+    }
+
+    #[test]
+    fn malayalam_for_range_compiles() {
+        let source = r#"
+// vani-lang: malayalam
+ഉദ്ദേശ്യം "for range test";
+കാര്യം main() -> i64 {
+  കരുതുക total: i64 = 0;
+  ഓരോ i നിന്ന് 1 വരെക്കും 5 {
+    total = total + i;
+  }
+  ഉറപ്പിക്കുക total == 10;
+  തിരികെ 0;
+}
+"#;
+        compile(source).expect("Malayalam oro-ninnu-varekkum for-range must compile");
+    }
+
+    #[test]
+    fn malayalam_match_enum_compiles() {
+        let source = r#"
+// vani-lang: malayalam
+ഉദ്ദേശ്യം "enum match test";
+എണ്ണൽ Opt { Some(i64), None }
+കാര്യം unwrap(o: Opt) -> i64 {
+  തിരികെ പൊരുത്തപ്പെടുത്തുക o {
+    Opt.Some(v) പിന്നെ v,
+    Opt.None    പിന്നെ 0,
+  };
+}
+കാര്യം main() -> i64 {
+  ഉറപ്പിക്കുക unwrap(Opt.Some(7)) == 7;
+  ഉറപ്പിക്കുക unwrap(Opt.None) == 0;
+  തിരികെ 0;
+}
+"#;
+        compile(source).expect("Malayalam ennal/poruthappeduthuka/pinne must compile");
+    }
+
+    #[test]
+    fn malayalam_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: malayalam
+ഉദ്ദേശ്യം "requires/proves test";
+കാര്യം clamp_low(x: i64, lo: i64) -> i64
+ആവശ്യം lo >= 0;
+{
+  എങ്കിൽ x < lo {
+    തിരികെ lo;
+  } അല്ലെങ്കിൽ {
+    തിരികെ x;
+  }
+}
+കാര്യം main() -> i64 {
+  ഉറപ്പിക്കുക clamp_low(0 - 5, 0) == 0;
+  ഉറപ്പിക്കുക clamp_low(10, 3) == 10;
+  തിരികെ 0;
+}
+"#;
+        compile(source).expect("Malayalam aavasyam/theliyikkuka must compile");
     }
 
     #[test]

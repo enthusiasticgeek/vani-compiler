@@ -1,0 +1,47 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/early_exit.vani              # LLVM
+//   vanic run examples/language/kannada/early_exit.vani --backend=c  # C
+
+ಉದ್ದೇಶ "break and continue for early exit and skip";
+
+// `ನಿಲ್ಲಿ` = break, `ಮುಂದುವರಿಸಿ` = continue
+
+ಕಾರ್ಯ find_first_negative(xs: ನೋಡಿ Vec<i64>) -> i64 {
+  ಊಹಿಸಿ i: u64 = 0;
+  ಊಹಿಸಿ result: i64 = 0 - 1;
+  ತನಕ i < len(xs) {
+    ಆದರೆ xs[i] < 0 {
+      result = xs[i];
+      ನಿಲ್ಲಿ;
+    }
+    i = i + 1;
+  }
+  ಮರಳಿ result;
+}
+
+ಕಾರ್ಯ count_positive(xs: ನೋಡಿ Vec<i64>) -> i64 {
+  ಊಹಿಸಿ i: u64 = 0;
+  ಊಹಿಸಿ count: i64 = 0;
+  ತನಕ i < len(xs) {
+    ಆದರೆ xs[i] <= 0 {
+      i = i + 1;
+      ಮುಂದುವರಿಸಿ;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  ಮರಳಿ count;
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  ಊಹಿಸಿ first_neg: i64 = find_first_negative(ನೋಡಿ xs);
+  ಊಹಿಸಿ positives: i64 = count_positive(ನೋಡಿ xs);
+  ಖಚಿತಪಡಿಸಿ first_neg == 0 - 3;
+  ಖಚಿತಪಡಿಸಿ positives == 3;
+  ಬರೆ first_neg;
+  ಬರೆ positives;
+  ಮರಳಿ 0;
+}

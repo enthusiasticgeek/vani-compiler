@@ -1,0 +1,42 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/kannada/option_types.vani              # LLVM
+
+ಉದ್ದೇಶ "Payloaded enums via Option<i64>";
+
+// `ಎಣಿಕೆ` = enum, `ಹೊಂದಾಣಿಕೆ` = match, `ನಂತರ` = then
+
+ಎಣಿಕೆ Opt { Some(i64), None }
+
+ಕಾರ್ಯ unwrap_or(o: Opt, def: i64) -> i64 {
+  ಮರಳಿ ಹೊಂದಾಣಿಕೆ o {
+    Opt.Some(v) ನಂತರ v,
+    Opt.None    ನಂತರ def,
+  };
+}
+
+ಕಾರ್ಯ is_some(o: Opt) -> i64 {
+  ಮರಳಿ ಹೊಂದಾಣಿಕೆ o {
+    Opt.Some(v) ನಂತರ 1,
+    Opt.None    ನಂತರ 0,
+  };
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ a: Opt = Opt.Some(42);
+  ಊಹಿಸಿ b: Opt = Opt.None;
+
+  ಊಹಿಸಿ x: i64 = unwrap_or(a, 0);
+  ಊಹಿಸಿ y: i64 = unwrap_or(b, 100);
+
+  ಖಚಿತಪಡಿಸಿ x == 42;
+  ಖಚಿತಪಡಿಸಿ y == 100;
+  ಖಚಿತಪಡಿಸಿ is_some(a) == 1;
+  ಖಚಿತಪಡಿಸಿ is_some(b) == 0;
+
+  ಬರೆ "Some(42) unwrapped =", x;
+  ಬರೆ "None with default 100 =", y;
+  ಮರಳಿ 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/keywords.vani              # LLVM
+//   vanic run examples/language/kannada/keywords.vani --backend=c  # C
+
+// ಕನ್ನಡ (Kannada) — keyword showcase.
+// `ಕಾರ್ಯ` = fn, `ಊಹಿಸಿ` = let, `ಮರಳಿ` = return,
+// `ಆದರೆ` / `ಇಲ್ಲದಿದ್ದರೆ` = if / else, `ಖಚಿತಪಡಿಸಿ` = assert.
+
+ಉದ್ದೇಶ "Kannada keyword showcase — factorial with if/else";
+
+ಕಾರ್ಯ factorial(n: i64) -> i64 {
+  ಆದರೆ n <= 1 {
+    ಮರಳಿ 1;
+  } ಇಲ್ಲದಿದ್ದರೆ {
+    ಮರಳಿ n * factorial(n - 1);
+  }
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ a: i64 = factorial(5);
+  ಊಹಿಸಿ b: i64 = factorial(6);
+
+  ಖಚಿತಪಡಿಸಿ a == 120;
+  ಖಚಿತಪಡಿಸಿ b == 720;
+
+  ಬರೆ "5! =", a, " 6! =", b;
+  ಮರಳಿ 0;
+}

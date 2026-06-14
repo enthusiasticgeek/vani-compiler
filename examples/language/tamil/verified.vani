@@ -1,0 +1,38 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/verified.vani              # LLVM
+//   vanic run examples/language/tamil/verified.vani --backend=c  # C
+
+நோக்கம் "SMT verifier — preconditions and proofs";
+
+// `தேவை` = requires, `நிரூபி` = prove
+
+செயல்பாடு clamp_low(x: i64, lo: i64) -> i64
+தேவை lo >= 0;
+{
+  என்றால் x < lo {
+    திருப்பு lo;
+  } இல்லாவிட்டால் {
+    திருப்பு x;
+  }
+}
+
+செயல்பாடு safe_subtract(a: i64, b: i64) -> i64
+தேவை a >= b;
+தேவை b >= 0;
+{
+  நிரூபி a - b >= 0;
+  திருப்பு a - b;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் x: i64 = clamp_low(0 - 5, 0);
+  உறுதி x == 0;
+
+  கொள் d: i64 = safe_subtract(10, 3);
+  உறுதி d == 7;
+
+  எழுது d;
+  திருப்பு 0;
+}

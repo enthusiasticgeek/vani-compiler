@@ -1,0 +1,29 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/telugu/box_recursive_drop.vani --backend=c  # C
+
+ఉద్దేశం "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+// `నిర్మాణం` = struct
+
+నిర్మాణం Bag {
+  contents: Box<Vec<i64>>,
+}
+
+పని main() -> i64 {
+  అనుకో v: Vec<i64> = vec(10, 20, 30);
+  అనుకో b: Box<Vec<i64>> = box(v);
+  రాయి "constructed Box<Vec<i64>>";
+
+  అనుకో v2: Vec<i64> = vec(7, 8, 9);
+  అనుకో bag: Bag = Bag { contents: box(v2) };
+  రాయి "constructed Bag";
+
+  అనుకో s: OwnedStr = "hi" + "!";
+  అనుకో bs: Box<OwnedStr> = box(s);
+  రాయి "constructed Box<OwnedStr>";
+
+  తిరిగి 0;
+}

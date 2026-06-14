@@ -1,0 +1,41 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/for_loops.vani              # LLVM
+//   vanic run examples/language/telugu/for_loops.vani --backend=c  # C
+
+ఉద్దేశం "for-loops over integer ranges";
+
+// `ప్రతి` = for, `నుండి` = from, `వరకూ` = to, `ఆపు` = break
+
+పని sum_squares(n: i64) -> i64 {
+  అనుకో total: i64 = 0;
+  ప్రతి i నుండి 1 వరకూ n {
+    total = total + i * i;
+  }
+  తిరిగి total;
+}
+
+పని find_first_zero(xs: చూడు [i64; 5]) -> i64 {
+  అనుకో result: i64 = 0 - 1;
+  ప్రతి i నుండి 0 వరకూ len(xs) {
+    అయితే xs[i] == 0 {
+      result = i గా i64;
+      ఆపు;
+    }
+  }
+  తిరిగి result;
+}
+
+పని main() -> i64 {
+  అనుకో s: i64 = sum_squares(5);
+  నిర్ధారించు s == 30;
+
+  అనుకో xs: [i64; 5] = [3, 7, 0, 9, 1];
+  అనుకో idx: i64 = find_first_zero(చూడు xs);
+  నిర్ధారించు idx == 2;
+
+  రాయి s;
+  రాయి idx;
+  తిరిగి 0;
+}

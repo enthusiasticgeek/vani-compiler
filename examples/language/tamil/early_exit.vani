@@ -1,0 +1,47 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/early_exit.vani              # LLVM
+//   vanic run examples/language/tamil/early_exit.vani --backend=c  # C
+
+நோக்கம் "break and continue for early exit and skip";
+
+// `நிறுத்து` = break, `தொடர்` = continue
+
+செயல்பாடு find_first_negative(xs: பார் Vec<i64>) -> i64 {
+  கொள் i: u64 = 0;
+  கொள் result: i64 = 0 - 1;
+  வரை i < len(xs) {
+    என்றால் xs[i] < 0 {
+      result = xs[i];
+      நிறுத்து;
+    }
+    i = i + 1;
+  }
+  திருப்பு result;
+}
+
+செயல்பாடு count_positive(xs: பார் Vec<i64>) -> i64 {
+  கொள் i: u64 = 0;
+  கொள் count: i64 = 0;
+  வரை i < len(xs) {
+    என்றால் xs[i] <= 0 {
+      i = i + 1;
+      தொடர்;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  திருப்பு count;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  கொள் first_neg: i64 = find_first_negative(பார் xs);
+  கொள் positives: i64 = count_positive(பார் xs);
+  உறுதி first_neg == 0 - 3;
+  உறுதி positives == 3;
+  எழுது first_neg;
+  எழுது positives;
+  திருப்பு 0;
+}

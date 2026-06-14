@@ -1,0 +1,47 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/early_exit.vani              # LLVM
+//   vanic run examples/language/telugu/early_exit.vani --backend=c  # C
+
+ఉద్దేశం "break and continue for early exit and skip";
+
+// `ఆపు` = break, `కొనసాగించు` = continue
+
+పని find_first_negative(xs: చూడు Vec<i64>) -> i64 {
+  అనుకో i: u64 = 0;
+  అనుకో result: i64 = 0 - 1;
+  వరకు i < len(xs) {
+    అయితే xs[i] < 0 {
+      result = xs[i];
+      ఆపు;
+    }
+    i = i + 1;
+  }
+  తిరిగి result;
+}
+
+పని count_positive(xs: చూడు Vec<i64>) -> i64 {
+  అనుకో i: u64 = 0;
+  అనుకో count: i64 = 0;
+  వరకు i < len(xs) {
+    అయితే xs[i] <= 0 {
+      i = i + 1;
+      కొనసాగించు;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  తిరిగి count;
+}
+
+పని main() -> i64 {
+  అనుకో xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  అనుకో first_neg: i64 = find_first_negative(చూడు xs);
+  అనుకో positives: i64 = count_positive(చూడు xs);
+  నిర్ధారించు first_neg == 0 - 3;
+  నిర్ధారించు positives == 3;
+  రాయి first_neg;
+  రాయి positives;
+  తిరిగి 0;
+}

@@ -1,0 +1,33 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/try_question_op.vani              # LLVM
+//   vanic run examples/language/kannada/try_question_op.vani --backend=c  # C
+
+ಉದ್ದೇಶ "Postfix ? early-return sugar on payloaded enums";
+
+ಎಣಿಕೆ Opt { Some(i64), None }
+
+ಕಾರ್ಯ doubled_q(o: Opt) -> Opt {
+  ಊಹಿಸಿ v: i64 = o?;
+  ಮರಳಿ Opt.Some(v * 2);
+}
+
+ಕಾರ್ಯ unwrap_or(o: Opt, def: i64) -> i64 {
+  ಮರಳಿ ಹೊಂದಾಣಿಕೆ o {
+    Opt.Some(v) ನಂತರ v,
+    Opt.None    ನಂತರ def,
+  };
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ a: Opt = doubled_q(Opt.Some(5));
+  ಖಚಿತಪಡಿಸಿ unwrap_or(a, 0) == 10;
+
+  ಊಹಿಸಿ b: Opt = doubled_q(Opt.None);
+  ಖಚಿತಪಡಿಸಿ unwrap_or(b, 99) == 99;
+
+  ಬರೆ "Some(5)? doubled =", unwrap_or(a, 0);
+  ಬರೆ "None? defaulted to", unwrap_or(b, 99);
+  ಮರಳಿ 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/keywords.vani              # LLVM
+//   vanic run examples/language/telugu/keywords.vani --backend=c  # C
+
+// తెలుగు (Telugu) — keyword showcase.
+// `పని` = fn, `అనుకో` = let, `తిరిగి` = return,
+// `అయితే` / `లేకపోతే` = if / else, `నిర్ధారించు` = assert.
+
+ఉద్దేశం "Telugu keyword showcase — factorial with if/else";
+
+పని factorial(n: i64) -> i64 {
+  అయితే n <= 1 {
+    తిరిగి 1;
+  } లేకపోతే {
+    తిరిగి n * factorial(n - 1);
+  }
+}
+
+పని main() -> i64 {
+  అనుకో a: i64 = factorial(5);
+  అనుకో b: i64 = factorial(6);
+
+  నిర్ధారించు a == 120;
+  నిర్ధారించు b == 720;
+
+  రాయి "5! =", a, " 6! =", b;
+  తిరిగి 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/keywords.vani              # LLVM
+//   vanic run examples/language/tamil/keywords.vani --backend=c  # C
+
+// தமிழ் (Tamil) — keyword showcase.
+// `செயல்பாடு` = fn, `கொள்` = let, `திருப்பு` = return,
+// `என்றால்` / `இல்லாவிட்டால்` = if / else, `உறுதி` = assert.
+
+நோக்கம் "Tamil keyword showcase — factorial with if/else";
+
+செயல்பாடு factorial(n: i64) -> i64 {
+  என்றால் n <= 1 {
+    திருப்பு 1;
+  } இல்லாவிட்டால் {
+    திருப்பு n * factorial(n - 1);
+  }
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் a: i64 = factorial(5);
+  கொள் b: i64 = factorial(6);
+
+  உறுதி a == 120;
+  உறுதி b == 720;
+
+  எழுது "5! =", a, " 6! =", b;
+  திருப்பு 0;
+}

@@ -1,0 +1,64 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/iterate.vani              # LLVM
+//   vanic run examples/language/kannada/iterate.vani --backend=c  # C
+
+ಉದ್ದೇಶ "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `ಪ್ರತಿ` = for, `ರಲ್ಲಿ` = in, `ನೋಡಿ` = ref
+
+ಕಾರ್ಯ sum_vec(xs: ನೋಡಿ Vec<i64>) -> i64 {
+  ಊಹಿಸಿ total: i64 = 0;
+  ಪ್ರತಿ x ರಲ್ಲಿ ನೋಡಿ xs {
+    total = total + x;
+  }
+  ಮರಳಿ total;
+}
+
+ಕಾರ್ಯ max_in_array(xs: ನೋಡಿ [i64; 5]) -> i64 {
+  ಊಹಿಸಿ best: i64 = xs[0];
+  ಪ್ರತಿ x ರಲ್ಲಿ ನೋಡಿ xs {
+    ಆದರೆ x > best {
+      best = x;
+    }
+  }
+  ಮರಳಿ best;
+}
+
+ಕಾರ್ಯ count_positives(xs: ನೋಡಿ Vec<i64>) -> i64 {
+  ಊಹಿಸಿ count: i64 = 0;
+  ಪ್ರತಿ x ರಲ್ಲಿ ನೋಡಿ xs {
+    ಆದರೆ x > 0 {
+      count = count + 1;
+    }
+  }
+  ಮರಳಿ count;
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  ಊಹಿಸಿ total: i64 = sum_vec(ನೋಡಿ nums);
+  ಖಚಿತಪಡಿಸಿ total == 15;
+
+  ಊಹಿಸಿ arr: [i64; 5] = [3, 7, 1, 9, 4];
+  ಊಹಿಸಿ m: i64 = max_in_array(ನೋಡಿ arr);
+  ಖಚಿತಪಡಿಸಿ m == 9;
+
+  ಊಹಿಸಿ mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  ಊಹಿಸಿ p: i64 = count_positives(ನೋಡಿ mixed);
+  ಖಚಿತಪಡಿಸಿ p == 3;
+
+  ಊಹಿಸಿ owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  ಊಹಿಸಿ owned_total: i64 = 0;
+  ಪ್ರತಿ s ರಲ್ಲಿ owned {
+    owned_total = owned_total + (len(s) ಆಗಿ i64);
+  }
+  ಖಚಿತಪಡಿಸಿ owned_total == 6;
+
+  ಬರೆ total;
+  ಬರೆ m;
+  ಬರೆ p;
+  ಬರೆ owned_total;
+  ಮರಳಿ 0;
+}

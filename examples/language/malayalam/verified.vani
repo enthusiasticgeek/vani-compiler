@@ -1,0 +1,38 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/verified.vani              # LLVM
+//   vanic run examples/language/malayalam/verified.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "SMT verifier — preconditions and proofs";
+
+// `ആവശ്യം` = requires, `തെളിയിക്കുക` = prove
+
+കാര്യം clamp_low(x: i64, lo: i64) -> i64
+ആവശ്യം lo >= 0;
+{
+  എങ്കിൽ x < lo {
+    തിരികെ lo;
+  } അല്ലെങ്കിൽ {
+    തിരികെ x;
+  }
+}
+
+കാര്യം safe_subtract(a: i64, b: i64) -> i64
+ആവശ്യം a >= b;
+ആവശ്യം b >= 0;
+{
+  തെളിയിക്കുക a - b >= 0;
+  തിരികെ a - b;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക x: i64 = clamp_low(0 - 5, 0);
+  ഉറപ്പിക്കുക x == 0;
+
+  കരുതുക d: i64 = safe_subtract(10, 3);
+  ഉറപ്പിക്കുക d == 7;
+
+  എഴുതുക d;
+  തിരികെ 0;
+}

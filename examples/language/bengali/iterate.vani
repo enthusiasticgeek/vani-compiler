@@ -1,0 +1,65 @@
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/iterate.vani              # LLVM
+//   vanic run examples/language/bengali/iterate.vani --backend=c  # C
+
+উদ্দেশ্য "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `প্রতি` = for, `মধ্যে` = in, `দেখ` = ref
+
+কাজ sum_vec(xs: দেখ Vec<i64>) -> i64 {
+  মান total: i64 = 0;
+  প্রতি x মধ্যে দেখ xs {
+    total = total + x;
+  }
+  ফেরত total;
+}
+
+কাজ max_in_array(xs: দেখ [i64; 5]) -> i64 {
+  মান best: i64 = xs[0];
+  প্রতি x মধ্যে দেখ xs {
+    যদি x > best {
+      best = x;
+    }
+  }
+  ফেরত best;
+}
+
+কাজ count_positives(xs: দেখ Vec<i64>) -> i64 {
+  মান count: i64 = 0;
+  প্রতি x মধ্যে দেখ xs {
+    যদি x > 0 {
+      count = count + 1;
+    }
+  }
+  ফেরত count;
+}
+
+কাজ main() -> i64 {
+  মান nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  মান total: i64 = sum_vec(দেখ nums);
+  নিশ্চিত total == 15;
+
+  মান arr: [i64; 5] = [3, 7, 1, 9, 4];
+  মান m: i64 = max_in_array(দেখ arr);
+  নিশ্চিত m == 9;
+
+  মান mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  মান p: i64 = count_positives(দেখ mixed);
+  নিশ্চিত p == 3;
+
+  // Consuming `for x in xs` — each OwnedStr moves into x and frees at scope exit.
+  মান owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  মান owned_total: i64 = 0;
+  প্রতি s মধ্যে owned {
+    owned_total = owned_total + (len(s) হিসাবে i64);
+  }
+  নিশ্চিত owned_total == 6;
+
+  লেখ total;
+  লেখ m;
+  লেখ p;
+  লেখ owned_total;
+  ফেরত 0;
+}

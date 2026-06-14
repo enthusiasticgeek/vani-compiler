@@ -1,0 +1,42 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/malayalam/option_types.vani              # LLVM
+
+ഉദ്ദേശ്യം "Payloaded enums via Option<i64>";
+
+// `എണ്ണൽ` = enum, `പൊരുത്തപ്പെടുത്തുക` = match, `പിന്നെ` = then
+
+എണ്ണൽ Opt { Some(i64), None }
+
+കാര്യം unwrap_or(o: Opt, def: i64) -> i64 {
+  തിരികെ പൊരുത്തപ്പെടുത്തുക o {
+    Opt.Some(v) പിന്നെ v,
+    Opt.None    പിന്നെ def,
+  };
+}
+
+കാര്യം is_some(o: Opt) -> i64 {
+  തിരികെ പൊരുത്തപ്പെടുത്തുക o {
+    Opt.Some(v) പിന്നെ 1,
+    Opt.None    പിന്നെ 0,
+  };
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക a: Opt = Opt.Some(42);
+  കരുതുക b: Opt = Opt.None;
+
+  കരുതുക x: i64 = unwrap_or(a, 0);
+  കരുതുക y: i64 = unwrap_or(b, 100);
+
+  ഉറപ്പിക്കുക x == 42;
+  ഉറപ്പിക്കുക y == 100;
+  ഉറപ്പിക്കുക is_some(a) == 1;
+  ഉറപ്പിക്കുക is_some(b) == 0;
+
+  എഴുതുക "Some(42) unwrapped =", x;
+  എഴുതുക "None with default 100 =", y;
+  തിരികെ 0;
+}

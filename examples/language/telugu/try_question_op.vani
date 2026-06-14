@@ -1,0 +1,33 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/try_question_op.vani              # LLVM
+//   vanic run examples/language/telugu/try_question_op.vani --backend=c  # C
+
+ఉద్దేశం "Postfix ? early-return sugar on payloaded enums";
+
+గణన Opt { Some(i64), None }
+
+పని doubled_q(o: Opt) -> Opt {
+  అనుకో v: i64 = o?;
+  తిరిగి Opt.Some(v * 2);
+}
+
+పని unwrap_or(o: Opt, def: i64) -> i64 {
+  తిరిగి సరిపోలు o {
+    Opt.Some(v) అప్పుడు v,
+    Opt.None    అప్పుడు def,
+  };
+}
+
+పని main() -> i64 {
+  అనుకో a: Opt = doubled_q(Opt.Some(5));
+  నిర్ధారించు unwrap_or(a, 0) == 10;
+
+  అనుకో b: Opt = doubled_q(Opt.None);
+  నిర్ధారించు unwrap_or(b, 99) == 99;
+
+  రాయి "Some(5)? doubled =", unwrap_or(a, 0);
+  రాయి "None? defaulted to", unwrap_or(b, 99);
+  తిరిగి 0;
+}

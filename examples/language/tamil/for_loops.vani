@@ -1,0 +1,41 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/for_loops.vani              # LLVM
+//   vanic run examples/language/tamil/for_loops.vani --backend=c  # C
+
+நோக்கம் "for-loops over integer ranges";
+
+// `ஒவ்வொரு` = for, `இருந்து` = from, `வரைக்கும்` = to, `நிறுத்து` = break
+
+செயல்பாடு sum_squares(n: i64) -> i64 {
+  கொள் total: i64 = 0;
+  ஒவ்வொரு i இருந்து 1 வரைக்கும் n {
+    total = total + i * i;
+  }
+  திருப்பு total;
+}
+
+செயல்பாடு find_first_zero(xs: பார் [i64; 5]) -> i64 {
+  கொள் result: i64 = 0 - 1;
+  ஒவ்வொரு i இருந்து 0 வரைக்கும் len(xs) {
+    என்றால் xs[i] == 0 {
+      result = i ஆக i64;
+      நிறுத்து;
+    }
+  }
+  திருப்பு result;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் s: i64 = sum_squares(5);
+  உறுதி s == 30;
+
+  கொள் xs: [i64; 5] = [3, 7, 0, 9, 1];
+  கொள் idx: i64 = find_first_zero(பார் xs);
+  உறுதி idx == 2;
+
+  எழுது s;
+  எழுது idx;
+  திருப்பு 0;
+}

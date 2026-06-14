@@ -1,0 +1,42 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/telugu/option_types.vani              # LLVM
+
+ఉద్దేశం "Payloaded enums via Option<i64>";
+
+// `గణన` = enum, `సరిపోలు` = match, `అప్పుడు` = then
+
+గణన Opt { Some(i64), None }
+
+పని unwrap_or(o: Opt, def: i64) -> i64 {
+  తిరిగి సరిపోలు o {
+    Opt.Some(v) అప్పుడు v,
+    Opt.None    అప్పుడు def,
+  };
+}
+
+పని is_some(o: Opt) -> i64 {
+  తిరిగి సరిపోలు o {
+    Opt.Some(v) అప్పుడు 1,
+    Opt.None    అప్పుడు 0,
+  };
+}
+
+పని main() -> i64 {
+  అనుకో a: Opt = Opt.Some(42);
+  అనుకో b: Opt = Opt.None;
+
+  అనుకో x: i64 = unwrap_or(a, 0);
+  అనుకో y: i64 = unwrap_or(b, 100);
+
+  నిర్ధారించు x == 42;
+  నిర్ధారించు y == 100;
+  నిర్ధారించు is_some(a) == 1;
+  నిర్ధారించు is_some(b) == 0;
+
+  రాయి "Some(42) unwrapped =", x;
+  రాయి "None with default 100 =", y;
+  తిరిగి 0;
+}

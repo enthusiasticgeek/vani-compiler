@@ -568,6 +568,7 @@ fn tamil_keyword(text: &str) -> Option<TokenKind> {
         // === SOV-S7 parity ===
         "நோக்கம்" => TokenKind::Intent,            // nokkam (intent)
         "வகை" => TokenKind::Type,                  // vagai (type/kind)
+        "மாறிலா" => TokenKind::Invariant,          // maarilaa (unchanging — invariant)
         _ => return None,
     };
     Some(kind)
@@ -613,6 +614,7 @@ fn telugu_keyword(text: &str) -> Option<TokenKind> {
         "ముద్రించు" => TokenKind::Print,           // mudrinchu (print)
         "ఉద్దేశం" => TokenKind::Intent,            // uddesam (intent — tatsama)
         "రకం" => TokenKind::Type,                  // rakam (type/kind)
+        "మారని" => TokenKind::Invariant,           // maarani (not changing — invariant)
         _ => return None,
     };
     Some(kind)
@@ -755,6 +757,7 @@ fn kannada_keyword(text: &str) -> Option<TokenKind> {
         "ಮುದ್ರಿಸಿ" => TokenKind::Print,             // mudrisi (print — tatsama)
         "ಉದ್ದೇಶ" => TokenKind::Intent,               // uddesha (intent — tatsama)
         "ಪ್ರಕಾರ" => TokenKind::Type,                 // prakaara (type — tatsama)
+        "ಅಚಲ" => TokenKind::Invariant,               // achala (unchanging — tatsama invariant)
         _ => return None,
     };
     Some(kind)
@@ -801,6 +804,7 @@ fn malayalam_keyword(text: &str) -> Option<TokenKind> {
         "അച്ചടിക്കുക" => TokenKind::Print,          // achchadikuka (print)
         "ഉദ്ദേശ്യം" => TokenKind::Intent,            // uddeshyam (intent — tatsama)
         "തരം" => TokenKind::Type,                    // tharam (type)
+        "അചലം" => TokenKind::Invariant,              // achalam (unchanging — tatsama invariant)
         _ => return None,
     };
     Some(kind)
@@ -868,7 +872,7 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "ලෙස" => TokenKind::As,                      // lesa (as)
         "ආපසු" => TokenKind::Return,                  // aapasu (return back)
         "නම්" => TokenKind::If,                       // nam (if)
-        "නොඑසේ නම්" => TokenKind::Else,              // no-ese nam (else — multi-word; queued)
+        "නැතිනම්" => TokenKind::Else,                 // nætinam (if not — single-word else)
         "තෙක්" => TokenKind::While,                  // thek (while/until)
         "සෑම" => TokenKind::For,                     // saema (every/for)
         "තුළ" => TokenKind::In,                      // thula (in)
@@ -892,6 +896,7 @@ fn sinhala_keyword(text: &str) -> Option<TokenKind> {
         "මුද්‍රණය" => TokenKind::Print,               // mudranaya (print — tatsama)
         "අරමුණ" => TokenKind::Intent,                 // aramuna (intent/purpose)
         "වර්ගය" => TokenKind::Type,                   // vargaya (type)
+        "නිශ්චල" => TokenKind::Invariant,             // nishchala (motionless/invariant — tatsama)
         _ => return None,
     };
     Some(kind)

@@ -1,0 +1,34 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/vec_invariants.vani              # LLVM
+//   vanic run examples/language/telugu/vec_invariants.vani --backend=c  # C
+
+ఉద్దేశం "Loop invariants over Vec length, end-to-end";
+
+// `మారని` = invariant ("not changing"), `నిరూపించు` = prove
+
+పని main() -> i64 {
+  అనుకో xs: Vec<i64> = vec(0);
+  అనుకో i: i64 = 1;
+
+  వరకు i < 5
+  మారని len(xs) == (i గా u64);
+  మారని i >= 1;
+  మారని i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  నిరూపించు i == 5;
+  నిరూపించు len(xs) == 5;
+
+  రాయి xs[0];
+  రాయి xs[1];
+  రాయి xs[2];
+  రాయి xs[3];
+  రాయి xs[4];
+
+  తిరిగి 0;
+}

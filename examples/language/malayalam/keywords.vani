@@ -1,0 +1,30 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/keywords.vani              # LLVM
+//   vanic run examples/language/malayalam/keywords.vani --backend=c  # C
+
+// മലയാളം (Malayalam) — keyword showcase.
+// `കാര്യം` = fn, `കരുതുക` = let, `തിരികെ` = return,
+// `എങ്കിൽ` / `അല്ലെങ്കിൽ` = if / else, `ഉറപ്പിക്കുക` = assert.
+
+ഉദ്ദേശ്യം "Malayalam keyword showcase — factorial with if/else";
+
+കാര്യം factorial(n: i64) -> i64 {
+  എങ്കിൽ n <= 1 {
+    തിരികെ 1;
+  } അല്ലെങ്കിൽ {
+    തിരികെ n * factorial(n - 1);
+  }
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക a: i64 = factorial(5);
+  കരുതുക b: i64 = factorial(6);
+
+  ഉറപ്പിക്കുക a == 120;
+  ഉറപ്പിക്കുക b == 720;
+
+  എഴുതുക "5! =", a, " 6! =", b;
+  തിരികെ 0;
+}

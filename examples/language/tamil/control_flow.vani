@@ -1,0 +1,42 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/control_flow.vani              # LLVM
+//   vanic run examples/language/tamil/control_flow.vani --backend=c  # C
+
+நோக்கம் "if/else and while loops with Vec mutation";
+
+// `வரை` = while, `பார்` = ref
+
+செயல்பாடு sum(xs: பார் Vec<i64>) -> i64 {
+  கொள் total: i64 = 0;
+  கொள் i: u64 = 0;
+  கொள் n: u64 = len(xs);
+  வரை i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  திருப்பு total;
+}
+
+செயல்பாடு build_range(n: i64) -> Vec<i64> {
+  கொள் xs: Vec<i64> = vec(0);
+  கொள் i: i64 = 1;
+  வரை i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  திருப்பு xs;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் xs: Vec<i64> = build_range(5);
+  கொள் total: i64 = sum(பார் xs);
+  என்றால் total > 5 {
+    உறுதி total == 10;
+  } இல்லாவிட்டால் {
+    உறுதி total <= 5;
+  }
+  எழுது total;
+  திருப்பு 0;
+}

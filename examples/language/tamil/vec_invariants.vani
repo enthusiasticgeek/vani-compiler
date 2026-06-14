@@ -1,0 +1,34 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/vec_invariants.vani              # LLVM
+//   vanic run examples/language/tamil/vec_invariants.vani --backend=c  # C
+
+நோக்கம் "Loop invariants over Vec length, end-to-end";
+
+// `மாறிலா` = invariant ("unchanging"), `நிரூபி` = prove
+
+செயல்பாடு main() -> i64 {
+  கொள் xs: Vec<i64> = vec(0);
+  கொள் i: i64 = 1;
+
+  வரை i < 5
+  மாறிலா len(xs) == (i ஆக u64);
+  மாறிலா i >= 1;
+  மாறிலா i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  நிரூபி i == 5;
+  நிரூபி len(xs) == 5;
+
+  எழுது xs[0];
+  எழுது xs[1];
+  எழுது xs[2];
+  எழுது xs[3];
+  எழுது xs[4];
+
+  திருப்பு 0;
+}

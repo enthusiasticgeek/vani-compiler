@@ -1,0 +1,47 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/early_exit.vani              # LLVM
+//   vanic run examples/language/malayalam/early_exit.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "break and continue for early exit and skip";
+
+// `നിർത്തുക` = break, `തുടരുക` = continue
+
+കാര്യം find_first_negative(xs: നോക്കുക Vec<i64>) -> i64 {
+  കരുതുക i: u64 = 0;
+  കരുതുക result: i64 = 0 - 1;
+  വരെ i < len(xs) {
+    എങ്കിൽ xs[i] < 0 {
+      result = xs[i];
+      നിർത്തുക;
+    }
+    i = i + 1;
+  }
+  തിരികെ result;
+}
+
+കാര്യം count_positive(xs: നോക്കുക Vec<i64>) -> i64 {
+  കരുതുക i: u64 = 0;
+  കരുതുക count: i64 = 0;
+  വരെ i < len(xs) {
+    എങ്കിൽ xs[i] <= 0 {
+      i = i + 1;
+      തുടരുക;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  തിരികെ count;
+}
+
+കാര്യം main() -> i64 {
+  കരുതുക xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  കരുതുക first_neg: i64 = find_first_negative(നോക്കുക xs);
+  കരുതുക positives: i64 = count_positive(നോക്കുക xs);
+  ഉറപ്പിക്കുക first_neg == 0 - 3;
+  ഉറപ്പിക്കുക positives == 3;
+  എഴുതുക first_neg;
+  എഴുതുക positives;
+  തിരികെ 0;
+}

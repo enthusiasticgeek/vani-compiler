@@ -1,0 +1,34 @@
+// vani-lang: malayalam
+//
+// build & run:
+//   vanic run examples/language/malayalam/vec_invariants.vani              # LLVM
+//   vanic run examples/language/malayalam/vec_invariants.vani --backend=c  # C
+
+ഉദ്ദേശ്യം "Loop invariants over Vec length, end-to-end";
+
+// `അചലം` = invariant ("unchanging"), `തെളിയിക്കുക` = prove
+
+കാര്യം main() -> i64 {
+  കരുതുക xs: Vec<i64> = vec(0);
+  കരുതുക i: i64 = 1;
+
+  വരെ i < 5
+  അചലം len(xs) == (i ആയി u64);
+  അചലം i >= 1;
+  അചലം i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  തെളിയിക്കുക i == 5;
+  തെളിയിക്കുക len(xs) == 5;
+
+  എഴുതുക xs[0];
+  എഴുതുക xs[1];
+  എഴുതുക xs[2];
+  എഴുതുക xs[3];
+  എഴുതുക xs[4];
+
+  തിരികെ 0;
+}
