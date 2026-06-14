@@ -1,0 +1,33 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/try_question_op.vani              # LLVM
+//   vanic run examples/language/turkish/try_question_op.vani --backend=c  # C
+
+amaç "Turkish postfix ? early-return sugar on payloaded enums";
+
+sıralama Opt { Some(i64), None }
+
+işlev ikile_q(o: Opt) -> Opt {
+  olsun v: i64 = o?;
+  dön Opt.Some(v * 2);
+}
+
+işlev cikar_veya(o: Opt, varsayilan: i64) -> i64 {
+  dön eşle o {
+    Opt.Some(v) then v,
+    Opt.None    then varsayilan,
+  };
+}
+
+fn main() -> i64 {
+  olsun a: Opt = ikile_q(Opt.Some(5));
+  doğrula cikar_veya(a, 0) == 10;
+
+  olsun b: Opt = ikile_q(Opt.None);
+  doğrula cikar_veya(b, 99) == 99;
+
+  yazdır "Some(5)? ikiye katlandi =", cikar_veya(a, 0);
+  yazdır "None? varsayilan", cikar_veya(b, 99);
+  dön 0;
+}

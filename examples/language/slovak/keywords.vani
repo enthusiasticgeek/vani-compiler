@@ -1,0 +1,27 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/keywords.vani              # LLVM
+//   vanic run examples/language/slovak/keywords.vani --backend=c  # C
+
+účel "Slovak keyword showcase — funkcia/nech/štruktúra/vráť/potvrď/dokáž";
+
+štruktúra Bod {
+  x: i64,
+  y: i64,
+}
+
+funkcia sucet(a: i64, b: i64) -> i64 {
+  vráť a + b;
+}
+
+funkcia hlavna() -> i64 {
+  nech p: Bod = Bod { x: 3, y: 4 };
+  nech s: i64 = sucet(p.x, p.y);
+  potvrď s == 7;
+  dokáž 1 + 1 == 2;
+  vytlač s;
+  vráť 0;
+}
+
+fn main() -> i64 { vráť hlavna(); }

@@ -1,0 +1,32 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/vec_invariants.vani              # LLVM
+//   vanic run examples/language/turkish/vec_invariants.vani --backend=c  # C
+
+amaç "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  olsun xs: Vec<i64> = vec(0);
+  olsun i: i64 = 1;
+
+  iken i < 5
+  değişmez len(xs) == (i olarak u64);
+  değişmez i >= 1;
+  değişmez i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  kanıtla i == 5;
+  kanıtla len(xs) == 5;
+
+  yazdır xs[0];
+  yazdır xs[1];
+  yazdır xs[2];
+  yazdır xs[3];
+  yazdır xs[4];
+
+  dön 0;
+}

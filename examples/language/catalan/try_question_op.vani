@@ -1,0 +1,33 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/try_question_op.vani              # LLVM
+//   vanic run examples/language/catalan/try_question_op.vani --backend=c  # C
+
+propòsit "Catalan postfix ? early-return sugar on payloaded enums";
+
+enumeració Opt { Some(i64), None }
+
+funció dobla_q(o: Opt) -> Opt {
+  sigui v: i64 = o?;
+  retorna Opt.Some(v * 2);
+}
+
+funció desemballa_o(o: Opt, predeterminat: i64) -> i64 {
+  retorna coincideix o {
+    Opt.Some(v) aleshores v,
+    Opt.None    aleshores predeterminat,
+  };
+}
+
+fn main() -> i64 {
+  sigui a: Opt = dobla_q(Opt.Some(5));
+  afirma desemballa_o(a, 0) == 10;
+
+  sigui b: Opt = dobla_q(Opt.None);
+  afirma desemballa_o(b, 99) == 99;
+
+  imprimeix "Some(5)? doblat =", desemballa_o(a, 0);
+  imprimeix "None? predeterminat es", desemballa_o(b, 99);
+  retorna 0;
+}

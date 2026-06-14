@@ -1,0 +1,33 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/try_question_op.vani              # LLVM
+//   vanic run examples/language/greek/try_question_op.vani --backend=c  # C
+
+σκοπός "Greek postfix ? early-return sugar on payloaded enums";
+
+απαρίθμηση Opt { Some(i64), None }
+
+συνάρτηση double_q(o: Opt) -> Opt {
+  έστω v: i64 = o?;
+  επιστροφή Opt.Some(v * 2);
+}
+
+συνάρτηση unwrap_or(o: Opt, default_val: i64) -> i64 {
+  επιστροφή αντιστοιχία o {
+    Opt.Some(v) τότε v,
+    Opt.None    τότε default_val,
+  };
+}
+
+συνάρτηση main() -> i64 {
+  έστω a: Opt = double_q(Opt.Some(5));
+  επιβεβαίωση unwrap_or(a, 0) == 10;
+
+  έστω b: Opt = double_q(Opt.None);
+  επιβεβαίωση unwrap_or(b, 99) == 99;
+
+  εκτύπωση "Some(5)? doubled =", unwrap_or(a, 0);
+  εκτύπωση "None? default", unwrap_or(b, 99);
+  επιστροφή 0;
+}

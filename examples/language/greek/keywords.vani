@@ -1,0 +1,27 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/keywords.vani              # LLVM
+//   vanic run examples/language/greek/keywords.vani --backend=c  # C
+
+σκοπός "Greek keyword showcase — συνάρτηση/έστω/δομή/επιστροφή/επιβεβαίωση/απόδειξη";
+
+δομή Point {
+  x: i64,
+  y: i64,
+}
+
+συνάρτηση sum(a: i64, b: i64) -> i64 {
+  επιστροφή a + b;
+}
+
+συνάρτηση demo() -> i64 {
+  έστω p: Point = Point { x: 3, y: 4 };
+  έστω s: i64 = sum(p.x, p.y);
+  επιβεβαίωση s == 7;
+  απόδειξη 1 + 1 == 2;
+  εκτύπωση s;
+  επιστροφή 0;
+}
+
+συνάρτηση main() -> i64 { επιστροφή demo(); }

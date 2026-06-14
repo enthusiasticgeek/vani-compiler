@@ -1,0 +1,25 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/verified.vani              # LLVM
+//   vanic run examples/language/catalan/verified.vani --backend=c  # C
+
+propòsit "SMT-verified clamp_low";
+
+funció clamp_low(x: i64, llindar: i64) -> i64
+requereix llindar >= 0;
+{
+  si x < llindar {
+    retorna llindar;
+  } altrament {
+    retorna x;
+  }
+}
+
+fn main() -> i64 {
+  afirma clamp_low(0 - 5, 0) == 0;
+  afirma clamp_low(10, 3) == 10;
+  imprimeix clamp_low(0 - 5, 0);
+  imprimeix clamp_low(10, 3);
+  retorna 0;
+}

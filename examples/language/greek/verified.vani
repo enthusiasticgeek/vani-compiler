@@ -1,0 +1,25 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/verified.vani              # LLVM
+//   vanic run examples/language/greek/verified.vani --backend=c  # C
+
+σκοπός "SMT-verified clamp_low";
+
+συνάρτηση clamp_low(x: i64, threshold: i64) -> i64
+απαιτεί threshold >= 0;
+{
+  αν x < threshold {
+    επιστροφή threshold;
+  } αλλιώς {
+    επιστροφή x;
+  }
+}
+
+συνάρτηση main() -> i64 {
+  επιβεβαίωση clamp_low(0 - 5, 0) == 0;
+  επιβεβαίωση clamp_low(10, 3) == 10;
+  εκτύπωση clamp_low(0 - 5, 0);
+  εκτύπωση clamp_low(10, 3);
+  επιστροφή 0;
+}

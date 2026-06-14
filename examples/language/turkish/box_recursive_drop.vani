@@ -1,0 +1,27 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/turkish/box_recursive_drop.vani --backend=c  # C
+
+amaç "Turkish Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+yapı Canta {
+  icerik: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  olsun v: Vec<i64> = vec(10, 20, 30);
+  olsun b: Box<Vec<i64>> = box(v);
+  yazdır "Box<Vec<i64>> olusturuldu";
+
+  olsun v2: Vec<i64> = vec(7, 8, 9);
+  olsun canta: Canta = Canta { icerik: box(v2) };
+  yazdır "Canta olusturuldu";
+
+  olsun s: OwnedStr = "merhaba" + "!";
+  olsun bs: Box<OwnedStr> = box(s);
+  yazdır "Box<OwnedStr> olusturuldu";
+
+  dön 0;
+}

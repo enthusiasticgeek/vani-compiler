@@ -1,0 +1,25 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/verified.vani              # LLVM
+//   vanic run examples/language/slovak/verified.vani --backend=c  # C
+
+účel "SMT-verified clamp_low";
+
+funkcia clamp_low(x: i64, hranica: i64) -> i64
+vyžaduje hranica >= 0;
+{
+  ak x < hranica {
+    vráť hranica;
+  } inak {
+    vráť x;
+  }
+}
+
+fn main() -> i64 {
+  potvrď clamp_low(0 - 5, 0) == 0;
+  potvrď clamp_low(10, 3) == 10;
+  vytlač clamp_low(0 - 5, 0);
+  vytlač clamp_low(10, 3);
+  vráť 0;
+}

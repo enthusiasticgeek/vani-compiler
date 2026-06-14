@@ -1,0 +1,30 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/for_loops.vani              # LLVM
+//   vanic run examples/language/catalan/for_loops.vani --backend=c  # C
+
+propòsit "Catalan for-range loops — per/des/fins";
+
+funció suma_rang(inici: i64, fi: i64) -> i64 {
+  sigui total: i64 = 0;
+  per i des inici fins fi {
+    total = total + i;
+  }
+  retorna total;
+}
+
+funció compta() -> i64 {
+  sigui n: i64 = 0;
+  per _i des 0 fins 5 {
+    n = n + 1;
+  }
+  retorna n;
+}
+
+fn main() -> i64 {
+  afirma suma_rang(1, 5) == 10;
+  afirma compta() == 5;
+  imprimeix "suma del rang =", suma_rang(1, 5);
+  retorna 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/for_loops.vani              # LLVM
+//   vanic run examples/language/turkish/for_loops.vani --backend=c  # C
+
+amaç "Turkish for-range loops — için/den/kadar";
+
+işlev aralik_toplam(baslangic: i64, bitis: i64) -> i64 {
+  olsun toplam: i64 = 0;
+  için i den baslangic kadar bitis {
+    toplam = toplam + i;
+  }
+  dön toplam;
+}
+
+işlev say() -> i64 {
+  olsun n: i64 = 0;
+  için _i den 0 kadar 5 {
+    n = n + 1;
+  }
+  dön n;
+}
+
+fn main() -> i64 {
+  doğrula aralik_toplam(1, 5) == 10;
+  doğrula say() == 5;
+  yazdır "aralik toplami =", aralik_toplam(1, 5);
+  dön 0;
+}

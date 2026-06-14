@@ -1,0 +1,36 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/early_exit.vani              # LLVM
+//   vanic run examples/language/greek/early_exit.vani --backend=c  # C
+
+σκοπός "Greek early exit — διακοπή/επιστροφή";
+
+συνάρτηση first_positive(v: Vec<i64>) -> i64 {
+  για i από 0 μέχρι len(v) {
+    αν v[i] > 0 {
+      επιστροφή v[i];
+    }
+  }
+  επιστροφή -1;
+}
+
+συνάρτηση sum_until_zero(v: Vec<i64>) -> i64 {
+  έστω total: i64 = 0;
+  για i από 0 μέχρι len(v) {
+    αν v[i] == 0 { διακοπή; }
+    total = total + v[i];
+  }
+  επιστροφή total;
+}
+
+συνάρτηση main() -> i64 {
+  έστω v: Vec<i64> = vec(-1, -2, 3, 4);
+  επιβεβαίωση first_positive(v) == 3;
+
+  έστω w: Vec<i64> = vec(1, 2, 0, 9);
+  επιβεβαίωση sum_until_zero(w) == 3;
+
+  εκτύπωση "early exit ok";
+  επιστροφή 0;
+}

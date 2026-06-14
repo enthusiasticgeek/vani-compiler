@@ -1,0 +1,32 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/vec_invariants.vani              # LLVM
+//   vanic run examples/language/greek/vec_invariants.vani --backend=c  # C
+
+σκοπός "Loop invariants over Vec length, end-to-end";
+
+συνάρτηση main() -> i64 {
+  έστω xs: Vec<i64> = vec(0);
+  έστω i: i64 = 1;
+
+  όσο i < 5
+  αμετάβλητο len(xs) == (i ως u64);
+  αμετάβλητο i >= 1;
+  αμετάβλητο i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  απόδειξη i == 5;
+  απόδειξη len(xs) == 5;
+
+  εκτύπωση xs[0];
+  εκτύπωση xs[1];
+  εκτύπωση xs[2];
+  εκτύπωση xs[3];
+  εκτύπωση xs[4];
+
+  επιστροφή 0;
+}

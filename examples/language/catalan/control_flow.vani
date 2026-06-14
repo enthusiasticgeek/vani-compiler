@@ -1,0 +1,36 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/control_flow.vani              # LLVM
+//   vanic run examples/language/catalan/control_flow.vani --backend=c  # C
+
+propòsit "Catalan control flow — si/altrament/mentre";
+
+funció signe(n: i64) -> i64 {
+  si n > 0 {
+    retorna 1;
+  } altrament si n < 0 {
+    retorna -1;
+  } altrament {
+    retorna 0;
+  }
+}
+
+funció compte_enrere(des_n: i64) -> i64 {
+  sigui i: i64 = des_n;
+  sigui total: i64 = 0;
+  mentre i > 0 {
+    total = total + i;
+    i = i - 1;
+  }
+  retorna total;
+}
+
+fn main() -> i64 {
+  afirma signe(5)  == 1;
+  afirma signe(-3) == -1;
+  afirma signe(0)  == 0;
+  afirma compte_enrere(4) == 10;
+  imprimeix "signe i compte_enrere ok";
+  retorna 0;
+}

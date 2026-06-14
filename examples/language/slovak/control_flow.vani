@@ -1,0 +1,36 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/control_flow.vani              # LLVM
+//   vanic run examples/language/slovak/control_flow.vani --backend=c  # C
+
+účel "Slovak control flow — ak/inak/pokiaľ";
+
+funkcia znamienko(n: i64) -> i64 {
+  ak n > 0 {
+    vráť 1;
+  } inak ak n < 0 {
+    vráť -1;
+  } inak {
+    vráť 0;
+  }
+}
+
+funkcia odpocet(od_n: i64) -> i64 {
+  nech i: i64 = od_n;
+  nech sucet: i64 = 0;
+  pokiaľ i > 0 {
+    sucet = sucet + i;
+    i = i - 1;
+  }
+  vráť sucet;
+}
+
+fn main() -> i64 {
+  potvrď znamienko(5)  == 1;
+  potvrď znamienko(-3) == -1;
+  potvrď znamienko(0)  == 0;
+  potvrď odpocet(4) == 10;
+  vytlač "znamienko a odpocet ok";
+  vráť 0;
+}

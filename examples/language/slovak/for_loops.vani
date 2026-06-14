@@ -1,0 +1,30 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/for_loops.vani              # LLVM
+//   vanic run examples/language/slovak/for_loops.vani --backend=c  # C
+
+účel "Slovak for-range loops — pre/od/do";
+
+funkcia sucet_rozsah(zaciatok: i64, koniec: i64) -> i64 {
+  nech sucet: i64 = 0;
+  pre i od zaciatok do koniec {
+    sucet = sucet + i;
+  }
+  vráť sucet;
+}
+
+funkcia pocitaj() -> i64 {
+  nech pocet: i64 = 0;
+  pre _i od 0 do 5 {
+    pocet = pocet + 1;
+  }
+  vráť pocet;
+}
+
+fn main() -> i64 {
+  potvrď sucet_rozsah(1, 5) == 10;
+  potvrď pocitaj() == 5;
+  vytlač "sluckovy sucet =", sucet_rozsah(1, 5);
+  vráť 0;
+}

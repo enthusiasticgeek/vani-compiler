@@ -1,0 +1,34 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/iterate.vani              # LLVM
+//   vanic run examples/language/turkish/iterate.vani --backend=c  # C
+
+amaç "Turkish vec iteration";
+
+işlev vec_toplam(v: Vec<i64>) -> i64 {
+  olsun toplam: i64 = 0;
+  için i den 0 kadar len(v) {
+    toplam = toplam + v[i];
+  }
+  dön toplam;
+}
+
+işlev vec_maks(v: Vec<i64>) -> i64 {
+  olsun m: i64 = v[0];
+  için i den 1 kadar len(v) {
+    eğer v[i] > m {
+      m = v[i];
+    }
+  }
+  dön m;
+}
+
+fn main() -> i64 {
+  olsun v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  doğrula vec_toplam(v) == 23;
+  doğrula vec_maks(v) == 9;
+  yazdır "toplam =", vec_toplam(v);
+  yazdır "maks =", vec_maks(v);
+  dön 0;
+}

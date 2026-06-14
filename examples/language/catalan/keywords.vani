@@ -1,0 +1,27 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/keywords.vani              # LLVM
+//   vanic run examples/language/catalan/keywords.vani --backend=c  # C
+
+propòsit "Catalan keyword showcase — funció/sigui/estructura/retorna/afirma/demostra";
+
+estructura Punt {
+  x: i64,
+  y: i64,
+}
+
+funció suma(a: i64, b: i64) -> i64 {
+  retorna a + b;
+}
+
+funció principal() -> i64 {
+  sigui p: Punt = Punt { x: 3, y: 4 };
+  sigui s: i64 = suma(p.x, p.y);
+  afirma s == 7;
+  demostra 1 + 1 == 2;
+  imprimeix s;
+  retorna 0;
+}
+
+fn main() -> i64 { retorna principal(); }

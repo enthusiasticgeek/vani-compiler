@@ -1,0 +1,36 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/control_flow.vani              # LLVM
+//   vanic run examples/language/greek/control_flow.vani --backend=c  # C
+
+σκοπός "Greek control flow — αν/αλλιώς/όσο";
+
+συνάρτηση sign(n: i64) -> i64 {
+  αν n > 0 {
+    επιστροφή 1;
+  } αλλιώς αν n < 0 {
+    επιστροφή -1;
+  } αλλιώς {
+    επιστροφή 0;
+  }
+}
+
+συνάρτηση countdown(start: i64) -> i64 {
+  έστω i: i64 = start;
+  έστω total: i64 = 0;
+  όσο i > 0 {
+    total = total + i;
+    i = i - 1;
+  }
+  επιστροφή total;
+}
+
+συνάρτηση main() -> i64 {
+  επιβεβαίωση sign(5)  == 1;
+  επιβεβαίωση sign(-3) == -1;
+  επιβεβαίωση sign(0)  == 0;
+  επιβεβαίωση countdown(4) == 10;
+  εκτύπωση "sign kai countdown ok";
+  επιστροφή 0;
+}

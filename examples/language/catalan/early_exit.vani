@@ -1,0 +1,36 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/early_exit.vani              # LLVM
+//   vanic run examples/language/catalan/early_exit.vani --backend=c  # C
+
+propòsit "Catalan early exit — trenca/retorna";
+
+funció primer_positiu(v: Vec<i64>) -> i64 {
+  per i des 0 fins len(v) {
+    si v[i] > 0 {
+      retorna v[i];
+    }
+  }
+  retorna -1;
+}
+
+funció suma_fins_zero(v: Vec<i64>) -> i64 {
+  sigui total: i64 = 0;
+  per i des 0 fins len(v) {
+    si v[i] == 0 { trenca; }
+    total = total + v[i];
+  }
+  retorna total;
+}
+
+fn main() -> i64 {
+  sigui v: Vec<i64> = vec(-1, -2, 3, 4);
+  afirma primer_positiu(v) == 3;
+
+  sigui w: Vec<i64> = vec(1, 2, 0, 9);
+  afirma suma_fins_zero(w) == 3;
+
+  imprimeix "sortida anticipada ok";
+  retorna 0;
+}

@@ -1,0 +1,40 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/option_types.vani              # LLVM
+//   vanic run examples/language/catalan/option_types.vani --backend=c  # C
+
+propòsit "Catalan payloaded enums via Opt<i64>";
+
+enumeració Opt { Some(i64), None }
+
+funció desemballa_o(o: Opt, predeterminat: i64) -> i64 {
+  retorna coincideix o {
+    Opt.Some(v) aleshores v,
+    Opt.None    aleshores predeterminat,
+  };
+}
+
+funció es_some(o: Opt) -> i64 {
+  retorna coincideix o {
+    Opt.Some(v) aleshores 1,
+    Opt.None    aleshores 0,
+  };
+}
+
+fn main() -> i64 {
+  sigui a: Opt = Opt.Some(42);
+  sigui b: Opt = Opt.None;
+
+  sigui x: i64 = desemballa_o(a, 0);
+  sigui y: i64 = desemballa_o(b, 100);
+
+  afirma x == 42;
+  afirma y == 100;
+  afirma es_some(a) == 1;
+  afirma es_some(b) == 0;
+
+  imprimeix "Some(42) desemballat =", x;
+  imprimeix "None predeterminat 100 =", y;
+  retorna 0;
+}

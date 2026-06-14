@@ -1,0 +1,36 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/early_exit.vani              # LLVM
+//   vanic run examples/language/turkish/early_exit.vani --backend=c  # C
+
+amaç "Turkish early exit — kır/dön";
+
+işlev ilk_pozitif(v: Vec<i64>) -> i64 {
+  için i den 0 kadar len(v) {
+    eğer v[i] > 0 {
+      dön v[i];
+    }
+  }
+  dön -1;
+}
+
+işlev sifira_kadar_topla(v: Vec<i64>) -> i64 {
+  olsun toplam: i64 = 0;
+  için i den 0 kadar len(v) {
+    eğer v[i] == 0 { kır; }
+    toplam = toplam + v[i];
+  }
+  dön toplam;
+}
+
+fn main() -> i64 {
+  olsun v: Vec<i64> = vec(-1, -2, 3, 4);
+  doğrula ilk_pozitif(v) == 3;
+
+  olsun w: Vec<i64> = vec(1, 2, 0, 9);
+  doğrula sifira_kadar_topla(w) == 3;
+
+  yazdır "erken cikis tamam";
+  dön 0;
+}

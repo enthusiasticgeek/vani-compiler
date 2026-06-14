@@ -1,0 +1,27 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/catalan/box_recursive_drop.vani --backend=c  # C
+
+propòsit "Catalan Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+estructura Motxilla {
+  contingut: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  sigui v: Vec<i64> = vec(10, 20, 30);
+  sigui b: Box<Vec<i64>> = box(v);
+  imprimeix "Box<Vec<i64>> creat";
+
+  sigui v2: Vec<i64> = vec(7, 8, 9);
+  sigui motxilla: Motxilla = Motxilla { contingut: box(v2) };
+  imprimeix "Motxilla creada";
+
+  sigui s: OwnedStr = "hola" + "!";
+  sigui bs: Box<OwnedStr> = box(s);
+  imprimeix "Box<OwnedStr> creat";
+
+  retorna 0;
+}

@@ -1,0 +1,40 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/option_types.vani              # LLVM
+//   vanic run examples/language/slovak/option_types.vani --backend=c  # C
+
+účel "Slovak payloaded enums via Opt<i64>";
+
+vypocet Opt { Some(i64), None }
+
+funkcia rozbal_alebo(o: Opt, predvoleny: i64) -> i64 {
+  vráť porovnaj o {
+    Opt.Some(v) potom v,
+    Opt.None    potom predvoleny,
+  };
+}
+
+funkcia je_some(o: Opt) -> i64 {
+  vráť porovnaj o {
+    Opt.Some(v) potom 1,
+    Opt.None    potom 0,
+  };
+}
+
+fn main() -> i64 {
+  nech a: Opt = Opt.Some(42);
+  nech b: Opt = Opt.None;
+
+  nech x: i64 = rozbal_alebo(a, 0);
+  nech y: i64 = rozbal_alebo(b, 100);
+
+  potvrď x == 42;
+  potvrď y == 100;
+  potvrď je_some(a) == 1;
+  potvrď je_some(b) == 0;
+
+  vytlač "Some(42) rozbalene =", x;
+  vytlač "None predvoleny 100 =", y;
+  vráť 0;
+}

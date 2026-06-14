@@ -1,0 +1,27 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/greek/box_recursive_drop.vani --backend=c  # C
+
+σκοπός "Greek Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+δομή Bag {
+  contents: Box<Vec<i64>>,
+}
+
+συνάρτηση main() -> i64 {
+  έστω v: Vec<i64> = vec(10, 20, 30);
+  έστω b: Box<Vec<i64>> = box(v);
+  εκτύπωση "Box<Vec<i64>> created";
+
+  έστω v2: Vec<i64> = vec(7, 8, 9);
+  έστω bag: Bag = Bag { contents: box(v2) };
+  εκτύπωση "Bag created";
+
+  έστω s: OwnedStr = "yia" + "sas";
+  έστω bs: Box<OwnedStr> = box(s);
+  εκτύπωση "Box<OwnedStr> created";
+
+  επιστροφή 0;
+}

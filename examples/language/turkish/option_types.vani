@@ -1,0 +1,40 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/option_types.vani              # LLVM
+//   vanic run examples/language/turkish/option_types.vani --backend=c  # C
+
+amaç "Turkish payloaded enums via Opt<i64>";
+
+sıralama Opt { Some(i64), None }
+
+işlev cikar_veya(o: Opt, varsayilan: i64) -> i64 {
+  dön eşle o {
+    Opt.Some(v) then v,
+    Opt.None    then varsayilan,
+  };
+}
+
+işlev some_mu(o: Opt) -> i64 {
+  dön eşle o {
+    Opt.Some(v) then 1,
+    Opt.None    then 0,
+  };
+}
+
+fn main() -> i64 {
+  olsun a: Opt = Opt.Some(42);
+  olsun b: Opt = Opt.None;
+
+  olsun x: i64 = cikar_veya(a, 0);
+  olsun y: i64 = cikar_veya(b, 100);
+
+  doğrula x == 42;
+  doğrula y == 100;
+  doğrula some_mu(a) == 1;
+  doğrula some_mu(b) == 0;
+
+  yazdır "Some(42) cikarildi =", x;
+  yazdır "None varsayilan 100 =", y;
+  dön 0;
+}

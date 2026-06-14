@@ -30697,6 +30697,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn slovak_invariant_keyword_compiles() {
+        let source = "// vani-lang: slovak\n\
+                      účel \"Slovak invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        nech xs: Vec<i64> = vec(0);\n  \
+                        nech i: i64 = 1;\n  \
+                        pokiaľ i < 3\n  \
+                        nemenný i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        vráť 0;\n\
+                      }\n";
+        crate::compile(source).expect("Slovak invariant compiles");
+    }
+
+    #[test]
+    fn slovak_for_range_compiles() {
+        let source = "// vani-lang: slovak\n\
+                      účel \"Slovak for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        nech sucet: i64 = 0;\n  \
+                        pre i od 0 do 5 {\n    \
+                          sucet = sucet + i;\n  \
+                        }\n  \
+                        potvrď sucet == 10;\n  \
+                        vráť 0;\n\
+                      }\n";
+        crate::compile(source).expect("Slovak for-range compiles");
+    }
+
+    #[test]
+    fn slovak_match_enum_compiles() {
+        let source = "// vani-lang: slovak\n\
+                      účel \"Slovak match/enum\";\n\
+                      vypocet Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        nech a: Opt = Opt.Some(7);\n  \
+                        nech v: i64 = porovnaj a {\n    \
+                          Opt.Some(x) potom x,\n    \
+                          Opt.None    potom 0,\n  \
+                        };\n  \
+                        potvrď v == 7;\n  \
+                        vráť 0;\n\
+                      }\n";
+        crate::compile(source).expect("Slovak match/enum compiles");
+    }
+
+    #[test]
+    fn slovak_requires_proves_compiles() {
+        let source = "// vani-lang: slovak\n\
+                      účel \"Slovak requires/proves\";\n\
+                      funkcia clamp_low(x: i64, hranica: i64) -> i64\n\
+                      vyžaduje hranica >= 0;\n\
+                      {\n  \
+                        ak x < hranica { vráť hranica; } inak { vráť x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        potvrď clamp_low(0 - 3, 0) == 0;\n  \
+                        vráť 0;\n\
+                      }\n";
+        crate::compile(source).expect("Slovak requires/proves compiles");
+    }
+
+    #[test]
     fn finnish_uralic_latin_compiles() {
         let source = "// vani-lang: finnish\n\
                       tarkoitus \"basic Finnish demo\";\n\
@@ -30794,6 +30860,72 @@ fn main() -> i64 {
                         retorna 0;\n\
                       }\n";
         crate::compile(source).expect("Catalan basics compile");
+    }
+
+    #[test]
+    fn catalan_invariant_keyword_compiles() {
+        let source = "// vani-lang: catalan\n\
+                      propòsit \"Catalan invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        sigui xs: Vec<i64> = vec(0);\n  \
+                        sigui i: i64 = 1;\n  \
+                        mentre i < 3\n  \
+                        invariant i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        retorna 0;\n\
+                      }\n";
+        crate::compile(source).expect("Catalan invariant compiles");
+    }
+
+    #[test]
+    fn catalan_for_range_compiles() {
+        let source = "// vani-lang: catalan\n\
+                      propòsit \"Catalan for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        sigui total: i64 = 0;\n  \
+                        per i des 0 fins 5 {\n    \
+                          total = total + i;\n  \
+                        }\n  \
+                        afirma total == 10;\n  \
+                        retorna 0;\n\
+                      }\n";
+        crate::compile(source).expect("Catalan for-range compiles");
+    }
+
+    #[test]
+    fn catalan_match_enum_compiles() {
+        let source = "// vani-lang: catalan\n\
+                      propòsit \"Catalan match/enum\";\n\
+                      enumeració Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        sigui a: Opt = Opt.Some(7);\n  \
+                        sigui v: i64 = coincideix a {\n    \
+                          Opt.Some(x) aleshores x,\n    \
+                          Opt.None    aleshores 0,\n  \
+                        };\n  \
+                        afirma v == 7;\n  \
+                        retorna 0;\n\
+                      }\n";
+        crate::compile(source).expect("Catalan match/enum compiles");
+    }
+
+    #[test]
+    fn catalan_requires_proves_compiles() {
+        let source = "// vani-lang: catalan\n\
+                      propòsit \"Catalan requires/proves\";\n\
+                      funció clamp_low(x: i64, llindar: i64) -> i64\n\
+                      requereix llindar >= 0;\n\
+                      {\n  \
+                        si x < llindar { retorna llindar; } altrament { retorna x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        afirma clamp_low(0 - 3, 0) == 0;\n  \
+                        retorna 0;\n\
+                      }\n";
+        crate::compile(source).expect("Catalan requires/proves compiles");
     }
 
     #[test]
@@ -31653,6 +31785,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn turkish_invariant_keyword_compiles() {
+        let source = "// vani-lang: turkish\n\
+                      amaç \"Turkish invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        olsun xs: Vec<i64> = vec(0);\n  \
+                        olsun i: i64 = 1;\n  \
+                        iken i < 3\n  \
+                        değişmez i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        dön 0;\n\
+                      }\n";
+        crate::compile(source).expect("Turkish invariant compiles");
+    }
+
+    #[test]
+    fn turkish_for_range_compiles() {
+        let source = "// vani-lang: turkish\n\
+                      amaç \"Turkish for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        olsun toplam: i64 = 0;\n  \
+                        için i den 0 kadar 5 {\n    \
+                          toplam = toplam + i;\n  \
+                        }\n  \
+                        doğrula toplam == 10;\n  \
+                        dön 0;\n\
+                      }\n";
+        crate::compile(source).expect("Turkish for-range compiles");
+    }
+
+    #[test]
+    fn turkish_match_enum_compiles() {
+        let source = "// vani-lang: turkish\n\
+                      amaç \"Turkish match/enum\";\n\
+                      sıralama Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        olsun a: Opt = Opt.Some(7);\n  \
+                        olsun v: i64 = eşle a {\n    \
+                          Opt.Some(x) then x,\n    \
+                          Opt.None    then 0,\n  \
+                        };\n  \
+                        doğrula v == 7;\n  \
+                        dön 0;\n\
+                      }\n";
+        crate::compile(source).expect("Turkish match/enum compiles");
+    }
+
+    #[test]
+    fn turkish_requires_proves_compiles() {
+        let source = "// vani-lang: turkish\n\
+                      amaç \"Turkish requires/proves\";\n\
+                      işlev clamp_low(x: i64, esik: i64) -> i64\n\
+                      gerek esik >= 0;\n\
+                      {\n  \
+                        eğer x < esik { dön esik; } yoksa { dön x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        doğrula clamp_low(0 - 3, 0) == 0;\n  \
+                        dön 0;\n\
+                      }\n";
+        crate::compile(source).expect("Turkish requires/proves compiles");
+    }
+
+    #[test]
     fn malay_basic_latin_pragma_compiles() {
         // Phase 13.10 (2026-06-08): sibling of Indonesian.
         // Distinct keyword choices: palsu (false) vs salah,
@@ -31834,6 +32032,72 @@ funzione main() -> i64 {
                         επιστροφή 0;\n\
                       }\n";
         crate::compile(source).expect("Greek basics compile");
+    }
+
+    #[test]
+    fn greek_invariant_keyword_compiles() {
+        let source = "// vani-lang: greek\n\
+                      σκοπός \"Greek invariant\";\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        έστω xs: Vec<i64> = vec(0);\n  \
+                        έστω i: i64 = 1;\n  \
+                        όσο i < 3\n  \
+                        αμετάβλητο i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        crate::compile(source).expect("Greek invariant compiles");
+    }
+
+    #[test]
+    fn greek_for_range_compiles() {
+        let source = "// vani-lang: greek\n\
+                      σκοπός \"Greek for-range\";\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        έστω total: i64 = 0;\n  \
+                        για i από 0 μέχρι 5 {\n    \
+                          total = total + i;\n  \
+                        }\n  \
+                        επιβεβαίωση total == 10;\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        crate::compile(source).expect("Greek for-range compiles");
+    }
+
+    #[test]
+    fn greek_match_enum_compiles() {
+        let source = "// vani-lang: greek\n\
+                      σκοπός \"Greek match/enum\";\n\
+                      απαρίθμηση Opt { Some(i64), None }\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        έστω a: Opt = Opt.Some(7);\n  \
+                        έστω v: i64 = αντιστοιχία a {\n    \
+                          Opt.Some(x) τότε x,\n    \
+                          Opt.None    τότε 0,\n  \
+                        };\n  \
+                        επιβεβαίωση v == 7;\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        crate::compile(source).expect("Greek match/enum compiles");
+    }
+
+    #[test]
+    fn greek_requires_proves_compiles() {
+        let source = "// vani-lang: greek\n\
+                      σκοπός \"Greek requires/proves\";\n\
+                      συνάρτηση clamp_low(x: i64, threshold: i64) -> i64\n\
+                      απαιτεί threshold >= 0;\n\
+                      {\n  \
+                        αν x < threshold { επιστροφή threshold; } αλλιώς { επιστροφή x; }\n\
+                      }\n\
+                      συνάρτηση main() -> i64 {\n  \
+                        επιβεβαίωση clamp_low(0 - 3, 0) == 0;\n  \
+                        επιστροφή 0;\n\
+                      }\n";
+        crate::compile(source).expect("Greek requires/proves compiles");
     }
 
     #[test]

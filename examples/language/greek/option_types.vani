@@ -1,0 +1,40 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/option_types.vani              # LLVM
+//   vanic run examples/language/greek/option_types.vani --backend=c  # C
+
+σκοπός "Greek payloaded enums via Opt<i64>";
+
+απαρίθμηση Opt { Some(i64), None }
+
+συνάρτηση unwrap_or(o: Opt, default_val: i64) -> i64 {
+  επιστροφή αντιστοιχία o {
+    Opt.Some(v) τότε v,
+    Opt.None    τότε default_val,
+  };
+}
+
+συνάρτηση is_some(o: Opt) -> i64 {
+  επιστροφή αντιστοιχία o {
+    Opt.Some(v) τότε 1,
+    Opt.None    τότε 0,
+  };
+}
+
+συνάρτηση main() -> i64 {
+  έστω a: Opt = Opt.Some(42);
+  έστω b: Opt = Opt.None;
+
+  έστω x: i64 = unwrap_or(a, 0);
+  έστω y: i64 = unwrap_or(b, 100);
+
+  επιβεβαίωση x == 42;
+  επιβεβαίωση y == 100;
+  επιβεβαίωση is_some(a) == 1;
+  επιβεβαίωση is_some(b) == 0;
+
+  εκτύπωση "Some(42) =", x;
+  εκτύπωση "None default 100 =", y;
+  επιστροφή 0;
+}

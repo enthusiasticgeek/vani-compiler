@@ -1,0 +1,33 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/try_question_op.vani              # LLVM
+//   vanic run examples/language/slovak/try_question_op.vani --backend=c  # C
+
+účel "Slovak postfix ? early-return sugar on payloaded enums";
+
+vypocet Opt { Some(i64), None }
+
+funkcia zdvojene_q(o: Opt) -> Opt {
+  nech v: i64 = o?;
+  vráť Opt.Some(v * 2);
+}
+
+funkcia rozbal_alebo(o: Opt, predvoleny: i64) -> i64 {
+  vráť porovnaj o {
+    Opt.Some(v) potom v,
+    Opt.None    potom predvoleny,
+  };
+}
+
+fn main() -> i64 {
+  nech a: Opt = zdvojene_q(Opt.Some(5));
+  potvrď rozbal_alebo(a, 0) == 10;
+
+  nech b: Opt = zdvojene_q(Opt.None);
+  potvrď rozbal_alebo(b, 99) == 99;
+
+  vytlač "Some(5)? zdvojene =", rozbal_alebo(a, 0);
+  vytlač "None? predvoleny je", rozbal_alebo(b, 99);
+  vráť 0;
+}

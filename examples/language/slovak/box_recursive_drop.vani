@@ -1,0 +1,27 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/slovak/box_recursive_drop.vani --backend=c  # C
+
+účel "Slovak Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+štruktúra Taska {
+  obsah: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  nech v: Vec<i64> = vec(10, 20, 30);
+  nech b: Box<Vec<i64>> = box(v);
+  vytlač "Box<Vec<i64>> vytvoreny";
+
+  nech v2: Vec<i64> = vec(7, 8, 9);
+  nech taska: Taska = Taska { obsah: box(v2) };
+  vytlač "Taska vytvorena";
+
+  nech s: OwnedStr = "ahoj" + "!";
+  nech bs: Box<OwnedStr> = box(s);
+  vytlač "Box<OwnedStr> vytvoreny";
+
+  vráť 0;
+}

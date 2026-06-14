@@ -1,0 +1,36 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/early_exit.vani              # LLVM
+//   vanic run examples/language/slovak/early_exit.vani --backend=c  # C
+
+účel "Slovak early exit — preruš/vráť";
+
+funkcia prvy_kladny(v: Vec<i64>) -> i64 {
+  pre i od 0 do len(v) {
+    ak v[i] > 0 {
+      vráť v[i];
+    }
+  }
+  vráť -1;
+}
+
+funkcia sucet_do_nuly(v: Vec<i64>) -> i64 {
+  nech sucet: i64 = 0;
+  pre i od 0 do len(v) {
+    ak v[i] == 0 { preruš; }
+    sucet = sucet + v[i];
+  }
+  vráť sucet;
+}
+
+fn main() -> i64 {
+  nech v: Vec<i64> = vec(-1, -2, 3, 4);
+  potvrď prvy_kladny(v) == 3;
+
+  nech w: Vec<i64> = vec(1, 2, 0, 9);
+  potvrď sucet_do_nuly(w) == 3;
+
+  vytlač "casny vychod ok";
+  vráť 0;
+}

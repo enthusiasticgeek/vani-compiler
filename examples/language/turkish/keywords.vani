@@ -1,0 +1,27 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/keywords.vani              # LLVM
+//   vanic run examples/language/turkish/keywords.vani --backend=c  # C
+
+amaç "Turkish keyword showcase — işlev/olsun/yapı/dön/doğrula/kanıtla";
+
+yapı Nokta {
+  x: i64,
+  y: i64,
+}
+
+işlev toplam(a: i64, b: i64) -> i64 {
+  dön a + b;
+}
+
+işlev ana() -> i64 {
+  olsun n: Nokta = Nokta { x: 3, y: 4 };
+  olsun s: i64 = toplam(n.x, n.y);
+  doğrula s == 7;
+  kanıtla 1 + 1 == 2;
+  yazdır s;
+  dön 0;
+}
+
+fn main() -> i64 { dön ana(); }

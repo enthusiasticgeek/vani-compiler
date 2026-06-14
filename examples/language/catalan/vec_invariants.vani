@@ -1,0 +1,32 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/vec_invariants.vani              # LLVM
+//   vanic run examples/language/catalan/vec_invariants.vani --backend=c  # C
+
+propòsit "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  sigui xs: Vec<i64> = vec(0);
+  sigui i: i64 = 1;
+
+  mentre i < 5
+  invariant len(xs) == (i com u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  demostra i == 5;
+  demostra len(xs) == 5;
+
+  imprimeix xs[0];
+  imprimeix xs[1];
+  imprimeix xs[2];
+  imprimeix xs[3];
+  imprimeix xs[4];
+
+  retorna 0;
+}
