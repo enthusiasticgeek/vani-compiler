@@ -1,0 +1,33 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/try_question_op.vani              # LLVM
+//   vanic run examples/language/russian/try_question_op.vani --backend=c  # C
+
+цель "Postfix ? early-return sugar on payloaded enums";
+
+перечисление Opt { Some(i64), None }
+
+функция doubled_q(o: Opt) -> Opt {
+  пусть v: i64 = o?;
+  вернуть Opt.Some(v * 2);
+}
+
+функция unwrap_or(o: Opt, def: i64) -> i64 {
+  вернуть совпадение o {
+    Opt.Some(v) тогда v,
+    Opt.None    тогда def,
+  };
+}
+
+функция main() -> i64 {
+  пусть a: Opt = doubled_q(Opt.Some(5));
+  утверждать unwrap_or(a, 0) == 10;
+
+  пусть b: Opt = doubled_q(Opt.None);
+  утверждать unwrap_or(b, 99) == 99;
+
+  печатать "Some(5)? doubled =", unwrap_or(a, 0);
+  печатать "None? defaulted to", unwrap_or(b, 99);
+  вернуть 0;
+}

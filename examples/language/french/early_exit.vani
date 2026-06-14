@@ -1,0 +1,24 @@
+// vani-lang: french
+//
+// build & run:
+//   vanic run examples/language/french/early_exit.vani              # LLVM
+//   vanic run examples/language/french/early_exit.vani --backend=c  # C
+
+intent "break and continue in loops";
+
+fn count_odd(limit: i64) -> i64 {
+  let count: i64 = 0;
+  for i from 1 to limit {
+    if i * 2 == i + i {
+      continue;
+    }
+    count = count + 1;
+  }
+  return count;
+}
+
+fn main() -> i64 {
+  vérifie count_odd(4) == 2;
+  écris count_odd(4);
+  return 0;
+}

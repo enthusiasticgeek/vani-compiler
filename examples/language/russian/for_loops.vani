@@ -1,0 +1,24 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/for_loops.vani              # LLVM
+//   vanic run examples/language/russian/for_loops.vani --backend=c  # C
+
+цель "for-range loops";
+
+// `для` = for, `от` = from, `до` = to
+
+функция sum_to(n: i64) -> i64 {
+  пусть total: i64 = 0;
+  для i от 1 до n {
+    total = total + i;
+  }
+  вернуть total;
+}
+
+функция main() -> i64 {
+  утверждать sum_to(4) == 10;
+  утверждать sum_to(0) == 0;
+  печатать sum_to(4);
+  вернуть 0;
+}

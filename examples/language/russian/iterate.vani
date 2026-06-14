@@ -1,0 +1,18 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/iterate.vani              # LLVM
+//   vanic run examples/language/russian/iterate.vani --backend=c  # C
+
+цель "Vec iteration";
+
+функция main() -> i64 {
+  пусть xs: Vec<i64> = vec(10, 20, 30);
+  пусть total: i64 = 0;
+  для i от 0 до 3 {
+    total = total + xs[i как u64];
+  }
+  утверждать total == 60;
+  печатать total;
+  вернуть 0;
+}

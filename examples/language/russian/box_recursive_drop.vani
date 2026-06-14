@@ -1,0 +1,29 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/russian/box_recursive_drop.vani --backend=c  # C
+
+цель "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+// `структура` = struct
+
+структура Bag {
+  contents: Box<Vec<i64>>,
+}
+
+функция main() -> i64 {
+  пусть v: Vec<i64> = vec(10, 20, 30);
+  пусть b: Box<Vec<i64>> = box(v);
+  печатать "constructed Box<Vec<i64>>";
+
+  пусть v2: Vec<i64> = vec(7, 8, 9);
+  пусть bag: Bag = Bag { contents: box(v2) };
+  печатать "constructed Bag";
+
+  пусть s: OwnedStr = "hi" + "!";
+  пусть bs: Box<OwnedStr> = box(s);
+  печатать "constructed Box<OwnedStr>";
+
+  вернуть 0;
+}

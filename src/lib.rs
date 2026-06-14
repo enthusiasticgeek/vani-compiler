@@ -31985,6 +31985,88 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn russian_invariant_keyword_compiles() {
+        // `инвариант` (invariant — Cyrillic loanword) is the Russian invariant keyword.
+        let source = r#"
+// vani-lang: russian
+цель "invariant test";
+функция main() -> i64 {
+  пусть i: i64 = 0;
+  пока i < 3
+  инвариант i >= 0;
+  инвариант i <= 3;
+  {
+    i = i + 1;
+  }
+  утверждать i == 3;
+  вернуть 0;
+}
+"#;
+        compile(source).expect("Russian invariant loanword must compile");
+    }
+
+    #[test]
+    fn russian_for_range_compiles() {
+        let source = r#"
+// vani-lang: russian
+цель "for range test";
+функция main() -> i64 {
+  пусть total: i64 = 0;
+  для i от 1 до 5 {
+    total = total + i;
+  }
+  утверждать total == 10;
+  вернуть 0;
+}
+"#;
+        compile(source).expect("Russian dlya-ot-do for-range must compile");
+    }
+
+    #[test]
+    fn russian_match_enum_compiles() {
+        let source = r#"
+// vani-lang: russian
+цель "enum match test";
+перечисление Opt { Some(i64), None }
+функция unwrap(o: Opt) -> i64 {
+  вернуть совпадение o {
+    Opt.Some(v) тогда v,
+    Opt.None    тогда 0,
+  };
+}
+функция main() -> i64 {
+  утверждать unwrap(Opt.Some(7)) == 7;
+  утверждать unwrap(Opt.None) == 0;
+  вернуть 0;
+}
+"#;
+        compile(source).expect("Russian perechislenie/sovpadenie/togda must compile");
+    }
+
+    #[test]
+    fn russian_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: russian
+цель "requires/proves test";
+функция clamp_low(x: i64, lo: i64) -> i64
+требует lo >= 0;
+{
+  если x < lo {
+    вернуть lo;
+  } иначе {
+    вернуть x;
+  }
+}
+функция main() -> i64 {
+  утверждать clamp_low(0 - 5, 0) == 0;
+  утверждать clamp_low(10, 3) == 10;
+  вернуть 0;
+}
+"#;
+        compile(source).expect("Russian trebuet/dokazat must compile");
+    }
+
+    #[test]
     fn unknown_pragma_returns_none_and_falls_back_to_script_level_purity() {
         // Phase 2 (2026-06-07): an unrecognized tag (e.g.
         // `// vani-lang: pali`) is silently ignored, falling

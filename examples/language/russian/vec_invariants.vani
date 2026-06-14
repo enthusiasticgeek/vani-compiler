@@ -1,0 +1,34 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/russian/vec_invariants.vani --backend=c  # C
+
+цель "Loop invariants over Vec length, end-to-end";
+
+// `инвариант` = invariant (loanword), `доказать` = prove
+
+функция main() -> i64 {
+  пусть xs: Vec<i64> = vec(0);
+  пусть i: i64 = 1;
+
+  пока i < 5
+  инвариант len(xs) == (i как u64);
+  инвариант i >= 1;
+  инвариант i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  доказать i == 5;
+  доказать len(xs) == 5;
+
+  печатать xs[0];
+  печатать xs[1];
+  печатать xs[2];
+  печатать xs[3];
+  печатать xs[4];
+
+  вернуть 0;
+}

@@ -1,0 +1,18 @@
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/iterate.vani              # LLVM
+//   vanic run examples/language/spanish/iterate.vani --backend=c  # C
+
+intención "Vec iteration";
+
+función main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let total: i64 = 0;
+  for i from 0 to 3 {
+    total = total + xs[i as u64];
+  }
+  assert total == 60;
+  print total;
+  return 0;
+}

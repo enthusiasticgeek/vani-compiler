@@ -1,0 +1,27 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/verified.vani              # LLVM
+//   vanic run examples/language/russian/verified.vani --backend=c  # C
+
+цель "SMT-verified clamp_low";
+
+// `требует` = requires, `доказать` = prove
+
+функция clamp_low(x: i64, lo: i64) -> i64
+требует lo >= 0;
+{
+  если x < lo {
+    вернуть lo;
+  } иначе {
+    вернуть x;
+  }
+}
+
+функция main() -> i64 {
+  утверждать clamp_low(0 - 5, 0) == 0;
+  утверждать clamp_low(10, 3) == 10;
+  печатать clamp_low(0 - 5, 0);
+  печатать clamp_low(10, 3);
+  вернуть 0;
+}

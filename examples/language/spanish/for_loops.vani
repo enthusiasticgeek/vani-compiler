@@ -1,0 +1,22 @@
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/for_loops.vani              # LLVM
+//   vanic run examples/language/spanish/for_loops.vani --backend=c  # C
+
+intención "for-range loops";
+
+función sum_to(n: i64) -> i64 {
+  let total: i64 = 0;
+  for i from 1 to n {
+    total = total + i;
+  }
+  return total;
+}
+
+función main() -> i64 {
+  assert sum_to(4) == 10;
+  assert sum_to(0) == 0;
+  print sum_to(4);
+  return 0;
+}

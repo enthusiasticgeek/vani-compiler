@@ -1,0 +1,26 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/early_exit.vani              # LLVM
+//   vanic run examples/language/russian/early_exit.vani --backend=c  # C
+
+цель "break and continue in loops";
+
+// `прервать` = break, `продолжить` = continue
+
+функция count_odd(limit: i64) -> i64 {
+  пусть count: i64 = 0;
+  для i от 1 до limit {
+    если i * 2 == i + i {
+      продолжить;
+    }
+    count = count + 1;
+  }
+  вернуть count;
+}
+
+функция main() -> i64 {
+  утверждать count_odd(4) == 2;
+  печатать count_odd(4);
+  вернуть 0;
+}

@@ -1,0 +1,42 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/option_types.vani              # LLVM
+//   vanic run examples/language/russian/option_types.vani --backend=c  # C
+
+цель "Payloaded enums via Option<i64>";
+
+// `перечисление` = enum, `совпадение` = match, `тогда` = then
+
+перечисление Opt { Some(i64), None }
+
+функция unwrap_or(o: Opt, def: i64) -> i64 {
+  вернуть совпадение o {
+    Opt.Some(v) тогда v,
+    Opt.None    тогда def,
+  };
+}
+
+функция is_some(o: Opt) -> i64 {
+  вернуть совпадение o {
+    Opt.Some(v) тогда 1,
+    Opt.None    тогда 0,
+  };
+}
+
+функция main() -> i64 {
+  пусть a: Opt = Opt.Some(42);
+  пусть b: Opt = Opt.None;
+
+  пусть x: i64 = unwrap_or(a, 0);
+  пусть y: i64 = unwrap_or(b, 100);
+
+  утверждать x == 42;
+  утверждать y == 100;
+  утверждать is_some(a) == 1;
+  утверждать is_some(b) == 0;
+
+  печатать "Some(42) unwrapped =", x;
+  печатать "None with default 100 =", y;
+  вернуть 0;
+}

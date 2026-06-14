@@ -1,0 +1,32 @@
+// vani-lang: spanish
+//
+// build & run:
+//   vanic run examples/language/spanish/keywords.vani              # LLVM
+//   vanic run examples/language/spanish/keywords.vani --backend=c  # C
+//
+// v1: non-ASCII Spanish aliases (función, intención, enumeración, público,
+// módulo) are active; pure-ASCII control-flow uses English keywords.
+
+intención "Spanish keyword showcase";
+
+función add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+función max(a: i64, b: i64) -> i64 {
+  if a > b {
+    return a;
+  } else {
+    return b;
+  }
+}
+
+función main() -> i64 {
+  let x: i64 = add(3, 4);
+  assert x == 7;
+  let y: i64 = max(10, 20);
+  assert y == 20;
+  print x;
+  print y;
+  return 0;
+}

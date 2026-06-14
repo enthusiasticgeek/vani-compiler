@@ -1,0 +1,27 @@
+// vani-lang: french
+//
+// build & run:
+//   vanic run examples/language/french/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/french/box_recursive_drop.vani --backend=c  # C
+
+intent "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struct Bag {
+  contents: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  let v: Vec<i64> = vec(10, 20, 30);
+  let b: Box<Vec<i64>> = box(v);
+  écris "constructed Box<Vec<i64>>";
+
+  let v2: Vec<i64> = vec(7, 8, 9);
+  let bag: Bag = Bag { contents: box(v2) };
+  écris "constructed Bag";
+
+  let s: OwnedStr = "hi" + "!";
+  let bs: Box<OwnedStr> = box(s);
+  écris "constructed Box<OwnedStr>";
+
+  return 0;
+}

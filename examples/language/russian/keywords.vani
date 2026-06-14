@@ -1,0 +1,31 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/keywords.vani              # LLVM
+//   vanic run examples/language/russian/keywords.vani --backend=c  # C
+
+цель "Russian keyword showcase";
+
+// `функция` = fn, `пусть` = let, `вернуть` = return
+
+функция add(a: i64, b: i64) -> i64 {
+  вернуть a + b;
+}
+
+функция max(a: i64, b: i64) -> i64 {
+  если a > b {
+    вернуть a;
+  } иначе {
+    вернуть b;
+  }
+}
+
+функция main() -> i64 {
+  пусть x: i64 = add(3, 4);
+  утверждать x == 7;
+  пусть y: i64 = max(10, 20);
+  утверждать y == 20;
+  печатать x;
+  печатать y;
+  вернуть 0;
+}

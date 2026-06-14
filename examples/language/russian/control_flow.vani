@@ -1,0 +1,34 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/control_flow.vani              # LLVM
+//   vanic run examples/language/russian/control_flow.vani --backend=c  # C
+
+цель "if/else and while control flow";
+
+функция sign(x: i64) -> i64 {
+  если x > 0 {
+    вернуть 1;
+  } иначе {
+    если x < 0 {
+      вернуть 0 - 1;
+    } иначе {
+      вернуть 0;
+    }
+  }
+}
+
+функция main() -> i64 {
+  утверждать sign(5) == 1;
+  утверждать sign(0 - 3) == 0 - 1;
+  утверждать sign(0) == 0;
+
+  пусть i: i64 = 0;
+  пока i < 5 {
+    i = i + 1;
+  }
+  утверждать i == 5;
+
+  печатать sign(42);
+  вернуть 0;
+}
