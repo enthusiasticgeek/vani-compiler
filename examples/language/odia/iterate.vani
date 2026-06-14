@@ -1,0 +1,65 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/iterate.vani              # LLVM
+//   vanic run examples/language/odia/iterate.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `ପ୍ରତି` = for, `ରେ` = in, `ଦେଖନ୍ତୁ` = ref
+
+କାର୍ଯ୍ୟ sum_vec(xs: ଦେଖନ୍ତୁ Vec<i64>) -> i64 {
+  ମନେକର total: i64 = 0;
+  ପ୍ରତି x ରେ ଦେଖନ୍ତୁ xs {
+    total = total + x;
+  }
+  ଫେରନ୍ତୁ total;
+}
+
+କାର୍ଯ୍ୟ max_in_array(xs: ଦେଖନ୍ତୁ [i64; 5]) -> i64 {
+  ମନେକର best: i64 = xs[0];
+  ପ୍ରତି x ରେ ଦେଖନ୍ତୁ xs {
+    ଯଦି x > best {
+      best = x;
+    }
+  }
+  ଫେରନ୍ତୁ best;
+}
+
+କାର୍ଯ୍ୟ count_positives(xs: ଦେଖନ୍ତୁ Vec<i64>) -> i64 {
+  ମନେକର count: i64 = 0;
+  ପ୍ରତି x ରେ ଦେଖନ୍ତୁ xs {
+    ଯଦି x > 0 {
+      count = count + 1;
+    }
+  }
+  ଫେରନ୍ତୁ count;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  ମନେକର total: i64 = sum_vec(ଦେଖନ୍ତୁ nums);
+  ନିଶ୍ଚିତ total == 15;
+
+  ମନେକର arr: [i64; 5] = [3, 7, 1, 9, 4];
+  ମନେକର m: i64 = max_in_array(ଦେଖନ୍ତୁ arr);
+  ନିଶ୍ଚିତ m == 9;
+
+  ମନେକର mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  ମନେକର p: i64 = count_positives(ଦେଖନ୍ତୁ mixed);
+  ନିଶ୍ଚିତ p == 3;
+
+  // Consuming `for x in xs` — each OwnedStr moves into x and frees at scope exit.
+  ମନେକର owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  ମନେକର owned_total: i64 = 0;
+  ପ୍ରତି s ରେ owned {
+    owned_total = owned_total + (len(s) ଭାବେ i64);
+  }
+  ନିଶ୍ଚିତ owned_total == 6;
+
+  ଲେଖ total;
+  ଲେଖ m;
+  ଲେଖ p;
+  ଲେଖ owned_total;
+  ଫେରନ୍ତୁ 0;
+}

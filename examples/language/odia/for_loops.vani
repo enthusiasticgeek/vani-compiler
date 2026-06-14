@@ -1,0 +1,41 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/for_loops.vani              # LLVM
+//   vanic run examples/language/odia/for_loops.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "for-loops over integer ranges";
+
+// `ପ୍ରତି` = for, `ରୁ` = from, `ପର୍ଯ୍ୟନ୍ତ` = to, `ବନ୍ଦ` = break
+
+କାର୍ଯ୍ୟ sum_squares(n: i64) -> i64 {
+  ମନେକର total: i64 = 0;
+  ପ୍ରତି i ରୁ 1 ପର୍ଯ୍ୟନ୍ତ n {
+    total = total + i * i;
+  }
+  ଫେରନ୍ତୁ total;
+}
+
+କାର୍ଯ୍ୟ find_first_zero(xs: ଦେଖନ୍ତୁ [i64; 5]) -> i64 {
+  ମନେକର result: i64 = 0 - 1;
+  ପ୍ରତି i ରୁ 0 ପର୍ଯ୍ୟନ୍ତ len(xs) {
+    ଯଦି xs[i] == 0 {
+      result = i ଭାବେ i64;
+      ବନ୍ଦ;
+    }
+  }
+  ଫେରନ୍ତୁ result;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର s: i64 = sum_squares(5);
+  ନିଶ୍ଚିତ s == 30;
+
+  ମନେକର xs: [i64; 5] = [3, 7, 0, 9, 1];
+  ମନେକର idx: i64 = find_first_zero(ଦେଖନ୍ତୁ xs);
+  ନିଶ୍ଚିତ idx == 2;
+
+  ଲେଖ s;
+  ଲେଖ idx;
+  ଫେରନ୍ତୁ 0;
+}

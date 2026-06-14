@@ -1,0 +1,30 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/keywords.vani              # LLVM
+//   vanic run examples/language/punjabi/keywords.vani --backend=c  # C
+
+// ਪੰਜਾਬੀ (Punjabi) — keyword showcase.
+// `ਕਾਰਜ` = fn, `ਮੰਨੋ` = let, `ਮੁੜੋ` = return,
+// `ਜੇ` / `ਵਰਨਾ` = if / else, `ਨਿਸ਼ਚਿਤ` = assert.
+
+ਉਦੇਸ਼ "Punjabi keyword showcase — factorial with if/else";
+
+ਕਾਰਜ factorial(n: i64) -> i64 {
+  ਜੇ n <= 1 {
+    ਮੁੜੋ 1;
+  } ਵਰਨਾ {
+    ਮੁੜੋ n * factorial(n - 1);
+  }
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ a: i64 = factorial(5);
+  ਮੰਨੋ b: i64 = factorial(6);
+
+  ਨਿਸ਼ਚਿਤ a == 120;
+  ਨਿਸ਼ਚਿਤ b == 720;
+
+  ਲਿਖੋ "5! =", a, " 6! =", b;
+  ਮੁੜੋ 0;
+}

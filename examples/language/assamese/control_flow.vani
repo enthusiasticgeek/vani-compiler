@@ -1,0 +1,42 @@
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/control_flow.vani              # LLVM
+//   vanic run examples/language/assamese/control_flow.vani --backend=c  # C
+
+উদ্দেশ্য "if/else and while loops with Vec mutation";
+
+// `যতক্ষণ` = while, `দেখ` = ref
+
+কাজ sum(xs: দেখ Vec<i64>) -> i64 {
+  মান total: i64 = 0;
+  মান i: u64 = 0;
+  মান n: u64 = len(xs);
+  যতক্ষণ i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  ফেরত total;
+}
+
+কাজ build_range(n: i64) -> Vec<i64> {
+  মান xs: Vec<i64> = vec(0);
+  মান i: i64 = 1;
+  যতক্ষণ i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  ফেরত xs;
+}
+
+কাজ main() -> i64 {
+  মান xs: Vec<i64> = build_range(5);
+  মান total: i64 = sum(দেখ xs);
+  যদি total > 5 {
+    নিশ্চিত total == 10;
+  } নাহলে {
+    নিশ্চিত total <= 5;
+  }
+  লেখ total;
+  ফেরত 0;
+}

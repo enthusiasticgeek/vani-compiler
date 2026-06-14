@@ -1,0 +1,38 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/verified.vani              # LLVM
+//   vanic run examples/language/punjabi/verified.vani --backend=c  # C
+
+ਉਦੇਸ਼ "SMT verifier — preconditions and proofs";
+
+// `ਲੋੜੀਂਦਾ` = requires, `ਪ੍ਰਮਾਣ` = prove
+
+ਕਾਰਜ clamp_low(x: i64, lo: i64) -> i64
+ਲੋੜੀਂਦਾ lo >= 0;
+{
+  ਜੇ x < lo {
+    ਮੁੜੋ lo;
+  } ਵਰਨਾ {
+    ਮੁੜੋ x;
+  }
+}
+
+ਕਾਰਜ safe_subtract(a: i64, b: i64) -> i64
+ਲੋੜੀਂਦਾ a >= b;
+ਲੋੜੀਂਦਾ b >= 0;
+{
+  ਪ੍ਰਮਾਣ a - b >= 0;
+  ਮੁੜੋ a - b;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ x: i64 = clamp_low(0 - 5, 0);
+  ਨਿਸ਼ਚਿਤ x == 0;
+
+  ਮੰਨੋ d: i64 = safe_subtract(10, 3);
+  ਨਿਸ਼ਚਿਤ d == 7;
+
+  ਲਿਖੋ d;
+  ਮੁੜੋ 0;
+}

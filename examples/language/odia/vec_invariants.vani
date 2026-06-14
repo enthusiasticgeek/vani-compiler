@@ -1,0 +1,34 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/vec_invariants.vani              # LLVM
+//   vanic run examples/language/odia/vec_invariants.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "Loop invariants over Vec length, end-to-end";
+
+// `ଅଚଳ` = invariant ("unchanging"), `ପ୍ରମାଣ` = prove
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର xs: Vec<i64> = vec(0);
+  ମନେକର i: i64 = 1;
+
+  ଯେତେବେଳେ i < 5
+  ଅଚଳ len(xs) == (i ଭାବେ u64);
+  ଅଚଳ i >= 1;
+  ଅଚଳ i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  ପ୍ରମାଣ i == 5;
+  ପ୍ରମାଣ len(xs) == 5;
+
+  ଲେଖ xs[0];
+  ଲେଖ xs[1];
+  ଲେଖ xs[2];
+  ଲେଖ xs[3];
+  ଲେଖ xs[4];
+
+  ଫେରନ୍ତୁ 0;
+}

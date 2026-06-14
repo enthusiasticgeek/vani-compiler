@@ -1,0 +1,30 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/keywords.vani              # LLVM
+//   vanic run examples/language/odia/keywords.vani --backend=c  # C
+
+// ଓଡ଼ିଆ (Odia) — keyword showcase.
+// `କାର୍ଯ୍ୟ` = fn, `ମନେକର` = let, `ଫେରନ୍ତୁ` = return,
+// `ଯଦି` / `ଅନ୍ୟଥା` = if / else, `ନିଶ୍ଚିତ` = assert.
+
+ଉଦ୍ଦେଶ୍ୟ "Odia keyword showcase — factorial with if/else";
+
+କାର୍ଯ୍ୟ factorial(n: i64) -> i64 {
+  ଯଦି n <= 1 {
+    ଫେରନ୍ତୁ 1;
+  } ଅନ୍ୟଥା {
+    ଫେରନ୍ତୁ n * factorial(n - 1);
+  }
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର a: i64 = factorial(5);
+  ମନେକର b: i64 = factorial(6);
+
+  ନିଶ୍ଚିତ a == 120;
+  ନିଶ୍ଚିତ b == 720;
+
+  ଲେଖ "5! =", a, " 6! =", b;
+  ଫେରନ୍ତୁ 0;
+}

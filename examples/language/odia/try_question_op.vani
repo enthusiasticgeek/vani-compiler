@@ -1,0 +1,33 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/try_question_op.vani              # LLVM
+//   vanic run examples/language/odia/try_question_op.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "Postfix ? early-return sugar on payloaded enums";
+
+ଗଣନା Opt { Some(i64), None }
+
+କାର୍ଯ୍ୟ doubled_q(o: Opt) -> Opt {
+  ମନେକର v: i64 = o?;
+  ଫେରନ୍ତୁ Opt.Some(v * 2);
+}
+
+କାର୍ଯ୍ୟ unwrap_or(o: Opt, def: i64) -> i64 {
+  ଫେରନ୍ତୁ ମେଳ o {
+    Opt.Some(v) ତାହେଲେ v,
+    Opt.None    ତାହେଲେ def,
+  };
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର a: Opt = doubled_q(Opt.Some(5));
+  ନିଶ୍ଚିତ unwrap_or(a, 0) == 10;
+
+  ମନେକର b: Opt = doubled_q(Opt.None);
+  ନିଶ୍ଚିତ unwrap_or(b, 99) == 99;
+
+  ଲେଖ "Some(5)? doubled =", unwrap_or(a, 0);
+  ଲେଖ "None? defaulted to", unwrap_or(b, 99);
+  ଫେରନ୍ତୁ 0;
+}

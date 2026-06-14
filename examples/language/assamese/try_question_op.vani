@@ -1,0 +1,33 @@
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/try_question_op.vani              # LLVM
+//   vanic run examples/language/assamese/try_question_op.vani --backend=c  # C
+
+উদ্দেশ্য "Postfix ? early-return sugar on payloaded enums";
+
+গণনা Opt { Some(i64), None }
+
+কাজ doubled_q(o: Opt) -> Opt {
+  মান v: i64 = o?;
+  ফেরত Opt.Some(v * 2);
+}
+
+কাজ unwrap_or(o: Opt, def: i64) -> i64 {
+  ফেরত মেলে o {
+    Opt.Some(v) তবে v,
+    Opt.None    তবে def,
+  };
+}
+
+কাজ main() -> i64 {
+  মান a: Opt = doubled_q(Opt.Some(5));
+  নিশ্চিত unwrap_or(a, 0) == 10;
+
+  মান b: Opt = doubled_q(Opt.None);
+  নিশ্চিত unwrap_or(b, 99) == 99;
+
+  লেখ "Some(5)? doubled =", unwrap_or(a, 0);
+  লেখ "None? defaulted to", unwrap_or(b, 99);
+  ফেরত 0;
+}

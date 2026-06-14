@@ -1,0 +1,41 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/for_loops.vani              # LLVM
+//   vanic run examples/language/punjabi/for_loops.vani --backend=c  # C
+
+ਉਦੇਸ਼ "for-loops over integer ranges";
+
+// `ਹਰ` = for, `ਤੋਂ` = from, `ਤੱਕ` = to, `ਵਿਰਾਮ` = break
+
+ਕਾਰਜ sum_squares(n: i64) -> i64 {
+  ਮੰਨੋ total: i64 = 0;
+  ਹਰ i ਤੋਂ 1 ਤੱਕ n {
+    total = total + i * i;
+  }
+  ਮੁੜੋ total;
+}
+
+ਕਾਰਜ find_first_zero(xs: ਵੇਖੋ [i64; 5]) -> i64 {
+  ਮੰਨੋ result: i64 = 0 - 1;
+  ਹਰ i ਤੋਂ 0 ਤੱਕ len(xs) {
+    ਜੇ xs[i] == 0 {
+      result = i ਵਜੋਂ i64;
+      ਵਿਰਾਮ;
+    }
+  }
+  ਮੁੜੋ result;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ s: i64 = sum_squares(5);
+  ਨਿਸ਼ਚਿਤ s == 30;
+
+  ਮੰਨੋ xs: [i64; 5] = [3, 7, 0, 9, 1];
+  ਮੰਨੋ idx: i64 = find_first_zero(ਵੇਖੋ xs);
+  ਨਿਸ਼ਚਿਤ idx == 2;
+
+  ਲਿਖੋ s;
+  ਲਿਖੋ idx;
+  ਮੁੜੋ 0;
+}

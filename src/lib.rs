@@ -29116,6 +29116,126 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn punjabi_while_single_word_compiles() {
+        // `ਜਦੋਂ` (jadon — single-word while) replaced broken multi-word `ਜਦੋਂ ਤੱਕ`.
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "while loop test";
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ i: i64 = 0;
+  ਜਦੋਂ i < 3 {
+    i = i + 1;
+  }
+  ਨਿਸ਼ਚਿਤ i == 3;
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi jadon while must compile");
+    }
+
+    #[test]
+    fn punjabi_else_single_word_compiles() {
+        // `ਵਰਨਾ` (varna — "otherwise") replaced broken multi-word `ਨਹੀਂ ਤਾਂ`.
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "if/else test";
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ x: i64 = 10;
+  ਜੇ x > 5 {
+    ਨਿਸ਼ਚਿਤ x == 10;
+  } ਵਰਨਾ {
+    ਨਿਸ਼ਚਿਤ x <= 5;
+  }
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi varna else must compile");
+    }
+
+    #[test]
+    fn punjabi_invariant_keyword_compiles() {
+        // `ਅਟੱਲ` (attal — "unchanging") is the Punjabi invariant keyword.
+        // Use assert (runtime) not prove (static SMT) to focus on parsing.
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "invariant test";
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ i: i64 = 0;
+  ਜਦੋਂ i < 3
+  ਅਟੱਲ i >= 0;
+  ਅਟੱਲ i <= 3;
+  {
+    i = i + 1;
+  }
+  ਨਿਸ਼ਚਿਤ i == 3;
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi attal invariant must compile");
+    }
+
+    #[test]
+    fn punjabi_for_range_compiles() {
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "for range test";
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ total: i64 = 0;
+  ਹਰ i ਤੋਂ 1 ਤੱਕ 5 {
+    total = total + i;
+  }
+  ਨਿਸ਼ਚਿਤ total == 10;
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi har-ton-takk for-range must compile");
+    }
+
+    #[test]
+    fn punjabi_match_enum_compiles() {
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "enum match test";
+ਗਣਨਾ Opt { Some(i64), None }
+ਕਾਰਜ unwrap(o: Opt) -> i64 {
+  ਮੁੜੋ ਮੇਲ o {
+    Opt.Some(v) ਤਦ v,
+    Opt.None    ਤਦ 0,
+  };
+}
+ਕਾਰਜ main() -> i64 {
+  ਨਿਸ਼ਚਿਤ unwrap(Opt.Some(7)) == 7;
+  ਨਿਸ਼ਚਿਤ unwrap(Opt.None) == 0;
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi gannaa/mel/tad must compile");
+    }
+
+    #[test]
+    fn punjabi_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: punjabi
+ਉਦੇਸ਼ "requires/proves test";
+ਕਾਰਜ clamp_low(x: i64, lo: i64) -> i64
+ਲੋੜੀਂਦਾ lo >= 0;
+{
+  ਜੇ x < lo {
+    ਮੁੜੋ lo;
+  } ਵਰਨਾ {
+    ਮੁੜੋ x;
+  }
+}
+ਕਾਰਜ main() -> i64 {
+  ਨਿਸ਼ਚਿਤ clamp_low(0 - 5, 0) == 0;
+  ਨਿਸ਼ਚਿਤ clamp_low(10, 3) == 10;
+  ਮੁੜੋ 0;
+}
+"#;
+        compile(source).expect("Punjabi lorindaa/praman must compile");
+    }
+
+    #[test]
     fn kannada_pragma_compiles_and_emits_kannada_print() {
         // Phase 6 second half (2026-06-07).
         let source = "// vani-lang: kannada\n\
@@ -29159,6 +29279,107 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn odia_else_single_word_compiles() {
+        // `ଅନ୍ୟଥା` (anyatha — "otherwise") replaced broken multi-word `ନ ହେଲେ`.
+        let source = r#"
+// vani-lang: odia
+ଉଦ୍ଦେଶ୍ୟ "if/else test";
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର x: i64 = 10;
+  ଯଦି x > 5 {
+    ନିଶ୍ଚିତ x == 10;
+  } ଅନ୍ୟଥା {
+    ନିଶ୍ଚିତ x <= 5;
+  }
+  ଫେରନ୍ତୁ 0;
+}
+"#;
+        compile(source).expect("Odia anyatha else must compile");
+    }
+
+    #[test]
+    fn odia_invariant_keyword_compiles() {
+        // `ଅଚଳ` (achala — "unchanging", tatsama) is the Odia invariant keyword.
+        let source = r#"
+// vani-lang: odia
+ଉଦ୍ଦେଶ୍ୟ "invariant test";
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର i: i64 = 0;
+  ଯେତେବେଳେ i < 3
+  ଅଚଳ i >= 0;
+  ଅଚଳ i <= 3;
+  {
+    i = i + 1;
+  }
+  ନିଶ୍ଚିତ i == 3;
+  ଫେରନ୍ତୁ 0;
+}
+"#;
+        compile(source).expect("Odia achala invariant must compile");
+    }
+
+    #[test]
+    fn odia_for_range_compiles() {
+        let source = r#"
+// vani-lang: odia
+ଉଦ୍ଦେଶ୍ୟ "for range test";
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର total: i64 = 0;
+  ପ୍ରତି i ରୁ 1 ପର୍ଯ୍ୟନ୍ତ 5 {
+    total = total + i;
+  }
+  ନିଶ୍ଚିତ total == 10;
+  ଫେରନ୍ତୁ 0;
+}
+"#;
+        compile(source).expect("Odia prati-ru-paryanta for-range must compile");
+    }
+
+    #[test]
+    fn odia_match_enum_compiles() {
+        let source = r#"
+// vani-lang: odia
+ଉଦ୍ଦେଶ୍ୟ "enum match test";
+ଗଣନା Opt { Some(i64), None }
+କାର୍ଯ୍ୟ unwrap(o: Opt) -> i64 {
+  ଫେରନ୍ତୁ ମେଳ o {
+    Opt.Some(v) ତାହେଲେ v,
+    Opt.None    ତାହେଲେ 0,
+  };
+}
+କାର୍ଯ୍ୟ main() -> i64 {
+  ନିଶ୍ଚିତ unwrap(Opt.Some(7)) == 7;
+  ନିଶ୍ଚିତ unwrap(Opt.None) == 0;
+  ଫେରନ୍ତୁ 0;
+}
+"#;
+        compile(source).expect("Odia ganana/mela/tahele must compile");
+    }
+
+    #[test]
+    fn odia_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: odia
+ଉଦ୍ଦେଶ୍ୟ "requires/proves test";
+କାର୍ଯ୍ୟ clamp_low(x: i64, lo: i64) -> i64
+ଆବଶ୍ୟକ lo >= 0;
+{
+  ଯଦି x < lo {
+    ଫେରନ୍ତୁ lo;
+  } ଅନ୍ୟଥା {
+    ଫେରନ୍ତୁ x;
+  }
+}
+କାର୍ଯ୍ୟ main() -> i64 {
+  ନିଶ୍ଚିତ clamp_low(0 - 5, 0) == 0;
+  ନିଶ୍ଚିତ clamp_low(10, 3) == 10;
+  ଫେରନ୍ତୁ 0;
+}
+"#;
+        compile(source).expect("Odia aabashyaka/pramana must compile");
+    }
+
+    #[test]
     fn assamese_pragma_compiles_and_reuses_bengali_print() {
         // Phase 6 (2026-06-07): Assamese rides Bengali's script
         // and Bengali's numerals — it should emit the BENGALI
@@ -29173,6 +29394,106 @@ fn main() -> i64 {
         let c = compile_to_c(source).expect("Assamese program compiles");
         assert!(c.contains("intent_print_int_ben"),
             "Assamese must reuse Bengali helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn assamese_while_compiles() {
+        // Assamese routes through Bengali — `যতক্ষণ` (jatakshan) is the while keyword.
+        let source = r#"
+// vani-lang: assamese
+উদ্দেশ্য "while loop test";
+কাজ main() -> i64 {
+  মান i: i64 = 0;
+  যতক্ষণ i < 3 {
+    i = i + 1;
+  }
+  নিশ্চিত i == 3;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Assamese jatakshan while must compile");
+    }
+
+    #[test]
+    fn assamese_invariant_keyword_compiles() {
+        // `অপরিবর্তনীয়` (aparibartaniya — "invariant") from the Bengali keyword table.
+        let source = r#"
+// vani-lang: assamese
+উদ্দেশ্য "invariant test";
+কাজ main() -> i64 {
+  মান i: i64 = 0;
+  যতক্ষণ i < 3
+  অপরিবর্তনীয় i >= 0;
+  অপরিবর্তনীয় i <= 3;
+  {
+    i = i + 1;
+  }
+  নিশ্চিত i == 3;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Assamese aparibartaniya invariant must compile");
+    }
+
+    #[test]
+    fn assamese_for_range_compiles() {
+        let source = r#"
+// vani-lang: assamese
+উদ্দেশ্য "for range test";
+কাজ main() -> i64 {
+  মান total: i64 = 0;
+  প্রতি i থেকে 1 পর্যন্ত 5 {
+    total = total + i;
+  }
+  নিশ্চিত total == 10;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Assamese prati-theke-paryanta for-range must compile");
+    }
+
+    #[test]
+    fn assamese_match_enum_compiles() {
+        let source = r#"
+// vani-lang: assamese
+উদ্দেশ্য "enum match test";
+গণনা Opt { Some(i64), None }
+কাজ unwrap(o: Opt) -> i64 {
+  ফেরত মেলে o {
+    Opt.Some(v) তবে v,
+    Opt.None    তবে 0,
+  };
+}
+কাজ main() -> i64 {
+  নিশ্চিত unwrap(Opt.Some(7)) == 7;
+  নিশ্চিত unwrap(Opt.None) == 0;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Assamese ganana/mele/tobe must compile");
+    }
+
+    #[test]
+    fn assamese_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: assamese
+উদ্দেশ্য "requires/proves test";
+কাজ clamp_low(x: i64, lo: i64) -> i64
+প্রয়োজনীয় lo >= 0;
+{
+  যদি x < lo {
+    ফেরত lo;
+  } নাহলে {
+    ফেরত x;
+  }
+}
+কাজ main() -> i64 {
+  নিশ্চিত clamp_low(0 - 5, 0) == 0;
+  নিশ্চিত clamp_low(10, 3) == 10;
+  ফেরত 0;
+}
+"#;
+        compile(source).expect("Assamese proyojaniya/praman must compile");
     }
 
     #[test]

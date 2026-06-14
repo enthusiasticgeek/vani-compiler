@@ -1,0 +1,29 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/punjabi/box_recursive_drop.vani --backend=c  # C
+
+ਉਦੇਸ਼ "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+// `ਰਚਨਾ` = struct
+
+ਰਚਨਾ Bag {
+  contents: Box<Vec<i64>>,
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ v: Vec<i64> = vec(10, 20, 30);
+  ਮੰਨੋ b: Box<Vec<i64>> = box(v);
+  ਲਿਖੋ "constructed Box<Vec<i64>>";
+
+  ਮੰਨੋ v2: Vec<i64> = vec(7, 8, 9);
+  ਮੰਨੋ bag: Bag = Bag { contents: box(v2) };
+  ਲਿਖੋ "constructed Bag";
+
+  ਮੰਨੋ s: OwnedStr = "hi" + "!";
+  ਮੰਨੋ bs: Box<OwnedStr> = box(s);
+  ਲਿਖੋ "constructed Box<OwnedStr>";
+
+  ਮੁੜੋ 0;
+}

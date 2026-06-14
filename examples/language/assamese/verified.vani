@@ -1,0 +1,38 @@
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/verified.vani              # LLVM
+//   vanic run examples/language/assamese/verified.vani --backend=c  # C
+
+উদ্দেশ্য "SMT verifier — preconditions and proofs";
+
+// `প্রয়োজনীয়` = requires, `প্রমাণ` = prove
+
+কাজ clamp_low(x: i64, lo: i64) -> i64
+প্রয়োজনীয় lo >= 0;
+{
+  যদি x < lo {
+    ফেরত lo;
+  } নাহলে {
+    ফেরত x;
+  }
+}
+
+কাজ safe_subtract(a: i64, b: i64) -> i64
+প্রয়োজনীয় a >= b;
+প্রয়োজনীয় b >= 0;
+{
+  প্রমাণ a - b >= 0;
+  ফেরত a - b;
+}
+
+কাজ main() -> i64 {
+  মান x: i64 = clamp_low(0 - 5, 0);
+  নিশ্চিত x == 0;
+
+  মান d: i64 = safe_subtract(10, 3);
+  নিশ্চিত d == 7;
+
+  লেখ d;
+  ফেরত 0;
+}

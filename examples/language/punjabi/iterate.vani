@@ -1,0 +1,65 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/iterate.vani              # LLVM
+//   vanic run examples/language/punjabi/iterate.vani --backend=c  # C
+
+ਉਦੇਸ਼ "Iterate over arrays and Vecs with for-in ref and consuming for-in";
+
+// `ਹਰ` = for, `ਵਿੱਚ` = in, `ਵੇਖੋ` = ref
+
+ਕਾਰਜ sum_vec(xs: ਵੇਖੋ Vec<i64>) -> i64 {
+  ਮੰਨੋ total: i64 = 0;
+  ਹਰ x ਵਿੱਚ ਵੇਖੋ xs {
+    total = total + x;
+  }
+  ਮੁੜੋ total;
+}
+
+ਕਾਰਜ max_in_array(xs: ਵੇਖੋ [i64; 5]) -> i64 {
+  ਮੰਨੋ best: i64 = xs[0];
+  ਹਰ x ਵਿੱਚ ਵੇਖੋ xs {
+    ਜੇ x > best {
+      best = x;
+    }
+  }
+  ਮੁੜੋ best;
+}
+
+ਕਾਰਜ count_positives(xs: ਵੇਖੋ Vec<i64>) -> i64 {
+  ਮੰਨੋ count: i64 = 0;
+  ਹਰ x ਵਿੱਚ ਵੇਖੋ xs {
+    ਜੇ x > 0 {
+      count = count + 1;
+    }
+  }
+  ਮੁੜੋ count;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ nums: Vec<i64> = vec(1, 2, 3, 4, 5);
+  ਮੰਨੋ total: i64 = sum_vec(ਵੇਖੋ nums);
+  ਨਿਸ਼ਚਿਤ total == 15;
+
+  ਮੰਨੋ arr: [i64; 5] = [3, 7, 1, 9, 4];
+  ਮੰਨੋ m: i64 = max_in_array(ਵੇਖੋ arr);
+  ਨਿਸ਼ਚਿਤ m == 9;
+
+  ਮੰਨੋ mixed: Vec<i64> = vec(0 - 2, 5, 0 - 1, 3, 0, 4);
+  ਮੰਨੋ p: i64 = count_positives(ਵੇਖੋ mixed);
+  ਨਿਸ਼ਚਿਤ p == 3;
+
+  // Consuming `for x in xs` — each OwnedStr moves into x and frees at scope exit.
+  ਮੰਨੋ owned: Vec<OwnedStr> = vec("a" + "", "bb" + "", "ccc" + "");
+  ਮੰਨੋ owned_total: i64 = 0;
+  ਹਰ s ਵਿੱਚ owned {
+    owned_total = owned_total + (len(s) ਵਜੋਂ i64);
+  }
+  ਨਿਸ਼ਚਿਤ owned_total == 6;
+
+  ਲਿਖੋ total;
+  ਲਿਖੋ m;
+  ਲਿਖੋ p;
+  ਲਿਖੋ owned_total;
+  ਮੁੜੋ 0;
+}

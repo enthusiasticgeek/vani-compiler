@@ -1,0 +1,47 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/early_exit.vani              # LLVM
+//   vanic run examples/language/punjabi/early_exit.vani --backend=c  # C
+
+ਉਦੇਸ਼ "break and continue for early exit and skip";
+
+// `ਵਿਰਾਮ` = break, `ਜਾਰੀ` = continue
+
+ਕਾਰਜ find_first_negative(xs: ਵੇਖੋ Vec<i64>) -> i64 {
+  ਮੰਨੋ i: u64 = 0;
+  ਮੰਨੋ result: i64 = 0 - 1;
+  ਜਦੋਂ i < len(xs) {
+    ਜੇ xs[i] < 0 {
+      result = xs[i];
+      ਵਿਰਾਮ;
+    }
+    i = i + 1;
+  }
+  ਮੁੜੋ result;
+}
+
+ਕਾਰਜ count_positive(xs: ਵੇਖੋ Vec<i64>) -> i64 {
+  ਮੰਨੋ i: u64 = 0;
+  ਮੰਨੋ count: i64 = 0;
+  ਜਦੋਂ i < len(xs) {
+    ਜੇ xs[i] <= 0 {
+      i = i + 1;
+      ਜਾਰੀ;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  ਮੁੜੋ count;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  ਮੰਨੋ first_neg: i64 = find_first_negative(ਵੇਖੋ xs);
+  ਮੰਨੋ positives: i64 = count_positive(ਵੇਖੋ xs);
+  ਨਿਸ਼ਚਿਤ first_neg == 0 - 3;
+  ਨਿਸ਼ਚਿਤ positives == 3;
+  ਲਿਖੋ first_neg;
+  ਲਿਖੋ positives;
+  ਮੁੜੋ 0;
+}

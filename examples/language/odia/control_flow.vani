@@ -1,0 +1,42 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/control_flow.vani              # LLVM
+//   vanic run examples/language/odia/control_flow.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "if/else and while loops with Vec mutation";
+
+// `ଯେତେବେଳେ` = while, `ଦେଖନ୍ତୁ` = ref
+
+କାର୍ଯ୍ୟ sum(xs: ଦେଖନ୍ତୁ Vec<i64>) -> i64 {
+  ମନେକର total: i64 = 0;
+  ମନେକର i: u64 = 0;
+  ମନେକର n: u64 = len(xs);
+  ଯେତେବେଳେ i < n {
+    total = total + xs[i];
+    i = i + 1;
+  }
+  ଫେରନ୍ତୁ total;
+}
+
+କାର୍ଯ୍ୟ build_range(n: i64) -> Vec<i64> {
+  ମନେକର xs: Vec<i64> = vec(0);
+  ମନେକର i: i64 = 1;
+  ଯେତେବେଳେ i < n {
+    xs = push(xs, i);
+    i = i + 1;
+  }
+  ଫେରନ୍ତୁ xs;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର xs: Vec<i64> = build_range(5);
+  ମନେକର total: i64 = sum(ଦେଖନ୍ତୁ xs);
+  ଯଦି total > 5 {
+    ନିଶ୍ଚିତ total == 10;
+  } ଅନ୍ୟଥା {
+    ନିଶ୍ଚିତ total <= 5;
+  }
+  ଲେଖ total;
+  ଫେରନ୍ତୁ 0;
+}

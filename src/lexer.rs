@@ -684,8 +684,8 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
         "ਵਜੋਂ" => TokenKind::As,                   // vajon (as)
         "ਮੁੜੋ" => TokenKind::Return,               // mudho (return)
         "ਜੇ" => TokenKind::If,                     // je (if)
-        "ਨਹੀਂ ਤਾਂ" => TokenKind::Else,             // nahin taan (else — multi-word; TBD)
-        "ਜਦੋਂ ਤੱਕ" => TokenKind::While,            // jadon takk (while/until)
+        "ਵਰਨਾ" => TokenKind::Else,                  // varna (otherwise — single-word)
+        "ਜਦੋਂ" => TokenKind::While,                // jadon (while/when — single-word)
         "ਹਰ" => TokenKind::For,                    // har (every/for)
         "ਵਿੱਚ" => TokenKind::In,                   // vich (in)
         "ਤੋਂ" => TokenKind::From,                  // ton (from)
@@ -706,6 +706,7 @@ fn punjabi_keyword(text: &str) -> Option<TokenKind> {
         "ਛਾਪੋ" => TokenKind::Print,                // chhapo (print)
         "ਉਦੇਸ਼" => TokenKind::Intent,              // udesh (intent — tatsama)
         "ਕਿਸਮ" => TokenKind::Type,                 // kism (type)
+        "ਅਟੱਲ" => TokenKind::Invariant,            // attal (unchanging — invariant)
         _ => return None,
     };
     Some(kind)
@@ -822,7 +823,7 @@ fn odia_keyword(text: &str) -> Option<TokenKind> {
         "ଭାବେ" => TokenKind::As,                      // bhabe (as)
         "ଫେରନ୍ତୁ" => TokenKind::Return,              // pherantu (return)
         "ଯଦି" => TokenKind::If,                      // jadi (if)
-        "ନ ହେଲେ" => TokenKind::Else,                 // na hele (else — multi-word; queued)
+        "ଅନ୍ୟଥା" => TokenKind::Else,                 // anyatha (otherwise — single-word tatsama)
         "ଯେତେବେଳେ" => TokenKind::While,             // jetebele (while)
         "ପ୍ରତି" => TokenKind::For,                   // prati (for each — tatsama)
         "ରେ" => TokenKind::In,                       // re (in)
@@ -844,6 +845,7 @@ fn odia_keyword(text: &str) -> Option<TokenKind> {
         "ଛାପନ୍ତୁ" => TokenKind::Print,                // chhapantu (print)
         "ଉଦ୍ଦେଶ୍ୟ" => TokenKind::Intent,              // uddeshya (intent — tatsama)
         "ପ୍ରକାର" => TokenKind::Type,                  // prakaara (type — tatsama)
+        "ଅଚଳ" => TokenKind::Invariant,               // achala (unchanging — invariant, tatsama)
         _ => return None,
     };
     Some(kind)

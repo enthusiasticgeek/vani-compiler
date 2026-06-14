@@ -1,0 +1,29 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/odia/box_recursive_drop.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+// `ଗଠନ` = struct
+
+ଗଠନ Bag {
+  contents: Box<Vec<i64>>,
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର v: Vec<i64> = vec(10, 20, 30);
+  ମନେକର b: Box<Vec<i64>> = box(v);
+  ଲେଖ "constructed Box<Vec<i64>>";
+
+  ମନେକର v2: Vec<i64> = vec(7, 8, 9);
+  ମନେକର bag: Bag = Bag { contents: box(v2) };
+  ଲେଖ "constructed Bag";
+
+  ମନେକର s: OwnedStr = "hi" + "!";
+  ମନେକର bs: Box<OwnedStr> = box(s);
+  ଲେଖ "constructed Box<OwnedStr>";
+
+  ଫେରନ୍ତୁ 0;
+}

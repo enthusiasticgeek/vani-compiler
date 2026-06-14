@@ -1,0 +1,34 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/vec_invariants.vani              # LLVM
+//   vanic run examples/language/punjabi/vec_invariants.vani --backend=c  # C
+
+ਉਦੇਸ਼ "Loop invariants over Vec length, end-to-end";
+
+// `ਅਟੱਲ` = invariant ("unchanging"), `ਪ੍ਰਮਾਣ` = prove
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ xs: Vec<i64> = vec(0);
+  ਮੰਨੋ i: i64 = 1;
+
+  ਜਦੋਂ i < 5
+  ਅਟੱਲ len(xs) == (i ਵਜੋਂ u64);
+  ਅਟੱਲ i >= 1;
+  ਅਟੱਲ i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  ਪ੍ਰਮਾਣ i == 5;
+  ਪ੍ਰਮਾਣ len(xs) == 5;
+
+  ਲਿਖੋ xs[0];
+  ਲਿਖੋ xs[1];
+  ਲਿਖੋ xs[2];
+  ਲਿਖੋ xs[3];
+  ਲਿਖੋ xs[4];
+
+  ਮੁੜੋ 0;
+}

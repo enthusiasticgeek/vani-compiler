@@ -1,0 +1,47 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/early_exit.vani              # LLVM
+//   vanic run examples/language/odia/early_exit.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "break and continue for early exit and skip";
+
+// `ବନ୍ଦ` = break, `ଜାରି` = continue
+
+କାର୍ଯ୍ୟ find_first_negative(xs: ଦେଖନ୍ତୁ Vec<i64>) -> i64 {
+  ମନେକର i: u64 = 0;
+  ମନେକର result: i64 = 0 - 1;
+  ଯେତେବେଳେ i < len(xs) {
+    ଯଦି xs[i] < 0 {
+      result = xs[i];
+      ବନ୍ଦ;
+    }
+    i = i + 1;
+  }
+  ଫେରନ୍ତୁ result;
+}
+
+କାର୍ଯ୍ୟ count_positive(xs: ଦେଖନ୍ତୁ Vec<i64>) -> i64 {
+  ମନେକର i: u64 = 0;
+  ମନେକର count: i64 = 0;
+  ଯେତେବେଳେ i < len(xs) {
+    ଯଦି xs[i] <= 0 {
+      i = i + 1;
+      ଜାରି;
+    }
+    count = count + 1;
+    i = i + 1;
+  }
+  ଫେରନ୍ତୁ count;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର xs: Vec<i64> = vec(1, 2, 0 - 3, 4, 0 - 5);
+  ମନେକର first_neg: i64 = find_first_negative(ଦେଖନ୍ତୁ xs);
+  ମନେକର positives: i64 = count_positive(ଦେଖନ୍ତୁ xs);
+  ନିଶ୍ଚିତ first_neg == 0 - 3;
+  ନିଶ୍ଚିତ positives == 3;
+  ଲେଖ first_neg;
+  ଲେଖ positives;
+  ଫେରନ୍ତୁ 0;
+}

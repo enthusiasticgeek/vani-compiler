@@ -1,0 +1,38 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/verified.vani              # LLVM
+//   vanic run examples/language/odia/verified.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "SMT verifier — preconditions and proofs";
+
+// `ଆବଶ୍ୟକ` = requires, `ପ୍ରମାଣ` = prove
+
+କାର୍ଯ୍ୟ clamp_low(x: i64, lo: i64) -> i64
+ଆବଶ୍ୟକ lo >= 0;
+{
+  ଯଦି x < lo {
+    ଫେରନ୍ତୁ lo;
+  } ଅନ୍ୟଥା {
+    ଫେରନ୍ତୁ x;
+  }
+}
+
+କାର୍ଯ୍ୟ safe_subtract(a: i64, b: i64) -> i64
+ଆବଶ୍ୟକ a >= b;
+ଆବଶ୍ୟକ b >= 0;
+{
+  ପ୍ରମାଣ a - b >= 0;
+  ଫେରନ୍ତୁ a - b;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର x: i64 = clamp_low(0 - 5, 0);
+  ନିଶ୍ଚିତ x == 0;
+
+  ମନେକର d: i64 = safe_subtract(10, 3);
+  ନିଶ୍ଚିତ d == 7;
+
+  ଲେଖ d;
+  ଫେରନ୍ତୁ 0;
+}

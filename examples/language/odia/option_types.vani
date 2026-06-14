@@ -1,0 +1,42 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/odia/option_types.vani              # LLVM
+
+ଉଦ୍ଦେଶ୍ୟ "Payloaded enums via Option<i64>";
+
+// `ଗଣନା` = enum, `ମେଳ` = match, `ତାହେଲେ` = then
+
+ଗଣନା Opt { Some(i64), None }
+
+କାର୍ଯ୍ୟ unwrap_or(o: Opt, def: i64) -> i64 {
+  ଫେରନ୍ତୁ ମେଳ o {
+    Opt.Some(v) ତାହେଲେ v,
+    Opt.None    ତାହେଲେ def,
+  };
+}
+
+କାର୍ଯ୍ୟ is_some(o: Opt) -> i64 {
+  ଫେରନ୍ତୁ ମେଳ o {
+    Opt.Some(v) ତାହେଲେ 1,
+    Opt.None    ତାହେଲେ 0,
+  };
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର a: Opt = Opt.Some(42);
+  ମନେକର b: Opt = Opt.None;
+
+  ମନେକର x: i64 = unwrap_or(a, 0);
+  ମନେକର y: i64 = unwrap_or(b, 100);
+
+  ନିଶ୍ଚିତ x == 42;
+  ନିଶ୍ଚିତ y == 100;
+  ନିଶ୍ଚିତ is_some(a) == 1;
+  ନିଶ୍ଚିତ is_some(b) == 0;
+
+  ଲେଖ "Some(42) unwrapped =", x;
+  ଲେଖ "None with default 100 =", y;
+  ଫେରନ୍ତୁ 0;
+}

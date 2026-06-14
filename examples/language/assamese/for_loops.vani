@@ -1,0 +1,41 @@
+// vani-lang: assamese
+//
+// build & run:
+//   vanic run examples/language/assamese/for_loops.vani              # LLVM
+//   vanic run examples/language/assamese/for_loops.vani --backend=c  # C
+
+উদ্দেশ্য "for-loops over integer ranges";
+
+// `প্রতি` = for, `থেকে` = from, `পর্যন্ত` = to, `বিরাম` = break
+
+কাজ sum_squares(n: i64) -> i64 {
+  মান total: i64 = 0;
+  প্রতি i থেকে 1 পর্যন্ত n {
+    total = total + i * i;
+  }
+  ফেরত total;
+}
+
+কাজ find_first_zero(xs: দেখ [i64; 5]) -> i64 {
+  মান result: i64 = 0 - 1;
+  প্রতি i থেকে 0 পর্যন্ত len(xs) {
+    যদি xs[i] == 0 {
+      result = i হিসাবে i64;
+      বিরাম;
+    }
+  }
+  ফেরত result;
+}
+
+কাজ main() -> i64 {
+  মান s: i64 = sum_squares(5);
+  নিশ্চিত s == 30;
+
+  মান xs: [i64; 5] = [3, 7, 0, 9, 1];
+  মান idx: i64 = find_first_zero(দেখ xs);
+  নিশ্চিত idx == 2;
+
+  লেখ s;
+  লেখ idx;
+  ফেরত 0;
+}

@@ -1,0 +1,42 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/option_types.vani --backend=c  # C (tagged-union)
+//   vanic run examples/language/punjabi/option_types.vani              # LLVM
+
+ਉਦੇਸ਼ "Payloaded enums via Option<i64>";
+
+// `ਗਣਨਾ` = enum, `ਮੇਲ` = match, `ਤਦ` = then
+
+ਗਣਨਾ Opt { Some(i64), None }
+
+ਕਾਰਜ unwrap_or(o: Opt, def: i64) -> i64 {
+  ਮੁੜੋ ਮੇਲ o {
+    Opt.Some(v) ਤਦ v,
+    Opt.None    ਤਦ def,
+  };
+}
+
+ਕਾਰਜ is_some(o: Opt) -> i64 {
+  ਮੁੜੋ ਮੇਲ o {
+    Opt.Some(v) ਤਦ 1,
+    Opt.None    ਤਦ 0,
+  };
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ a: Opt = Opt.Some(42);
+  ਮੰਨੋ b: Opt = Opt.None;
+
+  ਮੰਨੋ x: i64 = unwrap_or(a, 0);
+  ਮੰਨੋ y: i64 = unwrap_or(b, 100);
+
+  ਨਿਸ਼ਚਿਤ x == 42;
+  ਨਿਸ਼ਚਿਤ y == 100;
+  ਨਿਸ਼ਚਿਤ is_some(a) == 1;
+  ਨਿਸ਼ਚਿਤ is_some(b) == 0;
+
+  ਲਿਖੋ "Some(42) unwrapped =", x;
+  ਲਿਖੋ "None with default 100 =", y;
+  ਮੁੜੋ 0;
+}
