@@ -1,0 +1,40 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/option_types.vani              # LLVM
+//   vanic run examples/language/hungarian/option_types.vani --backend=c  # C
+
+cél "Hungarian payloaded enums via Opt<i64>";
+
+felsorolás Opt { Some(i64), None }
+
+fuggveny kicsomagol_vagy(o: Opt, alapert: i64) -> i64 {
+  visszatér egyezzen o {
+    Opt.Some(v) akkor v,
+    Opt.None    akkor alapert,
+  };
+}
+
+fuggveny van_some(o: Opt) -> i64 {
+  visszatér egyezzen o {
+    Opt.Some(v) akkor 1,
+    Opt.None    akkor 0,
+  };
+}
+
+fn main() -> i64 {
+  legyen a: Opt = Opt.Some(42);
+  legyen b: Opt = Opt.None;
+
+  legyen x: i64 = kicsomagol_vagy(a, 0);
+  legyen y: i64 = kicsomagol_vagy(b, 100);
+
+  állítsd x == 42;
+  állítsd y == 100;
+  állítsd van_some(a) == 1;
+  állítsd van_some(b) == 0;
+
+  nyomtass "Some(42) kicsomagolva =", x;
+  nyomtass "None alapert 100 =", y;
+  visszatér 0;
+}

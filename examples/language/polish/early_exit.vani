@@ -1,0 +1,36 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/early_exit.vani              # LLVM
+//   vanic run examples/language/polish/early_exit.vani --backend=c  # C
+
+cel "Polish early exit — przerwij/kontynuuj/wroc";
+
+funkcja pierwsza_dodatnia(v: Vec<i64>) -> i64 {
+  dla i od 0 to len(v) {
+    jesli v[i] > 0 {
+      wroc v[i];
+    }
+  }
+  wroc -1;
+}
+
+funkcja suma_do_zera(v: Vec<i64>) -> i64 {
+  niech suma: i64 = 0;
+  dla i od 0 to len(v) {
+    jesli v[i] == 0 { przerwij; }
+    suma = suma + v[i];
+  }
+  wroc suma;
+}
+
+fn main() -> i64 {
+  niech v: Vec<i64> = vec(-1, -2, 3, 4);
+  potwierdz pierwsza_dodatnia(v) == 3;
+
+  niech w: Vec<i64> = vec(1, 2, 0, 9);
+  potwierdz suma_do_zera(w) == 3;
+
+  drukuj "wczesne wyjscie ok";
+  wroc 0;
+}

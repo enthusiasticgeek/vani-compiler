@@ -1,0 +1,33 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/try_question_op.vani              # LLVM
+//   vanic run examples/language/czech/try_question_op.vani --backend=c  # C
+
+záměr "Czech postfix ? early-return sugar on payloaded enums";
+
+výčet Opt { Some(i64), None }
+
+funkce zdvojene_q(o: Opt) -> Opt {
+  let v: i64 = o?;
+  vrať Opt.Some(v * 2);
+}
+
+funkce rozbalit_nebo(o: Opt, vychozi: i64) -> i64 {
+  vrať odpovídej o {
+    Opt.Some(v) pak v,
+    Opt.None    pak vychozi,
+  };
+}
+
+fn main() -> i64 {
+  let a: Opt = zdvojene_q(Opt.Some(5));
+  tvrď rozbalit_nebo(a, 0) == 10;
+
+  let b: Opt = zdvojene_q(Opt.None);
+  tvrď rozbalit_nebo(b, 99) == 99;
+
+  vypiš "Some(5)? zdvojeno =", rozbalit_nebo(a, 0);
+  vypiš "None? vychozi je", rozbalit_nebo(b, 99);
+  vrať 0;
+}

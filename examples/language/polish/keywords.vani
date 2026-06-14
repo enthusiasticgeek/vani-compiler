@@ -1,0 +1,27 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/keywords.vani              # LLVM
+//   vanic run examples/language/polish/keywords.vani --backend=c  # C
+
+cel "Polish keyword showcase — funkcja/niech/struktura/wroc/potwierdz/udowodnij";
+
+struktura Punkt {
+  x: i64,
+  y: i64,
+}
+
+funkcja suma(a: i64, b: i64) -> i64 {
+  wroc a + b;
+}
+
+funkcja glowna() -> i64 {
+  niech p: Punkt = Punkt { x: 3, y: 4 };
+  niech s: i64 = suma(p.x, p.y);
+  potwierdz s == 7;
+  udowodnij 1 + 1 == 2;
+  drukuj s;
+  wroc 0;
+}
+
+fn main() -> i64 { wroc glowna(); }

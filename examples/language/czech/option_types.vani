@@ -1,0 +1,40 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/option_types.vani              # LLVM
+//   vanic run examples/language/czech/option_types.vani --backend=c  # C
+
+záměr "Czech payloaded enums via Opt<i64>";
+
+výčet Opt { Some(i64), None }
+
+funkce rozbalit_nebo(o: Opt, vychozi: i64) -> i64 {
+  vrať odpovídej o {
+    Opt.Some(v) pak v,
+    Opt.None    pak vychozi,
+  };
+}
+
+funkce je_some(o: Opt) -> i64 {
+  vrať odpovídej o {
+    Opt.Some(v) pak 1,
+    Opt.None    pak 0,
+  };
+}
+
+fn main() -> i64 {
+  let a: Opt = Opt.Some(42);
+  let b: Opt = Opt.None;
+
+  let x: i64 = rozbalit_nebo(a, 0);
+  let y: i64 = rozbalit_nebo(b, 100);
+
+  tvrď x == 42;
+  tvrď y == 100;
+  tvrď je_some(a) == 1;
+  tvrď je_some(b) == 0;
+
+  vypiš "Some(42) rozbaleno =", x;
+  vypiš "None vychozi 100 =", y;
+  vrať 0;
+}

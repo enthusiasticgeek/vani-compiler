@@ -1,0 +1,25 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/verified.vani              # LLVM
+//   vanic run examples/language/romanian/verified.vani --backend=c  # C
+
+scop "SMT-verified clamp_low";
+
+functie clamp_low(x: i64, limita: i64) -> i64
+necesita limita >= 0;
+{
+  daca x < limita {
+    intoarce limita;
+  } altfel {
+    intoarce x;
+  }
+}
+
+fn main() -> i64 {
+  afirma clamp_low(0 - 5, 0) == 0;
+  afirma clamp_low(10, 3) == 10;
+  scrie clamp_low(0 - 5, 0);
+  scrie clamp_low(10, 3);
+  intoarce 0;
+}

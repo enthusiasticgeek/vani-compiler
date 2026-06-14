@@ -1,0 +1,40 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/option_types.vani              # LLVM
+//   vanic run examples/language/romanian/option_types.vani --backend=c  # C
+
+scop "Romanian payloaded enums via Opt<i64>";
+
+enumerare Opt { Some(i64), None }
+
+functie despacheta_sau(o: Opt, implicit: i64) -> i64 {
+  intoarce potriveste o {
+    Opt.Some(v) atunci v,
+    Opt.None    atunci implicit,
+  };
+}
+
+functie este_some(o: Opt) -> i64 {
+  intoarce potriveste o {
+    Opt.Some(v) atunci 1,
+    Opt.None    atunci 0,
+  };
+}
+
+fn main() -> i64 {
+  fie a: Opt = Opt.Some(42);
+  fie b: Opt = Opt.None;
+
+  fie x: i64 = despacheta_sau(a, 0);
+  fie y: i64 = despacheta_sau(b, 100);
+
+  afirma x == 42;
+  afirma y == 100;
+  afirma este_some(a) == 1;
+  afirma este_some(b) == 0;
+
+  scrie "Some(42) despahetat =", x;
+  scrie "None implicit 100 =", y;
+  intoarce 0;
+}

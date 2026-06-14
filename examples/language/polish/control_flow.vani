@@ -1,0 +1,36 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/control_flow.vani              # LLVM
+//   vanic run examples/language/polish/control_flow.vani --backend=c  # C
+
+cel "Polish control flow — jesli/inaczej/dopoki";
+
+funkcja znak(n: i64) -> i64 {
+  jesli n > 0 {
+    wroc 1;
+  } inaczej jesli n < 0 {
+    wroc -1;
+  } inaczej {
+    wroc 0;
+  }
+}
+
+funkcja odliczanie(od_n: i64) -> i64 {
+  niech i: i64 = od_n;
+  niech suma: i64 = 0;
+  dopoki i > 0 {
+    suma = suma + i;
+    i = i - 1;
+  }
+  wroc suma;
+}
+
+fn main() -> i64 {
+  potwierdz znak(5)  == 1;
+  potwierdz znak(-3) == -1;
+  potwierdz znak(0)  == 0;
+  potwierdz odliczanie(4) == 10;
+  drukuj "znak i odliczanie ok";
+  wroc 0;
+}

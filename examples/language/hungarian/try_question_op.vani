@@ -1,0 +1,33 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/try_question_op.vani              # LLVM
+//   vanic run examples/language/hungarian/try_question_op.vani --backend=c  # C
+
+cél "Hungarian postfix ? early-return sugar on payloaded enums";
+
+felsorolás Opt { Some(i64), None }
+
+fuggveny ketszerezett_q(o: Opt) -> Opt {
+  legyen v: i64 = o?;
+  visszatér Opt.Some(v * 2);
+}
+
+fuggveny kicsomagol_vagy(o: Opt, alapert: i64) -> i64 {
+  visszatér egyezzen o {
+    Opt.Some(v) akkor v,
+    Opt.None    akkor alapert,
+  };
+}
+
+fn main() -> i64 {
+  legyen a: Opt = ketszerezett_q(Opt.Some(5));
+  állítsd kicsomagol_vagy(a, 0) == 10;
+
+  legyen b: Opt = ketszerezett_q(Opt.None);
+  állítsd kicsomagol_vagy(b, 99) == 99;
+
+  nyomtass "Some(5)? ketszerezve =", kicsomagol_vagy(a, 0);
+  nyomtass "None? alapert az", kicsomagol_vagy(b, 99);
+  visszatér 0;
+}

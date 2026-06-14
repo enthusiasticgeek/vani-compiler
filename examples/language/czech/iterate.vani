@@ -1,0 +1,34 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/iterate.vani              # LLVM
+//   vanic run examples/language/czech/iterate.vani --backend=c  # C
+
+záměr "Czech vec iteration";
+
+funkce soucet_vec(v: Vec<i64>) -> i64 {
+  let soucet: i64 = 0;
+  pro i od 0 do len(v) {
+    soucet = soucet + v[i];
+  }
+  vrať soucet;
+}
+
+funkce max_vec(v: Vec<i64>) -> i64 {
+  let m: i64 = v[0];
+  pro i od 1 do len(v) {
+    pokud v[i] > m {
+      m = v[i];
+    }
+  }
+  vrať m;
+}
+
+fn main() -> i64 {
+  let v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  tvrď soucet_vec(v) == 23;
+  tvrď max_vec(v) == 9;
+  vypiš "soucet =", soucet_vec(v);
+  vypiš "max =", max_vec(v);
+  vrať 0;
+}

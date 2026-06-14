@@ -1,0 +1,33 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/try_question_op.vani              # LLVM
+//   vanic run examples/language/polish/try_question_op.vani --backend=c  # C
+
+cel "Polish postfix ? early-return sugar on payloaded enums";
+
+wyliczenie Opt { Some(i64), None }
+
+funkcja podwojone_q(o: Opt) -> Opt {
+  niech v: i64 = o?;
+  wroc Opt.Some(v * 2);
+}
+
+funkcja rozpakuj_lub(o: Opt, domyslna: i64) -> i64 {
+  wroc dopasuj o {
+    Opt.Some(v) wtedy v,
+    Opt.None    wtedy domyslna,
+  };
+}
+
+fn main() -> i64 {
+  niech a: Opt = podwojone_q(Opt.Some(5));
+  potwierdz rozpakuj_lub(a, 0) == 10;
+
+  niech b: Opt = podwojone_q(Opt.None);
+  potwierdz rozpakuj_lub(b, 99) == 99;
+
+  drukuj "Some(5)? podwojone =", rozpakuj_lub(a, 0);
+  drukuj "None? domyslna to", rozpakuj_lub(b, 99);
+  wroc 0;
+}

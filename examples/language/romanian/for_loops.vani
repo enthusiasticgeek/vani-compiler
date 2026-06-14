@@ -1,0 +1,30 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/for_loops.vani              # LLVM
+//   vanic run examples/language/romanian/for_loops.vani --backend=c  # C
+
+scop "Romanian for-range loops — pentru/from/pana";
+
+functie suma_interval(inceput: i64, sfarsit: i64) -> i64 {
+  fie suma: i64 = 0;
+  pentru i from inceput pana sfarsit {
+    suma = suma + i;
+  }
+  intoarce suma;
+}
+
+functie numara() -> i64 {
+  fie numar: i64 = 0;
+  pentru _i from 0 pana 5 {
+    numar = numar + 1;
+  }
+  intoarce numar;
+}
+
+fn main() -> i64 {
+  afirma suma_interval(1, 5) == 10;
+  afirma numara() == 5;
+  scrie "suma bucla =", suma_interval(1, 5);
+  intoarce 0;
+}

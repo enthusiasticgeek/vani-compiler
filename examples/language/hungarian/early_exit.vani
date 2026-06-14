@@ -1,0 +1,36 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/early_exit.vani              # LLVM
+//   vanic run examples/language/hungarian/early_exit.vani --backend=c  # C
+
+cél "Hungarian early exit — törj/folytasd/visszatér";
+
+fuggveny elso_pozitiv(v: Vec<i64>) -> i64 {
+  minden i from 0 to len(v) {
+    ha v[i] > 0 {
+      visszatér v[i];
+    }
+  }
+  visszatér -1;
+}
+
+fuggveny osszeg_nullaig(v: Vec<i64>) -> i64 {
+  legyen osszeg: i64 = 0;
+  minden i from 0 to len(v) {
+    ha v[i] == 0 { törj; }
+    osszeg = osszeg + v[i];
+  }
+  visszatér osszeg;
+}
+
+fn main() -> i64 {
+  legyen v: Vec<i64> = vec(-1, -2, 3, 4);
+  állítsd elso_pozitiv(v) == 3;
+
+  legyen w: Vec<i64> = vec(1, 2, 0, 9);
+  állítsd osszeg_nullaig(w) == 3;
+
+  nyomtass "korai kilepes ok";
+  visszatér 0;
+}

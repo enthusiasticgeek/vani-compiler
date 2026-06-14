@@ -1,0 +1,36 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/control_flow.vani              # LLVM
+//   vanic run examples/language/romanian/control_flow.vani --backend=c  # C
+
+scop "Romanian control flow — daca/altfel/cat_timp";
+
+functie semn(n: i64) -> i64 {
+  daca n > 0 {
+    intoarce 1;
+  } altfel daca n < 0 {
+    intoarce -1;
+  } altfel {
+    intoarce 0;
+  }
+}
+
+functie numaratoare_inversa(de_la_n: i64) -> i64 {
+  fie i: i64 = de_la_n;
+  fie suma: i64 = 0;
+  cat_timp i > 0 {
+    suma = suma + i;
+    i = i - 1;
+  }
+  intoarce suma;
+}
+
+fn main() -> i64 {
+  afirma semn(5)  == 1;
+  afirma semn(-3) == -1;
+  afirma semn(0)  == 0;
+  afirma numaratoare_inversa(4) == 10;
+  scrie "semn si numaratoare ok";
+  intoarce 0;
+}

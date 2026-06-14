@@ -31072,6 +31072,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn hungarian_invariant_keyword_compiles() {
+        let source = "// vani-lang: hungarian\n\
+                      cél \"Hungarian invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        legyen xs: Vec<i64> = vec(0);\n  \
+                        legyen i: i64 = 1;\n  \
+                        amíg i < 3\n  \
+                        invariant i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        visszatér 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hungarian invariant compiles");
+    }
+
+    #[test]
+    fn hungarian_for_range_compiles() {
+        let source = "// vani-lang: hungarian\n\
+                      cél \"Hungarian for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        legyen osszeg: i64 = 0;\n  \
+                        minden i from 0 to 5 {\n    \
+                          osszeg = osszeg + i;\n  \
+                        }\n  \
+                        állítsd osszeg == 10;\n  \
+                        visszatér 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hungarian for-range compiles");
+    }
+
+    #[test]
+    fn hungarian_match_enum_compiles() {
+        let source = "// vani-lang: hungarian\n\
+                      cél \"Hungarian match/enum\";\n\
+                      felsorolás Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        legyen a: Opt = Opt.Some(7);\n  \
+                        legyen v: i64 = egyezzen a {\n    \
+                          Opt.Some(x) akkor x,\n    \
+                          Opt.None    akkor 0,\n  \
+                        };\n  \
+                        állítsd v == 7;\n  \
+                        visszatér 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hungarian match/enum compiles");
+    }
+
+    #[test]
+    fn hungarian_requires_proves_compiles() {
+        let source = "// vani-lang: hungarian\n\
+                      cél \"Hungarian requires/proves\";\n\
+                      fuggveny clamp_low(x: i64, kuszob: i64) -> i64\n\
+                      igényel kuszob >= 0;\n\
+                      {\n  \
+                        ha x < kuszob { visszatér kuszob; } különben { visszatér x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        állítsd clamp_low(0 - 3, 0) == 0;\n  \
+                        visszatér 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hungarian requires/proves compiles");
+    }
+
+    #[test]
     fn czech_slavic_latin_compiles() {
         // Phase 13.17: second Slavic Latin (after Polish).
         // Czech-distinctive ř + extensive háček marks.
@@ -31088,6 +31154,72 @@ fn main() -> i64 {
                         vrať 0;\n\
                       }\n";
         crate::compile(source).expect("Czech basics compile");
+    }
+
+    #[test]
+    fn czech_invariant_keyword_compiles() {
+        let source = "// vani-lang: czech\n\
+                      záměr \"Czech invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        let xs: Vec<i64> = vec(0);\n  \
+                        let i: i64 = 1;\n  \
+                        dokud i < 3\n  \
+                        neměnný i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        vrať 0;\n\
+                      }\n";
+        crate::compile(source).expect("Czech invariant compiles");
+    }
+
+    #[test]
+    fn czech_for_range_compiles() {
+        let source = "// vani-lang: czech\n\
+                      záměr \"Czech for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        let soucet: i64 = 0;\n  \
+                        pro i od 0 do 5 {\n    \
+                          soucet = soucet + i;\n  \
+                        }\n  \
+                        tvrď soucet == 10;\n  \
+                        vrať 0;\n\
+                      }\n";
+        crate::compile(source).expect("Czech for-range compiles");
+    }
+
+    #[test]
+    fn czech_match_enum_compiles() {
+        let source = "// vani-lang: czech\n\
+                      záměr \"Czech match/enum\";\n\
+                      výčet Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        let a: Opt = Opt.Some(7);\n  \
+                        let v: i64 = odpovídej a {\n    \
+                          Opt.Some(x) pak x,\n    \
+                          Opt.None    pak 0,\n  \
+                        };\n  \
+                        tvrď v == 7;\n  \
+                        vrať 0;\n\
+                      }\n";
+        crate::compile(source).expect("Czech match/enum compiles");
+    }
+
+    #[test]
+    fn czech_requires_proves_compiles() {
+        let source = "// vani-lang: czech\n\
+                      záměr \"Czech requires/proves\";\n\
+                      funkce clamp_low(x: i64, hranice: i64) -> i64\n\
+                      vyžaduje hranice >= 0;\n\
+                      {\n  \
+                        pokud x < hranice { vrať hranice; } jinak { vrať x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        tvrď clamp_low(0 - 3, 0) == 0;\n  \
+                        vrať 0;\n\
+                      }\n";
+        crate::compile(source).expect("Czech requires/proves compiles");
     }
 
     #[test]
@@ -31233,6 +31365,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn romanian_invariant_keyword_compiles() {
+        let source = "// vani-lang: romanian\n\
+                      scop \"Romanian invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        fie xs: Vec<i64> = vec(0);\n  \
+                        fie i: i64 = 1;\n  \
+                        cat_timp i < 3\n  \
+                        invariant i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        intoarce 0;\n\
+                      }\n";
+        crate::compile(source).expect("Romanian invariant compiles");
+    }
+
+    #[test]
+    fn romanian_for_range_compiles() {
+        let source = "// vani-lang: romanian\n\
+                      scop \"Romanian for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        fie suma: i64 = 0;\n  \
+                        pentru i from 0 pana 5 {\n    \
+                          suma = suma + i;\n  \
+                        }\n  \
+                        afirma suma == 10;\n  \
+                        intoarce 0;\n\
+                      }\n";
+        crate::compile(source).expect("Romanian for-range compiles");
+    }
+
+    #[test]
+    fn romanian_match_enum_compiles() {
+        let source = "// vani-lang: romanian\n\
+                      scop \"Romanian match/enum\";\n\
+                      enumerare Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        fie a: Opt = Opt.Some(7);\n  \
+                        fie v: i64 = potriveste a {\n    \
+                          Opt.Some(x) atunci x,\n    \
+                          Opt.None    atunci 0,\n  \
+                        };\n  \
+                        afirma v == 7;\n  \
+                        intoarce 0;\n\
+                      }\n";
+        crate::compile(source).expect("Romanian match/enum compiles");
+    }
+
+    #[test]
+    fn romanian_requires_proves_compiles() {
+        let source = "// vani-lang: romanian\n\
+                      scop \"Romanian requires/proves\";\n\
+                      functie clamp_low(x: i64, limita: i64) -> i64\n\
+                      necesita limita >= 0;\n\
+                      {\n  \
+                        daca x < limita { intoarce limita; } altfel { intoarce x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        afirma clamp_low(0 - 3, 0) == 0;\n  \
+                        intoarce 0;\n\
+                      }\n";
+        crate::compile(source).expect("Romanian requires/proves compiles");
+    }
+
+    #[test]
     fn dutch_basic_latin_pragma_compiles() {
         // Phase 13.14: basic-Latin Germanic. Rides pragma
         // threading directly.
@@ -31367,6 +31565,72 @@ fn main() -> i64 {
                         zwróć 0;\n\
                       }\n";
         crate::compile(source).expect("Polish basics compile");
+    }
+
+    #[test]
+    fn polish_invariant_keyword_compiles() {
+        let source = "// vani-lang: polish\n\
+                      cel \"Polish invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        niech xs: Vec<i64> = vec(0);\n  \
+                        niech i: i64 = 1;\n  \
+                        dopoki i < 3\n  \
+                        niezmienny i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        wroc 0;\n\
+                      }\n";
+        crate::compile(source).expect("Polish invariant compiles");
+    }
+
+    #[test]
+    fn polish_for_range_compiles() {
+        let source = "// vani-lang: polish\n\
+                      cel \"Polish for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        niech suma: i64 = 0;\n  \
+                        dla i od 0 to 5 {\n    \
+                          suma = suma + i;\n  \
+                        }\n  \
+                        potwierdz suma == 10;\n  \
+                        wroc 0;\n\
+                      }\n";
+        crate::compile(source).expect("Polish for-range compiles");
+    }
+
+    #[test]
+    fn polish_match_enum_compiles() {
+        let source = "// vani-lang: polish\n\
+                      cel \"Polish match/enum\";\n\
+                      wyliczenie Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        niech a: Opt = Opt.Some(7);\n  \
+                        niech v: i64 = dopasuj a {\n    \
+                          Opt.Some(x) wtedy x,\n    \
+                          Opt.None    wtedy 0,\n  \
+                        };\n  \
+                        potwierdz v == 7;\n  \
+                        wroc 0;\n\
+                      }\n";
+        crate::compile(source).expect("Polish match/enum compiles");
+    }
+
+    #[test]
+    fn polish_requires_proves_compiles() {
+        let source = "// vani-lang: polish\n\
+                      cel \"Polish requires/proves\";\n\
+                      funkcja clamp_low(x: i64, prog: i64) -> i64\n\
+                      wymaga prog >= 0;\n\
+                      {\n  \
+                        jesli x < prog { wroc prog; } inaczej { wroc x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        potwierdz clamp_low(0 - 3, 0) == 0;\n  \
+                        wroc 0;\n\
+                      }\n";
+        crate::compile(source).expect("Polish requires/proves compiles");
     }
 
     #[test]

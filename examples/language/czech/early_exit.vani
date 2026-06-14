@@ -1,0 +1,36 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/early_exit.vani              # LLVM
+//   vanic run examples/language/czech/early_exit.vani --backend=c  # C
+
+záměr "Czech early exit — přeruš/pokračuj/vrať";
+
+funkce prvni_kladne(v: Vec<i64>) -> i64 {
+  pro i od 0 do len(v) {
+    pokud v[i] > 0 {
+      vrať v[i];
+    }
+  }
+  vrať -1;
+}
+
+funkce soucet_do_nuly(v: Vec<i64>) -> i64 {
+  let soucet: i64 = 0;
+  pro i od 0 do len(v) {
+    pokud v[i] == 0 { přeruš; }
+    soucet = soucet + v[i];
+  }
+  vrať soucet;
+}
+
+fn main() -> i64 {
+  let v: Vec<i64> = vec(-1, -2, 3, 4);
+  tvrď prvni_kladne(v) == 3;
+
+  let w: Vec<i64> = vec(1, 2, 0, 9);
+  tvrď soucet_do_nuly(w) == 3;
+
+  vypiš "casny vychod ok";
+  vrať 0;
+}

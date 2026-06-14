@@ -1,0 +1,34 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/iterate.vani              # LLVM
+//   vanic run examples/language/romanian/iterate.vani --backend=c  # C
+
+scop "Romanian vec iteration";
+
+functie suma_vec(v: Vec<i64>) -> i64 {
+  fie suma: i64 = 0;
+  pentru i from 0 pana len(v) {
+    suma = suma + v[i];
+  }
+  intoarce suma;
+}
+
+functie max_vec(v: Vec<i64>) -> i64 {
+  fie m: i64 = v[0];
+  pentru i from 1 pana len(v) {
+    daca v[i] > m {
+      m = v[i];
+    }
+  }
+  intoarce m;
+}
+
+fn main() -> i64 {
+  fie v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  afirma suma_vec(v) == 23;
+  afirma max_vec(v) == 9;
+  scrie "suma =", suma_vec(v);
+  scrie "max =", max_vec(v);
+  intoarce 0;
+}

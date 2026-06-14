@@ -1,0 +1,32 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/romanian/vec_invariants.vani --backend=c  # C
+
+scop "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  fie xs: Vec<i64> = vec(0);
+  fie i: i64 = 1;
+
+  cat_timp i < 5
+  invariant len(xs) == (i ca u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  dovedeste i == 5;
+  dovedeste len(xs) == 5;
+
+  scrie xs[0];
+  scrie xs[1];
+  scrie xs[2];
+  scrie xs[3];
+  scrie xs[4];
+
+  intoarce 0;
+}

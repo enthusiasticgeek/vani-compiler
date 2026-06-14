@@ -1,0 +1,36 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/control_flow.vani              # LLVM
+//   vanic run examples/language/hungarian/control_flow.vani --backend=c  # C
+
+cél "Hungarian control flow — ha/különben/amíg";
+
+fuggveny elojel(n: i64) -> i64 {
+  ha n > 0 {
+    visszatér 1;
+  } különben ha n < 0 {
+    visszatér -1;
+  } különben {
+    visszatér 0;
+  }
+}
+
+fuggveny visszaszamlal(n_tol: i64) -> i64 {
+  legyen i: i64 = n_tol;
+  legyen osszeg: i64 = 0;
+  amíg i > 0 {
+    osszeg = osszeg + i;
+    i = i - 1;
+  }
+  visszatér osszeg;
+}
+
+fn main() -> i64 {
+  állítsd elojel(5)  == 1;
+  állítsd elojel(-3) == -1;
+  állítsd elojel(0)  == 0;
+  állítsd visszaszamlal(4) == 10;
+  nyomtass "elojel es visszaszamlal ok";
+  visszatér 0;
+}

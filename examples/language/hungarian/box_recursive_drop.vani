@@ -1,0 +1,27 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/hungarian/box_recursive_drop.vani --backend=c  # C
+
+cél "Hungarian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+szerkezet Taska {
+  tartalom: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  legyen v: Vec<i64> = vec(10, 20, 30);
+  legyen b: Box<Vec<i64>> = box(v);
+  nyomtass "Box<Vec<i64>> letrehozva";
+
+  legyen v2: Vec<i64> = vec(7, 8, 9);
+  legyen taska: Taska = Taska { tartalom: box(v2) };
+  nyomtass "Taska letrehozva";
+
+  legyen s: OwnedStr = "szia" + "!";
+  legyen bs: Box<OwnedStr> = box(s);
+  nyomtass "Box<OwnedStr> letrehozva";
+
+  visszatér 0;
+}

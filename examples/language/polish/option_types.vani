@@ -1,0 +1,40 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/option_types.vani              # LLVM
+//   vanic run examples/language/polish/option_types.vani --backend=c  # C
+
+cel "Polish payloaded enums via Opt<i64>";
+
+wyliczenie Opt { Some(i64), None }
+
+funkcja rozpakuj_lub(o: Opt, domyslna: i64) -> i64 {
+  wroc dopasuj o {
+    Opt.Some(v) wtedy v,
+    Opt.None    wtedy domyslna,
+  };
+}
+
+funkcja jest_some(o: Opt) -> i64 {
+  wroc dopasuj o {
+    Opt.Some(v) wtedy 1,
+    Opt.None    wtedy 0,
+  };
+}
+
+fn main() -> i64 {
+  niech a: Opt = Opt.Some(42);
+  niech b: Opt = Opt.None;
+
+  niech x: i64 = rozpakuj_lub(a, 0);
+  niech y: i64 = rozpakuj_lub(b, 100);
+
+  potwierdz x == 42;
+  potwierdz y == 100;
+  potwierdz jest_some(a) == 1;
+  potwierdz jest_some(b) == 0;
+
+  drukuj "Some(42) rozpakowane =", x;
+  drukuj "None domyslna 100 =", y;
+  wroc 0;
+}

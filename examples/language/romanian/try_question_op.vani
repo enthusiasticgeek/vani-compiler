@@ -1,0 +1,33 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/try_question_op.vani              # LLVM
+//   vanic run examples/language/romanian/try_question_op.vani --backend=c  # C
+
+scop "Romanian postfix ? early-return sugar on payloaded enums";
+
+enumerare Opt { Some(i64), None }
+
+functie dublat_q(o: Opt) -> Opt {
+  fie v: i64 = o?;
+  intoarce Opt.Some(v * 2);
+}
+
+functie despacheta_sau(o: Opt, implicit: i64) -> i64 {
+  intoarce potriveste o {
+    Opt.Some(v) atunci v,
+    Opt.None    atunci implicit,
+  };
+}
+
+fn main() -> i64 {
+  fie a: Opt = dublat_q(Opt.Some(5));
+  afirma despacheta_sau(a, 0) == 10;
+
+  fie b: Opt = dublat_q(Opt.None);
+  afirma despacheta_sau(b, 99) == 99;
+
+  scrie "Some(5)? dublat =", despacheta_sau(a, 0);
+  scrie "None? implicit este", despacheta_sau(b, 99);
+  intoarce 0;
+}

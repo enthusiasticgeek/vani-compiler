@@ -1,0 +1,36 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/control_flow.vani              # LLVM
+//   vanic run examples/language/czech/control_flow.vani --backend=c  # C
+
+záměr "Czech control flow — pokud/jinak/dokud";
+
+funkce znamenko(n: i64) -> i64 {
+  pokud n > 0 {
+    vrať 1;
+  } jinak pokud n < 0 {
+    vrať -1;
+  } jinak {
+    vrať 0;
+  }
+}
+
+funkce odpocet(od_n: i64) -> i64 {
+  let i: i64 = od_n;
+  let soucet: i64 = 0;
+  dokud i > 0 {
+    soucet = soucet + i;
+    i = i - 1;
+  }
+  vrať soucet;
+}
+
+fn main() -> i64 {
+  tvrď znamenko(5)  == 1;
+  tvrď znamenko(-3) == -1;
+  tvrď znamenko(0)  == 0;
+  tvrď odpocet(4) == 10;
+  vypiš "znamenko a odpocet ok";
+  vrať 0;
+}

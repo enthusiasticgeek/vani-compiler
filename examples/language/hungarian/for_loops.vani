@@ -1,0 +1,30 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/for_loops.vani              # LLVM
+//   vanic run examples/language/hungarian/for_loops.vani --backend=c  # C
+
+cél "Hungarian for-range loops — minden/from/to";
+
+fuggveny osszeg_tartomany(kezdet: i64, veg: i64) -> i64 {
+  legyen osszeg: i64 = 0;
+  minden i from kezdet to veg {
+    osszeg = osszeg + i;
+  }
+  visszatér osszeg;
+}
+
+fuggveny szamol() -> i64 {
+  legyen darab: i64 = 0;
+  minden _i from 0 to 5 {
+    darab = darab + 1;
+  }
+  visszatér darab;
+}
+
+fn main() -> i64 {
+  állítsd osszeg_tartomany(1, 5) == 10;
+  állítsd szamol() == 5;
+  nyomtass "ciklus-osszeg =", osszeg_tartomany(1, 5);
+  visszatér 0;
+}

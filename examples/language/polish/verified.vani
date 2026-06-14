@@ -1,0 +1,25 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/verified.vani              # LLVM
+//   vanic run examples/language/polish/verified.vani --backend=c  # C
+
+cel "SMT-verified clamp_low";
+
+funkcja clamp_low(x: i64, prog: i64) -> i64
+wymaga prog >= 0;
+{
+  jesli x < prog {
+    wroc prog;
+  } inaczej {
+    wroc x;
+  }
+}
+
+fn main() -> i64 {
+  potwierdz clamp_low(0 - 5, 0) == 0;
+  potwierdz clamp_low(10, 3) == 10;
+  drukuj clamp_low(0 - 5, 0);
+  drukuj clamp_low(10, 3);
+  wroc 0;
+}

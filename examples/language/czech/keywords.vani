@@ -1,0 +1,27 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/keywords.vani              # LLVM
+//   vanic run examples/language/czech/keywords.vani --backend=c  # C
+
+záměr "Czech keyword showcase — funkce/let/struktura/vrať/tvrď/dokaž";
+
+struktura Bod {
+  x: i64,
+  y: i64,
+}
+
+funkce soucet(a: i64, b: i64) -> i64 {
+  vrať a + b;
+}
+
+funkce hlavni() -> i64 {
+  let p: Bod = Bod { x: 3, y: 4 };
+  let s: i64 = soucet(p.x, p.y);
+  tvrď s == 7;
+  dokaž 1 + 1 == 2;
+  vypiš s;
+  vrať 0;
+}
+
+fn main() -> i64 { vrať hlavni(); }

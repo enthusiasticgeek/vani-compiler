@@ -1,0 +1,30 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/for_loops.vani              # LLVM
+//   vanic run examples/language/polish/for_loops.vani --backend=c  # C
+
+cel "Polish for-range loops — dla/od/to";
+
+funkcja suma_zakresu(poczatek: i64, koniec: i64) -> i64 {
+  niech suma: i64 = 0;
+  dla i od poczatek to koniec {
+    suma = suma + i;
+  }
+  wroc suma;
+}
+
+funkcja licz() -> i64 {
+  niech liczba: i64 = 0;
+  dla _i od 0 to 5 {
+    liczba = liczba + 1;
+  }
+  wroc liczba;
+}
+
+fn main() -> i64 {
+  potwierdz suma_zakresu(1, 5) == 10;
+  potwierdz licz() == 5;
+  drukuj "suma petli =", suma_zakresu(1, 5);
+  wroc 0;
+}

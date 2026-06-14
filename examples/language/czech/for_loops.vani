@@ -1,0 +1,30 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/for_loops.vani              # LLVM
+//   vanic run examples/language/czech/for_loops.vani --backend=c  # C
+
+záměr "Czech for-range loops — pro/od/do";
+
+funkce soucet_rozsah(zacatek: i64, konec: i64) -> i64 {
+  let soucet: i64 = 0;
+  pro i od zacatek do konec {
+    soucet = soucet + i;
+  }
+  vrať soucet;
+}
+
+funkce pocitej() -> i64 {
+  let pocet: i64 = 0;
+  pro _i od 0 do 5 {
+    pocet = pocet + 1;
+  }
+  vrať pocet;
+}
+
+fn main() -> i64 {
+  tvrď soucet_rozsah(1, 5) == 10;
+  tvrď pocitej() == 5;
+  vypiš "smyckovy soucet =", soucet_rozsah(1, 5);
+  vrať 0;
+}

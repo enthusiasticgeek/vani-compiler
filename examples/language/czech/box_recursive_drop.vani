@@ -1,0 +1,27 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/czech/box_recursive_drop.vani --backend=c  # C
+
+záměr "Czech Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktura Taška {
+  obsah: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  let v: Vec<i64> = vec(10, 20, 30);
+  let b: Box<Vec<i64>> = box(v);
+  vypiš "Box<Vec<i64>> vytvoreno";
+
+  let v2: Vec<i64> = vec(7, 8, 9);
+  let taska: Taška = Taška { obsah: box(v2) };
+  vypiš "Taska vytvorena";
+
+  let s: OwnedStr = "ahoj" + "!";
+  let bs: Box<OwnedStr> = box(s);
+  vypiš "Box<OwnedStr> vytvoreno";
+
+  vrať 0;
+}

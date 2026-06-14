@@ -1,0 +1,32 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/vec_invariants.vani              # LLVM
+//   vanic run examples/language/czech/vec_invariants.vani --backend=c  # C
+
+záměr "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(0);
+  let i: i64 = 1;
+
+  dokud i < 5
+  neměnný len(xs) == (i jako u64);
+  neměnný i >= 1;
+  neměnný i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  dokaž i == 5;
+  dokaž len(xs) == 5;
+
+  vypiš xs[0];
+  vypiš xs[1];
+  vypiš xs[2];
+  vypiš xs[3];
+  vypiš xs[4];
+
+  vrať 0;
+}

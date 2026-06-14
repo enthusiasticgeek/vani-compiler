@@ -1,0 +1,36 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/early_exit.vani              # LLVM
+//   vanic run examples/language/romanian/early_exit.vani --backend=c  # C
+
+scop "Romanian early exit — rupe/continua/intoarce";
+
+functie primul_pozitiv(v: Vec<i64>) -> i64 {
+  pentru i from 0 pana len(v) {
+    daca v[i] > 0 {
+      intoarce v[i];
+    }
+  }
+  intoarce -1;
+}
+
+functie suma_pana_la_zero(v: Vec<i64>) -> i64 {
+  fie suma: i64 = 0;
+  pentru i from 0 pana len(v) {
+    daca v[i] == 0 { rupe; }
+    suma = suma + v[i];
+  }
+  intoarce suma;
+}
+
+fn main() -> i64 {
+  fie v: Vec<i64> = vec(-1, -2, 3, 4);
+  afirma primul_pozitiv(v) == 3;
+
+  fie w: Vec<i64> = vec(1, 2, 0, 9);
+  afirma suma_pana_la_zero(w) == 3;
+
+  scrie "iesire timpurie ok";
+  intoarce 0;
+}

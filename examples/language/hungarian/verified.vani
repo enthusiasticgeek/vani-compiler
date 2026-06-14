@@ -1,0 +1,25 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/verified.vani              # LLVM
+//   vanic run examples/language/hungarian/verified.vani --backend=c  # C
+
+cél "SMT-verified clamp_low";
+
+fuggveny clamp_low(x: i64, kuszob: i64) -> i64
+igényel kuszob >= 0;
+{
+  ha x < kuszob {
+    visszatér kuszob;
+  } különben {
+    visszatér x;
+  }
+}
+
+fn main() -> i64 {
+  állítsd clamp_low(0 - 5, 0) == 0;
+  állítsd clamp_low(10, 3) == 10;
+  nyomtass clamp_low(0 - 5, 0);
+  nyomtass clamp_low(10, 3);
+  visszatér 0;
+}

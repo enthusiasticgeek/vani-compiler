@@ -1,0 +1,27 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/romanian/box_recursive_drop.vani --backend=c  # C
+
+scop "Romanian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+structura Geanta {
+  continut: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  fie v: Vec<i64> = vec(10, 20, 30);
+  fie b: Box<Vec<i64>> = box(v);
+  scrie "Box<Vec<i64>> creat";
+
+  fie v2: Vec<i64> = vec(7, 8, 9);
+  fie geanta: Geanta = Geanta { continut: box(v2) };
+  scrie "Geanta creata";
+
+  fie s: OwnedStr = "salut" + "!";
+  fie bs: Box<OwnedStr> = box(s);
+  scrie "Box<OwnedStr> creat";
+
+  intoarce 0;
+}

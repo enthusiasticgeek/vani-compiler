@@ -1,0 +1,27 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/keywords.vani              # LLVM
+//   vanic run examples/language/hungarian/keywords.vani --backend=c  # C
+
+cél "Hungarian keyword showcase — fuggveny/legyen/szerkezet/visszater/allitsd/bizonyitsd";
+
+szerkezet Pont {
+  x: i64,
+  y: i64,
+}
+
+fuggveny osszeg(a: i64, b: i64) -> i64 {
+  visszatér a + b;
+}
+
+fuggveny fo() -> i64 {
+  legyen p: Pont = Pont { x: 3, y: 4 };
+  legyen s: i64 = osszeg(p.x, p.y);
+  állítsd s == 7;
+  bizonyítsd 1 + 1 == 2;
+  nyomtass s;
+  visszatér 0;
+}
+
+fn main() -> i64 { visszatér fo(); }

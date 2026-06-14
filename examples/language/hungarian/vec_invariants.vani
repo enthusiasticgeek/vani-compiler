@@ -1,0 +1,32 @@
+// vani-lang: hungarian
+//
+// build & run:
+//   vanic run examples/language/hungarian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/hungarian/vec_invariants.vani --backend=c  # C
+
+cél "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  legyen xs: Vec<i64> = vec(0);
+  legyen i: i64 = 1;
+
+  amíg i < 5
+  invariant len(xs) == (i as u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  prove i == 5;
+  prove len(xs) == 5;
+
+  nyomtass xs[0];
+  nyomtass xs[1];
+  nyomtass xs[2];
+  nyomtass xs[3];
+  nyomtass xs[4];
+
+  visszatér 0;
+}

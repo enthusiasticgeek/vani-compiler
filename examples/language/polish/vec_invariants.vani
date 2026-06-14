@@ -1,0 +1,32 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/vec_invariants.vani              # LLVM
+//   vanic run examples/language/polish/vec_invariants.vani --backend=c  # C
+
+cel "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  niech xs: Vec<i64> = vec(0);
+  niech i: i64 = 1;
+
+  dopoki i < 5
+  niezmienny len(xs) == (i jako u64);
+  niezmienny i >= 1;
+  niezmienny i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  udowodnij i == 5;
+  udowodnij len(xs) == 5;
+
+  drukuj xs[0];
+  drukuj xs[1];
+  drukuj xs[2];
+  drukuj xs[3];
+  drukuj xs[4];
+
+  wroc 0;
+}

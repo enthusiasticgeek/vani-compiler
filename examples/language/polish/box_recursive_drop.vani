@@ -1,0 +1,27 @@
+// vani-lang: polish
+//
+// build & run:
+//   vanic run examples/language/polish/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/polish/box_recursive_drop.vani --backend=c  # C
+
+cel "Polish Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktura Torba {
+  zawartosc: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  niech v: Vec<i64> = vec(10, 20, 30);
+  niech b: Box<Vec<i64>> = box(v);
+  drukuj "Box<Vec<i64>> utworzone";
+
+  niech v2: Vec<i64> = vec(7, 8, 9);
+  niech torba: Torba = Torba { zawartosc: box(v2) };
+  drukuj "Torba utworzona";
+
+  niech s: OwnedStr = "czesc" + "!";
+  niech bs: Box<OwnedStr> = box(s);
+  drukuj "Box<OwnedStr> utworzone";
+
+  wroc 0;
+}

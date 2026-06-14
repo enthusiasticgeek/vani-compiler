@@ -1,0 +1,27 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/keywords.vani              # LLVM
+//   vanic run examples/language/romanian/keywords.vani --backend=c  # C
+
+scop "Romanian keyword showcase — functie/fie/structura/intoarce/afirma/dovedeste";
+
+structura Punct {
+  x: i64,
+  y: i64,
+}
+
+functie suma(a: i64, b: i64) -> i64 {
+  intoarce a + b;
+}
+
+functie principal() -> i64 {
+  fie p: Punct = Punct { x: 3, y: 4 };
+  fie s: i64 = suma(p.x, p.y);
+  afirma s == 7;
+  dovedeste 1 + 1 == 2;
+  scrie s;
+  intoarce 0;
+}
+
+fn main() -> i64 { intoarce principal(); }
