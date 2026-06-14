@@ -1,0 +1,27 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/verified.vani              # LLVM
+//   vanic run examples/language/sinhala/verified.vani --backend=c  # C
+
+අරමුණ "SMT-verified clamp_low";
+
+// `අවශ්‍ය` = requires, `ඔප්පු` = prove
+
+කාර්යය clamp_low(x: i64, lo: i64) -> i64
+අවශ්‍ය lo >= 0;
+{
+  නම් x < lo {
+    ආපසු lo;
+  } නැතිනම් {
+    ආපසු x;
+  }
+}
+
+කාර්යය main() -> i64 {
+  තහවුරු clamp_low(0 - 5, 0) == 0;
+  තහවුරු clamp_low(10, 3) == 10;
+  ලියන්න clamp_low(0 - 5, 0);
+  ලියන්න clamp_low(10, 3);
+  ආපසු 0;
+}

@@ -1,0 +1,34 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/vec_invariants.vani              # LLVM
+//   vanic run examples/language/sinhala/vec_invariants.vani --backend=c  # C
+
+අරමුණ "Loop invariants over Vec length, end-to-end";
+
+// `නිශ්චල` = invariant, `ඔප්පු` = prove
+
+කාර්යය main() -> i64 {
+  අනුමානය xs: Vec<i64> = vec(0);
+  අනුමානය i: i64 = 1;
+
+  තෙක් i < 5
+  නිශ්චල len(xs) == (i ලෙස u64);
+  නිශ්චල i >= 1;
+  නිශ්චල i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  ඔප්පු i == 5;
+  ඔප්පු len(xs) == 5;
+
+  ලියන්න xs[0];
+  ලියන්න xs[1];
+  ලියන්න xs[2];
+  ලියන්න xs[3];
+  ලියන්න xs[4];
+
+  ආපසු 0;
+}

@@ -1,0 +1,24 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/for_loops.vani              # LLVM
+//   vanic run examples/language/sinhala/for_loops.vani --backend=c  # C
+
+අරමුණ "for-range loops";
+
+// `සෑම` = for, `සිට` = from, `දක්වා` = to
+
+කාර්යය sum_to(n: i64) -> i64 {
+  අනුමානය total: i64 = 0;
+  සෑම i සිට 1 දක්වා n {
+    total = total + i;
+  }
+  ආපසු total;
+}
+
+කාර්යය main() -> i64 {
+  තහවුරු sum_to(4) == 10;
+  තහවුරු sum_to(0) == 0;
+  ලියන්න sum_to(4);
+  ආපසු 0;
+}

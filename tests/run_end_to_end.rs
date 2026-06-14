@@ -1128,6 +1128,16 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../assamese/try_question_op.vani",
         "../assamese/box_recursive_drop.vani",
         "../sinhala/basics.vani",
+        "../sinhala/keywords.vani",
+        "../sinhala/control_flow.vani",
+        "../sinhala/for_loops.vani",
+        "../sinhala/early_exit.vani",
+        "../sinhala/iterate.vani",
+        "../sinhala/vec_invariants.vani",
+        "../sinhala/verified.vani",
+        "../sinhala/option_types.vani",
+        "../sinhala/try_question_op.vani",
+        "../sinhala/box_recursive_drop.vani",
         // Phase 12 (2026-06-07): first Perso-Arabic / RTL
         // dialect. Eastern Arabic-Indic digits ٠..٩ at
         // U+0660..0669 (2-byte UTF-8) — the print helper

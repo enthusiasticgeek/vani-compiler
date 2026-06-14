@@ -1,0 +1,35 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/early_exit.vani              # LLVM
+//   vanic run examples/language/sinhala/early_exit.vani --backend=c  # C
+
+අරමුණ "break and continue in loops";
+
+// `නවත්වන්න` = break, `ඉදිරියට` = continue
+
+කාර්යය first_even(limit: i64) -> i64 {
+  සෑම i සිට 1 දක්වා limit {
+    නම් i * 2 == i + i {
+      ආපසු i * 2;
+    }
+  }
+  ආපසු 0 - 1;
+}
+
+කාර්යය count_odd(limit: i64) -> i64 {
+  අනුමානය count: i64 = 0;
+  සෑම i සිට 1 දක්වා limit {
+    නම් i * 2 == i + i {
+      ඉදිරියට;
+    }
+    count = count + 1;
+  }
+  ආපසු count;
+}
+
+කාර්යය main() -> i64 {
+  තහවුරු count_odd(4) == 2;
+  ලියන්න count_odd(4);
+  ආපසු 0;
+}

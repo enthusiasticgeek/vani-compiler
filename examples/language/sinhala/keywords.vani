@@ -1,0 +1,31 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/keywords.vani              # LLVM
+//   vanic run examples/language/sinhala/keywords.vani --backend=c  # C
+
+අරමුණ "Sinhala keyword showcase";
+
+// `කාර්යය` = fn, `අනුමානය` = let, `ආපසු` = return
+
+කාර්යය add(a: i64, b: i64) -> i64 {
+  ආපසු a + b;
+}
+
+කාර්යය max(a: i64, b: i64) -> i64 {
+  නම් a > b {
+    ආපසු a;
+  } නැතිනම් {
+    ආපසු b;
+  }
+}
+
+කාර්යය main() -> i64 {
+  අනුමානය x: i64 = add(3, 4);
+  තහවුරු x == 7;
+  අනුමානය y: i64 = max(10, 20);
+  තහවුරු y == 20;
+  ලියන්න x;
+  ලියන්න y;
+  ආපසු 0;
+}

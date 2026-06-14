@@ -30005,6 +30005,107 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn sinhala_invariant_keyword_compiles() {
+        // `නිශ්චල` (nishchala — "motionless/invariant", tatsama) is the Sinhala invariant keyword.
+        let source = r#"
+// vani-lang: sinhala
+අරමුණ "invariant test";
+කාර්යය main() -> i64 {
+  අනුමානය i: i64 = 0;
+  තෙක් i < 3
+  නිශ්චල i >= 0;
+  නිශ්චල i <= 3;
+  {
+    i = i + 1;
+  }
+  තහවුරු i == 3;
+  ආපසු 0;
+}
+"#;
+        compile(source).expect("Sinhala nishchala invariant must compile");
+    }
+
+    #[test]
+    fn sinhala_else_single_word_compiles() {
+        // `නැතිනම්` (nætinam — "if not") replaced broken multi-word `නොඑසේ නම්`.
+        let source = r#"
+// vani-lang: sinhala
+අරමුණ "if/else test";
+කාර්යය main() -> i64 {
+  අනුමානය x: i64 = 10;
+  නම් x > 5 {
+    තහවුරු x == 10;
+  } නැතිනම් {
+    තහවුරු x <= 5;
+  }
+  ආපසු 0;
+}
+"#;
+        compile(source).expect("Sinhala nætinam else must compile");
+    }
+
+    #[test]
+    fn sinhala_for_range_compiles() {
+        let source = r#"
+// vani-lang: sinhala
+අරමුණ "for range test";
+කාර්යය main() -> i64 {
+  අනුමානය total: i64 = 0;
+  සෑම i සිට 1 දක්වා 5 {
+    total = total + i;
+  }
+  තහවුරු total == 10;
+  ආපසු 0;
+}
+"#;
+        compile(source).expect("Sinhala saema-sita-dakvaa for-range must compile");
+    }
+
+    #[test]
+    fn sinhala_match_enum_compiles() {
+        let source = r#"
+// vani-lang: sinhala
+අරමුණ "enum match test";
+ගණනය Opt { Some(i64), None }
+කාර්යය unwrap(o: Opt) -> i64 {
+  ආපසු ගැලපීම o {
+    Opt.Some(v) පසු v,
+    Opt.None    පසු 0,
+  };
+}
+කාර්යය main() -> i64 {
+  තහවුරු unwrap(Opt.Some(7)) == 7;
+  තහවුරු unwrap(Opt.None) == 0;
+  ආපසු 0;
+}
+"#;
+        compile(source).expect("Sinhala ganaya/gaelapeema/pasu must compile");
+    }
+
+    #[test]
+    fn sinhala_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: sinhala
+අරමුණ "requires/proves test";
+කාර්යය clamp_low(x: i64, lo: i64) -> i64
+අවශ්‍ය lo >= 0;
+{
+  නම් x < lo {
+    ආපසු lo;
+  } නැතිනම් {
+    ආපසු x;
+  }
+}
+කාර්යය main() -> i64 {
+  තහවුරු clamp_low(0 - 5, 0) == 0;
+  තහවුරු clamp_low(10, 3) == 10;
+  ආපසු 0;
+}
+"#;
+        compile(source).expect("Sinhala avashya/oppu must compile");
+    }
+
+    #[test]
     fn urdu_pragma_compiles_and_emits_arabic_indic_print() {
         // Phase 12 (2026-06-07): Urdu — first Perso-Arabic
         // dialect. Eastern Arabic-Indic digits at U+0660..0669
