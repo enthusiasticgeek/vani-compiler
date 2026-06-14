@@ -1,0 +1,40 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/option_types.vani              # LLVM
+//   vanic run examples/language/filipino/option_types.vani --backend=c  # C
+
+layunin "Filipino payloaded enums via Opt<i64>";
+
+pagbilang Opt { Some(i64), None }
+
+gawain buksan_o(o: Opt, default: i64) -> i64 {
+  ibalik tugmain o {
+    Opt.Some(v) then v,
+    Opt.None    then default,
+  };
+}
+
+gawain may_some(o: Opt) -> i64 {
+  ibalik tugmain o {
+    Opt.Some(v) then 1,
+    Opt.None    then 0,
+  };
+}
+
+gawain main() -> i64 {
+  hayaan a: Opt = Opt.Some(42);
+  hayaan b: Opt = Opt.None;
+
+  hayaan x: i64 = buksan_o(a, 0);
+  hayaan y: i64 = buksan_o(b, 100);
+
+  patunayan x == 42;
+  patunayan y == 100;
+  patunayan may_some(a) == 1;
+  patunayan may_some(b) == 0;
+
+  isulat "Some(42) nabuksan =", x;
+  isulat "None default 100 =", y;
+  ibalik 0;
+}

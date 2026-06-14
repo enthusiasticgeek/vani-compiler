@@ -1,0 +1,27 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/indonesian/box_recursive_drop.vani --backend=c  # C
+
+tujuan "Indonesian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktur Tas {
+  isi: Box<Vec<i64>>,
+}
+
+fungsi main() -> i64 {
+  biarkan v: Vec<i64> = vec(10, 20, 30);
+  biarkan b: Box<Vec<i64>> = box(v);
+  cetak "Box<Vec<i64>> dibuat";
+
+  biarkan v2: Vec<i64> = vec(7, 8, 9);
+  biarkan tas: Tas = Tas { isi: box(v2) };
+  cetak "Tas dibuat";
+
+  biarkan s: OwnedStr = "halo" + "!";
+  biarkan bs: Box<OwnedStr> = box(s);
+  cetak "Box<OwnedStr> dibuat";
+
+  kembali 0;
+}

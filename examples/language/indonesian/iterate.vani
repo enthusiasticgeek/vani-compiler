@@ -1,0 +1,34 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/iterate.vani              # LLVM
+//   vanic run examples/language/indonesian/iterate.vani --backend=c  # C
+
+tujuan "Indonesian vec iteration";
+
+fungsi jumlah_vec(v: Vec<i64>) -> i64 {
+  biarkan total: i64 = 0;
+  untuk i dari 0 sampai len(v) {
+    total = total + v[i];
+  }
+  kembali total;
+}
+
+fungsi maks_vec(v: Vec<i64>) -> i64 {
+  biarkan m: i64 = v[0];
+  untuk i dari 1 sampai len(v) {
+    jika v[i] > m {
+      m = v[i];
+    }
+  }
+  kembali m;
+}
+
+fungsi main() -> i64 {
+  biarkan v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  pastikan jumlah_vec(v) == 23;
+  pastikan maks_vec(v) == 9;
+  cetak "jumlah =", jumlah_vec(v);
+  cetak "maks =", maks_vec(v);
+  kembali 0;
+}

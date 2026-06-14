@@ -1,0 +1,35 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/control_flow.vani              # LLVM
+//   vanic run examples/language/filipino/control_flow.vani --backend=c  # C
+
+layunin "Filipino if/else and match control flow";
+
+pagbilang Tanda { Positibo, Zero, Negatibo }
+
+gawain tanda(x: i64) -> Tanda {
+  kung x > 0 {
+    ibalik Tanda.Positibo;
+  } kundi kung x == 0 {
+    ibalik Tanda.Zero;
+  } kundi {
+    ibalik Tanda.Negatibo;
+  }
+}
+
+gawain pangalan_tanda(t: Tanda) -> i64 {
+  ibalik tugmain t {
+    Tanda.Positibo then 1,
+    Tanda.Zero     then 0,
+    Tanda.Negatibo then 0 - 1,
+  };
+}
+
+gawain main() -> i64 {
+  patunayan pangalan_tanda(tanda(5))    == 1;
+  patunayan pangalan_tanda(tanda(0))    == 0;
+  patunayan pangalan_tanda(tanda(0-3))  == 0 - 1;
+  isulat "control flow OK";
+  ibalik 0;
+}

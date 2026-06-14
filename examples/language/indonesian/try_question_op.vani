@@ -1,0 +1,33 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/try_question_op.vani              # LLVM
+//   vanic run examples/language/indonesian/try_question_op.vani --backend=c  # C
+
+tujuan "Indonesian postfix ? early-return sugar on payloaded enums";
+
+enumerasi Opt { Some(i64), None }
+
+fungsi dobel_q(o: Opt) -> Opt {
+  biarkan v: i64 = o?;
+  kembali Opt.Some(v * 2);
+}
+
+fungsi buka_atau(o: Opt, bawaan: i64) -> i64 {
+  kembali cocokkan o {
+    Opt.Some(v) maka v,
+    Opt.None    maka bawaan,
+  };
+}
+
+fungsi main() -> i64 {
+  biarkan a: Opt = dobel_q(Opt.Some(5));
+  pastikan buka_atau(a, 0) == 10;
+
+  biarkan b: Opt = dobel_q(Opt.None);
+  pastikan buka_atau(b, 99) == 99;
+
+  cetak "Some(5)? didobel =", buka_atau(a, 0);
+  cetak "None? bawaan", buka_atau(b, 99);
+  kembali 0;
+}

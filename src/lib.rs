@@ -32113,6 +32113,290 @@ funzione main() -> i64 {
         );
     }
 
+    // ── Indonesian ────────────────────────────────────────────────
+    #[test]
+    fn indonesian_invariant_keyword_compiles() {
+        let source = "// vani-lang: indonesian\n\
+                      tujuan \"Indonesian invariant\";\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan xs: Vec<i64> = vec(0);\n  \
+                        biarkan i: i64 = 1;\n  \
+                        selama i < 3\n  \
+                        invarian len(xs) == (i sebagai u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Indonesian invariant compiles");
+    }
+
+    #[test]
+    fn indonesian_for_range_compiles() {
+        let source = "// vani-lang: indonesian\n\
+                      tujuan \"Indonesian for range\";\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan s: i64 = 0;\n  \
+                        untuk i dari 0 sampai 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        pastikan s == 10;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Indonesian for range compiles");
+    }
+
+    #[test]
+    fn indonesian_match_enum_compiles() {
+        let source = "// vani-lang: indonesian\n\
+                      tujuan \"Indonesian match enum\";\n\
+                      enumerasi Warna { Merah, Hijau }\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan w: Warna = Warna.Merah;\n  \
+                        biarkan r: i64 = cocokkan w {\n    \
+                          Warna.Merah maka 1,\n    \
+                          Warna.Hijau maka 2,\n  \
+                        };\n  \
+                        pastikan r == 1;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Indonesian match enum compiles");
+    }
+
+    #[test]
+    fn indonesian_requires_proves_compiles() {
+        let source = "// vani-lang: indonesian\n\
+                      tujuan \"Indonesian requires\";\n\
+                      fungsi clamp(x: i64, lo: i64) -> i64\n\
+                      perlu lo >= 0;\n\
+                      {\n  \
+                        jika x < lo {\n    \
+                          kembali lo;\n  \
+                        } selainnya {\n    \
+                          kembali x;\n  \
+                        }\n\
+                      }\n\
+                      fungsi main() -> i64 {\n  \
+                        pastikan clamp(0 - 1, 0) == 0;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Indonesian requires compiles");
+    }
+
+    // ── Malay ────────────────────────────────────────────────────
+    #[test]
+    fn malay_invariant_keyword_compiles() {
+        let source = "// vani-lang: malay\n\
+                      tujuan \"Malay invariant\";\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan xs: Vec<i64> = vec(0);\n  \
+                        biarkan i: i64 = 1;\n  \
+                        selama i < 3\n  \
+                        tetap len(xs) == (i sebagai u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Malay invariant compiles");
+    }
+
+    #[test]
+    fn malay_for_range_compiles() {
+        let source = "// vani-lang: malay\n\
+                      tujuan \"Malay for range\";\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan s: i64 = 0;\n  \
+                        untuk i dari 0 hingga 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        pastikan s == 10;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Malay for range compiles");
+    }
+
+    #[test]
+    fn malay_match_enum_compiles() {
+        let source = "// vani-lang: malay\n\
+                      tujuan \"Malay match enum\";\n\
+                      penghitungan Warna { Merah, Hijau }\n\
+                      fungsi main() -> i64 {\n  \
+                        biarkan w: Warna = Warna.Merah;\n  \
+                        biarkan r: i64 = padan w {\n    \
+                          Warna.Merah maka 1,\n    \
+                          Warna.Hijau maka 2,\n  \
+                        };\n  \
+                        pastikan r == 1;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Malay match enum compiles");
+    }
+
+    #[test]
+    fn malay_requires_proves_compiles() {
+        let source = "// vani-lang: malay\n\
+                      tujuan \"Malay requires\";\n\
+                      fungsi clamp(x: i64, lo: i64) -> i64\n\
+                      memerlukan lo >= 0;\n\
+                      {\n  \
+                        jika x < lo {\n    \
+                          kembali lo;\n  \
+                        } selainnya {\n    \
+                          kembali x;\n  \
+                        }\n\
+                      }\n\
+                      fungsi main() -> i64 {\n  \
+                        pastikan clamp(0 - 1, 0) == 0;\n  \
+                        kembali 0;\n\
+                      }\n";
+        crate::compile(source).expect("Malay requires compiles");
+    }
+
+    // ── Swahili ──────────────────────────────────────────────────
+    #[test]
+    fn swahili_invariant_keyword_compiles() {
+        let source = "// vani-lang: swahili\n\
+                      lengo \"Swahili invariant\";\n\
+                      kazi main() -> i64 {\n  \
+                        acha xs: Vec<i64> = vec(0);\n  \
+                        acha i: i64 = 1;\n  \
+                        wakati i < 3\n  \
+                        isiyobadilika len(xs) == (i kama u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        rudi 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swahili invariant compiles");
+    }
+
+    #[test]
+    fn swahili_for_range_compiles() {
+        let source = "// vani-lang: swahili\n\
+                      lengo \"Swahili for range\";\n\
+                      kazi main() -> i64 {\n  \
+                        acha s: i64 = 0;\n  \
+                        kwa i kutoka 0 hadi 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        thibitisha s == 10;\n  \
+                        rudi 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swahili for range compiles");
+    }
+
+    #[test]
+    fn swahili_match_enum_compiles() {
+        let source = "// vani-lang: swahili\n\
+                      lengo \"Swahili match enum\";\n\
+                      orodha Rangi { Nyekundu, Kijani }\n\
+                      kazi main() -> i64 {\n  \
+                        acha r: Rangi = Rangi.Nyekundu;\n  \
+                        acha x: i64 = linganisha r {\n    \
+                          Rangi.Nyekundu kisha 1,\n    \
+                          Rangi.Kijani   kisha 2,\n  \
+                        };\n  \
+                        thibitisha x == 1;\n  \
+                        rudi 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swahili match enum compiles");
+    }
+
+    #[test]
+    fn swahili_requires_proves_compiles() {
+        let source = "// vani-lang: swahili\n\
+                      lengo \"Swahili requires\";\n\
+                      kazi clamp(x: i64, kiwango: i64) -> i64\n\
+                      hitaji kiwango >= 0;\n\
+                      {\n  \
+                        ikiwa x < kiwango {\n    \
+                          rudi kiwango;\n  \
+                        } vinginevyo {\n    \
+                          rudi x;\n  \
+                        }\n\
+                      }\n\
+                      kazi main() -> i64 {\n  \
+                        thibitisha clamp(0 - 1, 0) == 0;\n  \
+                        rudi 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swahili requires compiles");
+    }
+
+    // ── Filipino ─────────────────────────────────────────────────
+    #[test]
+    fn filipino_invariant_keyword_compiles() {
+        let source = "// vani-lang: filipino\n\
+                      layunin \"Filipino invariant\";\n\
+                      gawain main() -> i64 {\n  \
+                        hayaan xs: Vec<i64> = vec(0);\n  \
+                        hayaan i: i64 = 1;\n  \
+                        habang i < 3\n  \
+                        invariant len(xs) == (i bilang u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        ibalik 0;\n\
+                      }\n";
+        crate::compile(source).expect("Filipino invariant compiles");
+    }
+
+    #[test]
+    fn filipino_for_range_compiles() {
+        let source = "// vani-lang: filipino\n\
+                      layunin \"Filipino for range\";\n\
+                      gawain main() -> i64 {\n  \
+                        hayaan s: i64 = 0;\n  \
+                        for i mula 0 hanggang 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        patunayan s == 10;\n  \
+                        ibalik 0;\n\
+                      }\n";
+        crate::compile(source).expect("Filipino for range compiles");
+    }
+
+    #[test]
+    fn filipino_match_enum_compiles() {
+        let source = "// vani-lang: filipino\n\
+                      layunin \"Filipino match enum\";\n\
+                      pagbilang Kulay { Pula, Berde }\n\
+                      gawain main() -> i64 {\n  \
+                        hayaan k: Kulay = Kulay.Pula;\n  \
+                        hayaan r: i64 = tugmain k {\n    \
+                          Kulay.Pula  then 1,\n    \
+                          Kulay.Berde then 2,\n  \
+                        };\n  \
+                        patunayan r == 1;\n  \
+                        ibalik 0;\n\
+                      }\n";
+        crate::compile(source).expect("Filipino match enum compiles");
+    }
+
+    #[test]
+    fn filipino_requires_proves_compiles() {
+        let source = "// vani-lang: filipino\n\
+                      layunin \"Filipino requires\";\n\
+                      gawain clamp(x: i64, hangganan: i64) -> i64\n\
+                      kailangan hangganan >= 0;\n\
+                      {\n  \
+                        kung x < hangganan {\n    \
+                          ibalik hangganan;\n  \
+                        } kundi {\n    \
+                          ibalik x;\n  \
+                        }\n\
+                      }\n\
+                      gawain main() -> i64 {\n  \
+                        patunayan clamp(0 - 1, 0) == 0;\n  \
+                        ibalik 0;\n\
+                      }\n";
+        crate::compile(source).expect("Filipino requires compiles");
+    }
+
     #[test]
     fn hebrew_script_pragma_compiles_and_runs() {
         // Phase 13.5 (2026-06-08): first Hebrew-script dialect.

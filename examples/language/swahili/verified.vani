@@ -1,0 +1,25 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/verified.vani              # LLVM
+//   vanic run examples/language/swahili/verified.vani --backend=c  # C
+
+lengo "SMT-verified clamp_low";
+
+kazi clamp_low(x: i64, kiwango: i64) -> i64
+hitaji kiwango >= 0;
+{
+  ikiwa x < kiwango {
+    rudi kiwango;
+  } vinginevyo {
+    rudi x;
+  }
+}
+
+kazi main() -> i64 {
+  thibitisha clamp_low(0 - 5, 0) == 0;
+  thibitisha clamp_low(10, 3) == 10;
+  chapisha clamp_low(0 - 5, 0);
+  chapisha clamp_low(10, 3);
+  rudi 0;
+}

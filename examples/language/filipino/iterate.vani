@@ -1,0 +1,31 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/iterate.vani              # LLVM
+//   vanic run examples/language/filipino/iterate.vani --backend=c  # C
+
+layunin "Filipino while loop iteration";
+
+gawain fibonacci(n: i64) -> i64 {
+  kung n <= 1 {
+    ibalik n;
+  }
+  hayaan a: i64 = 0;
+  hayaan b: i64 = 1;
+  hayaan i: i64 = 2;
+  habang i <= n {
+    hayaan temp: i64 = a + b;
+    a = b;
+    b = temp;
+    i = i + 1;
+  }
+  ibalik b;
+}
+
+gawain main() -> i64 {
+  patunayan fibonacci(0) == 0;
+  patunayan fibonacci(1) == 1;
+  patunayan fibonacci(7) == 13;
+  isulat "fib(7) =", fibonacci(7);
+  ibalik 0;
+}

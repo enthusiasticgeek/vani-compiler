@@ -1,0 +1,30 @@
+// vani-lang: malay
+//
+// build & run:
+//   vanic run examples/language/malay/for_loops.vani              # LLVM
+//   vanic run examples/language/malay/for_loops.vani --backend=c  # C
+
+tujuan "Malay for-range loops — untuk/dari/hingga";
+
+fungsi jumlah_julat(mula: i64, tamat: i64) -> i64 {
+  biarkan jumlah: i64 = 0;
+  untuk i dari mula hingga tamat {
+    jumlah = jumlah + i;
+  }
+  kembali jumlah;
+}
+
+fungsi kira() -> i64 {
+  biarkan n: i64 = 0;
+  untuk _i dari 0 hingga 5 {
+    n = n + 1;
+  }
+  kembali n;
+}
+
+fungsi main() -> i64 {
+  pastikan jumlah_julat(1, 5) == 10;
+  pastikan kira() == 5;
+  cetak "jumlah julat =", jumlah_julat(1, 5);
+  kembali 0;
+}

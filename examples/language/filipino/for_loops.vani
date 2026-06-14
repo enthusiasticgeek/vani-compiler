@@ -1,0 +1,23 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/for_loops.vani              # LLVM
+//   vanic run examples/language/filipino/for_loops.vani --backend=c  # C
+
+layunin "Filipino for-range loops";
+
+gawain kabuuan(n: i64) -> i64 {
+  hayaan s: i64 = 0;
+  for i mula 0 hanggang n {
+    s = s + i;
+  }
+  ibalik s;
+}
+
+gawain main() -> i64 {
+  patunayan kabuuan(5) == 10;
+  patunayan kabuuan(10) == 45;
+  isulat "kabuuan(5) =", kabuuan(5);
+  isulat "kabuuan(10) =", kabuuan(10);
+  ibalik 0;
+}

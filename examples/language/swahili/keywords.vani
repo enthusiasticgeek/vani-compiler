@@ -1,0 +1,27 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/keywords.vani              # LLVM
+//   vanic run examples/language/swahili/keywords.vani --backend=c  # C
+
+lengo "Swahili keyword showcase — kazi/acha/muundo/rudi/thibitisha/thibitisha_kabisa";
+
+muundo Nukta {
+  x: i64,
+  y: i64,
+}
+
+kazi jumla(a: i64, b: i64) -> i64 {
+  rudi a + b;
+}
+
+kazi kuu() -> i64 {
+  acha p: Nukta = Nukta { x: 3, y: 4 };
+  acha s: i64 = jumla(p.x, p.y);
+  thibitisha s == 7;
+  thibitisha_kabisa 1 + 1 == 2;
+  chapisha s;
+  rudi 0;
+}
+
+kazi main() -> i64 { rudi kuu(); }

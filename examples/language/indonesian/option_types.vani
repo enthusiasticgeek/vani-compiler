@@ -1,0 +1,40 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/option_types.vani              # LLVM
+//   vanic run examples/language/indonesian/option_types.vani --backend=c  # C
+
+tujuan "Indonesian payloaded enums via Opt<i64>";
+
+enumerasi Opt { Some(i64), None }
+
+fungsi buka_atau(o: Opt, bawaan: i64) -> i64 {
+  kembali cocokkan o {
+    Opt.Some(v) maka v,
+    Opt.None    maka bawaan,
+  };
+}
+
+fungsi ada_some(o: Opt) -> i64 {
+  kembali cocokkan o {
+    Opt.Some(v) maka 1,
+    Opt.None    maka 0,
+  };
+}
+
+fungsi main() -> i64 {
+  biarkan a: Opt = Opt.Some(42);
+  biarkan b: Opt = Opt.None;
+
+  biarkan x: i64 = buka_atau(a, 0);
+  biarkan y: i64 = buka_atau(b, 100);
+
+  pastikan x == 42;
+  pastikan y == 100;
+  pastikan ada_some(a) == 1;
+  pastikan ada_some(b) == 0;
+
+  cetak "Some(42) dibuka =", x;
+  cetak "None bawaan 100 =", y;
+  kembali 0;
+}

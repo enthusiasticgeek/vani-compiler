@@ -1,0 +1,36 @@
+// vani-lang: malay
+//
+// build & run:
+//   vanic run examples/language/malay/control_flow.vani              # LLVM
+//   vanic run examples/language/malay/control_flow.vani --backend=c  # C
+
+tujuan "Malay control flow — jika/selainnya/selama";
+
+fungsi tanda(n: i64) -> i64 {
+  jika n > 0 {
+    kembali 1;
+  } selainnya jika n < 0 {
+    kembali -1;
+  } selainnya {
+    kembali 0;
+  }
+}
+
+fungsi kira_balik(dari_n: i64) -> i64 {
+  biarkan i: i64 = dari_n;
+  biarkan jumlah: i64 = 0;
+  selama i > 0 {
+    jumlah = jumlah + i;
+    i = i - 1;
+  }
+  kembali jumlah;
+}
+
+fungsi main() -> i64 {
+  pastikan tanda(5)  == 1;
+  pastikan tanda(-3) == -1;
+  pastikan tanda(0)  == 0;
+  pastikan kira_balik(4) == 10;
+  cetak "tanda dan kira_balik ok";
+  kembali 0;
+}

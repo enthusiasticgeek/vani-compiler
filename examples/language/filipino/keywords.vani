@@ -1,0 +1,27 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/keywords.vani              # LLVM
+//   vanic run examples/language/filipino/keywords.vani --backend=c  # C
+
+layunin "Filipino keyword smoke-test";
+
+istraktura Punto {
+  x: i64,
+  y: i64,
+}
+
+pagbilang Kulay { Pula, Berde, Asul }
+
+gawain idagdag(a: i64, b: i64) -> i64 {
+  ibalik a + b;
+}
+
+gawain main() -> i64 {
+  hayaan p: Punto = Punto { x: 3, y: 4 };
+  hayaan k: Kulay = Kulay.Pula;
+  hayaan s: i64 = idagdag(p.x, p.y);
+  patunayan s == 7;
+  isulat "Filipino keywords OK", s;
+  ibalik 0;
+}

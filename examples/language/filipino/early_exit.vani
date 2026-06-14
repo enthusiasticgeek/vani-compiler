@@ -1,0 +1,26 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/early_exit.vani              # LLVM
+//   vanic run examples/language/filipino/early_exit.vani --backend=c  # C
+
+layunin "Filipino break / early return";
+
+gawain unang_negatibo(xs: Vec<i64>) -> i64 {
+  hayaan resulta: i64 = 0 - 1;
+  for i mula 0 hanggang len(xs) bilang i64 {
+    kung xs[i bilang u64] < 0 {
+      resulta = xs[i bilang u64];
+      tumigil;
+    }
+  }
+  ibalik resulta;
+}
+
+gawain main() -> i64 {
+  hayaan xs: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  hayaan r: i64 = unang_negatibo(xs);
+  patunayan r == 0 - 2;
+  isulat "unang negatibo =", r;
+  ibalik 0;
+}

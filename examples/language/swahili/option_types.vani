@@ -1,0 +1,40 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/option_types.vani              # LLVM
+//   vanic run examples/language/swahili/option_types.vani --backend=c  # C
+
+lengo "Swahili payloaded enums via Opt<i64>";
+
+orodha Opt { Some(i64), None }
+
+kazi fungua_au(o: Opt, kawaida: i64) -> i64 {
+  rudi linganisha o {
+    Opt.Some(v) kisha v,
+    Opt.None    kisha kawaida,
+  };
+}
+
+kazi kuna_some(o: Opt) -> i64 {
+  rudi linganisha o {
+    Opt.Some(v) kisha 1,
+    Opt.None    kisha 0,
+  };
+}
+
+kazi main() -> i64 {
+  acha a: Opt = Opt.Some(42);
+  acha b: Opt = Opt.None;
+
+  acha x: i64 = fungua_au(a, 0);
+  acha y: i64 = fungua_au(b, 100);
+
+  thibitisha x == 42;
+  thibitisha y == 100;
+  thibitisha kuna_some(a) == 1;
+  thibitisha kuna_some(b) == 0;
+
+  chapisha "Some(42) imefunguliwa =", x;
+  chapisha "None kawaida 100 =", y;
+  rudi 0;
+}

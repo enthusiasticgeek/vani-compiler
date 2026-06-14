@@ -1,0 +1,36 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/early_exit.vani              # LLVM
+//   vanic run examples/language/swahili/early_exit.vani --backend=c  # C
+
+lengo "Swahili early exit — vunja/rudi";
+
+kazi kwanza_chanya(v: Vec<i64>) -> i64 {
+  kwa i kutoka 0 hadi len(v) {
+    ikiwa v[i] > 0 {
+      rudi v[i];
+    }
+  }
+  rudi -1;
+}
+
+kazi jumla_hadi_sifuri(v: Vec<i64>) -> i64 {
+  acha jumla: i64 = 0;
+  kwa i kutoka 0 hadi len(v) {
+    ikiwa v[i] == 0 { vunja; }
+    jumla = jumla + v[i];
+  }
+  rudi jumla;
+}
+
+kazi main() -> i64 {
+  acha v: Vec<i64> = vec(-1, -2, 3, 4);
+  thibitisha kwanza_chanya(v) == 3;
+
+  acha w: Vec<i64> = vec(1, 2, 0, 9);
+  thibitisha jumla_hadi_sifuri(w) == 3;
+
+  chapisha "kutoka mapema sawa";
+  rudi 0;
+}

@@ -1,0 +1,40 @@
+// vani-lang: malay
+//
+// build & run:
+//   vanic run examples/language/malay/option_types.vani              # LLVM
+//   vanic run examples/language/malay/option_types.vani --backend=c  # C
+
+tujuan "Malay payloaded enums via Opt<i64>";
+
+penghitungan Opt { Some(i64), None }
+
+fungsi buka_atau(o: Opt, lalai: i64) -> i64 {
+  kembali padan o {
+    Opt.Some(v) maka v,
+    Opt.None    maka lalai,
+  };
+}
+
+fungsi ada_some(o: Opt) -> i64 {
+  kembali padan o {
+    Opt.Some(v) maka 1,
+    Opt.None    maka 0,
+  };
+}
+
+fungsi main() -> i64 {
+  biarkan a: Opt = Opt.Some(42);
+  biarkan b: Opt = Opt.None;
+
+  biarkan x: i64 = buka_atau(a, 0);
+  biarkan y: i64 = buka_atau(b, 100);
+
+  pastikan x == 42;
+  pastikan y == 100;
+  pastikan ada_some(a) == 1;
+  pastikan ada_some(b) == 0;
+
+  cetak "Some(42) dibuka =", x;
+  cetak "None lalai 100 =", y;
+  kembali 0;
+}

@@ -1,0 +1,36 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/control_flow.vani              # LLVM
+//   vanic run examples/language/swahili/control_flow.vani --backend=c  # C
+
+lengo "Swahili control flow — ikiwa/vinginevyo/wakati";
+
+kazi ishara(n: i64) -> i64 {
+  ikiwa n > 0 {
+    rudi 1;
+  } vinginevyo ikiwa n < 0 {
+    rudi -1;
+  } vinginevyo {
+    rudi 0;
+  }
+}
+
+kazi hesabu_nyuma(kutoka_n: i64) -> i64 {
+  acha i: i64 = kutoka_n;
+  acha jumla: i64 = 0;
+  wakati i > 0 {
+    jumla = jumla + i;
+    i = i - 1;
+  }
+  rudi jumla;
+}
+
+kazi main() -> i64 {
+  thibitisha ishara(5)  == 1;
+  thibitisha ishara(-3) == -1;
+  thibitisha ishara(0)  == 0;
+  thibitisha hesabu_nyuma(4) == 10;
+  chapisha "ishara na hesabu_nyuma sawa";
+  rudi 0;
+}

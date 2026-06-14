@@ -1,0 +1,30 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/for_loops.vani              # LLVM
+//   vanic run examples/language/swahili/for_loops.vani --backend=c  # C
+
+lengo "Swahili for-range loops — kwa/kutoka/hadi";
+
+kazi jumla_mfululizo(mwanzo: i64, mwisho: i64) -> i64 {
+  acha jumla: i64 = 0;
+  kwa i kutoka mwanzo hadi mwisho {
+    jumla = jumla + i;
+  }
+  rudi jumla;
+}
+
+kazi hesabu() -> i64 {
+  acha n: i64 = 0;
+  kwa _i kutoka 0 hadi 5 {
+    n = n + 1;
+  }
+  rudi n;
+}
+
+kazi main() -> i64 {
+  thibitisha jumla_mfululizo(1, 5) == 10;
+  thibitisha hesabu() == 5;
+  chapisha "jumla ya mfululizo =", jumla_mfululizo(1, 5);
+  rudi 0;
+}

@@ -1,0 +1,33 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/try_question_op.vani              # LLVM
+//   vanic run examples/language/filipino/try_question_op.vani --backend=c  # C
+
+layunin "Filipino postfix ? early-return sugar on payloaded enums";
+
+pagbilang Opt { Some(i64), None }
+
+gawain doblehin_q(o: Opt) -> Opt {
+  hayaan v: i64 = o?;
+  ibalik Opt.Some(v * 2);
+}
+
+gawain buksan_o(o: Opt, default: i64) -> i64 {
+  ibalik tugmain o {
+    Opt.Some(v) then v,
+    Opt.None    then default,
+  };
+}
+
+gawain main() -> i64 {
+  hayaan a: Opt = doblehin_q(Opt.Some(5));
+  patunayan buksan_o(a, 0) == 10;
+
+  hayaan b: Opt = doblehin_q(Opt.None);
+  patunayan buksan_o(b, 99) == 99;
+
+  isulat "Some(5)? dinuble =", buksan_o(a, 0);
+  isulat "None? default", buksan_o(b, 99);
+  ibalik 0;
+}

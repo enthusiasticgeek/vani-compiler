@@ -1,0 +1,33 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/try_question_op.vani              # LLVM
+//   vanic run examples/language/swahili/try_question_op.vani --backend=c  # C
+
+lengo "Swahili postfix ? early-return sugar on payloaded enums";
+
+orodha Opt { Some(i64), None }
+
+kazi mara_mbili_q(o: Opt) -> Opt {
+  acha v: i64 = o?;
+  rudi Opt.Some(v * 2);
+}
+
+kazi fungua_au(o: Opt, kawaida: i64) -> i64 {
+  rudi linganisha o {
+    Opt.Some(v) kisha v,
+    Opt.None    kisha kawaida,
+  };
+}
+
+kazi main() -> i64 {
+  acha a: Opt = mara_mbili_q(Opt.Some(5));
+  thibitisha fungua_au(a, 0) == 10;
+
+  acha b: Opt = mara_mbili_q(Opt.None);
+  thibitisha fungua_au(b, 99) == 99;
+
+  chapisha "Some(5)? imemaradufu =", fungua_au(a, 0);
+  chapisha "None? kawaida", fungua_au(b, 99);
+  rudi 0;
+}

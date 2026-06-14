@@ -1,0 +1,27 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/filipino/box_recursive_drop.vani --backend=c  # C
+
+layunin "Filipino Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+istraktura Supot {
+  nilalaman: Box<Vec<i64>>,
+}
+
+gawain main() -> i64 {
+  hayaan v: Vec<i64> = vec(10, 20, 30);
+  hayaan b: Box<Vec<i64>> = box(v);
+  isulat "Box<Vec<i64>> nagawa";
+
+  hayaan v2: Vec<i64> = vec(7, 8, 9);
+  hayaan supot: Supot = Supot { nilalaman: box(v2) };
+  isulat "Supot nagawa";
+
+  hayaan s: OwnedStr = "kamusta" + "!";
+  hayaan bs: Box<OwnedStr> = box(s);
+  isulat "Box<OwnedStr> nagawa";
+
+  ibalik 0;
+}

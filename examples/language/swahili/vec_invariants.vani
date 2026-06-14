@@ -1,0 +1,32 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/vec_invariants.vani              # LLVM
+//   vanic run examples/language/swahili/vec_invariants.vani --backend=c  # C
+
+lengo "Loop invariants over Vec length, end-to-end";
+
+kazi main() -> i64 {
+  acha xs: Vec<i64> = vec(0);
+  acha i: i64 = 1;
+
+  wakati i < 5
+  isiyobadilika len(xs) == (i kama u64);
+  isiyobadilika i >= 1;
+  isiyobadilika i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  thibitisha_kabisa i == 5;
+  thibitisha_kabisa len(xs) == 5;
+
+  chapisha xs[0];
+  chapisha xs[1];
+  chapisha xs[2];
+  chapisha xs[3];
+  chapisha xs[4];
+
+  rudi 0;
+}

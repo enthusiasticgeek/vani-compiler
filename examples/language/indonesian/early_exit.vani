@@ -1,0 +1,36 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/early_exit.vani              # LLVM
+//   vanic run examples/language/indonesian/early_exit.vani --backend=c  # C
+
+tujuan "Indonesian early exit — berhenti/kembali";
+
+fungsi pertama_positif(v: Vec<i64>) -> i64 {
+  untuk i dari 0 sampai len(v) {
+    jika v[i] > 0 {
+      kembali v[i];
+    }
+  }
+  kembali -1;
+}
+
+fungsi jumlah_sampai_nol(v: Vec<i64>) -> i64 {
+  biarkan total: i64 = 0;
+  untuk i dari 0 sampai len(v) {
+    jika v[i] == 0 { berhenti; }
+    total = total + v[i];
+  }
+  kembali total;
+}
+
+fungsi main() -> i64 {
+  biarkan v: Vec<i64> = vec(-1, -2, 3, 4);
+  pastikan pertama_positif(v) == 3;
+
+  biarkan w: Vec<i64> = vec(1, 2, 0, 9);
+  pastikan jumlah_sampai_nol(w) == 3;
+
+  cetak "keluar awal ok";
+  kembali 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/swahili/box_recursive_drop.vani --backend=c  # C
+
+lengo "Swahili Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+muundo Mfuko {
+  maudhui: Box<Vec<i64>>,
+}
+
+kazi main() -> i64 {
+  acha v: Vec<i64> = vec(10, 20, 30);
+  acha b: Box<Vec<i64>> = box(v);
+  chapisha "Box<Vec<i64>> imeundwa";
+
+  acha v2: Vec<i64> = vec(7, 8, 9);
+  acha mfuko: Mfuko = Mfuko { maudhui: box(v2) };
+  chapisha "Mfuko umeundwa";
+
+  acha s: OwnedStr = "jambo" + "!";
+  acha bs: Box<OwnedStr> = box(s);
+  chapisha "Box<OwnedStr> imeundwa";
+
+  rudi 0;
+}

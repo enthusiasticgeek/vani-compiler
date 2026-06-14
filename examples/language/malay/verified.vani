@@ -1,0 +1,25 @@
+// vani-lang: malay
+//
+// build & run:
+//   vanic run examples/language/malay/verified.vani              # LLVM
+//   vanic run examples/language/malay/verified.vani --backend=c  # C
+
+tujuan "SMT-verified clamp_low";
+
+fungsi clamp_low(x: i64, ambang: i64) -> i64
+memerlukan ambang >= 0;
+{
+  jika x < ambang {
+    kembali ambang;
+  } selainnya {
+    kembali x;
+  }
+}
+
+fungsi main() -> i64 {
+  pastikan clamp_low(0 - 5, 0) == 0;
+  pastikan clamp_low(10, 3) == 10;
+  cetak clamp_low(0 - 5, 0);
+  cetak clamp_low(10, 3);
+  kembali 0;
+}

@@ -1,0 +1,36 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/control_flow.vani              # LLVM
+//   vanic run examples/language/indonesian/control_flow.vani --backend=c  # C
+
+tujuan "Indonesian control flow — jika/selainnya/selama";
+
+fungsi tanda(n: i64) -> i64 {
+  jika n > 0 {
+    kembali 1;
+  } selainnya jika n < 0 {
+    kembali -1;
+  } selainnya {
+    kembali 0;
+  }
+}
+
+fungsi hitung_mundur(dari_n: i64) -> i64 {
+  biarkan i: i64 = dari_n;
+  biarkan total: i64 = 0;
+  selama i > 0 {
+    total = total + i;
+    i = i - 1;
+  }
+  kembali total;
+}
+
+fungsi main() -> i64 {
+  pastikan tanda(5)  == 1;
+  pastikan tanda(-3) == -1;
+  pastikan tanda(0)  == 0;
+  pastikan hitung_mundur(4) == 10;
+  cetak "tanda dan hitung_mundur ok";
+  kembali 0;
+}

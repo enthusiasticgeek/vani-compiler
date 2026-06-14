@@ -1,0 +1,27 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/keywords.vani              # LLVM
+//   vanic run examples/language/indonesian/keywords.vani --backend=c  # C
+
+tujuan "Indonesian keyword showcase — fungsi/biarkan/struktur/kembali/pastikan/buktikan";
+
+struktur Titik {
+  x: i64,
+  y: i64,
+}
+
+fungsi jumlah(a: i64, b: i64) -> i64 {
+  kembali a + b;
+}
+
+fungsi utama() -> i64 {
+  biarkan p: Titik = Titik { x: 3, y: 4 };
+  biarkan s: i64 = jumlah(p.x, p.y);
+  pastikan s == 7;
+  buktikan 1 + 1 == 2;
+  cetak s;
+  kembali 0;
+}
+
+fungsi main() -> i64 { kembali utama(); }
