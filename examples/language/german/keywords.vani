@@ -1,0 +1,32 @@
+// vani-lang: german
+//
+// build & run:
+//   vanic run examples/language/german/keywords.vani              # LLVM
+//   vanic run examples/language/german/keywords.vani --backend=c  # C
+//
+// v1: non-ASCII German aliases (während, für, zurück, überprüfe, ausführe,
+// aufzählung, öffentlich) are active; pure-ASCII structure uses English.
+
+intent "German keyword showcase";
+
+fn add(a: i64, b: i64) -> i64 {
+  zurück a + b;
+}
+
+fn max(a: i64, b: i64) -> i64 {
+  if a > b {
+    zurück a;
+  } else {
+    zurück b;
+  }
+}
+
+fn main() -> i64 {
+  let x: i64 = add(3, 4);
+  überprüfe x == 7;
+  let y: i64 = max(10, 20);
+  überprüfe y == 20;
+  ausführe x;
+  ausführe y;
+  zurück 0;
+}

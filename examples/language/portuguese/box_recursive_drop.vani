@@ -1,0 +1,29 @@
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/portuguese/box_recursive_drop.vani --backend=c  # C
+
+intenção "Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+// `estrutura` = struct (ASCII form; `estrutura` is pragma-gated)
+
+struct Bag {
+  contents: Box<Vec<i64>>,
+}
+
+função main() -> i64 {
+  seja v: Vec<i64> = vec(10, 20, 30);
+  seja b: Box<Vec<i64>> = box(v);
+  imprimir "constructed Box<Vec<i64>>";
+
+  seja v2: Vec<i64> = vec(7, 8, 9);
+  seja bag: Bag = Bag { contents: box(v2) };
+  imprimir "constructed Bag";
+
+  seja s: OwnedStr = "hi" + "!";
+  seja bs: Box<OwnedStr> = box(s);
+  imprimir "constructed Box<OwnedStr>";
+
+  retornar 0;
+}

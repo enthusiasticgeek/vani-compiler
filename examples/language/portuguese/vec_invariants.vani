@@ -1,0 +1,34 @@
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/portuguese/vec_invariants.vani --backend=c  # C
+
+intenção "Loop invariants over Vec length, end-to-end";
+
+// `invariante` = invariant, `provar` = prove
+
+função main() -> i64 {
+  seja xs: Vec<i64> = vec(0);
+  seja i: i64 = 1;
+
+  enquanto i < 5
+  invariante len(xs) == (i como u64);
+  invariante i >= 1;
+  invariante i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  provar i == 5;
+  provar len(xs) == 5;
+
+  imprimir xs[0];
+  imprimir xs[1];
+  imprimir xs[2];
+  imprimir xs[3];
+  imprimir xs[4];
+
+  retornar 0;
+}

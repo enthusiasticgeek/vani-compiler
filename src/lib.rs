@@ -31120,6 +31120,88 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn italian_invariant_keyword_compiles() {
+        // `invariante` (invariant — Italian loanword) is the invariant keyword.
+        let source = r#"
+// vani-lang: italian
+scopo "invariant test";
+funzione main() -> i64 {
+  sia i: i64 = 0;
+  mentre i < 3
+  invariante i >= 0;
+  invariante i <= 3;
+  {
+    i = i + 1;
+  }
+  affermare i == 3;
+  ritornare 0;
+}
+"#;
+        compile(source).expect("Italian invariante must compile");
+    }
+
+    #[test]
+    fn italian_for_range_compiles() {
+        let source = r#"
+// vani-lang: italian
+scopo "for range test";
+funzione main() -> i64 {
+  sia total: i64 = 0;
+  per i da 1 fino 5 {
+    total = total + i;
+  }
+  affermare total == 10;
+  ritornare 0;
+}
+"#;
+        compile(source).expect("Italian per-da-fino for-range must compile");
+    }
+
+    #[test]
+    fn italian_match_enum_compiles() {
+        let source = r#"
+// vani-lang: italian
+scopo "enum match test";
+enumerazione Opt { Some(i64), None }
+funzione unwrap(o: Opt) -> i64 {
+  ritornare corrispondere o {
+    Opt.Some(v) allora v,
+    Opt.None    allora 0,
+  };
+}
+funzione main() -> i64 {
+  affermare unwrap(Opt.Some(7)) == 7;
+  affermare unwrap(Opt.None) == 0;
+  ritornare 0;
+}
+"#;
+        compile(source).expect("Italian enumerazione/corrispondere/allora must compile");
+    }
+
+    #[test]
+    fn italian_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: italian
+scopo "requires/proves test";
+funzione clamp_low(x: i64, lo: i64) -> i64
+richiede lo >= 0;
+{
+  se x < lo {
+    ritornare lo;
+  } altrimenti {
+    ritornare x;
+  }
+}
+funzione main() -> i64 {
+  affermare clamp_low(0 - 5, 0) == 0;
+  affermare clamp_low(10, 3) == 10;
+  ritornare 0;
+}
+"#;
+        compile(source).expect("Italian richiede/dimostrare must compile");
+    }
+
+    #[test]
     fn arabic_modern_standard_compiles_and_runs() {
         // Phase 13.7 (2026-06-08): Modern Standard Arabic on the
         // existing Arabic SCRIPT infra. Distinct from the
@@ -31274,6 +31356,88 @@ fn main() -> i64 {
                         retornar 0;\n\
                       }\n";
         crate::compile(source).expect("pure-ASCII Portuguese compiles under pragma");
+    }
+
+    #[test]
+    fn portuguese_invariant_keyword_compiles() {
+        // `invariante` (invariant — Portuguese loanword) is the invariant keyword.
+        let source = r#"
+// vani-lang: portuguese
+intenção "invariant test";
+função main() -> i64 {
+  seja i: i64 = 0;
+  enquanto i < 3
+  invariante i >= 0;
+  invariante i <= 3;
+  {
+    i = i + 1;
+  }
+  afirmar i == 3;
+  retornar 0;
+}
+"#;
+        compile(source).expect("Portuguese invariante must compile");
+    }
+
+    #[test]
+    fn portuguese_for_range_compiles() {
+        let source = r#"
+// vani-lang: portuguese
+intenção "for range test";
+função main() -> i64 {
+  seja total: i64 = 0;
+  para i desde 1 até 5 {
+    total = total + i;
+  }
+  afirmar total == 10;
+  retornar 0;
+}
+"#;
+        compile(source).expect("Portuguese para-desde-até for-range must compile");
+    }
+
+    #[test]
+    fn portuguese_match_enum_compiles() {
+        let source = r#"
+// vani-lang: portuguese
+intenção "enum match test";
+enumeração Opt { Some(i64), None }
+função unwrap(o: Opt) -> i64 {
+  retornar combinar o {
+    Opt.Some(v) então v,
+    Opt.None    então 0,
+  };
+}
+função main() -> i64 {
+  afirmar unwrap(Opt.Some(7)) == 7;
+  afirmar unwrap(Opt.None) == 0;
+  retornar 0;
+}
+"#;
+        compile(source).expect("Portuguese enumeração/combinar/então must compile");
+    }
+
+    #[test]
+    fn portuguese_requires_proves_compiles() {
+        let source = r#"
+// vani-lang: portuguese
+intenção "requires/proves test";
+função clamp_low(x: i64, lo: i64) -> i64
+requer lo >= 0;
+{
+  se x < lo {
+    retornar lo;
+  } senão {
+    retornar x;
+  }
+}
+função main() -> i64 {
+  afirmar clamp_low(0 - 5, 0) == 0;
+  afirmar clamp_low(10, 3) == 10;
+  retornar 0;
+}
+"#;
+        compile(source).expect("Portuguese requer/provar must compile");
     }
 
     #[test]

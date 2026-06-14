@@ -1,0 +1,31 @@
+// vani-lang: italian
+//
+// build & run:
+//   vanic run examples/language/italian/keywords.vani              # LLVM
+//   vanic run examples/language/italian/keywords.vani --backend=c  # C
+
+scopo "Italian keyword showcase";
+
+// `funzione` = fn, `sia` = let, `ritornare` = return
+
+funzione add(a: i64, b: i64) -> i64 {
+  ritornare a + b;
+}
+
+funzione max(a: i64, b: i64) -> i64 {
+  se a > b {
+    ritornare a;
+  } altrimenti {
+    ritornare b;
+  }
+}
+
+funzione main() -> i64 {
+  sia x: i64 = add(3, 4);
+  affermare x == 7;
+  sia y: i64 = max(10, 20);
+  affermare y == 20;
+  stampare x;
+  stampare y;
+  ritornare 0;
+}

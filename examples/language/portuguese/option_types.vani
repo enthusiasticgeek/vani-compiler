@@ -1,0 +1,42 @@
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/option_types.vani              # LLVM
+//   vanic run examples/language/portuguese/option_types.vani --backend=c  # C
+
+intenção "Payloaded enums via Option<i64>";
+
+// `enumeração` = enum (accented), `combinar` = match, `então` = then
+
+enumeração Opt { Some(i64), None }
+
+função unwrap_or(o: Opt, def: i64) -> i64 {
+  retornar combinar o {
+    Opt.Some(v) então v,
+    Opt.None    então def,
+  };
+}
+
+função is_some(o: Opt) -> i64 {
+  retornar combinar o {
+    Opt.Some(v) então 1,
+    Opt.None    então 0,
+  };
+}
+
+função main() -> i64 {
+  seja a: Opt = Opt.Some(42);
+  seja b: Opt = Opt.None;
+
+  seja x: i64 = unwrap_or(a, 0);
+  seja y: i64 = unwrap_or(b, 100);
+
+  afirmar x == 42;
+  afirmar y == 100;
+  afirmar is_some(a) == 1;
+  afirmar is_some(b) == 0;
+
+  imprimir "Some(42) unwrapped =", x;
+  imprimir "None with default 100 =", y;
+  retornar 0;
+}

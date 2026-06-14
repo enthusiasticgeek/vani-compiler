@@ -1,0 +1,42 @@
+// vani-lang: italian
+//
+// build & run:
+//   vanic run examples/language/italian/option_types.vani              # LLVM
+//   vanic run examples/language/italian/option_types.vani --backend=c  # C
+
+scopo "Payloaded enums via Option<i64>";
+
+// `enumerazione` = enum, `corrispondere` = match, `allora` = then
+
+enumerazione Opt { Some(i64), None }
+
+funzione unwrap_or(o: Opt, def: i64) -> i64 {
+  ritornare corrispondere o {
+    Opt.Some(v) allora v,
+    Opt.None    allora def,
+  };
+}
+
+funzione is_some(o: Opt) -> i64 {
+  ritornare corrispondere o {
+    Opt.Some(v) allora 1,
+    Opt.None    allora 0,
+  };
+}
+
+funzione main() -> i64 {
+  sia a: Opt = Opt.Some(42);
+  sia b: Opt = Opt.None;
+
+  sia x: i64 = unwrap_or(a, 0);
+  sia y: i64 = unwrap_or(b, 100);
+
+  affermare x == 42;
+  affermare y == 100;
+  affermare is_some(a) == 1;
+  affermare is_some(b) == 0;
+
+  stampare "Some(42) unwrapped =", x;
+  stampare "None with default 100 =", y;
+  ritornare 0;
+}

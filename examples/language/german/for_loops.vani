@@ -1,0 +1,24 @@
+// vani-lang: german
+//
+// build & run:
+//   vanic run examples/language/german/for_loops.vani              # LLVM
+//   vanic run examples/language/german/for_loops.vani --backend=c  # C
+
+intent "for-range loops";
+
+// `für` = for; English `from`/`to` (no German equiv in v1)
+
+fn sum_to(n: i64) -> i64 {
+  let total: i64 = 0;
+  für i from 1 to n {
+    total = total + i;
+  }
+  zurück total;
+}
+
+fn main() -> i64 {
+  überprüfe sum_to(4) == 10;
+  überprüfe sum_to(0) == 0;
+  ausführe sum_to(4);
+  zurück 0;
+}

@@ -1,0 +1,18 @@
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/iterate.vani              # LLVM
+//   vanic run examples/language/portuguese/iterate.vani --backend=c  # C
+
+intenção "Vec iteration";
+
+função main() -> i64 {
+  seja xs: Vec<i64> = vec(10, 20, 30);
+  seja total: i64 = 0;
+  para i desde 0 até 3 {
+    total = total + xs[i como u64];
+  }
+  afirmar total == 60;
+  imprimir total;
+  retornar 0;
+}
