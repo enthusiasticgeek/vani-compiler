@@ -1,0 +1,40 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/option_types.vani              # LLVM
+//   vanic run examples/language/swedish/option_types.vani --backend=c  # C
+
+syfte "Swedish payloaded enums via Opt<i64>";
+
+uppräkning Opt { Some(i64), None }
+
+funktion packa_upp_eller(o: Opt, standard: i64) -> i64 {
+  återvänd matcha o {
+    Opt.Some(v) så v,
+    Opt.None    så standard,
+  };
+}
+
+funktion är_some(o: Opt) -> i64 {
+  återvänd matcha o {
+    Opt.Some(v) så 1,
+    Opt.None    så 0,
+  };
+}
+
+fn main() -> i64 {
+  låt a: Opt = Opt.Some(42);
+  låt b: Opt = Opt.None;
+
+  låt x: i64 = packa_upp_eller(a, 0);
+  låt y: i64 = packa_upp_eller(b, 100);
+
+  påstå x == 42;
+  påstå y == 100;
+  påstå är_some(a) == 1;
+  påstå är_some(b) == 0;
+
+  skriv "Some(42) uppackad =", x;
+  skriv "None standard 100 =", y;
+  återvänd 0;
+}

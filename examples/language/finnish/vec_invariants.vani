@@ -1,0 +1,32 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/vec_invariants.vani              # LLVM
+//   vanic run examples/language/finnish/vec_invariants.vani --backend=c  # C
+
+tarkoitus "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  olkoon xs: Vec<i64> = vec(0);
+  olkoon i: i64 = 1;
+
+  kun i < 5
+  muuttumaton len(xs) == (i kuten u64);
+  muuttumaton i >= 1;
+  muuttumaton i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  todista i == 5;
+  todista len(xs) == 5;
+
+  tulosta xs[0];
+  tulosta xs[1];
+  tulosta xs[2];
+  tulosta xs[3];
+  tulosta xs[4];
+
+  palaa 0;
+}

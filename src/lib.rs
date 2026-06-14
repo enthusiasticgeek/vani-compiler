@@ -30714,6 +30714,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn finnish_invariant_keyword_compiles() {
+        let source = "// vani-lang: finnish\n\
+                      tarkoitus \"Finnish invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        olkoon xs: Vec<i64> = vec(0);\n  \
+                        olkoon i: i64 = 1;\n  \
+                        kun i < 3\n  \
+                        muuttumaton i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        palaa 0;\n\
+                      }\n";
+        crate::compile(source).expect("Finnish invariant compiles");
+    }
+
+    #[test]
+    fn finnish_for_range_compiles() {
+        let source = "// vani-lang: finnish\n\
+                      tarkoitus \"Finnish for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        olkoon summa: i64 = 0;\n  \
+                        jokaiselle i lähtien 0 asti 5 {\n    \
+                          summa = summa + i;\n  \
+                        }\n  \
+                        vahvista summa == 10;\n  \
+                        palaa 0;\n\
+                      }\n";
+        crate::compile(source).expect("Finnish for-range compiles");
+    }
+
+    #[test]
+    fn finnish_match_enum_compiles() {
+        let source = "// vani-lang: finnish\n\
+                      tarkoitus \"Finnish match/enum\";\n\
+                      luettelointi Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        olkoon a: Opt = Opt.Some(7);\n  \
+                        olkoon v: i64 = vastaa a {\n    \
+                          Opt.Some(x) sitten x,\n    \
+                          Opt.None    sitten 0,\n  \
+                        };\n  \
+                        vahvista v == 7;\n  \
+                        palaa 0;\n\
+                      }\n";
+        crate::compile(source).expect("Finnish match/enum compiles");
+    }
+
+    #[test]
+    fn finnish_requires_proves_compiles() {
+        let source = "// vani-lang: finnish\n\
+                      tarkoitus \"Finnish requires/proves\";\n\
+                      funktio clamp_low(x: i64, kynnys: i64) -> i64\n\
+                      vaatii kynnys >= 0;\n\
+                      {\n  \
+                        jos x < kynnys { palaa kynnys; } muuten { palaa x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        vahvista clamp_low(0 - 3, 0) == 0;\n  \
+                        palaa 0;\n\
+                      }\n";
+        crate::compile(source).expect("Finnish requires/proves compiles");
+    }
+
+    #[test]
     fn catalan_romance_compiles() {
         let source = "// vani-lang: catalan\n\
                       propòsit \"basic Catalan demo\";\n\
@@ -30783,6 +30849,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn norwegian_invariant_keyword_compiles() {
+        let source = "// vani-lang: norwegian\n\
+                      formål \"Norwegian invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        la xs: Vec<i64> = vec(0);\n  \
+                        la i: i64 = 1;\n  \
+                        mens i < 3\n  \
+                        uforanderlig i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Norwegian invariant compiles");
+    }
+
+    #[test]
+    fn norwegian_for_range_compiles() {
+        let source = "// vani-lang: norwegian\n\
+                      formål \"Norwegian for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        la sum: i64 = 0;\n  \
+                        for i fra 0 til 5 {\n    \
+                          sum = sum + i;\n  \
+                        }\n  \
+                        bekreft sum == 10;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Norwegian for-range compiles");
+    }
+
+    #[test]
+    fn norwegian_match_enum_compiles() {
+        let source = "// vani-lang: norwegian\n\
+                      formål \"Norwegian match/enum\";\n\
+                      oppregning Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        la a: Opt = Opt.Some(7);\n  \
+                        la v: i64 = sammenlign a {\n    \
+                          Opt.Some(x) da x,\n    \
+                          Opt.None    da 0,\n  \
+                        };\n  \
+                        bekreft v == 7;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Norwegian match/enum compiles");
+    }
+
+    #[test]
+    fn norwegian_requires_proves_compiles() {
+        let source = "// vani-lang: norwegian\n\
+                      formål \"Norwegian requires/proves\";\n\
+                      funksjon clamp_low(x: i64, grense: i64) -> i64\n\
+                      krever grense >= 0;\n\
+                      {\n  \
+                        hvis x < grense { returner grense; } ellers { returner x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        bekreft clamp_low(0 - 3, 0) == 0;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Norwegian requires/proves compiles");
+    }
+
+    #[test]
     fn danish_nordic_compiles() {
         // Phase 13.21: third Nordic. Shares å/æ/ø with Norwegian.
         let source = "// vani-lang: danish\n\
@@ -30798,6 +30930,72 @@ fn main() -> i64 {
                         returner 0;\n\
                       }\n";
         crate::compile(source).expect("Danish basics compile");
+    }
+
+    #[test]
+    fn danish_invariant_keyword_compiles() {
+        let source = "// vani-lang: danish\n\
+                      formaal \"Danish invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        lad xs: Vec<i64> = vec(0);\n  \
+                        lad i: i64 = 1;\n  \
+                        mens i < 3\n  \
+                        uforanderlig i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Danish invariant compiles");
+    }
+
+    #[test]
+    fn danish_for_range_compiles() {
+        let source = "// vani-lang: danish\n\
+                      formaal \"Danish for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        lad sum: i64 = 0;\n  \
+                        for i fra 0 til 5 {\n    \
+                          sum = sum + i;\n  \
+                        }\n  \
+                        bekraeft sum == 10;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Danish for-range compiles");
+    }
+
+    #[test]
+    fn danish_match_enum_compiles() {
+        let source = "// vani-lang: danish\n\
+                      formaal \"Danish match/enum\";\n\
+                      optaelling Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        lad a: Opt = Opt.Some(7);\n  \
+                        lad v: i64 = match a {\n    \
+                          Opt.Some(x) saa x,\n    \
+                          Opt.None    saa 0,\n  \
+                        };\n  \
+                        bekraeft v == 7;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Danish match/enum compiles");
+    }
+
+    #[test]
+    fn danish_requires_proves_compiles() {
+        let source = "// vani-lang: danish\n\
+                      formaal \"Danish requires/proves\";\n\
+                      funktion clamp_low(x: i64, graense: i64) -> i64\n\
+                      kraever graense >= 0;\n\
+                      {\n  \
+                        hvis x < graense { returner graense; } ellers { returner x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        bekraeft clamp_low(0 - 3, 0) == 0;\n  \
+                        returner 0;\n\
+                      }\n";
+        crate::compile(source).expect("Danish requires/proves compiles");
     }
 
     #[test]
@@ -30911,6 +31109,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn swedish_invariant_keyword_compiles() {
+        let source = "// vani-lang: swedish\n\
+                      syfte \"Swedish invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        låt xs: Vec<i64> = vec(0);\n  \
+                        låt i: i64 = 1;\n  \
+                        medan i < 3\n  \
+                        oföränderlig i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        återvänd 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swedish invariant compiles");
+    }
+
+    #[test]
+    fn swedish_for_range_compiles() {
+        let source = "// vani-lang: swedish\n\
+                      syfte \"Swedish for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        låt summa: i64 = 0;\n  \
+                        för i från 0 till 5 {\n    \
+                          summa = summa + i;\n  \
+                        }\n  \
+                        påstå summa == 10;\n  \
+                        återvänd 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swedish for-range compiles");
+    }
+
+    #[test]
+    fn swedish_match_enum_compiles() {
+        let source = "// vani-lang: swedish\n\
+                      syfte \"Swedish match/enum\";\n\
+                      uppräkning Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        låt a: Opt = Opt.Some(7);\n  \
+                        låt v: i64 = matcha a {\n    \
+                          Opt.Some(x) så x,\n    \
+                          Opt.None    så 0,\n  \
+                        };\n  \
+                        påstå v == 7;\n  \
+                        återvänd 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swedish match/enum compiles");
+    }
+
+    #[test]
+    fn swedish_requires_proves_compiles() {
+        let source = "// vani-lang: swedish\n\
+                      syfte \"Swedish requires/proves\";\n\
+                      funktion clamp_low(x: i64, grans: i64) -> i64\n\
+                      kräver grans >= 0;\n\
+                      {\n  \
+                        om x < grans { återvänd grans; } annars { återvänd x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        påstå clamp_low(0 - 3, 0) == 0;\n  \
+                        återvänd 0;\n\
+                      }\n";
+        crate::compile(source).expect("Swedish requires/proves compiles");
+    }
+
+    #[test]
     fn filipino_austronesian_basic_latin_compiles() {
         // Phase 13.19: first Austronesian Tagalog-based dialect.
         // ~45M speakers; rides pragma threading (no diacritics).
@@ -30985,6 +31249,72 @@ fn main() -> i64 {
                         terug 0;\n\
                       }\n";
         crate::compile(source).expect("Dutch basics compile");
+    }
+
+    #[test]
+    fn dutch_invariant_keyword_compiles() {
+        let source = "// vani-lang: dutch\n\
+                      doel \"Dutch invariant\";\n\
+                      fn main() -> i64 {\n  \
+                        laat xs: Vec<i64> = vec(0);\n  \
+                        laat i: i64 = 1;\n  \
+                        zolang i < 3\n  \
+                        invariant i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        terug 0;\n\
+                      }\n";
+        crate::compile(source).expect("Dutch invariant compiles");
+    }
+
+    #[test]
+    fn dutch_for_range_compiles() {
+        let source = "// vani-lang: dutch\n\
+                      doel \"Dutch for-range\";\n\
+                      fn main() -> i64 {\n  \
+                        laat som: i64 = 0;\n  \
+                        voor i van 0 tot 5 {\n    \
+                          som = som + i;\n  \
+                        }\n  \
+                        bevestig som == 10;\n  \
+                        terug 0;\n\
+                      }\n";
+        crate::compile(source).expect("Dutch for-range compiles");
+    }
+
+    #[test]
+    fn dutch_match_enum_compiles() {
+        let source = "// vani-lang: dutch\n\
+                      doel \"Dutch match/enum\";\n\
+                      opsomming Opt { Some(i64), None }\n\
+                      fn main() -> i64 {\n  \
+                        laat a: Opt = Opt.Some(7);\n  \
+                        laat v: i64 = vergelijk a {\n    \
+                          Opt.Some(x) dan x,\n    \
+                          Opt.None    dan 0,\n  \
+                        };\n  \
+                        bevestig v == 7;\n  \
+                        terug 0;\n\
+                      }\n";
+        crate::compile(source).expect("Dutch match/enum compiles");
+    }
+
+    #[test]
+    fn dutch_requires_proves_compiles() {
+        let source = "// vani-lang: dutch\n\
+                      doel \"Dutch requires/proves\";\n\
+                      functie clamp_low(x: i64, grens: i64) -> i64\n\
+                      vereist grens >= 0;\n\
+                      {\n  \
+                        indien x < grens { terug grens; } anders { terug x; }\n\
+                      }\n\
+                      fn main() -> i64 {\n  \
+                        bevestig clamp_low(0 - 3, 0) == 0;\n  \
+                        terug 0;\n\
+                      }\n";
+        crate::compile(source).expect("Dutch requires/proves compiles");
     }
 
     #[test]

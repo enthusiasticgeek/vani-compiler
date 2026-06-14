@@ -1,0 +1,27 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/dutch/box_recursive_drop.vani --backend=c  # C
+
+doel "Dutch Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+structuur Zak {
+  inhoud: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  laat v: Vec<i64> = vec(10, 20, 30);
+  laat b: Box<Vec<i64>> = box(v);
+  druk "Box<Vec<i64>> aangemaakt";
+
+  laat v2: Vec<i64> = vec(7, 8, 9);
+  laat zak: Zak = Zak { inhoud: box(v2) };
+  druk "Zak aangemaakt";
+
+  laat s: OwnedStr = "hoi" + "!";
+  laat bs: Box<OwnedStr> = box(s);
+  druk "Box<OwnedStr> aangemaakt";
+
+  terug 0;
+}

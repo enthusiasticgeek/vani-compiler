@@ -1,0 +1,36 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/early_exit.vani              # LLVM
+//   vanic run examples/language/swedish/early_exit.vani --backend=c  # C
+
+syfte "Swedish early exit — bryt/fortsätt/återvänd";
+
+funktion första_positiv(v: Vec<i64>) -> i64 {
+  för i från 0 till len(v) {
+    om v[i] > 0 {
+      återvänd v[i];
+    }
+  }
+  återvänd -1;
+}
+
+funktion summa_till_noll(v: Vec<i64>) -> i64 {
+  låt summa: i64 = 0;
+  för i från 0 till len(v) {
+    om v[i] == 0 { bryt; }
+    summa = summa + v[i];
+  }
+  återvänd summa;
+}
+
+fn main() -> i64 {
+  låt v: Vec<i64> = vec(-1, -2, 3, 4);
+  påstå första_positiv(v) == 3;
+
+  låt w: Vec<i64> = vec(1, 2, 0, 9);
+  påstå summa_till_noll(w) == 3;
+
+  skriv "tidig exit ok";
+  återvänd 0;
+}

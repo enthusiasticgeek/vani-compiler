@@ -1,0 +1,40 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/option_types.vani              # LLVM
+//   vanic run examples/language/finnish/option_types.vani --backend=c  # C
+
+tarkoitus "Finnish payloaded enums via Opt<i64>";
+
+luettelointi Opt { Some(i64), None }
+
+funktio pura_tai(o: Opt, oletus: i64) -> i64 {
+  palaa vastaa o {
+    Opt.Some(v) sitten v,
+    Opt.None    sitten oletus,
+  };
+}
+
+funktio on_some(o: Opt) -> i64 {
+  palaa vastaa o {
+    Opt.Some(v) sitten 1,
+    Opt.None    sitten 0,
+  };
+}
+
+fn main() -> i64 {
+  olkoon a: Opt = Opt.Some(42);
+  olkoon b: Opt = Opt.None;
+
+  olkoon x: i64 = pura_tai(a, 0);
+  olkoon y: i64 = pura_tai(b, 100);
+
+  vahvista x == 42;
+  vahvista y == 100;
+  vahvista on_some(a) == 1;
+  vahvista on_some(b) == 0;
+
+  tulosta "Some(42) purettu =", x;
+  tulosta "None oletus 100 =", y;
+  palaa 0;
+}

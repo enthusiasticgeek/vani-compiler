@@ -1,0 +1,27 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/keywords.vani              # LLVM
+//   vanic run examples/language/danish/keywords.vani --backend=c  # C
+
+formaal "Danish keyword showcase — funktion/lad/struktur/returner/bekraeft/bevis";
+
+struktur Punkt {
+  x: i64,
+  y: i64,
+}
+
+funktion sum(a: i64, b: i64) -> i64 {
+  returner a + b;
+}
+
+funktion hoved() -> i64 {
+  lad p: Punkt = Punkt { x: 3, y: 4 };
+  lad s: i64 = sum(p.x, p.y);
+  bekraeft s == 7;
+  bevis 1 + 1 == 2;
+  udskriv s;
+  returner 0;
+}
+
+fn main() -> i64 { returner hoved(); }

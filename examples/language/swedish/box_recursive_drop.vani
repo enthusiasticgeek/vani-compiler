@@ -1,0 +1,27 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/swedish/box_recursive_drop.vani --backend=c  # C
+
+syfte "Swedish Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktur Väska {
+  innehåll: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  låt v: Vec<i64> = vec(10, 20, 30);
+  låt b: Box<Vec<i64>> = box(v);
+  skriv "Box<Vec<i64>> skapad";
+
+  låt v2: Vec<i64> = vec(7, 8, 9);
+  låt väska: Väska = Väska { innehåll: box(v2) };
+  skriv "Väska skapad";
+
+  låt s: OwnedStr = "hej" + "!";
+  låt bs: Box<OwnedStr> = box(s);
+  skriv "Box<OwnedStr> skapad";
+
+  återvänd 0;
+}

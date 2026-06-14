@@ -1,0 +1,27 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/norwegian/box_recursive_drop.vani --backend=c  # C
+
+formål "Norwegian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktur Veske {
+  innhold: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  la v: Vec<i64> = vec(10, 20, 30);
+  la b: Box<Vec<i64>> = box(v);
+  skriv "Box<Vec<i64>> opprettet";
+
+  la v2: Vec<i64> = vec(7, 8, 9);
+  la veske: Veske = Veske { innhold: box(v2) };
+  skriv "Veske opprettet";
+
+  la s: OwnedStr = "hei" + "!";
+  la bs: Box<OwnedStr> = box(s);
+  skriv "Box<OwnedStr> opprettet";
+
+  returner 0;
+}

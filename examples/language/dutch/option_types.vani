@@ -1,0 +1,40 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/option_types.vani              # LLVM
+//   vanic run examples/language/dutch/option_types.vani --backend=c  # C
+
+doel "Dutch payloaded enums via Opt<i64>";
+
+opsomming Opt { Some(i64), None }
+
+functie uitpakken_of(o: Opt, standaard: i64) -> i64 {
+  terug vergelijk o {
+    Opt.Some(v) dan v,
+    Opt.None    dan standaard,
+  };
+}
+
+functie is_some(o: Opt) -> i64 {
+  terug vergelijk o {
+    Opt.Some(v) dan 1,
+    Opt.None    dan 0,
+  };
+}
+
+fn main() -> i64 {
+  laat a: Opt = Opt.Some(42);
+  laat b: Opt = Opt.None;
+
+  laat x: i64 = uitpakken_of(a, 0);
+  laat y: i64 = uitpakken_of(b, 100);
+
+  bevestig x == 42;
+  bevestig y == 100;
+  bevestig is_some(a) == 1;
+  bevestig is_some(b) == 0;
+
+  druk "Some(42) uitpakt =", x;
+  druk "None standaard 100 =", y;
+  terug 0;
+}

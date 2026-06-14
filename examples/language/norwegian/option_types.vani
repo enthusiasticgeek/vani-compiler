@@ -1,0 +1,40 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/option_types.vani              # LLVM
+//   vanic run examples/language/norwegian/option_types.vani --backend=c  # C
+
+formål "Norwegian payloaded enums via Opt<i64>";
+
+oppregning Opt { Some(i64), None }
+
+funksjon pakk_ut_eller(o: Opt, standard: i64) -> i64 {
+  returner sammenlign o {
+    Opt.Some(v) da v,
+    Opt.None    da standard,
+  };
+}
+
+funksjon er_some(o: Opt) -> i64 {
+  returner sammenlign o {
+    Opt.Some(v) da 1,
+    Opt.None    da 0,
+  };
+}
+
+fn main() -> i64 {
+  la a: Opt = Opt.Some(42);
+  la b: Opt = Opt.None;
+
+  la x: i64 = pakk_ut_eller(a, 0);
+  la y: i64 = pakk_ut_eller(b, 100);
+
+  bekreft x == 42;
+  bekreft y == 100;
+  bekreft er_some(a) == 1;
+  bekreft er_some(b) == 0;
+
+  skriv "Some(42) pakket ut =", x;
+  skriv "None standard 100 =", y;
+  returner 0;
+}

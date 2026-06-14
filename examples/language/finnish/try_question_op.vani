@@ -1,0 +1,33 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/try_question_op.vani              # LLVM
+//   vanic run examples/language/finnish/try_question_op.vani --backend=c  # C
+
+tarkoitus "Finnish postfix ? early-return sugar on payloaded enums";
+
+luettelointi Opt { Some(i64), None }
+
+funktio kaksinkertaistettu_q(o: Opt) -> Opt {
+  olkoon v: i64 = o?;
+  palaa Opt.Some(v * 2);
+}
+
+funktio pura_tai(o: Opt, oletus: i64) -> i64 {
+  palaa vastaa o {
+    Opt.Some(v) sitten v,
+    Opt.None    sitten oletus,
+  };
+}
+
+fn main() -> i64 {
+  olkoon a: Opt = kaksinkertaistettu_q(Opt.Some(5));
+  vahvista pura_tai(a, 0) == 10;
+
+  olkoon b: Opt = kaksinkertaistettu_q(Opt.None);
+  vahvista pura_tai(b, 99) == 99;
+
+  tulosta "Some(5)? kaksinkertaistettu =", pura_tai(a, 0);
+  tulosta "None? oletus on", pura_tai(b, 99);
+  palaa 0;
+}

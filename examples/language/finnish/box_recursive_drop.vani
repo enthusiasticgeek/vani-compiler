@@ -1,0 +1,27 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/finnish/box_recursive_drop.vani --backend=c  # C
+
+tarkoitus "Finnish Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+rakenne Laukku {
+  sisalto: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  olkoon v: Vec<i64> = vec(10, 20, 30);
+  olkoon b: Box<Vec<i64>> = box(v);
+  tulosta "Box<Vec<i64>> luotu";
+
+  olkoon v2: Vec<i64> = vec(7, 8, 9);
+  olkoon laukku: Laukku = Laukku { sisalto: box(v2) };
+  tulosta "Laukku luotu";
+
+  olkoon s: OwnedStr = "hei" + "!";
+  olkoon bs: Box<OwnedStr> = box(s);
+  tulosta "Box<OwnedStr> luotu";
+
+  palaa 0;
+}

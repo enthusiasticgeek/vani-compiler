@@ -1,0 +1,34 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/iterate.vani              # LLVM
+//   vanic run examples/language/dutch/iterate.vani --backend=c  # C
+
+doel "Dutch vec iteration";
+
+functie som_vec(v: Vec<i64>) -> i64 {
+  laat som: i64 = 0;
+  voor i van 0 tot len(v) {
+    som = som + v[i];
+  }
+  terug som;
+}
+
+functie max_vec(v: Vec<i64>) -> i64 {
+  laat m: i64 = v[0];
+  voor i van 1 tot len(v) {
+    indien v[i] > m {
+      m = v[i];
+    }
+  }
+  terug m;
+}
+
+fn main() -> i64 {
+  laat v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  bevestig som_vec(v) == 23;
+  bevestig max_vec(v) == 9;
+  druk "som =", som_vec(v);
+  druk "max =", max_vec(v);
+  terug 0;
+}

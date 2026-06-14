@@ -1,0 +1,33 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/try_question_op.vani              # LLVM
+//   vanic run examples/language/norwegian/try_question_op.vani --backend=c  # C
+
+formål "Norwegian postfix ? early-return sugar on payloaded enums";
+
+oppregning Opt { Some(i64), None }
+
+funksjon doblet_q(o: Opt) -> Opt {
+  la v: i64 = o?;
+  returner Opt.Some(v * 2);
+}
+
+funksjon pakk_ut_eller(o: Opt, standard: i64) -> i64 {
+  returner sammenlign o {
+    Opt.Some(v) da v,
+    Opt.None    da standard,
+  };
+}
+
+fn main() -> i64 {
+  la a: Opt = doblet_q(Opt.Some(5));
+  bekreft pakk_ut_eller(a, 0) == 10;
+
+  la b: Opt = doblet_q(Opt.None);
+  bekreft pakk_ut_eller(b, 99) == 99;
+
+  skriv "Some(5)? doblet =", pakk_ut_eller(a, 0);
+  skriv "None? standard er", pakk_ut_eller(b, 99);
+  returner 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/for_loops.vani              # LLVM
+//   vanic run examples/language/norwegian/for_loops.vani --backend=c  # C
+
+formål "Norwegian for-range loops — for/fra/til";
+
+funksjon sum_rekkevidde(start: i64, slutt: i64) -> i64 {
+  la sum: i64 = 0;
+  for i fra start til slutt {
+    sum = sum + i;
+  }
+  returner sum;
+}
+
+funksjon telle() -> i64 {
+  la antall: i64 = 0;
+  for _i fra 0 til 5 {
+    antall = antall + 1;
+  }
+  returner antall;
+}
+
+fn main() -> i64 {
+  bekreft sum_rekkevidde(1, 5) == 10;
+  bekreft telle() == 5;
+  skriv "løkke-sum =", sum_rekkevidde(1, 5);
+  returner 0;
+}

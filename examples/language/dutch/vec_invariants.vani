@@ -1,0 +1,32 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/vec_invariants.vani              # LLVM
+//   vanic run examples/language/dutch/vec_invariants.vani --backend=c  # C
+
+doel "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  laat xs: Vec<i64> = vec(0);
+  laat i: i64 = 1;
+
+  zolang i < 5
+  invariant len(xs) == (i als u64);
+  invariant i >= 1;
+  invariant i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  bewijs i == 5;
+  bewijs len(xs) == 5;
+
+  druk xs[0];
+  druk xs[1];
+  druk xs[2];
+  druk xs[3];
+  druk xs[4];
+
+  terug 0;
+}

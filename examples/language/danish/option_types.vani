@@ -1,0 +1,40 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/option_types.vani              # LLVM
+//   vanic run examples/language/danish/option_types.vani --backend=c  # C
+
+formaal "Danish payloaded enums via Opt<i64>";
+
+optaelling Opt { Some(i64), None }
+
+funktion udpak_eller(o: Opt, standard: i64) -> i64 {
+  returner match o {
+    Opt.Some(v) saa v,
+    Opt.None    saa standard,
+  };
+}
+
+funktion er_some(o: Opt) -> i64 {
+  returner match o {
+    Opt.Some(v) saa 1,
+    Opt.None    saa 0,
+  };
+}
+
+fn main() -> i64 {
+  lad a: Opt = Opt.Some(42);
+  lad b: Opt = Opt.None;
+
+  lad x: i64 = udpak_eller(a, 0);
+  lad y: i64 = udpak_eller(b, 100);
+
+  bekraeft x == 42;
+  bekraeft y == 100;
+  bekraeft er_some(a) == 1;
+  bekraeft er_some(b) == 0;
+
+  udskriv "Some(42) udpakket =", x;
+  udskriv "None standard 100 =", y;
+  returner 0;
+}

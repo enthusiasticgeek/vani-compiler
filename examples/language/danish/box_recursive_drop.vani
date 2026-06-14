@@ -1,0 +1,27 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/danish/box_recursive_drop.vani --backend=c  # C
+
+formaal "Danish Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+struktur Taske {
+  indhold: Box<Vec<i64>>,
+}
+
+fn main() -> i64 {
+  lad v: Vec<i64> = vec(10, 20, 30);
+  lad b: Box<Vec<i64>> = box(v);
+  udskriv "Box<Vec<i64>> oprettet";
+
+  lad v2: Vec<i64> = vec(7, 8, 9);
+  lad taske: Taske = Taske { indhold: box(v2) };
+  udskriv "Taske oprettet";
+
+  lad s: OwnedStr = "hej" + "!";
+  lad bs: Box<OwnedStr> = box(s);
+  udskriv "Box<OwnedStr> oprettet";
+
+  returner 0;
+}

@@ -1,0 +1,30 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/for_loops.vani              # LLVM
+//   vanic run examples/language/danish/for_loops.vani --backend=c  # C
+
+formaal "Danish for-range loops — for/fra/til";
+
+funktion sum_raekkevidde(start: i64, slut: i64) -> i64 {
+  lad sum: i64 = 0;
+  for i fra start til slut {
+    sum = sum + i;
+  }
+  returner sum;
+}
+
+funktion tael() -> i64 {
+  lad antal: i64 = 0;
+  for _i fra 0 til 5 {
+    antal = antal + 1;
+  }
+  returner antal;
+}
+
+fn main() -> i64 {
+  bekraeft sum_raekkevidde(1, 5) == 10;
+  bekraeft tael() == 5;
+  udskriv "loekke-sum =", sum_raekkevidde(1, 5);
+  returner 0;
+}

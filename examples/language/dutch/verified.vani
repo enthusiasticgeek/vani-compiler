@@ -1,0 +1,25 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/verified.vani              # LLVM
+//   vanic run examples/language/dutch/verified.vani --backend=c  # C
+
+doel "SMT-verified clamp_low";
+
+functie clamp_low(x: i64, grens: i64) -> i64
+vereist grens >= 0;
+{
+  indien x < grens {
+    terug grens;
+  } anders {
+    terug x;
+  }
+}
+
+fn main() -> i64 {
+  bevestig clamp_low(0 - 5, 0) == 0;
+  bevestig clamp_low(10, 3) == 10;
+  druk clamp_low(0 - 5, 0);
+  druk clamp_low(10, 3);
+  terug 0;
+}

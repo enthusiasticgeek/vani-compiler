@@ -1,0 +1,27 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/keywords.vani              # LLVM
+//   vanic run examples/language/finnish/keywords.vani --backend=c  # C
+
+tarkoitus "Finnish keyword showcase — funktio/olkoon/rakenne/palaa/vahvista/todista";
+
+rakenne Piste {
+  x: i64,
+  y: i64,
+}
+
+funktio summa(a: i64, b: i64) -> i64 {
+  palaa a + b;
+}
+
+funktio paa() -> i64 {
+  olkoon p: Piste = Piste { x: 3, y: 4 };
+  olkoon s: i64 = summa(p.x, p.y);
+  vahvista s == 7;
+  todista 1 + 1 == 2;
+  tulosta s;
+  palaa 0;
+}
+
+fn main() -> i64 { palaa paa(); }

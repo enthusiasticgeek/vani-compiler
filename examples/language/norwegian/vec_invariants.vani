@@ -1,0 +1,32 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/norwegian/vec_invariants.vani --backend=c  # C
+
+formål "Loop invariants over Vec length, end-to-end";
+
+fn main() -> i64 {
+  la xs: Vec<i64> = vec(0);
+  la i: i64 = 1;
+
+  mens i < 5
+  uforanderlig len(xs) == (i som u64);
+  uforanderlig i >= 1;
+  uforanderlig i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  bevis i == 5;
+  bevis len(xs) == 5;
+
+  skriv xs[0];
+  skriv xs[1];
+  skriv xs[2];
+  skriv xs[3];
+  skriv xs[4];
+
+  returner 0;
+}

@@ -1,0 +1,36 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/control_flow.vani              # LLVM
+//   vanic run examples/language/dutch/control_flow.vani --backend=c  # C
+
+doel "Dutch control flow — indien/anders/zolang";
+
+functie teken(n: i64) -> i64 {
+  indien n > 0 {
+    terug 1;
+  } anders indien n < 0 {
+    terug -1;
+  } anders {
+    terug 0;
+  }
+}
+
+functie aftellen(van_n: i64) -> i64 {
+  laat i: i64 = van_n;
+  laat som: i64 = 0;
+  zolang i > 0 {
+    som = som + i;
+    i = i - 1;
+  }
+  terug som;
+}
+
+fn main() -> i64 {
+  bevestig teken(5)  == 1;
+  bevestig teken(-3) == -1;
+  bevestig teken(0)  == 0;
+  bevestig aftellen(4) == 10;
+  druk "teken en aftellen ok";
+  terug 0;
+}

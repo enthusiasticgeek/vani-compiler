@@ -1,0 +1,36 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/control_flow.vani              # LLVM
+//   vanic run examples/language/finnish/control_flow.vani --backend=c  # C
+
+tarkoitus "Finnish control flow — jos/muuten/kun";
+
+funktio merkki(n: i64) -> i64 {
+  jos n > 0 {
+    palaa 1;
+  } muuten jos n < 0 {
+    palaa -1;
+  } muuten {
+    palaa 0;
+  }
+}
+
+funktio laske_alas(alku_n: i64) -> i64 {
+  olkoon i: i64 = alku_n;
+  olkoon summa: i64 = 0;
+  kun i > 0 {
+    summa = summa + i;
+    i = i - 1;
+  }
+  palaa summa;
+}
+
+fn main() -> i64 {
+  vahvista merkki(5)  == 1;
+  vahvista merkki(-3) == -1;
+  vahvista merkki(0)  == 0;
+  vahvista laske_alas(4) == 10;
+  tulosta "merkki ja laske_alas ok";
+  palaa 0;
+}

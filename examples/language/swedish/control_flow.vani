@@ -1,0 +1,36 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/control_flow.vani              # LLVM
+//   vanic run examples/language/swedish/control_flow.vani --backend=c  # C
+
+syfte "Swedish control flow — om/annars/medan";
+
+funktion tecken(n: i64) -> i64 {
+  om n > 0 {
+    återvänd 1;
+  } annars om n < 0 {
+    återvänd -1;
+  } annars {
+    återvänd 0;
+  }
+}
+
+funktion nedräkning(från_n: i64) -> i64 {
+  låt i: i64 = från_n;
+  låt summa: i64 = 0;
+  medan i > 0 {
+    summa = summa + i;
+    i = i - 1;
+  }
+  återvänd summa;
+}
+
+fn main() -> i64 {
+  påstå tecken(5)  == 1;
+  påstå tecken(-3) == -1;
+  påstå tecken(0)  == 0;
+  påstå nedräkning(4) == 10;
+  skriv "tecken och nedräkning ok";
+  återvänd 0;
+}

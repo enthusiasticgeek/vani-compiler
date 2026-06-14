@@ -1,0 +1,30 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/for_loops.vani              # LLVM
+//   vanic run examples/language/finnish/for_loops.vani --backend=c  # C
+
+tarkoitus "Finnish for-range loops — jokaiselle/lähtien/asti";
+
+funktio summa_alue(alku: i64, loppu: i64) -> i64 {
+  olkoon summa: i64 = 0;
+  jokaiselle i lähtien alku asti loppu {
+    summa = summa + i;
+  }
+  palaa summa;
+}
+
+funktio laskuri() -> i64 {
+  olkoon maara: i64 = 0;
+  jokaiselle _i lähtien 0 asti 5 {
+    maara = maara + 1;
+  }
+  palaa maara;
+}
+
+fn main() -> i64 {
+  vahvista summa_alue(1, 5) == 10;
+  vahvista laskuri() == 5;
+  tulosta "silmukka-summa =", summa_alue(1, 5);
+  palaa 0;
+}

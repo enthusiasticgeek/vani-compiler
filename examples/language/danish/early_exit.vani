@@ -1,0 +1,36 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/early_exit.vani              # LLVM
+//   vanic run examples/language/danish/early_exit.vani --backend=c  # C
+
+formaal "Danish early exit — bryd/fortsaet/returner";
+
+funktion foerste_positiv(v: Vec<i64>) -> i64 {
+  for i fra 0 til len(v) {
+    hvis v[i] > 0 {
+      returner v[i];
+    }
+  }
+  returner -1;
+}
+
+funktion sum_til_nul(v: Vec<i64>) -> i64 {
+  lad sum: i64 = 0;
+  for i fra 0 til len(v) {
+    hvis v[i] == 0 { bryd; }
+    sum = sum + v[i];
+  }
+  returner sum;
+}
+
+fn main() -> i64 {
+  lad v: Vec<i64> = vec(-1, -2, 3, 4);
+  bekraeft foerste_positiv(v) == 3;
+
+  lad w: Vec<i64> = vec(1, 2, 0, 9);
+  bekraeft sum_til_nul(w) == 3;
+
+  udskriv "tidlig afslutning ok";
+  returner 0;
+}

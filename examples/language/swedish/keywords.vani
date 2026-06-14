@@ -1,0 +1,27 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/keywords.vani              # LLVM
+//   vanic run examples/language/swedish/keywords.vani --backend=c  # C
+
+syfte "Swedish keyword showcase — funktion/låt/struktur/återvänd/påstå/bevisa";
+
+struktur Punkt {
+  x: i64,
+  y: i64,
+}
+
+funktion summa(a: i64, b: i64) -> i64 {
+  återvänd a + b;
+}
+
+funktion huvud() -> i64 {
+  låt p: Punkt = Punkt { x: 3, y: 4 };
+  låt s: i64 = summa(p.x, p.y);
+  påstå s == 7;
+  bevisa 1 + 1 == 2;
+  skriv s;
+  återvänd 0;
+}
+
+fn main() -> i64 { återvänd huvud(); }

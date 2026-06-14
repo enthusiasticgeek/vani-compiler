@@ -1,0 +1,36 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/early_exit.vani              # LLVM
+//   vanic run examples/language/norwegian/early_exit.vani --backend=c  # C
+
+formål "Norwegian early exit — bryt/fortsett/returner";
+
+funksjon første_positiv(v: Vec<i64>) -> i64 {
+  for i fra 0 til len(v) {
+    hvis v[i] > 0 {
+      returner v[i];
+    }
+  }
+  returner -1;
+}
+
+funksjon sum_til_null(v: Vec<i64>) -> i64 {
+  la sum: i64 = 0;
+  for i fra 0 til len(v) {
+    hvis v[i] == 0 { bryt; }
+    sum = sum + v[i];
+  }
+  returner sum;
+}
+
+fn main() -> i64 {
+  la v: Vec<i64> = vec(-1, -2, 3, 4);
+  bekreft første_positiv(v) == 3;
+
+  la w: Vec<i64> = vec(1, 2, 0, 9);
+  bekreft sum_til_null(w) == 3;
+
+  skriv "tidlig avslutning ok";
+  returner 0;
+}

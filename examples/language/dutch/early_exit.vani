@@ -1,0 +1,36 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/early_exit.vani              # LLVM
+//   vanic run examples/language/dutch/early_exit.vani --backend=c  # C
+
+doel "Dutch early exit — stop/verder/terug";
+
+functie eerste_positief(v: Vec<i64>) -> i64 {
+  voor i van 0 tot len(v) {
+    indien v[i] > 0 {
+      terug v[i];
+    }
+  }
+  terug -1;
+}
+
+functie som_tot_nul(v: Vec<i64>) -> i64 {
+  laat som: i64 = 0;
+  voor i van 0 tot len(v) {
+    indien v[i] == 0 { stop; }
+    som = som + v[i];
+  }
+  terug som;
+}
+
+fn main() -> i64 {
+  laat v: Vec<i64> = vec(-1, -2, 3, 4);
+  bevestig eerste_positief(v) == 3;
+
+  laat w: Vec<i64> = vec(1, 2, 0, 9);
+  bevestig som_tot_nul(w) == 3;
+
+  druk "vroeg uitgang ok";
+  terug 0;
+}

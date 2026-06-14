@@ -1,0 +1,34 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/iterate.vani              # LLVM
+//   vanic run examples/language/swedish/iterate.vani --backend=c  # C
+
+syfte "Swedish vec iteration";
+
+funktion summa_vec(v: Vec<i64>) -> i64 {
+  låt summa: i64 = 0;
+  för i från 0 till len(v) {
+    summa = summa + v[i];
+  }
+  återvänd summa;
+}
+
+funktion max_vec(v: Vec<i64>) -> i64 {
+  låt m: i64 = v[0];
+  för i från 1 till len(v) {
+    om v[i] > m {
+      m = v[i];
+    }
+  }
+  återvänd m;
+}
+
+fn main() -> i64 {
+  låt v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  påstå summa_vec(v) == 23;
+  påstå max_vec(v) == 9;
+  skriv "summa =", summa_vec(v);
+  skriv "max =", max_vec(v);
+  återvänd 0;
+}

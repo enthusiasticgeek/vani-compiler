@@ -1,0 +1,30 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/for_loops.vani              # LLVM
+//   vanic run examples/language/swedish/for_loops.vani --backend=c  # C
+
+syfte "Swedish for-range loops — för/från/till";
+
+funktion summa_intervall(start: i64, slut: i64) -> i64 {
+  låt summa: i64 = 0;
+  för i från start till slut {
+    summa = summa + i;
+  }
+  återvänd summa;
+}
+
+funktion räkna() -> i64 {
+  låt antal: i64 = 0;
+  för _i från 0 till 5 {
+    antal = antal + 1;
+  }
+  återvänd antal;
+}
+
+fn main() -> i64 {
+  påstå summa_intervall(1, 5) == 10;
+  påstå räkna() == 5;
+  skriv "loop-summa =", summa_intervall(1, 5);
+  återvänd 0;
+}

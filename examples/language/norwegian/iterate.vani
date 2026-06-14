@@ -1,0 +1,34 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/iterate.vani              # LLVM
+//   vanic run examples/language/norwegian/iterate.vani --backend=c  # C
+
+formål "Norwegian vec iteration";
+
+funksjon sum_vec(v: Vec<i64>) -> i64 {
+  la sum: i64 = 0;
+  for i fra 0 til len(v) {
+    sum = sum + v[i];
+  }
+  returner sum;
+}
+
+funksjon max_vec(v: Vec<i64>) -> i64 {
+  la m: i64 = v[0];
+  for i fra 1 til len(v) {
+    hvis v[i] > m {
+      m = v[i];
+    }
+  }
+  returner m;
+}
+
+fn main() -> i64 {
+  la v: Vec<i64> = vec(3, 1, 4, 1, 5, 9);
+  bekreft sum_vec(v) == 23;
+  bekreft max_vec(v) == 9;
+  skriv "sum =", sum_vec(v);
+  skriv "max =", max_vec(v);
+  returner 0;
+}

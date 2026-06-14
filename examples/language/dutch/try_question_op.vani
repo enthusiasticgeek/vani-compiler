@@ -1,0 +1,33 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/try_question_op.vani              # LLVM
+//   vanic run examples/language/dutch/try_question_op.vani --backend=c  # C
+
+doel "Dutch postfix ? early-return sugar on payloaded enums";
+
+opsomming Opt { Some(i64), None }
+
+functie verdubbeld_q(o: Opt) -> Opt {
+  laat v: i64 = o?;
+  terug Opt.Some(v * 2);
+}
+
+functie uitpakken_of(o: Opt, standaard: i64) -> i64 {
+  terug vergelijk o {
+    Opt.Some(v) dan v,
+    Opt.None    dan standaard,
+  };
+}
+
+fn main() -> i64 {
+  laat a: Opt = verdubbeld_q(Opt.Some(5));
+  bevestig uitpakken_of(a, 0) == 10;
+
+  laat b: Opt = verdubbeld_q(Opt.None);
+  bevestig uitpakken_of(b, 99) == 99;
+
+  druk "Some(5)? verdubbeld =", uitpakken_of(a, 0);
+  druk "None? standaard is", uitpakken_of(b, 99);
+  terug 0;
+}

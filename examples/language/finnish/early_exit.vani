@@ -1,0 +1,36 @@
+// vani-lang: finnish
+//
+// build & run:
+//   vanic run examples/language/finnish/early_exit.vani              # LLVM
+//   vanic run examples/language/finnish/early_exit.vani --backend=c  # C
+
+tarkoitus "Finnish early exit — katkaise/jatka/palaa";
+
+funktio ensimmainen_positiivinen(v: Vec<i64>) -> i64 {
+  jokaiselle i lähtien 0 asti len(v) {
+    jos v[i] > 0 {
+      palaa v[i];
+    }
+  }
+  palaa -1;
+}
+
+funktio summa_nollaan(v: Vec<i64>) -> i64 {
+  olkoon summa: i64 = 0;
+  jokaiselle i lähtien 0 asti len(v) {
+    jos v[i] == 0 { katkaise; }
+    summa = summa + v[i];
+  }
+  palaa summa;
+}
+
+fn main() -> i64 {
+  olkoon v: Vec<i64> = vec(-1, -2, 3, 4);
+  vahvista ensimmainen_positiivinen(v) == 3;
+
+  olkoon w: Vec<i64> = vec(1, 2, 0, 9);
+  vahvista summa_nollaan(w) == 3;
+
+  tulosta "varhainen poistuminen ok";
+  palaa 0;
+}

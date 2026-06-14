@@ -1,0 +1,36 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/control_flow.vani              # LLVM
+//   vanic run examples/language/norwegian/control_flow.vani --backend=c  # C
+
+formål "Norwegian control flow — hvis/ellers/mens";
+
+funksjon tegn(n: i64) -> i64 {
+  hvis n > 0 {
+    returner 1;
+  } ellers hvis n < 0 {
+    returner -1;
+  } ellers {
+    returner 0;
+  }
+}
+
+funksjon nedtelling(fra_n: i64) -> i64 {
+  la i: i64 = fra_n;
+  la sum: i64 = 0;
+  mens i > 0 {
+    sum = sum + i;
+    i = i - 1;
+  }
+  returner sum;
+}
+
+fn main() -> i64 {
+  bekreft tegn(5)  == 1;
+  bekreft tegn(-3) == -1;
+  bekreft tegn(0)  == 0;
+  bekreft nedtelling(4) == 10;
+  skriv "tegn og nedtelling ok";
+  returner 0;
+}

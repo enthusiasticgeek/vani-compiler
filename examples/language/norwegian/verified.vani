@@ -1,0 +1,25 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/verified.vani              # LLVM
+//   vanic run examples/language/norwegian/verified.vani --backend=c  # C
+
+formål "SMT-verified clamp_low";
+
+funksjon clamp_low(x: i64, grense: i64) -> i64
+krever grense >= 0;
+{
+  hvis x < grense {
+    returner grense;
+  } ellers {
+    returner x;
+  }
+}
+
+fn main() -> i64 {
+  bekreft clamp_low(0 - 5, 0) == 0;
+  bekreft clamp_low(10, 3) == 10;
+  skriv clamp_low(0 - 5, 0);
+  skriv clamp_low(10, 3);
+  returner 0;
+}

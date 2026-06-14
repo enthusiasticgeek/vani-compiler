@@ -1,0 +1,27 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/keywords.vani              # LLVM
+//   vanic run examples/language/norwegian/keywords.vani --backend=c  # C
+
+formål "Norwegian keyword showcase — funksjon/la/struktur/returner/bekreft/bevis";
+
+struktur Punkt {
+  x: i64,
+  y: i64,
+}
+
+funksjon sum(a: i64, b: i64) -> i64 {
+  returner a + b;
+}
+
+funksjon hoved() -> i64 {
+  la p: Punkt = Punkt { x: 3, y: 4 };
+  la s: i64 = sum(p.x, p.y);
+  bekreft s == 7;
+  bevis 1 + 1 == 2;
+  skriv s;
+  returner 0;
+}
+
+fn main() -> i64 { returner hoved(); }

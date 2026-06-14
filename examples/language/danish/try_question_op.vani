@@ -1,0 +1,33 @@
+// vani-lang: danish
+//
+// build & run:
+//   vanic run examples/language/danish/try_question_op.vani              # LLVM
+//   vanic run examples/language/danish/try_question_op.vani --backend=c  # C
+
+formaal "Danish postfix ? early-return sugar on payloaded enums";
+
+optaelling Opt { Some(i64), None }
+
+funktion doblet_q(o: Opt) -> Opt {
+  lad v: i64 = o?;
+  returner Opt.Some(v * 2);
+}
+
+funktion udpak_eller(o: Opt, standard: i64) -> i64 {
+  returner match o {
+    Opt.Some(v) saa v,
+    Opt.None    saa standard,
+  };
+}
+
+fn main() -> i64 {
+  lad a: Opt = doblet_q(Opt.Some(5));
+  bekraeft udpak_eller(a, 0) == 10;
+
+  lad b: Opt = doblet_q(Opt.None);
+  bekraeft udpak_eller(b, 99) == 99;
+
+  udskriv "Some(5)? doblet =", udpak_eller(a, 0);
+  udskriv "None? standard er", udpak_eller(b, 99);
+  returner 0;
+}

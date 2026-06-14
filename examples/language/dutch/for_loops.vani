@@ -1,0 +1,30 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/for_loops.vani              # LLVM
+//   vanic run examples/language/dutch/for_loops.vani --backend=c  # C
+
+doel "Dutch for-range loops — voor/van/tot";
+
+functie som_bereik(begin: i64, eind: i64) -> i64 {
+  laat som: i64 = 0;
+  voor i van begin tot eind {
+    som = som + i;
+  }
+  terug som;
+}
+
+functie tellen() -> i64 {
+  laat tel: i64 = 0;
+  voor _i van 0 tot 5 {
+    tel = tel + 1;
+  }
+  terug tel;
+}
+
+fn main() -> i64 {
+  bevestig som_bereik(1, 5) == 10;
+  bevestig tellen() == 5;
+  druk "lus-som =", som_bereik(1, 5);
+  terug 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/keywords.vani              # LLVM
+//   vanic run examples/language/dutch/keywords.vani --backend=c  # C
+
+doel "Dutch keyword showcase — fn/let/struct/return/assert/prove";
+
+structuur Punt {
+  x: i64,
+  y: i64,
+}
+
+functie som(a: i64, b: i64) -> i64 {
+  terug a + b;
+}
+
+functie hoofd() -> i64 {
+  laat p: Punt = Punt { x: 3, y: 4 };
+  laat s: i64 = som(p.x, p.y);
+  bevestig s == 7;
+  bewijs 1 + 1 == 2;
+  druk s;
+  terug 0;
+}
+
+fn main() -> i64 { terug hoofd(); }

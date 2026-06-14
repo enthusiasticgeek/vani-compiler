@@ -1,0 +1,33 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/try_question_op.vani              # LLVM
+//   vanic run examples/language/swedish/try_question_op.vani --backend=c  # C
+
+syfte "Swedish postfix ? early-return sugar on payloaded enums";
+
+uppräkning Opt { Some(i64), None }
+
+funktion fördubblad_q(o: Opt) -> Opt {
+  låt v: i64 = o?;
+  återvänd Opt.Some(v * 2);
+}
+
+funktion packa_upp_eller(o: Opt, standard: i64) -> i64 {
+  återvänd matcha o {
+    Opt.Some(v) så v,
+    Opt.None    så standard,
+  };
+}
+
+fn main() -> i64 {
+  låt a: Opt = fördubblad_q(Opt.Some(5));
+  påstå packa_upp_eller(a, 0) == 10;
+
+  låt b: Opt = fördubblad_q(Opt.None);
+  påstå packa_upp_eller(b, 99) == 99;
+
+  skriv "Some(5)? fördubblad =", packa_upp_eller(a, 0);
+  skriv "None? standard är", packa_upp_eller(b, 99);
+  återvänd 0;
+}
