@@ -1,0 +1,25 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/verified.vani              # LLVM
+//   vanic run examples/language/hausa/verified.vani --backend=c  # C
+
+nufin "SMT-verified clamp_low";
+
+aiki clamp_low(x: i64, iyaka: i64) -> i64
+bukata iyaka >= 0;
+{
+  idan x < iyaka {
+    koma iyaka;
+  } ko_kuwa {
+    koma x;
+  }
+}
+
+aiki main() -> i64 {
+  tabbatar clamp_low(0 - 5, 0) == 0;
+  tabbatar clamp_low(10, 3) == 10;
+  rubuta clamp_low(0 - 5, 0);
+  rubuta clamp_low(10, 3);
+  koma 0;
+}

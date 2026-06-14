@@ -30946,6 +30946,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn yoruba_invariant_keyword_compiles() {
+        let source = "// vani-lang: yoruba\n\
+                      ìpinnu \"Yoruba invariant\";\n\
+                      iṣẹ́ main() -> i64 {\n  \
+                        jẹ́ xs: Vec<i64> = vec(0);\n  \
+                        jẹ́ i: i64 = 1;\n  \
+                        nígbà i < 3\n  \
+                        àìyípadà len(xs) == (i bí_ti u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        padà 0;\n\
+                      }\n";
+        crate::compile(source).expect("Yoruba invariant compiles");
+    }
+
+    #[test]
+    fn yoruba_for_range_compiles() {
+        let source = "// vani-lang: yoruba\n\
+                      ìpinnu \"Yoruba for range\";\n\
+                      iṣẹ́ main() -> i64 {\n  \
+                        jẹ́ s: i64 = 0;\n  \
+                        fún i láti 0 dé 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        jẹ́risí s == 10;\n  \
+                        padà 0;\n\
+                      }\n";
+        crate::compile(source).expect("Yoruba for range compiles");
+    }
+
+    #[test]
+    fn yoruba_match_enum_compiles() {
+        let source = "// vani-lang: yoruba\n\
+                      ìpinnu \"Yoruba match enum\";\n\
+                      àkọsílẹ̀ Ipo { Dara, Buru }\n\
+                      iṣẹ́ main() -> i64 {\n  \
+                        jẹ́ w: Ipo = Ipo.Dara;\n  \
+                        jẹ́ r: i64 = bámu w {\n    \
+                          Ipo.Dara nígbànáà 1,\n    \
+                          Ipo.Buru nígbànáà 2,\n  \
+                        };\n  \
+                        jẹ́risí r == 1;\n  \
+                        padà 0;\n\
+                      }\n";
+        crate::compile(source).expect("Yoruba match enum compiles");
+    }
+
+    #[test]
+    fn yoruba_requires_proves_compiles() {
+        let source = "// vani-lang: yoruba\n\
+                      ìpinnu \"Yoruba requires\";\n\
+                      iṣẹ́ clamp(x: i64, ìpele: i64) -> i64\n\
+                      nílò ìpele >= 0;\n\
+                      {\n  \
+                        bí x < ìpele { padà ìpele; } else { padà x; }\n\
+                      }\n\
+                      iṣẹ́ main() -> i64 {\n  \
+                        jẹ́risí clamp(0 - 1, 0) == 0;\n  \
+                        padà 0;\n\
+                      }\n";
+        crate::compile(source).expect("Yoruba requires compiles");
+    }
+
+    #[test]
     fn hausa_afroasiatic_compiles() {
         let source = "// vani-lang: hausa\n\
                       nufin \"basic Hausa demo\";\n\
@@ -30960,6 +31026,72 @@ fn main() -> i64 {
                         koma 0;\n\
                       }\n";
         crate::compile(source).expect("Hausa basics compile");
+    }
+
+    #[test]
+    fn hausa_invariant_keyword_compiles() {
+        let source = "// vani-lang: hausa\n\
+                      nufin \"Hausa invariant\";\n\
+                      aiki main() -> i64 {\n  \
+                        bari xs: Vec<i64> = vec(0);\n  \
+                        bari i: i64 = 1;\n  \
+                        yayin i < 3\n  \
+                        a_canzawa len(xs) == (i kamar u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        koma 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hausa invariant compiles");
+    }
+
+    #[test]
+    fn hausa_for_range_compiles() {
+        let source = "// vani-lang: hausa\n\
+                      nufin \"Hausa for range\";\n\
+                      aiki main() -> i64 {\n  \
+                        bari s: i64 = 0;\n  \
+                        ga i daga 0 zuwa 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        tabbatar s == 10;\n  \
+                        koma 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hausa for range compiles");
+    }
+
+    #[test]
+    fn hausa_match_enum_compiles() {
+        let source = "// vani-lang: hausa\n\
+                      nufin \"Hausa match enum\";\n\
+                      lissafi Launi { Ja, Kore }\n\
+                      aiki main() -> i64 {\n  \
+                        bari l: Launi = Launi.Ja;\n  \
+                        bari r: i64 = dace l {\n    \
+                          Launi.Ja   sannan 1,\n    \
+                          Launi.Kore sannan 2,\n  \
+                        };\n  \
+                        tabbatar r == 1;\n  \
+                        koma 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hausa match enum compiles");
+    }
+
+    #[test]
+    fn hausa_requires_proves_compiles() {
+        let source = "// vani-lang: hausa\n\
+                      nufin \"Hausa requires\";\n\
+                      aiki clamp(x: i64, iyaka: i64) -> i64\n\
+                      bukata iyaka >= 0;\n\
+                      {\n  \
+                        idan x < iyaka { koma iyaka; } ko_kuwa { koma x; }\n\
+                      }\n\
+                      aiki main() -> i64 {\n  \
+                        tabbatar clamp(0 - 1, 0) == 0;\n  \
+                        koma 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hausa requires compiles");
     }
 
     #[test]
@@ -31475,6 +31607,72 @@ fn main() -> i64 {
                         trả_về 0;\n\
                       }\n";
         crate::compile(source).expect("Vietnamese basics compile");
+    }
+
+    #[test]
+    fn vietnamese_invariant_keyword_compiles() {
+        let source = "// vani-lang: vietnamese\n\
+                      mục_đích \"Vietnamese invariant\";\n\
+                      hàm main() -> i64 {\n  \
+                        đặt xs: Vec<i64> = vec(0);\n  \
+                        đặt i: i64 = 1;\n  \
+                        trong_khi i < 3\n  \
+                        bất_biến len(xs) == (i như u64);\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        trả_về 0;\n\
+                      }\n";
+        crate::compile(source).expect("Vietnamese invariant compiles");
+    }
+
+    #[test]
+    fn vietnamese_for_range_compiles() {
+        let source = "// vani-lang: vietnamese\n\
+                      mục_đích \"Vietnamese for range\";\n\
+                      hàm main() -> i64 {\n  \
+                        đặt s: i64 = 0;\n  \
+                        với_mỗi i từ 0 đến 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        khẳng_định s == 10;\n  \
+                        trả_về 0;\n\
+                      }\n";
+        crate::compile(source).expect("Vietnamese for range compiles");
+    }
+
+    #[test]
+    fn vietnamese_match_enum_compiles() {
+        let source = "// vani-lang: vietnamese\n\
+                      mục_đích \"Vietnamese match enum\";\n\
+                      liệt_kê Màu { Đỏ, Xanh }\n\
+                      hàm main() -> i64 {\n  \
+                        đặt m: Màu = Màu.Đỏ;\n  \
+                        đặt r: i64 = khớp m {\n    \
+                          Màu.Đỏ   thì 1,\n    \
+                          Màu.Xanh thì 2,\n  \
+                        };\n  \
+                        khẳng_định r == 1;\n  \
+                        trả_về 0;\n\
+                      }\n";
+        crate::compile(source).expect("Vietnamese match enum compiles");
+    }
+
+    #[test]
+    fn vietnamese_requires_proves_compiles() {
+        let source = "// vani-lang: vietnamese\n\
+                      mục_đích \"Vietnamese requires\";\n\
+                      hàm clamp(x: i64, ngưỡng: i64) -> i64\n\
+                      yêu_cầu ngưỡng >= 0;\n\
+                      {\n  \
+                        nếu x < ngưỡng { trả_về ngưỡng; } ngược_lại { trả_về x; }\n\
+                      }\n\
+                      hàm main() -> i64 {\n  \
+                        khẳng_định clamp(0 - 1, 0) == 0;\n  \
+                        trả_về 0;\n\
+                      }\n";
+        crate::compile(source).expect("Vietnamese requires compiles");
     }
 
     #[test]

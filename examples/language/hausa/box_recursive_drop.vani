@@ -1,0 +1,27 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/hausa/box_recursive_drop.vani --backend=c  # C
+
+nufin "Hausa Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+tsari Jaka {
+  abubuwa: Box<Vec<i64>>,
+}
+
+aiki main() -> i64 {
+  bari v: Vec<i64> = vec(10, 20, 30);
+  bari b: Box<Vec<i64>> = box(v);
+  rubuta "Box<Vec<i64>> an yi";
+
+  bari v2: Vec<i64> = vec(7, 8, 9);
+  bari jaka: Jaka = Jaka { abubuwa: box(v2) };
+  rubuta "Jaka an yi";
+
+  bari s: OwnedStr = "sannu" + "!";
+  bari bs: Box<OwnedStr> = box(s);
+  rubuta "Box<OwnedStr> an yi";
+
+  koma 0;
+}

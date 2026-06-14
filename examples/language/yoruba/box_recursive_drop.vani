@@ -1,0 +1,27 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/yoruba/box_recursive_drop.vani --backend=c  # C
+
+ìpinnu "Yoruba Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+ọ̀nà Àpò {
+  àkóónú: Box<Vec<i64>>,
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ v: Vec<i64> = vec(10, 20, 30);
+  jẹ́ b: Box<Vec<i64>> = box(v);
+  tẹ̀ "Box<Vec<i64>> tí dá";
+
+  jẹ́ v2: Vec<i64> = vec(7, 8, 9);
+  jẹ́ àpò: Àpò = Àpò { àkóónú: box(v2) };
+  tẹ̀ "Àpò tí dá";
+
+  jẹ́ s: OwnedStr = "ẹ káabọ̀" + "!";
+  jẹ́ bs: Box<OwnedStr> = box(s);
+  tẹ̀ "Box<OwnedStr> tí dá";
+
+  padà 0;
+}

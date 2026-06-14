@@ -1,0 +1,32 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/vec_invariants.vani              # LLVM
+//   vanic run examples/language/yoruba/vec_invariants.vani --backend=c  # C
+
+ìpinnu "Loop invariants over Vec length, end-to-end";
+
+iṣẹ́ main() -> i64 {
+  jẹ́ xs: Vec<i64> = vec(0);
+  jẹ́ i: i64 = 1;
+
+  nígbà i < 5
+  àìyípadà len(xs) == (i bí_ti u64);
+  àìyípadà i >= 1;
+  àìyípadà i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  fihàn i == 5;
+  fihàn len(xs) == 5;
+
+  tẹ̀ xs[0];
+  tẹ̀ xs[1];
+  tẹ̀ xs[2];
+  tẹ̀ xs[3];
+  tẹ̀ xs[4];
+
+  padà 0;
+}

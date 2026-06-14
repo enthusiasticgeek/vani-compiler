@@ -1,0 +1,33 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/try_question_op.vani              # LLVM
+//   vanic run examples/language/hausa/try_question_op.vani --backend=c  # C
+
+nufin "Hausa postfix ? early-return sugar on payloaded enums";
+
+lissafi Opt { Some(i64), None }
+
+aiki ninka_q(o: Opt) -> Opt {
+  bari v: i64 = o?;
+  koma Opt.Some(v * 2);
+}
+
+aiki buɗe_ko(o: Opt, tsoho: i64) -> i64 {
+  koma dace o {
+    Opt.Some(v) sannan v,
+    Opt.None    sannan tsoho,
+  };
+}
+
+aiki main() -> i64 {
+  bari a: Opt = ninka_q(Opt.Some(5));
+  tabbatar buɗe_ko(a, 0) == 10;
+
+  bari b: Opt = ninka_q(Opt.None);
+  tabbatar buɗe_ko(b, 99) == 99;
+
+  rubuta "Some(5)? an ninka =", buɗe_ko(a, 0);
+  rubuta "None? tsoho", buɗe_ko(b, 99);
+  koma 0;
+}

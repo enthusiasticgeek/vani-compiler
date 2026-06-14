@@ -1,0 +1,31 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/iterate.vani              # LLVM
+//   vanic run examples/language/hausa/iterate.vani --backend=c  # C
+
+nufin "Hausa while loop iteration";
+
+aiki fibonacci(n: i64) -> i64 {
+  idan n <= 1 {
+    koma n;
+  }
+  bari a: i64 = 0;
+  bari b: i64 = 1;
+  bari i: i64 = 2;
+  yayin i <= n {
+    bari wucin: i64 = a + b;
+    a = b;
+    b = wucin;
+    i = i + 1;
+  }
+  koma b;
+}
+
+aiki main() -> i64 {
+  tabbatar fibonacci(0) == 0;
+  tabbatar fibonacci(1) == 1;
+  tabbatar fibonacci(7) == 13;
+  rubuta "fib(7) =", fibonacci(7);
+  koma 0;
+}

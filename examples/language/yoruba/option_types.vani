@@ -1,0 +1,40 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/option_types.vani              # LLVM
+//   vanic run examples/language/yoruba/option_types.vani --backend=c  # C
+
+ìpinnu "Yoruba payloaded enums via Opt<i64>";
+
+àkọsílẹ̀ Opt { Some(i64), None }
+
+iṣẹ́ ṣí_tàbí(o: Opt, ìpilẹ̀: i64) -> i64 {
+  padà bámu o {
+    Opt.Some(v) nígbànáà v,
+    Opt.None    nígbànáà ìpilẹ̀,
+  };
+}
+
+iṣẹ́ ní_some(o: Opt) -> i64 {
+  padà bámu o {
+    Opt.Some(v) nígbànáà 1,
+    Opt.None    nígbànáà 0,
+  };
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ a: Opt = Opt.Some(42);
+  jẹ́ b: Opt = Opt.None;
+
+  jẹ́ x: i64 = ṣí_tàbí(a, 0);
+  jẹ́ y: i64 = ṣí_tàbí(b, 100);
+
+  jẹ́risí x == 42;
+  jẹ́risí y == 100;
+  jẹ́risí ní_some(a) == 1;
+  jẹ́risí ní_some(b) == 0;
+
+  tẹ̀ "Some(42) tí ṣí =", x;
+  tẹ̀ "None ìpilẹ̀ 100 =", y;
+  padà 0;
+}

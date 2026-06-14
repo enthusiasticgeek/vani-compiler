@@ -1,0 +1,23 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/for_loops.vani              # LLVM
+//   vanic run examples/language/hausa/for_loops.vani --backend=c  # C
+
+nufin "Hausa for-range loops";
+
+aiki jimla(n: i64) -> i64 {
+  bari s: i64 = 0;
+  ga i daga 0 zuwa n {
+    s = s + i;
+  }
+  koma s;
+}
+
+aiki main() -> i64 {
+  tabbatar jimla(5) == 10;
+  tabbatar jimla(10) == 45;
+  rubuta "jimla(5) =", jimla(5);
+  rubuta "jimla(10) =", jimla(10);
+  koma 0;
+}

@@ -1,0 +1,35 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/control_flow.vani              # LLVM
+//   vanic run examples/language/yoruba/control_flow.vani --backend=c  # C
+
+ìpinnu "Yoruba if/else and match control flow";
+
+àkọsílẹ̀ Àmì { Rere, Òfo, Búburú }
+
+iṣẹ́ àmì(x: i64) -> Àmì {
+  bí x > 0 {
+    padà Àmì.Rere;
+  } else bí x == 0 {
+    padà Àmì.Òfo;
+  } else {
+    padà Àmì.Búburú;
+  }
+}
+
+iṣẹ́ orúkọ_àmì(a: Àmì) -> i64 {
+  padà bámu a {
+    Àmì.Rere   nígbànáà 1,
+    Àmì.Òfo    nígbànáà 0,
+    Àmì.Búburú nígbànáà 0 - 1,
+  };
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́risí orúkọ_àmì(àmì(5))    == 1;
+  jẹ́risí orúkọ_àmì(àmì(0))    == 0;
+  jẹ́risí orúkọ_àmì(àmì(0-3))  == 0 - 1;
+  tẹ̀ "control flow OK";
+  padà 0;
+}

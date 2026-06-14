@@ -1,0 +1,23 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/for_loops.vani              # LLVM
+//   vanic run examples/language/yoruba/for_loops.vani --backend=c  # C
+
+ìpinnu "Yoruba for-range loops";
+
+iṣẹ́ àpapọ̀(n: i64) -> i64 {
+  jẹ́ s: i64 = 0;
+  fún i láti 0 dé n {
+    s = s + i;
+  }
+  padà s;
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́risí àpapọ̀(5) == 10;
+  jẹ́risí àpapọ̀(10) == 45;
+  tẹ̀ "àpapọ̀(5) =", àpapọ̀(5);
+  tẹ̀ "àpapọ̀(10) =", àpapọ̀(10);
+  padà 0;
+}

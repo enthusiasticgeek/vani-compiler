@@ -1,0 +1,27 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/vietnamese/box_recursive_drop.vani --backend=c  # C
+
+mục_đích "Vietnamese Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+cấu_trúc TúiNhớ {
+  nội_dung: Box<Vec<i64>>,
+}
+
+hàm main() -> i64 {
+  đặt v: Vec<i64> = vec(10, 20, 30);
+  đặt b: Box<Vec<i64>> = box(v);
+  in_ra "Box<Vec<i64>> đã tạo";
+
+  đặt v2: Vec<i64> = vec(7, 8, 9);
+  đặt túi: TúiNhớ = TúiNhớ { nội_dung: box(v2) };
+  in_ra "TúiNhớ đã tạo";
+
+  đặt s: OwnedStr = "xin chào" + "!";
+  đặt bs: Box<OwnedStr> = box(s);
+  in_ra "Box<OwnedStr> đã tạo";
+
+  trả_về 0;
+}

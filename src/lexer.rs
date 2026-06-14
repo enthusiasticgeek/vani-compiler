@@ -2354,6 +2354,8 @@ fn vietnamese_keyword(text: &str) -> Option<TokenKind> {
 fn vietnamese_ascii_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "in_ra" => TokenKind::Print,          // print (pure-ASCII Vietnamese)
+        "trong_khi" => TokenKind::While,      // while (all-ASCII, missed by unicode path)
+        "sai" => TokenKind::False,            // false (all-ASCII)
         _ => return None,
     };
     Some(kind)

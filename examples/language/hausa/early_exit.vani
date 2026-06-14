@@ -1,0 +1,26 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/early_exit.vani              # LLVM
+//   vanic run examples/language/hausa/early_exit.vani --backend=c  # C
+
+nufin "Hausa break / early return";
+
+aiki farko_mara_kyau(xs: Vec<i64>) -> i64 {
+  bari sakamako: i64 = 0 - 1;
+  ga i daga 0 zuwa len(xs) kamar i64 {
+    idan xs[i kamar u64] < 0 {
+      sakamako = xs[i kamar u64];
+      dakatar;
+    }
+  }
+  koma sakamako;
+}
+
+aiki main() -> i64 {
+  bari xs: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  bari r: i64 = farko_mara_kyau(xs);
+  tabbatar r == 0 - 2;
+  rubuta "farko mara kyau =", r;
+  koma 0;
+}

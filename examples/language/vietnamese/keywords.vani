@@ -1,0 +1,27 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/keywords.vani              # LLVM
+//   vanic run examples/language/vietnamese/keywords.vani --backend=c  # C
+
+mục_đích "Vietnamese keyword smoke-test";
+
+cấu_trúc Điểm {
+  x: i64,
+  y: i64,
+}
+
+liệt_kê Màu { Đỏ, Xanh, Vàng }
+
+hàm cộng(a: i64, b: i64) -> i64 {
+  trả_về a + b;
+}
+
+hàm main() -> i64 {
+  đặt d: Điểm = Điểm { x: 3, y: 4 };
+  đặt m: Màu = Màu.Đỏ;
+  đặt s: i64 = cộng(d.x, d.y);
+  khẳng_định s == 7;
+  in_ra "Vietnamese keywords OK", s;
+  trả_về 0;
+}

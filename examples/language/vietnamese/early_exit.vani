@@ -1,0 +1,26 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/early_exit.vani              # LLVM
+//   vanic run examples/language/vietnamese/early_exit.vani --backend=c  # C
+
+mục_đích "Vietnamese break / early return";
+
+hàm đầu_tiên_âm(xs: Vec<i64>) -> i64 {
+  đặt kết_quả: i64 = 0 - 1;
+  với_mỗi i từ 0 đến len(xs) như i64 {
+    nếu xs[i như u64] < 0 {
+      kết_quả = xs[i như u64];
+      ngắt;
+    }
+  }
+  trả_về kết_quả;
+}
+
+hàm main() -> i64 {
+  đặt xs: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  đặt r: i64 = đầu_tiên_âm(xs);
+  khẳng_định r == 0 - 2;
+  in_ra "đầu tiên âm =", r;
+  trả_về 0;
+}

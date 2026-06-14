@@ -1,0 +1,35 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/control_flow.vani              # LLVM
+//   vanic run examples/language/vietnamese/control_flow.vani --backend=c  # C
+
+mục_đích "Vietnamese if/else and match control flow";
+
+liệt_kê Dấu { DươngTính, Không, ÂmTính }
+
+hàm dấu(x: i64) -> Dấu {
+  nếu x > 0 {
+    trả_về Dấu.DươngTính;
+  } ngược_lại nếu x == 0 {
+    trả_về Dấu.Không;
+  } ngược_lại {
+    trả_về Dấu.ÂmTính;
+  }
+}
+
+hàm tên_dấu(d: Dấu) -> i64 {
+  trả_về khớp d {
+    Dấu.DươngTính thì 1,
+    Dấu.Không     thì 0,
+    Dấu.ÂmTính    thì 0 - 1,
+  };
+}
+
+hàm main() -> i64 {
+  khẳng_định tên_dấu(dấu(5))   == 1;
+  khẳng_định tên_dấu(dấu(0))   == 0;
+  khẳng_định tên_dấu(dấu(0-3)) == 0 - 1;
+  in_ra "control flow OK";
+  trả_về 0;
+}

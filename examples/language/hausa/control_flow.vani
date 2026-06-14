@@ -1,0 +1,35 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/control_flow.vani              # LLVM
+//   vanic run examples/language/hausa/control_flow.vani --backend=c  # C
+
+nufin "Hausa if/else and match control flow";
+
+lissafi Alamar { Tabbas, Sifiri, Rashi }
+
+aiki alamar(x: i64) -> Alamar {
+  idan x > 0 {
+    koma Alamar.Tabbas;
+  } ko_kuwa idan x == 0 {
+    koma Alamar.Sifiri;
+  } ko_kuwa {
+    koma Alamar.Rashi;
+  }
+}
+
+aiki suna_alamar(a: Alamar) -> i64 {
+  koma dace a {
+    Alamar.Tabbas sannan 1,
+    Alamar.Sifiri  sannan 0,
+    Alamar.Rashi   sannan 0 - 1,
+  };
+}
+
+aiki main() -> i64 {
+  tabbatar suna_alamar(alamar(5))   == 1;
+  tabbatar suna_alamar(alamar(0))   == 0;
+  tabbatar suna_alamar(alamar(0-3)) == 0 - 1;
+  rubuta "control flow OK";
+  koma 0;
+}

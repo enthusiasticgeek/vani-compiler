@@ -1,0 +1,23 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/for_loops.vani              # LLVM
+//   vanic run examples/language/vietnamese/for_loops.vani --backend=c  # C
+
+mục_đích "Vietnamese for-range loops";
+
+hàm tổng(n: i64) -> i64 {
+  đặt s: i64 = 0;
+  với_mỗi i từ 0 đến n {
+    s = s + i;
+  }
+  trả_về s;
+}
+
+hàm main() -> i64 {
+  khẳng_định tổng(5) == 10;
+  khẳng_định tổng(10) == 45;
+  in_ra "tổng(5) =", tổng(5);
+  in_ra "tổng(10) =", tổng(10);
+  trả_về 0;
+}

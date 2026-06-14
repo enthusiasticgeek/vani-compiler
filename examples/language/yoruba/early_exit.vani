@@ -1,0 +1,26 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/early_exit.vani              # LLVM
+//   vanic run examples/language/yoruba/early_exit.vani --backend=c  # C
+
+ìpinnu "Yoruba break / early return";
+
+iṣẹ́ àkọ́kọ́_òdì(xs: Vec<i64>) -> i64 {
+  jẹ́ èsì: i64 = 0 - 1;
+  fún i láti 0 dé len(xs) bí_ti i64 {
+    bí xs[i bí_ti u64] < 0 {
+      èsì = xs[i bí_ti u64];
+      dáwọ́dúró;
+    }
+  }
+  padà èsì;
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ xs: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  jẹ́ r: i64 = àkọ́kọ́_òdì(xs);
+  jẹ́risí r == 0 - 2;
+  tẹ̀ "àkọ́kọ́ òdì =", r;
+  padà 0;
+}

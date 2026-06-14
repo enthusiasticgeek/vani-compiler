@@ -1,0 +1,40 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/option_types.vani              # LLVM
+//   vanic run examples/language/hausa/option_types.vani --backend=c  # C
+
+nufin "Hausa payloaded enums via Opt<i64>";
+
+lissafi Opt { Some(i64), None }
+
+aiki buɗe_ko(o: Opt, tsoho: i64) -> i64 {
+  koma dace o {
+    Opt.Some(v) sannan v,
+    Opt.None    sannan tsoho,
+  };
+}
+
+aiki akwai_some(o: Opt) -> i64 {
+  koma dace o {
+    Opt.Some(v) sannan 1,
+    Opt.None    sannan 0,
+  };
+}
+
+aiki main() -> i64 {
+  bari a: Opt = Opt.Some(42);
+  bari b: Opt = Opt.None;
+
+  bari x: i64 = buɗe_ko(a, 0);
+  bari y: i64 = buɗe_ko(b, 100);
+
+  tabbatar x == 42;
+  tabbatar y == 100;
+  tabbatar akwai_some(a) == 1;
+  tabbatar akwai_some(b) == 0;
+
+  rubuta "Some(42) an buɗe =", x;
+  rubuta "None tsoho 100 =", y;
+  koma 0;
+}

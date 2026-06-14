@@ -1,0 +1,32 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/vietnamese/vec_invariants.vani --backend=c  # C
+
+mục_đích "Loop invariants over Vec length, end-to-end";
+
+hàm main() -> i64 {
+  đặt xs: Vec<i64> = vec(0);
+  đặt i: i64 = 1;
+
+  trong_khi i < 5
+  bất_biến len(xs) == (i như u64);
+  bất_biến i >= 1;
+  bất_biến i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  chứng_minh i == 5;
+  chứng_minh len(xs) == 5;
+
+  in_ra xs[0];
+  in_ra xs[1];
+  in_ra xs[2];
+  in_ra xs[3];
+  in_ra xs[4];
+
+  trả_về 0;
+}

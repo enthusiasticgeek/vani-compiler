@@ -1,0 +1,27 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/keywords.vani              # LLVM
+//   vanic run examples/language/hausa/keywords.vani --backend=c  # C
+
+nufin "Hausa keyword smoke-test";
+
+tsari Batu {
+  x: i64,
+  y: i64,
+}
+
+lissafi Launi { Ja, Kore, Shuɗi }
+
+aiki ƙara(a: i64, b: i64) -> i64 {
+  koma a + b;
+}
+
+aiki main() -> i64 {
+  bari b: Batu = Batu { x: 3, y: 4 };
+  bari l: Launi = Launi.Ja;
+  bari s: i64 = ƙara(b.x, b.y);
+  tabbatar s == 7;
+  rubuta "Hausa keywords OK", s;
+  koma 0;
+}

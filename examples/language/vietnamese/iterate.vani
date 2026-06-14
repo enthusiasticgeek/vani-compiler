@@ -1,0 +1,31 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/iterate.vani              # LLVM
+//   vanic run examples/language/vietnamese/iterate.vani --backend=c  # C
+
+mục_đích "Vietnamese while loop iteration";
+
+hàm fibonacci(n: i64) -> i64 {
+  nếu n <= 1 {
+    trả_về n;
+  }
+  đặt a: i64 = 0;
+  đặt b: i64 = 1;
+  đặt i: i64 = 2;
+  trong_khi i <= n {
+    đặt temp: i64 = a + b;
+    a = b;
+    b = temp;
+    i = i + 1;
+  }
+  trả_về b;
+}
+
+hàm main() -> i64 {
+  khẳng_định fibonacci(0) == 0;
+  khẳng_định fibonacci(1) == 1;
+  khẳng_định fibonacci(7) == 13;
+  in_ra "fib(7) =", fibonacci(7);
+  trả_về 0;
+}

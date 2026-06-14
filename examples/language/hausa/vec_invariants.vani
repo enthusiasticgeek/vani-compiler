@@ -1,0 +1,32 @@
+// vani-lang: hausa
+//
+// build & run:
+//   vanic run examples/language/hausa/vec_invariants.vani              # LLVM
+//   vanic run examples/language/hausa/vec_invariants.vani --backend=c  # C
+
+nufin "Loop invariants over Vec length, end-to-end";
+
+aiki main() -> i64 {
+  bari xs: Vec<i64> = vec(0);
+  bari i: i64 = 1;
+
+  yayin i < 5
+  a_canzawa len(xs) == (i kamar u64);
+  a_canzawa i >= 1;
+  a_canzawa i <= 5;
+  {
+    xs = push(xs, i * 10);
+    i = i + 1;
+  }
+
+  nuna i == 5;
+  nuna len(xs) == 5;
+
+  rubuta xs[0];
+  rubuta xs[1];
+  rubuta xs[2];
+  rubuta xs[3];
+  rubuta xs[4];
+
+  koma 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: yoruba
+//
+// build & run:
+//   vanic run examples/language/yoruba/keywords.vani              # LLVM
+//   vanic run examples/language/yoruba/keywords.vani --backend=c  # C
+
+ìpinnu "Yoruba keyword smoke-test";
+
+ọ̀nà Àmì {
+  x: i64,
+  y: i64,
+}
+
+àkọsílẹ̀ Àwọ̀ { Pupa, Ewé, Búlúù }
+
+iṣẹ́ fikún(a: i64, b: i64) -> i64 {
+  padà a + b;
+}
+
+iṣẹ́ main() -> i64 {
+  jẹ́ a: Àmì = Àmì { x: 3, y: 4 };
+  jẹ́ w: Àwọ̀ = Àwọ̀.Pupa;
+  jẹ́ s: i64 = fikún(a.x, a.y);
+  jẹ́risí s == 7;
+  tẹ̀ "Yoruba keywords OK", s;
+  padà 0;
+}
