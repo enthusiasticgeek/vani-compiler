@@ -1297,6 +1297,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../portuguese/try_question_op.vani",
         "../portuguese/box_recursive_drop.vani",
         // Phase 8b cont.: Dutch, Swedish, Norwegian, Danish, Finnish (10 files each)
+        "../dutch/basics.vani",
         "../dutch/keywords.vani",
         "../dutch/control_flow.vani",
         "../dutch/for_loops.vani",
@@ -1307,6 +1308,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../dutch/option_types.vani",
         "../dutch/try_question_op.vani",
         "../dutch/box_recursive_drop.vani",
+        "../swedish/basics.vani",
         "../swedish/keywords.vani",
         "../swedish/control_flow.vani",
         "../swedish/for_loops.vani",
@@ -1317,6 +1319,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../swedish/option_types.vani",
         "../swedish/try_question_op.vani",
         "../swedish/box_recursive_drop.vani",
+        "../norwegian/basics.vani",
         "../norwegian/keywords.vani",
         "../norwegian/control_flow.vani",
         "../norwegian/for_loops.vani",
@@ -1327,6 +1330,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../norwegian/option_types.vani",
         "../norwegian/try_question_op.vani",
         "../norwegian/box_recursive_drop.vani",
+        "../danish/basics.vani",
         "../danish/keywords.vani",
         "../danish/control_flow.vani",
         "../danish/for_loops.vani",
@@ -1337,6 +1341,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../danish/option_types.vani",
         "../danish/try_question_op.vani",
         "../danish/box_recursive_drop.vani",
+        "../finnish/basics.vani",
         "../finnish/keywords.vani",
         "../finnish/control_flow.vani",
         "../finnish/for_loops.vani",
@@ -1348,6 +1353,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../finnish/try_question_op.vani",
         "../finnish/box_recursive_drop.vani",
         // Czech
+        "../czech/basics.vani",
         "../czech/keywords.vani",
         "../czech/control_flow.vani",
         "../czech/for_loops.vani",
@@ -1359,6 +1365,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../czech/try_question_op.vani",
         "../czech/box_recursive_drop.vani",
         // Polish
+        "../polish/basics.vani",
         "../polish/keywords.vani",
         "../polish/control_flow.vani",
         "../polish/for_loops.vani",
@@ -1370,6 +1377,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../polish/try_question_op.vani",
         "../polish/box_recursive_drop.vani",
         // Romanian
+        "../romanian/basics.vani",
         "../romanian/keywords.vani",
         "../romanian/control_flow.vani",
         "../romanian/for_loops.vani",
@@ -1381,6 +1389,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../romanian/try_question_op.vani",
         "../romanian/box_recursive_drop.vani",
         // Hungarian
+        "../hungarian/basics.vani",
         "../hungarian/keywords.vani",
         "../hungarian/control_flow.vani",
         "../hungarian/for_loops.vani",
@@ -1392,6 +1401,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../hungarian/try_question_op.vani",
         "../hungarian/box_recursive_drop.vani",
         // Slovak
+        "../slovak/basics.vani",
         "../slovak/keywords.vani",
         "../slovak/control_flow.vani",
         "../slovak/for_loops.vani",
@@ -1403,6 +1413,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../slovak/try_question_op.vani",
         "../slovak/box_recursive_drop.vani",
         // Catalan
+        "../catalan/basics.vani",
         "../catalan/keywords.vani",
         "../catalan/control_flow.vani",
         "../catalan/for_loops.vani",
@@ -1414,6 +1425,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../catalan/try_question_op.vani",
         "../catalan/box_recursive_drop.vani",
         // Turkish
+        "../turkish/basics.vani",
         "../turkish/keywords.vani",
         "../turkish/control_flow.vani",
         "../turkish/for_loops.vani",
@@ -1425,6 +1437,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../turkish/try_question_op.vani",
         "../turkish/box_recursive_drop.vani",
         // Greek
+        "../greek/basics.vani",
         "../greek/keywords.vani",
         "../greek/control_flow.vani",
         "../greek/for_loops.vani",
@@ -1436,6 +1449,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../greek/try_question_op.vani",
         "../greek/box_recursive_drop.vani",
         // ── Indonesian (Latin-script, SE Asia) ──────────────────────────────
+        "../indonesian/basics.vani",
         "../indonesian/keywords.vani",
         "../indonesian/control_flow.vani",
         "../indonesian/for_loops.vani",
@@ -1447,6 +1461,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../indonesian/try_question_op.vani",
         "../indonesian/box_recursive_drop.vani",
         // ── Malay (Latin-script, SE Asia) ───────────────────────────────────
+        "../malay/basics.vani",
         "../malay/keywords.vani",
         "../malay/control_flow.vani",
         "../malay/for_loops.vani",
@@ -1458,6 +1473,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../malay/try_question_op.vani",
         "../malay/box_recursive_drop.vani",
         // ── Swahili (Latin-script, East Africa) ─────────────────────────────
+        "../swahili/basics.vani",
         "../swahili/keywords.vani",
         "../swahili/control_flow.vani",
         "../swahili/for_loops.vani",
@@ -1469,6 +1485,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../swahili/try_question_op.vani",
         "../swahili/box_recursive_drop.vani",
         // ── Filipino (Latin-script, SE Asia) ────────────────────────────────
+        "../filipino/basics.vani",
         "../filipino/keywords.vani",
         "../filipino/control_flow.vani",
         "../filipino/for_loops.vani",
@@ -1480,6 +1497,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../filipino/try_question_op.vani",
         "../filipino/box_recursive_drop.vani",
         // ── Vietnamese (Latin-script + tone marks, SE Asia) ──────────────────
+        "../vietnamese/basics.vani",
         "../vietnamese/keywords.vani",
         "../vietnamese/control_flow.vani",
         "../vietnamese/for_loops.vani",
@@ -1491,6 +1509,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../vietnamese/try_question_op.vani",
         "../vietnamese/box_recursive_drop.vani",
         // ── Hausa (Latin-script + ƙ/ɓ/ɗ, Afroasiatic, West Africa) ─────────
+        "../hausa/basics.vani",
         "../hausa/keywords.vani",
         "../hausa/control_flow.vani",
         "../hausa/for_loops.vani",
@@ -1502,6 +1521,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../hausa/try_question_op.vani",
         "../hausa/box_recursive_drop.vani",
         // ── Yoruba (Latin + tone diacritics, Niger-Congo, West Africa) ───────
+        "../yoruba/basics.vani",
         "../yoruba/keywords.vani",
         "../yoruba/control_flow.vani",
         "../yoruba/for_loops.vani",
@@ -1513,6 +1533,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../yoruba/try_question_op.vani",
         "../yoruba/box_recursive_drop.vani",
         // ── Arabic (Arabic script, RTL) ──────────────────────────────────────
+        "../arabic/basics.vani",
         "../arabic/keywords.vani",
         "../arabic/control_flow.vani",
         "../arabic/for_loops.vani",
@@ -1524,6 +1545,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../arabic/try_question_op.vani",
         "../arabic/box_recursive_drop.vani",
         // ── Hebrew (Hebrew script, RTL) ──────────────────────────────────────
+        "../hebrew/basics.vani",
         "../hebrew/keywords.vani",
         "../hebrew/control_flow.vani",
         "../hebrew/for_loops.vani",
@@ -1535,6 +1557,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../hebrew/try_question_op.vani",
         "../hebrew/box_recursive_drop.vani",
         // ── Armenian (Armenian script) ───────────────────────────────────────
+        "../armenian/basics.vani",
         "../armenian/keywords.vani",
         "../armenian/control_flow.vani",
         "../armenian/for_loops.vani",
@@ -1546,6 +1569,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../armenian/try_question_op.vani",
         "../armenian/box_recursive_drop.vani",
         // ── Georgian (Georgian Mkhedruli script) ─────────────────────────────
+        "../georgian/basics.vani",
         "../georgian/keywords.vani",
         "../georgian/control_flow.vani",
         "../georgian/for_loops.vani",
@@ -1557,6 +1581,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../georgian/try_question_op.vani",
         "../georgian/box_recursive_drop.vani",
         // Phase 9b / 10.2 / 13.1: CJK scripts — Japanese, Mandarin, Korean
+        "../japanese/basics.vani",
         "../japanese/keywords.vani",
         "../japanese/control_flow.vani",
         "../japanese/for_loops.vani",
@@ -1577,6 +1602,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../mandarin/option_types.vani",
         "../mandarin/try_question_op.vani",
         "../mandarin/box_recursive_drop.vani",
+        "../korean/basics.vani",
         "../korean/keywords.vani",
         "../korean/control_flow.vani",
         "../korean/for_loops.vani",
@@ -1588,6 +1614,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../korean/try_question_op.vani",
         "../korean/box_recursive_drop.vani",
         // Phase 13.15 / 13.29–13.30 / 13.34: SE Asian scripts — Thai, Khmer, Burmese, Lao
+        "../thai/basics.vani",
         "../thai/keywords.vani",
         "../thai/control_flow.vani",
         "../thai/for_loops.vani",
@@ -1598,6 +1625,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../thai/option_types.vani",
         "../thai/try_question_op.vani",
         "../thai/box_recursive_drop.vani",
+        "../khmer/basics.vani",
         "../khmer/keywords.vani",
         "../khmer/control_flow.vani",
         "../khmer/for_loops.vani",
@@ -1608,6 +1636,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../khmer/option_types.vani",
         "../khmer/try_question_op.vani",
         "../khmer/box_recursive_drop.vani",
+        "../burmese/basics.vani",
         "../burmese/keywords.vani",
         "../burmese/control_flow.vani",
         "../burmese/for_loops.vani",
@@ -1618,6 +1647,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../burmese/option_types.vani",
         "../burmese/try_question_op.vani",
         "../burmese/box_recursive_drop.vani",
+        "../lao/basics.vani",
         "../lao/keywords.vani",
         "../lao/control_flow.vani",
         "../lao/for_loops.vani",
@@ -1629,6 +1659,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../lao/try_question_op.vani",
         "../lao/box_recursive_drop.vani",
         // Amharic (Ethiopic script)
+        "../amharic/basics.vani",
         "../amharic/keywords.vani",
         "../amharic/control_flow.vani",
         "../amharic/for_loops.vani",
@@ -1640,6 +1671,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../amharic/try_question_op.vani",
         "../amharic/box_recursive_drop.vani",
         // Tibetan
+        "../tibetan/basics.vani",
         "../tibetan/keywords.vani",
         "../tibetan/control_flow.vani",
         "../tibetan/for_loops.vani",
@@ -1651,6 +1683,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../tibetan/try_question_op.vani",
         "../tibetan/box_recursive_drop.vani",
         // Mongolian (Traditional script)
+        "../mongolian/basics.vani",
         "../mongolian/keywords.vani",
         "../mongolian/control_flow.vani",
         "../mongolian/for_loops.vani",
@@ -1662,6 +1695,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../mongolian/try_question_op.vani",
         "../mongolian/box_recursive_drop.vani",
         // Cherokee (syllabary)
+        "../cherokee/basics.vani",
         "../cherokee/keywords.vani",
         "../cherokee/control_flow.vani",
         "../cherokee/for_loops.vani",
