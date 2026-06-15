@@ -1,0 +1,22 @@
+// vani-lang: czech
+//
+// build & run:
+//   vanic run examples/language/czech/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/czech/async_cancel_auto.vani --backend=c  # C
+
+záměr "Czech async/await smoke";
+
+async funkce delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  vrať v;
+}
+
+fn main() -> i64 {
+  let a: i64 = await(delay(5, 42));
+  let b: i64 = await(delay(10, 7));
+
+  tvrď a == 42;
+  tvrď b == 7;
+  vypiš "delays:", a, b;
+  vrať 0;
+}

@@ -1,0 +1,22 @@
+// vani-lang: portuguese
+//
+// build & run:
+//   vanic run examples/language/portuguese/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/portuguese/async_cancel_auto.vani --backend=c  # C
+
+intenção "Portuguese async/await smoke";
+
+async função delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  retornar v;
+}
+
+função main() -> i64 {
+  seja a: i64 = await(delay(5, 42));
+  seja b: i64 = await(delay(10, 7));
+
+  afirmar a == 42;
+  afirmar b == 7;
+  imprimir "delays:", a, b;
+  retornar 0;
+}

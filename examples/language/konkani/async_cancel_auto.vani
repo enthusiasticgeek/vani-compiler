@@ -1,0 +1,24 @@
+// vani-lang: konkani
+//
+// build & run:
+//   vanic run examples/language/konkani/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/konkani/async_cancel_auto.vani --backend=c  # C
+//
+// Konkani smoke of the async/await dialect lift.
+
+उद्देश्य "Konkani async/await smoke";
+
+async कार्य delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  लौटाओ v;
+}
+
+कार्य main() -> i64 {
+  माना a: i64 = await(delay(5, 42));
+  माना b: i64 = await(delay(10, 7));
+
+  सुनिश्चित a == 42;
+  सुनिश्चित b == 7;
+  लिखो "delays:", a, b;
+  लौटाओ 0;
+}

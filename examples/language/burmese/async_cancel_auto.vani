@@ -1,0 +1,22 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/burmese/async_cancel_auto.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese async/await smoke";
+
+async လုပ်ဆောင်ချက် delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ပြန် v;
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား a: i64 = await(delay(5, 42));
+  ထား b: i64 = await(delay(10, 7));
+
+  သေချာ a == 42;
+  သေချာ b == 7;
+  ပုံနှိပ် "delays:", a, b;
+  ပြန် 0;
+}

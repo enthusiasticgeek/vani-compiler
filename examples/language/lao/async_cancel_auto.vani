@@ -1,0 +1,22 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/lao/async_cancel_auto.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao async/await smoke";
+
+async ໜ້າທີ່ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ກັບຄືນ v;
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ a: i64 = await(delay(5, 42));
+  ໃຫ້ b: i64 = await(delay(10, 7));
+
+  ຢືນຢັນ a == 42;
+  ຢືນຢັນ b == 7;
+  ພິມ "delays:", a, b;
+  ກັບຄືນ 0;
+}

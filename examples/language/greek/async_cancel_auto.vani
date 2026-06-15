@@ -1,0 +1,22 @@
+// vani-lang: greek
+//
+// build & run:
+//   vanic run examples/language/greek/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/greek/async_cancel_auto.vani --backend=c  # C
+
+σκοπός "Greek async/await smoke";
+
+async συνάρτηση delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  επιστροφή v;
+}
+
+συνάρτηση main() -> i64 {
+  έστω a: i64 = await(delay(5, 42));
+  έστω b: i64 = await(delay(10, 7));
+
+  επιβεβαίωση a == 42;
+  επιβεβαίωση b == 7;
+  εκτύπωση "delays:", a, b;
+  επιστροφή 0;
+}

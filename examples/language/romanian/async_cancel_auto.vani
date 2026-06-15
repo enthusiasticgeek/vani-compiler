@@ -1,0 +1,22 @@
+// vani-lang: romanian
+//
+// build & run:
+//   vanic run examples/language/romanian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/romanian/async_cancel_auto.vani --backend=c  # C
+
+scop "Romanian async/await smoke";
+
+async functie delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  intoarce v;
+}
+
+fn main() -> i64 {
+  fie a: i64 = await(delay(5, 42));
+  fie b: i64 = await(delay(10, 7));
+
+  afirma a == 42;
+  afirma b == 7;
+  scrie "delays:", a, b;
+  intoarce 0;
+}

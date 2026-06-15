@@ -1,0 +1,22 @@
+// vani-lang: russian
+//
+// build & run:
+//   vanic run examples/language/russian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/russian/async_cancel_auto.vani --backend=c  # C
+
+цель "Russian async/await smoke";
+
+async функция delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  вернуть v;
+}
+
+функция main() -> i64 {
+  пусть a: i64 = await(delay(5, 42));
+  пусть b: i64 = await(delay(10, 7));
+
+  утверждать a == 42;
+  утверждать b == 7;
+  печатать "delays:", a, b;
+  вернуть 0;
+}

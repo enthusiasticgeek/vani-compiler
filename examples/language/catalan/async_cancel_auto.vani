@@ -1,0 +1,22 @@
+// vani-lang: catalan
+//
+// build & run:
+//   vanic run examples/language/catalan/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/catalan/async_cancel_auto.vani --backend=c  # C
+
+propòsit "Catalan async/await smoke";
+
+async funció delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  retorna v;
+}
+
+fn main() -> i64 {
+  sigui a: i64 = await(delay(5, 42));
+  sigui b: i64 = await(delay(10, 7));
+
+  afirma a == 42;
+  afirma b == 7;
+  imprimeix "delays:", a, b;
+  retorna 0;
+}

@@ -1,0 +1,22 @@
+// vani-lang: bengali
+//
+// build & run:
+//   vanic run examples/language/bengali/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/bengali/async_cancel_auto.vani --backend=c  # C
+
+উদ্দেশ্য "Bengali async/await smoke";
+
+async কাজ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ফেরত v;
+}
+
+কাজ main() -> i64 {
+  মান a: i64 = await(delay(5, 42));
+  মান b: i64 = await(delay(10, 7));
+
+  নিশ্চিত a == 42;
+  নিশ্চিত b == 7;
+  লেখ "delays:", a, b;
+  ফেরত 0;
+}

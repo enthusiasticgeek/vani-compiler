@@ -1,0 +1,22 @@
+// vani-lang: turkish
+//
+// build & run:
+//   vanic run examples/language/turkish/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/turkish/async_cancel_auto.vani --backend=c  # C
+
+amaç "Turkish async/await smoke";
+
+async işlev delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  dön v;
+}
+
+fn main() -> i64 {
+  olsun a: i64 = await(delay(5, 42));
+  olsun b: i64 = await(delay(10, 7));
+
+  doğrula a == 42;
+  doğrula b == 7;
+  yazdır "delays:", a, b;
+  dön 0;
+}

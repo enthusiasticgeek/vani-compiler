@@ -1,0 +1,22 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/thai/async_cancel_auto.vani --backend=c  # C
+
+จุดประสงค์ "Thai async/await smoke";
+
+async ฟังก์ชัน delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  คืน v;
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ a: i64 = await(delay(5, 42));
+  ให้ b: i64 = await(delay(10, 7));
+
+  ยืนยัน a == 42;
+  ยืนยัน b == 7;
+  พิมพ์ "delays:", a, b;
+  คืน 0;
+}

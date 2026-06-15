@@ -1,0 +1,22 @@
+// vani-lang: dutch
+//
+// build & run:
+//   vanic run examples/language/dutch/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/dutch/async_cancel_auto.vani --backend=c  # C
+
+doel "Dutch async/await smoke";
+
+async functie delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  terug v;
+}
+
+fn main() -> i64 {
+  laat a: i64 = await(delay(5, 42));
+  laat b: i64 = await(delay(10, 7));
+
+  bevestig a == 42;
+  bevestig b == 7;
+  druk "delays:", a, b;
+  terug 0;
+}

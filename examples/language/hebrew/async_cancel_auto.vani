@@ -1,0 +1,22 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/hebrew/async_cancel_auto.vani --backend=c  # C
+
+מטרה "Hebrew async/await smoke";
+
+async פונקציה delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  החזר v;
+}
+
+פונקציה main() -> i64 {
+  יהי a: i64 = await(delay(5, 42));
+  יהי b: i64 = await(delay(10, 7));
+
+  ודא a == 42;
+  ודא b == 7;
+  הדפס "delays:", a, b;
+  החזר 0;
+}

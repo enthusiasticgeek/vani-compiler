@@ -1,0 +1,22 @@
+// vani-lang: sinhala
+//
+// build & run:
+//   vanic run examples/language/sinhala/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/sinhala/async_cancel_auto.vani --backend=c  # C
+
+අරමුණ "Sinhala async/await smoke";
+
+async කාර්යය delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ආපසු v;
+}
+
+කාර්යය main() -> i64 {
+  අනුමානය a: i64 = await(delay(5, 42));
+  අනුමානය b: i64 = await(delay(10, 7));
+
+  තහවුරු a == 42;
+  තහවුරු b == 7;
+  ලියන්න "delays:", a, b;
+  ආපසු 0;
+}

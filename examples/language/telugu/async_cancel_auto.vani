@@ -1,0 +1,22 @@
+// vani-lang: telugu
+//
+// build & run:
+//   vanic run examples/language/telugu/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/telugu/async_cancel_auto.vani --backend=c  # C
+
+ఉద్దేశం "Telugu async/await smoke";
+
+async పని delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  తిరిగి v;
+}
+
+పని main() -> i64 {
+  అనుకో a: i64 = await(delay(5, 42));
+  అనుకో b: i64 = await(delay(10, 7));
+
+  నిర్ధారించు a == 42;
+  నిర్ధారించు b == 7;
+  రాయి "delays:", a, b;
+  తిరిగి 0;
+}

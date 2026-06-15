@@ -1,0 +1,22 @@
+// vani-lang: odia
+//
+// build & run:
+//   vanic run examples/language/odia/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/odia/async_cancel_auto.vani --backend=c  # C
+
+ଉଦ୍ଦେଶ୍ୟ "Odia async/await smoke";
+
+async କାର୍ଯ୍ୟ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ଫେରନ୍ତୁ v;
+}
+
+କାର୍ଯ୍ୟ main() -> i64 {
+  ମନେକର a: i64 = await(delay(5, 42));
+  ମନେକର b: i64 = await(delay(10, 7));
+
+  ନିଶ୍ଚିତ a == 42;
+  ନିଶ୍ଚିତ b == 7;
+  ଲେଖ "delays:", a, b;
+  ଫେରନ୍ତୁ 0;
+}

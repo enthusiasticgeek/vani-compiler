@@ -1,0 +1,22 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/korean/async_cancel_auto.vani --backend=c  # C
+
+목적 "Korean async/await smoke";
+
+async 함수 delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  반환 v;
+}
+
+함수 main() -> i64 {
+  정의 a: i64 = await(delay(5, 42));
+  정의 b: i64 = await(delay(10, 7));
+
+  확인 a == 42;
+  확인 b == 7;
+  출력 "delays:", a, b;
+  반환 0;
+}

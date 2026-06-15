@@ -1,0 +1,22 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/armenian/async_cancel_auto.vani --backend=c  # C
+
+նպատակ "Armenian async/await smoke";
+
+async ֆունկցիա delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  վերադարձ v;
+}
+
+ֆունկցիա main() -> i64 {
+  թող a: i64 = await(delay(5, 42));
+  թող b: i64 = await(delay(10, 7));
+
+  հաստատել a == 42;
+  հաստատել b == 7;
+  տպել "delays:", a, b;
+  վերադարձ 0;
+}

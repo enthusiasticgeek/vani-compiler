@@ -1,0 +1,22 @@
+// vani-lang: vietnamese
+//
+// build & run:
+//   vanic run examples/language/vietnamese/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/vietnamese/async_cancel_auto.vani --backend=c  # C
+
+mục_đích "Vietnamese async/await smoke";
+
+async hàm delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  trả_về v;
+}
+
+hàm main() -> i64 {
+  đặt a: i64 = await(delay(5, 42));
+  đặt b: i64 = await(delay(10, 7));
+
+  khẳng_định a == 42;
+  khẳng_định b == 7;
+  in_ra "delays:", a, b;
+  trả_về 0;
+}

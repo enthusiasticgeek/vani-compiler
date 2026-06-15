@@ -1,0 +1,22 @@
+// vani-lang: swedish
+//
+// build & run:
+//   vanic run examples/language/swedish/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/swedish/async_cancel_auto.vani --backend=c  # C
+
+syfte "Swedish async/await smoke";
+
+async funktion delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  återvänd v;
+}
+
+fn main() -> i64 {
+  låt a: i64 = await(delay(5, 42));
+  låt b: i64 = await(delay(10, 7));
+
+  påstå a == 42;
+  påstå b == 7;
+  skriv "delays:", a, b;
+  återvänd 0;
+}

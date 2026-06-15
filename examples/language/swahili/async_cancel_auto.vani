@@ -1,0 +1,22 @@
+// vani-lang: swahili
+//
+// build & run:
+//   vanic run examples/language/swahili/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/swahili/async_cancel_auto.vani --backend=c  # C
+
+lengo "Swahili async/await smoke";
+
+async kazi delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  rudi v;
+}
+
+kazi main() -> i64 {
+  acha a: i64 = await(delay(5, 42));
+  acha b: i64 = await(delay(10, 7));
+
+  thibitisha a == 42;
+  thibitisha b == 7;
+  chapisha "delays:", a, b;
+  rudi 0;
+}

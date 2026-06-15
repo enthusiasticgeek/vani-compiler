@@ -1,0 +1,22 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/tibetan/async_cancel_auto.vani --backend=c  # C
+
+དམིགས་ཡུལ "Tibetan async/await smoke";
+
+async ལས་ཀ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ལོག v;
+}
+
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག a: i64 = await(delay(5, 42));
+  ཡོད་པར་ཤོག b: i64 = await(delay(10, 7));
+
+  ངེས a == 42;
+  ངེས b == 7;
+  པར "delays:", a, b;
+  ལོག 0;
+}

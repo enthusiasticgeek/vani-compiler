@@ -1,0 +1,22 @@
+// vani-lang: urdu
+//
+// build & run:
+//   vanic run examples/language/urdu/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/urdu/async_cancel_auto.vani --backend=c  # C
+
+مقصد "Urdu async/await smoke";
+
+async فنکشن delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  واپس v;
+}
+
+فنکشن main() -> i64 {
+  مانیں a: i64 = await(delay(5, 42));
+  مانیں b: i64 = await(delay(10, 7));
+
+  یقینی a == 42;
+  یقینی b == 7;
+  لکھو "delays:", a, b;
+  واپس 0;
+}

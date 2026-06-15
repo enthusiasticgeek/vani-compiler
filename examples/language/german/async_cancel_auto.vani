@@ -1,0 +1,22 @@
+// vani-lang: german
+//
+// build & run:
+//   vanic run examples/language/german/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/german/async_cancel_auto.vani --backend=c  # C
+
+intent "German async/await smoke";
+
+async fn delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  zurück v;
+}
+
+fn main() -> i64 {
+  let a: i64 = await(delay(5, 42));
+  let b: i64 = await(delay(10, 7));
+
+  überprüfe a == 42;
+  überprüfe b == 7;
+  ausführe "delays:", a, b;
+  zurück 0;
+}

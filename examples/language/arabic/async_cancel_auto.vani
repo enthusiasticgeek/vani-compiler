@@ -1,0 +1,22 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/arabic/async_cancel_auto.vani --backend=c  # C
+
+هدف "Arabic async/await smoke";
+
+async دالة delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  أرجع v;
+}
+
+دالة main() -> i64 {
+  ليكن a: i64 = await(delay(5, 42));
+  ليكن b: i64 = await(delay(10, 7));
+
+  تأكد a == 42;
+  تأكد b == 7;
+  اطبع "delays:", a, b;
+  أرجع 0;
+}

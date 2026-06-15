@@ -1,0 +1,22 @@
+// vani-lang: indonesian
+//
+// build & run:
+//   vanic run examples/language/indonesian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/indonesian/async_cancel_auto.vani --backend=c  # C
+
+tujuan "Indonesian async/await smoke";
+
+async fungsi delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  kembali v;
+}
+
+fungsi main() -> i64 {
+  biarkan a: i64 = await(delay(5, 42));
+  biarkan b: i64 = await(delay(10, 7));
+
+  pastikan a == 42;
+  pastikan b == 7;
+  cetak "delays:", a, b;
+  kembali 0;
+}

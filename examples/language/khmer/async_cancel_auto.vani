@@ -1,0 +1,22 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/khmer/async_cancel_auto.vani --backend=c  # C
+
+គោលបំណង "Khmer async/await smoke";
+
+async មុខងារ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ត្រលប់ v;
+}
+
+មុខងារ main() -> i64 {
+  អោយ a: i64 = await(delay(5, 42));
+  អោយ b: i64 = await(delay(10, 7));
+
+  បញ្ជាក់ a == 42;
+  បញ្ជាក់ b == 7;
+  បោះពុម្ព "delays:", a, b;
+  ត្រលប់ 0;
+}

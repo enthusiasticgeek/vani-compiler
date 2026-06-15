@@ -1,0 +1,22 @@
+// vani-lang: norwegian
+//
+// build & run:
+//   vanic run examples/language/norwegian/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/norwegian/async_cancel_auto.vani --backend=c  # C
+
+formål "Norwegian async/await smoke";
+
+async funksjon delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  returner v;
+}
+
+fn main() -> i64 {
+  la a: i64 = await(delay(5, 42));
+  la b: i64 = await(delay(10, 7));
+
+  bekreft a == 42;
+  bekreft b == 7;
+  skriv "delays:", a, b;
+  returner 0;
+}

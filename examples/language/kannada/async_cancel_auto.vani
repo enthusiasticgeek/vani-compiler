@@ -1,0 +1,22 @@
+// vani-lang: kannada
+//
+// build & run:
+//   vanic run examples/language/kannada/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/kannada/async_cancel_auto.vani --backend=c  # C
+
+ಉದ್ದೇಶ "Kannada async/await smoke";
+
+async ಕಾರ್ಯ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ಮರಳಿ v;
+}
+
+ಕಾರ್ಯ main() -> i64 {
+  ಊಹಿಸಿ a: i64 = await(delay(5, 42));
+  ಊಹಿಸಿ b: i64 = await(delay(10, 7));
+
+  ಖಚಿತಪಡಿಸಿ a == 42;
+  ಖಚಿತಪಡಿಸಿ b == 7;
+  ಬರೆ "delays:", a, b;
+  ಮರಳಿ 0;
+}

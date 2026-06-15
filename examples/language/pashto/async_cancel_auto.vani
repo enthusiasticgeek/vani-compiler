@@ -1,0 +1,22 @@
+// vani-lang: pashto
+//
+// build & run:
+//   vanic run examples/language/pashto/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/pashto/async_cancel_auto.vani --backend=c  # C
+
+موخه "Pashto async/await smoke";
+
+async کار delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  بېرته v;
+}
+
+کار main() -> i64 {
+  ووایه a: i64 = await(delay(5, 42));
+  ووایه b: i64 = await(delay(10, 7));
+
+  تایید a == 42;
+  تایید b == 7;
+  ولیکه "delays:", a, b;
+  بېرته 0;
+}

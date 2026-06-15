@@ -1,0 +1,22 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/amharic/async_cancel_auto.vani --backend=c  # C
+
+ዓላማ "Amharic async/await smoke";
+
+async ተግባር delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  መልስ v;
+}
+
+ተግባር main() -> i64 {
+  ይሁን a: i64 = await(delay(5, 42));
+  ይሁን b: i64 = await(delay(10, 7));
+
+  አረጋግጥ a == 42;
+  አረጋግጥ b == 7;
+  ህትመት "delays:", a, b;
+  መልስ 0;
+}

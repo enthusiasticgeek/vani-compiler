@@ -1,0 +1,22 @@
+// vani-lang: punjabi
+//
+// build & run:
+//   vanic run examples/language/punjabi/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/punjabi/async_cancel_auto.vani --backend=c  # C
+
+ਉਦੇਸ਼ "Punjabi async/await smoke";
+
+async ਕਾਰਜ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ਮੁੜੋ v;
+}
+
+ਕਾਰਜ main() -> i64 {
+  ਮੰਨੋ a: i64 = await(delay(5, 42));
+  ਮੰਨੋ b: i64 = await(delay(10, 7));
+
+  ਨਿਸ਼ਚਿਤ a == 42;
+  ਨਿਸ਼ਚਿਤ b == 7;
+  ਲਿਖੋ "delays:", a, b;
+  ਮੁੜੋ 0;
+}

@@ -1,0 +1,22 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/cherokee/async_cancel_auto.vani --backend=c  # C
+
+ᎤᎲᏍᏛ "Cherokee async/await smoke";
+
+async ᏗᎦᏬᏂᎯᏍᏗ delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ᏗᎬᏎᏗ v;
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ a: i64 = await(delay(5, 42));
+  ᎠᏁᎳ b: i64 = await(delay(10, 7));
+
+  ᎯᏍᏗᏎᏍᏗ a == 42;
+  ᎯᏍᏗᏎᏍᏗ b == 7;
+  ᎠᎴᏂᏍᎬᎢ "delays:", a, b;
+  ᏗᎬᏎᏗ 0;
+}

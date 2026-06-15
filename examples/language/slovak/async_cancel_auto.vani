@@ -1,0 +1,22 @@
+// vani-lang: slovak
+//
+// build & run:
+//   vanic run examples/language/slovak/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/slovak/async_cancel_auto.vani --backend=c  # C
+
+účel "Slovak async/await smoke";
+
+async funkcia delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  vráť v;
+}
+
+fn main() -> i64 {
+  nech a: i64 = await(delay(5, 42));
+  nech b: i64 = await(delay(10, 7));
+
+  potvrď a == 42;
+  potvrď b == 7;
+  vytlač "delays:", a, b;
+  vráť 0;
+}

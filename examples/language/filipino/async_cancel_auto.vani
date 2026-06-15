@@ -1,0 +1,22 @@
+// vani-lang: filipino
+//
+// build & run:
+//   vanic run examples/language/filipino/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/filipino/async_cancel_auto.vani --backend=c  # C
+
+layunin "Filipino async/await smoke";
+
+async gawain delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  ibalik v;
+}
+
+gawain main() -> i64 {
+  hayaan a: i64 = await(delay(5, 42));
+  hayaan b: i64 = await(delay(10, 7));
+
+  patunayan a == 42;
+  patunayan b == 7;
+  isulat "delays:", a, b;
+  ibalik 0;
+}

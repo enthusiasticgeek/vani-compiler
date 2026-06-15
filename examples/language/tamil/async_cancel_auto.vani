@@ -1,0 +1,22 @@
+// vani-lang: tamil
+//
+// build & run:
+//   vanic run examples/language/tamil/async_cancel_auto.vani              # LLVM
+//   vanic run examples/language/tamil/async_cancel_auto.vani --backend=c  # C
+
+நோக்கம் "Tamil async/await smoke";
+
+async செயல்பாடு delay(ms: i64, v: i64) -> i64 {
+  sleep_ms(ms);
+  திருப்பு v;
+}
+
+செயல்பாடு main() -> i64 {
+  கொள் a: i64 = await(delay(5, 42));
+  கொள் b: i64 = await(delay(10, 7));
+
+  உறுதி a == 42;
+  உறுதி b == 7;
+  எழுது "delays:", a, b;
+  திருப்பு 0;
+}
