@@ -1,0 +1,25 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/verified.vani              # LLVM
+//   vanic run examples/language/georgian/verified.vani --backend=c  # C
+
+მიზანი "SMT-verified clamp_low";
+
+ფუნქცია clamp_low(x: i64, ზღვარი: i64) -> i64
+მოითხოვს ზღვარი >= 0;
+{
+  თუ x < ზღვარი {
+    დაბრუნება ზღვარი;
+  } სხვა {
+    დაბრუნება x;
+  }
+}
+
+ფუნქცია main() -> i64 {
+  დაამოწმე clamp_low(0 - 5, 0) == 0;
+  დაამოწმე clamp_low(10, 3) == 10;
+  ბეჭდვა clamp_low(0 - 5, 0);
+  ბეჭდვა clamp_low(10, 3);
+  დაბრუნება 0;
+}

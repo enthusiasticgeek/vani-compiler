@@ -1,0 +1,25 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/verified.vani              # LLVM
+//   vanic run examples/language/hebrew/verified.vani --backend=c  # C
+
+מטרה "SMT-verified clamp_low";
+
+פונקציה clamp_low(ס: i64, סף: i64) -> i64
+דורש סף >= 0;
+{
+  אם ס < סף {
+    החזר סף;
+  } אחרת {
+    החזר ס;
+  }
+}
+
+פונקציה main() -> i64 {
+  ודא clamp_low(0 - 5, 0) == 0;
+  ודא clamp_low(10, 3) == 10;
+  הדפס clamp_low(0 - 5, 0);
+  הדפס clamp_low(10, 3);
+  החזר 0;
+}

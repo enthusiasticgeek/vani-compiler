@@ -1,0 +1,27 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/hebrew/box_recursive_drop.vani --backend=c  # C
+
+מטרה "Hebrew Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+מבנה תיק {
+  תוכן: Box<Vec<i64>>,
+}
+
+פונקציה main() -> i64 {
+  יהי ק: Vec<i64> = vec(10, 20, 30);
+  יהי ב: Box<Vec<i64>> = box(ק);
+  הדפס "Box<Vec<i64>> נוצר";
+
+  יהי ק2: Vec<i64> = vec(7, 8, 9);
+  יהי ת: תיק = תיק { תוכן: box(ק2) };
+  הדפס "תיק נוצר";
+
+  יהי ש: OwnedStr = "שלום" + "!";
+  יהי בש: Box<OwnedStr> = box(ש);
+  הדפס "Box<OwnedStr> נוצר";
+
+  החזר 0;
+}

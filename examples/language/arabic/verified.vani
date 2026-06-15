@@ -1,0 +1,25 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/verified.vani              # LLVM
+//   vanic run examples/language/arabic/verified.vani --backend=c  # C
+
+هدف "SMT-verified clamp_low";
+
+دالة clamp_low(س: i64, حد: i64) -> i64
+يتطلب حد >= 0;
+{
+  إذا س < حد {
+    أرجع حد;
+  } وإلا {
+    أرجع س;
+  }
+}
+
+دالة main() -> i64 {
+  تأكد clamp_low(0 - 5, 0) == 0;
+  تأكد clamp_low(10, 3) == 10;
+  اطبع clamp_low(0 - 5, 0);
+  اطبع clamp_low(10, 3);
+  أرجع 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/armenian/box_recursive_drop.vani --backend=c  # C
+
+նպատակ "Armenian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+կառուցվածք Պայուսակ {
+  բովանդակ: Box<Vec<i64>>,
+}
+
+ֆունկցիա main() -> i64 {
+  թող ք: Vec<i64> = vec(10, 20, 30);
+  թող բ: Box<Vec<i64>> = box(ք);
+  տպել "Box<Vec<i64>> ստեղծված";
+
+  թող ք2: Vec<i64> = vec(7, 8, 9);
+  թող պ: Պայուսակ = Պայուսակ { բովանդակ: box(ք2) };
+  տպել "Պայուսակ ստեղծված";
+
+  թող ս: OwnedStr = "բարև" + "!";
+  թող բս: Box<OwnedStr> = box(ս);
+  տպել "Box<OwnedStr> ստեղծված";
+
+  վերադարձ 0;
+}

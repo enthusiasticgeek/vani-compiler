@@ -1,0 +1,27 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/arabic/box_recursive_drop.vani --backend=c  # C
+
+هدف "Arabic Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+بنية حقيبة {
+  محتوى: Box<Vec<i64>>,
+}
+
+دالة main() -> i64 {
+  ليكن ق: Vec<i64> = vec(10, 20, 30);
+  ليكن ب: Box<Vec<i64>> = box(ق);
+  اطبع "Box<Vec<i64>> تم إنشاؤه";
+
+  ليكن ق2: Vec<i64> = vec(7, 8, 9);
+  ليكن ح: حقيبة = حقيبة { محتوى: box(ق2) };
+  اطبع "حقيبة تم إنشاؤها";
+
+  ليكن ن: OwnedStr = "مرحبا" + "!";
+  ليكن بن: Box<OwnedStr> = box(ن);
+  اطبع "Box<OwnedStr> تم إنشاؤه";
+
+  أرجع 0;
+}

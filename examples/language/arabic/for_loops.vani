@@ -1,0 +1,23 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/for_loops.vani              # LLVM
+//   vanic run examples/language/arabic/for_loops.vani --backend=c  # C
+
+هدف "Arabic for-range loops";
+
+دالة مجموع(ن: i64) -> i64 {
+  ليكن م: i64 = 0;
+  لكل ع من 0 إلى ن {
+    م = م + ع;
+  }
+  أرجع م;
+}
+
+دالة main() -> i64 {
+  تأكد مجموع(5) == 10;
+  تأكد مجموع(10) == 45;
+  اطبع "مجموع(5) =", مجموع(5);
+  اطبع "مجموع(10) =", مجموع(10);
+  أرجع 0;
+}

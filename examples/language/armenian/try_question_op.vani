@@ -1,0 +1,33 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/try_question_op.vani              # LLVM
+//   vanic run examples/language/armenian/try_question_op.vani --backend=c  # C
+
+նպատակ "Armenian postfix ? early-return sugar on payloaded enums";
+
+թվարկում Ընտ { Ոմն(i64), Ոչ }
+
+ֆունկցիա կրկնակ_q(o: Ընտ) -> Ընտ {
+  թող v: i64 = o?;
+  վերադարձ Ընտ.Ոմն(v * 2);
+}
+
+ֆունկցիա բաց_կամ(o: Ընտ, կանխ: i64) -> i64 {
+  վերադարձ համապատասխանեցնել o {
+    Ընտ.Ոմն(v) ապա v,
+    Ընտ.Ոչ    ապա կանխ,
+  };
+}
+
+ֆունկցիա main() -> i64 {
+  թող ա: Ընտ = կրկնակ_q(Ընտ.Ոմն(5));
+  հաստատել բաց_կամ(ա, 0) == 10;
+
+  թող բ: Ընտ = կրկնակ_q(Ընտ.Ոչ);
+  հաստատել բաց_կամ(բ, 99) == 99;
+
+  տպել "Ոմն(5)? կրկնակ =", բաց_կամ(ա, 0);
+  տպել "Ոչ? կանխ", բաց_կամ(բ, 99);
+  վերադարձ 0;
+}

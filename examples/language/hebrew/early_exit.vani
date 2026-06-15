@@ -1,0 +1,28 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/early_exit.vani              # LLVM
+//   vanic run examples/language/hebrew/early_exit.vani --backend=c  # C
+
+מטרה "Hebrew break / early return";
+
+פונקציה ראשון_שלילי(רשימה: Vec<i64>) -> i64 {
+  יהי תוצאה: i64 = 0 - 1;
+  יהי ע: u64 = 0;
+  כאשר ע < len(רשימה) {
+    אם רשימה[ע] < 0 {
+      תוצאה = רשימה[ע];
+      שבור;
+    }
+    ע = ע + 1;
+  }
+  החזר תוצאה;
+}
+
+פונקציה main() -> i64 {
+  יהי ר: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  יהי ת: i64 = ראשון_שלילי(ר);
+  ודא ת == 0 - 2;
+  הדפס "ראשון שלילי =", ת;
+  החזר 0;
+}

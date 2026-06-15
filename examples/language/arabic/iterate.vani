@@ -1,0 +1,31 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/iterate.vani              # LLVM
+//   vanic run examples/language/arabic/iterate.vani --backend=c  # C
+
+هدف "Arabic while loop iteration";
+
+دالة فيبوناتشي(ن: i64) -> i64 {
+  إذا ن <= 1 {
+    أرجع ن;
+  }
+  ليكن أ: i64 = 0;
+  ليكن ب: i64 = 1;
+  ليكن ع: i64 = 2;
+  بينما ع <= ن {
+    ليكن مؤقت: i64 = أ + ب;
+    أ = ب;
+    ب = مؤقت;
+    ع = ع + 1;
+  }
+  أرجع ب;
+}
+
+دالة main() -> i64 {
+  تأكد فيبوناتشي(0) == 0;
+  تأكد فيبوناتشي(1) == 1;
+  تأكد فيبوناتشي(7) == 13;
+  اطبع "fib(7) =", فيبوناتشي(7);
+  أرجع 0;
+}

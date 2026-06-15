@@ -31315,6 +31315,140 @@ fn main() -> i64 {
         );
     }
 
+    // ── Armenian ─────────────────────────────────────────────────
+    #[test]
+    fn armenian_invariant_keyword_compiles() {
+        let source = "// vani-lang: armenian\n\
+                      նպատակ \"Armenian invariant\";\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        թող xs: Vec<i64> = vec(0);\n  \
+                        թող i: i64 = 1;\n  \
+                        քանի i < 3\n  \
+                        անփոփոխ i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Armenian invariant compiles");
+    }
+
+    #[test]
+    fn armenian_for_range_compiles() {
+        let source = "// vani-lang: armenian\n\
+                      նպատակ \"Armenian for range\";\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        թող s: i64 = 0;\n  \
+                        ամեն i ից 0 մինչև 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        հաստատել s == 10;\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Armenian for range compiles");
+    }
+
+    #[test]
+    fn armenian_match_enum_compiles() {
+        let source = "// vani-lang: armenian\n\
+                      նպատակ \"Armenian match enum\";\n\
+                      թվարկում Guynt { Karmir, Kanachy }\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        թող g: Guynt = Guynt.Karmir;\n  \
+                        թող r: i64 = համապատասխանեցնել g {\n    \
+                          Guynt.Karmir  ապա 1,\n    \
+                          Guynt.Kanachy ապա 2,\n  \
+                        };\n  \
+                        հաստատել r == 1;\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Armenian match enum compiles");
+    }
+
+    #[test]
+    fn armenian_requires_proves_compiles() {
+        let source = "// vani-lang: armenian\n\
+                      նպատակ \"Armenian requires\";\n\
+                      ֆունկցիա clamp(x: i64, shem: i64) -> i64\n\
+                      պահանջում shem >= 0;\n\
+                      {\n  \
+                        եթե x < shem { վերադարձ shem; } այլապես { վերադարձ x; }\n\
+                      }\n\
+                      ֆունկցիա main() -> i64 {\n  \
+                        հաստատել clamp(0 - 1, 0) == 0;\n  \
+                        վերադարձ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Armenian requires compiles");
+    }
+
+    // ── Georgian ─────────────────────────────────────────────────
+    #[test]
+    fn georgian_invariant_keyword_compiles() {
+        let source = "// vani-lang: georgian\n\
+                      მიზანი \"Georgian invariant\";\n\
+                      ფუნქცია main() -> i64 {\n  \
+                        მიეცი xs: Vec<i64> = vec(0);\n  \
+                        მიეცი i: i64 = 1;\n  \
+                        სანამ i < 3\n  \
+                        უცვლელი i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        დაბრუნება 0;\n\
+                      }\n";
+        crate::compile(source).expect("Georgian invariant compiles");
+    }
+
+    #[test]
+    fn georgian_for_range_compiles() {
+        let source = "// vani-lang: georgian\n\
+                      მიზანი \"Georgian for range\";\n\
+                      ფუნქცია main() -> i64 {\n  \
+                        მიეცი s: i64 = 0;\n  \
+                        თითოეული i დან 0 მდე 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        დაამოწმე s == 10;\n  \
+                        დაბრუნება 0;\n\
+                      }\n";
+        crate::compile(source).expect("Georgian for range compiles");
+    }
+
+    #[test]
+    fn georgian_match_enum_compiles() {
+        let source = "// vani-lang: georgian\n\
+                      მიზანი \"Georgian match enum\";\n\
+                      ჩამოთვლა Feri { Ts, Mn }\n\
+                      ფუნქცია main() -> i64 {\n  \
+                        მიეცი f: Feri = Feri.Ts;\n  \
+                        მიეცი r: i64 = შესაბამისობა f {\n    \
+                          Feri.Ts მაშინ 1,\n    \
+                          Feri.Mn მაშინ 2,\n  \
+                        };\n  \
+                        დაამოწმე r == 1;\n  \
+                        დაბრუნება 0;\n\
+                      }\n";
+        crate::compile(source).expect("Georgian match enum compiles");
+    }
+
+    #[test]
+    fn georgian_requires_proves_compiles() {
+        let source = "// vani-lang: georgian\n\
+                      მიზანი \"Georgian requires\";\n\
+                      ფუნქცია clamp(x: i64, zgv: i64) -> i64\n\
+                      მოითხოვს zgv >= 0;\n\
+                      {\n  \
+                        თუ x < zgv { დაბრუნება zgv; } სხვა { დაბრუნება x; }\n\
+                      }\n\
+                      ფუნქცია main() -> i64 {\n  \
+                        დაამოწმე clamp(0 - 1, 0) == 0;\n  \
+                        დაბრუნება 0;\n\
+                      }\n";
+        crate::compile(source).expect("Georgian requires compiles");
+    }
+
     #[test]
     fn hungarian_uralic_latin_compiles() {
         // Phase 13.16: Uralic family, first non-Indo-European
@@ -32214,6 +32348,72 @@ funzione main() -> i64 {
     }
 
     #[test]
+    fn arabic_invariant_keyword_compiles() {
+        let source = "// vani-lang: arabic\n\
+                      هدف \"Arabic invariant\";\n\
+                      دالة main() -> i64 {\n  \
+                        ليكن xs: Vec<i64> = vec(0);\n  \
+                        ليكن i: i64 = 1;\n  \
+                        بينما i < 3\n  \
+                        مستقر i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        أرجع 0;\n\
+                      }\n";
+        crate::compile(source).expect("Arabic invariant compiles");
+    }
+
+    #[test]
+    fn arabic_for_range_compiles() {
+        let source = "// vani-lang: arabic\n\
+                      هدف \"Arabic for range\";\n\
+                      دالة main() -> i64 {\n  \
+                        ليكن s: i64 = 0;\n  \
+                        لكل i من 0 إلى 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        تأكد s == 10;\n  \
+                        أرجع 0;\n\
+                      }\n";
+        crate::compile(source).expect("Arabic for range compiles");
+    }
+
+    #[test]
+    fn arabic_match_enum_compiles() {
+        let source = "// vani-lang: arabic\n\
+                      هدف \"Arabic match enum\";\n\
+                      تعداد Lon { Ahm, Akdh }\n\
+                      دالة main() -> i64 {\n  \
+                        ليكن l: Lon = Lon.Ahm;\n  \
+                        ليكن r: i64 = طابق l {\n    \
+                          Lon.Ahm  ثم 1,\n    \
+                          Lon.Akdh ثم 2,\n  \
+                        };\n  \
+                        تأكد r == 1;\n  \
+                        أرجع 0;\n\
+                      }\n";
+        crate::compile(source).expect("Arabic match enum compiles");
+    }
+
+    #[test]
+    fn arabic_requires_proves_compiles() {
+        let source = "// vani-lang: arabic\n\
+                      هدف \"Arabic requires\";\n\
+                      دالة clamp(x: i64, had: i64) -> i64\n\
+                      يتطلب had >= 0;\n\
+                      {\n  \
+                        إذا x < had { أرجع had; } وإلا { أرجع x; }\n\
+                      }\n\
+                      دالة main() -> i64 {\n  \
+                        تأكد clamp(0 - 1, 0) == 0;\n  \
+                        أرجع 0;\n\
+                      }\n";
+        crate::compile(source).expect("Arabic requires compiles");
+    }
+
+    #[test]
     fn greek_script_pragma_compiles_and_runs() {
         // Phase 13.4 (2026-06-08): first Greek-script dialect.
         // Modern Greek monotonic accents in keyword spellings.
@@ -32630,6 +32830,73 @@ funzione main() -> i64 {
             crate::compile(source).is_err(),
             "Hebrew pragma + Greek keyword must be rejected"
         );
+    }
+
+    // ── Hebrew ───────────────────────────────────────────────────
+    #[test]
+    fn hebrew_invariant_keyword_compiles() {
+        let source = "// vani-lang: hebrew\n\
+                      מטרה \"Hebrew invariant\";\n\
+                      פונקציה main() -> i64 {\n  \
+                        יהי xs: Vec<i64> = vec(0);\n  \
+                        יהי i: i64 = 1;\n  \
+                        כאשר i < 3\n  \
+                        בלתי_משתנה i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        החזר 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hebrew invariant compiles");
+    }
+
+    #[test]
+    fn hebrew_for_range_compiles() {
+        let source = "// vani-lang: hebrew\n\
+                      מטרה \"Hebrew for range\";\n\
+                      פונקציה main() -> i64 {\n  \
+                        יהי s: i64 = 0;\n  \
+                        עבור i מתוך 0 עד 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        ודא s == 10;\n  \
+                        החזר 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hebrew for range compiles");
+    }
+
+    #[test]
+    fn hebrew_match_enum_compiles() {
+        let source = "// vani-lang: hebrew\n\
+                      מטרה \"Hebrew match enum\";\n\
+                      ספירה Tzv { Ad, Yr }\n\
+                      פונקציה main() -> i64 {\n  \
+                        יהי t: Tzv = Tzv.Ad;\n  \
+                        יהי r: i64 = התאם t {\n    \
+                          Tzv.Ad אז 1,\n    \
+                          Tzv.Yr אז 2,\n  \
+                        };\n  \
+                        ודא r == 1;\n  \
+                        החזר 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hebrew match enum compiles");
+    }
+
+    #[test]
+    fn hebrew_requires_proves_compiles() {
+        let source = "// vani-lang: hebrew\n\
+                      מטרה \"Hebrew requires\";\n\
+                      פונקציה clamp(x: i64, saf: i64) -> i64\n\
+                      דורש saf >= 0;\n\
+                      {\n  \
+                        אם x < saf { החזר saf; } אחרת { החזר x; }\n\
+                      }\n\
+                      פונקציה main() -> i64 {\n  \
+                        ודא clamp(0 - 1, 0) == 0;\n  \
+                        החזר 0;\n\
+                      }\n";
+        crate::compile(source).expect("Hebrew requires compiles");
     }
 
     #[test]

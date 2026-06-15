@@ -1,0 +1,23 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/for_loops.vani              # LLVM
+//   vanic run examples/language/hebrew/for_loops.vani --backend=c  # C
+
+מטרה "Hebrew for-range loops";
+
+פונקציה סכום(נ: i64) -> i64 {
+  יהי ס: i64 = 0;
+  עבור ע מתוך 0 עד נ {
+    ס = ס + ע;
+  }
+  החזר ס;
+}
+
+פונקציה main() -> i64 {
+  ודא סכום(5) == 10;
+  ודא סכום(10) == 45;
+  הדפס "סכום(5) =", סכום(5);
+  הדפס "סכום(10) =", סכום(10);
+  החזר 0;
+}

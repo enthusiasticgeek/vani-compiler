@@ -1,0 +1,27 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/keywords.vani              # LLVM
+//   vanic run examples/language/hebrew/keywords.vani --backend=c  # C
+
+מטרה "Hebrew keyword smoke-test";
+
+מבנה נקודה {
+  ס: i64,
+  ץ: i64,
+}
+
+ספירה צבע { אדום, ירוק, כחול }
+
+פונקציה חיבור(א: i64, ב: i64) -> i64 {
+  החזר א + ב;
+}
+
+פונקציה main() -> i64 {
+  יהי נ: נקודה = נקודה { ס: 3, ץ: 4 };
+  יהי צ: צבע = צבע.אדום;
+  יהי ס: i64 = חיבור(נ.ס, נ.ץ);
+  ודא ס == 7;
+  הדפס "Hebrew keywords OK", ס;
+  החזר 0;
+}

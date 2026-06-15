@@ -1,0 +1,28 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/early_exit.vani              # LLVM
+//   vanic run examples/language/georgian/early_exit.vani --backend=c  # C
+
+მიზანი "Georgian break / early return";
+
+ფუნქცია პირველი_უარყოფითი(სია: Vec<i64>) -> i64 {
+  მიეცი შედეგი: i64 = 0 - 1;
+  მიეცი ი: u64 = 0;
+  სანამ ი < len(სია) {
+    თუ სია[ი] < 0 {
+      შედეგი = სია[ი];
+      შეჩერება;
+    }
+    ი = ი + 1;
+  }
+  დაბრუნება შედეგი;
+}
+
+ფუნქცია main() -> i64 {
+  მიეცი ს: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  მიეცი შ: i64 = პირველი_უარყოფითი(ს);
+  დაამოწმე შ == 0 - 2;
+  ბეჭდვა "პირველი უარყოფითი =", შ;
+  დაბრუნება 0;
+}

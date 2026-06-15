@@ -1,0 +1,31 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/vec_invariants.vani              # LLVM
+//   vanic run examples/language/arabic/vec_invariants.vani --backend=c  # C
+
+هدف "Loop invariants over Vec length, end-to-end";
+
+دالة main() -> i64 {
+  ليكن قائمة: Vec<i64> = vec(0);
+  ليكن ع: i64 = 1;
+
+  بينما ع < 5
+  مستقر ع >= 1;
+  مستقر ع <= 5;
+  {
+    قائمة = push(قائمة, ع * 10);
+    ع = ع + 1;
+  }
+
+  أثبت ع == 5;
+  أثبت len(قائمة) == 5;
+
+  اطبع قائمة[0];
+  اطبع قائمة[1];
+  اطبع قائمة[2];
+  اطبع قائمة[3];
+  اطبع قائمة[4];
+
+  أرجع 0;
+}

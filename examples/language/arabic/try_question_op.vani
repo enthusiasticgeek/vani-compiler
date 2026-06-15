@@ -1,0 +1,33 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/try_question_op.vani              # LLVM
+//   vanic run examples/language/arabic/try_question_op.vani --backend=c  # C
+
+هدف "Arabic postfix ? early-return sugar on payloaded enums";
+
+تعداد خيار { بعض(i64), لا_شيء }
+
+دالة ضاعف_خيار(خ: خيار) -> خيار {
+  ليكن ق: i64 = خ?;
+  أرجع خيار.بعض(ق * 2);
+}
+
+دالة فتح_أو(خ: خيار, افتراضي: i64) -> i64 {
+  أرجع طابق خ {
+    خيار.بعض(ق) ثم ق,
+    خيار.لا_شيء ثم افتراضي,
+  };
+}
+
+دالة main() -> i64 {
+  ليكن أ: خيار = ضاعف_خيار(خيار.بعض(5));
+  تأكد فتح_أو(أ, 0) == 10;
+
+  ليكن ب: خيار = ضاعف_خيار(خيار.لا_شيء);
+  تأكد فتح_أو(ب, 99) == 99;
+
+  اطبع "Some(5)? ضوعف =", فتح_أو(أ, 0);
+  اطبع "None? افتراضي", فتح_أو(ب, 99);
+  أرجع 0;
+}

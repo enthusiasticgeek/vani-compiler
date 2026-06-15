@@ -1,0 +1,28 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/early_exit.vani              # LLVM
+//   vanic run examples/language/armenian/early_exit.vani --backend=c  # C
+
+նպատակ "Armenian break / early return";
+
+ֆունկցիա առաջին_բացասական(ցուցակ: Vec<i64>) -> i64 {
+  թող արդյունք: i64 = 0 - 1;
+  թող ե: u64 = 0;
+  քանի ե < len(ցուցակ) {
+    եթե ցուցակ[ե] < 0 {
+      արդյունք = ցուցակ[ե];
+      ընդհատել;
+    }
+    ե = ե + 1;
+  }
+  վերադարձ արդյունք;
+}
+
+ֆունկցիա main() -> i64 {
+  թող ց: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  թող ա: i64 = առաջին_բացասական(ց);
+  հաստատել ա == 0 - 2;
+  տպել "առաջին բացասական =", ա;
+  վերադարձ 0;
+}

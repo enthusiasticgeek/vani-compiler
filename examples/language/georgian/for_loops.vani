@@ -1,0 +1,23 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/for_loops.vani              # LLVM
+//   vanic run examples/language/georgian/for_loops.vani --backend=c  # C
+
+მიზანი "Georgian for-range loops";
+
+ფუნქცია ჯამი(ნ: i64) -> i64 {
+  მიეცი ს: i64 = 0;
+  თითოეული ი დან 0 მდე ნ {
+    ს = ს + ი;
+  }
+  დაბრუნება ს;
+}
+
+ფუნქცია main() -> i64 {
+  დაამოწმე ჯამი(5) == 10;
+  დაამოწმე ჯამი(10) == 45;
+  ბეჭდვა "ჯამი(5) =", ჯამი(5);
+  ბეჭდვა "ჯამი(10) =", ჯამი(10);
+  დაბრუნება 0;
+}

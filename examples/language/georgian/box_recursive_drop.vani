@@ -1,0 +1,27 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/georgian/box_recursive_drop.vani --backend=c  # C
+
+მიზანი "Georgian Box<Vec<T>> and Box<OwnedStr> recursive drop";
+
+სტრუქტურა ჩანთა {
+  შინაარსი: Box<Vec<i64>>,
+}
+
+ფუნქცია main() -> i64 {
+  მიეცი ვ: Vec<i64> = vec(10, 20, 30);
+  მიეცი ბ: Box<Vec<i64>> = box(ვ);
+  ბეჭდვა "Box<Vec<i64>> შექმნილია";
+
+  მიეცი ვ2: Vec<i64> = vec(7, 8, 9);
+  მიეცი ჩ: ჩანთა = ჩანთა { შინაარსი: box(ვ2) };
+  ბეჭდვა "ჩანთა შექმნილია";
+
+  მიეცი ს: OwnedStr = "გამარჯობა" + "!";
+  მიეცი ბს: Box<OwnedStr> = box(ს);
+  ბეჭდვა "Box<OwnedStr> შექმნილია";
+
+  დაბრუნება 0;
+}

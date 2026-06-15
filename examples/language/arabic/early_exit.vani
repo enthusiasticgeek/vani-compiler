@@ -1,0 +1,28 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/early_exit.vani              # LLVM
+//   vanic run examples/language/arabic/early_exit.vani --backend=c  # C
+
+هدف "Arabic break / early return";
+
+دالة أول_سالب(قائمة: Vec<i64>) -> i64 {
+  ليكن نتيجة: i64 = 0 - 1;
+  ليكن ع: u64 = 0;
+  بينما ع < len(قائمة) {
+    إذا قائمة[ع] < 0 {
+      نتيجة = قائمة[ع];
+      كسر;
+    }
+    ع = ع + 1;
+  }
+  أرجع نتيجة;
+}
+
+دالة main() -> i64 {
+  ليكن ق: Vec<i64> = vec(3, 7, 0 - 2, 5, 0 - 8);
+  ليكن ن: i64 = أول_سالب(ق);
+  تأكد ن == 0 - 2;
+  اطبع "أول سالب =", ن;
+  أرجع 0;
+}

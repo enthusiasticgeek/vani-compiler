@@ -1,0 +1,23 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/for_loops.vani              # LLVM
+//   vanic run examples/language/armenian/for_loops.vani --backend=c  # C
+
+նպատակ "Armenian for-range loops";
+
+ֆունկցիա գումար(ն: i64) -> i64 {
+  թող ս: i64 = 0;
+  ամեն ե ից 0 մինչև ն {
+    ս = ս + ե;
+  }
+  վերադարձ ս;
+}
+
+ֆունկցիա main() -> i64 {
+  հաստատել գումար(5) == 10;
+  հաստատել գումար(10) == 45;
+  տպել "գումար(5) =", գումար(5);
+  տպել "գումար(10) =", գումար(10);
+  վերադարձ 0;
+}

@@ -1,0 +1,32 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/armenian/vec_invariants.vani --backend=c  # C
+
+նպատակ "Loop invariants over Vec length, end-to-end";
+
+ֆունկցիա main() -> i64 {
+  թող ցուցակ: Vec<i64> = vec(0);
+  թող ե: i64 = 1;
+
+  քանի ե < 5
+  անփոփոխ len(ցուցակ) == (ե որպես u64);
+  անփոփոխ ե >= 1;
+  անփոփոխ ե <= 5;
+  {
+    ցուցակ = push(ցուցակ, ե * 10);
+    ե = ե + 1;
+  }
+
+  ապացուցել ե == 5;
+  ապացուցել len(ցուցակ) == 5;
+
+  տպել ցուցակ[0];
+  տպել ցուցակ[1];
+  տպել ցուցակ[2];
+  տպել ցուցակ[3];
+  տպել ցուցակ[4];
+
+  վերադարձ 0;
+}

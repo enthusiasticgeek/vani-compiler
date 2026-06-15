@@ -1,0 +1,25 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/verified.vani              # LLVM
+//   vanic run examples/language/armenian/verified.vani --backend=c  # C
+
+նպատակ "SMT-verified clamp_low";
+
+ֆունկցիա clamp_low(x: i64, շեմ: i64) -> i64
+պահանջում շեմ >= 0;
+{
+  եթե x < շեմ {
+    վերադարձ շեմ;
+  } այլապես {
+    վերադարձ x;
+  }
+}
+
+ֆունկցիա main() -> i64 {
+  հաստատել clamp_low(0 - 5, 0) == 0;
+  հաստատել clamp_low(10, 3) == 10;
+  տպել clamp_low(0 - 5, 0);
+  տպել clamp_low(10, 3);
+  վերադարձ 0;
+}

@@ -3070,7 +3070,7 @@ fn arabic_keyword(text: &str) -> Option<TokenKind> {
         "هدف" => TokenKind::Intent,           // hadaf (goal / intent)
         "نوع" => TokenKind::Type,             // naw' (type / kind)
         "خارجي" => TokenKind::Extern,         // khārijī (external)
-        "ثابت" => TokenKind::Invariant,       // thābit (constant / invariant)
+        "مستقر" => TokenKind::Invariant,      // mustaqarr (stable / invariant — avoids collision with Urdu/Persian ثابت=Const)
         _ => return None,
     };
     Some(kind)
@@ -3219,7 +3219,7 @@ fn hebrew_keyword(text: &str) -> Option<TokenKind> {
         "סוג" => TokenKind::Type,             // sug (kind)
         "טיפוס" => TokenKind::Type,           // tipus (type — alt loanword)
         "חיצוני" => TokenKind::Extern,        // khitsoni (external)
-        "בלתי-משתנה" => TokenKind::Invariant, // bilti-mishtaneh (unchanging)
+        "בלתי_משתנה" => TokenKind::Invariant, // bilti_mishtaneh (unchanging)
         _ => return None,
     };
     Some(kind)

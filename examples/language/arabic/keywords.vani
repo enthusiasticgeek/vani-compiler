@@ -1,0 +1,27 @@
+// vani-lang: arabic
+//
+// build & run:
+//   vanic run examples/language/arabic/keywords.vani              # LLVM
+//   vanic run examples/language/arabic/keywords.vani --backend=c  # C
+
+هدف "Arabic keyword smoke-test";
+
+بنية نقطة {
+  س: i64,
+  ص: i64,
+}
+
+تعداد لون { أحمر, أخضر, أزرق }
+
+دالة جمع(أ: i64, ب: i64) -> i64 {
+  أرجع أ + ب;
+}
+
+دالة main() -> i64 {
+  ليكن ن: نقطة = نقطة { س: 3, ص: 4 };
+  ليكن ل: لون = لون.أحمر;
+  ليكن ج: i64 = جمع(ن.س, ن.ص);
+  تأكد ج == 7;
+  اطبع "Arabic keywords OK", ج;
+  أرجع 0;
+}

@@ -1,0 +1,31 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/iterate.vani              # LLVM
+//   vanic run examples/language/hebrew/iterate.vani --backend=c  # C
+
+מטרה "Hebrew while loop iteration";
+
+פונקציה פיבונאצ'י(נ: i64) -> i64 {
+  אם נ <= 1 {
+    החזר נ;
+  }
+  יהי א: i64 = 0;
+  יהי ב: i64 = 1;
+  יהי ע: i64 = 2;
+  כאשר ע <= נ {
+    יהי זמני: i64 = א + ב;
+    א = ב;
+    ב = זמני;
+    ע = ע + 1;
+  }
+  החזר ב;
+}
+
+פונקציה main() -> i64 {
+  ודא פיבונאצ'י(0) == 0;
+  ודא פיבונאצ'י(1) == 1;
+  ודא פיבונאצ'י(7) == 13;
+  הדפס "fib(7) =", פיבונאצ'י(7);
+  החזר 0;
+}

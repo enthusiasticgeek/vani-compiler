@@ -1,0 +1,31 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/iterate.vani              # LLVM
+//   vanic run examples/language/armenian/iterate.vani --backend=c  # C
+
+նպատակ "Armenian while loop iteration";
+
+ֆունկցիա ֆիբոնաչի(ն: i64) -> i64 {
+  եթե ն <= 1 {
+    վերադարձ ն;
+  }
+  թող ա: i64 = 0;
+  թող բ: i64 = 1;
+  թող ե: i64 = 2;
+  քանի ե <= ն {
+    թող ժամ: i64 = ա + բ;
+    ա = բ;
+    բ = ժամ;
+    ե = ե + 1;
+  }
+  վերադարձ բ;
+}
+
+ֆունկցիա main() -> i64 {
+  հաստատել ֆիբոնաչի(0) == 0;
+  հաստատել ֆիբոնաչի(1) == 1;
+  հաստատել ֆիբոնաչի(7) == 13;
+  տպել "fib(7) =", ֆիբոնաչի(7);
+  վերադարձ 0;
+}

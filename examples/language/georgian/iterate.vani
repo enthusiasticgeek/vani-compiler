@@ -1,0 +1,31 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/iterate.vani              # LLVM
+//   vanic run examples/language/georgian/iterate.vani --backend=c  # C
+
+მიზანი "Georgian while loop iteration";
+
+ფუნქცია ფიბონაჩი(ნ: i64) -> i64 {
+  თუ ნ <= 1 {
+    დაბრუნება ნ;
+  }
+  მიეცი ა: i64 = 0;
+  მიეცი ბ: i64 = 1;
+  მიეცი ი: i64 = 2;
+  სანამ ი <= ნ {
+    მიეცი ც: i64 = ა + ბ;
+    ა = ბ;
+    ბ = ც;
+    ი = ი + 1;
+  }
+  დაბრუნება ბ;
+}
+
+ფუნქცია main() -> i64 {
+  დაამოწმე ფიბონაჩი(0) == 0;
+  დაამოწმე ფიბონაჩი(1) == 1;
+  დაამოწმე ფიბონაჩი(7) == 13;
+  ბეჭდვა "fib(7) =", ფიბონაჩი(7);
+  დაბრუნება 0;
+}

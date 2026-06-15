@@ -1,0 +1,27 @@
+// vani-lang: armenian
+//
+// build & run:
+//   vanic run examples/language/armenian/keywords.vani              # LLVM
+//   vanic run examples/language/armenian/keywords.vani --backend=c  # C
+
+նպատակ "Armenian keyword smoke-test";
+
+կառուցվածք Կետ {
+  x: i64,
+  y: i64,
+}
+
+թվարկում Գույն { Կարմիր, Կանաչ, Կապույտ }
+
+ֆունկցիա գումար(ա: i64, բ: i64) -> i64 {
+  վերադարձ ա + բ;
+}
+
+ֆունկցիա main() -> i64 {
+  թող կ: Կետ = Կետ { x: 3, y: 4 };
+  թող գ: Գույն = Գույն.Կարմիր;
+  թող ս: i64 = գումար(կ.x, կ.y);
+  հաստատել ս == 7;
+  տպել "Armenian keywords OK", ս;
+  վերադարձ 0;
+}

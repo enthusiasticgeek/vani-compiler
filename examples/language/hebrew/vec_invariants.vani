@@ -1,0 +1,31 @@
+// vani-lang: hebrew
+//
+// build & run:
+//   vanic run examples/language/hebrew/vec_invariants.vani              # LLVM
+//   vanic run examples/language/hebrew/vec_invariants.vani --backend=c  # C
+
+מטרה "Loop invariants over Vec length, end-to-end";
+
+פונקציה main() -> i64 {
+  יהי רשימה: Vec<i64> = vec(0);
+  יהי ע: i64 = 1;
+
+  כאשר ע < 5
+  בלתי_משתנה ע >= 1;
+  בלתי_משתנה ע <= 5;
+  {
+    רשימה = push(רשימה, ע * 10);
+    ע = ע + 1;
+  }
+
+  הוכח ע == 5;
+  הוכח len(רשימה) == 5;
+
+  הדפס רשימה[0];
+  הדפס רשימה[1];
+  הדפס רשימה[2];
+  הדפס רשימה[3];
+  הדפס רשימה[4];
+
+  החזר 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: georgian
+//
+// build & run:
+//   vanic run examples/language/georgian/keywords.vani              # LLVM
+//   vanic run examples/language/georgian/keywords.vani --backend=c  # C
+
+მიზანი "Georgian keyword smoke-test";
+
+სტრუქტურა წერტილი {
+  x: i64,
+  y: i64,
+}
+
+ჩამოთვლა ფერი { წითელი, მწვანე, ლურჯი }
+
+ფუნქცია შეკრება(ა: i64, ბ: i64) -> i64 {
+  დაბრუნება ა + ბ;
+}
+
+ფუნქცია main() -> i64 {
+  მიეცი წ: წერტილი = წერტილი { x: 3, y: 4 };
+  მიეცი ფ: ფერი = ფერი.წითელი;
+  მიეცი ს: i64 = შეკრება(წ.x, წ.y);
+  დაამოწმე ს == 7;
+  ბეჭდვა "Georgian keywords OK", ს;
+  დაბრუნება 0;
+}
