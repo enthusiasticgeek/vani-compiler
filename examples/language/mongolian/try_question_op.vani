@@ -1,0 +1,29 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/try_question_op.vani              # LLVM
+//   vanic run examples/language/mongolian/try_question_op.vani --backend=c  # C
+//
+// Note: Mongolian has no native match keyword; ? operator tested via chaining.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian try-? operator smoke-test";
+
+ᠴᠠᠭ parse_pos(x: i64) -> Option<i64> {
+  ᠬᠡᠷᠪᠡ x <= 0 {
+    ᠪᠤᠴᠠ None;
+  } ᠡᠰᠡᠪᠡᠯ {
+    ᠪᠤᠴᠠ Some(x);
+  }
+}
+
+ᠴᠠᠭ double_pos(x: i64) -> Option<i64> {
+  ᠶᠠᠪᠤᠭᠤᠯ v: i64 = parse_pos(x)?;
+  ᠪᠤᠴᠠ Some(v * 2);
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ r1: Option<i64> = double_pos(5);
+  ᠶᠠᠪᠤᠭᠤᠯ r2: Option<i64> = double_pos(0 - 3);
+  ᠬᠡᠪᠯᠡ "Mongolian try-? OK";
+  ᠪᠤᠴᠠ 0;
+}

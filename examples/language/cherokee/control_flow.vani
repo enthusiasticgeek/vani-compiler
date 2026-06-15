@@ -1,0 +1,25 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/control_flow.vani              # LLVM
+//   vanic run examples/language/cherokee/control_flow.vani --backend=c  # C
+
+ᎤᎲᏍᏛ "Cherokee control flow smoke-test";
+
+ᏗᎦᏬᏂᎯᏍᏗ temdeg(n: i64) -> i64 {
+  ᎢᏳᏃ n < 0 {
+    ᏗᎬᏎᏗ -1;
+  } ᎪᎯ ᎢᏳᏃ n == 0 {
+    ᏗᎬᏎᏗ 0;
+  } ᎪᎯ {
+    ᏗᎬᏎᏗ 1;
+  }
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎯᏍᏗᏎᏍᏗ temdeg(-5) == -1;
+  ᎯᏍᏗᏎᏍᏗ temdeg(0) == 0;
+  ᎯᏍᏗᏎᏍᏗ temdeg(3) == 1;
+  ᎠᎴᏂᏍᎬᎢ "Cherokee control flow OK";
+  ᏗᎬᏎᏗ 0;
+}

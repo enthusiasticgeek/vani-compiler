@@ -1,0 +1,20 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/early_exit.vani              # LLVM
+//   vanic run examples/language/mongolian/early_exit.vani --backend=c  # C
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian early-exit (break) smoke-test";
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ n: i64 = 0;
+  ᠶᠠᠭ᠎ᠠ n < 100 {
+    ᠬᠡᠷᠪᠡ n == 5 {
+      ᠵᠣᠭᠰᠣ;
+    }
+    n = n + 1;
+  }
+  ᠪᠠᠲᠤᠯ n == 5;
+  ᠬᠡᠪᠯᠡ "Mongolian early exit OK", n;
+  ᠪᠤᠴᠠ 0;
+}

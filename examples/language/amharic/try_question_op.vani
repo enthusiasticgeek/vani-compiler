@@ -1,0 +1,28 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/try_question_op.vani              # LLVM
+//   vanic run examples/language/amharic/try_question_op.vani --backend=c  # C
+//
+// Note: Amharic has no native match keyword; ? operator tested via chaining.
+
+ዓላማ "Amharic ? operator smoke-test";
+
+ተግባር ፈትሽ(n: i64) -> Option<i64> {
+  ከ n < 0 {
+    መልስ None;
+  }
+  መልስ Some(n * 3);
+}
+
+ተግባር አሰላ(n: i64) -> Option<i64> {
+  ይሁን v: i64 = ፈትሽ(n)?;
+  መልስ Some(v + 1);
+}
+
+ተግባር main() -> i64 {
+  ይሁን ጥሩ: Option<i64> = አሰላ(4);
+  ይሁን መጥፎ: Option<i64> = አሰላ(0 - 1);
+  ህትመት "Amharic ? op OK";
+  መልስ 0;
+}

@@ -1,0 +1,25 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/control_flow.vani              # LLVM
+//   vanic run examples/language/tibetan/control_flow.vani --backend=c  # C
+
+དམིགས་ཡུལ "Tibetan control flow smoke-test";
+
+ལས་ཀ ངོས་འཛིན(n: i64) -> i64 {
+  གལ་ཏེ n < 0 {
+    ལོག -1;
+  } གཞན གལ་ཏེ n == 0 {
+    ལོག 0;
+  } གཞན {
+    ལོག 1;
+  }
+}
+
+ལས་ཀ main() -> i64 {
+  ངེས ངོས་འཛིན(-5) == -1;
+  ངེས ངོས་འཛིན(0) == 0;
+  ངེས ངོས་འཛིན(3) == 1;
+  པར "Tibetan control flow OK";
+  ལོག 0;
+}

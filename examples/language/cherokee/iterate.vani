@@ -1,0 +1,19 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/iterate.vani              # LLVM
+//   vanic run examples/language/cherokee/iterate.vani --backend=c  # C
+
+ᎤᎲᏍᏛ "Cherokee Vec iteration smoke-test";
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ arr: Vec<i64> = vec(0);
+  arr = push(arr, 10);
+  arr = push(arr, 20);
+  arr = push(arr, 30);
+  ᎯᏍᏗᏎᏍᏗ arr[0] == 10;
+  ᎯᏍᏗᏎᏍᏗ arr[1] == 20;
+  ᎯᏍᏗᏎᏍᏗ arr[2] == 30;
+  ᎠᎴᏂᏍᎬᎢ "Cherokee iterate OK";
+  ᏗᎬᏎᏗ 0;
+}

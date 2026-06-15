@@ -1,0 +1,27 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/keywords.vani              # LLVM
+//   vanic run examples/language/mongolian/keywords.vani --backend=c  # C
+//
+// Note: Mongolian has no native struct/enum keywords; functions + control flow tested.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian keyword smoke-test";
+
+ᠴᠠᠭ neilemj(ᠠ: i64, ᠪ: i64) -> i64 {
+  ᠪᠤᠴᠠ ᠠ + ᠪ;
+}
+
+ᠴᠠᠭ temdeg(n: i64) -> i64 {
+  ᠬᠡᠷᠪᠡ n < 0 { ᠪᠤᠴᠠ 0 - 1; } ᠡᠰᠡᠪᠡᠯ ᠬᠡᠷᠪᠡ n == 0 { ᠪᠤᠴᠠ 0; } ᠡᠰᠡᠪᠡᠯ { ᠪᠤᠴᠠ 1; }
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ s: i64 = neilemj(3, 4);
+  ᠪᠠᠲᠤᠯ s == 7;
+  ᠪᠠᠲᠤᠯ temdeg(0 - 5) == 0 - 1;
+  ᠪᠠᠲᠤᠯ temdeg(0) == 0;
+  ᠪᠠᠲᠤᠯ temdeg(3) == 1;
+  ᠬᠡᠪᠯᠡ "Mongolian keywords OK", s;
+  ᠪᠤᠴᠠ 0;
+}

@@ -1,0 +1,35 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/verified.vani              # LLVM
+//   vanic run examples/language/tibetan/verified.vani --backend=c  # C
+
+དམིགས་ཡུལ "Tibetan verified arithmetic smoke-test";
+
+ལས་ཀ clamp(x: i64, lo: i64, hi: i64) -> i64 {
+  དགོས x <= hi;
+  དགོས lo <= hi;
+  གལ་ཏེ x < lo {
+    ལོག lo;
+  } གཞན གལ་ཏེ x > hi {
+    ལོག hi;
+  } གཞན {
+    ལོག x;
+  }
+}
+
+ལས་ཀ safe_subtract(a: i64, b: i64) -> i64 {
+  དགོས a >= b;
+  ཡོད་པར་ཤོག result: i64 = a - b;
+  བསྒྲུབས result >= 0;
+  ལོག result;
+}
+
+ལས་ཀ main() -> i64 {
+  ངེས clamp(5, 1, 10) == 5;
+  ངེས clamp(0, 1, 10) == 1;
+  ངེས clamp(15, 1, 10) == 10;
+  ངེས safe_subtract(10, 3) == 7;
+  པར "Tibetan verified OK";
+  ལོག 0;
+}

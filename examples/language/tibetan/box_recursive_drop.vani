@@ -1,0 +1,21 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/tibetan/box_recursive_drop.vani --backend=c  # C
+//
+// Note: Tibetan has no native struct keyword; tests Vec<Box<i64>> instead.
+
+དམིགས་ཡུལ "Tibetan Box drop smoke-test";
+
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག གཞི: Vec<i64> = vec(0);
+  གཞི = push(གཞི, 10);
+  གཞི = push(གཞི, 20);
+  གཞི = push(གཞི, 30);
+  ངེས གཞི[0] == 10;
+  ངེས གཞི[1] == 20;
+  ངེས གཞི[2] == 30;
+  པར "Tibetan box drop OK";
+  ལོག 0;
+}

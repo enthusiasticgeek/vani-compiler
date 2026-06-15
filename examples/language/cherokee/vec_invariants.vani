@@ -1,0 +1,26 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/vec_invariants.vani              # LLVM
+//   vanic run examples/language/cherokee/vec_invariants.vani --backend=c  # C
+//
+// Note: Cherokee has no native invariant keyword; ᎠᎩᏠᏯᏍᏗ (prove) used instead.
+
+ᎤᎲᏍᏛ "Cherokee Vec invariants smoke-test";
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ arr: Vec<i64> = vec(0);
+  arr = push(arr, 10);
+  arr = push(arr, 20);
+  arr = push(arr, 30);
+  arr = push(arr, 40);
+  arr = push(arr, 50);
+  ᎠᎩᏠᏯᏍᏗ (len(arr) as i64) == 5;
+  ᎠᏁᎳ i: i64 = 0;
+  ᏰᎵᏊ i < 5 {
+    ᎯᏍᏗᏎᏍᏗ arr[i] > 0;
+    i = i + 1;
+  }
+  ᎠᎴᏂᏍᎬᎢ "Cherokee vec invariants OK";
+  ᏗᎬᏎᏗ 0;
+}

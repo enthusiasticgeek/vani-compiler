@@ -1,0 +1,29 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/try_question_op.vani              # LLVM
+//   vanic run examples/language/cherokee/try_question_op.vani --backend=c  # C
+//
+// Note: Cherokee has no native match keyword; ? operator tested via chaining.
+
+ᎤᎲᏍᏛ "Cherokee try-? operator smoke-test";
+
+ᏗᎦᏬᏂᎯᏍᏗ parse_pos(x: i64) -> Option<i64> {
+  ᎢᏳᏃ x <= 0 {
+    ᏗᎬᏎᏗ None;
+  } ᎪᎯ {
+    ᏗᎬᏎᏗ Some(x);
+  }
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ double_pos(x: i64) -> Option<i64> {
+  ᎠᏁᎳ v: i64 = parse_pos(x)?;
+  ᏗᎬᏎᏗ Some(v * 2);
+}
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ r1: Option<i64> = double_pos(5);
+  ᎠᏁᎳ r2: Option<i64> = double_pos(0 - 3);
+  ᎠᎴᏂᏍᎬᎢ "Cherokee try-? OK";
+  ᏗᎬᏎᏗ 0;
+}

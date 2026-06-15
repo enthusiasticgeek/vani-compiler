@@ -1,0 +1,21 @@
+// vani-lang: cherokee
+//
+// build & run:
+//   vanic run examples/language/cherokee/for_loops.vani              # LLVM
+//   vanic run examples/language/cherokee/for_loops.vani --backend=c  # C
+//
+// Note: Cherokee has no native from/to keywords; loop simulated with ᏰᎵᏊ (while).
+
+ᎤᎲᏍᏛ "Cherokee for-loop smoke-test";
+
+ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {
+  ᎠᏁᎳ ᎠᏁᎳᏏ: i64 = 0;
+  ᎠᏁᎳ i: i64 = 1;
+  ᏰᎵᏊ i < 6 {
+    ᎠᏁᎳᏏ = ᎠᏁᎳᏏ + i;
+    i = i + 1;
+  }
+  ᎯᏍᏗᏎᏍᏗ ᎠᏁᎳᏏ == 15;
+  ᎠᎴᏂᏍᎬᎢ "Cherokee for-loops OK", ᎠᏁᎳᏏ;
+  ᏗᎬᏎᏗ 0;
+}

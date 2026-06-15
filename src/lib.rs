@@ -30755,6 +30755,74 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn amharic_invariant_keyword_compiles() {
+        let source = "// vani-lang: amharic\n\
+                      ዓላማ \"Amharic invariant\";\n\
+                      ተግባር main() -> i64 {\n  \
+                        ይሁን xs: Vec<i64> = vec(0);\n  \
+                        ይሁን i: i64 = 1;\n  \
+                        ሲ i < 3\n  \
+                        የማይለወጥ i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        መልስ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Amharic invariant compiles");
+    }
+
+    #[test]
+    fn amharic_for_range_compiles() {
+        let source = "// vani-lang: amharic\n\
+                      ዓላማ \"Amharic while-sum (no from/to in table)\";\n\
+                      ተግባር main() -> i64 {\n  \
+                        ይሁን s: i64 = 0;\n  \
+                        ይሁን i: i64 = 0;\n  \
+                        ሲ i < 5 {\n    \
+                          s = s + i;\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        አረጋግጥ s == 10;\n  \
+                        መልስ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Amharic while-sum compiles");
+    }
+
+    #[test]
+    fn amharic_match_enum_compiles() {
+        let source = "// vani-lang: amharic\n\
+                      ዓላማ \"Amharic enum declaration\";\n\
+                      ቆጠራ Qolo { Ts, Mn }\n\
+                      ተግባር pick(flag: i64) -> Qolo {\n  \
+                        ከ flag == 0 { መልስ Qolo.Mn; } ካልሆነ { መልስ Qolo.Ts; }\n\
+                      }\n\
+                      ተግባር main() -> i64 {\n  \
+                        ይሁን f: Qolo = pick(1);\n  \
+                        ይሁን r: i64 = 1;\n  \
+                        አረጋግጥ r == 1;\n  \
+                        መልስ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Amharic enum compiles");
+    }
+
+    #[test]
+    fn amharic_requires_proves_compiles() {
+        let source = "// vani-lang: amharic\n\
+                      ዓላማ \"Amharic requires\";\n\
+                      ተግባር clamp(x: i64, lo: i64) -> i64\n\
+                      ይፈልጋል lo >= 0;\n\
+                      {\n  \
+                        ከ x < lo { መልስ lo; } ካልሆነ { መልስ x; }\n\
+                      }\n\
+                      ተግባር main() -> i64 {\n  \
+                        አረጋግጥ clamp(0 - 1, 0) == 0;\n  \
+                        መልስ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Amharic requires compiles");
+    }
+
+    #[test]
     fn tibetan_script_compiles() {
         let source = "// vani-lang: tibetan\n\
                       དམིགས་ཡུལ \"basic Tibetan demo\";\n\
@@ -30768,6 +30836,67 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn tibetan_invariant_keyword_compiles() {
+        let source = "// vani-lang: tibetan\n\
+                      དམིགས་ཡུལ \"Tibetan prove (no native invariant)\";\n\
+                      ལས་ཀ main() -> i64 {\n  \
+                        ཡོད་པར་ཤོག s: i64 = 2 + 3;\n  \
+                        བསྒྲུབས s == 5;\n  \
+                        བསྒྲུབས s > 0;\n  \
+                        ལོག 0;\n\
+                      }\n";
+        crate::compile(source).expect("Tibetan prove compiles");
+    }
+
+    #[test]
+    fn tibetan_for_range_compiles() {
+        let source = "// vani-lang: tibetan\n\
+                      དམིགས་ཡུལ \"Tibetan for-range\";\n\
+                      ལས་ཀ main() -> i64 {\n  \
+                        ཡོད་པར་ཤོག s: i64 = 0;\n  \
+                        ལ i ནས 0 བར་དུ 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        ངེས s == 10;\n  \
+                        ལོག 0;\n\
+                      }\n";
+        crate::compile(source).expect("Tibetan for-range compiles");
+    }
+
+    #[test]
+    fn tibetan_match_enum_compiles() {
+        let source = "// vani-lang: tibetan\n\
+                      དམིགས་ཡུལ \"Tibetan match/enum\";\n\
+                      རྩིས Dus { Ts, Mn }\n\
+                      ལས་ཀ main() -> i64 {\n  \
+                        ཡོད་པར་ཤོག f: Dus = Dus.Ts;\n  \
+                        ཡོད་པར་ཤོག r: i64 = མཐུན f {\n    \
+                          Dus.Ts དེ་ནས 1,\n    \
+                          Dus.Mn དེ་ནས 2,\n  \
+                        };\n  \
+                        ངེས r == 1;\n  \
+                        ལོག 0;\n\
+                      }\n";
+        crate::compile(source).expect("Tibetan match/enum compiles");
+    }
+
+    #[test]
+    fn tibetan_requires_proves_compiles() {
+        let source = "// vani-lang: tibetan\n\
+                      དམིགས་ཡུལ \"Tibetan requires\";\n\
+                      ལས་ཀ clamp(x: i64, lo: i64) -> i64\n\
+                      དགོས lo >= 0;\n\
+                      {\n  \
+                        གལ་ཏེ x < lo { ལོག lo; } གཞན { ལོག x; }\n\
+                      }\n\
+                      ལས་ཀ main() -> i64 {\n  \
+                        ངེས clamp(0 - 1, 0) == 0;\n  \
+                        ལོག 0;\n\
+                      }\n";
+        crate::compile(source).expect("Tibetan requires compiles");
+    }
+
+    #[test]
     fn cherokee_syllabary_compiles() {
         let source = "// vani-lang: cherokee\n\
                       ᎤᎲᏍᏛ \"basic Cherokee demo\";\n\
@@ -30777,6 +30906,67 @@ fn main() -> i64 {
                         ᏗᎬᏎᏗ 0;\n\
                       }\n";
         crate::compile(source).expect("Cherokee basics compile");
+    }
+
+    #[test]
+    fn cherokee_invariant_keyword_compiles() {
+        let source = "// vani-lang: cherokee\n\
+                      ᎤᎲᏍᏛ \"Cherokee prove (no native invariant)\";\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {\n  \
+                        ᎠᏁᎳ s: i64 = 2 + 3;\n  \
+                        ᎠᎩᏠᏯᏍᏗ s == 5;\n  \
+                        ᎠᎩᏠᏯᏍᏗ s > 0;\n  \
+                        ᏗᎬᏎᏗ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Cherokee prove compiles");
+    }
+
+    #[test]
+    fn cherokee_for_range_compiles() {
+        let source = "// vani-lang: cherokee\n\
+                      ᎤᎲᏍᏛ \"Cherokee while-sum (no native from/to)\";\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {\n  \
+                        ᎠᏁᎳ s: i64 = 0;\n  \
+                        ᎠᏁᎳ i: i64 = 0;\n  \
+                        ᏰᎵᏊ i < 5 {\n    \
+                          s = s + i;\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        ᎯᏍᏗᏎᏍᏗ s == 10;\n  \
+                        ᏗᎬᏎᏗ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Cherokee while-sum compiles");
+    }
+
+    #[test]
+    fn cherokee_match_enum_compiles() {
+        let source = "// vani-lang: cherokee\n\
+                      ᎤᎲᏍᏛ \"Cherokee struct + if-else (no native enum/match)\";\n\
+                      ᎠᏙᏢᏍᎩ Tsig { x: i64, y: i64 }\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {\n  \
+                        ᎠᏁᎳ p: Tsig = Tsig { x: 3, y: 4 };\n  \
+                        ᎠᏁᎳ r: i64 = 0;\n  \
+                        ᎢᏳᏃ p.x == 3 { r = 1; } ᎪᎯ { r = 2; }\n  \
+                        ᎯᏍᏗᏎᏍᏗ r == 1;\n  \
+                        ᏗᎬᏎᏗ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Cherokee struct/if-else compiles");
+    }
+
+    #[test]
+    fn cherokee_requires_proves_compiles() {
+        let source = "// vani-lang: cherokee\n\
+                      ᎤᎲᏍᏛ \"Cherokee prove arithmetic (no native requires)\";\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ safe_sub(a: i64, b: i64) -> i64 {\n  \
+                        ᎠᏁᎳ r: i64 = a + b;\n  \
+                        ᎠᎩᏠᏯᏍᏗ 5 - 3 >= 0;\n  \
+                        ᏗᎬᏎᏗ r;\n\
+                      }\n\
+                      ᏗᎦᏬᏂᎯᏍᏗ main() -> i64 {\n  \
+                        ᎯᏍᏗᏎᏍᏗ safe_sub(3, 7) == 10;\n  \
+                        ᏗᎬᏎᏗ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Cherokee prove arithmetic compiles");
     }
 
     #[test]
@@ -30875,6 +31065,66 @@ fn main() -> i64 {
                         ᠪᠤᠴᠠ 0;\n\
                       }\n";
         crate::compile(source).expect("Mongolian basics compile");
+    }
+
+    #[test]
+    fn mongolian_invariant_keyword_compiles() {
+        let source = "// vani-lang: mongolian\n\
+                      ᠵᠣᠷᠢᠯᠭ᠎ᠠ \"Mongolian prove (no native invariant)\";\n\
+                      ᠴᠠᠭ main() -> i64 {\n  \
+                        ᠶᠠᠪᠤᠭᠤᠯ s: i64 = 2 + 3;\n  \
+                        ᠨᠣᠲᠠᠯᠠ s == 5;\n  \
+                        ᠨᠣᠲᠠᠯᠠ s > 0;\n  \
+                        ᠪᠤᠴᠠ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mongolian prove compiles");
+    }
+
+    #[test]
+    fn mongolian_for_range_compiles() {
+        let source = "// vani-lang: mongolian\n\
+                      ᠵᠣᠷᠢᠯᠭ᠎ᠠ \"Mongolian for-range\";\n\
+                      ᠴᠠᠭ main() -> i64 {\n  \
+                        ᠶᠠᠪᠤᠭᠤᠯ s: i64 = 0;\n  \
+                        ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ i ᠠᠴᠠ 0 ᠬᠦᠷᠲᠡᠯᠡ 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        ᠪᠠᠲᠤᠯ s == 10;\n  \
+                        ᠪᠤᠴᠠ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mongolian for-range compiles");
+    }
+
+    #[test]
+    fn mongolian_match_enum_compiles() {
+        let source = "// vani-lang: mongolian\n\
+                      ᠵᠣᠷᠢᠯᠭ᠎ᠠ \"Mongolian if-else branching (no native enum/match)\";\n\
+                      ᠴᠠᠭ classify(n: i64) -> i64 {\n  \
+                        ᠬᠡᠷᠪᠡ n < 0 { ᠪᠤᠴᠠ 0 - 1; } ᠡᠰᠡᠪᠡᠯ ᠬᠡᠷᠪᠡ n == 0 { ᠪᠤᠴᠠ 0; } ᠡᠰᠡᠪᠡᠯ { ᠪᠤᠴᠠ 1; }\n\
+                      }\n\
+                      ᠴᠠᠭ main() -> i64 {\n  \
+                        ᠪᠠᠲᠤᠯ classify(0 - 3) == 0 - 1;\n  \
+                        ᠪᠠᠲᠤᠯ classify(0) == 0;\n  \
+                        ᠪᠠᠲᠤᠯ classify(5) == 1;\n  \
+                        ᠪᠤᠴᠠ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mongolian if-else compiles");
+    }
+
+    #[test]
+    fn mongolian_requires_proves_compiles() {
+        let source = "// vani-lang: mongolian\n\
+                      ᠵᠣᠷᠢᠯᠭ᠎ᠠ \"Mongolian prove arithmetic (no native requires)\";\n\
+                      ᠴᠠᠭ safe_add(a: i64, b: i64) -> i64 {\n  \
+                        ᠶᠠᠪᠤᠭᠤᠯ r: i64 = a + b;\n  \
+                        ᠨᠣᠲᠠᠯᠠ 5 - 3 >= 0;\n  \
+                        ᠪᠤᠴᠠ r;\n\
+                      }\n\
+                      ᠴᠠᠭ main() -> i64 {\n  \
+                        ᠪᠠᠲᠤᠯ safe_add(3, 7) == 10;\n  \
+                        ᠪᠤᠴᠠ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mongolian prove arithmetic compiles");
     }
 
     #[test]

@@ -1,0 +1,19 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/iterate.vani              # LLVM
+//   vanic run examples/language/mongolian/iterate.vani --backend=c  # C
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian Vec iteration smoke-test";
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ arr: Vec<i64> = vec(0);
+  arr = push(arr, 10);
+  arr = push(arr, 20);
+  arr = push(arr, 30);
+  ᠪᠠᠲᠤᠯ arr[0] == 10;
+  ᠪᠠᠲᠤᠯ arr[1] == 20;
+  ᠪᠠᠲᠤᠯ arr[2] == 30;
+  ᠬᠡᠪᠯᠡ "Mongolian iterate OK";
+  ᠪᠤᠴᠠ 0;
+}

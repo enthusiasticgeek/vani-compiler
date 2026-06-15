@@ -1,0 +1,27 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/keywords.vani              # LLVM
+//   vanic run examples/language/amharic/keywords.vani --backend=c  # C
+
+ዓላማ "Amharic keyword smoke-test";
+
+መዋቅር Mot {
+  x: i64,
+  y: i64,
+}
+
+ቆጠራ Qolo { Red, Green, Blue }
+
+ተግባር ደምር(ሀ: i64, ለ: i64) -> i64 {
+  መልስ ሀ + ለ;
+}
+
+ተግባር main() -> i64 {
+  ይሁን p: Mot = Mot { x: 3, y: 4 };
+  ይሁን c: Qolo = Qolo.Red;
+  ይሁን s: i64 = ደምር(p.x, p.y);
+  አረጋግጥ s == 7;
+  ህትመት "Amharic keywords OK", s;
+  መልስ 0;
+}

@@ -1,0 +1,19 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/iterate.vani              # LLVM
+//   vanic run examples/language/amharic/iterate.vani --backend=c  # C
+
+ዓላማ "Amharic Vec iteration smoke-test";
+
+ተግባር main() -> i64 {
+  ይሁን ዝርዝር: Vec<i64> = vec(0);
+  ዝርዝር = push(ዝርዝር, 10);
+  ዝርዝር = push(ዝርዝር, 20);
+  ዝርዝር = push(ዝርዝር, 30);
+  አረጋግጥ ዝርዝር[0] == 10;
+  አረጋግጥ ዝርዝር[1] == 20;
+  አረጋግጥ ዝርዝር[2] == 30;
+  ህትመት "Amharic iterate OK";
+  መልስ 0;
+}

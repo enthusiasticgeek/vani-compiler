@@ -1,0 +1,28 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/option_types.vani              # LLVM
+//   vanic run examples/language/amharic/option_types.vani --backend=c  # C
+//
+// Note: Amharic has no native match keyword; Option<T> tested via ? chaining.
+
+ዓላማ "Amharic Option<T> smoke-test";
+
+ተግባር ደህና_ክፈፍ(a: i64, b: i64) -> Option<i64> {
+  ከ b == 0 {
+    መልስ None;
+  }
+  መልስ Some(a / b);
+}
+
+ተግባር ሰንሰለት(a: i64, b: i64) -> Option<i64> {
+  ይሁን v: i64 = ደህና_ክፈፍ(a, b)?;
+  መልስ Some(v * 2);
+}
+
+ተግባር main() -> i64 {
+  ይሁን r1: Option<i64> = ሰንሰለት(10, 2);
+  ይሁን r2: Option<i64> = ሰንሰለት(5, 0);
+  ህትመት "Amharic option types OK";
+  መልስ 0;
+}

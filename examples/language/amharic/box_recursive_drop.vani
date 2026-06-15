@@ -1,0 +1,28 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/amharic/box_recursive_drop.vani --backend=c  # C
+
+ዓላማ "Amharic Box<T> recursive-drop smoke-test";
+
+መዋቅር Node {
+  ዋጋ: i64,
+  ቀጣይ: Option<Box<Node>>,
+}
+
+ተግባር main() -> i64 {
+  ይሁን ዝርዝር: Node = Node {
+    ዋጋ: 1,
+    ቀጣይ: Some(Box(Node {
+      ዋጋ: 2,
+      ቀጣይ: Some(Box(Node {
+        ዋጋ: 3,
+        ቀጣይ: None,
+      })),
+    })),
+  };
+  አረጋግጥ ዝርዝር.ዋጋ == 1;
+  ህትመት "Amharic box recursive drop OK";
+  መልስ 0;
+}

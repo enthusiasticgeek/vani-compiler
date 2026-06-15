@@ -1,0 +1,34 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/verified.vani              # LLVM
+//   vanic run examples/language/mongolian/verified.vani --backend=c  # C
+//
+// Note: Mongolian has no native requires keyword; ᠨᠣᠲᠠᠯᠠ (prove) used instead.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian verified arithmetic smoke-test";
+
+ᠴᠠᠭ clamp(x: i64, lo: i64, hi: i64) -> i64 {
+  ᠬᠡᠷᠪᠡ x < lo {
+    ᠪᠤᠴᠠ lo;
+  } ᠡᠰᠡᠪᠡᠯ ᠬᠡᠷᠪᠡ x > hi {
+    ᠪᠤᠴᠠ hi;
+  } ᠡᠰᠡᠪᠡᠯ {
+    ᠪᠤᠴᠠ x;
+  }
+}
+
+ᠴᠠᠭ safe_subtract(a: i64, b: i64) -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ result: i64 = a - b;
+  ᠨᠣᠲᠠᠯᠠ result + b == a;
+  ᠪᠤᠴᠠ result;
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠪᠠᠲᠤᠯ clamp(5, 1, 10) == 5;
+  ᠪᠠᠲᠤᠯ clamp(0, 1, 10) == 1;
+  ᠪᠠᠲᠤᠯ clamp(15, 1, 10) == 10;
+  ᠪᠠᠲᠤᠯ safe_subtract(10, 3) == 7;
+  ᠬᠡᠪᠯᠡ "Mongolian verified OK";
+  ᠪᠤᠴᠠ 0;
+}

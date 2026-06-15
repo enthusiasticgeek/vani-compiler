@@ -1,0 +1,21 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/mongolian/box_recursive_drop.vani --backend=c  # C
+//
+// Note: Mongolian has no native struct keyword; tests Vec<i64> operations instead.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian Box drop smoke-test";
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ arr: Vec<i64> = vec(0);
+  arr = push(arr, 10);
+  arr = push(arr, 20);
+  arr = push(arr, 30);
+  ᠪᠠᠲᠤᠯ arr[0] == 10;
+  ᠪᠠᠲᠤᠯ arr[1] == 20;
+  ᠪᠠᠲᠤᠯ arr[2] == 30;
+  ᠬᠡᠪᠯᠡ "Mongolian box drop OK";
+  ᠪᠤᠴᠠ 0;
+}

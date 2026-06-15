@@ -1,0 +1,20 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/early_exit.vani              # LLVM
+//   vanic run examples/language/amharic/early_exit.vani --backend=c  # C
+
+ዓላማ "Amharic early-exit (break) smoke-test";
+
+ተግባር main() -> i64 {
+  ይሁን n: i64 = 0;
+  ሲ n < 100 {
+    ከ n == 5 {
+      ስብር;
+    }
+    n = n + 1;
+  }
+  አረጋግጥ n == 5;
+  ህትመት "Amharic early exit OK", n;
+  መልስ 0;
+}

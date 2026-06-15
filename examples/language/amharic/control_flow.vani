@@ -1,0 +1,25 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/control_flow.vani              # LLVM
+//   vanic run examples/language/amharic/control_flow.vani --backend=c  # C
+
+ዓላማ "Amharic control flow smoke-test";
+
+ተግባር ምደባ(n: i64) -> i64 {
+  ከ n < 0 {
+    መልስ -1;
+  } ካልሆነ ከ n == 0 {
+    መልስ 0;
+  } ካልሆነ {
+    መልስ 1;
+  }
+}
+
+ተግባር main() -> i64 {
+  አረጋግጥ ምደባ(-5) == -1;
+  አረጋግጥ ምደባ(0) == 0;
+  አረጋግጥ ምደባ(3) == 1;
+  ህትመት "Amharic control flow OK";
+  መልስ 0;
+}

@@ -1,0 +1,23 @@
+// vani-lang: tibetan
+//
+// build & run:
+//   vanic run examples/language/tibetan/keywords.vani              # LLVM
+//   vanic run examples/language/tibetan/keywords.vani --backend=c  # C
+//
+// Note: Tibetan has no native struct keyword; enum + functions tested instead.
+
+དམིགས་ཡུལ "Tibetan keyword smoke-test";
+
+རྩིས Kha { Red, Green, Blue }
+
+ལས་ཀ ལྡོབ(ཀ: i64, ཁ: i64) -> i64 {
+  ལོག ཀ + ཁ;
+}
+
+ལས་ཀ main() -> i64 {
+  ཡོད་པར་ཤོག c: Kha = Kha.Red;
+  ཡོད་པར་ཤོག s: i64 = ལྡོབ(3, 4);
+  ངེས s == 7;
+  པར "Tibetan keywords OK", s;
+  ལོག 0;
+}

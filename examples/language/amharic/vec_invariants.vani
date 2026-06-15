@@ -1,0 +1,31 @@
+// vani-lang: amharic
+//
+// build & run:
+//   vanic run examples/language/amharic/vec_invariants.vani              # LLVM
+//   vanic run examples/language/amharic/vec_invariants.vani --backend=c  # C
+
+ዓላማ "Loop invariants over Vec length, end-to-end";
+
+ተግባር main() -> i64 {
+  ይሁን ዝርዝር: Vec<i64> = vec(0);
+  ይሁን ቁጠር: i64 = 1;
+
+  ሲ ቁጠር < 5
+  የማይለወጥ ቁጠር >= 1;
+  የማይለወጥ ቁጠር <= 5;
+  {
+    ዝርዝር = push(ዝርዝር, ቁጠር * 10);
+    ቁጠር = ቁጠር + 1;
+  }
+
+  አስረዳ ቁጠር == 5;
+  አረጋግጥ (len(ዝርዝር) እንደ i64) == 5;
+
+  ህትመት ዝርዝር[0];
+  ህትመት ዝርዝር[1];
+  ህትመት ዝርዝር[2];
+  ህትመት ዝርዝር[3];
+  ህትመት ዝርዝር[4];
+
+  መልስ 0;
+}

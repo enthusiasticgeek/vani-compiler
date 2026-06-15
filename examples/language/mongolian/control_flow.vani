@@ -1,0 +1,25 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/control_flow.vani              # LLVM
+//   vanic run examples/language/mongolian/control_flow.vani --backend=c  # C
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian control flow smoke-test";
+
+ᠴᠠᠭ temdeg(n: i64) -> i64 {
+  ᠬᠡᠷᠪᠡ n < 0 {
+    ᠪᠤᠴᠠ -1;
+  } ᠡᠰᠡᠪᠡᠯ ᠬᠡᠷᠪᠡ n == 0 {
+    ᠪᠤᠴᠠ 0;
+  } ᠡᠰᠡᠪᠡᠯ {
+    ᠪᠤᠴᠠ 1;
+  }
+}
+
+ᠴᠠᠭ main() -> i64 {
+  ᠪᠠᠲᠤᠯ temdeg(-5) == -1;
+  ᠪᠠᠲᠤᠯ temdeg(0) == 0;
+  ᠪᠠᠲᠤᠯ temdeg(3) == 1;
+  ᠬᠡᠪᠯᠡ "Mongolian control flow OK";
+  ᠪᠤᠴᠠ 0;
+}

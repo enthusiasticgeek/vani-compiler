@@ -1,0 +1,26 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/vec_invariants.vani              # LLVM
+//   vanic run examples/language/mongolian/vec_invariants.vani --backend=c  # C
+//
+// Note: Mongolian has no native invariant keyword; ᠨᠣᠲᠠᠯᠠ (prove) used instead.
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian Vec invariants smoke-test";
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ arr: Vec<i64> = vec(0);
+  arr = push(arr, 10);
+  arr = push(arr, 20);
+  arr = push(arr, 30);
+  arr = push(arr, 40);
+  arr = push(arr, 50);
+  ᠨᠣᠲᠠᠯᠠ (len(arr) as i64) == 5;
+  ᠶᠠᠪᠤᠭᠤᠯ i: i64 = 0;
+  ᠶᠠᠭ᠎ᠠ i < 5 {
+    ᠪᠠᠲᠤᠯ arr[i] > 0;
+    i = i + 1;
+  }
+  ᠬᠡᠪᠯᠡ "Mongolian vec invariants OK";
+  ᠪᠤᠴᠠ 0;
+}

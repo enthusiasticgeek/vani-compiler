@@ -1,0 +1,17 @@
+// vani-lang: mongolian
+//
+// build & run:
+//   vanic run examples/language/mongolian/for_loops.vani              # LLVM
+//   vanic run examples/language/mongolian/for_loops.vani --backend=c  # C
+
+ᠵᠣᠷᠢᠯᠭ᠎ᠠ "Mongolian for-loop smoke-test";
+
+ᠴᠠᠭ main() -> i64 {
+  ᠶᠠᠪᠤᠭᠤᠯ niilber: i64 = 0;
+  ᠬᠠᠷᠠᠭᠠᠯᠵᠠᠯ i ᠠᠴᠠ 1 ᠬᠦᠷᠲᠡᠯᠡ 6 {
+    niilber = niilber + i;
+  }
+  ᠪᠠᠲᠤᠯ niilber == 15;
+  ᠬᠡᠪᠯᠡ "Mongolian for-loops OK", niilber;
+  ᠪᠤᠴᠠ 0;
+}
