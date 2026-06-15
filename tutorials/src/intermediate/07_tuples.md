@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 7 worked example — tuples and tuple destructure.";
 
 fn divmod(a: i64, b: i64) -> (i64, i64) {
@@ -82,7 +82,7 @@ to bind all three values in one line and print them.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn stats(xs: ref Vec<i64>) -> (i64, i64, i64) {
   let lo: i64 = xs[0];
   let hi: i64 = xs[0];

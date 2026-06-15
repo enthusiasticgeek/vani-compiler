@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Advanced 2 worked example — parallel for + reduction.";
 
 fn main() -> i64 {
@@ -87,7 +87,7 @@ the semantics.
 If you want a transform-each-element pattern (no reduction),
 the safe v1 form is a `mut ref Vec` + index-by-iteration:
 
-```rust
+```vani
 fn double_all(xs: mut ref Vec<i64>) -> i64 {
   let n: u64 = len(xs);
   parallel for i from 0 to n {
@@ -110,7 +110,7 @@ that returns Σ aᵢ·bᵢ. Use `parallel for` with `reduce sum with
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn dot_product(a: ref Vec<i64>, b: ref Vec<i64>) -> i64
 requires len(a) == len(b);
 {

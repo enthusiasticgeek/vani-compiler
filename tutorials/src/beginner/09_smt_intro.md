@@ -8,7 +8,7 @@
 
 Save this in `~/lesson9.vani`:
 
-```rust
+```vani
 intent "Lesson 9 worked example — assert / prove / requires.";
 
 fn double(n: i64) -> i64
@@ -94,7 +94,7 @@ documented in
 
 The fix is to add an `ensures` clause to `double`:
 
-```rust
+```vani
 fn double(n: i64) -> i64
 requires n >= 0;
 requires n <= 1000;
@@ -118,7 +118,7 @@ code is emitted for it).
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn safe_inc(n: i64) -> i64
 requires n < 1000;
 {

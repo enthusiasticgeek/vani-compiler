@@ -50,7 +50,7 @@ choices in most respects.
 
 A struct can have its fields moved INDEPENDENTLY:
 
-```rust
+```vani
 struct Bag { name: OwnedStr, count: i64 }
 
 fn split(b: Bag) -> i64 {
@@ -82,7 +82,7 @@ A *very* clear error from a fairly subtle situation.
 What if you move a value in ONE branch of an `if`, but not
 the other?
 
-```rust
+```vani
 fn maybe_consume(xs: Vec<i64>, do_it: bool) -> i64 {
   if do_it {
     let other: Vec<i64> = xs;   // moves xs
@@ -107,7 +107,7 @@ it conservatively treats xs as "possibly moved" after the if
 The fix: either move in BOTH branches, or move in NEITHER.
 Make the branches consistent in their handling of `xs`.
 
-```rust
+```vani
 fn maybe_consume_fixed(xs: Vec<i64>, do_it: bool) -> i64 {
   if do_it {
     let other: Vec<i64> = xs;
@@ -125,7 +125,7 @@ returns before reading it. The compiler approves.
 A borrow `ref x` doesn't last forever. It's valid for a
 specific scope. The simplest case:
 
-```rust
+```vani
 fn main() -> i64 {
   let xs: Vec<i64> = vec(1, 2, 3);
   let n: i64 = sum(ref xs);   // borrow lives for this call only
@@ -141,7 +141,7 @@ once the call returns, the borrow ends.
 
 The tricky case: STORING a borrow.
 
-```rust
+```vani
 let xs: Vec<i64> = vec(1, 2, 3);
 let r: ref Vec<i64> = ref xs;
 print r[0];
@@ -153,7 +153,7 @@ can have many of them at once. They're all read-only.
 
 But for **mutable borrows** (`mut ref`): no, you can't.
 
-```rust
+```vani
 let xs: Vec<i64> = vec(1, 2, 3);
 let r: mut ref Vec<i64> = mut ref xs;
 push(r, 4);

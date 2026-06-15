@@ -73,7 +73,7 @@ This is the part that surprises CS-experienced readers coming
 from JavaScript / Python — and is the entire point of vāṇी's
 async story.
 
-```rust
+```vani
 async fn fetch(fd: i64) -> i64 {
   let n: i64 = io_recv_async(fd, 64);
   return n;
@@ -135,7 +135,7 @@ compiler-generated state machine inserts a state-transition.
 After the await, code that ran before the await is "earlier
 in the state machine"; code after is "later".
 
-```rust
+```vani
 async fn handler(fd: i64) -> i64 {
   let req: i64 = await(io_recv_async(fd, 64));   // suspend point 1
   let resp: i64 = process(req);
@@ -162,7 +162,7 @@ has to actually poll the resulting Task in a loop, calling
 `__poll_X` over and over, sleeping (via `epoll_wait_one`)
 between rounds when no task has progress to make.
 
-```rust
+```vani
 fn drive(ep: i64, t: mut ref Task__fetch) -> i64 {
   while true {
     let r: i64 = __poll_fetch(t);

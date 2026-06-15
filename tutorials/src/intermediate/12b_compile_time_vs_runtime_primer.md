@@ -181,7 +181,7 @@ The fix: tell it via `requires` or `ensures`.
 
 Example:
 
-```rust
+```vani
 fn sum_first_three(xs: ref Vec<i64>) -> i64 {
   return xs[0] + xs[1] + xs[2];   // 3 bounds checks emitted
 }
@@ -190,7 +190,7 @@ fn sum_first_three(xs: ref Vec<i64>) -> i64 {
 The compiler can't prove `len(xs) >= 3` from this code alone.
 Add a contract:
 
-```rust
+```vani
 fn sum_first_three(xs: ref Vec<i64>) -> i64
   requires len(xs) >= 3
 {

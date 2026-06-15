@@ -69,7 +69,7 @@ it ergonomic.
 
 The standard "did it work?" type:
 
-```rust
+```vani
 enum Result<T, E> {
   Ok(T),    // success — wraps a T
   Err(E),   // failure — wraps an E
@@ -79,7 +79,7 @@ enum Result<T, E> {
 A function that might fail returns `Result<the-value-it-would-
 have-returned, the-kind-of-error>`:
 
-```rust
+```vani
 fn parse_int(s: Str) -> Result<i64, ParseError> { ... }
 ```
 
@@ -91,7 +91,7 @@ or `Err(e)`?
 
 You inspect every Result with a match:
 
-```rust
+```vani
 fn pipeline(s: Str) -> Result<i64, ParseError> {
   let parsed: Result<i64, ParseError> = parse_int(s);
   let n: i64 = match parsed {
@@ -116,7 +116,7 @@ error."
 vāṇी's `try EXPR` does exactly what that match does, but
 written once at the call site:
 
-```rust
+```vani
 fn pipeline(s: Str) -> Result<i64, ParseError> {
   let n: i64 = try parse_int(s);       // if Err, return it
   let v: i64 = try validate(n);        // if Err, return it
@@ -137,7 +137,7 @@ the error).
 
 Same meaning as `try`, written as a suffix:
 
-```rust
+```vani
 fn pipeline(s: Str) -> Result<i64, ParseError> {
   let n: i64 = parse_int(s)?;          // same as `try parse_int(s)`
   let v: i64 = validate(n)?;           // same as `try validate(n)`
@@ -155,7 +155,7 @@ because something WENT WRONG, but because there's just nothing
 there. Looking up a key in a map; reading the first element of
 a possibly-empty Vec.
 
-```rust
+```vani
 enum Option<T> {
   Some(T),
   None,
@@ -189,7 +189,7 @@ input, network outages.
 Sometimes you can ELIMINATE a Result by proving the failure
 case impossible:
 
-```rust
+```vani
 fn divide(a: i64, b: i64) -> Result<i64, DivisionError>
   // returns Err(...) when b == 0
 

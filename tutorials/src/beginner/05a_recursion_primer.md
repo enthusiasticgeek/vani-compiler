@@ -12,7 +12,7 @@ This chapter has **no compiler code**. Pure intuition.
 
 You've seen a function call other functions:
 
-```rust
+```vani
 fn double(n: i64) -> i64 { return n * 2; }
 
 fn quadruple(n: i64) -> i64 {
@@ -25,7 +25,7 @@ fn quadruple(n: i64) -> i64 {
 A **recursive** function does something stranger — it calls
 **itself**:
 
-```rust
+```vani
 fn countdown(n: i64) -> i64 {
   if n <= 0 { return 0; }
   print n;
@@ -65,7 +65,7 @@ A tree of nodes (filesystem directory, AST, JSON parse tree)
 has the recursive shape "a node is a value plus zero or more
 child nodes." Code that walks the tree is naturally recursive:
 
-```rust
+```vani
 fn visit(node: ref Node) -> i64 {
   // Do something with this node's value...
   print node.value;
@@ -111,7 +111,7 @@ Some math is defined recursively. Factorial:
 `fib(n) = fib(n-1) + fib(n-2)` and `fib(0) = 0, fib(1) = 1`.
 The code that computes these mirrors the math directly:
 
-```rust
+```vani
 fn fact(n: i64) -> i64 {
   if n <= 1 { return 1; }
   return n * fact(n - 1);
@@ -173,7 +173,7 @@ The most common bug. Either no base case, or the base case is
 unreachable for some inputs. Result: the program crashes when
 the stack runs out.
 
-```rust
+```vani
 fn bad(n: i64) -> i64 {
   return bad(n - 1);  // No base case → stack overflow.
 }
@@ -191,7 +191,7 @@ two more. `fib(40)` makes ~1 billion calls. Compute
 `fib(100)` recursively and you'll wait until the heat death
 of the universe.
 
-```rust
+```vani
 fn fib(n: i64) -> i64 {
   if n <= 1 { return n; }
   return fib(n - 1) + fib(n - 2);   // Two recursive calls!

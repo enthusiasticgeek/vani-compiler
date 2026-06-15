@@ -10,7 +10,7 @@
 
 Save this in `~/lesson12.vani`:
 
-```rust
+```vani
 // श्री।
 // vani-lang: sanskrit
 उद्देश्य "Lesson 12 — first program with a Sanskrit pragma.";

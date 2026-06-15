@@ -8,7 +8,7 @@
 
 Save this in `~/lesson7.vani`:
 
-```rust
+```vani
 intent "Lesson 7 worked example — arrays + Vec basics.";
 
 fn sum_array(xs: ref [i64; 4]) -> i64 {
@@ -107,7 +107,7 @@ maximum element. Assume the Vec is non-empty (you'll add a
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn max_in_vec(xs: ref Vec<i64>) -> i64 {
   let best: i64 = xs[0];
   let i: u64 = 1;

@@ -20,7 +20,7 @@ a `ref T`, reads through it, and returns by value.
 
 What if a function wants to **return a reference**?
 
-```rust
+```vani
 struct Point { x: i64, y: i64 }
 
 fn shared(p: ref Point) -> ref Point {
@@ -31,7 +31,7 @@ fn shared(p: ref Point) -> ref Point {
 The function gets `p` (a ref into the caller's Point), and
 hands the same ref back. The caller does:
 
-```rust
+```vani
 let pt: Point = Point { x: 3, y: 4 };
 let r: ref Point = shared(ref pt);
 print area(r);  // ← r points at pt; pt is still alive
@@ -59,7 +59,7 @@ That's it. One sentence. Three cases:
 
 ### Case 1: exactly one ref param → ✅ accept
 
-```rust
+```vani
 fn first(xs: ref Vec<i64>) -> ref i64 {
   return ref xs[0];
 }
@@ -71,7 +71,7 @@ first(ref my_vec);` makes `r`'s lifetime equal to `my_vec`'s.
 
 ### Case 2: zero ref params → ❌ reject
 
-```rust
+```vani
 fn make() -> ref i64 {
   let x: i64 = 42;
   return ref x;   // ← x drops on return; the ref would dangle
@@ -91,7 +91,7 @@ mistake. C compiles it; vāṇी rejects it at the signature.
 
 ### Case 3: two or more ref params → ❌ reject
 
-```rust
+```vani
 fn pick(a: ref Point, b: ref Point) -> ref Point {
   return a;   // ← a's lifetime? b's lifetime? Compiler can't tell.
 }
@@ -117,7 +117,7 @@ split into two functions.
 
 The call site is where the magic happens. When you write:
 
-```rust
+```vani
 let pt: Point = Point { x: 3, y: 4 };
 let r: ref Point = shared(ref pt);
 ```
@@ -140,7 +140,7 @@ makes the implicit explicit at every use site.
 
 ### Chaining ref-returning calls
 
-```rust
+```vani
 fn shared(p: ref Point) -> ref Point { return p; }
 
 let pt: Point = ...;
@@ -156,7 +156,7 @@ diagnostic.
 
 ### Field-ref returns
 
-```rust
+```vani
 fn x_ref(p: ref Point) -> ref i64 {
   return ref p.x;
 }
@@ -175,7 +175,7 @@ lifetime variables, which v1 doesn't ship:
 
 ### Multi-input distinct lifetimes
 
-```rust
+```vani
 // Rust: fn pick<'a, 'b>(a: &'a P, b: &'b P) -> &'a P
 // vāṇी: not allowed — only single-ref-param elision.
 ```
@@ -187,7 +187,7 @@ by value, or call multiple narrower fns).
 
 ### Struct fields holding refs in return types
 
-```rust
+```vani
 // Rust: struct View<'a> { x: &'a T }, fn make<'a>(t: &'a T) -> View<'a>
 // vāṇी: works for SIMPLE cases via the existing struct-field
 // scope-escape analyzer, but explicit-lifetime-in-return-type
@@ -201,7 +201,7 @@ not supported is multi-lifetime structs.
 
 ### Closures capturing refs that outlive the closure
 
-```rust
+```vani
 // Path D — closures + lifetimes is genuinely complex.
 // vāṇी v1 closures don't capture refs that outlive the
 // declaration scope.
@@ -229,7 +229,7 @@ shapes.
 
 When you see:
 
-```rust
+```vani
 fn foo(p: ref T) -> ref U
 ```
 
@@ -238,7 +238,7 @@ source as `p`." The lifetime is implicit but real.
 
 When you see:
 
-```rust
+```vani
 fn foo(p: ref T) -> U
 ```
 
@@ -247,7 +247,7 @@ caller owns whatever comes back.
 
 When you see:
 
-```rust
+```vani
 fn foo(p: T) -> T
 ```
 
@@ -260,7 +260,7 @@ Three shapes you'll see in real code:
 
 ### The accessor
 
-```rust
+```vani
 fn name(person: ref Person) -> ref OwnedStr {
   return ref person.name;
 }
@@ -271,7 +271,7 @@ string through the ref without owning it.
 
 ### The index lookup
 
-```rust
+```vani
 fn nth(xs: ref Vec<i64>, i: u64) -> ref i64
   requires i < len(xs)
 {
@@ -284,7 +284,7 @@ in-bounds (caller's contract).
 
 ### The map lookup (when you have HashMap)
 
-```rust
+```vani
 fn lookup(map: ref HashMap, key: i64) -> Option<ref V>
 ```
 

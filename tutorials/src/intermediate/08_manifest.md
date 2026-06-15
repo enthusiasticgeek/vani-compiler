@@ -24,7 +24,7 @@ entry = "src/main.vani"
 
 `src/math.vani`:
 
-```rust
+```vani
 intent "Math helpers module.";
 
 module math {
@@ -40,7 +40,7 @@ module math {
 
 `src/main.vani`:
 
-```rust
+```vani
 use "math.vani";
 use math::{square, cube};
 

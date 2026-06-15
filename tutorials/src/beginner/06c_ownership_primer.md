@@ -161,7 +161,7 @@ non-Copy value.
 
 The most common shape is **function arguments**:
 
-```rust
+```vani
 fn consume(xs: Vec<i64>) -> i64 {
   return xs[0];
 }
@@ -177,7 +177,7 @@ fn main() -> i64 {
 
 If you don't want to lose `xs`, take a borrow:
 
-```rust
+```vani
 fn peek(xs: ref Vec<i64>) -> i64 {
   return xs[0];
 }

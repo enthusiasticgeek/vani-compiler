@@ -86,7 +86,7 @@ Paste the bundle as the first message. Then ask:
 
 A capable model produces something like:
 
-```rust
+```vani
 fn factorial(n: i64) -> i64
 requires n >= 0;
 ensures result >= 1;

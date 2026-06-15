@@ -8,7 +8,7 @@
 
 Save this in `~/lesson10.vani`:
 
-```rust
+```vani
 intent "Lesson 10 worked example — modules + pub + use.";
 
 module math {
@@ -96,7 +96,7 @@ both calls produce identical output.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 module geom {
   fn ensure_positive(n: i64) -> i64 {
     if n < 0 {

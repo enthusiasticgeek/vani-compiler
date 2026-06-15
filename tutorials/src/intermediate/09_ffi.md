@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 9 worked example — FFI to libc.";
 
 // `extern "C" fn` declares a foreign function. The linker
@@ -102,7 +102,7 @@ input is longer.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 extern "C" fn strlen(s: Str) -> u64;
 
 fn longest_of(a: Str, b: Str) -> Str {

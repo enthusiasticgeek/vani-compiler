@@ -8,7 +8,7 @@
 
 Save this in `~/lesson5.vani`:
 
-```rust
+```vani
 intent "Lesson 5 worked example — while and for loops.";
 
 fn sum_to_n(n: i64) -> i64 {
@@ -95,7 +95,7 @@ it on 7, 42, and 12345.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn count_digits(n: i64) -> i64 {
   if n == 0 {
     return 1;

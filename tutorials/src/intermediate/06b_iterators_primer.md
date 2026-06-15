@@ -18,7 +18,7 @@ You have a list of numbers. You want to:
 
 The "imperative" way — write a loop:
 
-```rust
+```vani
 let total: i64 = 0;
 for x in ref xs {
   if x % 2 == 0 {
@@ -33,7 +33,7 @@ code in 6 months, you have to mentally untangle them.
 
 The "iterator combinator" way:
 
-```rust
+```vani
 let total: i64 = xs.filter(|x| x % 2 == 0)
                    .map(|x| x * 2)
                    .fold(0, |acc, x| acc + x);
@@ -111,7 +111,7 @@ Then the cycle repeats for the next element.
 
 This matters when chains involve `.take(n)`:
 
-```rust
+```vani
 let first_three_doubled: Vec<i64> = xs.map(|x| x * 2).take(3).collect();
 ```
 
@@ -132,7 +132,7 @@ why iterators + closures live in the same conceptual area —
 they compose to express most "operations over a collection"
 patterns.
 
-```rust
+```vani
 let threshold: i64 = compute_threshold();
 let large_ones: Vec<i64> = xs.filter(|x| x > threshold).collect();
                               // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -152,7 +152,7 @@ intermediate Vecs and Closures and slow things down?"
 In a naive implementation, yes. In vāṇी, no — the compiler
 **fuses** adjacent combinators into a single loop.
 
-```rust
+```vani
 let total: i64 = xs.map(|x| x * 2)
                    .filter(|x| x > 10)
                    .sum();

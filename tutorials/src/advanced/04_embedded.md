@@ -7,7 +7,7 @@
 
 ## The `unsafe` block
 
-```rust
+```vani
 intent "Advanced 4 — raw pointer + region-scoped arena.";
 
 fn poke(addr: *mut i32, val: i32) -> i64 {
@@ -32,7 +32,7 @@ fn poke(addr: *mut i32, val: i32) -> i64 {
 For interop with hardware MMIO, FFI buffers, or hand-written
 allocators:
 
-```rust
+```vani
 fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {
   unsafe {
     *(base + offset) = value;
@@ -49,7 +49,7 @@ LLVM backend uses `load` / `store` instructions.
 For embedded targets without a malloc, vāṇी provides an
 arena-style allocator scoped to a `region` block:
 
-```rust
+```vani
 intent "Advanced 4 — region-scoped Pool<i64>.";
 
 fn use_pool() -> i64 {

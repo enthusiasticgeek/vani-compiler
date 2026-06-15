@@ -51,7 +51,7 @@ the forward edge; parents are referenced but not owned.
 
 ### The Rust shape
 
-```rust
+```vani
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -95,7 +95,7 @@ Three things to notice:
 
 ### The vāṇी shape
 
-```rust
+```vani
 struct Node {
   value: i64,
   parent: i64,           // -1 for root; otherwise index into nodes[]
@@ -173,7 +173,7 @@ non-owning.
 
 ### The Rust shape
 
-```rust
+```vani
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -192,7 +192,7 @@ is `Weak<Node>`. Drop the head and the whole list cascades.
 
 The walking-backwards code looks like:
 
-```rust
+```vani
 fn walk_back(end: Rc<Node>) {
     let mut cur = Some(end);
     while let Some(n) = cur {
@@ -210,7 +210,7 @@ you can't accidentally dereference a freed target.
 
 ### The vāṇी shape
 
-```rust
+```vani
 struct Node {
   value: i64,
   next: i64,    // index or -1
@@ -291,7 +291,7 @@ of Observers. Cycle.
 
 ### The Rust shape
 
-```rust
+```vani
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -325,7 +325,7 @@ upgrades at every traversal.
 
 ### The vāṇी shape
 
-```rust
+```vani
 struct Subject {
   state: i64,
   observers: Vec<i64>,    // indices into world.observers[]

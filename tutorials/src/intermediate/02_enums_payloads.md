@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 2 worked example — enums with payloads.";
 
 enum Result { Ok(i64), Err(i64) }
@@ -88,7 +88,7 @@ for `Custom(n)`. Print results for several inputs.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 enum Color { Red, Green, Blue, Custom(i64) }
 
 fn brightness(c: Color) -> i64 {

@@ -8,7 +8,7 @@
 
 Save this in `~/lesson8.vani`:
 
-```rust
+```vani
 intent "Lesson 8 worked example — match on integers and booleans.";
 
 fn weekday_name(n: i64) -> Str {
@@ -111,7 +111,7 @@ match against string literals.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn is_yes(s: Str) -> bool {
   let ans: bool = match s {
     "y" then true,

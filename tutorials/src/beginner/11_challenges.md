@@ -24,7 +24,7 @@ Hint: use `%` and `if/else if/else`.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 intent "FizzBuzz from 1 to 15.";
 
 fn classify(n: i64) -> Str {
@@ -83,7 +83,7 @@ reads better when you import them with `use`.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 intent "Vector statistics — sum, max, min.";
 
 fn total_of(xs: ref Vec<i64>) -> i64 {
@@ -144,7 +144,7 @@ and print results.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 intent "Modular grading rubric.";
 
 module grading {

@@ -7,7 +7,7 @@
 
 Save this in `~/hello.vani`:
 
-```rust
+```vani
 intent "First vāṇी program — prints a greeting and returns 0.";
 
 fn main() -> i64 {
@@ -85,7 +85,7 @@ at the solution.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 intent "Two-line greeting.";
 
 fn main() -> i64 {
@@ -98,7 +98,7 @@ fn main() -> i64 {
 You can also pass multiple arguments to a single `print` — the
 runtime prints them separated by spaces:
 
-```rust
+```vani
 print "Hello,", "vāṇी!";
 ```
 

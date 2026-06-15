@@ -50,7 +50,7 @@ single CPU cycle (an address is typically 8 bytes — same size
 as `i64`). Functions that take large arguments take a reference
 to them so the call doesn't need to copy the whole thing.
 
-```rust
+```vani
 // SLOW (hypothetical — would copy a million items per call)
 fn count_admins(users: Vec<User>) -> i64 { ... }
 
@@ -67,7 +67,7 @@ function to change the caller's actual data, you must give it
 the **address** of the caller's data, so it can reach back and
 modify it.
 
-```rust
+```vani
 // `who` is a copy. The function changing it doesn't change
 // the caller's variable.
 fn rename(who: Str) -> i64 { ... }

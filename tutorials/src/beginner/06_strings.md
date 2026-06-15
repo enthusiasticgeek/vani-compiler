@@ -8,7 +8,7 @@
 
 Save this in `~/lesson6.vani`:
 
-```rust
+```vani
 intent "Lesson 6 worked example — Str borrowed literals.";
 
 fn role(who: Str) -> Str {
@@ -100,7 +100,7 @@ otherwise. Test it on a handful of inputs in `main`.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn is_yes(s: Str) -> bool {
   if s == "y" {
     return true;

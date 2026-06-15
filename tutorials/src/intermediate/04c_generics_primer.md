@@ -13,7 +13,7 @@ This chapter has **no compiler code**. Pure intuition.
 
 You wrote a function that returns the maximum of two i64s:
 
-```rust
+```vani
 fn max_i64(a: i64, b: i64) -> i64 {
   if a > b { return a; }
   return b;
@@ -40,7 +40,7 @@ material isn't specified. When you press the cutter into
 chocolate-chip dough, you get a chocolate-chip cookie. When you
 press it into oatmeal dough, you get an oatmeal cookie.
 
-```rust
+```vani
 fn max<T>(a: T, b: T) -> T where T is Comparable {
   if a > b { return a; }
   return b;
@@ -63,7 +63,7 @@ one generic version. It generates a **specialized copy per
 concrete type** you call it with.
 
 In your program:
-```rust
+```vani
 let x: i64 = max(3, 7);
 let y: f64 = max(3.14, 2.71);
 let z: u32 = max(100 as u32, 50 as u32);
@@ -117,7 +117,7 @@ compiled helpers (push, pop, len, etc.).
 
 ### `Option<T>` / `Result<T, E>` — generic enum
 
-```rust
+```vani
 enum Option<T> {
   Some(T),
   None,
@@ -129,7 +129,7 @@ generates `Option__i64`, `Option__OwnedStr`, etc. per use.
 
 ### `id<T>` — generic identity function
 
-```rust
+```vani
 fn id<T>(x: T) -> T { return x; }
 ```
 
@@ -138,7 +138,7 @@ be anything. Useful as a building block in functional patterns.
 
 ### Generic with bounds
 
-```rust
+```vani
 fn min<T>(a: T, b: T) -> T where T is Comparable {
   if a < b { return a; }
   return b;
@@ -152,7 +152,7 @@ an unknown type.
 
 ## Multi-parameter generics
 
-```rust
+```vani
 enum Result<T, E> {
   Ok(T),
   Err(E),

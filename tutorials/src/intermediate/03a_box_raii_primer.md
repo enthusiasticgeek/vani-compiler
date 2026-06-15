@@ -139,7 +139,7 @@ Same as any owning binding (from the ownership primer):
 
 ### Move
 
-```rust
+```vani
 let b: Box<Foo> = box(Foo { x: 42 });
 let c: Box<Foo> = b;   // moves; b is now invalid
 ```
@@ -149,7 +149,7 @@ to use it).
 
 ### Borrow
 
-```rust
+```vani
 let b: Box<Foo> = box(Foo { x: 42 });
 let n: i64 = read_foo(ref b);   // borrows; b still owns
 ```
@@ -189,7 +189,7 @@ makes the affine combinations work too.
 
 ### `Box<Vec<T>>` — heap-pointer to a heap-allocated Vec
 
-```rust
+```vani
 struct Bag { contents: Box<Vec<i64>> }
 
 let v: Vec<i64> = vec(10, 20, 30);
@@ -214,7 +214,7 @@ need cleanup. The compiler emits both calls automatically.
 
 ### `Box<OwnedStr>` — heap-pointer to a heap char buffer
 
-```rust
+```vani
 let s: OwnedStr = "hello" + "!";
 let b: Box<OwnedStr> = box(s);
 ```
@@ -229,7 +229,7 @@ need a stable heap address for a single string.
 
 ### `Box<dyn Iface>` — heap-allocated value behind an interface
 
-```rust
+```vani
 struct Drawer { rend: Box<dyn Renderer> }
 
 let circle: Circle = Circle { r: 7 };
@@ -251,7 +251,7 @@ session ledger) wired this end-to-end on both backends.
 
 ### `Box` of a tuple
 
-```rust
+```vani
 let pair: Box<(i64, OwnedStr)> = box((42, "answer" + ""));
 ```
 
@@ -262,7 +262,7 @@ a name to reference — but the compiler accepts it.
 
 ### `Box<Box<T>>` — pointer to a pointer
 
-```rust
+```vani
 let inner: Box<i64> = box(99);
 let outer: Box<Box<i64>> = box(inner);
 ```
@@ -275,7 +275,7 @@ indirection.
 
 ### `Vec<Box<T>>` — sequence of heap-allocated Ts
 
-```rust
+```vani
 let drawers: Vec<Box<dyn Renderer>> = vec(
   box(circle as dyn Renderer),
   box(square as dyn Renderer),
@@ -292,7 +292,7 @@ add or which types, store `Box<dyn Iface>` in a Vec.
 
 ### `Option<Box<T>>` — explicit nullable pointer
 
-```rust
+```vani
 struct Node {
   value: i64,
   next: Option<Box<Node>>,

@@ -42,7 +42,7 @@ false. Read it as "if `x = i64::MAX` and `b = i64::MIN`, then
 The fix is usually a tightened `requires` clause. From
 Intermediate §12:
 
-```rust
+```vani
 fn checked_sub(a: i64, b: i64) -> i64
 requires a >= b;
 requires b >= 0;           // <- adds upper bound on the subtraction

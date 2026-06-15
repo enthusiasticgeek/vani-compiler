@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 10 worked example — Result + manual propagation.";
 
 enum Result { Ok(i64), Err(i64) }
@@ -77,13 +77,13 @@ pipeline(-3)  = -999
 vāṇी reserves the `try` keyword for the standard Rust-style
 short-circuit:
 
-```rust
+```vani
 let v: i64 = try parse_pos(n);   // queued sugar
 ```
 
 …desugars to roughly:
 
-```rust
+```vani
 let __t = parse_pos(n);
 if /* __t is Err */ { return __t; }
 let v: i64 = /* the Ok payload */;

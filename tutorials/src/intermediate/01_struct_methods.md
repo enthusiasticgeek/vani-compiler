@@ -5,7 +5,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 1 worked example — structs and methods.";
 
 struct Point { x: i64, y: i64 }
@@ -77,7 +77,7 @@ twice from `main` and verify both results print.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 methods on Point {
   fn distance_squared(self: Point, other: Point) -> i64 {
     let dx: i64 = self.x - other.x;

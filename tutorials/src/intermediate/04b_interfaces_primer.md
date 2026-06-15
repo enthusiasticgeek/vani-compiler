@@ -28,7 +28,7 @@ or solid) is its own business.
 
 You wrote a function:
 
-```rust
+```vani
 fn print_area(s: Shape) -> i64 {  // ← what does Shape mean here?
   print s.area();
   return 0;
@@ -88,7 +88,7 @@ Cons:
 
 ## How vāṇी spells each
 
-```rust
+```vani
 // Static dispatch — compiler monomorphizes per call type
 fn print_area<T>(s: T) -> i64 where T is Shape {
   print s.area();
@@ -147,7 +147,7 @@ explicit; the compiler checks it.
 
 For a type `T` to satisfy interface `I`, you write:
 
-```rust
+```vani
 implement Shape for Circle {
   fn area(self: Circle) -> i64 { return self.r * self.r; }
 }
@@ -169,7 +169,7 @@ methods accidentally treated as "Cloneable").
 
 A single type can implement many interfaces:
 
-```rust
+```vani
 struct Point { x: i64, y: i64 }
 
 implement Shape for Point { ... }

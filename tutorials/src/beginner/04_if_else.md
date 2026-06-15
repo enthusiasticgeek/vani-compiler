@@ -7,7 +7,7 @@
 
 Save this in `~/lesson4.vani`:
 
-```rust
+```vani
 intent "Lesson 4 worked example — if / else / nested branches.";
 
 fn sign(n: i64) -> i64 {
@@ -91,7 +91,7 @@ x is a single-digit positive
 
 The single-arm form is two-arm by default:
 
-```rust
+```vani
 if x > 0 {
   print "positive";
 }
@@ -104,7 +104,7 @@ has no value when the condition is false. The statement form
 above is allowed without `else`; the expression form below is
 not:
 
-```rust
+```vani
 // statement form — no else required:
 if x > 0 { print "positive"; }
 
@@ -121,7 +121,7 @@ three arguments. Print `min3(7, 3, 5)` from `main`.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn min3(a: i64, b: i64, c: i64) -> i64 {
   if a <= b && a <= c {
     return a;

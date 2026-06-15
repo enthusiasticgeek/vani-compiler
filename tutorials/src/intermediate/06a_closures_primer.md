@@ -17,7 +17,7 @@ You write a "make-greeter" tool. Given someone's name, it
 returns a tiny custom function that greets that specific
 person.
 
-```rust
+```vani
 let say_hi_to_alice = make_greeter("alice");
 let say_hi_to_bob   = make_greeter("bob");
 
@@ -39,7 +39,7 @@ values from the surrounding context.
 Imagine functions as little robots. A regular function-robot
 just runs the same program every time you press its button:
 
-```rust
+```vani
 fn say_hello() -> i64 { print "hello"; return 0; }
 ```
 
@@ -48,7 +48,7 @@ things like `name = "alice"`, `count = 5`, etc. When you press
 its button, it runs its program AND consults the notes to fill
 in the blanks.
 
-```rust
+```vani
 let say_hi_to_alice = make_greeter("alice");
 ```
 
@@ -67,7 +67,7 @@ items. It can't reach into the surrounding scope.
 
 A closure can.
 
-```rust
+```vani
 fn make_counter() -> ??? {
   let start: i64 = 0;
   let inc = |x: i64| start + x;
@@ -133,7 +133,7 @@ it helps the mental model.
 
 When you write:
 
-```rust
+```vani
 fn make_greeter(name: OwnedStr) -> Closure {
   return |x: i64| print "hello,", name, x;
 }
@@ -141,7 +141,7 @@ fn make_greeter(name: OwnedStr) -> Closure {
 
 The compiler internally rewrites it to something like:
 
-```rust
+```vani
 // Step 1: lift the closure body into a top-level function
 fn __anon_fn_0(env: ref Env_0, x: i64) -> i64 {
   print "hello,", env.name, x;
@@ -168,7 +168,7 @@ source — the compiler handles it.
 
 ### 1. As function arguments (the iterator pattern)
 
-```rust
+```vani
 let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
 let doubled: Vec<i64> = vec_map(xs, |x| x * 2);
 ```
@@ -179,7 +179,7 @@ is a tiny anonymous function with no captures.
 
 When you add captures:
 
-```rust
+```vani
 let factor: i64 = 10;
 let scaled: Vec<i64> = vec_map(xs, |x| x * factor);
                                        // ^ captures `factor`
@@ -189,7 +189,7 @@ The closure now carries `factor` as part of its environment.
 
 ### 2. As returned values (factory patterns)
 
-```rust
+```vani
 fn make_validator(min: i64, max: i64) -> Closure {
   return |x| min <= x && x <= max;
 }
@@ -200,7 +200,7 @@ number is in the 0-100 range. The min/max are baked in.
 
 ### 3. Stored in data structures
 
-```rust
+```vani
 struct EventHandler {
   on_click: Closure,
   on_hover: Closure,
@@ -232,7 +232,7 @@ surface.
 A common over-use: turning a 3-line function body into a
 closure when a regular function would do.
 
-```rust
+```vani
 // Overkill — name it.
 let add: Closure = |a, b| a + b;
 let r = add(3, 5);

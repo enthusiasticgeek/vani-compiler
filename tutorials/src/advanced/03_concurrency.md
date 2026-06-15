@@ -7,7 +7,7 @@
 
 ## The `task` / `join` shape
 
-```rust
+```vani
 fn worker(n: i64) -> i64 {
   return n * 7;
 }
@@ -36,7 +36,7 @@ synchronization shape you need:
 
 ### `Atomic<T>` — lock-free counters and flags
 
-```rust
+```vani
 let counter: Atomic<i64> = atomic_new(0);
 let old: i64 = atomic_fetch_add(ref counter, 5);
 let cur: i64 = atomic_load(ref counter);
@@ -52,7 +52,7 @@ let _ = atomic_compare_exchange(ref counter, 0, 1);
 
 ### `Mutex<T>` — guarded mutation of a payload
 
-```rust
+```vani
 let m: Mutex<i64> = mutex_new(0);
 {
   let g: Guard<i64> = mutex_lock(ref m);
@@ -70,7 +70,7 @@ let m: Mutex<i64> = mutex_new(0);
 
 ### `Channel<T, N>` — bounded MPMC queue
 
-```rust
+```vani
 let ch: Channel<i64, 16> = channel_new();
 let _ = channel_send(ref ch, 42);     // blocks if full
 let v: i64 = channel_recv(ref ch);    // blocks if empty
@@ -82,7 +82,7 @@ let v: i64 = channel_recv(ref ch);    // blocks if empty
 
 ### `Condvar` — signaling for non-trivial wait conditions
 
-```rust
+```vani
 let cv: Condvar = condvar_new();
 let m: Mutex<i64> = mutex_new(0);
 

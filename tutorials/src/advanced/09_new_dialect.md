@@ -24,7 +24,7 @@ Suppose you're adding Burmese (မြန်မာ, U+1000..U+109F).
 
 In `src/lexer.rs`, add a new `*_keyword` function:
 
-```rust
+```vani
 fn burmese_keyword(text: &str) -> Option<TokenKind> {
     let kind = match text {
         "လုပ်ဆောင်ချက်" => TokenKind::Fn,
@@ -39,7 +39,7 @@ fn burmese_keyword(text: &str) -> Option<TokenKind> {
 
 Then wire it into the fallback chain in `lex_unicode_ident`:
 
-```rust
+```vani
 let kind = devanagari_keyword(text)
     .or_else(|| bengali_keyword(text))
     .or_else(|| tamil_keyword(text))
@@ -51,7 +51,7 @@ let kind = devanagari_keyword(text)
 
 Add the `DialectLang` variant:
 
-```rust
+```vani
 enum DialectLang {
     ...
     Burmese,
@@ -60,7 +60,7 @@ enum DialectLang {
 
 Add the pragma alias in `detect_language_pragma`:
 
-```rust
+```vani
 "burmese" | "myanmar" | "my" => Some(DialectLang::Burmese),
 ```
 
@@ -71,7 +71,7 @@ Update `DialectLang::name()` and `DialectLang::script()`.
 Add a new `Script` variant + Unicode block check in
 `Script::classify`:
 
-```rust
+```vani
 if ('\u{1000}'..='\u{109F}').contains(&c) {
     return Script::Burmese;
 }

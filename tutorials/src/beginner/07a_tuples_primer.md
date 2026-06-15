@@ -21,7 +21,7 @@ Three ways to handle the "two return values":
 
 ### Option 1: a struct
 
-```rust
+```vani
 struct DivMod { q: i64, r: i64 }
 
 fn divmod(a: i64, b: i64) -> DivMod {
@@ -35,7 +35,7 @@ site. For a one-off return, this feels like ceremony.
 
 ### Option 2: two out-params (older C style)
 
-```rust
+```vani
 fn divmod(a: i64, b: i64, out_q: mut ref i64, out_r: mut ref i64) -> i64 { ... }
 ```
 
@@ -44,7 +44,7 @@ then read them after. Ugly + error-prone.
 
 ### Option 3: a tuple
 
-```rust
+```vani
 fn divmod(a: i64, b: i64) -> (i64, i64) {
   return (a / b, a % b);
 }
@@ -112,7 +112,7 @@ arms:
 
 ### As function arguments
 
-```rust
+```vani
 fn distance(p: (i64, i64), q: (i64, i64)) -> i64 {
   let (px, py) = p;
   let (qx, qy) = q;
@@ -125,7 +125,7 @@ function body then operates on the components.
 
 ### In match arms
 
-```rust
+```vani
 match position {
   (0, 0) then "origin",
   (0, _) then "y-axis",
@@ -142,7 +142,7 @@ everything else and binds the components.
 
 You can also access individual slots without destructuring:
 
-```rust
+```vani
 let pair: (i64, OwnedStr) = (42, "answer");
 let n: i64 = pair.0;          // = 42
 let s: OwnedStr = pair.1;     // = "answer" (moved out)
@@ -161,7 +161,7 @@ Tuples follow the same ownership rules as any other type:
   non-Copy. It moves on assignment.
 - Partial moves work field-by-field, same as structs.
 
-```rust
+```vani
 let pair: (i64, OwnedStr) = (42, "hi" + "!");
 let answer: i64 = pair.0;      // copy — pair.0 is i64
 let msg: OwnedStr = pair.1;    // move — pair.1 is OwnedStr,
@@ -191,7 +191,7 @@ model:
 
 ### Tuple of structs
 
-```rust
+```vani
 struct Player { name: OwnedStr, score: i64 }
 struct Enemy  { kind: i64, hp: i64 }
 
@@ -211,7 +211,7 @@ Enemy.
 
 ### Nested tuples
 
-```rust
+```vani
 let line: ((i64, i64), (i64, i64)) = ((0, 0), (10, 5));
 let (start, end) = line;
 let (sx, sy) = start;
@@ -221,13 +221,13 @@ let (ex, ey) = end;
 A pair of pairs. Destructure in stages: outer first, then
 each inner. Or destructure-deep in one let if you want:
 
-```rust
+```vani
 let ((sx, sy), (ex, ey)) = line;
 ```
 
 ### Tuple containing a `Box`
 
-```rust
+```vani
 struct BigData { ... }   // imagine this is 4 KB
 
 fn make_pair() -> (i64, Box<BigData>) {
@@ -245,7 +245,7 @@ out-of-band.
 
 ### Tuple containing a `Vec`
 
-```rust
+```vani
 fn parse_line(s: Str) -> (Vec<i64>, OwnedStr) {
   let nums: Vec<i64> = vec();    // imagine parsing
   let leftover: OwnedStr = "rest" + "";
@@ -259,7 +259,7 @@ of scope, BOTH are freed.
 
 ### Tuple as a struct field
 
-```rust
+```vani
 struct Rectangle {
   top_left: (i64, i64),
   bottom_right: (i64, i64),
@@ -273,7 +273,7 @@ naming each: `top_left_x`, `top_left_y`, `bottom_right_x`,
 
 ### Tuple inside a Vec
 
-```rust
+```vani
 let coords: Vec<(i64, i64)> = vec((0, 0), (3, 4), (10, 0));
 for pt in ref coords {
   let (x, y) = pt;
@@ -288,7 +288,7 @@ contiguously.
 
 ### Mixed types in the same tuple
 
-```rust
+```vani
 fn snapshot() -> (OwnedStr, i64, bool, Vec<i64>) {
   return ("snapshot-1" + "", 1234, true, vec(10, 20, 30));
 }

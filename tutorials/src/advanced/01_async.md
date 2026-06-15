@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Advanced 1 — async fn + await + CancelToken.";
 
 async fn fetch(n: i64) -> i64 {
@@ -93,7 +93,7 @@ await cancellable(7, tok)  = -1
 **Sequential awaits**: write them as you would Rust. The
 desugar lowers each to a `match`.
 
-```rust
+```vani
 async fn pipeline(n: i64) -> i64 {
   let a: i64 = await(fetch(n));
   let b: i64 = await(fetch(a));
@@ -104,7 +104,7 @@ async fn pipeline(n: i64) -> i64 {
 **Conditional await**: standard `if` works inside async
 bodies.
 
-```rust
+```vani
 async fn maybe_fetch(use_cache: bool, key: i64) -> i64 {
   if use_cache {
     return key;

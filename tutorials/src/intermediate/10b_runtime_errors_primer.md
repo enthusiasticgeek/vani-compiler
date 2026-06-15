@@ -190,7 +190,7 @@ be a test of the type system itself, it's a contract.**
 
 ### Worked split — a small parser
 
-```rust
+```vani
 fn parse_int(s: Str) -> Result<i64, OwnedStr> { ... }
 // Recoverable: user input might be "abc". Caller decides.
 
@@ -224,7 +224,7 @@ functions, the postfix `?` operator (or the `try EXPR`
 keyword — same AST node, two surface spellings) propagates
 failures up:
 
-```rust
+```vani
 fn handle_request(s: Str) -> Result<i64, OwnedStr> {
   let parts: Vec<Str> = split(s, ":");
   let key: Str = parts[0];           // contract: parts has >= 1
@@ -258,7 +258,7 @@ that's never there can never fire.
 
 ### Index access — bounds elision
 
-```rust
+```vani
 fn sum_first_three(xs: ref Vec<i64>) -> i64
   requires len(xs) >= 3
 {
@@ -278,7 +278,7 @@ runtime checks — they MIGHT fire on a 0-length input.
 
 ### Integer overflow — range elision
 
-```rust
+```vani
 fn safe_add(a: i64, b: i64) -> i64
   requires a >= 0 && a <= 1000000
   requires b >= 0 && b <= 1000000
@@ -293,7 +293,7 @@ guard is elided.
 
 ### Divide-by-zero elision
 
-```rust
+```vani
 fn safe_divide(num: i64, den: i64) -> i64
   requires den != 0
 {
@@ -389,7 +389,7 @@ argument is "0"; silent wrong answer if argument is
 
 ### Rust
 
-```rust
+```vani
 fn main() {
     let n: i32 = std::env::args().nth(1).unwrap().parse().unwrap();
     let r = 100 / n;
@@ -418,7 +418,7 @@ for pure-Python code).
 
 ### vāṇी
 
-```rust
+```vani
 fn main(argv: Vec<Str>) -> i64 {
   if len(argv) < 2 {
     print "usage: divide <n>";
@@ -460,7 +460,7 @@ program — I can't recover." Two paths:
 
 ### 1. `assert` for invariants you've verified
 
-```rust
+```vani
 fn process(xs: ref Vec<i64>) -> i64 {
   // The caller has already validated this; if it's wrong,
   // there's a bug in the validator.
@@ -476,7 +476,7 @@ message instead of corrupting state."
 ### 2. `prove` for "I'm asserting this is mathematically
    true and want SMT to verify it now"
 
-```rust
+```vani
 fn next_power_of_two(n: i64) -> i64 {
   ...
   prove result >= n && result <= 2 * n;

@@ -29,6 +29,9 @@ boost-paragraph = 1
 # uses highlight.js under the hood; v1 falls back to Rust
 # highlighting (close enough for the keyword-first dialect) until
 # a dedicated grammar lands.
+[output.html.playground]
+runnable = false
+
 [output.html.fold]
 enable = true
 level = 2

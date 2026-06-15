@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 5 worked example — dyn Iface + heterogeneous Vec.";
 
 struct Circle { r: i64 }

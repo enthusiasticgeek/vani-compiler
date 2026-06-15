@@ -104,7 +104,7 @@ idiomatic Result handling.
 The actual chapter ([Intermediate 9](09_ffi.md)) has the
 syntax. The shape:
 
-```rust
+```vani
 extern "C" fn sqrt(x: f64) -> f64;
 
 fn main() -> i64 {
@@ -136,7 +136,7 @@ section where the type system isn't tracking ownership.
 The reverse direction also works. vAṇी functions can be passed
 as callbacks to C functions:
 
-```rust
+```vani
 extern "C" fn qsort(
   base: *mut i64, n: u64, size: u64,
   cmp: fn(*const i64, *const i64) -> i64,

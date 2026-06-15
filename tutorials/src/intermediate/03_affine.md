@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 3 worked example — affine ownership and borrows.";
 
 struct Pair { a: i64, b: i64 }
@@ -92,7 +92,7 @@ swapped after the call.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn swap_pair(p: mut ref Pair) -> i64 {
   let tmp: i64 = p.a;
   p.a = p.b;

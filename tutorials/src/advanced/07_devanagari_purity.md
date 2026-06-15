@@ -9,7 +9,7 @@
 Every `.vani` file optionally declares its dialect on the
 first ~10 lines:
 
-```rust
+```vani
 // श्री।                    (optional auspicious header)
 // vani-lang: sanskrit
 उद्देश्य "purity demo";
@@ -116,7 +116,7 @@ so adding spellings never breaks old files.
 
 ## A worked Sanskrit example
 
-```rust
+```vani
 // श्री।
 // vani-lang: sanskrit
 उद्देश्य "factorial demo";

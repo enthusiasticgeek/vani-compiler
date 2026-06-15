@@ -111,7 +111,7 @@ Either choice gives you race-free code.
 The simplest way to use parallelism in vāṇी is the parallel
 for loop:
 
-```rust
+```vani
 parallel for i from 0 to 1000 {
   let r: i64 = expensive_compute(i);
   results[i] = r;
@@ -141,7 +141,7 @@ parallelize correctly.
 
 What if you want to SUM all the values?
 
-```rust
+```vani
 let sum: i64 = 0;
 parallel for i from 0 to 1000 reduce sum with + {
   sum = sum + expensive_value(i);
@@ -166,7 +166,7 @@ that the reduction operator is associative — `+`, `*`, `min`,
 For coarser-grained parallelism (running a few things in
 parallel rather than thousands), use `task` + `join`:
 
-```rust
+```vani
 task download_a {
   let data: OwnedStr = fetch("a");
   // do something with data

@@ -101,7 +101,7 @@ Three reasons, each something you'll hit immediately:
 Squares, Triangles. Without `dyn`, you'd need separate vecs per
 type — a pain to manage and inflexible.
 
-```rust
+```vani
 // HYPOTHETICAL — what dyn lets you write
 let shapes: Vec<dyn Shape> = vec(c as dyn Shape, s as dyn Shape);
 for shape in ref shapes {
@@ -115,7 +115,7 @@ types.
 
 ### 2. Functions that take "any shape"
 
-```rust
+```vani
 fn print_area(shape: ref dyn Shape) -> i64 {
   print "area:", shape.area();
   return 0;

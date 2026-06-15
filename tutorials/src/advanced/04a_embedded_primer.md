@@ -47,7 +47,7 @@ environment.
 
 A function (or whole program) can be annotated:
 
-```rust
+```vani
 #[no_heap]
 fn process_packet(buf: ref [u8; 256]) -> i64 { ... }
 ```
@@ -64,7 +64,7 @@ You get a guarantee, not a hope.
 
 A function can declare its maximum stack usage:
 
-```rust
+```vani
 #[bounded_stack(64)]
 fn parse_packet(input: ref [u8; 1024]) -> Packet { ... }
 ```
@@ -83,7 +83,7 @@ hardware where debugging is excruciating.
 
 For real-time code:
 
-```rust
+```vani
 #[deterministic_timing]
 fn step_motor() -> i64 { ... }
 ```
@@ -110,7 +110,7 @@ Sometimes you genuinely need to:
 
 For these, you write:
 
-```rust
+```vani
 unsafe(reason = "GPIO pin 13 toggle — hardware-defined memory address") {
   let gpio_pin_13: *mut u32 = 0x40020000 as *mut u32;
   write_volatile(gpio_pin_13, 1);
@@ -143,7 +143,7 @@ or **region** allocation. Instead of a global heap, you have
 a fixed-size buffer; you allocate from it bumping a pointer
 up; you free the WHOLE buffer at once when you're done.
 
-```rust
+```vani
 region scratch[4096] {
   let temp_a: ref [u8; 100] = scratch_alloc(scratch, 100);
   let temp_b: ref [u8; 200] = scratch_alloc(scratch, 200);

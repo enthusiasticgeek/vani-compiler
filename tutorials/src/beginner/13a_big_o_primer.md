@@ -78,7 +78,7 @@ vāṇी's `--big-o` flag walks each function and looks at:
 
 So a function like:
 
-```rust
+```vani
 fn sort_then_search(xs: mut ref Vec<i64>, key: i64) -> i64 {
   let _ = sort(mut ref xs);
   return binary_search(ref xs, key);
@@ -90,7 +90,7 @@ binary_search.
 
 A function like:
 
-```rust
+```vani
 fn all_pairs(xs: ref Vec<i64>) -> i64 {
   // ... two nested loops over xs ...
 }

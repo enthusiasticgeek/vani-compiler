@@ -14,7 +14,7 @@ This chapter has **no compiler code**. Pure intuition.
 You have a value. You want to do different things depending on
 what's in it. The naive way is a chain of `if`/`else`:
 
-```rust
+```vani
 if x == 0 {
   print "zero";
 } else if x == 1 {
@@ -36,7 +36,7 @@ Works, but:
 
 `match` lets you write the same thing as:
 
-```rust
+```vani
 match x {
   0 then print "zero",
   1 then print "one",
@@ -61,7 +61,7 @@ syntax. The real power kicks in when patterns become
 You have a `Result<i64, ParseError>`. You want to handle both
 cases AND pull out the inner value:
 
-```rust
+```vani
 match parse_result {
   Result.Ok(n) then print "parsed:", n,
   Result.Err(e) then print "failed:", e.code,
@@ -78,7 +78,7 @@ Err.
 
 ### Pattern 2: tuples
 
-```rust
+```vani
 match (x, y) {
   (0, 0) then print "origin",
   (0, _) then print "y-axis",
@@ -92,7 +92,7 @@ components. `_` is the don't-care placeholder.
 
 ### Pattern 3: literal + binding combined
 
-```rust
+```vani
 match status {
   0 then print "ok",
   n if n < 0 then print "error:", n,    // n is bound;
@@ -112,7 +112,7 @@ A loose `if`/`else` chain might handle 4 cases and forget the
 behavior. With `match`, the compiler **checks that every
 possible value is covered**.
 
-```rust
+```vani
 enum Color { Red, Green, Blue }
 
 fn name(c: Color) -> Str {
@@ -161,7 +161,7 @@ input`.
 A subtle but important property: in vāṇी, `match` is an
 EXPRESSION. It produces a value.
 
-```rust
+```vani
 let name: Str = match c {
   Color.Red then "red",
   Color.Green then "green",
@@ -176,7 +176,7 @@ no separate variable initialized in each branch.
 This means you can use match wherever a value is expected —
 return position, function arguments, struct fields:
 
-```rust
+```vani
 fn describe(c: Color) -> Str {
   return match c {
     Color.Red then "warm",
@@ -190,7 +190,7 @@ fn describe(c: Color) -> Str {
 
 ### Default with a name
 
-```rust
+```vani
 let response: i64 = match input_kind {
   "ping" then 100,
   "echo" then 200,
@@ -204,7 +204,7 @@ value in the branch body.
 
 ### Match on a structured Result
 
-```rust
+```vani
 match parse_command(buf) {
   Result.Ok(Command.Quit) then exit(0),
   Result.Ok(Command.Status) then print_status(),
@@ -219,7 +219,7 @@ the inner Str into `s`."
 
 ### Range patterns (where supported)
 
-```rust
+```vani
 match code {
   0 then "ok",
   1..99 then "informational",

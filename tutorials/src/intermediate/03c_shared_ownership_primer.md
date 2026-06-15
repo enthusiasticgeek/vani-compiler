@@ -74,7 +74,7 @@ The most common pattern: when multiple parts of your code need
 to *read* the same data, give each a `ref T`. Many shared
 borrows can coexist freely.
 
-```rust
+```vani
 fn use_data(...) -> i64 {
   let xs: Vec<i64> = vec(1, 2, 3, 4);
   let a: i64 = sum(ref xs);
@@ -98,7 +98,7 @@ The "Entity-Component System" (ECS) pattern from game
 development. Instead of pointers to objects, you store objects
 in a Vec/Pool and use *indices* as handles.
 
-```rust
+```vani
 struct Entity { id: u32, generation: u32 }
 struct World {
   entities: Pool<Entity>,
@@ -132,7 +132,7 @@ Allocate many values from a shared arena; free the whole arena
 at once. The values "share ownership" of the arena's lifetime
 — they all live as long as the arena does, then die together.
 
-```rust
+```vani
 region scratch[64 * 1024] {
   let a: ref Foo = scratch_alloc(scratch, Foo { ... });
   let b: ref Foo = scratch_alloc(scratch, Foo { ... });
@@ -159,7 +159,7 @@ pattern) or do you actually need to MOVE the value?
 
 For moves, channels are cleaner:
 
-```rust
+```vani
 let ch: Channel<Vec<i64>, 8> = channel_new();
 
 task producer {
@@ -184,7 +184,7 @@ primitive.
 When you genuinely need multiple threads to MUTATE the same
 data, use `Mutex<T>`:
 
-```rust
+```vani
 struct SharedCounter { value: i64 }
 
 let counter: Mutex<SharedCounter> = mutex_new(SharedCounter { value: 0 });

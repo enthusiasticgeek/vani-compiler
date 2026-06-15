@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 6 worked example — anonymous fns + higher-order helpers.";
 
 fn apply(f: fn(i64) -> i64, x: i64) -> i64 {

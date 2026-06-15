@@ -8,7 +8,7 @@
 
 Save this in `~/lesson3.vani`:
 
-```rust
+```vani
 intent "Lesson 3 worked example — functions, parameters, return.";
 
 fn add(a: i64, b: i64) -> i64 {
@@ -97,7 +97,7 @@ twice with different arguments and print both results.
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 fn triangle_area(base: f64, height: f64) -> f64 {
   return 0.5 * base * height;
 }

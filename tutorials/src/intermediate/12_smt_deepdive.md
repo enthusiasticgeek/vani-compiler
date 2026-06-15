@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 12 worked example — SMT contracts in depth.";
 
 // `ensures _return >= 0;` is a postcondition the SMT verifier
@@ -81,7 +81,7 @@ by the function. It's the only valid reference to "the result"
 in an `ensures` clause; you don't write `result`, you don't
 write the literal `return` keyword in a predicate.
 
-```rust
+```vani
 ensures _return >= 0;
 ensures _return == n * 2;
 ensures _return > x;

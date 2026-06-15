@@ -24,7 +24,7 @@ explains what that means, and what it lets you do.
 
 Look at this snippet (any language):
 
-```rust
+```vani
 let xs = [10, 20, 30];   // 3 elements
 let i = compute_index();
 let value = xs[i];        // ← what if i is 5? Or -1?
@@ -92,7 +92,7 @@ properties of YOUR code.
 
 You add **contracts** to your functions:
 
-```rust
+```vani
 fn divide(a: i64, b: i64) -> i64
   requires b != 0;
 {
@@ -120,7 +120,7 @@ number" from a comment-in-prose into a compile-time check.
 
 "Before you call me, this must be true."
 
-```rust
+```vani
 fn sqrt_int(n: i64) -> i64
   requires n >= 0;
 {
@@ -136,7 +136,7 @@ was guaranteed by the contract).
 
 "When I return, the result will satisfy this."
 
-```rust
+```vani
 fn abs(n: i64) -> i64
   ensures _return >= 0;
 {
@@ -154,7 +154,7 @@ context.
 
 "Here, at this point in the body, this should be true."
 
-```rust
+```vani
 fn process(xs: ref Vec<i64>) -> i64
   requires len(xs) > 0;
 {
@@ -176,7 +176,7 @@ you get the same code shape either way.
 
 ### 1. Bounds checks vanish
 
-```rust
+```vani
 fn first_three_sum(xs: ref Vec<i64>) -> i64
   requires len(xs) >= 3;
 {
@@ -192,7 +192,7 @@ caller prove it.
 
 ### 2. Integer-overflow checks vanish
 
-```rust
+```vani
 fn double(n: i64) -> i64
   requires n <= 1000;
 {
@@ -211,7 +211,7 @@ runtime divide-by-zero check goes away.
 
 ### 4. Domain-specific contracts
 
-```rust
+```vani
 fn pop_unchecked(xs: mut ref Vec<i64>) -> i64
   requires len(xs) > 0;
   ensures len(xs) == old_len(xs) - 1;

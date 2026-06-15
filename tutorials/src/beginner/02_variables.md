@@ -7,7 +7,7 @@
 
 Save this in `~/lesson2.vani`:
 
-```rust
+```vani
 intent "Lesson 2 worked example — variables + types + operators.";
 
 fn main() -> i64 {
@@ -89,7 +89,7 @@ print it. Note the **type error** when you mix it with `a` (an
 <details>
 <summary>Solution</summary>
 
-```rust
+```vani
 let narrow: i32 = 5;
 // print narrow * a;            // error: type mismatch (i32 vs i64)
 let widened: i64 = narrow as i64;

@@ -6,7 +6,7 @@
 
 ## The program
 
-```rust
+```vani
 intent "Intermediate 4 worked example — interfaces + static dispatch.";
 
 struct Circle { r: i64 }
