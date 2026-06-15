@@ -1,0 +1,34 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/verified.vani              # LLVM
+//   vanic run examples/language/mandarin/verified.vani --backend=c  # C
+
+目的 "Mandarin requires/proves smoke-test";
+
+函数 下限值(x: i64, 下: i64) -> i64
+要求 下 >= 0;
+{
+  如果 x < 下 {
+    返回 下;
+  } 否则 {
+    返回 x;
+  }
+}
+
+函数 安全减法(甲: i64, 乙: i64) -> i64
+要求 甲 >= 乙;
+要求 乙 >= 0;
+{
+  证明 甲 - 乙 >= 0;
+  返回 甲 - 乙;
+}
+
+函数 main() -> i64 {
+  让 x: i64 = 下限值(0 - 5, 0);
+  断言 x == 0;
+  让 d: i64 = 安全减法(10, 3);
+  断言 d == 7;
+  打印 "Mandarin verified OK", d;
+  返回 0;
+}

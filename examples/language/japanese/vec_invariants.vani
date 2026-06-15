@@ -1,0 +1,31 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/japanese/vec_invariants.vani --backend=c  # C
+
+目的 "Loop invariants over Vec length, end-to-end";
+
+関数 main() -> i64 {
+  代入 配列: Vec<i64> = vec(0);
+  代入 カウント: i64 = 1;
+
+  間 カウント < 5
+  不変 カウント >= 1;
+  不変 カウント <= 5;
+  {
+    配列 = push(配列, カウント * 10);
+    カウント = カウント + 1;
+  }
+
+  証明 カウント == 5;
+  確認 (len(配列) として i64) == 5;
+
+  表示 配列[0];
+  表示 配列[1];
+  表示 配列[2];
+  表示 配列[3];
+  表示 配列[4];
+
+  戻る 0;
+}

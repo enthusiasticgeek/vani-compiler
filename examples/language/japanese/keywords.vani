@@ -1,0 +1,27 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/keywords.vani              # LLVM
+//   vanic run examples/language/japanese/keywords.vani --backend=c  # C
+
+目的 "Japanese keyword smoke-test";
+
+構造体 Ten {
+  x: i64,
+  y: i64,
+}
+
+列挙 Iro { Red, Green, Blue }
+
+関数 足す(あ: i64, い: i64) -> i64 {
+  戻る あ + い;
+}
+
+関数 main() -> i64 {
+  代入 p: Ten = Ten { x: 3, y: 4 };
+  代入 c: Iro = Iro.Red;
+  代入 s: i64 = 足す(p.x, p.y);
+  確認 s == 7;
+  表示 "Japanese keywords OK", s;
+  戻る 0;
+}

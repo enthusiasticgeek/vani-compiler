@@ -1,0 +1,28 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/japanese/box_recursive_drop.vani --backend=c  # C
+
+目的 "Japanese Box<T> recursive-drop smoke-test";
+
+構造体 Node {
+  値: i64,
+  次: Option<Box<Node>>,
+}
+
+関数 main() -> i64 {
+  代入 リスト: Node = Node {
+    値: 1,
+    次: Some(Box(Node {
+      値: 2,
+      次: Some(Box(Node {
+        値: 3,
+        次: None,
+      })),
+    })),
+  };
+  確認 リスト.値 == 1;
+  表示 "Japanese box recursive drop OK";
+  戻る 0;
+}

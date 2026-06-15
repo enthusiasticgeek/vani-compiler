@@ -1,0 +1,17 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/for_loops.vani              # LLVM
+//   vanic run examples/language/mandarin/for_loops.vani --backend=c  # C
+
+目的 "Mandarin for-loop smoke-test";
+
+函数 main() -> i64 {
+  让 总和: i64 = 0;
+  对于 i 从 1 到 6 {
+    总和 = 总和 + i;
+  }
+  断言 总和 == 15;
+  打印 "Mandarin for-loops OK", 总和;
+  返回 0;
+}

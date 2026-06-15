@@ -1,0 +1,20 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/early_exit.vani              # LLVM
+//   vanic run examples/language/mandarin/early_exit.vani --backend=c  # C
+
+目的 "Mandarin early-exit (break) smoke-test";
+
+函数 main() -> i64 {
+  让 n: i64 = 0;
+  当 n < 100 {
+    如果 n == 5 {
+      中断;
+    }
+    n = n + 1;
+  }
+  断言 n == 5;
+  打印 "Mandarin early exit OK", n;
+  返回 0;
+}

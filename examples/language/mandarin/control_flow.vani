@@ -1,0 +1,25 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/control_flow.vani              # LLVM
+//   vanic run examples/language/mandarin/control_flow.vani --backend=c  # C
+
+目的 "Mandarin control flow smoke-test";
+
+函数 分类(n: i64) -> i64 {
+  如果 n < 0 {
+    返回 -1;
+  } 否则 如果 n == 0 {
+    返回 0;
+  } 否则 {
+    返回 1;
+  }
+}
+
+函数 main() -> i64 {
+  断言 分类(-5) == -1;
+  断言 分类(0) == 0;
+  断言 分类(3) == 1;
+  打印 "Mandarin control flow OK";
+  返回 0;
+}

@@ -1,0 +1,28 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/option_types.vani              # LLVM
+//   vanic run examples/language/mandarin/option_types.vani --backend=c  # C
+
+目的 "Mandarin Option<T> smoke-test";
+
+函数 安全除法(a: i64, b: i64) -> Option<i64> {
+  如果 b == 0 {
+    返回 None;
+  }
+  返回 Some(a / b);
+}
+
+函数 main() -> i64 {
+  让 结果: Option<i64> = 安全除法(10, 2);
+  匹配 结果 {
+    Some(v) 那么 {
+      断言 v == 5;
+      打印 "Mandarin option OK", v;
+    }
+    None 那么 {
+      断言 false;
+    }
+  }
+  返回 0;
+}

@@ -1,0 +1,27 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/keywords.vani              # LLVM
+//   vanic run examples/language/mandarin/keywords.vani --backend=c  # C
+
+目的 "Mandarin keyword smoke-test";
+
+结构 Dian {
+  x: i64,
+  y: i64,
+}
+
+枚举 Yanse { Red, Green, Blue }
+
+函数 相加(甲: i64, 乙: i64) -> i64 {
+  返回 甲 + 乙;
+}
+
+函数 main() -> i64 {
+  让 p: Dian = Dian { x: 3, y: 4 };
+  让 c: Yanse = Yanse.Red;
+  让 s: i64 = 相加(p.x, p.y);
+  断言 s == 7;
+  打印 "Mandarin keywords OK", s;
+  返回 0;
+}

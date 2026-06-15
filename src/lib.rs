@@ -33084,6 +33084,74 @@ função main() -> i64 {
     }
 
     #[test]
+    fn korean_invariant_keyword_compiles() {
+        let source = "// vani-lang: korean\n\
+                      목적 \"Korean invariant\";\n\
+                      함수 main() -> i64 {\n  \
+                        정의 xs: Vec<i64> = vec(0);\n  \
+                        정의 i: i64 = 1;\n  \
+                        동안 i < 3\n  \
+                        불변 i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        반환 0;\n\
+                      }\n";
+        crate::compile(source).expect("Korean invariant compiles");
+    }
+
+    #[test]
+    fn korean_for_range_compiles() {
+        let source = "// vani-lang: korean\n\
+                      목적 \"Korean for-range\";\n\
+                      함수 main() -> i64 {\n  \
+                        정의 합계: i64 = 0;\n  \
+                        각각 i 에서 0 까지 5 {\n    \
+                          합계 = 합계 + i;\n  \
+                        }\n  \
+                        확인 합계 == 10;\n  \
+                        반환 0;\n\
+                      }\n";
+        crate::compile(source).expect("Korean for-range compiles");
+    }
+
+    #[test]
+    fn korean_match_enum_compiles() {
+        let source = "// vani-lang: korean\n\
+                      목적 \"Korean match/enum\";\n\
+                      열거 Gyejeol { Spr, Sum, Aut, Win }\n\
+                      함수 main() -> i64 {\n  \
+                        정의 s: Gyejeol = Gyejeol.Spr;\n  \
+                        정의 v: i64 = 일치 s {\n    \
+                          Gyejeol.Spr 그러면 1,\n    \
+                          Gyejeol.Sum 그러면 2,\n    \
+                          Gyejeol.Aut 그러면 3,\n    \
+                          Gyejeol.Win 그러면 4,\n  \
+                        };\n  \
+                        확인 v == 1;\n  \
+                        반환 0;\n\
+                      }\n";
+        crate::compile(source).expect("Korean match/enum compiles");
+    }
+
+    #[test]
+    fn korean_requires_proves_compiles() {
+        let source = "// vani-lang: korean\n\
+                      목적 \"Korean requires\";\n\
+                      함수 clamp(x: i64, lo: i64) -> i64\n\
+                      필요 lo >= 0;\n\
+                      {\n  \
+                        만약 x < lo { 반환 lo; } 아니면 { 반환 x; }\n\
+                      }\n\
+                      함수 main() -> i64 {\n  \
+                        확인 clamp(0 - 1, 0) == 0;\n  \
+                        반환 0;\n\
+                      }\n";
+        crate::compile(source).expect("Korean requires compiles");
+    }
+
+    #[test]
     fn german_latin_with_umlauts_pragma_compiles_and_runs() {
         // Phase 10.1 (2026-06-07): third Latin-with-accents
         // Tier II dialect. Same v1 scope as Spanish + French —
@@ -33163,6 +33231,74 @@ função main() -> i64 {
             crate::compile(source).is_err(),
             "Japanese pragma + Devanagari keyword must be rejected"
         );
+    }
+
+    #[test]
+    fn japanese_invariant_keyword_compiles() {
+        let source = "// vani-lang: japanese\n\
+                      目的 \"Japanese invariant\";\n\
+                      関数 main() -> i64 {\n  \
+                        代入 xs: Vec<i64> = vec(0);\n  \
+                        代入 i: i64 = 1;\n  \
+                        間 i < 3\n  \
+                        不変 i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        戻る 0;\n\
+                      }\n";
+        crate::compile(source).expect("Japanese invariant compiles");
+    }
+
+    #[test]
+    fn japanese_for_range_compiles() {
+        let source = "// vani-lang: japanese\n\
+                      目的 \"Japanese for-range\";\n\
+                      関数 main() -> i64 {\n  \
+                        代入 合計: i64 = 0;\n  \
+                        対象 i から 0 まで 5 {\n    \
+                          合計 = 合計 + i;\n  \
+                        }\n  \
+                        確認 合計 == 10;\n  \
+                        戻る 0;\n\
+                      }\n";
+        crate::compile(source).expect("Japanese for-range compiles");
+    }
+
+    #[test]
+    fn japanese_match_enum_compiles() {
+        let source = "// vani-lang: japanese\n\
+                      目的 \"Japanese match/enum\";\n\
+                      列挙 Kigo { Spr, Sum, Aut, Win }\n\
+                      関数 main() -> i64 {\n  \
+                        代入 s: Kigo = Kigo.Spr;\n  \
+                        代入 v: i64 = 一致 s {\n    \
+                          Kigo.Spr ならば 1,\n    \
+                          Kigo.Sum ならば 2,\n    \
+                          Kigo.Aut ならば 3,\n    \
+                          Kigo.Win ならば 4,\n  \
+                        };\n  \
+                        確認 v == 1;\n  \
+                        戻る 0;\n\
+                      }\n";
+        crate::compile(source).expect("Japanese match/enum compiles");
+    }
+
+    #[test]
+    fn japanese_requires_proves_compiles() {
+        let source = "// vani-lang: japanese\n\
+                      目的 \"Japanese requires\";\n\
+                      関数 clamp(x: i64, lo: i64) -> i64\n\
+                      前提 lo >= 0;\n\
+                      {\n  \
+                        もし x < lo { 戻る lo; } そうでなければ { 戻る x; }\n\
+                      }\n\
+                      関数 main() -> i64 {\n  \
+                        確認 clamp(0 - 1, 0) == 0;\n  \
+                        戻る 0;\n\
+                      }\n";
+        crate::compile(source).expect("Japanese requires compiles");
     }
 
     #[test]
@@ -33573,6 +33709,74 @@ função main() -> i64 {
         let japanese_source =
             "// vani-lang: japanese\n関数 main() -> i64 { 戻る 0; }\n";
         crate::compile(japanese_source).expect("Japanese 関数 still compiles");
+    }
+
+    #[test]
+    fn mandarin_invariant_keyword_compiles() {
+        let source = "// vani-lang: mandarin\n\
+                      目的 \"Mandarin invariant\";\n\
+                      函数 main() -> i64 {\n  \
+                        让 xs: Vec<i64> = vec(0);\n  \
+                        让 i: i64 = 1;\n  \
+                        当 i < 3\n  \
+                        不变量 i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        返回 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mandarin invariant compiles");
+    }
+
+    #[test]
+    fn mandarin_for_range_compiles() {
+        let source = "// vani-lang: mandarin\n\
+                      目的 \"Mandarin for-range\";\n\
+                      函数 main() -> i64 {\n  \
+                        让 总和: i64 = 0;\n  \
+                        对于 i 从 0 到 5 {\n    \
+                          总和 = 总和 + i;\n  \
+                        }\n  \
+                        断言 总和 == 10;\n  \
+                        返回 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mandarin for-range compiles");
+    }
+
+    #[test]
+    fn mandarin_match_enum_compiles() {
+        let source = "// vani-lang: mandarin\n\
+                      目的 \"Mandarin match/enum\";\n\
+                      枚举 Jijie { Spr, Sum, Aut, Win }\n\
+                      函数 main() -> i64 {\n  \
+                        让 s: Jijie = Jijie.Spr;\n  \
+                        让 v: i64 = 匹配 s {\n    \
+                          Jijie.Spr 那么 1,\n    \
+                          Jijie.Sum 那么 2,\n    \
+                          Jijie.Aut 那么 3,\n    \
+                          Jijie.Win 那么 4,\n  \
+                        };\n  \
+                        断言 v == 1;\n  \
+                        返回 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mandarin match/enum compiles");
+    }
+
+    #[test]
+    fn mandarin_requires_proves_compiles() {
+        let source = "// vani-lang: mandarin\n\
+                      目的 \"Mandarin requires\";\n\
+                      函数 clamp(x: i64, lo: i64) -> i64\n\
+                      要求 lo >= 0;\n\
+                      {\n  \
+                        如果 x < lo { 返回 lo; } 否则 { 返回 x; }\n\
+                      }\n\
+                      函数 main() -> i64 {\n  \
+                        断言 clamp(0 - 1, 0) == 0;\n  \
+                        返回 0;\n\
+                      }\n";
+        crate::compile(source).expect("Mandarin requires compiles");
     }
 
     #[test]

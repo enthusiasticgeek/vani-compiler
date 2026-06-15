@@ -1,0 +1,28 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/mandarin/box_recursive_drop.vani --backend=c  # C
+
+目的 "Mandarin Box<T> recursive-drop smoke-test";
+
+结构 Node {
+  值: i64,
+  下一个: Option<Box<Node>>,
+}
+
+函数 main() -> i64 {
+  让 列表: Node = Node {
+    值: 1,
+    下一个: Some(Box(Node {
+      值: 2,
+      下一个: Some(Box(Node {
+        值: 3,
+        下一个: None,
+      })),
+    })),
+  };
+  断言 列表.值 == 1;
+  打印 "Mandarin box recursive drop OK";
+  返回 0;
+}

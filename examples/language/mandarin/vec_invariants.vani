@@ -1,0 +1,31 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/vec_invariants.vani              # LLVM
+//   vanic run examples/language/mandarin/vec_invariants.vani --backend=c  # C
+
+目的 "Loop invariants over Vec length, end-to-end";
+
+函数 main() -> i64 {
+  让 数组: Vec<i64> = vec(0);
+  让 计数: i64 = 1;
+
+  当 计数 < 5
+  不变量 计数 >= 1;
+  不变量 计数 <= 5;
+  {
+    数组 = push(数组, 计数 * 10);
+    计数 = 计数 + 1;
+  }
+
+  证明 计数 == 5;
+  断言 (len(数组) 作为 i64) == 5;
+
+  打印 数组[0];
+  打印 数组[1];
+  打印 数组[2];
+  打印 数组[3];
+  打印 数组[4];
+
+  返回 0;
+}

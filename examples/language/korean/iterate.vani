@@ -1,0 +1,19 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/iterate.vani              # LLVM
+//   vanic run examples/language/korean/iterate.vani --backend=c  # C
+
+목적 "Korean Vec iteration smoke-test";
+
+함수 main() -> i64 {
+  정의 배열: Vec<i64> = vec(0);
+  배열 = push(배열, 10);
+  배열 = push(배열, 20);
+  배열 = push(배열, 30);
+  확인 배열[0] == 10;
+  확인 배열[1] == 20;
+  확인 배열[2] == 30;
+  출력 "Korean iterate OK";
+  반환 0;
+}

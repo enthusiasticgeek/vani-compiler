@@ -1,0 +1,19 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/iterate.vani              # LLVM
+//   vanic run examples/language/japanese/iterate.vani --backend=c  # C
+
+目的 "Japanese Vec iteration smoke-test";
+
+関数 main() -> i64 {
+  代入 配列: Vec<i64> = vec(0);
+  配列 = push(配列, 10);
+  配列 = push(配列, 20);
+  配列 = push(配列, 30);
+  確認 配列[0] == 10;
+  確認 配列[1] == 20;
+  確認 配列[2] == 30;
+  表示 "Japanese iterate OK";
+  戻る 0;
+}

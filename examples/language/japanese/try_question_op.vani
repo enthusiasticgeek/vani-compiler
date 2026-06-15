@@ -1,0 +1,33 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/try_question_op.vani              # LLVM
+//   vanic run examples/language/japanese/try_question_op.vani --backend=c  # C
+
+目的 "Japanese ? operator smoke-test";
+
+関数 解析(n: i64) -> Option<i64> {
+  もし n < 0 {
+    戻る None;
+  }
+  戻る Some(n * 3);
+}
+
+関数 計算(n: i64) -> Option<i64> {
+  代入 v: i64 = 解析(n)?;
+  戻る Some(v + 1);
+}
+
+関数 main() -> i64 {
+  代入 良い: Option<i64> = 計算(4);
+  一致 良い {
+    Some(v) ならば { 確認 v == 13; }
+    None ならば { 確認 false; }
+  }
+  代入 悪い: Option<i64> = 計算(-1);
+  一致 悪い {
+    Some(_) ならば { 確認 false; }
+    None ならば { 表示 "Japanese ? op OK"; }
+  }
+  戻る 0;
+}

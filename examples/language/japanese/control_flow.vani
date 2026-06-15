@@ -1,0 +1,25 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/control_flow.vani              # LLVM
+//   vanic run examples/language/japanese/control_flow.vani --backend=c  # C
+
+目的 "Japanese control flow smoke-test";
+
+関数 分類(n: i64) -> i64 {
+  もし n < 0 {
+    戻る -1;
+  } そうでなければ もし n == 0 {
+    戻る 0;
+  } そうでなければ {
+    戻る 1;
+  }
+}
+
+関数 main() -> i64 {
+  確認 分類(-5) == -1;
+  確認 分類(0) == 0;
+  確認 分類(3) == 1;
+  表示 "Japanese control flow OK";
+  戻る 0;
+}

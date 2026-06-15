@@ -1,0 +1,27 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/keywords.vani              # LLVM
+//   vanic run examples/language/korean/keywords.vani --backend=c  # C
+
+목적 "Korean keyword smoke-test";
+
+구조체 Jeom {
+  x: i64,
+  y: i64,
+}
+
+열거 Saek { Red, Green, Blue }
+
+함수 더하기(가: i64, 나: i64) -> i64 {
+  반환 가 + 나;
+}
+
+함수 main() -> i64 {
+  정의 p: Jeom = Jeom { x: 3, y: 4 };
+  정의 c: Saek = Saek.Red;
+  정의 s: i64 = 더하기(p.x, p.y);
+  확인 s == 7;
+  출력 "Korean keywords OK", s;
+  반환 0;
+}

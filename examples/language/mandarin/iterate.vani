@@ -1,0 +1,19 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/iterate.vani              # LLVM
+//   vanic run examples/language/mandarin/iterate.vani --backend=c  # C
+
+目的 "Mandarin Vec iteration smoke-test";
+
+函数 main() -> i64 {
+  让 数组: Vec<i64> = vec(0);
+  数组 = push(数组, 10);
+  数组 = push(数组, 20);
+  数组 = push(数组, 30);
+  断言 数组[0] == 10;
+  断言 数组[1] == 20;
+  断言 数组[2] == 30;
+  打印 "Mandarin iterate OK";
+  返回 0;
+}

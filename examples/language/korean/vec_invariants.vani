@@ -1,0 +1,31 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/vec_invariants.vani              # LLVM
+//   vanic run examples/language/korean/vec_invariants.vani --backend=c  # C
+
+목적 "Loop invariants over Vec length, end-to-end";
+
+함수 main() -> i64 {
+  정의 배열: Vec<i64> = vec(0);
+  정의 카운트: i64 = 1;
+
+  동안 카운트 < 5
+  불변 카운트 >= 1;
+  불변 카운트 <= 5;
+  {
+    배열 = push(배열, 카운트 * 10);
+    카운트 = 카운트 + 1;
+  }
+
+  증명 카운트 == 5;
+  확인 (len(배열) 로서 i64) == 5;
+
+  출력 배열[0];
+  출력 배열[1];
+  출력 배열[2];
+  출력 배열[3];
+  출력 배열[4];
+
+  반환 0;
+}

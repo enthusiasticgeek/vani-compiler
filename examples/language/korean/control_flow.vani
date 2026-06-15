@@ -1,0 +1,25 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/control_flow.vani              # LLVM
+//   vanic run examples/language/korean/control_flow.vani --backend=c  # C
+
+목적 "Korean control flow smoke-test";
+
+함수 분류(n: i64) -> i64 {
+  만약 n < 0 {
+    반환 -1;
+  } 아니면 만약 n == 0 {
+    반환 0;
+  } 아니면 {
+    반환 1;
+  }
+}
+
+함수 main() -> i64 {
+  확인 분류(-5) == -1;
+  확인 분류(0) == 0;
+  확인 분류(3) == 1;
+  출력 "Korean control flow OK";
+  반환 0;
+}

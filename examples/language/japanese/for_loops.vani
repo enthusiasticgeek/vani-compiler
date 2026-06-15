@@ -1,0 +1,17 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/for_loops.vani              # LLVM
+//   vanic run examples/language/japanese/for_loops.vani --backend=c  # C
+
+目的 "Japanese for-loop smoke-test";
+
+関数 main() -> i64 {
+  代入 合計: i64 = 0;
+  対象 i から 1 まで 6 {
+    合計 = 合計 + i;
+  }
+  確認 合計 == 15;
+  表示 "Japanese for-loops OK", 合計;
+  戻る 0;
+}

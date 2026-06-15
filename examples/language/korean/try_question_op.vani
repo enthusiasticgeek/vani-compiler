@@ -1,0 +1,33 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/try_question_op.vani              # LLVM
+//   vanic run examples/language/korean/try_question_op.vani --backend=c  # C
+
+목적 "Korean ? operator smoke-test";
+
+함수 분석(n: i64) -> Option<i64> {
+  만약 n < 0 {
+    반환 None;
+  }
+  반환 Some(n * 3);
+}
+
+함수 계산(n: i64) -> Option<i64> {
+  정의 v: i64 = 분석(n)?;
+  반환 Some(v + 1);
+}
+
+함수 main() -> i64 {
+  정의 좋음: Option<i64> = 계산(4);
+  일치 좋음 {
+    Some(v) 그러면 { 확인 v == 13; }
+    None 그러면 { 확인 false; }
+  }
+  정의 나쁨: Option<i64> = 계산(-1);
+  일치 나쁨 {
+    Some(_) 그러면 { 확인 false; }
+    None 그러면 { 출력 "Korean ? op OK"; }
+  }
+  반환 0;
+}

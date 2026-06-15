@@ -1,0 +1,33 @@
+// vani-lang: mandarin
+//
+// build & run:
+//   vanic run examples/language/mandarin/try_question_op.vani              # LLVM
+//   vanic run examples/language/mandarin/try_question_op.vani --backend=c  # C
+
+目的 "Mandarin ? operator smoke-test";
+
+函数 解析(n: i64) -> Option<i64> {
+  如果 n < 0 {
+    返回 None;
+  }
+  返回 Some(n * 3);
+}
+
+函数 计算(n: i64) -> Option<i64> {
+  让 v: i64 = 解析(n)?;
+  返回 Some(v + 1);
+}
+
+函数 main() -> i64 {
+  让 好的: Option<i64> = 计算(4);
+  匹配 好的 {
+    Some(v) 那么 { 断言 v == 13; }
+    None 那么 { 断言 false; }
+  }
+  让 坏的: Option<i64> = 计算(-1);
+  匹配 坏的 {
+    Some(_) 那么 { 断言 false; }
+    None 那么 { 打印 "Mandarin ? op OK"; }
+  }
+  返回 0;
+}

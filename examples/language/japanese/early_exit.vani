@@ -1,0 +1,20 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/early_exit.vani              # LLVM
+//   vanic run examples/language/japanese/early_exit.vani --backend=c  # C
+
+目的 "Japanese early-exit (break) smoke-test";
+
+関数 main() -> i64 {
+  代入 n: i64 = 0;
+  間 n < 100 {
+    もし n == 5 {
+      中断;
+    }
+    n = n + 1;
+  }
+  確認 n == 5;
+  表示 "Japanese early exit OK", n;
+  戻る 0;
+}

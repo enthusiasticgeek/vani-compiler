@@ -1,0 +1,17 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/for_loops.vani              # LLVM
+//   vanic run examples/language/korean/for_loops.vani --backend=c  # C
+
+목적 "Korean for-loop smoke-test";
+
+함수 main() -> i64 {
+  정의 합계: i64 = 0;
+  각각 i 에서 1 까지 6 {
+    합계 = 합계 + i;
+  }
+  확인 합계 == 15;
+  출력 "Korean for-loops OK", 합계;
+  반환 0;
+}

@@ -1,0 +1,28 @@
+// vani-lang: korean
+//
+// build & run:
+//   vanic run examples/language/korean/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/korean/box_recursive_drop.vani --backend=c  # C
+
+목적 "Korean Box<T> recursive-drop smoke-test";
+
+구조체 Node {
+  값: i64,
+  다음: Option<Box<Node>>,
+}
+
+함수 main() -> i64 {
+  정의 목록: Node = Node {
+    값: 1,
+    다음: Some(Box(Node {
+      값: 2,
+      다음: Some(Box(Node {
+        값: 3,
+        다음: None,
+      })),
+    })),
+  };
+  확인 목록.값 == 1;
+  출력 "Korean box recursive drop OK";
+  반환 0;
+}

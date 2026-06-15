@@ -1,0 +1,34 @@
+// vani-lang: japanese
+//
+// build & run:
+//   vanic run examples/language/japanese/verified.vani              # LLVM
+//   vanic run examples/language/japanese/verified.vani --backend=c  # C
+
+目的 "Japanese requires/proves smoke-test";
+
+関数 下限(x: i64, 下: i64) -> i64
+前提 下 >= 0;
+{
+  もし x < 下 {
+    戻る 下;
+  } そうでなければ {
+    戻る x;
+  }
+}
+
+関数 安全な引き算(あ: i64, い: i64) -> i64
+前提 あ >= い;
+前提 い >= 0;
+{
+  証明 あ - い >= 0;
+  戻る あ - い;
+}
+
+関数 main() -> i64 {
+  代入 x: i64 = 下限(0 - 5, 0);
+  確認 x == 0;
+  代入 d: i64 = 安全な引き算(10, 3);
+  確認 d == 7;
+  表示 "Japanese verified OK", d;
+  戻る 0;
+}
