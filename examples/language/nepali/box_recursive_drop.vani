@@ -1,0 +1,24 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/nepali/box_recursive_drop.vani --backend=c  # C
+
+उद्देश्य "Nepali Box recursive drop smoke-test";
+
+संरचना Bag {
+  contents: Box<Vec<i64>>,
+}
+
+कार्य main() -> i64 {
+  माना v: Vec<i64> = vec(0);
+  v = push(v, 10);
+  v = push(v, 20);
+  v = push(v, 30);
+  माना b: Box<Vec<i64>> = box(v);
+  माना v2: Vec<i64> = vec(0);
+  v2 = push(v2, 7);
+  माना थैला: Bag = Bag { contents: box(v2) };
+  लिखो "Nepali box recursive drop OK";
+  लौटाओ 0;
+}

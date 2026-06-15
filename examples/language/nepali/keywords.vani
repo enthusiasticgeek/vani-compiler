@@ -1,0 +1,27 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/keywords.vani              # LLVM
+//   vanic run examples/language/nepali/keywords.vani --backend=c  # C
+
+उद्देश्य "Nepali keyword smoke-test";
+
+संरचना बिन्दु {
+  क: i64,
+  ख: i64,
+}
+
+गणन रंग { रातो, हरियो, नीलो }
+
+कार्य जोड्नुस्(क: i64, ख: i64) -> i64 {
+  लौटाओ क + ख;
+}
+
+कार्य main() -> i64 {
+  माना प: बिन्दु = बिन्दु { क: 3, ख: 4 };
+  माना र: रंग = रंग.रातो;
+  माना स: i64 = जोड्नुस्(प.क, प.ख);
+  सिद्ध स == 7;
+  लिखो "Nepali keywords OK", स;
+  लौटाओ 0;
+}

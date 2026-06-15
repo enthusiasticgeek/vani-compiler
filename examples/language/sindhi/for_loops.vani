@@ -1,0 +1,11 @@
+// vani-lang: sindhi
+مقصد "Sindhi for loops smoke-test";
+فنکشن main() -> i64 {
+  مانیں مجموع: i64 = 0;
+  ہر i سے 1 تک 6 {
+    مجموع = مجموع + i;
+  }
+  یقینی مجموع == 15;
+  لکھو "Sindhi for loops OK";
+  واپس 0;
+}

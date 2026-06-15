@@ -1,0 +1,11 @@
+// vani-lang: konkani
+उद्देश्य "Konkani for loops smoke-test";
+कार्य main() -> i64 {
+  माना बेरीज: i64 = 0;
+  प्रति i से 1 तक 6 {
+    बेरीज = बेरीज + i;
+  }
+  सिद्ध बेरीज == 15;
+  लिखो "Konkani for loops OK";
+  लौटाओ 0;
+}

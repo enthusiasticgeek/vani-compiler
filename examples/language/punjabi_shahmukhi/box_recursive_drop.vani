@@ -1,0 +1,17 @@
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi Box recursive drop smoke-test";
+ساخت Bag {
+  contents: Box<Vec<i64>>,
+}
+فنکشن main() -> i64 {
+  مانیں v: Vec<i64> = vec(0);
+  v = push(v, 10);
+  v = push(v, 20);
+  v = push(v, 30);
+  مانیں b: Box<Vec<i64>> = box(v);
+  مانیں v2: Vec<i64> = vec(0);
+  v2 = push(v2, 7);
+  مانیں تھیلا: Bag = Bag { contents: box(v2) };
+  لکھو "Punjabi Shahmukhi box recursive drop OK";
+  واپس 0;
+}

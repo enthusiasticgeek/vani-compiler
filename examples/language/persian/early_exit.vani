@@ -1,0 +1,25 @@
+// vani-lang: persian
+هدف "Persian early exit smoke-test";
+تابع اول_صفر(فهرست: Vec<i64>) -> i64 {
+  فرض i: i64 = 0;
+  تا i < (len(فهرست) بعنوان i64) {
+    اگر فهرست[i] == 0 { بازگشت i; }
+    i = i + 1;
+  }
+  بازگشت -1;
+}
+تابع main() -> i64 {
+  فرض v: Vec<i64> = vec(0);
+  v = push(v, 3);
+  v = push(v, 0);
+  v = push(v, 7);
+  ادعا اول_صفر(v) == 1;
+  فرض i: i64 = 0;
+  تا i < 5 {
+    اگر i == 3 { بشکن; }
+    i = i + 1;
+  }
+  ادعا i == 3;
+  چاپ "Persian early exit OK";
+  بازگشت 0;
+}

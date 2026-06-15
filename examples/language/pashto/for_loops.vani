@@ -1,0 +1,13 @@
+// vani-lang: pashto
+موخه "Pashto for loops smoke-test";
+کار main() -> i64 {
+  ووایه مجموع: i64 = 0;
+  ووایه i: i64 = 1;
+  تا i < 6 {
+    مجموع = مجموع + i;
+    i = i + 1;
+  }
+  تایید مجموع == 15;
+  ولیکه "Pashto for loops OK";
+  بېرته 0;
+}

@@ -1,0 +1,19 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/iterate.vani              # LLVM
+//   vanic run examples/language/nepali/iterate.vani --backend=c  # C
+
+उद्देश्य "Nepali Vec iteration smoke-test";
+
+कार्य main() -> i64 {
+  माना सूची: Vec<i64> = vec(0);
+  सूची = push(सूची, 10);
+  सूची = push(सूची, 20);
+  सूची = push(सूची, 30);
+  सिद्ध सूची[0] == 10;
+  सिद्ध सूची[1] == 20;
+  सिद्ध सूची[2] == 30;
+  लिखो "Nepali iterate OK";
+  लौटाओ 0;
+}

@@ -1,0 +1,22 @@
+// vani-lang: persian
+هدف "Persian verified arithmetic smoke-test";
+تابع clamp(x: i64, lo: i64) -> i64
+نیاز lo >= 0;
+{
+  اگر x < lo { بازگشت lo; } وگرنه { بازگشت x; }
+}
+تابع safe_sub(a: i64, b: i64) -> i64
+نیاز a >= b;
+نیاز b >= 0;
+{
+  اثبات a - b >= 0;
+  بازگشت a - b;
+}
+تابع main() -> i64 {
+  فرض x: i64 = clamp(0 - 5, 0);
+  ادعا x == 0;
+  فرض d: i64 = safe_sub(10, 3);
+  ادعا d == 7;
+  چاپ "Persian verified OK";
+  بازگشت 0;
+}

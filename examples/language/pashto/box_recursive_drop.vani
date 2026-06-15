@@ -1,0 +1,17 @@
+// vani-lang: pashto
+موخه "Pashto Box recursive drop smoke-test";
+جوړښت Bag {
+  contents: Box<Vec<i64>>,
+}
+کار main() -> i64 {
+  ووایه v: Vec<i64> = vec(0);
+  v = push(v, 10);
+  v = push(v, 20);
+  v = push(v, 30);
+  ووایه b: Box<Vec<i64>> = box(v);
+  ووایه v2: Vec<i64> = vec(0);
+  v2 = push(v2, 7);
+  ووایه تھیلا: Bag = Bag { contents: box(v2) };
+  ولیکه "Pashto box recursive drop OK";
+  بېرته 0;
+}

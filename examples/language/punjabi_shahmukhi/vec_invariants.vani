@@ -1,0 +1,21 @@
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi Vec invariants smoke-test";
+فنکشن main() -> i64 {
+  مانیں فہرست: Vec<i64> = vec(0);
+  فہرست = push(فہرست, 10);
+  فہرست = push(فہرست, 20);
+  فہرست = push(فہرست, 30);
+  فہرست = push(فہرست, 40);
+  فہرست = push(فہرست, 50);
+  یقینی (len(فہرست) بطور i64) == 5;
+  مانیں i: i64 = 0;
+  تا i < 5
+  مستقر i >= 0;
+  مستقر i <= 5;
+  {
+    یقینی فہرست[i] > 0;
+    i = i + 1;
+  }
+  لکھو "Punjabi Shahmukhi vec invariants OK";
+  واپس 0;
+}

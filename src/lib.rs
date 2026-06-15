@@ -28892,6 +28892,174 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn nepali_invariant_keyword_compiles() {
+        let src = "// vani-lang: nepali\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना xs: Vec<i64> = vec(0);\n  माना i: i64 = 1;\n  जबतक i < 3\n  अपरिवर्तनीय i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Nepali invariant must compile");
+    }
+
+    #[test]
+    fn nepali_for_range_compiles() {
+        let src = "// vani-lang: nepali\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना s: i64 = 0;\n  प्रति i से 0 तक 5 {\n    s = s + i;\n  }\n  सुनिश्चित s == 10;\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Nepali for-range must compile");
+    }
+
+    #[test]
+    fn nepali_match_enum_compiles() {
+        let src = r#"
+// vani-lang: nepali
+उद्देश्य "enum match test";
+गणन Opt { Some(i64), None }
+कार्य निकाल(o: Opt) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None    तो 0,
+  };
+}
+कार्य main() -> i64 {
+  सुनिश्चित निकाल(Opt.Some(7)) == 7;
+  सुनिश्चित निकाल(Opt.None) == 0;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Nepali match/then must compile");
+    }
+
+    #[test]
+    fn nepali_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: nepali
+उद्देश्य "requires/proves test";
+कार्य clamp(x: i64, lo: i64) -> i64
+चाहिए lo >= 0;
+{
+  यदि x < lo {
+    लौटाओ lo;
+  } अन्यथा {
+    लौटाओ x;
+  }
+}
+कार्य main() -> i64 {
+  सुनिश्चित clamp(0 - 5, 0) == 0;
+  सुनिश्चित clamp(10, 3) == 10;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Nepali requires/prove must compile");
+    }
+
+    #[test]
+    fn maithili_invariant_keyword_compiles() {
+        let src = "// vani-lang: maithili\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना xs: Vec<i64> = vec(0);\n  माना i: i64 = 1;\n  जबतक i < 3\n  अपरिवर्तनीय i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Maithili invariant must compile");
+    }
+
+    #[test]
+    fn maithili_for_range_compiles() {
+        let src = "// vani-lang: maithili\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना s: i64 = 0;\n  प्रति i से 0 तक 5 {\n    s = s + i;\n  }\n  सुनिश्चित s == 10;\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Maithili for-range must compile");
+    }
+
+    #[test]
+    fn maithili_match_enum_compiles() {
+        let src = r#"
+// vani-lang: maithili
+उद्देश्य "enum match test";
+गणन Opt { Some(i64), None }
+कार्य निकाल(o: Opt) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None    तो 0,
+  };
+}
+कार्य main() -> i64 {
+  सुनिश्चित निकाल(Opt.Some(7)) == 7;
+  सुनिश्चित निकाल(Opt.None) == 0;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Maithili match/then must compile");
+    }
+
+    #[test]
+    fn maithili_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: maithili
+उद्देश्य "requires/proves test";
+कार्य clamp(x: i64, lo: i64) -> i64
+चाहिए lo >= 0;
+{
+  यदि x < lo {
+    लौटाओ lo;
+  } अन्यथा {
+    लौटाओ x;
+  }
+}
+कार्य main() -> i64 {
+  सुनिश्चित clamp(0 - 5, 0) == 0;
+  सुनिश्चित clamp(10, 3) == 10;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Maithili requires/prove must compile");
+    }
+
+    #[test]
+    fn konkani_invariant_keyword_compiles() {
+        let src = "// vani-lang: konkani\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना xs: Vec<i64> = vec(0);\n  माना i: i64 = 1;\n  जबतक i < 3\n  अपरिवर्तनीय i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Konkani invariant must compile");
+    }
+
+    #[test]
+    fn konkani_for_range_compiles() {
+        let src = "// vani-lang: konkani\nउद्देश्य \"t\";\nकार्य main() -> i64 {\n  माना s: i64 = 0;\n  प्रति i से 0 तक 5 {\n    s = s + i;\n  }\n  सुनिश्चित s == 10;\n  लौटाओ 0;\n}\n";
+        compile(src).expect("Konkani for-range must compile");
+    }
+
+    #[test]
+    fn konkani_match_enum_compiles() {
+        let src = r#"
+// vani-lang: konkani
+उद्देश्य "enum match test";
+गणन Opt { Some(i64), None }
+कार्य निकाल(o: Opt) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None    तो 0,
+  };
+}
+कार्य main() -> i64 {
+  सुनिश्चित निकाल(Opt.Some(7)) == 7;
+  सुनिश्चित निकाल(Opt.None) == 0;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Konkani match/then must compile");
+    }
+
+    #[test]
+    fn konkani_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: konkani
+उद्देश्य "requires/proves test";
+कार्य clamp(x: i64, lo: i64) -> i64
+चाहिए lo >= 0;
+{
+  यदि x < lo {
+    लौटाओ lo;
+  } अन्यथा {
+    लौटाओ x;
+  }
+}
+कार्य main() -> i64 {
+  सुनिश्चित clamp(0 - 5, 0) == 0;
+  सुनिश्चित clamp(10, 3) == 10;
+  लौटाओ 0;
+}
+"#;
+        compile(src).expect("Konkani requires/prove must compile");
+    }
+
+    #[test]
     fn bengali_pragma_compiles_and_emits_bengali_print() {
         // Phase 5b (2026-06-07): Bengali is the first non-
         // Devanagari Brahmi script. Different Unicode block,
@@ -30209,6 +30377,267 @@ fn main() -> i64 {
         let c = compile_to_c(source).expect("Pashto program compiles");
         assert!(c.contains("intent_print_int_per"),
             "Pashto must reuse Persian helper, got:\n{}", c);
+    }
+
+    #[test]
+    fn urdu_invariant_keyword_compiles() {
+        let src = "// vani-lang: urdu\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} xs: Vec<i64> = vec(0);\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} i: i64 = 1;\n  \u{062a}\u{0627} i < 3\n  \u{0645}\u{0633}\u{062a}\u{0642}\u{0631} i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Urdu invariant (Arabic-table مستقر) must compile in Urdu file");
+    }
+
+    #[test]
+    fn urdu_for_range_compiles() {
+        let src = "// vani-lang: urdu\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} s: i64 = 0;\n  \u{06c1}\u{0631} i \u{0633}\u{06d2} 1 \u{062a}\u{06a9} 6 {\n    s = s + i;\n  }\n  \u{06cc}\u{0642}\u{06cc}\u{0646}\u{06cc} s == 15;\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Urdu for-range must compile");
+    }
+
+    #[test]
+    fn urdu_match_enum_compiles() {
+        let src = r#"
+// vani-lang: urdu
+مقصد "enum match test";
+شمار Opt { Some(i64), None }
+فنکشن نکال(o: Opt) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب 0,
+  };
+}
+فنکشن main() -> i64 {
+  یقینی نکال(Opt.Some(7)) == 7;
+  یقینی نکال(Opt.None) == 0;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Urdu match/then must compile");
+    }
+
+    #[test]
+    fn urdu_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: urdu
+مقصد "requires/proves test";
+فنکشن clamp(x: i64, lo: i64) -> i64
+درکار lo >= 0;
+{
+  اگر x < lo { واپس lo; } ورنہ { واپس x; }
+}
+فنکشن main() -> i64 {
+  یقینی clamp(0 - 5, 0) == 0;
+  یقینی clamp(10, 3) == 10;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Urdu requires/prove must compile");
+    }
+
+    #[test]
+    fn sindhi_invariant_keyword_compiles() {
+        let src = "// vani-lang: sindhi\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} xs: Vec<i64> = vec(0);\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} i: i64 = 1;\n  \u{062a}\u{0627} i < 3\n  \u{0645}\u{0633}\u{062a}\u{0642}\u{0631} i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Sindhi مستقر invariant must compile");
+    }
+
+    #[test]
+    fn sindhi_for_range_compiles() {
+        let src = "// vani-lang: sindhi\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} s: i64 = 0;\n  \u{06c1}\u{0631} i \u{0633}\u{06d2} 1 \u{062a}\u{06a9} 6 {\n    s = s + i;\n  }\n  \u{06cc}\u{0642}\u{06cc}\u{0646}\u{06cc} s == 15;\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Sindhi for-range must compile");
+    }
+
+    #[test]
+    fn sindhi_match_enum_compiles() {
+        let src = r#"
+// vani-lang: sindhi
+مقصد "enum match test";
+شمار Opt { Some(i64), None }
+فنکشن نکال(o: Opt) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب 0,
+  };
+}
+فنکشن main() -> i64 {
+  یقینی نکال(Opt.Some(7)) == 7;
+  یقینی نکال(Opt.None) == 0;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Sindhi match/then must compile");
+    }
+
+    #[test]
+    fn sindhi_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: sindhi
+مقصد "requires/proves test";
+فنکشن clamp(x: i64, lo: i64) -> i64
+درکار lo >= 0;
+{
+  اگر x < lo { واپس lo; } ورنہ { واپس x; }
+}
+فنکشن main() -> i64 {
+  یقینی clamp(0 - 5, 0) == 0;
+  یقینی clamp(10, 3) == 10;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Sindhi requires/prove must compile");
+    }
+
+    #[test]
+    fn punjabi_shahmukhi_invariant_keyword_compiles() {
+        let src = "// vani-lang: punjabi-shahmukhi\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} xs: Vec<i64> = vec(0);\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} i: i64 = 1;\n  \u{062a}\u{0627} i < 3\n  \u{0645}\u{0633}\u{062a}\u{0642}\u{0631} i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Punjabi-Shahmukhi مستقر invariant must compile");
+    }
+
+    #[test]
+    fn punjabi_shahmukhi_for_range_compiles() {
+        let src = "// vani-lang: punjabi-shahmukhi\n\u{0645}\u{0642}\u{0635}\u{062f} \"t\";\n\u{0641}\u{0646}\u{06a9}\u{0634}\u{0646} main() -> i64 {\n  \u{0645}\u{0627}\u{0646}\u{06cc}\u{06ba} s: i64 = 0;\n  \u{06c1}\u{0631} i \u{0633}\u{06d2} 1 \u{062a}\u{06a9} 6 {\n    s = s + i;\n  }\n  \u{06cc}\u{0642}\u{06cc}\u{0646}\u{06cc} s == 15;\n  \u{0648}\u{0627}\u{067e}\u{0633} 0;\n}\n";
+        compile(src).expect("Punjabi-Shahmukhi for-range must compile");
+    }
+
+    #[test]
+    fn punjabi_shahmukhi_match_enum_compiles() {
+        let src = r#"
+// vani-lang: punjabi-shahmukhi
+مقصد "enum match test";
+شمار Opt { Some(i64), None }
+فنکشن نکال(o: Opt) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب 0,
+  };
+}
+فنکشن main() -> i64 {
+  یقینی نکال(Opt.Some(7)) == 7;
+  یقینی نکال(Opt.None) == 0;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Punjabi-Shahmukhi match/then must compile");
+    }
+
+    #[test]
+    fn punjabi_shahmukhi_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: punjabi-shahmukhi
+مقصد "requires/proves test";
+فنکشن clamp(x: i64, lo: i64) -> i64
+درکار lo >= 0;
+{
+  اگر x < lo { واپس lo; } ورنہ { واپس x; }
+}
+فنکشن main() -> i64 {
+  یقینی clamp(0 - 5, 0) == 0;
+  یقینی clamp(10, 3) == 10;
+  واپس 0;
+}
+"#;
+        compile(src).expect("Punjabi-Shahmukhi requires/prove must compile");
+    }
+
+    #[test]
+    fn persian_invariant_keyword_compiles() {
+        let src = "// vani-lang: persian\n\u{0647}\u{062f}\u{0641} \"t\";\n\u{062a}\u{0627}\u{0628}\u{0639} main() -> i64 {\n  \u{0641}\u{0631}\u{0636} xs: Vec<i64> = vec(0);\n  \u{0641}\u{0631}\u{0636} i: i64 = 1;\n  \u{062a}\u{0627} i < 3\n  \u{0645}\u{0633}\u{062a}\u{0642}\u{0631} i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  \u{0628}\u{0627}\u{0632}\u{06af}\u{0634}\u{062a} 0;\n}\n";
+        compile(src).expect("Persian مستقر invariant must compile");
+    }
+
+    #[test]
+    fn persian_for_range_compiles() {
+        let src = "// vani-lang: persian\n\u{0647}\u{062f}\u{0641} \"t\";\n\u{062a}\u{0627}\u{0628}\u{0639} main() -> i64 {\n  \u{0641}\u{0631}\u{0636} s: i64 = 0;\n  \u{0647}\u{0631} i \u{0627}\u{0632} 1 \u{0625}\u{0644}\u{0649} 6 {\n    s = s + i;\n  }\n  \u{0627}\u{062f}\u{0639}\u{0627} s == 15;\n  \u{0628}\u{0627}\u{0632}\u{06af}\u{0634}\u{062a} 0;\n}\n";
+        compile(src).expect("Persian for-range (إلى from Arabic table) must compile");
+    }
+
+    #[test]
+    fn persian_match_enum_compiles() {
+        let src = r#"
+// vani-lang: persian
+هدف "enum match test";
+شمارش Opt { Some(i64), None }
+تابع نتیجه(o: Opt) -> i64 {
+  بازگشت تطبیق o {
+    Opt.Some(v) سپس v,
+    Opt.None    سپس 0,
+  };
+}
+تابع main() -> i64 {
+  ادعا نتیجه(Opt.Some(7)) == 7;
+  ادعا نتیجه(Opt.None) == 0;
+  بازگشت 0;
+}
+"#;
+        compile(src).expect("Persian match/then must compile");
+    }
+
+    #[test]
+    fn persian_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: persian
+هدف "requires/proves test";
+تابع clamp(x: i64, lo: i64) -> i64
+نیاز lo >= 0;
+{
+  اگر x < lo { بازگشت lo; } وگرنه { بازگشت x; }
+}
+تابع main() -> i64 {
+  ادعا clamp(0 - 5, 0) == 0;
+  ادعا clamp(10, 3) == 10;
+  بازگشت 0;
+}
+"#;
+        compile(src).expect("Persian requires/prove must compile");
+    }
+
+    #[test]
+    fn pashto_invariant_keyword_compiles() {
+        let src = "// vani-lang: pashto\n\u{0645}\u{0648}\u{062e}\u{0647} \"t\";\n\u{06a9}\u{0627}\u{0631} main() -> i64 {\n  \u{0648}\u{0648}\u{0627}\u{06cc}\u{0647} xs: Vec<i64> = vec(0);\n  \u{0648}\u{0648}\u{0627}\u{06cc}\u{0647} i: i64 = 1;\n  \u{062a}\u{0627} i < 3\n  \u{0645}\u{0633}\u{062a}\u{0642}\u{0631} i >= 1;\n  {\n    xs = push(xs, i);\n    i = i + 1;\n  }\n  \u{0628}\u{06d0}\u{0631}\u{062a}\u{0647} 0;\n}\n";
+        compile(src).expect("Pashto مستقر invariant must compile");
+    }
+
+    #[test]
+    fn pashto_for_range_compiles() {
+        let src = "// vani-lang: pashto\n\u{0645}\u{0648}\u{062e}\u{0647} \"t\";\n\u{06a9}\u{0627}\u{0631} main() -> i64 {\n  \u{0648}\u{0648}\u{0627}\u{06cc}\u{0647} s: i64 = 0;\n  \u{0648}\u{0648}\u{0627}\u{06cc}\u{0647} i: i64 = 1;\n  \u{062a}\u{0627} i < 6 {\n    s = s + i;\n    i = i + 1;\n  }\n  \u{062a}\u{0627}\u{06cc}\u{06cc}\u{062f} s == 15;\n  \u{0628}\u{06d0}\u{0631}\u{062a}\u{0647} 0;\n}\n";
+        compile(src).expect("Pashto while-as-for (Persian تا) must compile");
+    }
+
+    #[test]
+    fn pashto_match_enum_compiles() {
+        let src = r#"
+// vani-lang: pashto
+موخه "enum match test";
+شمېرل Opt { Some(i64), None }
+کار راوباسه(o: Opt) -> i64 {
+  بېرته سمون o {
+    Opt.Some(v) بیا v,
+    Opt.None    بیا 0,
+  };
+}
+کار main() -> i64 {
+  تایید راوباسه(Opt.Some(7)) == 7;
+  تایید راوباسه(Opt.None) == 0;
+  بېرته 0;
+}
+"#;
+        compile(src).expect("Pashto match/then must compile");
+    }
+
+    #[test]
+    fn pashto_requires_proves_compiles() {
+        let src = r#"
+// vani-lang: pashto
+موخه "requires/proves test";
+کار clamp(x: i64, lo: i64) -> i64
+اړتیا lo >= 0;
+{
+  که x < lo { بېرته lo; }
+  بېرته x;
+}
+کار main() -> i64 {
+  تایید clamp(0 - 5, 0) == 0;
+  تایید clamp(10, 3) == 10;
+  بېرته 0;
+}
+"#;
+        compile(src).expect("Pashto requires/prove must compile");
     }
 
     #[test]

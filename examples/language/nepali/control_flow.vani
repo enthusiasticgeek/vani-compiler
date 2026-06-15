@@ -1,0 +1,25 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/control_flow.vani              # LLVM
+//   vanic run examples/language/nepali/control_flow.vani --backend=c  # C
+
+उद्देश्य "Nepali control flow smoke-test";
+
+कार्य चिह्न(न: i64) -> i64 {
+  यदि न < 0 {
+    लौटाओ -1;
+  } अन्यथा यदि न == 0 {
+    लौटाओ 0;
+  } अन्यथा {
+    लौटाओ 1;
+  }
+}
+
+कार्य main() -> i64 {
+  सिद्ध चिह्न(-5) == -1;
+  सिद्ध चिह्न(0) == 0;
+  सिद्ध चिह्न(3) == 1;
+  लिखो "Nepali control flow OK";
+  लौटाओ 0;
+}

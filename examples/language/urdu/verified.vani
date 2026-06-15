@@ -1,0 +1,22 @@
+// vani-lang: urdu
+مقصد "Urdu verified arithmetic smoke-test";
+فنکشن clamp(x: i64, lo: i64) -> i64
+درکار lo >= 0;
+{
+  اگر x < lo { واپس lo; } ورنہ { واپس x; }
+}
+فنکشن safe_sub(a: i64, b: i64) -> i64
+درکار a >= b;
+درکار b >= 0;
+{
+  ثبوت a - b >= 0;
+  واپس a - b;
+}
+فنکشن main() -> i64 {
+  مانیں x: i64 = clamp(0 - 5, 0);
+  یقینی x == 0;
+  مانیں d: i64 = safe_sub(10, 3);
+  یقینی d == 7;
+  لکھو "Urdu verified OK";
+  واپس 0;
+}

@@ -1010,13 +1010,41 @@ fn llvm_backend_run_produces_same_output_as_c() {
         // Japanese via the pragma.
         "../mandarin/basics.vani",
         // Phase 2 (2026-06-07): Tier I dialect extensions —
-        // Nepali / Maithili / Konkani-Devanagari. Each has a
-        // single `basics.vani` exercising the dialect tag +
-        // Devanagari numeral PRINT. They accept the union of
-        // the Sanskrit/Hindi/Marathi keyword set in v1.
+        // Nepali / Maithili / Konkani-Devanagari. Full 10-file
+        // smoke-test suite (Phase 8b expansion, 2026-06-15).
         "../nepali/basics.vani",
+        "../nepali/keywords.vani",
+        "../nepali/control_flow.vani",
+        "../nepali/for_loops.vani",
+        "../nepali/early_exit.vani",
+        "../nepali/iterate.vani",
+        "../nepali/vec_invariants.vani",
+        "../nepali/verified.vani",
+        "../nepali/option_types.vani",
+        "../nepali/try_question_op.vani",
+        "../nepali/box_recursive_drop.vani",
         "../maithili/basics.vani",
+        "../maithili/keywords.vani",
+        "../maithili/control_flow.vani",
+        "../maithili/for_loops.vani",
+        "../maithili/early_exit.vani",
+        "../maithili/iterate.vani",
+        "../maithili/vec_invariants.vani",
+        "../maithili/verified.vani",
+        "../maithili/option_types.vani",
+        "../maithili/try_question_op.vani",
+        "../maithili/box_recursive_drop.vani",
         "../konkani/basics.vani",
+        "../konkani/keywords.vani",
+        "../konkani/control_flow.vani",
+        "../konkani/for_loops.vani",
+        "../konkani/early_exit.vani",
+        "../konkani/iterate.vani",
+        "../konkani/vec_invariants.vani",
+        "../konkani/verified.vani",
+        "../konkani/option_types.vani",
+        "../konkani/try_question_op.vani",
+        "../konkani/box_recursive_drop.vani",
         // Phase 5b (2026-06-07): first Brahmi-derived non-
         // Devanagari script — Bengali (U+0980..U+09FF). Sets up
         // the per-script abstraction for Tamil / Telugu / Kannada
@@ -1139,22 +1167,64 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "../sinhala/try_question_op.vani",
         "../sinhala/box_recursive_drop.vani",
         // Phase 12 (2026-06-07): first Perso-Arabic / RTL
-        // dialect. Eastern Arabic-Indic digits ٠..٩ at
-        // U+0660..0669 (2-byte UTF-8) — the print helper
-        // template parameterizes on prefix-byte length to
-        // cover both Arabic-Indic and the Brahmi 3-byte form.
+        // dialect. Full 10-file suite (Phase 8b expansion, 2026-06-15).
         "../urdu/basics.vani",
-        // Phase 12.2/12.3 (2026-06-07): more Perso-Arabic
-        // dialects — Sindhi and Punjabi-Shahmukhi. Same script
-        // + numeral helper as Urdu; the dialect tag is the
-        // only thing that varies.
+        "../urdu/keywords.vani",
+        "../urdu/control_flow.vani",
+        "../urdu/for_loops.vani",
+        "../urdu/early_exit.vani",
+        "../urdu/iterate.vani",
+        "../urdu/vec_invariants.vani",
+        "../urdu/verified.vani",
+        "../urdu/option_types.vani",
+        "../urdu/try_question_op.vani",
+        "../urdu/box_recursive_drop.vani",
+        // Phase 12.2/12.3 (2026-06-07): Sindhi and Punjabi-Shahmukhi.
         "../sindhi/basics.vani",
+        "../sindhi/keywords.vani",
+        "../sindhi/control_flow.vani",
+        "../sindhi/for_loops.vani",
+        "../sindhi/early_exit.vani",
+        "../sindhi/iterate.vani",
+        "../sindhi/vec_invariants.vani",
+        "../sindhi/verified.vani",
+        "../sindhi/option_types.vani",
+        "../sindhi/try_question_op.vani",
+        "../sindhi/box_recursive_drop.vani",
         "../punjabi_shahmukhi/basics.vani",
+        "../punjabi_shahmukhi/keywords.vani",
+        "../punjabi_shahmukhi/control_flow.vani",
+        "../punjabi_shahmukhi/for_loops.vani",
+        "../punjabi_shahmukhi/early_exit.vani",
+        "../punjabi_shahmukhi/iterate.vani",
+        "../punjabi_shahmukhi/vec_invariants.vani",
+        "../punjabi_shahmukhi/verified.vani",
+        "../punjabi_shahmukhi/option_types.vani",
+        "../punjabi_shahmukhi/try_question_op.vani",
+        "../punjabi_shahmukhi/box_recursive_drop.vani",
         // Phase 12.4/12.5 (2026-06-07): Persian + Pashto.
-        // Persian's distinct numeral helper (DB B0+d) +
-        // Pashto reuses it.
         "../persian/basics.vani",
+        "../persian/keywords.vani",
+        "../persian/control_flow.vani",
+        "../persian/for_loops.vani",
+        "../persian/early_exit.vani",
+        "../persian/iterate.vani",
+        "../persian/vec_invariants.vani",
+        "../persian/verified.vani",
+        "../persian/option_types.vani",
+        "../persian/try_question_op.vani",
+        "../persian/box_recursive_drop.vani",
         "../pashto/basics.vani",
+        "../pashto/keywords.vani",
+        "../pashto/control_flow.vani",
+        "../pashto/for_loops.vani",
+        "../pashto/early_exit.vani",
+        "../pashto/iterate.vani",
+        "../pashto/vec_invariants.vani",
+        "../pashto/verified.vani",
+        "../pashto/option_types.vani",
+        "../pashto/try_question_op.vani",
+        "../pashto/box_recursive_drop.vani",
         // Phase 8b (2026-06-07): European dialects — Spanish, French, Russian.
         // Spanish/French: non-ASCII aliases active (función, énumération, etc.);
         // pure-ASCII control-flow uses English keywords (v1). Russian: full Cyrillic.

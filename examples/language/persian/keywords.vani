@@ -1,0 +1,17 @@
+// vani-lang: persian
+هدف "Persian keywords smoke-test";
+ساختار Nokta {
+  x: i64,
+  y: i64,
+}
+شمارش Rang { Sorkh, Sabz, Abi }
+تابع jam(k: i64, kh: i64) -> i64 {
+  بازگشت k + kh;
+}
+تابع main() -> i64 {
+  فرض n: Nokta = Nokta { x: 3, y: 4 };
+  ادعا n.x == 3;
+  ادعا jam(2, 3) == 5;
+  چاپ "Persian keywords OK";
+  بازگشت 0;
+}

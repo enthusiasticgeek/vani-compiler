@@ -1,0 +1,30 @@
+// vani-lang: konkani
+//
+// build & run:
+//   vanic run examples/language/konkani/try_question_op.vani              # LLVM
+//   vanic run examples/language/konkani/try_question_op.vani --backend=c  # C
+
+उद्देश्य "Konkani try-? operator smoke-test";
+
+गणन Opt { Some(i64), None }
+
+कार्य दोगुना(o: Opt) -> Opt {
+  माना v: i64 = o?;
+  लौटाओ Opt.Some(v * 2);
+}
+
+कार्य अखोर(o: Opt, क: i64) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None    तो क,
+  };
+}
+
+कार्य main() -> i64 {
+  माना क: Opt = दोगुना(Opt.Some(5));
+  सुनिश्चित अखोर(क, 0) == 10;
+  माना ख: Opt = दोगुना(Opt.None);
+  सुनिश्चित अखोर(ख, 99) == 99;
+  लिखो "Konkani try-? OK";
+  लौटाओ 0;
+}

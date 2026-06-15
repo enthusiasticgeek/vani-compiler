@@ -1,0 +1,12 @@
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi control flow smoke-test";
+فنکشن درجہ(x: i64) -> i64 {
+  اگر x > 0 { واپس 1; } ورنہ اگر x < 0 { واپس -1; } ورنہ { واپس 0; }
+}
+فنکشن main() -> i64 {
+  یقینی درجہ(5) == 1;
+  یقینی درجہ(-3) == -1;
+  یقینی درجہ(0) == 0;
+  لکھو "Punjabi Shahmukhi control flow OK";
+  واپس 0;
+}

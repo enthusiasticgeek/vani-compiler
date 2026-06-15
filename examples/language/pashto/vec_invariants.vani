@@ -1,0 +1,21 @@
+// vani-lang: pashto
+موخه "Pashto Vec invariants smoke-test";
+کار main() -> i64 {
+  ووایه لیست: Vec<i64> = vec(0);
+  لیست = push(لیست, 10);
+  لیست = push(لیست, 20);
+  لیست = push(لیست, 30);
+  لیست = push(لیست, 40);
+  لیست = push(لیست, 50);
+  تایید (len(لیست) بطور i64) == 5;
+  ووایه i: i64 = 0;
+  تا i < 5
+  مستقر i >= 0;
+  مستقر i <= 5;
+  {
+    تایید لیست[i] > 0;
+    i = i + 1;
+  }
+  ولیکه "Pashto vec invariants OK";
+  بېرته 0;
+}

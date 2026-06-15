@@ -1,0 +1,17 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/for_loops.vani              # LLVM
+//   vanic run examples/language/nepali/for_loops.vani --backend=c  # C
+
+उद्देश्य "Nepali for-loop smoke-test";
+
+कार्य main() -> i64 {
+  माना जोडफल: i64 = 0;
+  प्रति i से 1 तक 6 {
+    जोडफल = जोडफल + i;
+  }
+  सिद्ध जोडफल == 15;
+  लिखो "Nepali for-loops OK", जोडफल;
+  लौटाओ 0;
+}

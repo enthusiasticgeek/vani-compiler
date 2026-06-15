@@ -1,0 +1,36 @@
+// vani-lang: konkani
+//
+// build & run:
+//   vanic run examples/language/konkani/option_types.vani              # LLVM
+//   vanic run examples/language/konkani/option_types.vani --backend=c  # C
+
+उद्देश्य "Konkani Option types smoke-test";
+
+गणन Opt { Some(i64), None }
+
+कार्य अखोर(o: Opt, क: i64) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो v,
+    Opt.None    तो क,
+  };
+}
+
+कार्य कोई_है(o: Opt) -> i64 {
+  लौटाओ मिलान o {
+    Opt.Some(v) तो 1,
+    Opt.None    तो 0,
+  };
+}
+
+कार्य main() -> i64 {
+  माना क: Opt = Opt.Some(42);
+  माना ख: Opt = Opt.None;
+  माना x: i64 = अखोर(क, 0);
+  माना y: i64 = अखोर(ख, 100);
+  सुनिश्चित x == 42;
+  सुनिश्चित y == 100;
+  सुनिश्चित कोई_है(क) == 1;
+  सुनिश्चित कोई_है(ख) == 0;
+  लिखो "Konkani option types OK";
+  लौटाओ 0;
+}

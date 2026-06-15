@@ -1,0 +1,34 @@
+// vani-lang: konkani
+//
+// build & run:
+//   vanic run examples/language/konkani/verified.vani              # LLVM
+//   vanic run examples/language/konkani/verified.vani --backend=c  # C
+
+उद्देश्य "Konkani verified arithmetic smoke-test";
+
+कार्य न्यून_सीमा(x: i64, न्यून: i64) -> i64
+चाहिए न्यून >= 0;
+{
+  यदि x < न्यून {
+    लौटाओ न्यून;
+  } अन्यथा {
+    लौटाओ x;
+  }
+}
+
+कार्य सुरक्षित_घटाउ(क: i64, ख: i64) -> i64
+चाहिए क >= ख;
+चाहिए ख >= 0;
+{
+  प्रमाण क - ख >= 0;
+  लौटाओ क - ख;
+}
+
+कार्य main() -> i64 {
+  माना x: i64 = न्यून_सीमा(0 - 5, 0);
+  सुनिश्चित x == 0;
+  माना d: i64 = सुरक्षित_घटाउ(10, 3);
+  सुनिश्चित d == 7;
+  लिखो "Konkani verified OK";
+  लौटाओ 0;
+}

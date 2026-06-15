@@ -1,0 +1,17 @@
+// vani-lang: pashto
+موخه "Pashto keywords smoke-test";
+جوړښت Nukta {
+  x: i64,
+  y: i64,
+}
+شمېرل Rang { Soor, Sheen, Nili }
+کار جمع(k: i64, kh: i64) -> i64 {
+  بېرته k + kh;
+}
+کار main() -> i64 {
+  ووایه n: Nukta = Nukta { x: 3, y: 4 };
+  تایید n.x == 3;
+  تایید جمع(2, 3) == 5;
+  ولیکه "Pashto keywords OK";
+  بېرته 0;
+}

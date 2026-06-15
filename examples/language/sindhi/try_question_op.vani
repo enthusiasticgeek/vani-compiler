@@ -1,0 +1,21 @@
+// vani-lang: sindhi
+مقصد "Sindhi try-? operator smoke-test";
+شمار Opt { Some(i64), None }
+فنکشن دوگنا(o: Opt) -> Opt {
+  مانیں v: i64 = o?;
+  واپس Opt.Some(v * 2);
+}
+فنکشن نکال(o: Opt, ک: i64) -> i64 {
+  واپس ملان o {
+    Opt.Some(v) تب v,
+    Opt.None    تب ک,
+  };
+}
+فنکشن main() -> i64 {
+  مانیں ک: Opt = دوگنا(Opt.Some(5));
+  یقینی نکال(ک, 0) == 10;
+  مانیں خ: Opt = دوگنا(Opt.None);
+  یقینی نکال(خ, 99) == 99;
+  لکھو "Sindhi try-? OK";
+  واپس 0;
+}

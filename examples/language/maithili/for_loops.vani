@@ -1,0 +1,11 @@
+// vani-lang: maithili
+उद्देश्य "Maithili for-loop smoke-test";
+कार्य main() -> i64 {
+  माना जोडफल: i64 = 0;
+  प्रति i से 1 तक 6 {
+    जोडफल = जोडफल + i;
+  }
+  सिद्ध जोडफल == 15;
+  लिखो "Maithili for-loops OK", जोडफल;
+  लौटाओ 0;
+}

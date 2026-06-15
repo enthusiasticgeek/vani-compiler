@@ -1,0 +1,17 @@
+// vani-lang: punjabi-shahmukhi
+مقصد "Punjabi Shahmukhi keywords smoke-test";
+ساخت Nukta {
+  x: i64,
+  y: i64,
+}
+شمار Rang { لال, ہرا, نیلا }
+فنکشن جوڑ(ک: i64, خ: i64) -> i64 {
+  واپس ک + خ;
+}
+فنکشن main() -> i64 {
+  مانیں ن: Nukta = Nukta { x: 3, y: 4 };
+  یقینی ن.x == 3;
+  یقینی جوڑ(2, 3) == 5;
+  لکھو "Punjabi Shahmukhi keywords OK";
+  واپس 0;
+}

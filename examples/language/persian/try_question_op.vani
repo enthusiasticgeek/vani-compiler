@@ -1,0 +1,21 @@
+// vani-lang: persian
+هدف "Persian try-? operator smoke-test";
+شمارش Opt { Some(i64), None }
+تابع دوبرابر(o: Opt) -> Opt {
+  فرض v: i64 = o?;
+  بازگشت Opt.Some(v * 2);
+}
+تابع نتیجه(o: Opt, k: i64) -> i64 {
+  بازگشت تطبیق o {
+    Opt.Some(v) سپس v,
+    Opt.None    سپس k,
+  };
+}
+تابع main() -> i64 {
+  فرض a: Opt = دوبرابر(Opt.Some(5));
+  ادعا نتیجه(a, 0) == 10;
+  فرض b: Opt = دوبرابر(Opt.None);
+  ادعا نتیجه(b, 99) == 99;
+  چاپ "Persian try-? OK";
+  بازگشت 0;
+}

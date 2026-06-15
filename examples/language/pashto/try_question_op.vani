@@ -1,0 +1,21 @@
+// vani-lang: pashto
+موخه "Pashto try-? operator smoke-test";
+شمېرل Opt { Some(i64), None }
+کار دوه_چنده(o: Opt) -> Opt {
+  ووایه v: i64 = o?;
+  بېرته Opt.Some(v * 2);
+}
+کار راوباسه(o: Opt, k: i64) -> i64 {
+  بېرته سمون o {
+    Opt.Some(v) بیا v,
+    Opt.None    بیا k,
+  };
+}
+کار main() -> i64 {
+  ووایه a: Opt = دوه_چنده(Opt.Some(5));
+  تایید راوباسه(a, 0) == 10;
+  ووایه b: Opt = دوه_چنده(Opt.None);
+  تایید راوباسه(b, 99) == 99;
+  ولیکه "Pashto try-? OK";
+  بېرته 0;
+}

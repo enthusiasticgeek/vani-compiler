@@ -1,0 +1,23 @@
+// vani-lang: pashto
+موخه "Pashto verified arithmetic smoke-test";
+کار clamp(x: i64, lo: i64) -> i64
+اړتیا lo >= 0;
+{
+  که x < lo { بېرته lo; }
+  بېرته x;
+}
+کار safe_sub(a: i64, b: i64) -> i64
+اړتیا a >= b;
+اړتیا b >= 0;
+{
+  ثبوت a - b >= 0;
+  بېرته a - b;
+}
+کار main() -> i64 {
+  ووایه x: i64 = clamp(0 - 5, 0);
+  تایید x == 0;
+  ووایه d: i64 = safe_sub(10, 3);
+  تایید d == 7;
+  ولیکه "Pashto verified OK";
+  بېرته 0;
+}

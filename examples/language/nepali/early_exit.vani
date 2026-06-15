@@ -1,0 +1,20 @@
+// vani-lang: nepali
+//
+// build & run:
+//   vanic run examples/language/nepali/early_exit.vani              # LLVM
+//   vanic run examples/language/nepali/early_exit.vani --backend=c  # C
+
+उद्देश्य "Nepali early-exit (break) smoke-test";
+
+कार्य main() -> i64 {
+  माना न: i64 = 0;
+  जबतक न < 100 {
+    यदि न == 5 {
+      विराम;
+    }
+    न = न + 1;
+  }
+  सिद्ध न == 5;
+  लिखो "Nepali early exit OK", न;
+  लौटाओ 0;
+}
