@@ -46091,5 +46091,109 @@ função main() -> i64 {
         );
     }
 
+    #[test]
+    fn elab_loop_control_outside_loop_break() {
+        let source = "fn main() -> i64 { break; return 0; }";
+        let errs = compile(source).expect_err("break outside loop must fail");
+        let has_elab = errs.iter().any(|d| {
+            d.message.contains("break") &&
+            d.elaboration.iter().any(|s| s.contains("break") || s.contains("loop"))
+        });
+        assert!(has_elab, "loop_control_outside_loop elaboration missing for break: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_loop_control_outside_loop_continue() {
+        let source = "fn main() -> i64 { continue; return 0; }";
+        let errs = compile(source).expect_err("continue outside loop must fail");
+        let has_elab = errs.iter().any(|d| {
+            d.message.contains("continue") &&
+            d.elaboration.iter().any(|s| s.contains("continue") || s.contains("loop"))
+        });
+        assert!(has_elab, "loop_control_outside_loop elaboration missing for continue: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_cannot_print_type_vec() {
+        let source = r#"fn main() -> i64 { let xs: Vec<i64> = vec(1, 2); print xs; return 0; }"#;
+        let errs = compile(source).expect_err("print Vec must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("print") || s.contains("scalar") || s.contains("Vec"))
+        );
+        assert!(has_elab, "cannot_print_type elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_unreachable_code_after_return() {
+        let source = "fn main() -> i64 { return 0; let x: i64 = 1; return x; }";
+        let errs = compile(source).expect_err("unreachable code must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("unreachable") || s.contains("exit") || s.contains("dead"))
+        );
+        assert!(has_elab, "unreachable_code elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_const_already_declared() {
+        let source = "const X: i64 = 1;\nconst X: i64 = 2;\nfn main() -> i64 { return X; }";
+        let errs = compile(source).expect_err("duplicate const must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("X") || s.contains("constant") || s.contains("Rename"))
+        );
+        assert!(has_elab, "const_already_declared elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_const_type_not_scalar() {
+        // Vec<i64> is a non-scalar type; `0` is a valid literal form
+        // but the type check (const_type_not_scalar) fires before the
+        // value-range check, so this triggers the right elaboration.
+        let source = "const XS: Vec<i64> = 0;\nfn main() -> i64 { return 0; }";
+        let errs = compile(source).expect_err("const of Vec type must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("scalar") || s.contains("Copy") || s.contains("i64"))
+        );
+        assert!(has_elab, "const_type_not_scalar elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_const_literal_required() {
+        let source = "fn double(x: i64) -> i64 { return x * 2; }\nconst X: i64 = double(3);\nfn main() -> i64 { return X; }";
+        let errs = compile(source).expect_err("const with fn-call initializer must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("literal") || s.contains("expression") || s.contains("X"))
+        );
+        assert!(has_elab, "const_literal_required elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_const_value_out_of_range() {
+        let source = "const X: i8 = 200;\nfn main() -> i64 { return 0; }";
+        let errs = compile(source).expect_err("const i8 = 200 must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("i8") || s.contains("fit") || s.contains("range") || s.contains("X"))
+        );
+        assert!(has_elab, "const_value_out_of_range elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn elab_cast_unsupported_struct_to_int() {
+        let source = "struct Point { x: i64 }\nfn main() -> i64 { let p: Point = Point { x: 3 }; let n: i64 = p as i64; return n; }";
+        let errs = compile(source).expect_err("struct as i64 must fail");
+        let has_elab = errs.iter().any(|d|
+            d.elaboration.iter().any(|s| s.contains("cast") || s.contains("numeric") || s.contains("conversion"))
+        );
+        assert!(has_elab, "cast_unsupported elaboration missing: {:?}",
+            errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
+    }
+
 }
 
