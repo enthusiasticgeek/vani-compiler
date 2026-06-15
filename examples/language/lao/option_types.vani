@@ -1,0 +1,28 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/option_types.vani              # LLVM
+//   vanic run examples/language/lao/option_types.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao Option<T> smoke-test";
+
+ໜ້າທີ່ ຫານປອດໄພ(a: i64, b: i64) -> Option<i64> {
+  ຖ້າ b == 0 {
+    ກັບຄືນ None;
+  }
+  ກັບຄືນ Some(a / b);
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ ຜົນ: Option<i64> = ຫານປອດໄພ(10, 2);
+  ກົງກັນ ຜົນ {
+    Some(v) ແລ້ວ {
+      ຢືນຢັນ v == 5;
+      ພິມ "Lao option OK", v;
+    }
+    None ແລ້ວ {
+      ຢືນຢັນ false;
+    }
+  }
+  ກັບຄືນ 0;
+}

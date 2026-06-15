@@ -1,0 +1,19 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/iterate.vani              # LLVM
+//   vanic run examples/language/burmese/iterate.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese Vec iteration smoke-test";
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား စာရင်း: Vec<i64> = vec(0);
+  စာရင်း = push(စာရင်း, 10);
+  စာရင်း = push(စာရင်း, 20);
+  စာရင်း = push(စာရင်း, 30);
+  သေချာ စာရင်း[0] == 10;
+  သေချာ စာရင်း[1] == 20;
+  သေချာ စာရင်း[2] == 30;
+  ပုံနှိပ် "Burmese iterate OK";
+  ပြန် 0;
+}

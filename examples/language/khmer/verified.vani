@@ -1,0 +1,34 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/verified.vani              # LLVM
+//   vanic run examples/language/khmer/verified.vani --backend=c  # C
+
+គោលបំណង "Khmer requires/proves smoke-test";
+
+មុខងារ clamp(x: i64, lo: i64) -> i64
+ត្រូវការ lo >= 0;
+{
+  បើ x < lo {
+    ត្រលប់ lo;
+  } ផ្សេង {
+    ត្រលប់ x;
+  }
+}
+
+មុខងារ ដកសុវត្ថិភាព(ក: i64, ខ: i64) -> i64
+ត្រូវការ ក >= ខ;
+ត្រូវការ ខ >= 0;
+{
+  បង្ហាញ ក - ខ >= 0;
+  ត្រលប់ ក - ខ;
+}
+
+មុខងារ main() -> i64 {
+  អោយ x: i64 = clamp(0 - 5, 0);
+  បញ្ជាក់ x == 0;
+  អោយ d: i64 = ដកសុវត្ថិភាព(10, 3);
+  បញ្ជាក់ d == 7;
+  បោះពុម្ព "Khmer verified OK", d;
+  ត្រលប់ 0;
+}

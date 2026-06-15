@@ -1,0 +1,17 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/for_loops.vani              # LLVM
+//   vanic run examples/language/khmer/for_loops.vani --backend=c  # C
+
+គោលបំណង "Khmer for-loop smoke-test";
+
+មុខងារ main() -> i64 {
+  អោយ សរុប: i64 = 0;
+  សម្រាប់ i ពី 1 ដល់ 6 {
+    សរុប = សរុប + i;
+  }
+  បញ្ជាក់ សរុប == 15;
+  បោះពុម្ព "Khmer for-loops OK", សរុប;
+  ត្រលប់ 0;
+}

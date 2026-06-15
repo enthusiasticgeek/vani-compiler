@@ -1,0 +1,27 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/keywords.vani              # LLVM
+//   vanic run examples/language/khmer/keywords.vani --backend=c  # C
+
+គោលបំណង "Khmer keyword smoke-test";
+
+រចនាសម្ព័ន្ធ Chnuot {
+  x: i64,
+  y: i64,
+}
+
+ការរាប់បញ្ចូល Poa { Red, Green, Blue }
+
+មុខងារ បូក(ក: i64, ខ: i64) -> i64 {
+  ត្រលប់ ក + ខ;
+}
+
+មុខងារ main() -> i64 {
+  អោយ p: Chnuot = Chnuot { x: 3, y: 4 };
+  អោយ c: Poa = Poa.Red;
+  អោយ s: i64 = បូក(p.x, p.y);
+  បញ្ជាក់ s == 7;
+  បោះពុម្ព "Khmer keywords OK", s;
+  ត្រលប់ 0;
+}

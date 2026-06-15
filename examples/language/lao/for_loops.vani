@@ -1,0 +1,17 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/for_loops.vani              # LLVM
+//   vanic run examples/language/lao/for_loops.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao for-loop smoke-test";
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ ລວມ: i64 = 0;
+  ສຳລັບ i ຈາກ 1 ເຖິງ 6 {
+    ລວມ = ລວມ + i;
+  }
+  ຢືນຢັນ ລວມ == 15;
+  ພິມ "Lao for-loops OK", ລວມ;
+  ກັບຄືນ 0;
+}

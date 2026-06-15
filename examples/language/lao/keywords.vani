@@ -1,0 +1,27 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/keywords.vani              # LLVM
+//   vanic run examples/language/lao/keywords.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao keyword smoke-test";
+
+ໂຄງສ້າງ Jut {
+  x: i64,
+  y: i64,
+}
+
+ການນັບ Si { Red, Green, Blue }
+
+ໜ້າທີ່ ບວກ(ກ: i64, ຂ: i64) -> i64 {
+  ກັບຄືນ ກ + ຂ;
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ p: Jut = Jut { x: 3, y: 4 };
+  ໃຫ້ c: Si = Si.Red;
+  ໃຫ້ s: i64 = ບວກ(p.x, p.y);
+  ຢືນຢັນ s == 7;
+  ພິມ "Lao keywords OK", s;
+  ກັບຄືນ 0;
+}

@@ -1,0 +1,28 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/option_types.vani              # LLVM
+//   vanic run examples/language/thai/option_types.vani --backend=c  # C
+
+จุดประสงค์ "Thai Option<T> smoke-test";
+
+ฟังก์ชัน หารปลอดภัย(a: i64, b: i64) -> Option<i64> {
+  ถ้า b == 0 {
+    คืน None;
+  }
+  คืน Some(a / b);
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ ผล: Option<i64> = หารปลอดภัย(10, 2);
+  ตรงกัน ผล {
+    Some(v) แล้ว {
+      ยืนยัน v == 5;
+      พิมพ์ "Thai option OK", v;
+    }
+    None แล้ว {
+      ยืนยัน false;
+    }
+  }
+  คืน 0;
+}

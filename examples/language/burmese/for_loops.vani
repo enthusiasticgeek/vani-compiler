@@ -1,0 +1,17 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/for_loops.vani              # LLVM
+//   vanic run examples/language/burmese/for_loops.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese for-loop smoke-test";
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား စုစုပေါင်း: i64 = 0;
+  အတွက် i မှ 1 သို့ 6 {
+    စုစုပေါင်း = စုစုပေါင်း + i;
+  }
+  သေချာ စုစုပေါင်း == 15;
+  ပုံနှိပ် "Burmese for-loops OK", စုစုပေါင်း;
+  ပြန် 0;
+}

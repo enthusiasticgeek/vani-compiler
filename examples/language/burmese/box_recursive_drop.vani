@@ -1,0 +1,28 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/burmese/box_recursive_drop.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese Box<T> recursive-drop smoke-test";
+
+ဖွဲ့စည်းပုံ Node {
+  တန်ဖိုး: i64,
+  နောက်တစ်ခု: Option<Box<Node>>,
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား စာရင်း: Node = Node {
+    တန်ဖိုး: 1,
+    နောက်တစ်ခု: Some(Box(Node {
+      တန်ဖိုး: 2,
+      နောက်တစ်ခု: Some(Box(Node {
+        တန်ဖိုး: 3,
+        နောက်တစ်ခု: None,
+      })),
+    })),
+  };
+  သေချာ စာရင်း.တန်ဖိုး == 1;
+  ပုံနှိပ် "Burmese box recursive drop OK";
+  ပြန် 0;
+}

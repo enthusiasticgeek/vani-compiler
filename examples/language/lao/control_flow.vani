@@ -1,0 +1,25 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/control_flow.vani              # LLVM
+//   vanic run examples/language/lao/control_flow.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao control flow smoke-test";
+
+ໜ້າທີ່ ຈັດປະເພດ(n: i64) -> i64 {
+  ຖ້າ n < 0 {
+    ກັບຄືນ -1;
+  } ບໍ່ດັ່ງນັ້ນ ຖ້າ n == 0 {
+    ກັບຄືນ 0;
+  } ບໍ່ດັ່ງນັ້ນ {
+    ກັບຄືນ 1;
+  }
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ຢືນຢັນ ຈັດປະເພດ(-5) == -1;
+  ຢືນຢັນ ຈັດປະເພດ(0) == 0;
+  ຢືນຢັນ ຈັດປະເພດ(3) == 1;
+  ພິມ "Lao control flow OK";
+  ກັບຄືນ 0;
+}

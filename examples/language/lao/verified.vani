@@ -1,0 +1,34 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/verified.vani              # LLVM
+//   vanic run examples/language/lao/verified.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao requires/proves smoke-test";
+
+ໜ້າທີ່ clamp(x: i64, lo: i64) -> i64
+ຕ້ອງການ lo >= 0;
+{
+  ຖ້າ x < lo {
+    ກັບຄືນ lo;
+  } ບໍ່ດັ່ງນັ້ນ {
+    ກັບຄືນ x;
+  }
+}
+
+ໜ້າທີ່ ລົບປອດໄພ(ກ: i64, ຂ: i64) -> i64
+ຕ້ອງການ ກ >= ຂ;
+ຕ້ອງການ ຂ >= 0;
+{
+  ພິສູດ ກ - ຂ >= 0;
+  ກັບຄືນ ກ - ຂ;
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ x: i64 = clamp(0 - 5, 0);
+  ຢືນຢັນ x == 0;
+  ໃຫ້ d: i64 = ລົບປອດໄພ(10, 3);
+  ຢືນຢັນ d == 7;
+  ພິມ "Lao verified OK", d;
+  ກັບຄືນ 0;
+}

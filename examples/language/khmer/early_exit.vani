@@ -1,0 +1,20 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/early_exit.vani              # LLVM
+//   vanic run examples/language/khmer/early_exit.vani --backend=c  # C
+
+គោលបំណង "Khmer early-exit (break) smoke-test";
+
+មុខងារ main() -> i64 {
+  អោយ n: i64 = 0;
+  ខណៈ n < 100 {
+    បើ n == 5 {
+      បំបាក់;
+    }
+    n = n + 1;
+  }
+  បញ្ជាក់ n == 5;
+  បោះពុម្ព "Khmer early exit OK", n;
+  ត្រលប់ 0;
+}

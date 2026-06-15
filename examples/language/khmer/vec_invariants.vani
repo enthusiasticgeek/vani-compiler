@@ -1,0 +1,31 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/vec_invariants.vani              # LLVM
+//   vanic run examples/language/khmer/vec_invariants.vani --backend=c  # C
+
+គោលបំណង "Loop invariants over Vec length, end-to-end";
+
+មុខងារ main() -> i64 {
+  អោយ បញ្ជី: Vec<i64> = vec(0);
+  អោយ រាប់: i64 = 1;
+
+  ខណៈ រាប់ < 5
+  មិនប្រែប្រួល រាប់ >= 1;
+  មិនប្រែប្រួល រាប់ <= 5;
+  {
+    បញ្ជី = push(បញ្ជី, រាប់ * 10);
+    រាប់ = រាប់ + 1;
+  }
+
+  បង្ហាញ រាប់ == 5;
+  បញ្ជាក់ (len(បញ្ជី) ជា i64) == 5;
+
+  បោះពុម្ព បញ្ជី[0];
+  បោះពុម្ព បញ្ជី[1];
+  បោះពុម្ព បញ្ជី[2];
+  បោះពុម្ព បញ្ជី[3];
+  បោះពុម្ព បញ្ជី[4];
+
+  ត្រលប់ 0;
+}

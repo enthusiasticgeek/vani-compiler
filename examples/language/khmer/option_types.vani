@@ -1,0 +1,28 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/option_types.vani              # LLVM
+//   vanic run examples/language/khmer/option_types.vani --backend=c  # C
+
+គោលបំណង "Khmer Option<T> smoke-test";
+
+មុខងារ ចែកសុវត្ថិភាព(a: i64, b: i64) -> Option<i64> {
+  បើ b == 0 {
+    ត្រលប់ None;
+  }
+  ត្រលប់ Some(a / b);
+}
+
+មុខងារ main() -> i64 {
+  អោយ លទ្ធផល: Option<i64> = ចែកសុវត្ថិភាព(10, 2);
+  ផ្គូផ្គង លទ្ធផល {
+    Some(v) បន្ទាប់មក {
+      បញ្ជាក់ v == 5;
+      បោះពុម្ព "Khmer option OK", v;
+    }
+    None បន្ទាប់មក {
+      បញ្ជាក់ false;
+    }
+  }
+  ត្រលប់ 0;
+}

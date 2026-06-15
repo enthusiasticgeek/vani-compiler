@@ -1,0 +1,19 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/iterate.vani              # LLVM
+//   vanic run examples/language/thai/iterate.vani --backend=c  # C
+
+จุดประสงค์ "Thai Vec iteration smoke-test";
+
+ฟังก์ชัน main() -> i64 {
+  ให้ รายการ: Vec<i64> = vec(0);
+  รายการ = push(รายการ, 10);
+  รายการ = push(รายการ, 20);
+  รายการ = push(รายการ, 30);
+  ยืนยัน รายการ[0] == 10;
+  ยืนยัน รายการ[1] == 20;
+  ยืนยัน รายการ[2] == 30;
+  พิมพ์ "Thai iterate OK";
+  คืน 0;
+}

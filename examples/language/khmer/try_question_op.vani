@@ -1,0 +1,33 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/try_question_op.vani              # LLVM
+//   vanic run examples/language/khmer/try_question_op.vani --backend=c  # C
+
+គោលបំណង "Khmer ? operator smoke-test";
+
+មុខងារ វិភាគ(n: i64) -> Option<i64> {
+  បើ n < 0 {
+    ត្រលប់ None;
+  }
+  ត្រលប់ Some(n * 3);
+}
+
+មុខងារ គណនា(n: i64) -> Option<i64> {
+  អោយ v: i64 = វិភាគ(n)?;
+  ត្រលប់ Some(v + 1);
+}
+
+មុខងារ main() -> i64 {
+  អោយ ល្អ: Option<i64> = គណនា(4);
+  ផ្គូផ្គង ល្អ {
+    Some(v) បន្ទាប់មក { បញ្ជាក់ v == 13; }
+    None បន្ទាប់មក { បញ្ជាក់ false; }
+  }
+  អោយ អាក្រក់: Option<i64> = គណនា(-1);
+  ផ្គូផ្គង អាក្រក់ {
+    Some(_) បន្ទាប់មក { បញ្ជាក់ false; }
+    None បន្ទាប់មក { បោះពុម្ព "Khmer ? op OK"; }
+  }
+  ត្រលប់ 0;
+}

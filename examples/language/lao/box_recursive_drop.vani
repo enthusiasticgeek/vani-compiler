@@ -1,0 +1,28 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/lao/box_recursive_drop.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao Box<T> recursive-drop smoke-test";
+
+ໂຄງສ້າງ Node {
+  ຄ່າ: i64,
+  ຕໍ່ໄປ: Option<Box<Node>>,
+}
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ ລາຍການ: Node = Node {
+    ຄ່າ: 1,
+    ຕໍ່ໄປ: Some(Box(Node {
+      ຄ່າ: 2,
+      ຕໍ່ໄປ: Some(Box(Node {
+        ຄ່າ: 3,
+        ຕໍ່ໄປ: None,
+      })),
+    })),
+  };
+  ຢືນຢັນ ລາຍການ.ຄ່າ == 1;
+  ພິມ "Lao box recursive drop OK";
+  ກັບຄືນ 0;
+}

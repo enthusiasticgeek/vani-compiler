@@ -1,0 +1,25 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/control_flow.vani              # LLVM
+//   vanic run examples/language/burmese/control_flow.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese control flow smoke-test";
+
+လုပ်ဆောင်ချက် သတ်မှတ်(n: i64) -> i64 {
+  ဆိုလျှင် n < 0 {
+    ပြန် -1;
+  } မဟုတ်ပါက ဆိုလျှင် n == 0 {
+    ပြန် 0;
+  } မဟုတ်ပါက {
+    ပြန် 1;
+  }
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  သေချာ သတ်မှတ်(-5) == -1;
+  သေချာ သတ်မှတ်(0) == 0;
+  သေချာ သတ်မှတ်(3) == 1;
+  ပုံနှိပ် "Burmese control flow OK";
+  ပြန် 0;
+}

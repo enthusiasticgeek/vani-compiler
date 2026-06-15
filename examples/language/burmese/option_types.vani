@@ -1,0 +1,28 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/option_types.vani              # LLVM
+//   vanic run examples/language/burmese/option_types.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese Option<T> smoke-test";
+
+လုပ်ဆောင်ချက် ဂဏန်းခွဲ(a: i64, b: i64) -> Option<i64> {
+  ဆိုလျှင် b == 0 {
+    ပြန် None;
+  }
+  ပြန် Some(a / b);
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား ရလဒ်: Option<i64> = ဂဏန်းခွဲ(10, 2);
+  ကိုက်ညီ ရလဒ် {
+    Some(v) ထို့နောက် {
+      သေချာ v == 5;
+      ပုံနှိပ် "Burmese option OK", v;
+    }
+    None ထို့နောက် {
+      သေချာ false;
+    }
+  }
+  ပြန် 0;
+}

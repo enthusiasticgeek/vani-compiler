@@ -30591,6 +30591,72 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn khmer_invariant_keyword_compiles() {
+        let source = "// vani-lang: khmer\n\
+                      គោលបំណង \"Khmer invariant\";\n\
+                      មុខងារ main() -> i64 {\n  \
+                        អោយ xs: Vec<i64> = vec(0);\n  \
+                        អោយ i: i64 = 1;\n  \
+                        ខណៈ i < 3\n  \
+                        មិនប្រែប្រួល i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        ត្រលប់ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Khmer invariant compiles");
+    }
+
+    #[test]
+    fn khmer_for_range_compiles() {
+        let source = "// vani-lang: khmer\n\
+                      គោលបំណង \"Khmer for-range\";\n\
+                      មុខងារ main() -> i64 {\n  \
+                        អោយ s: i64 = 0;\n  \
+                        សម្រាប់ i ពី 0 ដល់ 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        បញ្ជាក់ s == 10;\n  \
+                        ត្រលប់ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Khmer for-range compiles");
+    }
+
+    #[test]
+    fn khmer_match_enum_compiles() {
+        let source = "// vani-lang: khmer\n\
+                      គោលបំណង \"Khmer match/enum\";\n\
+                      ការរាប់បញ្ចូល Poa { Ts, Mn }\n\
+                      មុខងារ main() -> i64 {\n  \
+                        អោយ f: Poa = Poa.Ts;\n  \
+                        អោយ r: i64 = ផ្គូផ្គង f {\n    \
+                          Poa.Ts បន្ទាប់មក 1,\n    \
+                          Poa.Mn បន្ទាប់មក 2,\n  \
+                        };\n  \
+                        បញ្ជាក់ r == 1;\n  \
+                        ត្រលប់ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Khmer match/enum compiles");
+    }
+
+    #[test]
+    fn khmer_requires_proves_compiles() {
+        let source = "// vani-lang: khmer\n\
+                      គោលបំណង \"Khmer requires\";\n\
+                      មុខងារ clamp(x: i64, lo: i64) -> i64\n\
+                      ត្រូវការ lo >= 0;\n\
+                      {\n  \
+                        បើ x < lo { ត្រលប់ lo; } ផ្សេង { ត្រលប់ x; }\n\
+                      }\n\
+                      មុខងារ main() -> i64 {\n  \
+                        បញ្ជាក់ clamp(0 - 1, 0) == 0;\n  \
+                        ត្រលប់ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Khmer requires compiles");
+    }
+
+    #[test]
     fn burmese_script_compiles() {
         let source = "// vani-lang: burmese\n\
                       ရည်ရွယ်ချက် \"basic Burmese demo\";\n\
@@ -30604,6 +30670,72 @@ fn main() -> i64 {
                         ပြန် 0;\n\
                       }\n";
         crate::compile(source).expect("Burmese basics compile");
+    }
+
+    #[test]
+    fn burmese_invariant_keyword_compiles() {
+        let source = "// vani-lang: burmese\n\
+                      ရည်ရွယ်ချက် \"Burmese invariant\";\n\
+                      လုပ်ဆောင်ချက် main() -> i64 {\n  \
+                        ထား xs: Vec<i64> = vec(0);\n  \
+                        ထား i: i64 = 1;\n  \
+                        နေစဉ် i < 3\n  \
+                        မပြောင်းလဲ i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        ပြန် 0;\n\
+                      }\n";
+        crate::compile(source).expect("Burmese invariant compiles");
+    }
+
+    #[test]
+    fn burmese_for_range_compiles() {
+        let source = "// vani-lang: burmese\n\
+                      ရည်ရွယ်ချက် \"Burmese for-range\";\n\
+                      လုပ်ဆောင်ချက် main() -> i64 {\n  \
+                        ထား s: i64 = 0;\n  \
+                        အတွက် i မှ 0 သို့ 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        သေချာ s == 10;\n  \
+                        ပြန် 0;\n\
+                      }\n";
+        crate::compile(source).expect("Burmese for-range compiles");
+    }
+
+    #[test]
+    fn burmese_match_enum_compiles() {
+        let source = "// vani-lang: burmese\n\
+                      ရည်ရွယ်ချက် \"Burmese match/enum\";\n\
+                      စာရင်း Akye { Ts, Mn }\n\
+                      လုပ်ဆောင်ချက် main() -> i64 {\n  \
+                        ထား f: Akye = Akye.Ts;\n  \
+                        ထား r: i64 = ကိုက်ညီ f {\n    \
+                          Akye.Ts ထို့နောက် 1,\n    \
+                          Akye.Mn ထို့နောက် 2,\n  \
+                        };\n  \
+                        သေချာ r == 1;\n  \
+                        ပြန် 0;\n\
+                      }\n";
+        crate::compile(source).expect("Burmese match/enum compiles");
+    }
+
+    #[test]
+    fn burmese_requires_proves_compiles() {
+        let source = "// vani-lang: burmese\n\
+                      ရည်ရွယ်ချက် \"Burmese requires\";\n\
+                      လုပ်ဆောင်ချက် clamp(x: i64, lo: i64) -> i64\n\
+                      လို lo >= 0;\n\
+                      {\n  \
+                        ဆိုလျှင် x < lo { ပြန် lo; } မဟုတ်ပါက { ပြန် x; }\n\
+                      }\n\
+                      လုပ်ဆောင်ချက် main() -> i64 {\n  \
+                        သေချာ clamp(0 - 1, 0) == 0;\n  \
+                        ပြန် 0;\n\
+                      }\n";
+        crate::compile(source).expect("Burmese requires compiles");
     }
 
     #[test]
@@ -30661,6 +30793,72 @@ fn main() -> i64 {
                         ກັບຄືນ 0;\n\
                       }\n";
         crate::compile(source).expect("Lao basics compile");
+    }
+
+    #[test]
+    fn lao_invariant_keyword_compiles() {
+        let source = "// vani-lang: lao\n\
+                      ຈຸດປະສົງ \"Lao invariant\";\n\
+                      ໜ້າທີ່ main() -> i64 {\n  \
+                        ໃຫ້ xs: Vec<i64> = vec(0);\n  \
+                        ໃຫ້ i: i64 = 1;\n  \
+                        ໃນຂະນະທີ່ i < 3\n  \
+                        ບໍ່ປ່ຽນ i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        ກັບຄືນ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Lao invariant compiles");
+    }
+
+    #[test]
+    fn lao_for_range_compiles() {
+        let source = "// vani-lang: lao\n\
+                      ຈຸດປະສົງ \"Lao for-range\";\n\
+                      ໜ້າທີ່ main() -> i64 {\n  \
+                        ໃຫ້ s: i64 = 0;\n  \
+                        ສຳລັບ i ຈາກ 0 ເຖິງ 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        ຢືນຢັນ s == 10;\n  \
+                        ກັບຄືນ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Lao for-range compiles");
+    }
+
+    #[test]
+    fn lao_match_enum_compiles() {
+        let source = "// vani-lang: lao\n\
+                      ຈຸດປະສົງ \"Lao match/enum\";\n\
+                      ການນັບ Si { Ts, Mn }\n\
+                      ໜ້າທີ່ main() -> i64 {\n  \
+                        ໃຫ້ f: Si = Si.Ts;\n  \
+                        ໃຫ້ r: i64 = ກົງກັນ f {\n    \
+                          Si.Ts ແລ້ວ 1,\n    \
+                          Si.Mn ແລ້ວ 2,\n  \
+                        };\n  \
+                        ຢືນຢັນ r == 1;\n  \
+                        ກັບຄືນ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Lao match/enum compiles");
+    }
+
+    #[test]
+    fn lao_requires_proves_compiles() {
+        let source = "// vani-lang: lao\n\
+                      ຈຸດປະສົງ \"Lao requires\";\n\
+                      ໜ້າທີ່ clamp(x: i64, lo: i64) -> i64\n\
+                      ຕ້ອງການ lo >= 0;\n\
+                      {\n  \
+                        ຖ້າ x < lo { ກັບຄືນ lo; } ບໍ່ດັ່ງນັ້ນ { ກັບຄືນ x; }\n\
+                      }\n\
+                      ໜ້າທີ່ main() -> i64 {\n  \
+                        ຢືນຢັນ clamp(0 - 1, 0) == 0;\n  \
+                        ກັບຄືນ 0;\n\
+                      }\n";
+        crate::compile(source).expect("Lao requires compiles");
     }
 
     #[test]
@@ -32009,6 +32207,72 @@ fn main() -> i64 {
             crate::compile(source).is_err(),
             "Thai pragma + Devanagari keyword must be rejected"
         );
+    }
+
+    #[test]
+    fn thai_invariant_keyword_compiles() {
+        let source = "// vani-lang: thai\n\
+                      จุดประสงค์ \"Thai invariant\";\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        ให้ xs: Vec<i64> = vec(0);\n  \
+                        ให้ i: i64 = 1;\n  \
+                        ขณะที่ i < 3\n  \
+                        ไม่เปลี่ยน i >= 1;\n  \
+                        {\n    \
+                          xs = push(xs, i);\n    \
+                          i = i + 1;\n  \
+                        }\n  \
+                        คืน 0;\n\
+                      }\n";
+        crate::compile(source).expect("Thai invariant compiles");
+    }
+
+    #[test]
+    fn thai_for_range_compiles() {
+        let source = "// vani-lang: thai\n\
+                      จุดประสงค์ \"Thai for-range\";\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        ให้ s: i64 = 0;\n  \
+                        สำหรับ i จาก 0 ถึง 5 {\n    \
+                          s = s + i;\n  \
+                        }\n  \
+                        ยืนยัน s == 10;\n  \
+                        คืน 0;\n\
+                      }\n";
+        crate::compile(source).expect("Thai for-range compiles");
+    }
+
+    #[test]
+    fn thai_match_enum_compiles() {
+        let source = "// vani-lang: thai\n\
+                      จุดประสงค์ \"Thai match/enum\";\n\
+                      การแจงนับ Si { Ts, Mn }\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        ให้ f: Si = Si.Ts;\n  \
+                        ให้ r: i64 = ตรงกัน f {\n    \
+                          Si.Ts แล้ว 1,\n    \
+                          Si.Mn แล้ว 2,\n  \
+                        };\n  \
+                        ยืนยัน r == 1;\n  \
+                        คืน 0;\n\
+                      }\n";
+        crate::compile(source).expect("Thai match/enum compiles");
+    }
+
+    #[test]
+    fn thai_requires_proves_compiles() {
+        let source = "// vani-lang: thai\n\
+                      จุดประสงค์ \"Thai requires\";\n\
+                      ฟังก์ชัน clamp(x: i64, lo: i64) -> i64\n\
+                      ต้องการ lo >= 0;\n\
+                      {\n  \
+                        ถ้า x < lo { คืน lo; } ไม่เช่นนั้น { คืน x; }\n\
+                      }\n\
+                      ฟังก์ชัน main() -> i64 {\n  \
+                        ยืนยัน clamp(0 - 1, 0) == 0;\n  \
+                        คืน 0;\n\
+                      }\n";
+        crate::compile(source).expect("Thai requires compiles");
     }
 
     #[test]

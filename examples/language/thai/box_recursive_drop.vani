@@ -1,0 +1,28 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/thai/box_recursive_drop.vani --backend=c  # C
+
+จุดประสงค์ "Thai Box<T> recursive-drop smoke-test";
+
+โครงสร้าง Node {
+  ค่า: i64,
+  ถัดไป: Option<Box<Node>>,
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ รายการ: Node = Node {
+    ค่า: 1,
+    ถัดไป: Some(Box(Node {
+      ค่า: 2,
+      ถัดไป: Some(Box(Node {
+        ค่า: 3,
+        ถัดไป: None,
+      })),
+    })),
+  };
+  ยืนยัน รายการ.ค่า == 1;
+  พิมพ์ "Thai box recursive drop OK";
+  คืน 0;
+}

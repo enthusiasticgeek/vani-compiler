@@ -1,0 +1,31 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/vec_invariants.vani              # LLVM
+//   vanic run examples/language/burmese/vec_invariants.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Loop invariants over Vec length, end-to-end";
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား စာရင်း: Vec<i64> = vec(0);
+  ထား ရေတွက်: i64 = 1;
+
+  နေစဉ် ရေတွက် < 5
+  မပြောင်းလဲ ရေတွက် >= 1;
+  မပြောင်းလဲ ရေတွက် <= 5;
+  {
+    စာရင်း = push(စာရင်း, ရေတွက် * 10);
+    ရေတွက် = ရေတွက် + 1;
+  }
+
+  သက်သေပြ ရေတွက် == 5;
+  သေချာ (len(စာရင်း) အဖြစ် i64) == 5;
+
+  ပုံနှိပ် စာရင်း[0];
+  ပုံနှိပ် စာရင်း[1];
+  ပုံနှိပ် စာရင်း[2];
+  ပုံနှိပ် စာရင်း[3];
+  ပုံနှိပ် စာရင်း[4];
+
+  ပြန် 0;
+}

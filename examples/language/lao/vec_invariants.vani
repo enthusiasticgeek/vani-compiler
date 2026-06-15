@@ -1,0 +1,31 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/vec_invariants.vani              # LLVM
+//   vanic run examples/language/lao/vec_invariants.vani --backend=c  # C
+
+ຈຸດປະສົງ "Loop invariants over Vec length, end-to-end";
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ ລາຍການ: Vec<i64> = vec(0);
+  ໃຫ້ ນັບ: i64 = 1;
+
+  ໃນຂະນະທີ່ ນັບ < 5
+  ບໍ່ປ່ຽນ ນັບ >= 1;
+  ບໍ່ປ່ຽນ ນັບ <= 5;
+  {
+    ລາຍການ = push(ລາຍການ, ນັບ * 10);
+    ນັບ = ນັບ + 1;
+  }
+
+  ພິສູດ ນັບ == 5;
+  ຢືນຢັນ (len(ລາຍການ) ເປັນ i64) == 5;
+
+  ພິມ ລາຍການ[0];
+  ພິມ ລາຍການ[1];
+  ພິມ ລາຍການ[2];
+  ພິມ ລາຍການ[3];
+  ພິມ ລາຍການ[4];
+
+  ກັບຄືນ 0;
+}

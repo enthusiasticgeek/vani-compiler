@@ -1,0 +1,20 @@
+// vani-lang: lao
+//
+// build & run:
+//   vanic run examples/language/lao/early_exit.vani              # LLVM
+//   vanic run examples/language/lao/early_exit.vani --backend=c  # C
+
+ຈຸດປະສົງ "Lao early-exit (break) smoke-test";
+
+ໜ້າທີ່ main() -> i64 {
+  ໃຫ້ n: i64 = 0;
+  ໃນຂະນະທີ່ n < 100 {
+    ຖ້າ n == 5 {
+      ຢຸດ;
+    }
+    n = n + 1;
+  }
+  ຢືນຢັນ n == 5;
+  ພິມ "Lao early exit OK", n;
+  ກັບຄືນ 0;
+}

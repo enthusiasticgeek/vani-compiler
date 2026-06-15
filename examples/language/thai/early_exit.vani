@@ -1,0 +1,20 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/early_exit.vani              # LLVM
+//   vanic run examples/language/thai/early_exit.vani --backend=c  # C
+
+จุดประสงค์ "Thai early-exit (break) smoke-test";
+
+ฟังก์ชัน main() -> i64 {
+  ให้ n: i64 = 0;
+  ขณะที่ n < 100 {
+    ถ้า n == 5 {
+      หยุด;
+    }
+    n = n + 1;
+  }
+  ยืนยัน n == 5;
+  พิมพ์ "Thai early exit OK", n;
+  คืน 0;
+}

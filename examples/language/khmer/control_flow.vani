@@ -1,0 +1,25 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/control_flow.vani              # LLVM
+//   vanic run examples/language/khmer/control_flow.vani --backend=c  # C
+
+គោលបំណង "Khmer control flow smoke-test";
+
+មុខងារ ចាត់ប្រភេទ(n: i64) -> i64 {
+  បើ n < 0 {
+    ត្រលប់ -1;
+  } ផ្សេង បើ n == 0 {
+    ត្រលប់ 0;
+  } ផ្សេង {
+    ត្រលប់ 1;
+  }
+}
+
+មុខងារ main() -> i64 {
+  បញ្ជាក់ ចាត់ប្រភេទ(-5) == -1;
+  បញ្ជាក់ ចាត់ប្រភេទ(0) == 0;
+  បញ្ជាក់ ចាត់ប្រភេទ(3) == 1;
+  បោះពុម្ព "Khmer control flow OK";
+  ត្រលប់ 0;
+}

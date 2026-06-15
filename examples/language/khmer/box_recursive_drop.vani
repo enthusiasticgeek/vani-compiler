@@ -1,0 +1,28 @@
+// vani-lang: khmer
+//
+// build & run:
+//   vanic run examples/language/khmer/box_recursive_drop.vani              # LLVM
+//   vanic run examples/language/khmer/box_recursive_drop.vani --backend=c  # C
+
+គោលបំណង "Khmer Box<T> recursive-drop smoke-test";
+
+រចនាសម្ព័ន្ធ Node {
+  តម្លៃ: i64,
+  បន្ទាប់: Option<Box<Node>>,
+}
+
+មុខងារ main() -> i64 {
+  អោយ បញ្ជី: Node = Node {
+    តម្លៃ: 1,
+    បន្ទាប់: Some(Box(Node {
+      តម្លៃ: 2,
+      បន្ទាប់: Some(Box(Node {
+        តម្លៃ: 3,
+        បន្ទាប់: None,
+      })),
+    })),
+  };
+  បញ្ជាក់ បញ្ជី.តម្លៃ == 1;
+  បោះពុម្ព "Khmer box recursive drop OK";
+  ត្រលប់ 0;
+}

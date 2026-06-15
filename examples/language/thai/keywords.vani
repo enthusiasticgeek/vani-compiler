@@ -1,0 +1,27 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/keywords.vani              # LLVM
+//   vanic run examples/language/thai/keywords.vani --backend=c  # C
+
+จุดประสงค์ "Thai keyword smoke-test";
+
+โครงสร้าง Jut {
+  x: i64,
+  y: i64,
+}
+
+การแจงนับ Si { Red, Green, Blue }
+
+ฟังก์ชัน บวก(ก: i64, ข: i64) -> i64 {
+  คืน ก + ข;
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ p: Jut = Jut { x: 3, y: 4 };
+  ให้ c: Si = Si.Red;
+  ให้ s: i64 = บวก(p.x, p.y);
+  ยืนยัน s == 7;
+  พิมพ์ "Thai keywords OK", s;
+  คืน 0;
+}

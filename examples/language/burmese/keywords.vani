@@ -1,0 +1,27 @@
+// vani-lang: burmese
+//
+// build & run:
+//   vanic run examples/language/burmese/keywords.vani              # LLVM
+//   vanic run examples/language/burmese/keywords.vani --backend=c  # C
+
+ရည်ရွယ်ချက် "Burmese keyword smoke-test";
+
+ဖွဲ့စည်းပုံ Dot {
+  x: i64,
+  y: i64,
+}
+
+စာရင်း Akye { Red, Green, Blue }
+
+လုပ်ဆောင်ချက် ပေါင်း(က: i64, ခ: i64) -> i64 {
+  ပြန် က + ခ;
+}
+
+လုပ်ဆောင်ချက် main() -> i64 {
+  ထား p: Dot = Dot { x: 3, y: 4 };
+  ထား c: Akye = Akye.Red;
+  ထား s: i64 = ပေါင်း(p.x, p.y);
+  သေချာ s == 7;
+  ပုံနှိပ် "Burmese keywords OK", s;
+  ပြန် 0;
+}

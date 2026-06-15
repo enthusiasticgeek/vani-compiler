@@ -1,0 +1,25 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/control_flow.vani              # LLVM
+//   vanic run examples/language/thai/control_flow.vani --backend=c  # C
+
+จุดประสงค์ "Thai control flow smoke-test";
+
+ฟังก์ชัน จัดประเภท(n: i64) -> i64 {
+  ถ้า n < 0 {
+    คืน -1;
+  } ไม่เช่นนั้น ถ้า n == 0 {
+    คืน 0;
+  } ไม่เช่นนั้น {
+    คืน 1;
+  }
+}
+
+ฟังก์ชัน main() -> i64 {
+  ยืนยัน จัดประเภท(-5) == -1;
+  ยืนยัน จัดประเภท(0) == 0;
+  ยืนยัน จัดประเภท(3) == 1;
+  พิมพ์ "Thai control flow OK";
+  คืน 0;
+}

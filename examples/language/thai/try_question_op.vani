@@ -1,0 +1,33 @@
+// vani-lang: thai
+//
+// build & run:
+//   vanic run examples/language/thai/try_question_op.vani              # LLVM
+//   vanic run examples/language/thai/try_question_op.vani --backend=c  # C
+
+จุดประสงค์ "Thai ? operator smoke-test";
+
+ฟังก์ชัน วิเคราะห์(n: i64) -> Option<i64> {
+  ถ้า n < 0 {
+    คืน None;
+  }
+  คืน Some(n * 3);
+}
+
+ฟังก์ชัน คำนวณ(n: i64) -> Option<i64> {
+  ให้ v: i64 = วิเคราะห์(n)?;
+  คืน Some(v + 1);
+}
+
+ฟังก์ชัน main() -> i64 {
+  ให้ ดี: Option<i64> = คำนวณ(4);
+  ตรงกัน ดี {
+    Some(v) แล้ว { ยืนยัน v == 13; }
+    None แล้ว { ยืนยัน false; }
+  }
+  ให้ เสีย: Option<i64> = คำนวณ(-1);
+  ตรงกัน เสีย {
+    Some(_) แล้ว { ยืนยัน false; }
+    None แล้ว { พิมพ์ "Thai ? op OK"; }
+  }
+  คืน 0;
+}
