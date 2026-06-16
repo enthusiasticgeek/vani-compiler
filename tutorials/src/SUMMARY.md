@@ -57,6 +57,7 @@
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
 - [Option<T> and the option builtins](intermediate/13_option.md)
 - [HashMap<K,V> and HashSet<T>](intermediate/14_collections.md)
+- [Math, random numbers, and clone](intermediate/15_math_rng.md)
 
 # Advanced
 

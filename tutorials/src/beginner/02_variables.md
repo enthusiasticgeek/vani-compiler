@@ -111,6 +111,41 @@ must happen, which is harder to write but easier to read.
 
 </details>
 
+## Bitwise operators
+
+All integer types support the standard bitwise operators:
+
+| Operator | Meaning | Example |
+|---|---|---|
+| `&` | bitwise AND | `12 & 10` → `8` |
+| `\|` | bitwise OR | `12 \| 10` → `14` |
+| `^` | bitwise XOR | `12 ^ 10` → `6` |
+| `~` | bitwise NOT (complement) | `~0` → `-1` |
+| `<<` | left shift | `1 << 3` → `8` |
+| `>>` | right shift | `16 >> 2` → `4` |
+
+```vani
+intent "Lesson 2 — bitwise ops.";
+
+fn main() -> i64 {
+  let a: i64 = 0b1100;    // 12
+  let b: i64 = 0b1010;    // 10
+  print "AND:", a & b;    // 8  (0b1000)
+  print "OR:", a | b;     // 14 (0b1110)
+  print "XOR:", a ^ b;    // 6  (0b0110)
+  print "NOT 0:", ~0;     // -1 (all bits set in two's-complement)
+  print "left shift:", 1 << 4;   // 16
+  print "right shift:", 64 >> 3; // 8
+  return 0;
+}
+```
+
+Bitwise operations are also available as named builtins for
+advanced cases: `i64_set_bit(n, pos)`, `i64_clear_bit(n, pos)`,
+`i64_toggle_bit(n, pos)`, `i64_test_bit(n, pos)`,
+`i64_count_set_bits(n)`, `i64_leading_zeros(n)`,
+`i64_trailing_zeros(n)`, `i64_rotate_left(n, by)`.
+
 ---
 
 **Next**: [§3 — Functions and the four return aliases →](03_functions.md)
