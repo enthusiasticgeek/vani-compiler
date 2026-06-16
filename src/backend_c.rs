@@ -1471,7 +1471,10 @@ fn emit_intent_epoll_helpers_c(out: &mut String, body: &str) {
          \x20 if (want > sizeof(intent_tcp_buf)) want = sizeof(intent_tcp_buf);\n\
          \x20 int n = recv((SOCKET)fd, (char*)intent_tcp_buf, (int)want, 0);\n\
          \x20 if (n >= 0) return (int64_t)n;\n\
-         \x20 return (WSAGetLastError() == WSAEWOULDBLOCK) ? -2 : -1;\n\
+         \x20 int wsa_err = WSAGetLastError();\n\
+         \x20 if (wsa_err == WSAEWOULDBLOCK) return -2;\n\
+         \x20 if (wsa_err == WSAECONNRESET || wsa_err == WSAECONNABORTED) return 0;\n\
+         \x20 return -1;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_tcp_close(int64_t fd) {\n\
          \x20 int rc = closesocket((SOCKET)fd);\n\

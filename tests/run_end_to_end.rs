@@ -3804,19 +3804,15 @@ fn check_big_o_flag_annotates_sort_example() {
 }
 
 // ---------------------------------------------------------------------------
-// Windows IOCP byte-count parity (documented mismatch — kept #[ignore])
+// Windows async-recv byte-count parity (2026-06-16: WSAECONNRESET fix)
 //
-// echo_loop.vani runs through a C-backend and an LLVM-backend binary.
-// On Windows the LLVM backend's CRT buffering (non-IOCP path) can produce
-// a different number of output bytes than the C backend's MSVCRT path.
-// This test is intentionally #[ignore]d so normal CI skips the assertion;
-// it exists so the mismatch is not silently forgotten and can be re-enabled
-// once Windows IOCP plumbing (STATUS.md item 6) is complete.
+// echo_loop.vani produces identical stdout on C and LLVM backends on
+// Windows after fixing recv_nb to treat WSAECONNRESET/WSAECONNABORTED
+// as EOF (return 0) instead of error (return -1 → infinite yield loop).
 // ---------------------------------------------------------------------------
 
 #[test]
 #[cfg(target_os = "windows")]
-#[ignore = "IOCP byte-count parity not yet achieved — re-enable after STATUS.md item 6"]
 fn echo_loop_windows_byte_count_matches_c() {
     let binary = env!("CARGO_BIN_EXE_intentc");
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

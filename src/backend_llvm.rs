@@ -24402,8 +24402,15 @@ fn emit_intent_epoll_helpers_llvm_windows(out: &mut String) {
          check_wb:\n\
          \x20 %le = call i32 @WSAGetLastError()\n\
          \x20 %is_wb = icmp eq i32 %le, 10035\n\
-         \x20 %res = select i1 %is_wb, i64 -2, i64 -1\n\
+         \x20 br i1 %is_wb, label %ret_neg2, label %check_rst\n\
+         check_rst:\n\
+         \x20 %is_rst = icmp eq i32 %le, 10054\n\
+         \x20 %is_abrt = icmp eq i32 %le, 10053\n\
+         \x20 %is_eof = or i1 %is_rst, %is_abrt\n\
+         \x20 %res = select i1 %is_eof, i64 0, i64 -1\n\
          \x20 ret i64 %res\n\
+         ret_neg2:\n\
+         \x20 ret i64 -2\n\
          ret_neg1:\n\
          \x20 ret i64 -1\n\
          }\n\
