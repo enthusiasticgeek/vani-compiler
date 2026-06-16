@@ -1,0 +1,37 @@
+// build & run:
+//   vanic run examples/language/english/match_ref_payload.vani              # LLVM
+//   vanic run examples/language/english/match_ref_payload.vani --backend=c  # C
+//
+// Phase 11 L3 (2026-06-15): match on a `ref Enum` scrutinee where a
+// variant carries a non-Copy payload (Vec<i64>). The binding gets type
+// `ref Vec<i64>` — a borrow into the enum's payload slot — so the
+// owner's drop runs exactly once and no double-free is possible.
+
+intent "Phase 11 L3 — match-by-ref scrutinee with non-Copy payload binding";
+
+fn add_vec(v: ref Vec<i64>) -> i64 {
+  let s: i64 = 0;
+  for x in ref v { s = s + x; }
+  return s;
+}
+
+fn sum_opt(o: ref Option<Vec<i64>>) -> i64 {
+  return match o {
+    Option.None    then 0,
+    Option.Some(v) then add_vec(v),
+  };
+}
+
+fn main() -> i64 {
+  let v1: Vec<i64> = vec(10, 20, 30);
+  let opt1: Option<Vec<i64>> = Option.Some(v1);
+  let opt2: Option<Vec<i64>> = Option.None;
+
+  let s1: i64 = sum_opt(ref opt1);
+  let s2: i64 = sum_opt(ref opt2);
+
+  assert s1 == 60;
+  assert s2 == 0;
+  print "sum Some:", s1, "sum None:", s2;
+  return 0;
+}

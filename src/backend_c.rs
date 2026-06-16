@@ -13566,11 +13566,19 @@ fn emit_expr(expr: &TypedExpr) -> String {
                     } else {
                         "__scr.payload".to_string()
                     };
+                    // Phase 11 L3 (2026-06-15): ref-typed bindings
+                    // (non-Copy payload through a ref scrutinee)
+                    // need `&payload_slot` not the payload value.
+                    let init = if bty.is_any_ref() {
+                        format!("&({})", payload_access)
+                    } else {
+                        payload_access
+                    };
                     format!(
                         "{{ {} v_{} = {}; __r = ({}); }}",
                         c_type_name(bty),
                         bname,
-                        payload_access,
+                        init,
                         body_v
                     )
                 } else {

@@ -14491,6 +14491,63 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                 })
                             })
                             .unwrap_or(false);
+                        // Phase 11 L3 (2026-06-15): ref-typed binding
+                        // (non-Copy payload through a ref scrutinee).
+                        // The checker gave bty = Ref(inner). We need
+                        // a pointer-to-payload-slot rather than a copy
+                        // of the payload value: spill scr_v to an
+                        // alloca, GEP to field 1 (or the byte buffer
+                        // for mixed), and store that pointer in a
+                        // pointer-typed alloca — exactly the layout
+                        // every other ref-local uses.
+                        if bty.is_any_ref() {
+                            let inner_bty = match bty {
+                                Type::Ref(inner) | Type::RefMut(inner) => (**inner).clone(),
+                                _ => unreachable!(),
+                            };
+                            let inner_ll = llvm_type_string(&inner_bty);
+                            let spill = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = alloca {}\n", spill, struct_ty
+                            ));
+                            out.push_str(&format!(
+                                "  store {} {}, {}* {}\n",
+                                struct_ty, scr_v, struct_ty, spill
+                            ));
+                            let payload_ptr = ctx.fresh_tmp();
+                            if is_mixed {
+                                let enum_n = scr_enum_name.as_ref().unwrap();
+                                let buf_size = llvm_enum_payload_buffer_size_by_name(enum_n);
+                                let buf_ty = format!("[{} x i8]", buf_size);
+                                let buf_ptr = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                                    buf_ptr, struct_ty, struct_ty, spill
+                                ));
+                                let first_elem = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = getelementptr inbounds {}, {}* {}, i64 0, i64 0\n",
+                                    first_elem, buf_ty, buf_ty, buf_ptr
+                                ));
+                                out.push_str(&format!(
+                                    "  {} = bitcast i8* {} to {}*\n",
+                                    payload_ptr, first_elem, inner_ll
+                                ));
+                            } else {
+                                out.push_str(&format!(
+                                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                                    payload_ptr, struct_ty, struct_ty, spill
+                                ));
+                            }
+                            // Store the pointer directly in ctx.locals,
+                            // not wrapped in an alloca. The Var emitter
+                            // for `is_any_ref()` returns the addr value
+                            // directly (same as ref params), so the
+                            // payload_ptr IS the usable ref value.
+                            let prev = ctx.locals.get(bname).cloned();
+                            ctx.locals.insert(bname.clone(), (bty.clone(), payload_ptr));
+                            Some((bname.clone(), prev))
+                        } else {
                         let extracted = ctx.fresh_tmp();
                         if is_mixed {
                             let enum_n = scr_enum_name.as_ref().unwrap();
@@ -14541,6 +14598,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                         let prev = ctx.locals.get(bname).cloned();
                         ctx.locals.insert(bname.clone(), (bty.clone(), addr));
                         Some((bname.clone(), prev))
+                        }
                     } else {
                         None
                     };

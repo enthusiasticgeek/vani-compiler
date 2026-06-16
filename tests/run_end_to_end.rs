@@ -1809,6 +1809,7 @@ fn llvm_backend_run_produces_same_output_as_c() {
         "box_dyn_iface.vani",
         "ffi.vani",
         "pool.vani",
+        "match_ref_payload.vani",
         "tuple_eq.vani",
         "type_associated_fn.vani",
         "union_find.vani",

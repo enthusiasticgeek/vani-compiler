@@ -14393,44 +14393,35 @@ fn check_expr(
                                 lookup_enum_variant_payload(env, pat_enum, pat_variant)
                             })
                             .map(|ty| {
-                                let view_ty = match ty {
-                                    Type::OwnedStr => Type::Str,
-                                    other => other,
+                                // Phase 11 L3 (2026-06-15): when the
+                                // scrutinee is `ref Enum` / `mut ref
+                                // Enum`, give non-Copy payload bindings
+                                // a `ref T` borrow-view type instead of
+                                // the owned type. This prevents
+                                // double-frees — the binding borrows
+                                // into the scrutinee's payload slot
+                                // rather than moving it out. Copy types
+                                // and OwnedStr (which already uses the
+                                // Str borrow-view) are unchanged.
+                                let view_ty = if raw_scrut_ty.is_any_ref() {
+                                    match ty {
+                                        Type::OwnedStr => Type::Str,
+                                        other if !other.is_copy() => {
+                                            Type::Ref(Box::new(other))
+                                        }
+                                        other => other,
+                                    }
+                                } else {
+                                    match ty {
+                                        Type::OwnedStr => Type::Str,
+                                        other => other,
+                                    }
                                 };
                                 (binding.clone(), view_ty)
                             })
                     }
                     _ => None,
                 };
-                // Phase 11 (2026-06-07): L1 lift. Affine payload
-                // destructure-bindings (Vec<T>, structs with
-                // owning fields, …) are now allowed when the
-                // scrutinee is consumed by-value — ownership of
-                // the payload transfers into the binding, and
-                // the binding's scope-exit drop frees it like a
-                // regular let-binding.
-                //
-                // Ref scrutinees (`match r` where `r: ref Node`,
-                // Phase 11 L3) still need a borrow-view design
-                // for affine bindings — that case is rejected
-                // here for now so the lift doesn't introduce
-                // double-frees through the reference.
-                if let Some((_, bty)) = &arm_binding {
-                    if !bty.is_copy() && raw_scrut_ty.is_any_ref() {
-                        diagnostics.push(Diagnostic::new(
-                            arm.pattern_span,
-                            format!(
-                                "destructure binding for non-Copy payload type {} \
-                                 through a `ref` scrutinee is not supported in v1 \
-                                 — the binding would need an affine-borrow view \
-                                 to avoid aliasing through the reference. Move \
-                                 the scrutinee by value, OR use a wildcard \
-                                 binding (`Variant(_)`) to ignore the payload.",
-                                bty,
-                            ),
-                        ).with_elaboration(crate::diagnostic_elaborations::move_out_of_borrowed("")));
-                    }
-                }
                 let body_checked = if let Some((bname, bty)) = &arm_binding {
                     env.push_scope();
                     // Phase 11 (2026-06-07): for affine-payload

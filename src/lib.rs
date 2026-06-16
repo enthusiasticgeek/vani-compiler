@@ -46195,5 +46195,43 @@ função main() -> i64 {
             errs.iter().map(|d| (&d.message, &d.elaboration)).collect::<Vec<_>>());
     }
 
+    #[test]
+    fn phase11_l3_match_ref_scrutinee_non_copy_binding_accepted() {
+        // Phase 11 L3 (2026-06-15): match on a `ref Enum` scrutinee
+        // where a variant carries a non-Copy payload must be ACCEPTED.
+        // Previously rejected with "destructure binding for non-Copy
+        // payload type ... through a `ref` scrutinee is not supported".
+        // The binding now gets type `ref Vec<i64>` — a borrow-view —
+        // so no double-free is possible.
+        let source = r#"
+intent "L3 regression";
+fn sum_opt(o: ref Option<Vec<i64>>) -> i64 {
+  return match o {
+    Option.None    then 0,
+    Option.Some(v) then 1,
+  };
+}
+fn main() -> i64 { return 0; }
+"#;
+        compile(source).expect("L3 ref-scrutinee non-Copy binding must compile");
+    }
+
+    #[test]
+    fn phase11_l3_match_by_value_scrutinee_non_copy_binding_still_accepted() {
+        // By-value scrutinee with non-Copy payload (L1, already shipped).
+        // Regression guard: L3 changes must not break the by-value path.
+        let source = r#"
+intent "L1 guard";
+fn consume_opt(o: Option<Vec<i64>>) -> i64 {
+  return match o {
+    Option.None    then 0,
+    Option.Some(v) then 1,
+  };
+}
+fn main() -> i64 { return 0; }
+"#;
+        compile(source).expect("L1 by-value non-Copy payload must still compile");
+    }
+
 }
 
