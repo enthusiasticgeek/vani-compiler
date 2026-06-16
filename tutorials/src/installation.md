@@ -1,5 +1,32 @@
 # Installation
 
+## Quick install (pre-built binary)
+
+The fastest path — no Rust toolchain needed.
+
+**Linux / macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/enthusiasticgeek/vani-compiler/main/install.sh | sh
+```
+
+This downloads the correct binary for your platform and installs `vanic` to `/usr/local/bin`.  Pass `--prefix $HOME/.local` if you prefer a non-root location.
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/enthusiasticgeek/vani-compiler/main/install.ps1 | iex
+```
+
+This downloads the Windows binary and installs it to `%LOCALAPPDATA%\vanic\bin`, adding that directory to your user PATH automatically.
+
+> **After quick-install** you still need z3, gcc/clang, and lli for the full feature set.
+> `vanic check` works with just the binary; `vanic run` needs the tools below.
+
+---
+
+## Build from source
+
 Before you can follow any lesson you need three things on your machine:
 
 1. **Rust toolchain** — to build the `vanic` compiler from source
