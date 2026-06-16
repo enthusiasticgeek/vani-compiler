@@ -4,6 +4,20 @@
   <img src="vani_logo1.png" alt="vāṇī logo1" width="480">
 </p>
 
+<p align="center">
+  <a href="https://enthusiasticgeek.github.io/vani-compiler/"><strong>📖 Online Tutorial Book</strong></a>
+  &nbsp;•&nbsp;
+  <a href="https://github.com/enthusiasticgeek/vani-compiler/releases"><strong>Releases</strong></a>
+  &nbsp;•&nbsp;
+  <a href="docs/v1_limitations.md"><strong>v1 Limitations</strong></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/enthusiasticgeek/vani-compiler/actions/workflows/deploy-tutorials.yml">
+    <img src="https://github.com/enthusiasticgeek/vani-compiler/actions/workflows/deploy-tutorials.yml/badge.svg" alt="Deploy Tutorials">
+  </a>
+</p>
+
 **Verbose Alternative Natural Interface (VANI) — code like you speak.**
 
 Pronounced **vaa-NEE** (Sanskrit *vāṇī* — long-a, retroflex-n, long-i;
@@ -104,8 +118,12 @@ the terminology cheat-sheet.
     pipeline, SMT, async, memory).
   - License + trademark
 
-> Tutorials live under [`tutorials/`](tutorials/). 20+ intuition
-> primers + the formal Beginner / Intermediate / Advanced tracks.
+> **Tutorial book** — rendered and searchable at
+> **<https://enthusiasticgeek.github.io/vani-compiler/>**
+> (auto-deployed via GitHub Actions on every push to `main` that
+> touches `tutorials/`). Source lives under [`tutorials/`](tutorials/):
+> 20+ intuition primers + the formal Beginner / Intermediate / Advanced
+> tracks (15 Beginner + 15 Intermediate + 10 Advanced lessons).
 > Limitations are catalogued at [`docs/v1_limitations.md`](docs/v1_limitations.md).
 > The closure-by-closure ledger lives at [`STATUS.md`](STATUS.md).
 > The active task queue is [`TODO.md`](TODO.md).

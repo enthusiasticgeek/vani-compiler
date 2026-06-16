@@ -1,5 +1,8 @@
 name: Deploy Tutorials to GitHub Pages
 
+# Triggers:
+#   - Automatic: any push to main that changes tutorials/ or this file
+#   - Manual:    Actions tab → "Deploy Tutorials to GitHub Pages" → Run workflow
 on:
   push:
     branches: [main]
