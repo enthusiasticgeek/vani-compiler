@@ -4,6 +4,19 @@
 > their length, and understand the difference between `Str`
 > (borrowed) and `OwnedStr` (heap-allocated).
 
+> **New to this?** Read [Beginner 6a — Pointers and references primer](06a_pointers_refs_primer.md)
+> for the address/value analogy first.
+
+Think of a `Str` like a sticky note with directions to a book
+on a library shelf: it POINTS at some text that lives elsewhere
+in the program (usually hardcoded in the compiled binary), but
+it doesn't OWN that text. An `OwnedStr` is like buying your
+own copy of the book — the heap memory is yours, you can
+modify it, and when you're done it gets freed. Most programs
+only need to READ string literals (`Str` is enough); you need
+`OwnedStr` when you CONSTRUCT strings at runtime by combining
+or modifying parts.
+
 ## The program
 
 Save this in `~/lesson6.vani`:

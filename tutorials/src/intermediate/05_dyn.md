@@ -4,6 +4,18 @@
 > type that implements the interface, build a heterogeneous
 > `Vec<dyn Iface>`, and call methods through it.
 
+> **New to this?** Read [Intermediate 4a — What's a `dyn Iface`? primer](04a_dyn_iface_primer.md)
+> for the analogy first. This chapter is the code surface.
+
+A `dyn Shape` is a sealed envelope: the outside always shows the
+same label ("this is a Shape") regardless of what's inside
+(Circle, Square, Triangle). Every envelope comes with a tiny
+directory (the *vtable*) telling the code exactly which method
+to call for whichever concrete type is inside. You can put mixed
+envelopes in a single `Vec<dyn Shape>` and call `area()` on each
+one — the right formula is picked at runtime by following the
+directory. This is *dynamic dispatch*.
+
 ## The program
 
 ```vani

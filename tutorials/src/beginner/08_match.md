@@ -4,6 +4,17 @@
 > `match`, and learn that `match` in vāṇी is an **expression**
 > using `then` (not `=>`) between the pattern and the arm body.
 
+> **New to this?** Read [Beginner 8a — Pattern matching primer](08a_pattern_match_primer.md) first.
+
+Pattern matching is like a post-sorting machine at an airport:
+each parcel arrives, gets inspected against a set of routing
+rules in order ("is it fragile? → gate 1", "is it oversized?
+→ gate 2", "otherwise → gate 3"), and the FIRST matching rule
+wins. `match` works the same way: the compiler checks each arm
+in order and runs the body of the first arm whose pattern fits
+the value. No fall-through, no hidden priority — it's exhaustive
+(every possible value must be handled) and unambiguous.
+
 ## The program
 
 Save this in `~/lesson8.vani`:

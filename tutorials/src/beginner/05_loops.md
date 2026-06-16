@@ -4,6 +4,16 @@
 > condition, a `for ... from ... to ...` range loop, and use
 > `break` / `return` to exit early.
 
+> **New to this?** Read [Beginner 5a — Recursion primer](05a_recursion_primer.md) first
+> for why we repeat things — then come back here for the loop syntax.
+
+A loop is just an instruction you give a very obedient assistant:
+"keep doing X until I tell you to stop." A `while` loop says
+"keep going *while* this condition is true." A `for` loop with a
+range says "do this for each number from A to B." When you
+hit `break` it's like saying "stop now, we're done" and walking
+out the door mid-task.
+
 ## The program
 
 Save this in `~/lesson5.vani`:

@@ -4,6 +4,20 @@
 > thread a `CancelToken` through long operations, and
 > understand the v1 desugar from `async fn` to `Future<R>`.
 
+> **New to this?** Read [Advanced 1a — Async primer](01a_async_primer.md) first.
+
+Imagine a restaurant kitchen with one chef. When an order comes
+in for a pizza (a slow operation — it takes 15 min to bake),
+a synchronous chef would stand at the oven doing nothing until
+it's done. An async chef puts the pizza in the oven, notes
+"pizza for table 3 in the oven", and goes to make a salad
+(another request). When the oven timer dings, they come back
+(`await`), pull the pizza out, and finish the pizza order.
+`async fn` in vāṇी turns a function into this "return to it
+when the slow thing is done" style automatically. The compiler
+transforms it into a state machine so the one thread can
+juggle many in-progress tasks without blocking.
+
 ## The program
 
 ```vani

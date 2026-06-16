@@ -4,6 +4,17 @@
 > runtime invariants with `assert`, and ask the SMT verifier to
 > *prove* arithmetic facts at compile time with `prove`.
 
+Imagine a vending machine with a small sign: "Insert £1 or more."
+That sign is a *precondition* — it tells you what's required
+BEFORE you press the button. `requires n >= 0` works the same
+way: you're documenting "this function only makes sense when
+`n` is non-negative," and the compiler enforces it. `assert` is
+a self-check mid-function: "at this point in my recipe, the
+dough MUST have risen — crash loudly if it hasn't." `prove`
+goes further: instead of checking at runtime, it asks a
+mathematical solver to verify the claim is ALWAYS true, before
+the code ever runs.
+
 ## The program
 
 Save this in `~/lesson9.vani`:

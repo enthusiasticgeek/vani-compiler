@@ -4,6 +4,19 @@
 > for`, declare a `reduce` accumulator, and understand how the
 > affine type system proves race-freedom at compile time.
 
+> **New to this?** Read [Advanced 2a — Parallelism and race-freedom primer](02a_parallelism_primer.md) first.
+
+Imagine ten accountants each adding up a separate stack of
+receipts simultaneously — each one works on their own stack,
+never touching anyone else's, and at the end a supervisor
+adds up all their sub-totals. No two accountants can possibly
+interfere because the stacks are separate. That's a parallel
+reduction: split the work into non-overlapping pieces, do them
+simultaneously, combine the results. `parallel for ... reduce`
+expresses this pattern; the compiler verifies at compile time
+that loop iterations don't share writeable data (race-freedom
+— no accountant steals from another's stack mid-tally).
+
 ## The program
 
 ```vani

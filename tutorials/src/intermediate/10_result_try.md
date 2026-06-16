@@ -4,6 +4,19 @@
 > Result-style enum, chain operations that short-circuit on
 > error, and understand where the `try` keyword fits today.
 
+> **New to this?** Read [Intermediate 10a — Result and `try` primer](10a_result_try_primer.md)
+> and [Intermediate 10b — Runtime errors primer](10b_runtime_errors_primer.md) first.
+
+Imagine every step in a recipe either succeeds ("the dough rose")
+or fails ("the oven broke"). A `Result` is a small envelope that
+holds either the success value (`Ok(...)`) or a description of
+what went wrong (`Err(...)`). Instead of checking for failure
+after every step with a chain of `if` statements, you mark a
+function with `try` and the compiler automatically short-circuits
+to the error branch the moment any step returns `Err`. The
+kitchen closes, you report what broke, and callers decide how to
+handle it.
+
 ## The program
 
 ```vani

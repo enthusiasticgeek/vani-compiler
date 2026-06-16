@@ -4,6 +4,16 @@
 > return a value, and learn that `return` has three Devanagari
 > aliases for use in Sanskrit / Hindi / Marathi files.
 
+A function is a named recipe. You write it once, give it a name,
+and call it whenever you need the same task done. `fn add(a, b)`
+is like a recipe card labelled "Add two numbers": the card takes
+two ingredients (`a` and `b`) and produces one result (the sum).
+Calling `add(3, 4)` is like saying "follow the Add recipe with
+ingredients 3 and 4" — it produces 7 and hands it back to whoever
+asked. Functions let you avoid copying the same instructions
+everywhere; change the recipe once and every place that uses it
+automatically gets the update.
+
 ## The program
 
 Save this in `~/lesson3.vani`:

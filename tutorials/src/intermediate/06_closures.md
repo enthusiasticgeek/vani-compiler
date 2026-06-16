@@ -4,6 +4,17 @@
 > values, pass them to higher-order helpers, and build your
 > own `fold` over a `Vec<i64>`.
 
+> **New to this?** Read [Intermediate 6a — Closures primer](06a_closures_primer.md)
+> and [Intermediate 6b — Iterators primer](06b_iterators_primer.md) first.
+
+Imagine handing a recipe card to a chef: the card IS the
+instruction (a function), not a named dish on the menu.
+Higher-order functions work the same way — instead of calling
+a specific named function, you pass one in as a parameter,
+and the caller decides at runtime what "the thing to do" is.
+This lets you write `map`, `filter`, and `fold` once and reuse
+them for any operation the caller supplies.
+
 ## The program
 
 ```vani

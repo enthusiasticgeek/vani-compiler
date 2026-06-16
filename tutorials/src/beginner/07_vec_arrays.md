@@ -4,6 +4,17 @@
 > `Vec<T>`s, iterate them with `while` + indexing, and pass them
 > to functions by reference.
 
+> **New to this?** Read [Beginner 7a — Tuples and destructuring primer](07a_tuples_primer.md)
+> and [Beginner 6b — Heap and stack primer](06b_heap_vs_stack_primer.md) first.
+
+An array is like a fixed-size egg carton: you declare it holds
+exactly 4 eggs, and it always holds exactly 4 slots. A `Vec<T>`
+is like a resizable shopping bag: you can push items in and it
+grows as needed. Both hold items in order and let you access
+any item by its position number (starting from 0). Arrays live
+entirely on the stack; Vec keeps a small handle on the stack and
+stores the actual items on the heap, which is how it grows.
+
 ## The program
 
 Save this in `~/lesson7.vani`:

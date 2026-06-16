@@ -4,6 +4,18 @@
 > verifier composes them across calls, and learn the
 > bounds-thinking that keeps the SMT pass tractable.
 
+> **New to this?** Read [Intermediate 12a — SMT primer](12a_smt_primer.md) and
+> [Intermediate 12b — Compile time vs runtime primer](12b_compile_time_vs_runtime_primer.md) first.
+
+Imagine a legal contract: the buyer promises to pay (precondition,
+`requires`) and the seller promises to deliver by Friday
+(postcondition, `ensures`). An SMT verifier reads both promises
+and asks a solver to check if there's ANY possible input that
+could make the seller break their promise. If the solver finds
+one, compilation fails with a proof obligation that names the
+counterexample. If the solver can't find one, the contract is
+mathematically discharged — not just tested, *proven*.
+
 ## The program
 
 ```vani

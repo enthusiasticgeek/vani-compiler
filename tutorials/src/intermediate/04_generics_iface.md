@@ -4,6 +4,19 @@
 > traits), `implement` it for concrete types, and write a
 > generic function bounded by `where T is Iface`.
 
+> **New to this?** Read [Intermediate 4b — Interfaces and static dispatch primer](04b_interfaces_primer.md)
+> and [Intermediate 4c — Generics primer](04c_generics_primer.md) first. This chapter
+> is the code surface.
+
+Think of an `interface` as a job description: "any employee who
+fills this role must know how to do X, Y, Z." A `Circle` and a
+`Square` both apply for the `Drawable` role by implementing it
+— you write their specific skills in an `implement` block. A
+generic function that accepts `where T is Drawable` can then
+work with any shape, just like a manager can assign tasks to
+anyone who holds the right job title, without caring about the
+specific person.
+
 ## The program
 
 ```vani

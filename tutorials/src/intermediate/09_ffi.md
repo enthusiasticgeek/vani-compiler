@@ -4,6 +4,16 @@
 > a foreign function as `pure` so pure callers can use it, and
 > link external code at build time via `--link-with` / `-l<name>`.
 
+> **New to this?** Read [Intermediate 9a — FFI primer](09a_ffi_primer.md) first.
+
+Think of a hardware store that sells pre-made door hinges. Your
+house is written in vāṇी; the hinges were made in a C factory.
+You don't need to understand how the factory works — you just
+need to know the hinge's interface (its type signature) and where
+to get it (the library). `extern "C"` is the vāṇी way of
+describing that interface; `--link-with` tells the compiler where
+the factory's finished goods are stored.
+
 ## The program
 
 ```vani

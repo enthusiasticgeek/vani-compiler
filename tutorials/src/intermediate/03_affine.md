@@ -4,6 +4,17 @@
 > `mut ref` (exclusive read-write), and understand how vāṇी's
 > affine ownership keeps borrows safe at compile time.
 
+> **New to this?** Read [Beginner 6c — Ownership and move](../beginner/06c_ownership_primer.md)
+> first for the analogy, then [Intermediate 3b — Affine deeper pass](03b_affine_deeper_primer.md)
+> for the precise mechanics. This chapter is the code surface.
+
+Imagine a hotel room. You have the key (ownership). You can lend
+a friend a read-only pass (`ref` — they can look, not move
+furniture). Or you give a cleaner a full key (`mut ref` — they can
+rearrange), but only one cleaner can hold the key at a time so
+they don't conflict. When done, the key returns to you. That's
+the borrow model.
+
 ## The program
 
 ```vani

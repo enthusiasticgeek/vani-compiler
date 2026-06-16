@@ -476,18 +476,28 @@ UTF-8 directly.
 
 ## Platform / runtime limitations
 
-### L10 — macOS runtime verification deferred; Windows verified ✅ 2026-06-10
+### L10 — macOS runtime verification deferred; Windows fully verified ✅ 2026-06-16
 
-**Windows status** (verified 2026-06-10 on Windows 11 Home, Rust
+**Windows status** (verified 2026-06-16 on Windows 11 Home, Rust
 1.96 GNU, LLVM 22, z3 4.16, gcc 12 via MSYS2):
 - Compiler builds cleanly (`cargo build --release`).
-- All 2073 lib tests pass (`cargo test`).
-- `_WIN32` codegen paths (IOCP, winsock2, `CreateThread`, `Sleep`)
-  compile and emit correct IR/C. Runtime end-to-end tests for async
-  TCP (`tcp_echo_epoll.vani`) are the next milestone.
+- 2108+ lib tests pass (`cargo test`).
+- All 5 async-TCP examples (`async_showcase`, `echo_loop`,
+  `echo_loop_break`, `echo_match_stress`, `tcp_echo_epoll`) pass
+  on both C and LLVM backends end-to-end.
+- Root cause of Windows async hang fixed 2026-06-16 (commit `8193760`):
+  `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053) from an RST-close
+  were mapped to `-1` (error), not `0` (EOF). WSAPoll kept returning
+  "ready" on the error socket → infinite recv loop. Fix: both C-backend
+  and LLVM-backend Windows `recv_nb` helpers now return `0` for both
+  reset codes.
 - Six Linux-only tests (`epoll_emits_helpers_in_llvm`,
-  `host_is_linux_helper_present`, etc.) are now correctly guarded
+  `host_is_linux_helper_present`, etc.) are correctly guarded
   with `#[cfg(target_os = "linux")]`.
+- `volatile_read`/`volatile_write` builtins ship on all 4 Windows
+  backends (commit `2cea04a`).
+- `echo_loop_windows_byte_count_matches_c` e2e test de-ignored and
+  green after the WSAECONNRESET fix.
 
 **macOS status**: still deferred — no Darwin host available.
 `#elif defined(__APPLE__)` branches (kqueue, `EVFILT_TIMER`,

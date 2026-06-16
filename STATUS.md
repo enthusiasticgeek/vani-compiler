@@ -10,134 +10,109 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 📋 NEXT SESSION HANDOFF — 2026-06-13
+## 📋 NEXT SESSION HANDOFF — 2026-06-16
 
-**State**: Edge tests + elaboration JSON integration tests complete.
-597/597 elaboration sites; all 5 JSON elaboration CLI tests pass. Last commit: `8eb597b`.
+**State**: All v1 limitations (L1–L12) closed. All 62 dialects shipped.
+`volatile_read`/`volatile_write` builtins shipped. Elaboration 100% (597/597).
+Windows async-TCP unblocked (WSAECONNRESET fix, commit `8193760`).
+Big-O wired into all three subcommands.
+
+### Completed since 2026-06-13
+
+#### ~~Phase 6 / 8a / 8b / 10 / 12 / 13 language batches~~ ✅ ALL 62 DIALECTS SHIPPED
+
+All 62 non-English dialects are in `tests/run_end_to_end.rs` and pass
+on both backends. Includes: Gujarati, Punjabi-Gurmukhi, Odia, Assamese,
+Tamil, Telugu, Kannada, Malayalam, Sinhala, Urdu, Sindhi, Punjabi-Shahmukhi,
+Persian, Pashto, Spanish, French, Russian, German, Italian, Portuguese,
+Dutch, Swedish, Norwegian, Danish, Finnish, Hebrew, Armenian, Georgian,
+Japanese, Mandarin, Korean, Arabic, Amharic, Tibetan, Mongolian, Cherokee,
+Lao, and more.
+
+#### ~~Phase 11 L3 — match-by-ref scrutinee~~ ✅ DONE (commit `c0a4620`)
+
+`ref Option<Vec<i64>>` scrutinee now works — non-Copy payload bindings get
+type `ref PayloadType` (borrow, not move). Both C and LLVM backends.
+Example: `examples/language/english/match_ref_payload.vani`.
+
+#### ~~Installers + GitHub release workflow~~ ✅ DONE
+
+`install.sh`, `install.ps1`, `.github/workflows/release.yml` (matrix build
+for 5 targets). All landed in the session that followed the 2026-06-13 handoff.
+
+#### ~~GitHub Pages Playground fix~~ ✅ DONE
+
+All 221 ` ```rust ` fences in tutorials renamed to ` ```vani `; `book.toml`
+`runnable = false` added. mdBook no longer sends vāṇी code to
+`play.rust-lang.org`.
+
+#### ~~Big-O `--big-o` wired into `vanic run`~~ ✅ DONE (commit `5b73db7`)
+
+All three subcommands (`check`, `emit`, `run`) now accept `--big-o[=auto|force|off]`.
+`vanic run --big-o` prints per-fn complexity to stderr before executing.
+2 new lib tests verify Auto (O(1) skipped) and Force (O(1) included) modes.
+
+#### ~~Windows IOCP / async-TCP~~ ✅ DONE (commit `8193760`)
+
+Root cause identified: `WSAECONNRESET` (10054) / `WSAECONNABORTED` (10053)
+from a RST-close were mapped to error (-1), not EOF (0). The state machine
+then yielded forever while WSAPoll kept returning "ready" on the error socket.
+Fix: C and LLVM Windows `recv_nb` helpers now return 0 for both reset codes.
+All 5 async-TCP examples (`async_showcase`, `echo_loop`, `echo_loop_break`,
+`echo_match_stress`, `tcp_echo_epoll`) pass on both backends.
+`echo_loop_windows_byte_count_matches_c` de-ignored.
+
+#### ~~3 Windows edge tests~~ ✅ VERIFIED
+
+`windows_brahmi_numeral_output_no_crt_reorder`,
+`windows_tcp_echo_blocking_three_clients`,
+`windows_snprintf_dprintf_shim_roundtrip` — all pass.
+
+#### ~~`volatile_read` / `volatile_write` builtins~~ ✅ DONE (commit `2cea04a`)
+
+Embedded MMIO access. `volatile_read(ref reg) -> T` emits `load volatile`
+(LLVM) / `*(volatile T*)` (C). `volatile_write(mut ref reg, val: T)` emits
+`store volatile`. Gated by `INTENT_TARGET_EMBEDDED=1`; hosted diagnostic
+points to `Atomic<T>`. `examples/embedded/mmio_blink.vani` smoke example.
+All 4 backends (tree-C, tree-LLVM, SSA-C, SSA-LLVM).
+
+#### ~~Error-message elaboration~~ ✅ DONE 100% (commit `326ccad`)
+
+597/597 diagnostic sites have elaboration. 20–30+ high-value families seeded
+with step-by-step WHAT/WHY/HOW breakdowns. Integration tests for elaboration
+JSON format ship in `tests/`.
 
 ### Pick up in this order
 
-#### ~~1. Edge tests~~ ✅ DONE (commit b265ace)
+#### 1. Tutorials rewrite for non-CS readers (~20–40h, multi-session)
 
-All edge tests written: generic monomorphization (3), OwnedStr match-arm type
-uniformity (3), ref/lifetime (3), Windows IOCP `#[ignore]` stub in
-`tests/run_end_to_end.rs`.
+Beginner + Intermediate tracks rewritten with analogy-first approach.
+Each CS concept: 1-paragraph analogy → vāṇी example → CS explanation.
+Target: `tutorials/src/beginner/` and `tutorials/src/intermediate/`.
 
-#### ~~2. Elaboration integration tests~~ ✅ DONE (commit 8eb597b)
+Pattern per chapter: open with "imagine you're …" → 1-paragraph analogy
+→ tiny vāṇी example → CS explanation of what happened.
 
-5 CLI JSON integration tests in `tests/run_end_to_end.rs`:
-`json_elaboration_type_mismatch_appears_in_output`,
-`json_elaboration_unknown_variable_appears_in_output`,
-`json_elaboration_wrong_arity_appears_in_output`,
-`json_elaboration_iface_not_impl_appears_in_output`,
-`json_elaboration_pure_fn_effect_appears_in_output`. All pass.
+Topics flagged: pointers / references / mutable refs / heap vs stack /
+`interface` / `dyn Iface` / `Box` / RAII / affine ownership / modules /
+SMT contracts / parallelism.
 
-#### ~~3. TUT-5 — GitHub Pages deploy~~ ✅ DONE (commit 2bf83ed)
+#### 2. Deferred / long tail (touch only when asked)
 
-`.github/workflows/deploy-tutorials.yml` added; builds with mdBook v0.4.40
-and deploys to GitHub Pages on push to main (paths: `tutorials/**`).
-Local build verified clean. `tutorials/book.toml` repo URLs fixed.
-
-**One manual step required**: go to
-`https://github.com/enthusiasticgeek/vani-compiler/settings/pages`
-→ Source → select **"GitHub Actions"**. The workflow will then auto-trigger
-on the next push that touches `tutorials/`.
-
-#### 4. Phase 6 — Brahmi-derived language batch (~30h, pick one per session)
-
-Each is independent of the others. Start with whichever feels most
-tractable; they share the same pipeline structure as the shipped dialects.
-
-| Dialect | Script | Effort | Notes |
-|---|---|---|---|
-| **Gujarati** | Gujarati | 6–8h | Closest to Marathi grammar; good first pick |
-| **Punjabi-Gurmukhi** | Gurmukhi | 8–10h | Sikh/Indian; distinct script |
-| **Odia** | Odia | 6–8h | Brahmi-derived, moderate |
-| **Assamese** | Bengali-adjacent | 5–8h | Lexical overlap with Bengali pipeline |
-
-#### 5. Phase 8b — European openers (~13h total, independent of Phase 6)
-
-Three languages, each self-contained and buildable in a single session.
-Good for variety between the script-heavy batches above.
-
-| Dialect | Effort | Notes |
-|---|---|---|
-| **Spanish** | 5h | Latin SVO, easiest entry point into European langs |
-| **Russian** | 5h | Cyrillic SVO; reuse Latin tokenizer with new Unicode range |
-| **French** | 3h | Trivial after Spanish; mostly keyword table |
-
-#### 6. Windows IOCP (~20–30h, larger arc — dedicate a fresh session)
-
-5 async-socket tests still skipped on Windows. Root cause: sockets must
-be opened with `WSA_FLAG_OVERLAPPED` and all I/O submitted via
-`WSASend`/`WSARecv` with OVERLAPPED structs; the current shim uses
-blocking `GetQueuedCompletionStatus`.
-
-Entry points:
-- `src/backend_llvm.rs` → `emit_intent_epoll_helpers_llvm_windows`
-- `examples/tcp_echo_epoll.vani`, `examples/echo_loop.vani`
-
-Blocked tests: `tcp_echo_epoll.vani`, `echo_loop.vani`,
-`echo_loop_break.vani`, `async_showcase.vani`, `echo_match_stress.vani`.
-
-#### 7. Type-system cleanup (Phase 11 — pick one per fresh session)
-
-Each item is independent and can be done in any order.
-
-| Item | Effort | Notes |
-|---|---|---|
-| **L3: match-by-ref scrutinee** | 10h | Match on `ref T` without consuming |
-| **L1: enum destructure on affine payloads** | 15–20h | Move out of enum arm |
-| **L12: SMT prove across function calls** | 25–30h | Inline `ensures` at call sites |
-
-#### 8. Installers — Windows + Linux (~8–12h, independent, high user-facing value)
-
-Make `vanic` installable without a Rust toolchain. Both targets are
-independent and can be done in the same session or split.
-
-**Windows installer** (`installers/windows/`):
-- Build a self-contained `.msi` or NSIS `.exe` that bundles the
-  `vanic.exe` binary (pre-built for `x86_64-pc-windows-gnu`), places
-  it in `%ProgramFiles%\vanic\bin`, and updates `%PATH%` via the
-  registry. Alternatively a simple `install.ps1` that downloads the
-  GitHub release asset and adds to `$env:PATH` in the user profile.
-- Smoke test: fresh machine can run `vanic --version` after install.
-
-**Linux installer** (`installers/linux/`):
-- Shell script `install.sh` that detects the distro, fetches the
-  correct pre-built binary from GitHub Releases
-  (`x86_64-unknown-linux-gnu` or `aarch64-unknown-linux-gnu`), copies
-  to `/usr/local/bin/vanic`, and sets executable bit.
-- Optional: `.deb` and `.rpm` packages for `apt`/`dnf` managed
-  installs. Use `cargo-deb` / `cargo-generate-rpm` if already
-  cross-compiling. Entry: `Cargo.toml` `[package.metadata.deb]`
-  section.
-- Smoke test: `vanic check examples/basics.vani` exits 0 on a clean
-  Ubuntu 22.04 container.
-
-**Shared prerequisites** (do first, ~1h):
-- Add a GitHub Actions workflow (`.github/workflows/release.yml`) that
-  builds the binaries for both targets on tag push and uploads them as
-  release assets. The installer scripts can then curl those URLs.
-
-#### 9. Deferred / long tail (touch only when asked)
-
-- **Phase 8a** — Dravidian batch: Tamil, Telugu, Kannada, Malayalam (~50h; grammar consultant gating)
-- **Phase 9b** — Japanese 3-script lexer: Kanji + Hiragana + Katakana (~12h)
 - **Phase 9a** — ML-3 LoRA fine-tune (~25h + ~$200 GPU)
-- **Phase 12** — Perso-Arabic RTL: bidi parser + Urdu + Punjabi-Shahmukhi + Sindhi (~100h)
-- **Phase 13** — Browser WASM playground (50h+), Arabic, Korean, etc.
-- Grammar consultant pass on 62 dialects
+- **Phase 13** — Browser WASM playground (50h+)
+- **macOS runtime verification** — no Darwin host available
+- **Grammar consultant pass** on 62 dialects
 - CI / GH-Actions deploy (Tier 4 — last)
 
 ---
 
-### Key numbers (2026-06-13)
-- **Lib tests**: 2108 passing
-- **E2e tests**: all pass (5 async-TCP tests skipped on Windows)
+### Key numbers (2026-06-16)
+- **Lib tests**: 2108+ passing (2108 as of `c1cfb2e`; +elaboration + big-o tests since)
+- **E2e tests**: all pass (Windows async-TCP fully unblocked as of `8193760`)
 - **Elaboration coverage**: 597/597 (100%)
 - **Dialects**: 62 across 26 scripts
-- **Last commit**: `326ccad` — 100% elaboration coverage
+- **Last commit**: `8193760` — WSAECONNRESET fix
 
 ---
 

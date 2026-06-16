@@ -4,6 +4,16 @@
 > variants with payload data, and destructure them with
 > `match` arms.
 
+An enum is like a multiple-choice form field: the value is
+ALWAYS one of a fixed set of options, and each option can carry
+its own data. Think of a delivery status: it's either
+`Shipped(tracking_number)`, `Delivered(timestamp)`, or
+`Failed(reason)` — never more than one at a time, and each
+variant carries different information. `match` is the natural
+companion: it lets you write separate instructions for each
+possible status, and the compiler ensures you handle ALL of
+them (so no delivery status goes unprocessed).
+
 ## The program
 
 ```vani

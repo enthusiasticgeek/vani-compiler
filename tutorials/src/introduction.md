@@ -2,12 +2,22 @@
 
 Welcome to the **vāṇी** (वाणी) tutorials.
 
-vāṇी is a Rust-flavored language with a C and an LLVM backend,
-an SMT-backed compile-time verifier, and per-file dialect
-support so the same program can be written in English,
-Sanskrit, Hindi, or Marathi. The name (Sanskrit for *"speech"*)
-expands to *Verbose Alternative Natural Interface* — the design
-goal is **code that reads like speech, not punctuation**.
+vāṇी is a programming language designed to read like speech,
+not symbols. The name (Sanskrit for *"speech"*) expands to
+*Verbose Alternative Natural Interface*. You write `fn add(a: i64, b: i64) -> i64`
+and vāṇी turns it into a fast native binary — no startup
+overhead, no garbage collector slowing things down. It supports
+62 human languages as keyword sets (English, Hindi, Sanskrit,
+Mandarin, Arabic, and more), so you can write code in the
+language you think in.
+
+**No CS background required.** Every computer-science concept
+in these tutorials is introduced with an everyday analogy BEFORE
+the code. Look for chapters labelled *"intuition primer"* — they
+contain no code and exist specifically for readers coming from
+non-technical backgrounds. You can read them on a train with no
+laptop. The code chapters then assume you've built the mental
+model first.
 
 > **⚠️ Note on natural-language dialects.** vāṇी ships keyword
 > tables for 62 dialects across 26 scripts, but only **English**
@@ -63,9 +73,14 @@ for step-by-step instructions (Linux / macOS / Windows + WSL2).
   parallel, embedded, vtable internals, dialect contribution,
   compiler internals.
 
-If you're brand new to systems languages, start with the
-beginner track in order. If you have Rust experience, you can
-probably skim Beginner 1–5 and dive in from §6 (Strings).
+If you're completely new to programming or coming from a
+non-CS background, start with the beginner track in order —
+the primer chapters (marked *"intuition primer"* in the sidebar)
+come first in each section and build the mental model before any
+code appears. If you have experience in another language (Python,
+JavaScript, Java), skim the primers and read the code chapters
+straight through. If you have Rust experience, you can probably
+skip Beginner 1–5 and dive in from §6 (Strings).
 
 ## A note on dialects
 
