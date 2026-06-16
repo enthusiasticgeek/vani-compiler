@@ -89,29 +89,16 @@ JSON format ship in `tests/`.
 Both passes complete. SUMMARY reordered, 65 chapters have analogy/orientation
 openers. `unsafe(reason="...")` bare-`unsafe` bug in `04_embedded.md` fixed.
 
-#### 2. Tutorials — missing feature coverage (ACTIVE, ~6–10h)
+#### 2. Tutorials — missing feature coverage ✅ HIGH + MEDIUM DONE (commits `d176936`, `a8c2d68`, `b582d55`)
 
-Feature gap audit (2026-06-16). Implemented in the compiler; no tutorial example.
-
-**HIGH priority:**
-
-| Feature | Target |
-|---|---|
-| `Option<T>` + `option_map`/`option_unwrap_or`/`option_filter` | new `intermediate/13_option.md` |
-| `HashMap<K,V>` + `hashmap_new/insert/get/remove/len` | new `intermediate/14_collections.md` |
-| `HashSet<T>` + `hashset_*` | same chapter |
-| `vec_map`/`vec_filter`/`vec_sum`/`vec_any`/`vec_all` as builtins | addendum to `intermediate/06_closures.md` |
-| `str_split`/`str_join`/`str_to_upper`/`str_contains`/`str_trim` | addendum to `beginner/06_strings.md` |
-| `#[no_heap]`/`#[bounded_stack(N)]`/`#[deterministic_timing]` worked code | new section in `advanced/04_embedded.md` |
-
-**MEDIUM priority:**
-
-| Feature | Notes |
-|---|---|
-| Bitwise operators (`&`, `\|`, `^`, `~`, `<<`, `>>`) | Missing from beginner 02 |
-| Math builtins (`sqrt`, `sin`, `cos`, `log`, `floor`, `ceil`, `abs`, `pow`) | Add reference table |
-| `rand_i64`/`rand_f64`/`seed_rng`/`rand_normal` | No chapter |
-| `clone` builtin | Explicit copy of affine types; no coverage |
+All HIGH and MEDIUM gaps filled:
+- `intermediate/13_option.md` — `Option<T>` + all `option_*` builtins
+- `intermediate/14_collections.md` — `HashMap<K,V>` + `HashSet<T>` full API
+- `intermediate/15_math_rng.md` — math builtins, `seed_rng`/`rand_*`, `clone`
+- `intermediate/06_closures.md` addendum — `vec_map`/`vec_filter`/`vec_sum`/`vec_any`/`vec_all`
+- `beginner/06_strings.md` addendum — full string builtins reference table + sampler
+- `beginner/02_variables.md` addendum — bitwise operators (&, |, ^, ~, <<, >>)
+- `advanced/04_embedded.md` addendum — `#[no_heap]`/`#[bounded_stack]`/`#[deterministic_timing]`/`#[recursion_bound]`
 
 **LOW (add only when asked):**
 `BTreeMap`/`BTreeSet`/`Deque`, binary heap, union-find, trie, skiplist, bloom
@@ -133,7 +120,7 @@ filter, graph algorithms, hash utilities, `mmio_read_u32`/`mmio_write_u32`,
 - **E2e tests**: all pass (Windows async-TCP fully unblocked as of `8193760`)
 - **Elaboration coverage**: 597/597 (100%)
 - **Dialects**: 62 across 26 scripts
-- **Last commit**: `8193760` — WSAECONNRESET fix
+- **Last commit**: `b582d55` — tutorials HIGH+MEDIUM gap chapters
 
 ---
 
