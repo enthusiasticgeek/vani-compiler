@@ -229,7 +229,7 @@ already done.
 
 ### 📋 User-direction items (added 2026-06-08; updated 2026-06-16)
 
-All four original feature requests shipped. Kosh pre-registry work added as new actionable item.
+All four original feature requests shipped. **Kosh package manager is the active next arc** — registry decision made 2026-06-16 (GitHub Pages sparse index); pre-registry + registry steps are now fully unblocked.
 
 | Task | Effort | Scope |
 |---|---|---|
@@ -237,6 +237,7 @@ All four original feature requests shipped. Kosh pre-registry work added as new 
 | ~~**Big-O annotation in compilation output (flag-gated, default on)**~~ | ✅ DONE (`5b73db7` + earlier) | `--big-o[=auto\|force\|off]` wired to all 3 subcommands. `src/big_o.rs` fully implemented. |
 | ~~**Tutorials — explain CS concepts for non-CS-bg readers**~~ | ✅ DONE (commits `bb9596d` `6c2b6d8` `a8c2d68` `b582d55`) | SUMMARY reordered; 65 chapters have analogy openers; HIGH+MEDIUM feature gaps filled (Option, HashMap/HashSet, vec combinators, string builtins, bitwise ops, math/rng/clone, safety annotations). LOW tier (BTreeMap/Deque/graph algorithms) on request only. |
 | ~~**`volatile_read` / `volatile_write` built-ins (embedded MMIO)**~~ | ✅ DONE (commit `2cea04a`) | All 4 backends. Gated by `INTENT_TARGET_EMBEDDED=1`. `examples/embedded/mmio_blink.vani`. 3 lib tests. |
+| **Kosh package manager (Arc 9 a/b/e/f)** | ACTIVE — ~20-25h total | Registry decided 2026-06-16: GitHub Pages sparse index (`enthusiasticgeek/kosh-index`) + GitHub Release assets. Steps 1-5 unblocked (see `docs/kosh_design.md` migration table). Order: (1) `[package].version` + `[deps]` version constraint in `src/manifest.rs`, (2) `vanic vendor`, (3) `vani.lock` writer, (4) create index repo + `config.json`, (5) registry resolver + `vanic add`/`publish`. |
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
 
@@ -276,8 +277,7 @@ EXCEPT the grammar-consultant pass:
   review across the 61 shipped dialects. Ongoing/external.
 - ⏸ DEFER: macOS empirical verification (L10)
 - ⏸ DEFER: Windows empirical verification (L10)
-- 🟢 ACTIONABLE (no registry needed): **Kosh pre-registry steps** — `[package].version` field in `vani.toml`, `vanic vendor` command, `vani.lock` writer for path-deps. ~8-10h. See `docs/kosh_design.md` migration steps 1-4.
-- ⏸ DEFER (registry-blocked): Kosh steps 9e/9f — `vanic add` / `vanic publish` / registry resolver / stdlib-as-kosh. Blocked on Q1 (hosting model) + Q2 (namespace authority) in `docs/kosh_design.md`.
+- ~~**Kosh package manager**~~ — registry decided 2026-06-16; full arc moved to active queue (user-direction items above).
 - ⏸ DEFER: Arc 7 Win64 / AArch64 cross-platform CI
 
 #### ⚪ Tier 4 — Deferred to last (standing instruction)
@@ -351,8 +351,8 @@ Georgian.
 |---|---|---|
 | **macOS empirical verification** | Darwin host access | 2-4h test runs + bug fixes |
 | **Windows empirical verification** | Windows host access | 2-4h test runs + bug fixes |
-| **Kosh pre-registry** (`[package].version`, `vanic vendor`, `vani.lock` for path-deps) | None — can ship now | ~8-10h |
-| **Kosh registry** (9e resolver + CLI + 9f stdlib-as-kosh) | Registry hosting choice (Q1/Q2 in `docs/kosh_design.md`) | ~18-25h once unblocked |
+| ~~**Kosh pre-registry**~~ | ✅ Unblocked — moved to active queue (user-direction items) | — |
+| ~~**Kosh registry**~~ | ✅ Registry decided 2026-06-16 — moved to active queue | — |
 | **Arc 7 Win64 / AArch64** | Cross-platform CI wiring | 8-12h |
 | **Grammar consultant pass** | Native-speaker linguist | external; ongoing |
 

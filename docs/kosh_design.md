@@ -126,59 +126,90 @@ cleanly with the registry's "what crosses the package
 boundary" decision — pub-without-qualifier is the export
 surface.
 
-## Open questions — block on registry choice
+## Registry decision — 2026-06-16 ✅ DECIDED
 
-### Q1. Hosting model
+**Chosen: GitHub Pages sparse index + GitHub Release assets.**
 
-- **Git-based** (like Go modules, EarlyCrate days of Cargo).
-  Pro: no infrastructure beyond a git server. Con: no
-  dedicated metadata / search.
-- **HTTP+index** (modern Cargo / crates.io). Pro: fast
-  indexing, mature ecosystem patterns. Con: needs hosted
-  registry.
-- **IPFS / content-addressed** (Nix-like). Pro:
-  reproducible by construction; offline-mirror friendly.
-  Con: nascent tooling, niche.
-- **Custom protocol** (likely overkill; skip unless a clear
-  reason emerges).
+Rationale: vāṇी has zero external users today. The goal is a
+free, zero-infrastructure setup that scales to real adoption
+without a format change. The Cargo sparse registry (RFC 2789)
+pattern fits exactly.
 
-### Q2. Authority — who owns the namespace?
+### Architecture
 
-If centralized: who runs `kosh.example.org`? GitHub-like
-SSO? Org-owned namespaces?
+```
+enthusiasticgeek/kosh-index   (public GitHub repo)
+  config.json                 ← { "dl": "...", "api": "..." }
+  <2-char prefix>/<pkg-name>  ← one JSON line per version
+                                 (Cargo sparse format)
 
-If decentralized: how do packages prove ownership of a name?
-Cryptographic signing? DNS TXT records? Manual review?
+GitHub Pages: https://enthusiasticgeek.github.io/kosh-index/
+→ vani.toml: source = "registry+https://enthusiasticgeek.github.io/kosh-index/"
+```
 
-### Q3. License + audit policy
+Package tarballs are uploaded as GitHub Release assets on each
+package's own repo. The index file records the download URL +
+`sha256` checksum for reproducible builds.
 
-vāṇी's positioning around verified code: should the registry
-preferentially surface packages with SMT-verified contracts?
-Mandate `requires` / `ensures` on exported items? Allow
-unverified packages but flag them?
+### Q1. Hosting model — DECIDED
 
-### Q4. Mirror policy
+**GitHub Pages sparse index** (Cargo RFC 2789 format).
+- Index: static JSON files in `enthusiasticgeek/kosh-index`,
+  served free via GitHub Pages.
+- Tarballs: GitHub Release assets (free for public repos).
+- `vanic publish` = build tarball → upload Release asset →
+  append version line to index file → push index repo.
+- Migration path if GitHub Pages ever limits traffic: change
+  one URL in `config.json`; format is identical everywhere.
 
-Does the official registry mirror itself for offline reproducibility?
-Are users allowed to host their own mirrors?
+Rejected alternatives:
+- Git-based (Go modules): no search, no checksums, no
+  `vanic add` metadata.
+- HTTP+index (crates.io-style): needs a hosted server, has a
+  running cost.
+- IPFS: free but tooling is immature; overkill for 0 users.
 
-## Migration path
+### Q2. Authority — who owns the namespace? — DECIDED
 
-When registry choice is made:
+First-come first-served on package names, enforced by the
+index repo's CODEOWNERS / branch protection. The index repo
+owner (`enthusiasticgeek`) is the sole write authority in v1.
+No cryptographic signing required at this scale; SHA-256
+checksums in the lockfile are sufficient tamper-evidence.
 
-1. Land `version` field in `[package]` (today's manifest parser
-   tolerates extra fields, so this is forward-compatible).
-2. Land `version` field in `[deps]` entries (same).
-3. Land `vanic vendor` (no registry needed).
-4. Land `vani.lock` writer (no registry needed; works for
-   path deps + future registry deps both).
-5. Land registry resolver (BLOCKED on Q1/Q2).
-6. Land `vanic add` / `vanic search` / `vanic publish`
-   (depends on resolver).
+Org-namespaced packages (`@enthusiasticgeek/foo`) are
+supported in the index file format (the path becomes
+`en/enthusiasticgeek-foo`) but not enforced in v1.
 
-Phases 1-4 can ship independently before any registry decision
-and don't waste effort if the registry choice shifts. Phase 5+
-needs the choices in Q1-Q4 first.
+### Q3. License + audit policy — DECIDED (v1)
+
+No policy mandated at v1. Packages are flagged in the index
+as `"verified": true` if every exported item carries a
+`requires` / `ensures` contract that discharges under Z3.
+Unverified packages are allowed; the flag is informational.
+
+### Q4. Mirror policy — DECIDED (v1)
+
+The index repo is a public git repo — anyone can fork it as
+a mirror. `vani.toml` accepts any `registry+<url>` source, so
+private / mirror registries work without compiler changes.
+
+## Migration path (updated 2026-06-16)
+
+Registry choice is now made (see §above). Steps 1-4 need no
+registry and can ship in a single session (~8-10h). Steps 5-6
+can follow immediately after.
+
+| Step | Work | Registry needed? | Status |
+|---|---|---|---|
+| 1 | `version` field in `[package]` | No | **NEXT** |
+| 2 | `version` constraint in `[deps]` entries | No | **NEXT** |
+| 3 | `vanic vendor` — copies path-deps to `vendor/` | No | **NEXT** |
+| 4 | `vani.lock` writer for path-deps | No | **NEXT** |
+| 5 | Create `enthusiasticgeek/kosh-index` repo + `config.json` | Setup (1h) | **NEXT** |
+| 6 | Registry resolver — fetch sparse index, resolve versions, verify SHA-256 | Yes (index must exist) | After step 5 |
+| 7 | `vanic add` / `vanic search` / `vanic publish` | Yes | After step 6 |
+| 8 | Stdlib as a kosh (9f) — move built-in helpers behind `std` kosh | Yes | After step 7 |
 
 ## See also
 
