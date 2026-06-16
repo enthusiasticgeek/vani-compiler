@@ -97,6 +97,55 @@ underlying mechanism (anon fns + higher-order helpers) is, and
 you can build your own `map_into` / `filter_into` / `fold` on
 top of it.
 
+## Built-in vec combinators
+
+vāṇī ships the common functional combinators as builtins so you
+don't have to hand-roll them. They all accept a `ref Vec<i64>` and
+a function literal, and they return a new `Vec<i64>` (or a scalar).
+
+| Builtin | Signature | Returns |
+|---|---|---|
+| `vec_map(v, f)` | `ref Vec<i64>, fn(i64)->i64 -> Vec<i64>` | transformed copy |
+| `vec_filter(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> Vec<i64>` | elements where pred is true |
+| `vec_fold(v, init, f)` | `ref Vec<i64>, i64, fn(i64,i64)->i64 -> i64` | reduce to a single value |
+| `vec_sum(v)` | `ref Vec<i64> -> i64` | sum of all elements |
+| `vec_any(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> bool` | true if any element matches |
+| `vec_all(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> bool` | true if all elements match |
+| `vec_count(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> i64` | count of matching elements |
+| `vec_min(v)` | `ref Vec<i64> -> i64` | minimum value |
+| `vec_max(v)` | `ref Vec<i64> -> i64` | maximum value |
+| `vec_product(v)` | `ref Vec<i64> -> i64` | product of all elements |
+
+```vani
+intent "Intermediate 6 — built-in vec combinators.";
+
+fn main() -> i64 {
+  let nums: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+
+  // vec_map: square every element
+  let squares: Vec<i64> = vec_map(ref nums, fn(x: i64) -> i64 { return x * x; });
+  print "sum of squares:", vec_sum(ref squares);           // 385
+
+  // vec_filter: keep only even numbers
+  let evens: Vec<i64> = vec_filter(ref nums, fn(x: i64) -> bool { return x % 2 == 0; });
+  print "even count:", len(evens);                        // 5
+
+  // vec_fold: custom accumulator
+  let product: i64 = vec_fold(ref nums, 1, fn(acc: i64, x: i64) -> i64 { return acc * x; });
+  print "product:", product;                              // 3628800
+
+  // vec_any / vec_all
+  print "any >9:", vec_any(ref nums, fn(x: i64) -> bool { return x > 9; });   // true
+  print "all >0:", vec_all(ref nums, fn(x: i64) -> bool { return x > 0; });   // true
+
+  return 0;
+}
+```
+
+These builtins are the preferred form for common operations; the
+hand-rolled `fold` above is the fallback when you need a custom
+accumulator shape not covered by the table.
+
 ## Challenge
 
 Write a `map_into(src: ref Vec<i64>, dst: mut ref Vec<i64>, f:

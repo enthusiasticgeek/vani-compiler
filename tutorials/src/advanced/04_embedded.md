@@ -104,6 +104,98 @@ fn use_pool() -> i64 {
 See [`unsafe.md`](https://github.com/anthropics/claude-code/blob/main/unsafe.md)
 in the repo for the full layered design.
 
+## Compile-time safety annotations
+
+For embedded and safety-critical targets, vāṇī provides four
+attributes that the compiler enforces statically — no runtime
+overhead.
+
+### `#[no_heap]`
+
+Forbids any heap allocation (no `Vec`, `OwnedStr`, `HashMap`, etc.)
+inside the annotated function, *transitively* through all callees.
+
+```vani
+#[no_heap]
+fn isr_handler(counter: i64) -> i64 {
+  // Arithmetic and Pool<T> are fine.
+  // Vec / OwnedStr / HashMap would be a compile error here.
+  return counter + 1;
+}
+```
+
+The compiler traverses the full call graph; if *any* callee
+(directly or indirectly) allocates, you get a diagnostic naming
+the chain.
+
+### `#[bounded_stack(bytes=N)]`
+
+Asserts that the function's stack frame — plus all transitive
+callees — fits within N bytes. Useful when targeting MCUs with
+a few kilobytes of stack.
+
+```vani
+#[bounded_stack(bytes=512)]
+fn sensor_read(pin: i64) -> i64 {
+  let raw: i64 = pin * 3;
+  return raw;
+}
+```
+
+Setting `bytes=0` is a compile error (the attribute requires a
+positive budget). Setting the budget smaller than the actual frame
+produces a diagnostic with the measured size.
+
+### `#[deterministic_timing]`
+
+Rejects `while` loops, unbounded `for`, and `if` arms with
+different call costs — anything that would make execution time
+depend on the input. The function must be straight-line or use
+only `for` loops with a compile-time-constant upper bound.
+
+```vani
+#[deterministic_timing]
+fn mix_sample(a: i64, b: i64, t: i64) -> i64 {
+  // OK: straight-line arithmetic.
+  return a + (b - a) * t / 100;
+}
+```
+
+This attribute is targeted at audio DSP callbacks, control-loop
+ISRs, and cryptographic primitives where constant-time is a
+security or real-time requirement.
+
+### `#[recursion_bound(N)]`
+
+Caps the maximum recursion depth at N. Together with
+`#[bounded_stack]`, this lets the compiler prove the total stack
+usage is finite.
+
+```vani
+#[recursion_bound(32)]
+#[bounded_stack(bytes=4096)]
+fn tree_height(depth: i64) -> i64 {
+  if depth <= 0 {
+    return 0;
+  }
+  return 1 + tree_height(depth - 1);
+}
+```
+
+### Combining annotations
+
+Attributes stack: a function may carry any combination of the four.
+The checker runs each enforcement pass independently.
+
+```vani
+#[no_heap]
+#[bounded_stack(bytes=256)]
+#[deterministic_timing]
+fn critical_isr(x: i64) -> i64 {
+  return x ^ (x >> 1);    // XOR with right-shift: deterministic, no heap, tiny frame
+}
+```
+
 ## When you'll reach for this layer
 
 - **MCU firmware** with no malloc and known memory budgets.

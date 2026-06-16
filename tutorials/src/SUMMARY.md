@@ -55,6 +55,8 @@
 - [SMT — `requires` / `ensures` intuition primer](intermediate/12a_smt_primer.md)
 - [Compile time vs runtime — intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)
 - [SMT verification deep-dive](intermediate/12_smt_deepdive.md)
+- [Option<T> and the option builtins](intermediate/13_option.md)
+- [HashMap<K,V> and HashSet<T>](intermediate/14_collections.md)
 
 # Advanced
 
