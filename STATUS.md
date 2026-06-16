@@ -84,20 +84,41 @@ JSON format ship in `tests/`.
 
 ### Pick up in this order
 
-#### 1. Tutorials rewrite for non-CS readers (~20–40h, multi-session)
+#### 1. Tutorials — analogy-first rewrite ✅ DONE (commits `bb9596d`, `6c2b6d8`)
 
-Beginner + Intermediate tracks rewritten with analogy-first approach.
-Each CS concept: 1-paragraph analogy → vāṇी example → CS explanation.
-Target: `tutorials/src/beginner/` and `tutorials/src/intermediate/`.
+Both passes complete. SUMMARY reordered, 65 chapters have analogy/orientation
+openers. `unsafe(reason="...")` bare-`unsafe` bug in `04_embedded.md` fixed.
 
-Pattern per chapter: open with "imagine you're …" → 1-paragraph analogy
-→ tiny vāṇी example → CS explanation of what happened.
+#### 2. Tutorials — missing feature coverage (ACTIVE, ~6–10h)
 
-Topics flagged: pointers / references / mutable refs / heap vs stack /
-`interface` / `dyn Iface` / `Box` / RAII / affine ownership / modules /
-SMT contracts / parallelism.
+Feature gap audit (2026-06-16). Implemented in the compiler; no tutorial example.
 
-#### 2. Deferred / long tail (touch only when asked)
+**HIGH priority:**
+
+| Feature | Target |
+|---|---|
+| `Option<T>` + `option_map`/`option_unwrap_or`/`option_filter` | new `intermediate/13_option.md` |
+| `HashMap<K,V>` + `hashmap_new/insert/get/remove/len` | new `intermediate/14_collections.md` |
+| `HashSet<T>` + `hashset_*` | same chapter |
+| `vec_map`/`vec_filter`/`vec_sum`/`vec_any`/`vec_all` as builtins | addendum to `intermediate/06_closures.md` |
+| `str_split`/`str_join`/`str_to_upper`/`str_contains`/`str_trim` | addendum to `beginner/06_strings.md` |
+| `#[no_heap]`/`#[bounded_stack(N)]`/`#[deterministic_timing]` worked code | new section in `advanced/04_embedded.md` |
+
+**MEDIUM priority:**
+
+| Feature | Notes |
+|---|---|
+| Bitwise operators (`&`, `\|`, `^`, `~`, `<<`, `>>`) | Missing from beginner 02 |
+| Math builtins (`sqrt`, `sin`, `cos`, `log`, `floor`, `ceil`, `abs`, `pow`) | Add reference table |
+| `rand_i64`/`rand_f64`/`seed_rng`/`rand_normal` | No chapter |
+| `clone` builtin | Explicit copy of affine types; no coverage |
+
+**LOW (add only when asked):**
+`BTreeMap`/`BTreeSet`/`Deque`, binary heap, union-find, trie, skiplist, bloom
+filter, graph algorithms, hash utilities, `mmio_read_u32`/`mmio_write_u32`,
+`aref_load`/`aref_store`, `bptr_*`.
+
+#### 3. Deferred / long tail (touch only when asked)
 
 - **Phase 9a** — ML-3 LoRA fine-tune (~25h + ~$200 GPU)
 - **Phase 13** — Browser WASM playground (50h+)

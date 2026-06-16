@@ -13,7 +13,7 @@ by posted rules. The service door lets authorized staff (the
 ones who KNOW the rules) step behind the scenes to do things
 the public corridors can't: move large equipment, access
 electrical panels, interact with the building's raw
-infrastructure. `unsafe {}` in vāṇी works the same way:
+infrastructure. `unsafe(reason = "raw pointer write — hardware register") {}` in vāṇी works the same way:
 the rest of the language's safety rules still apply everywhere
 else; the `unsafe` block is a clearly-marked zone where the
 compiler relaxes exactly the restrictions that embedded
@@ -27,14 +27,14 @@ which code needs extra scrutiny.
 intent "Advanced 4 — raw pointer + region-scoped arena.";
 
 fn poke(addr: *mut i32, val: i32) -> i64 {
-  unsafe {
+  unsafe(reason = "raw pointer write — hardware register") {
     *addr = val;
   }
   return 0;
 }
 ```
 
-- `unsafe { ... }` blocks are the only place where the
+- `unsafe(reason = "raw pointer write — hardware register") { ... }` blocks are the only place where the
   following are allowed:
   - Dereferencing a raw pointer (`*p`).
   - Calling a `pure extern "C" fn` that's marked `unsafe`.
@@ -50,7 +50,7 @@ allocators:
 
 ```vani
 fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {
-  unsafe {
+  unsafe(reason = "raw pointer write — hardware register") {
     *(base + offset) = value;
   }
   return 0;
@@ -98,7 +98,7 @@ fn use_pool() -> i64 {
 | 1.1 | `*const T` / `*mut T` deref | unsafe |
 | 1.2 | `Pool<T>` / `Handle<T>` | safe (region typed) |
 | 2 | C extern fn call | safe (caller's responsibility) |
-| 3 | `unsafe { ... }` block | author's responsibility |
+| 3 | `unsafe(reason = "raw pointer write — hardware register") { ... }` block | author's responsibility |
 | 4.1 | `-fstack-protector-strong` | safe (opt-in build flag) |
 
 See [`unsafe.md`](https://github.com/anthropics/claude-code/blob/main/unsafe.md)
