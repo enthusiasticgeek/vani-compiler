@@ -229,14 +229,13 @@ already done.
 
 ### 📋 User-direction items (added 2026-06-08; updated 2026-06-16)
 
-Four feature requests from the user. Volatile and elaboration shipped;
-Big-O shipped; tutorials is the active remaining item.
+All four original feature requests shipped. Kosh pre-registry work added as new actionable item.
 
 | Task | Effort | Scope |
 |---|---|---|
 | ~~**Error-message elaboration — break diagnostics into step-by-step explanation**~~ | ✅ DONE 100% (commit `326ccad`) | 597/597 diagnostic sites have elaboration. 20–30+ families seeded with WHAT/WHY/HOW. `src/diagnostic.rs` `elaboration` field; integration tests in `tests/`. |
 | ~~**Big-O annotation in compilation output (flag-gated, default on)**~~ | ✅ DONE (`5b73db7` + earlier) | `--big-o[=auto\|force\|off]` wired to all 3 subcommands. `src/big_o.rs` fully implemented. |
-| **Tutorials — explain CS concepts for non-CS-bg readers** | 20-40h, multi-session arc | **ACTIVE — passes 1+2 done** (commits `bb9596d`, `6c2b6d8`): SUMMARY reordered, 65 chapters have analogy/orientation openers, `unsafe(reason=...)` bug fixed. **Remaining**: missing-feature chapters (see gap table in STATUS.md §2). HIGH: `Option<T>` (`intermediate/13_option.md`), `HashMap`/`HashSet` (`intermediate/14_collections.md`), `vec_map`/`vec_filter`/`vec_sum` builtins (addendum to ch.06), string builtins (addendum to ch.06_strings), `#[no_heap]`/`#[bounded_stack]`/`#[deterministic_timing]` code (addendum to `advanced/04_embedded.md`). MEDIUM: bitwise ops, math builtins table, rng, `clone`. LOW: BTreeMap/Set, Deque, graph algorithms, advanced data structures. |
+| ~~**Tutorials — explain CS concepts for non-CS-bg readers**~~ | ✅ DONE (commits `bb9596d` `6c2b6d8` `a8c2d68` `b582d55`) | SUMMARY reordered; 65 chapters have analogy openers; HIGH+MEDIUM feature gaps filled (Option, HashMap/HashSet, vec combinators, string builtins, bitwise ops, math/rng/clone, safety annotations). LOW tier (BTreeMap/Deque/graph algorithms) on request only. |
 | ~~**`volatile_read` / `volatile_write` built-ins (embedded MMIO)**~~ | ✅ DONE (commit `2cea04a`) | All 4 backends. Gated by `INTENT_TARGET_EMBEDDED=1`. `examples/embedded/mmio_blink.vani`. 3 lib tests. |
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
@@ -277,7 +276,8 @@ EXCEPT the grammar-consultant pass:
   review across the 61 shipped dialects. Ongoing/external.
 - ⏸ DEFER: macOS empirical verification (L10)
 - ⏸ DEFER: Windows empirical verification (L10)
-- ⏸ DEFER: Arc 9 a/b/e/f Kosh package manager
+- 🟢 ACTIONABLE (no registry needed): **Kosh pre-registry steps** — `[package].version` field in `vani.toml`, `vanic vendor` command, `vani.lock` writer for path-deps. ~8-10h. See `docs/kosh_design.md` migration steps 1-4.
+- ⏸ DEFER (registry-blocked): Kosh steps 9e/9f — `vanic add` / `vanic publish` / registry resolver / stdlib-as-kosh. Blocked on Q1 (hosting model) + Q2 (namespace authority) in `docs/kosh_design.md`.
 - ⏸ DEFER: Arc 7 Win64 / AArch64 cross-platform CI
 
 #### ⚪ Tier 4 — Deferred to last (standing instruction)
@@ -351,7 +351,8 @@ Georgian.
 |---|---|---|
 | **macOS empirical verification** | Darwin host access | 2-4h test runs + bug fixes |
 | **Windows empirical verification** | Windows host access | 2-4h test runs + bug fixes |
-| **Arc 9 a/b/e/f Kosh package manager** | Registry-hosting choice | 25-35h |
+| **Kosh pre-registry** (`[package].version`, `vanic vendor`, `vani.lock` for path-deps) | None — can ship now | ~8-10h |
+| **Kosh registry** (9e resolver + CLI + 9f stdlib-as-kosh) | Registry hosting choice (Q1/Q2 in `docs/kosh_design.md`) | ~18-25h once unblocked |
 | **Arc 7 Win64 / AArch64** | Cross-platform CI wiring | 8-12h |
 | **Grammar consultant pass** | Native-speaker linguist | external; ongoing |
 
