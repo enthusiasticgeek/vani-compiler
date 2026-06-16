@@ -776,12 +776,13 @@ COMMANDS:
     run <file.vani> [--backend=<c|llvm>]
         [--link-with PATH ...]            Compile and run a program. Default
         [-l<name> ...]                    backend is 'llvm' (emits LLVM IR
-                                          and runs it via $LLI or `lli`).
+        [--big-o[=<auto|force|off>]]      and runs it via $LLI or `lli`).
                                           With --backend=c, invokes $CC or
                                           `cc` on the C output.
                                           --link-with / -l<name> require
                                           --backend=c (LLVM-JIT auto-resolves
-                                          host symbols).
+                                          host symbols). --big-o prints per-fn
+                                          complexity to stderr before running.
     build <file.vani> [-o out]          AOT-compile to a native binary.
           [--link-with PATH ...]          Lowers via the LLVM backend, calls
           [-l<name> ...]                  $LLC (or `llc`) for object code,
@@ -1185,9 +1186,9 @@ fn run() -> Result<ExitCode, String> {
         }
         "run" => {
             let (file, flag_start) = required_file_at(&args, 2, "run")?;
-            let (backend_kind, link_args) = parse_run_args(&args, flag_start)?;
+            let (backend_kind, link_args, big_o_mode) = parse_run_args(&args, flag_start)?;
             match backend_kind {
-                BackendKind::C => run_program(&file, &link_args),
+                BackendKind::C => run_program(&file, &link_args, big_o_mode),
                 BackendKind::Llvm => {
                     if !link_args.is_empty() {
                         return Err(
@@ -1198,7 +1199,7 @@ fn run() -> Result<ExitCode, String> {
                                 .to_string(),
                         );
                     }
-                    run_program_llvm(&file)
+                    run_program_llvm(&file, big_o_mode)
                 }
             }
         }
@@ -2090,9 +2091,10 @@ enum BackendKind {
 fn parse_run_args(
     args: &[String],
     from: usize,
-) -> Result<(BackendKind, Vec<String>), String> {
+) -> Result<(BackendKind, Vec<String>, Option<vani::big_o::BigOMode>), String> {
     let mut backend = BackendKind::Llvm;
     let mut link_args: Vec<String> = Vec::new();
+    let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if let Some(value) = arg.strip_prefix("--backend=") {
@@ -2122,11 +2124,27 @@ fn parse_run_args(
                 .get(idx + 1)
                 .ok_or_else(|| format!("expected a path after '{}'", arg))?;
             idx += 2;
+        } else if arg == "--big-o" {
+            big_o_mode = Some(vani::big_o::BigOMode::Auto);
+            idx += 1;
+        } else if let Some(value) = arg.strip_prefix("--big-o=") {
+            match vani::big_o::BigOMode::parse(value) {
+                Some(m) => {
+                    big_o_mode = Some(m);
+                    idx += 1;
+                }
+                None => {
+                    return Err(format!(
+                        "unknown --big-o mode '{}'; expected auto|force|off",
+                        value,
+                    ));
+                }
+            }
         } else {
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((backend, link_args))
+    Ok((backend, link_args, big_o_mode))
 }
 
 fn parse_build_args(
@@ -2231,8 +2249,19 @@ fn compile_path_or_report(
         })
 }
 
-fn run_program(path: &Path, link_args: &[String]) -> Result<ExitCode, String> {
+fn run_program(
+    path: &Path,
+    link_args: &[String],
+    big_o_mode: Option<vani::big_o::BigOMode>,
+) -> Result<ExitCode, String> {
     let checked = compile_path_or_report(path)?;
+    if let Some(mode) = big_o_mode {
+        if mode != vani::big_o::BigOMode::Off {
+            for (name, complexity) in vani::big_o::annotate_program(&checked.ir, mode) {
+                eprintln!("  fn {}: {}", name, complexity);
+            }
+        }
+    }
     let c = emit_c_via_ssa(&checked.ir);
     let (c_path, bin_path) = temp_paths(path);
 
@@ -2328,8 +2357,18 @@ fn run_program(path: &Path, link_args: &[String]) -> Result<ExitCode, String> {
 /// LLVM equivalent of `run_program`. Emits `.ll`, runs it through
 /// `lli`, returns the program's exit code. `LLI` env var overrides
 /// the default `lli` binary lookup, mirroring `CC` for the C path.
-fn run_program_llvm(path: &Path) -> Result<ExitCode, String> {
+fn run_program_llvm(
+    path: &Path,
+    big_o_mode: Option<vani::big_o::BigOMode>,
+) -> Result<ExitCode, String> {
     let checked = compile_path_or_report(path)?;
+    if let Some(mode) = big_o_mode {
+        if mode != vani::big_o::BigOMode::Off {
+            for (name, complexity) in vani::big_o::annotate_program(&checked.ir, mode) {
+                eprintln!("  fn {}: {}", name, complexity);
+            }
+        }
+    }
     let ll = emit_llvm_via_ssa(&checked.ir);
     let stem = path
         .file_stem()

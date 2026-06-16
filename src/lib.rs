@@ -46233,5 +46233,54 @@ fn main() -> i64 { return 0; }
         compile(source).expect("L1 by-value non-Copy payload must still compile");
     }
 
+    #[test]
+    fn big_o_annotation_linear_fn_auto_mode() {
+        // --big-o Auto: O(n) function is included, O(1) helper is skipped.
+        let source = r#"
+intent "big-o test";
+fn sum_vec(v: ref Vec<i64>) -> i64 {
+  let s: i64 = 0;
+  for x in ref v { s = s + x; }
+  return s;
+}
+fn add_one(x: i64) -> i64 { return x + 1; }
+fn main() -> i64 { return 0; }
+"#;
+        let checked = compile(source).expect("must compile");
+        let ann = crate::big_o::annotate_program(&checked.ir, crate::big_o::BigOMode::Auto);
+        let names: Vec<&str> = ann.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            names.contains(&"sum_vec"),
+            "sum_vec (O(n)) must appear in Auto mode; got {:?}", ann
+        );
+        assert!(
+            !names.contains(&"add_one"),
+            "add_one (O(1)) must be skipped in Auto mode; got {:?}", ann
+        );
+        let linear = ann.iter().find(|(n, _)| n == "sum_vec").map(|(_, c)| c);
+        assert_eq!(linear, Some(&crate::big_o::BigO::Linear),
+            "sum_vec must be classified Linear; got {:?}", linear);
+    }
+
+    #[test]
+    fn big_o_annotation_force_mode_includes_constant() {
+        // --big-o Force: every function appears including O(1) ones.
+        let source = r#"
+intent "big-o force";
+fn trivial(x: i64) -> i64 { return x; }
+fn main() -> i64 { return 0; }
+"#;
+        let checked = compile(source).expect("must compile");
+        let ann = crate::big_o::annotate_program(&checked.ir, crate::big_o::BigOMode::Force);
+        let names: Vec<&str> = ann.iter().map(|(n, _)| n.as_str()).collect();
+        assert!(
+            names.contains(&"trivial"),
+            "trivial (O(1)) must appear in Force mode; got {:?}", ann
+        );
+        let c = ann.iter().find(|(n, _)| n == "trivial").map(|(_, c)| c);
+        assert_eq!(c, Some(&crate::big_o::BigO::Constant),
+            "trivial must be Constant; got {:?}", c);
+    }
+
 }
 
