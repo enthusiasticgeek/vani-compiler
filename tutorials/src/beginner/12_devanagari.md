@@ -6,6 +6,17 @@
 > you only plan to write English-keyword vāṇी; nothing later in
 > the tracks depends on it.
 
+Most programming languages use English keywords because they
+were invented by English speakers. vāṇी treats that as a
+historical accident, not a rule. The same compiler that reads
+`fn main()` also reads `मुख्य फलन`, because the Devanagari
+keyword `फलन` maps to `fn` in the same way `función` maps to
+"function" in Spanish. You add one line to your file —
+`// vani-lang: sanskrit` — and the entire keyword vocabulary
+switches. The program still runs identically; only the words
+you type change. This lesson shows you what that looks like in
+practice.
+
 ## The program
 
 Save this in `~/lesson12.vani`:

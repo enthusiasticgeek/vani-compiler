@@ -4,6 +4,17 @@
 > a tuple, read fields with `.0` / `.1` / `.N`, and unpack with
 > `let (a, b, c) = expr;`.
 
+> **New to this?** Read [Beginner 7a — Tuples and destructuring primer](../beginner/07a_tuples_primer.md) first.
+
+A tuple is an anonymous bundle — like a shoebox where you throw
+in a name, an age, and a score without bothering to name the
+box itself. When a function needs to hand back two or three
+pieces of information at once, a tuple is the quick alternative
+to defining a whole struct just for that one return. You access
+slots by position (`.0` is the first item, `.1` the second) and
+you can unpack the whole bundle in one line:
+`let (name, age) = get_user();`.
+
 ## The program
 
 ```vani

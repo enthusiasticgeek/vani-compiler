@@ -4,6 +4,16 @@
 > `invariant` fails, get the SMT solver to show its work and
 > turn the counterexample into a fix.
 
+When an SMT proof fails, the solver found a specific input that
+BREAKS your contract. Think of it like a QA tester who hands
+you a bug report: "I gave your add function `a = -1, b = 2`
+and `ensures _return >= 0` was false." The solver's
+counterexample IS that bug report. This chapter shows you how
+to ask the solver to print the counterexample in human-readable
+form, and how to use it to either tighten the contract
+(`requires a >= 0`) or fix the code (handle the negative case
+explicitly).
+
 ## Turning on the trace
 
 Set the env var, then re-run any compile command:

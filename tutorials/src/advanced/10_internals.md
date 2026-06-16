@@ -4,6 +4,26 @@
 > source tree so you can read a diagnostic, find the
 > responsible pass, and contribute a fix.
 
+A compiler is an assembly line that transforms text into a
+running program in five broad stages:
+1. **Lexer** — reads characters, groups them into tokens
+   (`let`, `42`, `+`). Like a copy editor who circles every
+   word on the page.
+2. **Parser** — reads tokens, builds a tree of the program's
+   structure (the AST). Like the editor grouping circled words
+   into sentences and paragraphs.
+3. **Checker** — verifies types, ownership, contract
+   obligations. Like a fact-checker who verifies every claim
+   before publication.
+4. **Codegen** — translates the checked tree into LLVM IR or C.
+   Like a translator who renders the document in another
+   language.
+5. **Backend** — LLVM compiles IR to machine code; `cc`
+   compiles C.
+
+Each Rust source file in `src/` maps closely to one stage.
+This chapter walks each one.
+
 ## The pipeline at 30,000 ft
 
 ```

@@ -4,6 +4,15 @@
 > purity gate, how the lexer enforces per-file dialect choice,
 > and how the SOV verb-at-end statement shapes desugar.
 
+**Who this chapter is for**: developers who want to write or
+maintain vāṇी programs in a Devanagari-script dialect (Sanskrit
+/ Hindi / Marathi and their close relatives). You'll learn what
+the pragma does, what the "purity gate" enforces (no mixing of
+dialects within one file), and how Subject–Object–Verb word
+order affects statement shape. Skip this chapter if you're only
+writing English-keyword vāṇी — nothing in the main tracks
+depends on it.
+
 ## The pragma + the gate
 
 Every `.vani` file optionally declares its dialect on the

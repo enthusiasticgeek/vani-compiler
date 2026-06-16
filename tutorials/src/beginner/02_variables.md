@@ -3,6 +3,15 @@
 > **Learning goal**: declare typed variables, do arithmetic with
 > integers and floats, and combine booleans.
 
+A variable is a named box. You give the box a label (`a`), say
+what kind of thing it holds (`i64` — a whole number), and put
+something in it (`7`). Later, whenever you write `a`, the
+program looks up that box and uses what's inside. The *type*
+(`i64`, `f64`, `bool`) is the shape of the box — it determines
+what values fit and what you're allowed to do with them (you
+can't add a whole number to a `true`/`false`, just like you
+can't fit a litre of milk in a coin slot).
+
 ## The program
 
 Save this in `~/lesson2.vani`:

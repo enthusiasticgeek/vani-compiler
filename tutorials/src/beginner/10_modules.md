@@ -4,6 +4,19 @@
 > exposed items with `pub`, reference them with `::`, and bring
 > them into scope with `use`.
 
+> **New to this?** Read [Beginner 9a — Modules and namespaces primer](09a_modules_primer.md) first.
+
+A module is like a filing cabinet drawer labelled by topic
+("Accounts", "HR", "Legal"). Functions and types live inside
+the relevant drawer. `pub` is the label you stick on a folder
+to say "anyone from outside this drawer is allowed to read
+this." Without `pub` the folder is internal — only code inside
+the same drawer can access it. `use` is shorthand: instead of
+spelling out the full drawer-path every time
+(`Accounts::invoices::create()`), you pull the folder to your
+desk (`use Accounts::invoices::create;`) so you can just write
+`create()`.
+
 ## The program
 
 Save this in `~/lesson10.vani`:

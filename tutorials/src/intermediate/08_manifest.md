@@ -4,6 +4,15 @@
 > files, wire them together with a `vani.toml` manifest, and
 > import items between files with `use "path";` declarations.
 
+Think of a multi-file project as a building with separate
+rooms. Each `.vani` file is a room; the `vani.toml` manifest
+is the building's floor plan that lists all the rooms and
+tells the compiler how they connect. `use "path/to/room.vani";`
+is how a room says "I need to borrow some furniture from
+room B." The manifest exists so you can type `vanic build .`
+in the project root and have the compiler find all the rooms
+automatically without you listing every file by hand.
+
 ## The project layout
 
 ```

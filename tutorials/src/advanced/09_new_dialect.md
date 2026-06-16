@@ -4,6 +4,14 @@
 > dialect to vāṇी, using the per-script abstraction set up in
 > Phase 5b / 6.
 
+**Who this chapter is for**: contributors who want to add a
+new human-language dialect (keyword table, examples, tests).
+Adding a Tier I dialect (a language that shares script and
+grammar patterns with an existing one) typically takes 4–8
+hours; a brand-new script family takes 15–30 hours. Read this
+chapter before opening a PR — it covers the exact files to
+touch, the test checklist, and the native-speaker review gate.
+
 ## Quick decision tree
 
 Before you start, decide which case you're in:

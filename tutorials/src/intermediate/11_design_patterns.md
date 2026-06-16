@@ -1,9 +1,20 @@
 # Intermediate 11 — The 22 GoF design patterns
 
 > **Learning goal**: orient yourself in the
-> [`design_patterns/`](https://github.com/anthropics/claude-code/tree/main/examples/language/english/design_patterns)
+> [`design_patterns/`](https://github.com/enthusiasticgeek/vani-compiler/tree/main/examples/language/english/design_patterns)
 > directory, understand which v1 idiom each pattern uses, and
 > know where to look when you reach for one.
+
+Design patterns are named solutions to recurring problems —
+think of them as blueprints, not finished buildings. A
+"Factory" pattern is not a specific piece of code; it's the
+idea "have one place that decides which concrete type to
+create, so callers don't need to know." The GoF ("Gang of Four")
+catalogue named 23 such patterns in 1994 and every major
+language community has since translated them into idiomatic
+examples. This chapter is a guided tour of the vāṇी versions —
+it assumes you've read through Intermediate 1–6 so the idioms
+feel familiar.
 
 ## The directory layout
 

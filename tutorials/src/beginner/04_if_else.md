@@ -3,6 +3,14 @@
 > **Learning goal**: branch on a `bool` condition, chain
 > `else if` arms, combine conditions with `&&` and `||`.
 
+`if` / `else` is the program making a decision. It's the same
+as everyday reasoning: "IF it's raining, take an umbrella;
+ELSE IF it's cold, take a coat; ELSE just go." The computer
+evaluates the condition (is it raining?), picks the matching
+branch, and runs only that one. All other branches are skipped
+entirely — the program doesn't wonder what would have happened
+if it had rained.
+
 ## The program
 
 Save this in `~/lesson4.vani`:

@@ -4,6 +4,19 @@
 > at runtime, when the compiler can prove a call is safe, and
 > where the C-backend code-gen lives.
 
+You already know that `dyn Iface` lets you call the right method
+regardless of which concrete type is inside the envelope. This
+chapter shows you the machinery that makes that work: the
+**vtable** (virtual dispatch table). Think of a vtable as a
+printed directory card stapled inside each envelope. The card
+lists the methods the interface promises ("area → page 7,
+draw → page 12") with each entry pointing to the concrete
+function for the specific type inside. When the runtime calls
+`d.area()`, it flips to the right entry in the card and jumps
+there — one extra pointer dereference, but no branching or
+type-checking. This chapter is for readers who want to know
+EXACTLY what memory is laid out and why.
+
 ## The fat-pointer layout
 
 A `dyn Iface` value is a 16-byte struct on a 64-bit target:

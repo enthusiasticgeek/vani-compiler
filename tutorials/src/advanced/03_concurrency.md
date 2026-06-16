@@ -5,6 +5,24 @@
 > (`Atomic<T>` / `Mutex<T>` / `Channel<T>` / `Condvar`) for
 > your synchronization need.
 
+Imagine two chefs sharing one kitchen at the same time (true
+parallelism — two threads). If they both reach for the salt
+shaker simultaneously, one has to wait. Concurrency primitives
+are the rules that prevent chaos:
+- **Atomic** — a single number with a padlock so small and fast
+  that the two chefs can each update it without ever noticing
+  the other. Good for simple counters.
+- **Mutex** — a door key: only the chef holding the key can
+  enter the walk-in fridge. One at a time; everyone else waits.
+- **Channel** — a pass-through hatch: chef A prepares dishes
+  and slides them through; chef B picks them up on the other
+  side. No shared space, no collision.
+- **Condvar** — a buzzer: one chef waits in the break room and
+  the other buzzes them when the oven is free.
+
+`task` spawns the second chef; `join` waits for them to finish
+cleaning up before you leave.
+
 ## The `task` / `join` shape
 
 ```vani

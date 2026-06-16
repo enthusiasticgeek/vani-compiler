@@ -4,6 +4,13 @@
 > support a new keyword spelling or a new dialect, and
 > understand the round-trip parity guarantee.
 
+**Who this chapter is for**: contributors who want to add
+vocabulary for a dialect that's close to one already shipped
+(e.g. a regional spelling variant), or developers who want to
+understand how the keyword-substitution pipeline works. The
+translator is a Python script — not part of the Rust compiler —
+so you don't need to understand compiler internals to use it.
+
 ## What the translator does
 
 `tools/vani_translate.py` does token-level keyword substitution
