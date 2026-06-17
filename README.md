@@ -334,16 +334,29 @@ semantic model **borrowed from Rust** and a code-generator that
   rules on `implement Iface for T`, collision diagnostics with
   precise `use … as …;` hints.
 
+**Kosh package manager** (shipped 2026-06-17):
+- `vani.toml` manifest — `[package]` (name, version, entry) + `[deps]`
+  with path deps and semver constraints (`^1.0`, `~1.2`, `>=1.0`).
+- `vani.lock` — Cargo.lock-style lockfile, auto-written when manifest
+  is newer than lock.
+- `vanic vendor` — copies dep source trees into `vendor/<name>/`.
+- `vanic add <name>[@constraint]` — fetches from the Kosh registry,
+  extracts to `vendor/<name>/`, updates `vani.toml` and `vani.lock`.
+- `vanic publish` — builds tarball, auth-gates against
+  `governance.allowed_publishers` in `config.json`, creates a GitHub
+  Release, and appends an NDJSON line to the sparse index.
+- Live registry: **[enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/)**
+- Governance model is registry-side: `allowed_publishers` list in
+  `config.json` — transfers to a committee without any compiler change.
+
 **Backends + tooling:**
 - LLVM IR (default) — tree path + SSA path with automatic fallback.
 - C — same dual-path arrangement.
-- `intentc check` (typecheck + SMT), `emit` (lowered source), `run`
+- `vanic check` (typecheck + SMT), `emit` (lowered source), `run`
   (compile + execute), `build` (AOT to native binary), `fmt`
   (formatter with round-trip + comment preservation), `ast` (AST
-  dump), LSP integration. *(The `intentc` binary name is a legacy
-  carryover from the project's earlier "future_compiler" / "intent"
-  names; a rename to `vanic` is queued — see
-  [TODO.md](TODO.md) §*CLI rename*.)*
+  dump), `vendor` / `add` / `publish` (package manager), LSP
+  integration. *(Legacy alias `intentc` kept for one release cycle.)*
 - Cross-backend parity test pins identical stdout + exit code on
   every example under both backends.
 
@@ -473,7 +486,8 @@ below.
   - **v3 async aliases + state-machine pattern** (commit `f7743a1`): 3 async-flavored builtin aliases (`io_recv_async` / `io_send_async` / `io_accept_async`) + [tcp_echo_state_machine.vani](examples/tcp_echo_state_machine.vani) showing the hand-rolled state-machine pattern (struct + poll fn + driver loop).
   - **Arc 8 v3.1 sugar — FEATURE-COMPLETE 2026-06-08** for typical user code (postfix `?`, multi-task scheduling, ref CancelToken + A4.4 auto-plumbing all shipped same day; full ledger above): the parser-level compiler transform auto-rewrites `async fn` bodies into state-machine struct/poll/constructor triples that users previously wrote by hand. **All phases shipped**: Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow + **4c-broad (full generic async fns)**. Covers linear bodies + non-suspending control flow + suspend-in-branch state-splitting + fall-through merge + nested ifs + ANF lifting + loops + break/continue + **match-with-suspends for every literal + enum pattern shape** (Int / Bool / Str / Float / Variant / VariantWithBinding / Wildcard) + **`try EXPR` keyword for Result propagation** + **non-i64 types across the entire async-fn boundary** (params + locals + returns: bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array `[T; N]`) + **nested async** (`let sub: Task__inner = inner(args); let r = __poll_inner(mut ref sub);` as `await sub`) + **multi-task scheduling** (multiple concurrent sub-tasks in one async fn) + **generic async fns** (`async fn identity<T>(...) -> T`). 28 acceptance examples + generic-async smoke all cross-backend parity-green. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
   - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS verification deferred (no host). **Windows fully verified (2026-06-11)**: all 2089 lib tests + all e2e tests pass on Windows 11 GNU toolchain after applying `putchar`→`printf("%c",…)` CRT shim, `ws2_32` MinGW linker flag, `Sleep` IR dedup, 64 MB stack, and CRLF normalisation. IOCP async-TCP tests (`tcp_echo_epoll`, `echo_loop`, `async_showcase`) remain skipped pending overlapped-I/O wiring. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
-- **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258. The full package-manager arc (a/b/e/f: `kosh.toml` manifest, resolver, registry, stdlib-as-kosh) is **deferred** pending registry-hosting choice.
+- **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258.
+- **Arc 9 a/b/e — Kosh package manager MVP — SHIPPED 2026-06-17**: `vani.toml` manifest with `[package].version` and `[deps]` version constraints; `vani.lock` writer; `vanic vendor`; live sparse registry at **[enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/)**; `vanic add <name>[@constraint]` (fetches from registry → `vendor/` → updates manifest + lockfile); `vanic publish` (builds tarball, creates GitHub Release, appends NDJSON index entry); publish gate via `governance.allowed_publishers` in `config.json` (governance transfers without a compiler change). See [docs/kosh_design.md](docs/kosh_design.md).
 
 **Test ledger at 2026-06-11: 2089 lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
@@ -4206,7 +4220,7 @@ roadmap surface and unblocks the items below it.
 | 18 | ⏳ **Data structures + algorithms roadmap (Levels 1–4)** | #14 (for Level 2+) | high (multi-session) | Levels 1–4 sequenced under affine ownership. Level 1: `sort` / `sort_by` / `find` / `binary_search` / `pop` / RNG / Hash interface. Level 2: `HashSet` / `HashMap` (⚠️ AFFINE-TENSION — `get -> Option<ref V>`) / `BTreeSet` / `BTreeMap` / `Deque` / `BinaryHeap`. Level 3: closures + iterator combinators. Level 4: arena-based BST / B-tree / Trie / graphs + algorithms. Full per-item plan in [TODO.md](TODO.md). |
 | 19 | ✅ **Condition variables (`Condvar`)** | — | medium (single session) | done 2026-05-28 (closure #292). ✅ AFFINE — new builtin type, stack-by-value. 5 builtins (`condvar_new / wait(ref cv, mut ref g: Guard<i64>) / wait_timeout / notify_one / notify_all`). Tree-C + SSA-C: shared runtime helpers (futex/WaitOnAddress/spin-yield). Tree-LLVM: inline IR per call site (`%intent_condvar = type { i32 }`, atomicrmw + syscall/WakeByAddress). SSA-LLVM: falls back to tree-LLVM. 5 lib tests + `examples/condvar.vani` cross-backend parity. Pending follow-ups: cross-task wait/notify (needs task-capture rule expansion), direct SSA-LLVM support, wider Mutex widths. |
 | 20 | ✅ **Async / asyncio** — SHIPPED 2026-06-08 (Arc 8 v1+v1.5+v1.6+v2+v3.1). ⚠️ AFFINE-TENSION via compiler-lowered state machines; 🛑 NOT Pin / self-references | Level 3 closures (#18) | high (multi-session) | Each `async fn` lowers (via Arc 8 v3.1 parser-level transform) to a struct/poll/constructor triple. Builtin TCP + epoll + non-blocking I/O families for single-thread cooperative scheduling; `Channel<T, N>` coordination primitive; `Future<T>` / `Poll<T>` / `CancelToken`. Linux verified; macOS kqueue + Windows IOCP branches ship with deferred host verification. 28 acceptance examples + generic-async smoke cross-backend parity-green. Not shipping: Rust-style `Pin<&mut Self>`, panic-based cancellation, stackful coroutines, async inside `parallel for`. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md). |
-| 21 | ⏳ **Kosh package manager + Vāṇī-Kosh registry** | #10, #13 | high (multi-session) | `kosh.toml` manifest, resolver + lockfile, `pub(kosh)` enforcement at the boundary, registry CLI (`intentc kosh add`, `kosh publish`), stdlib-as-kosh. Item #10 in [TODO.md](TODO.md). |
+| 21 | ✅ **Kosh package manager + Vāṇī-Kosh registry** — SHIPPED 2026-06-17 | #10, #13 | high (multi-session) | `vani.toml` with `[package].version` + `[deps]` version constraints; `vani.lock` writer; `vanic vendor` / `vanic add` / `vanic publish`. Live sparse registry at [enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/). Publish gate via `governance.allowed_publishers` in `config.json`. See [docs/kosh_design.md](docs/kosh_design.md). |
 
 **Devanagari aliases (#9) — current state + remaining work:**
 
