@@ -2522,6 +2522,9 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
                 || expr_mentions_var(tail, name)
         }
         ExprKind::Try { inner } => expr_mentions_var(inner, name),
+        ExprKind::WhileLoop { cond, body, .. } => {
+            expr_mentions_var(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
+        }
         ExprKind::AnonFn { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
     }
 }
@@ -2708,6 +2711,12 @@ fn walk_expr_for_captures(
         ExprKind::Try { inner } => {
             walk_expr_for_captures(inner, bound, env, top_level_names, captures, seen);
         }
+        ExprKind::WhileLoop { cond, body, .. } => {
+            walk_expr_for_captures(cond, bound, env, top_level_names, captures, seen);
+            for s in body {
+                walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen);
+            }
+        }
         ExprKind::AnonFn { .. } => {
             // Nested anon fns are lifted independently; their
             // own captures aren't ours to track.
@@ -2890,6 +2899,12 @@ fn rename_vars_in_expr(
         ExprKind::Try { inner } => {
             rename_vars_in_expr(inner, rename);
         }
+        ExprKind::WhileLoop { cond, body, .. } => {
+            rename_vars_in_expr(cond, rename);
+            for s in body {
+                rename_vars_in_stmt(s, rename);
+            }
+        }
         ExprKind::AnonFn { .. } => {}
     }
 }
@@ -3069,6 +3084,12 @@ fn rewrite_closure_calls_in_expr(
         }
         ExprKind::Var(_) | ExprKind::Int(_) | ExprKind::Float(_)
         | ExprKind::Bool(_) | ExprKind::Str(_) => {}
+        ExprKind::WhileLoop { cond, body, .. } => {
+            rewrite_closure_calls_in_expr(cond, closures);
+            for s in body {
+                rewrite_closure_calls_in_stmt(s, closures);
+            }
+        }
         ExprKind::AnonFn { .. } => {}
     }
 }
@@ -3251,6 +3272,12 @@ fn lift_expr_anon_fn(
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::Var(_) => {}
+        ExprKind::WhileLoop { cond, body, .. } => {
+            lift_expr_anon_fn(cond, counter, hoisted);
+            for s in body {
+                lift_stmt_anon_fn(s, counter, hoisted);
+            }
+        }
     }
 }
 
@@ -4437,6 +4464,12 @@ fn resolve_enum_types_in_expr(
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::Var(_) => {}
+        ExprKind::WhileLoop { cond, body, .. } => {
+            resolve_enum_types_in_expr(cond, enums);
+            for s in body {
+                resolve_enum_types_in_stmt(s, enums);
+            }
+        }
         ExprKind::AnonFn { params, return_type, body, .. } => {
             for p in params {
                 resolve_enum_types_in_type(&mut p.ty, enums);
@@ -4815,6 +4848,12 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::Var(_) => {}
+        ExprKind::WhileLoop { cond, body, .. } => {
+            sub_aliases_in_expr(cond, aliases);
+            for s in body {
+                sub_aliases_in_stmt(s, aliases);
+            }
+        }
         ExprKind::AnonFn { params, return_type, body, .. } => {
             for p in params {
                 sub_aliases_in_type(&mut p.ty, aliases);
@@ -7455,6 +7494,12 @@ fn dyn_src_synth_name() -> String {
     format!("__dyn_src_{}", DYN_SRC_COUNTER.fetch_add(1, Ordering::Relaxed))
 }
 
+fn fresh_loop_val_name() -> String {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static LOOP_VAL_COUNTER: AtomicUsize = AtomicUsize::new(0);
+    format!("__loop_val_{}", LOOP_VAL_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
 fn make_dyn_coerce(
     value: TypedExpr,
     iface_name: String,
@@ -8082,6 +8127,14 @@ struct LoopFrame {
     /// for emitting cleanup drops on `break` / `continue` across any nested
     /// scopes opened inside the body.
     body_scope_depth: usize,
+    /// When the loop is used as an expression (`let x = while ... { break v; }`),
+    /// the checker lowers it by injecting a `let __loop_val_N;` before the loop
+    /// and recording its name here. `break val;` assigns into this temp;
+    /// after the loop, `let x = __loop_val_N;` reads it.
+    value_temp: Option<String>,
+    /// Label from `'name: while ...`, used to resolve `break 'name` and
+    /// `continue 'name` in nested loops.
+    label: Option<String>,
 }
 
 /// Recursively walks `stmts` and inserts a clone of `free_node` before
@@ -8109,21 +8162,22 @@ fn inject_shallow_free_before_returns(
                     else_body: inject_shallow_free_before_returns(else_body, free_node),
                 });
             }
-            TypedStmt::While { cond, body } => {
+            TypedStmt::While { label, cond, body } => {
                 out.push(TypedStmt::While {
+                    label,
                     cond,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
-            TypedStmt::For { var, ty, start, end, body, parallel, reductions } => {
+            TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
                 out.push(TypedStmt::For {
-                    var, ty, start, end, parallel, reductions,
+                    label, var, ty, start, end, parallel, reductions,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
-            TypedStmt::ForIter { var, element_ty, collection, collection_ty, consumes, body } => {
+            TypedStmt::ForIter { label, var, element_ty, collection, collection_ty, consumes, body } => {
                 out.push(TypedStmt::ForIter {
-                    var, element_ty, collection, collection_ty, consumes,
+                    label, var, element_ty, collection, collection_ty, consumes,
                     body: inject_shallow_free_before_returns(body, free_node),
                 });
             }
@@ -8412,6 +8466,12 @@ fn walk_branch_mutations_in_expr(
         | ExprKind::Bool(_)
         | ExprKind::Str(_)
         | ExprKind::Var(_) => {}
+        ExprKind::WhileLoop { cond, body, .. } => {
+            walk_branch_mutations_in_expr(cond, out);
+            for s in body {
+                walk_branch_mutations(std::slice::from_ref(s), out);
+            }
+        }
         ExprKind::AnonFn { .. } => {
             // Anon fn body is lifted to a top-level fn before
             // branch-mutation analysis runs (closure #308).
@@ -8793,6 +8853,154 @@ fn emit_current_scope_drops(
     }
 }
 
+/// Lower `let name: annotation = while 'lbl? cond { body };` to:
+///   let __loop_val_N: T;         (zero-init temp)
+///   'lbl: while cond { body }    (break val; becomes __loop_val_N = val; break;)
+///   let name: T = __loop_val_N;  (bind result)
+fn check_while_loop_as_let_init(
+    name: &str,
+    annotation: &Option<crate::ast::Type>,
+    loop_label: &Option<String>,
+    loop_cond: &Expr,
+    loop_body: &[Stmt],
+    let_span: Span,
+    expr_span: Span,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    function: &Function,
+    loops: &mut Vec<LoopFrame>,
+    smt_facts: &mut Vec<Expr>,
+    body: &mut Vec<TypedStmt>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    // Infer the break-value type: use the annotation if provided; otherwise
+    // scan the body for the first `break val;` and use val's inferred type.
+    // We do a lightweight scan here; full type inference happens during
+    // the actual body checking when break-value is assigned into the temp.
+    let val_ty: Type = if let Some(ann) = annotation {
+        ann.clone()
+    } else {
+        // Heuristic: walk body looking for the first `break val;`
+        fn find_break_val_type(stmts: &[Stmt]) -> Option<Type> {
+            for s in stmts {
+                match s {
+                    Stmt::Break { value: Some(val), .. } => {
+                        // Crude type inference from literal kinds
+                        return Some(match &val.kind {
+                            ExprKind::Bool(_) => Type::Bool,
+                            ExprKind::Float(_) => Type::F64,
+                            _ => Type::I64,
+                        });
+                    }
+                    Stmt::If { then_body, else_body, .. } => {
+                        if let Some(t) = find_break_val_type(then_body)
+                            .or_else(|| find_break_val_type(else_body))
+                        {
+                            return Some(t);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            None
+        }
+        find_break_val_type(loop_body).unwrap_or(Type::I64)
+    };
+
+    let temp_name = fresh_loop_val_name();
+
+    // Emit: let __loop_val_N: T = <zero>;
+    let zero_expr = TypedExpr {
+        kind: match &val_ty {
+            Type::Bool => TypedExprKind::Bool(false),
+            Type::F64 => TypedExprKind::Float(0.0),
+            _ => TypedExprKind::Int(0),
+        },
+        ty: val_ty.clone(),
+        constant: None,
+        span: expr_span,
+        binding_decl_span: None,
+    };
+    env.insert_current(temp_name.clone(), VarInfo {
+        ty: val_ty.clone(),
+        constant: None,
+        moved: None,
+        decl_span: expr_span,
+        vec_literal_elements: None,
+        array_version: 0,
+        guarded_mutex: None,
+        no_drop: true,
+        is_const: false,
+        struct_literal_fields: None,
+        moved_fields: std::collections::BTreeMap::new(),
+        ref_aliases: Vec::new(),
+    });
+    body.push(TypedStmt::Let {
+        name: temp_name.clone(),
+        ty: val_ty.clone(),
+        expr: zero_expr,
+    });
+
+    // Check the condition
+    let cond_checked = check_expr(loop_cond, env, signatures, diagnostics);
+
+    // Push a loop scope and frame with the value temp recorded
+    let pre_env = env.clone();
+    let pre_facts = smt_facts.clone();
+    env.push_scope();
+    let body_scope_depth = env.depth();
+    loops.push(LoopFrame {
+        pre_env: pre_env.clone(),
+        body_scope_depth,
+        value_temp: Some(temp_name.clone()),
+        label: loop_label.clone(),
+    });
+    let mut inner_stmts = Vec::new();
+    check_stmt_list(loop_body, env, signatures, function, loops, smt_facts, &mut inner_stmts, diagnostics);
+    loops.pop();
+    if !inner_stmts.is_empty() {
+        emit_current_scope_drops(env, &mut inner_stmts, diagnostics);
+    }
+    env.pop_scope();
+    *env = pre_env;
+    *smt_facts = pre_facts;
+
+    // Emit: while 'lbl? cond { body }
+    body.push(TypedStmt::While {
+        label: loop_label.clone(),
+        cond: cond_checked.expr,
+        body: inner_stmts,
+    });
+
+    // Emit: let name: T = __loop_val_N
+    env.insert_current(name.to_string(), VarInfo {
+        ty: val_ty.clone(),
+        constant: None,
+        moved: None,
+        decl_span: let_span,
+        vec_literal_elements: None,
+        array_version: 0,
+        guarded_mutex: None,
+        no_drop: false,
+        is_const: false,
+        struct_literal_fields: None,
+        moved_fields: std::collections::BTreeMap::new(),
+        ref_aliases: Vec::new(),
+    });
+    body.push(TypedStmt::Let {
+        name: name.to_string(),
+        ty: val_ty.clone(),
+        expr: TypedExpr {
+            kind: TypedExprKind::Var(temp_name.clone()),
+            ty: val_ty,
+            constant: None,
+            span: expr_span,
+            binding_decl_span: None,
+        },
+    });
+    false
+}
+
 fn check_one_stmt(
     stmt: &Stmt,
     env: &mut Env,
@@ -8810,6 +9018,15 @@ fn check_one_stmt(
             expr,
             span,
         } => {
+            // Special-case: `let x: T = while ... { break val; }` — loop-as-expression.
+            // Lower before the normal check_expr path since WhileLoop needs statement-level context.
+            if let ExprKind::WhileLoop { label: loop_label, cond: loop_cond, body: loop_body } = &expr.kind {
+                return check_while_loop_as_let_init(
+                    name, annotation, loop_label, loop_cond, loop_body, *span, expr.span,
+                    env, signatures, function, loops, smt_facts, body, diagnostics,
+                );
+            }
+
             verify_call_args_in_expr(expr, smt_facts, env, signatures, diagnostics);
             let mut checked = if let Some(annotation) = annotation {
                 validate_array_element_type(annotation, *span, diagnostics);
@@ -9622,6 +9839,7 @@ fn check_one_stmt(
             then_terminated && else_terminated
         }
         Stmt::While {
+            label,
             cond,
             invariants,
             body: body_stmts,
@@ -9691,6 +9909,8 @@ fn check_one_stmt(
             loops.push(LoopFrame {
                 pre_env: pre_env.clone(),
                 body_scope_depth,
+                value_temp: None,
+                label: label.clone(),
             });
             let mut inner_stmts = Vec::new();
             let body_terminated = check_stmt_list(
@@ -9765,6 +9985,7 @@ fn check_one_stmt(
             }
 
             body.push(TypedStmt::While {
+                label: label.clone(),
                 cond: cond_checked.expr,
                 body: inner_stmts,
             });
@@ -10281,6 +10502,7 @@ fn check_one_stmt(
             false
         }
         Stmt::For {
+            label,
             var,
             start,
             end,
@@ -10404,6 +10626,8 @@ fn check_one_stmt(
             loops.push(LoopFrame {
                 pre_env: pre_env.clone(),
                 body_scope_depth: env.depth(),
+                value_temp: None,
+                label: label.clone(),
             });
             let mut inner_stmts = Vec::new();
             let body_terminated = check_stmt_list(
@@ -10582,6 +10806,7 @@ fn check_one_stmt(
                 );
             }
             body.push(TypedStmt::For {
+                label: label.clone(),
                 var: var.clone(),
                 ty: loop_ty,
                 start: start_coerced.expr,
@@ -10594,6 +10819,7 @@ fn check_one_stmt(
             false
         }
         Stmt::ForIter {
+            label,
             var,
             collection,
             consumes,
@@ -10793,6 +11019,8 @@ fn check_one_stmt(
             loops.push(LoopFrame {
                 pre_env: pre_env.clone(),
                 body_scope_depth: env.depth(),
+                value_temp: None,
+                label: label.clone(),
             });
             let mut inner_stmts = Vec::new();
             let body_terminated = check_stmt_list(
@@ -10845,6 +11073,7 @@ fn check_one_stmt(
                 inner_stmts
             };
             body.push(TypedStmt::ForIter {
+                label: label.clone(),
                 var: var.clone(),
                 element_ty,
                 collection: collection.clone(),
@@ -10854,14 +11083,34 @@ fn check_one_stmt(
             });
             false
         }
-        Stmt::Break { span } => {
+        Stmt::Break { label, value, span } => {
             let Some(frame) = loops.last().cloned() else {
                 diagnostics.push(Diagnostic::new(
                     *span,
-                    "'break' is only valid inside a 'while' loop",
+                    "'break' is only valid inside a loop",
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("break")));
                 return false;
             };
+            if let Some(val_expr) = value {
+                // break value: assign into the loop's value-temp if present,
+                // otherwise error (break value only valid in loop-expressions).
+                if let Some(ref temp_name) = frame.value_temp {
+                    let checked_val = check_expr(val_expr, env, signatures, diagnostics);
+                    let temp_name = temp_name.clone();
+                    let val_ty = checked_val.ty().clone();
+                    body.push(TypedStmt::Reassign {
+                        name: temp_name,
+                        ty: val_ty,
+                        expr: checked_val.expr,
+                        drop_old: false,
+                    });
+                } else {
+                    diagnostics.push(Diagnostic::new(
+                        *span,
+                        "'break value' is only valid when the loop is used as an expression (e.g. `let x = while ... { break val; }`)",
+                    ));
+                }
+            }
             emit_drops_through_loop(env, frame.body_scope_depth, body);
             validate_loop_balance(
                 &frame.pre_env,
@@ -10870,14 +11119,14 @@ fn check_one_stmt(
                 "break with inconsistent move state",
                 diagnostics,
             );
-            body.push(TypedStmt::Break);
+            body.push(TypedStmt::Break { label: label.clone() });
             true
         }
-        Stmt::Continue { span } => {
+        Stmt::Continue { label, span } => {
             let Some(frame) = loops.last().cloned() else {
                 diagnostics.push(Diagnostic::new(
                     *span,
-                    "'continue' is only valid inside a 'while' loop",
+                    "'continue' is only valid inside a loop",
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("continue")));
                 return false;
             };
@@ -10889,7 +11138,7 @@ fn check_one_stmt(
                 "continue with inconsistent move state",
                 diagnostics,
             );
-            body.push(TypedStmt::Continue);
+            body.push(TypedStmt::Continue { label: label.clone() });
             true
         }
         Stmt::TaskSpawn { name, body: task_body, span } => {
@@ -14859,6 +15108,7 @@ fn check_expr(
                             }
                         }
                         typed_stmts.push(TypedStmt::While {
+                            label: None,
                             cond: cond_checked.expr,
                             body: body_typed,
                         });
@@ -14999,6 +15249,18 @@ fn check_expr(
                 constant,
                 expr.span,
             )
+        }
+        ExprKind::WhileLoop { .. } => {
+            // WhileLoop is handled specially at the Stmt::Let level
+            // (check_while_loop_as_let_init). Reaching check_expr directly
+            // means the WhileLoop appeared outside a let initializer, which
+            // is not supported in v1.
+            diagnostics.push(Diagnostic::new(
+                expr.span,
+                "'while' as an expression is only valid as a 'let' initializer: \
+                 `let x: T = while ... { break val; };`",
+            ));
+            CheckedExpr::fallback_integer(expr.span)
         }
         ExprKind::AnonFn { .. } => {
             // Anon fns are lifted to top-level `__anon_fn_<N>`
@@ -28220,6 +28482,11 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
         ExprKind::Try { inner } => ExprKind::Try {
             inner: Box::new(substitute_expr(inner, subs)),
         },
+        ExprKind::WhileLoop { label, cond, body } => ExprKind::WhileLoop {
+            label: label.clone(),
+            cond: Box::new(substitute_expr(cond, subs)),
+            body: body.clone(),
+        },
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before contract substitution runs.
             unreachable!("AnonFn should have been lifted before substitute_expr")
@@ -28332,6 +28599,9 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
             }) || expr_mentions(tail, name)
         }
         ExprKind::Try { inner } => expr_mentions(inner, name),
+        ExprKind::WhileLoop { cond, body, .. } => {
+            expr_mentions(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
+        }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before fact-tracking analysis runs.
             unreachable!("AnonFn should have been lifted before expr_mentions")
@@ -28524,22 +28794,24 @@ fn strip_reduction_uses(
                         else_body: rec(else_body, reductions, context, diagnostics),
                     });
                 }
-                TypedStmt::While { cond, body } => {
+                TypedStmt::While { label, cond, body } => {
                     if any_read_of_reductions(cond, reductions) {
                         flag_read(cond.span, context, reductions, diagnostics);
                     }
                     out.push(TypedStmt::While {
+                        label: label.clone(),
                         cond: cond.clone(),
                         body: rec(body, reductions, context, diagnostics),
                     });
                 }
-                TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs } => {
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions: rs } => {
                     if any_read_of_reductions(start, reductions)
                         || any_read_of_reductions(end, reductions)
                     {
                         flag_read(start.span, context, reductions, diagnostics);
                     }
                     out.push(TypedStmt::For {
+                        label: label.clone(),
                         var: var.clone(),
                         ty: ty.clone(),
                         start: start.clone(),
@@ -28710,8 +28982,8 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         TypedStmt::IndexAssign { index, value, .. } => vec![index, value],
         TypedStmt::FieldAssign { object, value, .. } => vec![object, value],
         TypedStmt::Drop { .. }
-        | TypedStmt::Break
-        | TypedStmt::Continue
+        | TypedStmt::Break { .. }
+        | TypedStmt::Continue { .. }
         | TypedStmt::If { .. }
         | TypedStmt::While { .. }
         | TypedStmt::For { .. }
@@ -28836,7 +29108,7 @@ fn verify_pure_body(
                     walk(then_body, signatures, context, diagnostics);
                     walk(else_body, signatures, context, diagnostics);
                 }
-                TypedStmt::While { cond, body } => {
+                TypedStmt::While { cond, body, .. } => {
                     walk_expr(cond, signatures, context, diagnostics);
                     walk(body, signatures, context, diagnostics);
                 }
@@ -28878,7 +29150,7 @@ fn verify_pure_body(
                     // is OK — join itself is side-effect-free in
                     // v1's sequential lowering.
                 }
-                TypedStmt::Break => {
+                TypedStmt::Break { .. } => {
                     // OpenMP parallel-for rejects `break` —
                     // C compilers emit "break statement used
                     // with OpenMP for loop" and refuse to
@@ -28912,7 +29184,7 @@ fn verify_pure_body(
                     walk(body, signatures, context, diagnostics);
                 }
                 TypedStmt::Drop { .. }
-                | TypedStmt::Continue
+                | TypedStmt::Continue { .. }
                 | TypedStmt::ForIterShallowFree { .. } => {}
             }
         }
@@ -29231,6 +29503,14 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
         }
         ExprKind::Try { inner } => {
             pin_var_to_version(inner, name, version);
+        }
+        ExprKind::WhileLoop { cond, body, .. } => {
+            pin_var_to_version(cond, name, version);
+            for s in body {
+                if let Stmt::Let { expr, .. } = s {
+                    pin_var_to_version(expr, name, version);
+                }
+            }
         }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before SMT version-pinning runs.
@@ -29989,6 +30269,9 @@ fn pretty_expr(expr: &Expr) -> String {
         }
         ExprKind::Try { inner } => {
             format!("try {}", pretty_expr(inner))
+        }
+        ExprKind::WhileLoop { .. } => {
+            "while … { … }".to_string()
         }
         ExprKind::AnonFn { params, return_type, .. } => {
             let parts: Vec<String> = params

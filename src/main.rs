@@ -154,7 +154,7 @@ fn stmt_uses_vec_of_atomic_or_channel(stmt: &TypedStmt) -> bool {
                 || then_body.iter().any(stmt_uses_vec_of_atomic_or_channel)
                 || else_body.iter().any(stmt_uses_vec_of_atomic_or_channel)
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             expr_uses_vec_of_atomic_or_channel(cond)
                 || body.iter().any(stmt_uses_vec_of_atomic_or_channel)
         }
@@ -242,7 +242,7 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
                 && stmts_ssa_supported(then_body, extra_reject)
                 && stmts_ssa_supported(else_body, extra_reject)
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             expr_ssa_supported(cond) && stmts_ssa_supported(body, extra_reject)
         }
         TypedStmt::For { start, end, body, .. } => {
@@ -287,7 +287,7 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
         // FieldAssign currently has no SSA lowering — route
         // through the tree backend. T1.2 phase 2a follow-up.
         TypedStmt::FieldAssign { .. } => false,
-        TypedStmt::Break | TypedStmt::Continue => true,
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => true,
     }
 }
 

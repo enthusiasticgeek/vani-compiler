@@ -132,7 +132,7 @@ fn collect_in_stmt(stmt: &TypedStmt, seen: &mut BTreeSet<String>, out: &mut Vec<
                 collect_in_stmt(s, seen, out);
             }
         }
-        S::While { cond, body } => {
+        S::While { cond, body, .. } => {
             collect_in_expr(cond, seen, out);
             for s in body {
                 collect_in_stmt(s, seen, out);

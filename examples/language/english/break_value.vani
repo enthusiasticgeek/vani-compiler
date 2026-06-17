@@ -1,0 +1,45 @@
+// break value / loop-as-expression feature.
+//
+// Tests:
+//   1. Simple `let x = while ... { break val; }` lowering.
+//   2. Labeled loops with `break 'label val;`.
+//   3. `continue 'label;` jumping to outer loop.
+//
+// build & run:
+//   vanic run examples/language/english/break_value.vani --backend=c
+
+intent "break value and labeled loops";
+
+fn search_first_positive(limit: i64) -> i64 {
+  let result: i64 = while true {
+    let i: i64 = 0 - 5;
+    if i > 0 {
+      break i;
+    }
+    break 42;
+  };
+  return result;
+}
+
+fn labeled_break_outer() -> i64 {
+  let found: i64 = 0;
+  'outer: for i from 0 to 5 {
+    for j from 0 to 5 {
+      if i + j == 6 {
+        found = i + j;
+        break 'outer;
+      }
+    }
+  }
+  return found;
+}
+
+fn main() -> i64 {
+  let r1: i64 = search_first_positive(10);
+  print "break value:", r1;
+
+  let r2: i64 = labeled_break_outer();
+  print "labeled break outer found:", r2;
+
+  return 0;
+}

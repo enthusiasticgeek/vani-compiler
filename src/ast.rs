@@ -1439,6 +1439,7 @@ pub enum Stmt {
         span: Span,
     },
     While {
+        label: Option<String>,
         cond: Expr,
         invariants: Vec<Expr>,
         body: Vec<Stmt>,
@@ -1450,9 +1451,12 @@ pub enum Stmt {
         span: Span,
     },
     Break {
+        label: Option<String>,
+        value: Option<Box<Expr>>,
         span: Span,
     },
     Continue {
+        label: Option<String>,
         span: Span,
     },
     IndexAssign {
@@ -1482,6 +1486,7 @@ pub enum Stmt {
         span: Span,
     },
     For {
+        label: Option<String>,
         var: String,
         start: Expr,
         end: Expr,
@@ -1509,6 +1514,7 @@ pub enum Stmt {
     /// transfers ownership of `xs` into the loop; for `Vec<T>` the buffer
     /// is freed at the end of the loop.
     ForIter {
+        label: Option<String>,
         var: String,
         collection: String,
         consumes: bool,
@@ -1565,8 +1571,8 @@ impl Stmt {
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::Assign { span, .. }
-            | Stmt::Break { span }
-            | Stmt::Continue { span }
+            | Stmt::Break { span, .. }
+            | Stmt::Continue { span, .. }
             | Stmt::IndexAssign { span, .. }
             | Stmt::FieldAssign { span, .. }
             | Stmt::For { span, .. }
@@ -1709,6 +1715,15 @@ pub enum ExprKind {
     /// return type to match EXPR's enum type. T2.6.
     Try {
         inner: Box<Expr>,
+    },
+    /// `while cond { body }` in expression position, yielding
+    /// the value passed to `break value;`. The checker lowers
+    /// `let x: T = while ... { break val; }` to a temp-var
+    /// sequence so backends never see this variant directly.
+    WhileLoop {
+        label: Option<String>,
+        cond: Box<Expr>,
+        body: Vec<Stmt>,
     },
     /// Anonymous fn expression — `fn(p: T) -> R { body }`
     /// in value position. v1 has no captured environment:

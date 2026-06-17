@@ -1406,6 +1406,9 @@ fn encode_expr(
         ExprKind::AnonFn { .. } => Err(EncodeError::Unsupported(
             "anonymous fn expressions not supported in SMT v1".into(),
         )),
+        ExprKind::WhileLoop { .. } => Err(EncodeError::Unsupported(
+            "while loop expressions not supported in SMT v1".into(),
+        )),
     }
 }
 

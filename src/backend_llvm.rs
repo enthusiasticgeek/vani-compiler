@@ -3249,7 +3249,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str(&format!("{}:\n", ok));
         }
         TypedStmt::Print { items } => emit_print_items(items, ctx, out),
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             let header = ctx.fresh_label("loop_header");
             let body_lbl = ctx.fresh_label("loop_body");
             let exit = ctx.fresh_label("loop_exit");
@@ -3295,7 +3295,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // predecessors").
             ctx.current_block = exit;
         }
-        TypedStmt::Break => {
+        TypedStmt::Break { .. } => {
             if let Some(frame) = ctx.loops.last() {
                 out.push_str(&format!("  br label %{}\n", frame.exit));
                 ctx.terminated = true;
@@ -3303,7 +3303,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; break outside a loop (checker should have rejected this)\n");
             }
         }
-        TypedStmt::Continue => {
+        TypedStmt::Continue { .. } => {
             if let Some(frame) = ctx.loops.last() {
                 out.push_str(&format!("  br label %{}\n", frame.header));
                 ctx.terminated = true;
@@ -3311,7 +3311,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; continue outside a loop\n");
             }
         }
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions, .. } => {
             if !ty.is_integer() {
                 // The parser only accepts integer literals on the
                 // bounds and the checker enforces integer type on
@@ -3719,6 +3719,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             collection_ty,
             consumes,
             body,
+            ..
         } => {
             // Standard counter loop: i = 0..len(collection), body
             // reads collection[i] into `var` and runs. If we consume
@@ -23004,7 +23005,7 @@ fn program_uses_rng(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { body, .. } | S::ForIter { body, .. } => {
                 body.iter().any(stmt_uses)
             }
@@ -23119,7 +23120,7 @@ fn program_uses_sleep_ms(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { body, .. } | S::ForIter { body, .. } => {
                 body.iter().any(stmt_uses)
             }
@@ -23212,7 +23213,7 @@ fn program_uses_tcp(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { body, .. } | S::ForIter { body, .. } => {
                 body.iter().any(stmt_uses)
             }
@@ -23808,7 +23809,7 @@ fn program_uses_epoll(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { body, .. } | S::ForIter { body, .. } => {
                 body.iter().any(stmt_uses)
             }
@@ -24704,7 +24705,7 @@ fn program_uses_hash(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { body, .. } | S::ForIter { body, .. } => {
                 body.iter().any(stmt_uses)
             }
@@ -40092,7 +40093,7 @@ fn collect_print_strings(
             for s in then_body { collect_print_strings(s, msgs, idx); }
             for s in else_body { collect_print_strings(s, msgs, idx); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_strings_in_expr(cond, msgs, idx, &intern);
             for s in body { collect_print_strings(s, msgs, idx); }
         }
@@ -40396,7 +40397,7 @@ fn collect_vec_elements_in_stmt(
             for s in then_body { collect_vec_elements_in_stmt(s, seen, out); }
             for s in else_body { collect_vec_elements_in_stmt(s, seen, out); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_vec_elements_in_expr(cond, seen, out);
             for s in body { collect_vec_elements_in_stmt(s, seen, out); }
         }
@@ -40858,7 +40859,7 @@ pub(crate) fn walk_body(
                 walk_body(else_body, declared, order, seen);
                 *declared = saved;
             }
-            TypedStmt::While { cond, body } => {
+            TypedStmt::While { cond, body, .. } => {
                 walk_expr(cond, declared, order, seen);
                 let saved = declared.clone();
                 walk_body(body, declared, order, seen);
@@ -40907,8 +40908,8 @@ pub(crate) fn walk_body(
                 *declared = saved;
             }
             TypedStmt::Drop { .. }
-            | TypedStmt::Break
-            | TypedStmt::Continue
+            | TypedStmt::Break { .. }
+            | TypedStmt::Continue { .. }
             | TypedStmt::ForIterShallowFree { .. } => {}
         }
     }
@@ -41012,12 +41013,14 @@ fn rewrite_stmt_for_reductions(
             then_body: rewrite_body_for_reductions(then_body, reductions),
             else_body: rewrite_body_for_reductions(else_body, reductions),
         },
-        TypedStmt::While { cond, body } => TypedStmt::While {
+        TypedStmt::While { cond, body, label } => TypedStmt::While {
+            label: label.clone(),
             cond: cond.clone(),
             body: rewrite_body_for_reductions(body, reductions),
         },
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions: rs, label } => {
             TypedStmt::For {
+                label: label.clone(),
                 var: var.clone(),
                 ty: ty.clone(),
                 start: start.clone(),

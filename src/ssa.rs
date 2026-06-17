@@ -722,8 +722,8 @@ fn lower_stmt(
         TypedStmt::If { cond, then_body, else_body } => {
             lower_if(cond, then_body, else_body, b, locals)
         }
-        TypedStmt::While { cond, body } => lower_while(cond, body, b, locals),
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions } => {
+        TypedStmt::While { cond, body, .. } => lower_while(cond, body, b, locals),
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions, .. } => {
             if *parallel {
                 // Sequential lowering preserves correctness
                 // (the verifier already proved race-freedom).
@@ -863,7 +863,7 @@ fn lower_stmt(
             );
             Ok(())
         }
-        TypedStmt::Break => {
+        TypedStmt::Break { .. } => {
             let Some(frame) = b.loops.last().cloned() else {
                 return Err(LowerError {
                     message: "break outside any loop reached the SSA lowerer".into(),
@@ -877,7 +877,7 @@ fn lower_stmt(
             });
             Ok(())
         }
-        TypedStmt::Continue => {
+        TypedStmt::Continue { .. } => {
             let Some(frame) = b.loops.last().cloned() else {
                 return Err(LowerError {
                     message: "continue outside any loop reached the SSA lowerer".into(),
@@ -1090,7 +1090,7 @@ fn lower_stmt(
             // type-check time.
             Ok(())
         }
-        TypedStmt::ForIter { var, element_ty, collection, collection_ty: _, consumes, body } => {
+        TypedStmt::ForIter { var, element_ty, collection, collection_ty: _, consumes, body, .. } => {
             lower_for_iter(var, element_ty, collection, *consumes, body, b, locals)
         }
         TypedStmt::ForIterShallowFree { collection, element_ty: _ } => {
@@ -1347,8 +1347,8 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::If { .. } => "If",
         TypedStmt::While { .. } => "While",
         TypedStmt::Discard { .. } => "Discard",
-        TypedStmt::Break => "Break",
-        TypedStmt::Continue => "Continue",
+        TypedStmt::Break { .. } => "Break",
+        TypedStmt::Continue { .. } => "Continue",
         TypedStmt::IndexAssign { .. } => "IndexAssign",
         TypedStmt::FieldAssign { .. } => "FieldAssign",
         TypedStmt::For { .. } => "For",
@@ -1438,7 +1438,7 @@ fn modified_in_body(body: &[TypedStmt]) -> std::collections::BTreeSet<String> {
                     walk(then_body, inner, out);
                     walk(else_body, inner, out);
                 }
-                TypedStmt::While { cond, body } => {
+                TypedStmt::While { cond, body, .. } => {
                     walk_expr_reads(cond, out);
                     walk(body, inner, out);
                 }

@@ -208,6 +208,11 @@ pub enum TokenKind {
     /// parse time. Layer 1.1 of the embedded-vāṇी unsafe plan
     /// (`unsafe.md`).
     Unsafe,
+    /// `'name` — loop label. Used as `'name: while/for { }` to
+    /// label a loop, and in `break 'name;` / `continue 'name;`
+    /// to target a specific enclosing loop. The apostrophe
+    /// distinguishes labels from regular identifiers.
+    Label(String),
     Eof,
 }
 
@@ -5767,6 +5772,7 @@ impl<'a> Lexer<'a> {
                 // ride the same token.
                 b'#' => self.push(TokenKind::Hash, start),
                 b'?' => self.push(TokenKind::Question, start),
+                b'\'' => self.lex_label(start)?,
                 other => {
                     return Err(Diagnostic::new(
                         Span::new(start, start + 1),
@@ -6319,6 +6325,25 @@ impl<'a> Lexer<'a> {
             kind,
             span: Span::new(start, self.pos),
         });
+    }
+
+    fn lex_label(&mut self, start: usize) -> Result<(), Diagnostic> {
+        let name_start = self.pos;
+        if !matches!(self.peek(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_')) {
+            return Err(Diagnostic::new(
+                Span::new(start, start + 1),
+                "expected identifier after `'` for loop label (e.g. `'outer:`)".to_string(),
+            ));
+        }
+        while matches!(
+            self.peek(),
+            Some(b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+        ) {
+            self.advance();
+        }
+        let name = self.source[name_start..self.pos].to_string();
+        self.push(TokenKind::Label(name), start);
+        Ok(())
     }
 
     fn lex_string(&mut self, start: usize) -> Result<(), Diagnostic> {

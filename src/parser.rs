@@ -2290,6 +2290,8 @@ impl Parser {
             self.parse_print_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::If)) {
             self.parse_if_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
+            self.parse_labeled_loop_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::While)) {
             self.parse_while_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::For)) {
@@ -2329,14 +2331,34 @@ impl Parser {
             self.parse_region_block_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Break)) {
             let token = self.bump();
+            let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
+                let t = self.bump();
+                if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
+            } else {
+                None
+            };
+            let value = if self.check(|kind| matches!(kind, TokenKind::Semicolon)) {
+                None
+            } else {
+                Some(Box::new(self.parse_expr()?))
+            };
             let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
             Ok(Stmt::Break {
+                label,
+                value,
                 span: token.span.merge(semi.span),
             })
         } else if self.check(|kind| matches!(kind, TokenKind::Continue)) {
             let token = self.bump();
+            let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
+                let t = self.bump();
+                if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
+            } else {
+                None
+            };
             let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
             Ok(Stmt::Continue {
+                label,
                 span: token.span.merge(semi.span),
             })
         } else if let Some(verb) = self.looks_like_sov_block_verb() {
@@ -3150,6 +3172,7 @@ impl Parser {
                 .map(|s| s.span())
                 .unwrap_or(start_tok.span);
             return Ok(Stmt::ForIter {
+                label: None,
                 var,
                 collection,
                 consumes,
@@ -3178,6 +3201,7 @@ impl Parser {
         let body = self.parse_block()?;
         let end_span = body.last().map(|s| s.span()).unwrap_or(start_tok.span);
         Ok(Stmt::For {
+            label: None,
             var,
             start,
             end,
@@ -3237,6 +3261,7 @@ impl Parser {
             .map(|s| s.span())
             .unwrap_or(for_tok.span);
         Ok(Stmt::For {
+            label: None,
             var,
             start: start_expr,
             end: end_expr,
@@ -3331,6 +3356,37 @@ impl Parser {
         Ok(invariants)
     }
 
+    fn parse_labeled_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let label_tok = self.bump(); // consume the Label token
+        let label_name = if let TokenKind::Label(name) = label_tok.kind {
+            name
+        } else {
+            unreachable!()
+        };
+        self.expect_keyword("':' after loop label", |kind| matches!(kind, TokenKind::Colon))?;
+        if self.check(|kind| matches!(kind, TokenKind::While)) {
+            let mut stmt = self.parse_while_stmt()?;
+            if let Stmt::While { ref mut label, .. } = stmt {
+                *label = Some(label_name);
+            }
+            Ok(stmt)
+        } else if self.check(|kind| matches!(kind, TokenKind::For)) {
+            let mut stmt = self.parse_for_stmt()?;
+            match stmt {
+                Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
+                    *label = Some(label_name);
+                }
+                _ => {}
+            }
+            Ok(stmt)
+        } else {
+            Err(Diagnostic::new(
+                label_tok.span,
+                "loop label must be followed by 'while' or 'for'",
+            ))
+        }
+    }
+
     fn parse_while_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'while'", |kind| matches!(kind, TokenKind::While))?;
         let cond = self.parse_expr()?;
@@ -3338,6 +3394,7 @@ impl Parser {
         let body = self.parse_block()?;
         let end_span = body.last().map(|s| s.span()).unwrap_or(start.span);
         Ok(Stmt::While {
+            label: None,
             cond,
             invariants,
             body,
@@ -3573,6 +3630,7 @@ impl Parser {
                     |k| matches!(k, TokenKind::RBrace),
                 )?;
                 Ok(Stmt::While {
+                    label: None,
                     cond,
                     invariants: vec![],
                     body,
@@ -4740,6 +4798,41 @@ impl Parser {
                         array: Box::new(array),
                     },
                     span: token.span.merge(close.span),
+                })
+            }
+            TokenKind::While => {
+                // `while cond { ... }` as an expression — yields the
+                // value passed to `break val;`. The checker lowers
+                // `let x: T = while ... { break val; }` to a temp-var
+                // sequence so backends never see WhileLoop directly.
+                let open_span = token.span;
+                let cond = self.parse_expr()?;
+                let body = self.parse_block()?;
+                let end_span = body.last().map(|s| s.span()).unwrap_or(open_span);
+                Ok(Expr {
+                    kind: ExprKind::WhileLoop {
+                        label: None,
+                        cond: Box::new(cond),
+                        body,
+                    },
+                    span: open_span.merge(end_span),
+                })
+            }
+            TokenKind::Label(_) => {
+                // `'name: while cond { ... }` in expression position.
+                let label_name = if let TokenKind::Label(n) = token.kind { n } else { unreachable!() };
+                self.expect_keyword("':' after loop label", |kind| matches!(kind, TokenKind::Colon))?;
+                let while_tok = self.expect_keyword("'while' after labeled expression", |kind| matches!(kind, TokenKind::While))?;
+                let cond = self.parse_expr()?;
+                let body = self.parse_block()?;
+                let end_span = body.last().map(|s| s.span()).unwrap_or(while_tok.span);
+                Ok(Expr {
+                    kind: ExprKind::WhileLoop {
+                        label: Some(label_name),
+                        cond: Box::new(cond),
+                        body,
+                    },
+                    span: token.span.merge(end_span),
                 })
             }
             // `min(a, b)` / `max(a, b)` no longer get a
@@ -6438,7 +6531,7 @@ fn rewrite_break_continue_in_stmts(
     let mut out = Vec::new();
     for s in stmts {
         match s {
-            Stmt::Break { span } => {
+            Stmt::Break { span, .. } => {
                 out.push(Stmt::FieldAssign {
                     object: Expr {
                         kind: ExprKind::Var(t_param.to_string()),
@@ -6452,9 +6545,9 @@ fn rewrite_break_continue_in_stmts(
                     },
                     span: *span,
                 });
-                out.push(Stmt::Continue { span: *span });
+                out.push(Stmt::Continue { label: None, span: *span });
             }
-            Stmt::Continue { span } => {
+            Stmt::Continue { span, .. } => {
                 out.push(Stmt::FieldAssign {
                     object: Expr {
                         kind: ExprKind::Var(t_param.to_string()),
@@ -6468,7 +6561,7 @@ fn rewrite_break_continue_in_stmts(
                     },
                     span: *span,
                 });
-                out.push(Stmt::Continue { span: *span });
+                out.push(Stmt::Continue { label: None, span: *span });
             }
             Stmt::If { cond, then_body, else_body, span } => {
                 out.push(Stmt::If {
@@ -7065,7 +7158,8 @@ fn rewrite_vars_in_stmt(
                 .collect(),
             span: *span,
         },
-        Stmt::While { cond, invariants, body, span } => Stmt::While {
+        Stmt::While { label, cond, invariants, body, span } => Stmt::While {
+            label: label.clone(),
             cond: rewrite_vars_to_fields(cond, rename_set, obj_name),
             invariants: invariants.iter()
                 .map(|e| rewrite_vars_to_fields(e, rename_set, obj_name))
@@ -7271,12 +7365,14 @@ fn inject_cancel_guards(body: &[Stmt], token_name: &str, span: Span) -> Vec<Stmt
                 });
             }
             Stmt::While {
+                label,
                 cond,
                 invariants,
                 body: w_body,
                 span: s_span,
             } => {
                 out.push(Stmt::While {
+                    label: label.clone(),
                     cond: cond.clone(),
                     invariants: invariants.clone(),
                     body: inject_cancel_guards(w_body, token_name, span),
@@ -7802,7 +7898,7 @@ pub(crate) fn try_v31_transform(
                         terminated = true;
                     }
                 }
-                Stmt::Break { span } => {
+                Stmt::Break { span, .. } => {
                     // Phase 2.5b: break jumps to the innermost
                     // loop's post_loop state.
                     if let Some(&(_, post_loop)) = loop_stack.last() {
@@ -7817,7 +7913,7 @@ pub(crate) fn try_v31_transform(
                     // If no enclosing loop, the base language
                     // rejects already; defensively skip.
                 }
-                Stmt::Continue { span } => {
+                Stmt::Continue { span, .. } => {
                     // Phase 2.5b: continue jumps to the innermost
                     // loop's loop_header state.
                     if let Some(&(loop_header, _)) = loop_stack.last() {
@@ -8269,7 +8365,7 @@ pub(crate) fn try_v31_transform(
                         span: *span,
                     });
                     if *target_state <= state_idx {
-                        then_body.push(Stmt::Continue { span: *span });
+                        then_body.push(Stmt::Continue { label: None, span: *span });
                     }
                 }
                 Seg::Decision { cond, then_state, else_state, span } => {
@@ -8341,6 +8437,7 @@ pub(crate) fn try_v31_transform(
     // return -1 on the first iteration and exit normally.
     let wrapped_poll_body = vec![
         Stmt::While {
+            label: None,
             cond: Expr {
                 kind: ExprKind::Bool(true),
                 span: fn_name_span,

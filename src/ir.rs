@@ -182,11 +182,16 @@ pub enum TypedStmt {
         else_body: Vec<TypedStmt>,
     },
     While {
+        label: Option<String>,
         cond: TypedExpr,
         body: Vec<TypedStmt>,
     },
-    Break,
-    Continue,
+    Break {
+        label: Option<String>,
+    },
+    Continue {
+        label: Option<String>,
+    },
     IndexAssign {
         name: String,
         /// The static type of the base binding being indexed (owned [T;N],
@@ -223,6 +228,7 @@ pub enum TypedStmt {
         value: TypedExpr,
     },
     For {
+        label: Option<String>,
         var: String,
         ty: Type,
         start: TypedExpr,
@@ -244,6 +250,7 @@ pub enum TypedStmt {
         reductions: Vec<TypedReduction>,
     },
     ForIter {
+        label: Option<String>,
         var: String,
         /// Type of the element (Copy primitive).
         element_ty: Type,

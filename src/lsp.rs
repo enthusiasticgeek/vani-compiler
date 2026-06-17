@@ -773,7 +773,7 @@ fn collect_call_overrides_in_stmt(
                 collect_call_overrides_in_stmt(s, ctx, out);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_call_overrides_in_expr(cond, ctx, out);
             for s in body {
                 collect_call_overrides_in_stmt(s, ctx, out);
@@ -1853,7 +1853,7 @@ fn collect_var_uses(stmt: &TypedStmt, target: &Target, out: &mut Vec<crate::span
                 collect_var_uses(s, target, out);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_var_uses_in_expr(cond, target, out);
             for s in body {
                 collect_var_uses(s, target, out);
@@ -2033,7 +2033,7 @@ fn walk_stmt_for_var(
                 walk_stmt_for_var(s, offset, best);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             walk_expr_for_var(cond, offset, best);
             for s in body {
                 walk_stmt_for_var(s, offset, best);
@@ -2172,7 +2172,7 @@ fn stmt_contains_offset(stmt: &TypedStmt, offset: usize) -> bool {
                 || then_body.iter().any(|s| stmt_contains_offset(s, offset))
                 || else_body.iter().any(|s| stmt_contains_offset(s, offset))
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             (cond.span.start <= offset && offset <= cond.span.end)
                 || body.iter().any(|s| stmt_contains_offset(s, offset))
         }
@@ -2276,7 +2276,7 @@ fn walk_stmt(
                 walk_stmt(s, offset, best);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             walk_expr(cond, offset, best);
             for s in body {
                 walk_stmt(s, offset, best);
@@ -2308,7 +2308,7 @@ fn walk_stmt(
             }
         }
         TypedStmt::Drop { .. } | TypedStmt::Prove { .. } => {}
-        TypedStmt::Break | TypedStmt::Continue => {}
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
         TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }

@@ -283,7 +283,7 @@ pub(crate) fn stmt_callees(stmt: &TypedStmt, out: &mut Vec<String>) {
             for s in then_body { stmt_callees(s, out); }
             for s in else_body { stmt_callees(s, out); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             expr_callees(cond, out);
             for s in body { stmt_callees(s, out); }
         }

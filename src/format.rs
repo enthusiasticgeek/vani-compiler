@@ -943,7 +943,7 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
                 out.push_str("}\n");
             }
         }
-        Stmt::While { cond, invariants, body, span } => {
+        Stmt::While { cond, invariants, body, span, .. } => {
             out.push_str(&pad);
             out.push_str("while ");
             format_expr(cond, false, out);
@@ -1001,7 +1001,7 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             format_expr(value, false, out);
             out.push_str(";\n");
         }
-        Stmt::For { var, start, end, invariants, body, span, parallel, reductions } => {
+        Stmt::For { var, start, end, invariants, body, span, parallel, reductions, .. } => {
             out.push_str(&pad);
             if *parallel {
                 out.push_str("parallel ");
@@ -1036,7 +1036,7 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             out.push_str(&pad);
             out.push_str("}\n");
         }
-        Stmt::ForIter { var, collection, consumes, body, span } => {
+        Stmt::ForIter { var, collection, consumes, body, span, .. } => {
             out.push_str(&pad);
             out.push_str("for ");
             out.push_str(var);
@@ -1330,6 +1330,25 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
             }
             out.push('}');
         }
+        ExprKind::WhileLoop { label, cond, body } => {
+            if let Some(lbl) = label {
+                out.push('\'');
+                out.push_str(lbl);
+                out.push_str(": ");
+            }
+            out.push_str("while ");
+            format_expr(cond, false, out);
+            out.push_str(" { ");
+            let empty_comments: &[crate::lexer::Comment] = &[];
+            for s in body {
+                let mut tmp = String::new();
+                let mut ctx = FmtCtx::new("", empty_comments);
+                format_stmt(s, 0, &mut ctx, &mut tmp);
+                out.push_str(tmp.trim());
+                out.push(' ');
+            }
+            out.push('}');
+        }
     }
 }
 
@@ -1580,7 +1599,7 @@ mod tests {
                     zero_stmts(else_body);
                     *span = crate::span::Span::new(0, 0);
                 }
-                Stmt::While { cond, invariants, body, span } => {
+                Stmt::While { cond, invariants, body, span, .. } => {
                     zero_expr(cond);
                     for e in invariants {
                         zero_expr(e);

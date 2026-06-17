@@ -2149,7 +2149,7 @@ pub(crate) fn program_uses_region(program: &TypedProgram) -> bool {
             S::If { cond, then_body, else_body } => {
                 expr_uses(cond) || then_body.iter().any(stmt_uses) || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { start, end, body, .. } => {
                 expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
             }
@@ -2202,7 +2202,7 @@ pub(crate) fn program_uses_bptr(program: &TypedProgram) -> bool {
             S::If { cond, then_body, else_body } => {
                 expr_uses(cond) || then_body.iter().any(stmt_uses) || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { start, end, body, .. } => {
                 expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
             }
@@ -2246,7 +2246,7 @@ pub(crate) fn program_uses_unsafe_alloc(program: &TypedProgram) -> bool {
                     || then_body.iter().any(stmt_uses)
                     || else_body.iter().any(stmt_uses)
             }
-            S::While { cond, body } => expr_uses(cond) || body.iter().any(stmt_uses),
+            S::While { cond, body, .. } => expr_uses(cond) || body.iter().any(stmt_uses),
             S::For { start, end, body, .. } => {
                 expr_uses(start) || expr_uses(end) || body.iter().any(stmt_uses)
             }
@@ -7453,13 +7453,13 @@ fn collect_vec_elements_in_stmt(
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_vec_elements_in_expr(cond, seen, out);
             for s in body {
                 collect_vec_elements_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::Break | TypedStmt::Continue => {}
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
         TypedStmt::IndexAssign { index, value, .. } => {
             collect_vec_elements_in_expr(index, seen, out);
             collect_vec_elements_in_expr(value, seen, out);
@@ -7632,7 +7632,7 @@ fn collect_tuple_shapes_in_stmt(
                 collect_tuple_shapes_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_tuple_shapes_in_expr(cond, seen, out);
             for s in body {
                 collect_tuple_shapes_in_stmt(s, seen, out);
@@ -9998,13 +9998,13 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_channel_specs_in_expr(cond, seen, out);
             for s in body {
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::Break | TypedStmt::Continue => {}
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
         TypedStmt::IndexAssign { index, value, base_ty, .. } => {
             collect_channel_specs(base_ty, seen, out);
             collect_channel_specs_in_expr(index, seen, out);
@@ -12321,7 +12321,7 @@ return __intent_ret; }}\n",
             }
             out.push('\n');
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             out.push_str("  while (");
             out.push_str(&emit_expr(cond));
             out.push_str(") {\n");
@@ -12330,10 +12330,10 @@ return __intent_ret; }}\n",
             }
             out.push_str("  }\n");
         }
-        TypedStmt::Break => {
+        TypedStmt::Break { .. } => {
             out.push_str("  break;\n");
         }
-        TypedStmt::Continue => {
+        TypedStmt::Continue { .. } => {
             out.push_str("  continue;\n");
         }
         TypedStmt::IndexAssign {
@@ -12466,6 +12466,7 @@ return __intent_ret; }}\n",
             body,
             parallel,
             reductions,
+            ..
         } => {
             let local = local_name(var);
             let c_ty = c_leaf_type(ty);
@@ -12507,6 +12508,7 @@ return __intent_ret; }}\n",
             collection_ty,
             consumes,
             body,
+            ..
         } => emit_for_iter(
             var,
             element_ty,
@@ -13671,7 +13673,7 @@ fn emit_expr(expr: &TypedExpr) -> String {
                             emit_expr(rhs),
                         ));
                     }
-                    TypedStmt::While { cond, body: while_body } => {
+                    TypedStmt::While { cond, body: while_body, .. } => {
                         // Block-expr While loop (closure #238).
                         // Emit `while (cond) { body }` inside the
                         // GCC statement-expression. Inner body
@@ -18628,7 +18630,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
                 then_body.iter().for_each(|s| walk_stmt(s, set));
                 else_body.iter().for_each(|s| walk_stmt(s, set));
             }
-            TypedStmt::While { cond, body } => {
+            TypedStmt::While { cond, body, .. } => {
                 walk_expr(cond, set);
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
@@ -18660,8 +18662,8 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
             TypedStmt::TaskJoin { .. }
-            | TypedStmt::Break
-            | TypedStmt::Continue => {}
+            | TypedStmt::Break { .. }
+            | TypedStmt::Continue { .. } => {}
             TypedStmt::ForIterShallowFree { element_ty, .. } => walk_type(element_ty, set),
         }
     }

@@ -268,7 +268,7 @@ fn walk_stmt(stmt: &TypedStmt, alloc: &mut Option<DirectAlloc>, calls: &mut Vec<
             walk_stmts(then_body, alloc, calls);
             walk_stmts(else_body, alloc, calls);
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             walk_expr(cond, alloc, calls);
             walk_stmts(body, alloc, calls);
         }
@@ -387,7 +387,7 @@ fn walk_stmt_for_isr(
             for s in then_body { walk_stmt_for_isr(s, calls, violations); }
             for s in else_body { walk_stmt_for_isr(s, calls, violations); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             walk_expr_for_isr(cond, calls, violations);
             for s in body { walk_stmt_for_isr(s, calls, violations); }
         }
@@ -520,7 +520,7 @@ fn stmt_complexity(stmt: &TypedStmt) -> u64 {
             for s in else_body { c += stmt_complexity(s); }
             c
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             let mut c = 1; // the `while`
             c += expr_complexity(cond);
             for s in body { c += stmt_complexity(s); }
@@ -757,7 +757,7 @@ fn walk_stmt_for_float(
             for s in then_body { walk_stmt_for_float(s, float_use, calls); }
             for s in else_body { walk_stmt_for_float(s, float_use, calls); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             walk_expr_for_float(cond, float_use, calls);
             for s in body { walk_stmt_for_float(s, float_use, calls); }
         }
@@ -1073,7 +1073,7 @@ fn wcet_stmt(
         S::TaskJoin { .. } => None,
         S::ForIterShallowFree { .. } => Some(1),
         S::UnsafeBlock { body, .. } => wcet_body(body, fn_map, visiting, recursion_bound),
-        S::Break | S::Continue => Some(1),
+        S::Break { .. } | S::Continue { .. } => Some(1),
         S::Drop { .. } => Some(1),
     }
 }
@@ -1448,7 +1448,7 @@ fn check_misra_13_stmt(
                 check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
             }
         }
-        S::While { cond, body } => {
+        S::While { cond, body, .. } => {
             check_misra_13_expr(cond, fn_name, sig_pure, diagnostics);
             for s in body {
                 check_misra_13_stmt(s, fn_name, sig_pure, diagnostics);
@@ -1602,7 +1602,7 @@ fn collect_calls(stmt: &TypedStmt, out: &mut Vec<String>) {
             for s in then_body { collect_calls(s, out); }
             for s in else_body { collect_calls(s, out); }
         }
-        TypedStmt::While { cond, body } => {
+        TypedStmt::While { cond, body, .. } => {
             collect_expr_calls(cond, out);
             for s in body { collect_calls(s, out); }
         }
