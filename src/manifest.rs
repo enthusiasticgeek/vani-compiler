@@ -687,16 +687,70 @@ fn push_index_update(
     Ok(())
 }
 
+/// Fetch and parse `config.json` from a Kosh registry.
+fn fetch_registry_config(registry: &str) -> Result<serde_json::Value, String> {
+    let url = format!("{}/config.json", registry.trim_end_matches('/'));
+    let body = http_get_text(&url)?;
+    serde_json::from_str(&body).map_err(|e| format!("registry config.json: {e}"))
+}
+
+/// Gate `vanic publish`: verify the authenticated `gh` user appears in
+/// `config.json → governance.allowed_publishers`.
+///
+/// The allowlist lives in the registry's own `config.json`, so governance
+/// can be transferred to a committee (or moved to a new registry URL)
+/// without any compiler change — just update that file.
+fn check_publish_auth(registry: &str) -> Result<(), String> {
+    let config = fetch_registry_config(registry)?;
+    let allowed: Vec<String> = config["governance"]["allowed_publishers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if allowed.is_empty() {
+        return Err(
+            "registry config.json does not define governance.allowed_publishers.\n\
+             Publishing is blocked until the registry owner adds that field."
+                .to_string(),
+        );
+    }
+    let out = std::process::Command::new("gh")
+        .args(["api", "user", "--jq", ".login"])
+        .output()
+        .map_err(|e| format!("gh not found: {e}. Run `gh auth login` first."))?;
+    if !out.status.success() {
+        return Err("gh: could not identify authenticated user. Run `gh auth login`.".to_string());
+    }
+    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if !allowed.contains(&current) {
+        let gov_url = config["governance"]["governance_url"]
+            .as_str()
+            .unwrap_or(registry);
+        return Err(format!(
+            "publish rejected: '{}' is not an authorized publisher for this registry.\n\
+             Authorized: {}\n\
+             See {} for governance / submission details.",
+            current,
+            allowed.join(", "),
+            gov_url
+        ));
+    }
+    Ok(())
+}
+
 /// Publish the current package to the Kosh registry.
 ///
-/// 1. Builds a `<name>-<version>.tar.gz` tarball (*.vani + vani.toml only).
-/// 2. Computes its SHA-256.
-/// 3. Creates a GitHub Release in `kosh-index` with the tarball as asset.
-/// 4. Appends a NDJSON line to `index/<name>.json` in `kosh-index`.
+/// 1. Checks `governance.allowed_publishers` in registry `config.json`.
+/// 2. Builds a `<name>-<version>.tar.gz` tarball (*.vani + vani.toml only).
+/// 3. Computes its SHA-256.
+/// 4. Creates a GitHub Release in `kosh-index` with the tarball as asset.
+/// 5. Appends a NDJSON line to `index/<name>.json` in `kosh-index`.
 pub fn publish_package<F: Fn(&str)>(
     manifest_path: &Path,
     on_status: F,
 ) -> Result<PublishResult, String> {
+    on_status("  checking publish authorization...");
+    check_publish_auth(DEFAULT_REGISTRY)?;
+
     let manifest = load_manifest(manifest_path).map_err(|e| e.to_string())?;
     let version = manifest.package_version.clone().ok_or_else(|| {
         "vani.toml: [package].version is required for `vanic publish`".to_string()
