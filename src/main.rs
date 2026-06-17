@@ -887,6 +887,26 @@ COMMANDS:
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
 
+    apply-publisher [--accept-agreement]   Apply to become a Kosh publisher.
+                                          Without the flag: fetches and prints
+                                          the Publisher Agreement.
+                                          With --accept-agreement: reads your
+                                          gh identity, opens a GitHub issue in
+                                          kosh-index recording your acceptance,
+                                          and waits for operator approval.
+                                          Requires `gh` CLI + `gh auth login`.
+
+    registry-approve <username>            [Operator only] Approve a pending
+                                          publisher application. Moves the user
+                                          from pending_publishers to
+                                          allowed_publishers in governance.json.
+
+    registry-blacklist <username>          [Operator only] Blacklist a publisher.
+           [--reason=<text>]              Removes from allowed/pending lists,
+                                          adds to blacklisted with date +
+                                          reason. Default reason: policy
+                                          violation.
+
     publish                                Publish the current package to the
                                           Kosh registry. Reads [package].name
                                           and [package].version from vani.toml,
@@ -2037,6 +2057,38 @@ fn run() -> Result<ExitCode, String> {
                 Ok(ExitCode::SUCCESS)
             }
         }
+        // vanic apply-publisher [--accept-agreement]
+        "apply-publisher" => {
+            let accept = args.iter().skip(2).any(|a| a == "--accept-agreement");
+            vani::manifest::apply_publisher(vani::manifest::DEFAULT_REGISTRY, accept)?;
+            Ok(ExitCode::SUCCESS)
+        }
+
+        // vanic registry-approve <username>  [operator only]
+        "registry-approve" => {
+            let username = args.get(2).ok_or_else(|| {
+                "usage: vanic registry-approve <username>".to_string()
+            })?;
+            vani::manifest::registry_approve(vani::manifest::DEFAULT_REGISTRY, username)?;
+            Ok(ExitCode::SUCCESS)
+        }
+
+        // vanic registry-blacklist <username> [--reason=<text>]  [operator only]
+        "registry-blacklist" => {
+            let username = args.get(2).ok_or_else(|| {
+                "usage: vanic registry-blacklist <username> [--reason=<text>]".to_string()
+            })?;
+            let reason = args.iter().skip(3)
+                .find_map(|a| a.strip_prefix("--reason="))
+                .unwrap_or("policy violation");
+            vani::manifest::registry_blacklist(
+                vani::manifest::DEFAULT_REGISTRY,
+                username,
+                reason,
+            )?;
+            Ok(ExitCode::SUCCESS)
+        }
+
         // vanic publish
         // Build tarball, create GH Release in kosh-index, push NDJSON index line.
         "publish" => {

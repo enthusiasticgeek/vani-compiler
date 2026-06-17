@@ -687,32 +687,34 @@ fn push_index_update(
     Ok(())
 }
 
-/// Fetch and parse `config.json` from a Kosh registry.
-fn fetch_registry_config(registry: &str) -> Result<serde_json::Value, String> {
-    let url = format!("{}/config.json", registry.trim_end_matches('/'));
-    let body = http_get_text(&url)?;
-    serde_json::from_str(&body).map_err(|e| format!("registry config.json: {e}"))
+/// Return the date as "YYYY-MM-DD" using the system clock (no external deps).
+fn today_iso() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut days = secs / 86400;
+    let mut y = 1970u32;
+    loop {
+        let dy = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366u64 } else { 365 };
+        if days < dy { break; }
+        days -= dy;
+        y += 1;
+    }
+    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+    let mdays: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 1u32;
+    for &md in &mdays {
+        if days < md { break; }
+        days -= md;
+        m += 1;
+    }
+    format!("{:04}-{:02}-{:02}", y, m, days + 1)
 }
 
-/// Gate `vanic publish`: verify the authenticated `gh` user appears in
-/// `config.json → governance.allowed_publishers`.
-///
-/// The allowlist lives in the registry's own `config.json`, so governance
-/// can be transferred to a committee (or moved to a new registry URL)
-/// without any compiler change — just update that file.
-fn check_publish_auth(registry: &str) -> Result<(), String> {
-    let config = fetch_registry_config(registry)?;
-    let allowed: Vec<String> = config["governance"]["allowed_publishers"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-        .unwrap_or_default();
-    if allowed.is_empty() {
-        return Err(
-            "registry config.json does not define governance.allowed_publishers.\n\
-             Publishing is blocked until the registry owner adds that field."
-                .to_string(),
-        );
-    }
+/// Return the authenticated GitHub username via the `gh` CLI.
+fn get_gh_username() -> Result<String, String> {
     let out = std::process::Command::new("gh")
         .args(["api", "user", "--jq", ".login"])
         .output()
@@ -720,20 +722,269 @@ fn check_publish_auth(registry: &str) -> Result<(), String> {
     if !out.status.success() {
         return Err("gh: could not identify authenticated user. Run `gh auth login`.".to_string());
     }
-    let current = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// Fetch `governance.json` from the registry via the GitHub Contents API.
+/// Returns `(parsed_json, file_sha)`.
+fn fetch_governance_with_sha(registry: &str) -> Result<(serde_json::Value, String), String> {
+    // Derive the API path from the registry URL.
+    // Default registry lives in enthusiasticgeek/kosh-index.
+    let api_path = if registry == DEFAULT_REGISTRY {
+        "repos/enthusiasticgeek/kosh-index/contents/governance.json".to_string()
+    } else {
+        return Err(format!("non-default registries are not yet supported: {registry}"));
+    };
+    let out = std::process::Command::new("gh")
+        .args(["api", &api_path])
+        .output()
+        .map_err(|e| format!("gh not found: {e}"))?;
+    if !out.status.success() {
+        return Err("could not fetch governance.json from registry".to_string());
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("gh api: {e}"))?;
+    let file_sha = meta["sha"].as_str().unwrap_or("").to_string();
+    let download_url = meta["download_url"].as_str().unwrap_or("").to_string();
+    let content = http_get_text(&download_url)?;
+    let gov: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("governance.json: {e}"))?;
+    Ok((gov, file_sha))
+}
+
+/// Push an updated `governance.json` back to the registry via GitHub API.
+fn push_governance_update(
+    gov: &serde_json::Value,
+    file_sha: &str,
+    commit_msg: &str,
+) -> Result<(), String> {
+    let api_path = "repos/enthusiasticgeek/kosh-index/contents/governance.json";
+    let pretty =
+        serde_json::to_string_pretty(gov).map_err(|e| format!("serialize governance: {e}"))?;
+    let encoded = base64_encode(format!("{pretty}\n").as_bytes());
+    let body = serde_json::json!({ "message": commit_msg, "content": encoded, "sha": file_sha });
+    let body_str = body.to_string();
+    let mut child = std::process::Command::new("gh")
+        .args(["api", api_path, "--method", "PUT", "--input", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("gh: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(body_str.as_bytes()).map_err(|e| format!("gh stdin: {e}"))?;
+    }
+    let res = child.wait_with_output().map_err(|e| format!("gh wait: {e}"))?;
+    if !res.status.success() {
+        let msg = String::from_utf8_lossy(&res.stderr);
+        return Err(format!("gh api PUT failed: {}", msg.trim()));
+    }
+    Ok(())
+}
+
+/// Gate `vanic publish`: verifies the authenticated `gh` user against
+/// `governance.json → allowed_publishers` and checks the blacklist.
+///
+/// Governance lives entirely in `governance.json` — transferring to a
+/// committee or a new registry URL requires no compiler change.
+fn check_publish_auth(registry: &str) -> Result<(), String> {
+    let (gov, _) = fetch_governance_with_sha(registry)?;
+    let current = get_gh_username()?;
+
+    // Check blacklist first.
+    if let Some(bl) = gov["blacklisted"].as_array() {
+        if let Some(entry) = bl.iter().find(|v| v["username"].as_str() == Some(&current)) {
+            let reason = entry["reason"].as_str().unwrap_or("policy violation");
+            let since = entry["since"].as_str().unwrap_or("unknown");
+            let gov_url = gov["governance_url"].as_str().unwrap_or(registry);
+            return Err(format!(
+                "publish rejected: '{current}' is blacklisted from this registry.\n\
+                 Reason: {reason}\n\
+                 Since:  {since}\n\
+                 To appeal, open an issue at {gov_url}"
+            ));
+        }
+    }
+
+    let allowed: Vec<String> = gov["allowed_publishers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+
     if !allowed.contains(&current) {
-        let gov_url = config["governance"]["governance_url"]
-            .as_str()
-            .unwrap_or(registry);
+        let is_pending = gov["pending_publishers"]
+            .as_array()
+            .map(|a| a.iter().any(|v| v["username"].as_str() == Some(&current)))
+            .unwrap_or(false);
+        let agreement_url = gov["agreement_url"].as_str().unwrap_or("");
+        let gov_url = gov["governance_url"].as_str().unwrap_or(registry);
+
+        if is_pending {
+            return Err(format!(
+                "publish rejected: '{current}' has applied but is awaiting operator approval.\n\
+                 You will be notified via your GitHub issue when approved.\n\
+                 See {gov_url}"
+            ));
+        }
         return Err(format!(
-            "publish rejected: '{}' is not an authorized publisher for this registry.\n\
-             Authorized: {}\n\
-             See {} for governance / submission details.",
-            current,
-            allowed.join(", "),
-            gov_url
+            "publish rejected: '{current}' is not an authorized publisher.\n\
+             To apply:\n\
+               1. Read the agreement: {agreement_url}\n\
+               2. Run: vanic apply-publisher --accept-agreement\n\
+             Authorized: {}",
+            allowed.join(", ")
         ));
     }
+    Ok(())
+}
+
+/// Show the Publisher Agreement (no flag) or submit a publisher application
+/// (with `--accept-agreement`).
+pub fn apply_publisher(registry: &str, accept_agreement: bool) -> Result<(), String> {
+    let (gov, _) = fetch_governance_with_sha(registry)?;
+    let agreement_url = gov["agreement_url"].as_str().unwrap_or("");
+    let agreement_version = gov["agreement_version"].as_str().unwrap_or("1.0");
+    let gov_url = gov["governance_url"].as_str().unwrap_or(registry);
+
+    if !accept_agreement {
+        // Print the agreement and instructions.
+        if !agreement_url.is_empty() {
+            let text = http_get_text(agreement_url)?;
+            println!("{text}");
+        }
+        println!("\n─────────────────────────────────────────────────");
+        println!("To submit your application, re-run with --accept-agreement:");
+        println!("  vanic apply-publisher --accept-agreement");
+        return Ok(());
+    }
+
+    let current = get_gh_username()?;
+
+    // Already approved?
+    let allowed: Vec<String> = gov["allowed_publishers"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    if allowed.contains(&current) {
+        println!("'{current}' is already an authorized publisher. No action needed.");
+        return Ok(());
+    }
+
+    // Blacklisted?
+    if gov["blacklisted"]
+        .as_array()
+        .map(|a| a.iter().any(|v| v["username"].as_str() == Some(&current)))
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "'{current}' is blacklisted from this registry.\n\
+             To appeal, open an issue at {gov_url}"
+        ));
+    }
+
+    // Already pending?
+    if gov["pending_publishers"]
+        .as_array()
+        .map(|a| a.iter().any(|v| v["username"].as_str() == Some(&current)))
+        .unwrap_or(false)
+    {
+        println!("'{current}' already has a pending application. Wait for operator approval.");
+        println!("See {gov_url}");
+        return Ok(());
+    }
+
+    // Create a GitHub issue recording agreement acceptance.
+    let issue_title = format!("Publisher application: {current}");
+    let issue_body = format!(
+        "## Publisher Application\n\n\
+         **GitHub username**: `{current}`  \n\
+         **Agreement version accepted**: {agreement_version}  \n\
+         **Agreement URL**: {agreement_url}  \n\
+         **Applied**: {}  \n\n\
+         I have read and agree to the Kosh Publisher Agreement in full.  \n\
+         I understand that publishing malware, harmful code, or content that \
+         violates the agreement will result in immediate revocation, removal \
+         of my packages, and possible legal action.\n\n\
+         Please review my application and add me to `allowed_publishers` in \
+         `governance.json`.",
+        today_iso()
+    );
+
+    let out = std::process::Command::new("gh")
+        .args([
+            "issue", "create",
+            "--repo", "enthusiasticgeek/kosh-index",
+            "--title", &issue_title,
+            "--body", &issue_body,
+        ])
+        .output()
+        .map_err(|e| format!("gh not found: {e}"))?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("failed to create GitHub issue: {}", msg.trim()));
+    }
+    let issue_url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    println!("Application submitted: {issue_url}");
+    println!("The operator will review your application and notify you via the issue.");
+    Ok(())
+}
+
+/// Admin: approve a pending publisher (only operator can call this).
+pub fn registry_approve(registry: &str, username: &str) -> Result<(), String> {
+    check_publish_auth(registry)?; // only existing publishers (= operator) may approve
+    let (mut gov, sha) = fetch_governance_with_sha(registry)?;
+
+    // Add to allowed_publishers if absent.
+    if let Some(arr) = gov["allowed_publishers"].as_array_mut() {
+        if !arr.iter().any(|v| v.as_str() == Some(username)) {
+            arr.push(serde_json::Value::String(username.to_string()));
+        }
+    }
+    // Remove from pending_publishers.
+    if let Some(arr) = gov["pending_publishers"].as_array_mut() {
+        arr.retain(|v| v["username"].as_str() != Some(username));
+    }
+    // Remove from blacklisted (handles unban via approve).
+    if let Some(arr) = gov["blacklisted"].as_array_mut() {
+        arr.retain(|v| v["username"].as_str() != Some(username));
+    }
+
+    let msg = format!("governance: approve publisher '{username}'");
+    push_governance_update(&gov, &sha, &msg)?;
+    println!("'{username}' approved as a publisher.");
+    Ok(())
+}
+
+/// Admin: blacklist a publisher (only operator can call this).
+/// Removes the user from allowed and pending lists, adds to blacklisted.
+pub fn registry_blacklist(
+    registry: &str,
+    username: &str,
+    reason: &str,
+) -> Result<(), String> {
+    check_publish_auth(registry)?;
+    let (mut gov, sha) = fetch_governance_with_sha(registry)?;
+
+    if let Some(arr) = gov["allowed_publishers"].as_array_mut() {
+        arr.retain(|v| v.as_str() != Some(username));
+    }
+    if let Some(arr) = gov["pending_publishers"].as_array_mut() {
+        arr.retain(|v| v["username"].as_str() != Some(username));
+    }
+    if let Some(arr) = gov["blacklisted"].as_array_mut() {
+        if !arr.iter().any(|v| v["username"].as_str() == Some(username)) {
+            arr.push(serde_json::json!({
+                "username": username,
+                "reason": reason,
+                "since": today_iso(),
+            }));
+        }
+    }
+
+    let msg = format!("governance: blacklist '{username}'");
+    push_governance_update(&gov, &sha, &msg)?;
+    println!("'{username}' has been blacklisted. Reason: {reason}");
     Ok(())
 }
 
