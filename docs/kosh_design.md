@@ -21,6 +21,13 @@ vāṇी, implemented as Arc 9 in [TODO.md](../TODO.md).
 | `vanic add <name>[@constraint]` | ✅ | `4bf72c2` |
 | `vanic publish` | ✅ | `6e0ac44` |
 | Publish gate (`governance.allowed_publishers`) | ✅ | `3897371` |
+| `governance.json` (separate publisher management file) | ✅ | kosh-index `ab3ffb3` |
+| Publisher Agreement v1.0 + `apply-publisher` command | ✅ | `ab3ffb3` |
+| `registry-approve` / `registry-blacklist` operator commands | ✅ | `ab3ffb3` |
+| Checksum verification at `vanic add` time (SHA-256) | ✅ | 2026-06-17 |
+| `vanic remove <name>` | ✅ | 2026-06-17 |
+| `vanic search [<query>]` | ✅ | 2026-06-17 |
+| `vanic update` | ✅ | 2026-06-17 |
 
 ---
 
@@ -28,7 +35,10 @@ vāṇी, implemented as Arc 9 in [TODO.md](../TODO.md).
 
 ```
 enthusiasticgeek/kosh-index   (public GitHub repo)
-  config.json                 ← dl template, api, governance block
+  config.json                 ← dl template, api URL
+  governance.json             ← publisher management (allowlist, blacklist, agreement)
+  PUBLISHER_AGREEMENT.md      ← legal agreement all publishers must accept
+  PUBLISHING.md               ← how-to guide for new publishers
   index/
     <name>.json               ← one NDJSON line per published version
 
@@ -38,18 +48,34 @@ Tarballs:     GitHub Release assets inside kosh-index
 
 ### `config.json`
 
+Technical registry configuration only — no governance data here.
+
 ```json
 {
-  "dl":   "https://github.com/enthusiasticgeek/kosh-index/releases/download/{name}-v{version}/{name}-{version}.tar.gz",
-  "api":  "https://enthusiasticgeek.github.io/kosh-index",
-  "auth-required": false,
-  "governance": {
-    "allowed_publishers": ["enthusiasticgeek"],
-    "governance_url":     "https://github.com/enthusiasticgeek/kosh-index",
-    "note": "v1: enthusiasticgeek is the sole write authority. Registry URL and governance model will change when vani adoption warrants a committee-managed standalone domain."
-  }
+  "dl":  "https://github.com/enthusiasticgeek/kosh-index/releases/download/{name}-v{version}/{name}-{version}.tar.gz",
+  "api": "https://enthusiasticgeek.github.io/kosh-index",
+  "auth-required": false
 }
 ```
+
+### `governance.json`
+
+Publisher management — lives separately so governance can be updated
+(committee takeover, new domain) without any compiler change.
+
+```json
+{
+  "version": 1,
+  "agreement_version": "1.0",
+  "agreement_url":   "https://enthusiasticgeek.github.io/kosh-index/PUBLISHER_AGREEMENT.md",
+  "governance_url":  "https://github.com/enthusiasticgeek/kosh-index",
+  "allowed_publishers": ["enthusiasticgeek"],
+  "pending_publishers": [],
+  "blacklisted": []
+}
+```
+
+`blacklisted` entries carry `username`, `reason`, and `since` (ISO date).
 
 ### Index entry format (`index/<name>.json`)
 
@@ -88,9 +114,12 @@ parser  = { path = "./vendor/parser", version = "^2.1" }
 | `vanic vendor` | copies path-dep source trees to `vendor/` | ✅ |
 | `vanic add <name>[@constraint]` | fetches from registry → `vendor/` → updates `vani.toml` + `vani.lock` | ✅ |
 | `vanic publish` | build tarball → auth gate → GH Release → index append | ✅ |
-| `vanic remove <name>` | removes from `[deps]` + updates lockfile | future |
-| `vanic search <q>` | queries registry | future |
-| `vanic update` | re-resolves all registry deps | future |
+| `vanic apply-publisher [--accept-agreement]` | fetch + display publisher agreement; with flag: submit GitHub issue to apply | ✅ |
+| `vanic registry-approve <username>` | operator: approve a pending publisher (adds to `allowed_publishers`) | ✅ |
+| `vanic registry-blacklist <username> --reason=<text>` | operator: blacklist a publisher (removes from allowed + blocks future publish) | ✅ |
+| `vanic remove <name>` | remove from `[deps]`, delete `vendor/<name>/`, rewrite `vani.lock` | ✅ |
+| `vanic search [<query>]` | list all packages in registry, or filter by name substring | ✅ |
+| `vanic update` | re-resolve all registry deps to latest compatible version; verifies SHA-256 | ✅ |
 
 ---
 
@@ -111,18 +140,37 @@ parser  = { path = "./vendor/parser", version = "^2.1" }
 
 ### Publish gate (2026-06-17)
 
-`vanic publish` fetches `config.json` from the registry and reads
-`governance.allowed_publishers`. The authenticated `gh` user must
-appear in that list, otherwise publish is rejected with a clear error:
+Publishing is a two-step gated process:
+
+**Step 1 — Publisher agreement.** Before applying, a prospective publisher
+reads the [PUBLISHER_AGREEMENT.md](https://enthusiasticgeek.github.io/kosh-index/PUBLISHER_AGREEMENT.md)
+(fetched by `vanic apply-publisher`) and formally accepts it:
 
 ```
-publish rejected: 'bob' is not an authorized publisher for this registry.
-Authorized: enthusiasticgeek
-See https://github.com/enthusiasticgeek/kosh-index for governance details.
+vanic apply-publisher --accept-agreement
 ```
 
-The allowlist lives **entirely in the registry's `config.json`**. When
-governance transfers to a committee, or the registry moves to a new
+This creates a public GitHub issue in `kosh-index` recording the acceptance.
+
+**Step 2 — Operator approval.** The registry operator (`enthusiasticgeek`)
+reviews the application and either:
+- Runs `vanic registry-approve <username>` → adds them to `allowed_publishers`.
+- Closes the issue with an explanation.
+
+**On publish** (`vanic publish`), the compiler fetches `governance.json` and
+checks three states in order:
+
+| State | Error message |
+|-------|--------------|
+| Blacklisted | `publish rejected: '<user>' has been blacklisted from this registry.\nReason: <reason>\nSince: <date>\nTo appeal, open an issue at https://github.com/enthusiasticgeek/kosh-index` |
+| Pending approval | `publish rejected: '<user>' has applied but is awaiting operator approval.\nSee https://github.com/enthusiasticgeek/kosh-index for status.` |
+| Not in allowlist | `publish rejected: '<user>' is not an authorized publisher for this registry.\nTo apply, run: vanic apply-publisher\nSee https://github.com/enthusiasticgeek/kosh-index` |
+
+The blacklist is checked **before** the allowlist — a revoked publisher cannot
+slip through a race window.
+
+All publisher state lives **entirely in `governance.json`** in the registry
+repo. When governance transfers to a committee, or the registry moves to a new
 domain, only that file changes — no compiler update required.
 
 ### Future governance path

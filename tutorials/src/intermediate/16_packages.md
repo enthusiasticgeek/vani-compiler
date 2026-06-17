@@ -155,12 +155,45 @@ itself, and `target/`.
 
 ---
 
+## Becoming a publisher
+
+Publishing is **gated**: you must sign the publisher agreement and be
+approved by the registry operator before `vanic publish` will work.
+
+### Step 1 — Read the Publisher Agreement
+
+```
+vanic apply-publisher
+```
+
+This fetches and prints the
+[Publisher Agreement](https://enthusiasticgeek.github.io/kosh-index/PUBLISHER_AGREEMENT.md).
+Read every section. Key requirements:
+
+- No malware, viruses, ransomware, spyware, cryptominers, or any destructive payload.
+- No deceptive packages (typosquatting, impersonation).
+- No illegal content (CSAM, export-controlled code).
+- Every package must include a license declaration.
+
+### Step 2 — Submit your application
+
+```
+vanic apply-publisher --accept-agreement
+```
+
+This opens a public GitHub issue in `kosh-index` recording your acceptance.
+You will see a confirmation with the issue URL.
+
+### Step 3 — Wait for operator review
+
+The operator (`enthusiasticgeek`) reviews your application and either approves
+or denies it via the GitHub issue. Approval typically takes a few days.
+
+---
+
 ## Publishing your package
 
-Anyone can publish to the registry once they are an authorized publisher.
-The publisher list lives in the registry's own
-[`config.json`](https://enthusiasticgeek.github.io/kosh-index/config.json)
-— governance can be handed to a committee without any compiler change.
+Once approved, from your package root:
 
 ### Prerequisites
 
@@ -192,12 +225,17 @@ publish: my-library v1.0.0 → https://github.com/.../releases/tag/my-library-v1
 
 `vanic publish`:
 1. Reads `[package].name` and `[package].version` from `vani.toml`.
-2. Verifies the authenticated `gh` user is in `governance.allowed_publishers`.
+2. Verifies the authenticated `gh` user against `governance.json`
+   (`allowed_publishers`).
 3. Builds a `<name>-<version>.tar.gz` (only `*.vani` + `vani.toml`; skips
    `vendor/`, `target/`, hidden dirs).
 4. Computes SHA-256.
 5. Creates a GitHub Release in `kosh-index` with the tarball as an asset.
 6. Appends a line to `index/<name>.json` in the registry.
+
+The publisher list lives in the registry's
+[`governance.json`](https://enthusiasticgeek.github.io/kosh-index/governance.json)
+— governance can be handed to a committee without any compiler change.
 
 ### What goes into the tarball?
 
@@ -205,15 +243,87 @@ Only source files and the manifest:
 - `vani.toml`
 - `**/*.vani` (recursive, skipping `vendor/`, `target/`, hidden dirs)
 
-### Unauthorized publish
+### Authorization errors
 
-If you're not on the allowlist:
+`vanic publish` checks three states in order:
+
+| Situation | Message |
+|-----------|---------|
+| Blacklisted | `publish rejected: 'alice' has been blacklisted from this registry.` + reason + appeal instructions |
+| Applied but pending | `publish rejected: 'alice' has applied but is awaiting operator approval.` |
+| Never applied | `publish rejected: 'alice' is not an authorized publisher for this registry.` + `To apply, run: vanic apply-publisher` |
+
+---
+
+## Removing a dependency
 
 ```
-publish rejected: 'alice' is not an authorized publisher for this registry.
-Authorized: enthusiasticgeek
-See https://github.com/enthusiasticgeek/kosh-index for governance details.
+vanic remove hello-kosh
 ```
+
+This removes the `[deps]` entry from `vani.toml`, deletes `vendor/hello-kosh/`,
+and rewrites `vani.lock`.
+
+---
+
+## Searching the registry
+
+```
+vanic search           # list all packages
+vanic search math      # filter by name substring
+```
+
+Output:
+```
+NAME                           LATEST       VERSIONS
+hello-kosh                     0.2.0        2
+mathlib                        1.3.1        5
+
+2 package(s) found
+```
+
+---
+
+## Updating dependencies
+
+```
+vanic update
+```
+
+Re-resolves all registry deps (those in `./vendor/`) to their latest compatible
+version, verifies the SHA-256 checksum of each download, and rewrites `vani.toml`
++ `vani.lock`. Deps already at the latest allowed version are skipped.
+
+---
+
+## Checksum verification
+
+`vanic add` and `vanic update` both verify the downloaded tarball's SHA-256
+against the value recorded in the registry's sparse index. A mismatch aborts
+immediately:
+
+```
+checksum mismatch for 'mathlib' v1.3.1: expected 3f4a... got beef...
+```
+
+The verified checksum is also recorded in `vani.lock` for future reference.
+
+---
+
+## Admin commands (operator only)
+
+These commands require the `gh` CLI to be authenticated as `enthusiasticgeek`:
+
+```
+# Approve a pending publisher application
+vanic registry-approve alice
+
+# Blacklist a publisher
+vanic registry-blacklist alice --reason="published malware in v0.3.0"
+```
+
+Both commands update `governance.json` in the registry repo atomically via the
+GitHub Contents API.
 
 ---
 
@@ -246,7 +356,14 @@ Whether to commit `vendor/` is up to you:
 | `vanic add <name>` | Add latest version from registry |
 | `vanic add <name>@^1.0` | Add with version constraint |
 | `vanic vendor` | Copy path-dep sources into `vendor/` |
-| `vanic publish` | Build + upload tarball + update index |
+| `vanic remove <name>` | Remove dep from manifest + vendor + lockfile |
+| `vanic search [<query>]` | List registry packages (optionally filtered) |
+| `vanic update` | Re-download all registry deps to latest compatible version |
+| `vanic apply-publisher` | Fetch and display the Publisher Agreement |
+| `vanic apply-publisher --accept-agreement` | Submit a publisher application (GitHub issue) |
+| `vanic publish` | Build + upload tarball + update index (approved publishers only) |
+| `vanic registry-approve <user>` | (Operator) Approve a publisher application |
+| `vanic registry-blacklist <user> --reason=…` | (Operator) Blacklist a publisher |
 
 ---
 
@@ -257,6 +374,8 @@ Whether to commit `vendor/` is up to you:
 - `vanic add` is the one-command way to pull in a library from the registry.
 - `vani.lock` records exact resolved versions — commit it.
 - `vanic publish` ships your work to the world; the registry gates who can
-  publish via its own `config.json` governance block.
+  publish via `governance.json` — allowlist, pending list, and blacklist.
+- To become a publisher: `vanic apply-publisher` → read agreement →
+  `vanic apply-publisher --accept-agreement` → wait for operator approval.
 
 In the next chapter we look at interfaces and trait-style polymorphism.

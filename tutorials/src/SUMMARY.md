@@ -2,6 +2,7 @@
 
 [Introduction](introduction.md)
 [Installation](installation.md)
+[Editor integration (LSP)](installation.md#editor-integration-lsp)
 
 # Beginner
 

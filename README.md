@@ -341,13 +341,26 @@ semantic model **borrowed from Rust** and a code-generator that
   is newer than lock.
 - `vanic vendor` — copies dep source trees into `vendor/<name>/`.
 - `vanic add <name>[@constraint]` — fetches from the Kosh registry,
-  extracts to `vendor/<name>/`, updates `vani.toml` and `vani.lock`.
-- `vanic publish` — builds tarball, auth-gates against
-  `governance.allowed_publishers` in `config.json`, creates a GitHub
-  Release, and appends an NDJSON line to the sparse index.
+  verifies SHA-256 checksum, extracts to `vendor/<name>/`, updates
+  `vani.toml` and `vani.lock`.
+- `vanic remove <name>` — removes dep from manifest, deletes `vendor/<name>/`,
+  rewrites `vani.lock`.
+- `vanic search [<query>]` — list registry packages (optionally by name
+  substring).
+- `vanic update` — re-resolve all registry deps to latest compatible version
+  with checksum verification.
+- `vanic apply-publisher` — fetches and displays the Publisher Agreement.
+  `vanic apply-publisher --accept-agreement` submits a publisher application
+  as a GitHub issue in the registry repo.
+- `vanic publish` — builds tarball, auth-gates against `governance.json`
+  (`allowed_publishers` / `pending_publishers` / `blacklisted`), creates a
+  GitHub Release, and appends an NDJSON line to the sparse index.
+- `vanic registry-approve <user>` / `vanic registry-blacklist <user> --reason=…`
+  — operator-only commands to approve or blacklist publishers.
 - Live registry: **[enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/)**
-- Governance model is registry-side: `allowed_publishers` list in
-  `config.json` — transfers to a committee without any compiler change.
+- Governance model is registry-side: `governance.json` holds allowlist,
+  pending list, blacklist, and agreement version — transfers to a committee
+  without any compiler change.
 
 **Backends + tooling:**
 - LLVM IR (default) — tree path + SSA path with automatic fallback.
@@ -3502,95 +3515,37 @@ cargo test llvm_backend_run_produces_same_output_as_c     # Cross-backend parity
 
 ### Editor integration via LSP
 
-A minimal Language Server ships as the `intent-lsp` binary:
+The Language Server ships as both `vanic lsp` (invoked via the main binary) and
+as a standalone `intent-lsp` binary built from `src/bin/lsp.rs`:
 
 ```bash
 cargo build --bin intent-lsp
 ./target/debug/intent-lsp        # speaks LSP over stdio
 ```
 
-Capabilities today:
+**Full LSP feature set (as of 2026-06-17):**
 
-- `textDocument/publishDiagnostics` — lexer / parser / checker
-  errors pushed on every `didOpen` and `didChange`, with byte
-  spans mapped to LSP line/character ranges.
-- `textDocument/hover` — returns the inferred type of the
-  smallest typed expression covering the cursor (e.g. hovering
-  on `42` reports `: i64`, on `xs[i] + bias` reports the
-  promoted integer type). Returns nothing while the document
-  doesn't parse / check; reach a green state to see hover.
-- `textDocument/definition` — goto-definition. Click on a
-  binding reference (a `Var`, `&Var`, or `&mut Var`); the
-  server returns a `Location` pointing at the binding's
-  declaration site. Synthetic checker-inserted names (return
-  temps, iteration counters) are filtered so navigation only
-  lands on user-written declarations. `TypedStmt::Let`
-  doesn't yet carry a dedicated span, so the declaration
-  range is the let's RHS expression span — close enough for
-  editors to land in the right neighborhood.
-- `textDocument/references` — find all references.
-  Resolves the binding at the cursor (each `Var` / `Ref` /
-  `RefMut` carries its declaration site as
-  `TypedExpr::binding_decl_span`) and collects every other
-  occurrence with the matching `decl_span` — so two
-  same-name bindings in different scopes stay separate.
-  Honors the client's `includeDeclaration` flag.
-- `textDocument/rename` — rename a binding everywhere it
-  appears. Reuses references to collect occurrences,
-  prepends the declaration site, and returns a
-  `WorkspaceEdit` whose `TextEdit`s replace each span with
-  the new name. Validates the new name syntactically (must
-  match `[A-Za-z_][A-Za-z0-9_]*`) and rejects collisions
-  with reserved keywords; the editor surfaces these as
-  user-visible errors before applying. Scope-aware via the
-  same `binding_decl_span` resolution.
-- `textDocument/completion` — invocation-triggered
-  completion (Ctrl+Space; no automatic trigger characters
-  yet). Returns: language keywords + type names + the fixed
-  builtin function set (always; works even when the doc
-  doesn't compile, so mid-typed edits still get useful
-  suggestions); plus every top-level function name and the
-  in-scope bindings of the function the cursor is inside —
-  found by checking each `TypedFunction`'s `span` against
-  the cursor's byte offset. Parameters of *sibling*
-  functions are no longer leaked into the completion list.
-  Bindings declared after the cursor in the same scope are
-  also excluded.
-- `textDocument/codeAction` — quick fixes triggered by
-  diagnostics in the request context. v1 recognizes one
-  pattern: a parser diagnostic whose message says
-  `expected '<TOK>'` for a single-character token produces
-  an "Insert `<TOK>`" quick fix that patches the source at
-  the diagnostic's end. The action is marked
-  `is_preferred: true` so editors configured to auto-apply
-  the preferred quick fix on save will close the trivial
-  cases (missing `;`, `)`, `}`, …) without user
-  intervention. Adding more patterns is straightforward —
-  the fix-classifier is one helper per pattern.
-- `textDocument/semanticTokens/full` — lex-driven semantic
-  highlighting with IR-driven refinement. Re-lexes the
-  source and assigns each token a type from the legend
-  (`variable`, `function`, `parameter`, `type`, `keyword`,
-  `number`, `string`). Type primitives (`i64`, `Vec`, etc.)
-  and known type-position identifiers (`Atomic`, `Channel`,
-  `Mutex`, `Guard`, `Task`, `Str`/`OwnedStr`) become `type`;
-  `min`/`max` become `function`; literals get
-  `number`/`string`; identifier-shaped tokens default to
-  `variable`. When the document compiles, the typed IR is
-  walked to override token types at known callee and
-  parameter-declaration spans (using the `name_span` fields
-  on `TypedExprKind::Call` and `TypedParam`): a `Call`
-  callee is upgraded to `function` and a parameter
-  declaration to `parameter`. Two semantic-token modifiers
-  ship as well: `declaration` (set on parameter declaration
-  sites) and `readonly` (set on parameter declarations and on
-  every `Var` read whose `binding_decl_span` resolves to a
-  parameter — parameters can't be reassigned without
-  shadowing). Returns the empty token list on lex errors so
-  the editor's UI stays responsive during mid-edit states.
+| Capability | What it does |
+|---|---|
+| `publishDiagnostics` | Lexer / parser / checker errors on every `didOpen` + `didChange`; source tag `vanic` |
+| `hover` | Type of the smallest typed expression at cursor; augmented doc-block for the postfix `?` operator |
+| `definition` | Jump to declaration site of any binding (`Var`, `Ref`, `RefMut`) |
+| `references` | All reference sites for a binding; scope-separated via `binding_decl_span` |
+| `rename` | Rename a binding across the file; validates new name, rejects keyword collisions |
+| `completion` | Keywords (English + 30 supported dialects), type names, builtins (`vec`, `push`, `len`, `try_vec`, …), in-scope bindings, function names — scope-aware per function span |
+| `codeAction` | Quick-fix insertion for missing single-char tokens (`; ) }` …); marked `is_preferred` for auto-apply-on-save |
+| `semanticTokens/full` | Lex-driven coloring with IR-driven overrides: call callees → `function`, parameter declarations → `parameter + declaration + readonly`, parameter reads → `parameter + readonly`, type-position identifiers → `type`, keywords, numbers, strings |
 
-Point your editor at `intent-lsp` for `*.vani` files. For
-Neovim with `nvim-lspconfig`:
+**Dialect-aware completion** — when the file declares `// vani-lang: <tag>`,
+the completion popup surfaces that dialect's native keywords alongside English.
+All 30 supported dialects have keyword tables wired:
+Hindi/Sanskrit/Marathi/Nepali/Maithili/Konkani (Devanagari), Mandarin, Bengali,
+Tamil, Telugu, Gujarati, Punjabi, Kannada, Odia, Urdu, Persian, Korean,
+Japanese, Arabic, Hebrew, Russian, Spanish, French, German, Portuguese, Italian,
+Turkish, Polish, Indonesian, Malay, Swahili, Dutch, Thai, Hungarian, Czech.
+
+Point your editor at `intent-lsp` (or `vanic lsp`) for `*.vani` files.
+For Neovim with `nvim-lspconfig`:
 
 ```lua
 local lspconfig = require('lspconfig')
@@ -3607,6 +3562,9 @@ if not configs.vani then
 end
 lspconfig.vani.setup({})
 ```
+
+For VS Code, point the `vani` extension's `server.path` setting at the
+`intent-lsp` binary. Source tag in all diagnostics is `vanic`.
 
 The cross-backend parity test runs every file under `examples/`
 through both `--backend=c` and `--backend=llvm` and diffs stdout
@@ -4220,7 +4178,7 @@ roadmap surface and unblocks the items below it.
 | 18 | ⏳ **Data structures + algorithms roadmap (Levels 1–4)** | #14 (for Level 2+) | high (multi-session) | Levels 1–4 sequenced under affine ownership. Level 1: `sort` / `sort_by` / `find` / `binary_search` / `pop` / RNG / Hash interface. Level 2: `HashSet` / `HashMap` (⚠️ AFFINE-TENSION — `get -> Option<ref V>`) / `BTreeSet` / `BTreeMap` / `Deque` / `BinaryHeap`. Level 3: closures + iterator combinators. Level 4: arena-based BST / B-tree / Trie / graphs + algorithms. Full per-item plan in [TODO.md](TODO.md). |
 | 19 | ✅ **Condition variables (`Condvar`)** | — | medium (single session) | done 2026-05-28 (closure #292). ✅ AFFINE — new builtin type, stack-by-value. 5 builtins (`condvar_new / wait(ref cv, mut ref g: Guard<i64>) / wait_timeout / notify_one / notify_all`). Tree-C + SSA-C: shared runtime helpers (futex/WaitOnAddress/spin-yield). Tree-LLVM: inline IR per call site (`%intent_condvar = type { i32 }`, atomicrmw + syscall/WakeByAddress). SSA-LLVM: falls back to tree-LLVM. 5 lib tests + `examples/condvar.vani` cross-backend parity. Pending follow-ups: cross-task wait/notify (needs task-capture rule expansion), direct SSA-LLVM support, wider Mutex widths. |
 | 20 | ✅ **Async / asyncio** — SHIPPED 2026-06-08 (Arc 8 v1+v1.5+v1.6+v2+v3.1). ⚠️ AFFINE-TENSION via compiler-lowered state machines; 🛑 NOT Pin / self-references | Level 3 closures (#18) | high (multi-session) | Each `async fn` lowers (via Arc 8 v3.1 parser-level transform) to a struct/poll/constructor triple. Builtin TCP + epoll + non-blocking I/O families for single-thread cooperative scheduling; `Channel<T, N>` coordination primitive; `Future<T>` / `Poll<T>` / `CancelToken`. Linux verified; macOS kqueue + Windows IOCP branches ship with deferred host verification. 28 acceptance examples + generic-async smoke cross-backend parity-green. Not shipping: Rust-style `Pin<&mut Self>`, panic-based cancellation, stackful coroutines, async inside `parallel for`. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md). |
-| 21 | ✅ **Kosh package manager + Vāṇī-Kosh registry** — SHIPPED 2026-06-17 | #10, #13 | high (multi-session) | `vani.toml` with `[package].version` + `[deps]` version constraints; `vani.lock` writer; `vanic vendor` / `vanic add` / `vanic publish`. Live sparse registry at [enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/). Publish gate via `governance.allowed_publishers` in `config.json`. See [docs/kosh_design.md](docs/kosh_design.md). |
+| 21 | ✅ **Kosh package manager + Vāṇī-Kosh registry** — SHIPPED 2026-06-17 | #10, #13 | high (multi-session) | `vani.toml` with `[package].version` + `[deps]` version constraints; `vani.lock` writer; `vanic vendor` / `vanic add` / `vanic remove` / `vanic search` / `vanic update` / `vanic publish`. SHA-256 checksum verification on download. Live sparse registry at [enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/). Gated publish: Publisher Agreement v1.0 + operator approval + blacklist via `governance.json`. `vanic apply-publisher` / `registry-approve` / `registry-blacklist` commands. See [docs/kosh_design.md](docs/kosh_design.md). |
 
 **Devanagari aliases (#9) — current state + remaining work:**
 

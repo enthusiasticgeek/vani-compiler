@@ -284,6 +284,89 @@ If you see `42`, your install is healthy and you're ready for [Lesson 1 →](beg
 
 ---
 
+## Editor integration (LSP)
+
+vāṇी ships a Language Server that gives you hover types, go-to-definition,
+find-references, rename, completion, quick-fix code actions, and semantic
+highlighting in any LSP-compatible editor.
+
+### Build the language server
+
+```bash
+cargo build --release --bin intent-lsp
+```
+
+The binary is `target/release/intent-lsp`. Copy or symlink it somewhere on
+your PATH:
+
+```bash
+# Linux / macOS
+sudo ln -sf "$(pwd)/target/release/intent-lsp" /usr/local/bin/intent-lsp
+```
+
+```powershell
+# Windows — add target\release\ to your PATH (same as vanic above)
+```
+
+### Neovim (nvim-lspconfig)
+
+```lua
+local lspconfig = require('lspconfig')
+local configs   = require('lspconfig.configs')
+if not configs.vani then
+  configs.vani = {
+    default_config = {
+      cmd      = { 'intent-lsp' },
+      filetypes = { 'vani' },
+      root_dir = lspconfig.util.find_git_ancestor,
+      settings = {},
+    },
+  }
+end
+lspconfig.vani.setup({})
+```
+
+You may also want a filetype mapping so Neovim recognises `.vani` files:
+
+```lua
+vim.filetype.add({ extension = { vani = 'vani' } })
+```
+
+### VS Code
+
+1. Install the **vāṇī** extension (or use the generic
+   [LSP client](https://marketplace.visualstudio.com/items?itemName=matklad.rust-analyzer)
+   style manual config).
+2. Point the extension's `server.path` setting at your `intent-lsp` binary.
+3. Associate `*.vani` with the `vani` language ID.
+
+### Emacs (eglot)
+
+```emacs-lisp
+(add-to-list 'eglot-server-programs
+             '(vani-mode . ("intent-lsp")))
+(add-hook 'vani-mode-hook #'eglot-ensure)
+```
+
+### What you get
+
+| Feature | Behaviour |
+|---|---|
+| Diagnostics | Lexer / parser / checker errors as you type (source: `vanic`) |
+| Hover | Type of expression at cursor; `?` operator doc-block |
+| Go-to-definition | Jump to binding declaration |
+| Find references | All uses of a binding, scope-separated |
+| Rename | Rename across the file; keyword-collision check |
+| Completion | Keywords (English + 30 dialects), types, builtins, in-scope names |
+| Code actions | Auto-insert missing `;` `)` `}` and other single-char tokens |
+| Semantic tokens | Functions, parameters, types, keywords, numbers, strings — IR-driven |
+
+**Dialect-aware completion** — add `// vani-lang: korean` (or any supported
+tag) at the top of your file and the completion popup will include that
+dialect's native keywords alongside English.
+
+---
+
 ## Troubleshooting
 
 ### `error: linker 'cc' not found`

@@ -918,13 +918,28 @@ COMMANDS:
 
     add <name>[@<version>]                 Add a package from the Kosh registry.
                                           Fetches the best matching version,
-                                          downloads + extracts the tarball to
-                                          vendor/<name>/, then updates vani.toml
-                                          and rewrites vani.lock.
+                                          verifies SHA-256, downloads + extracts
+                                          to vendor/<name>/, then updates
+                                          vani.toml and rewrites vani.lock.
                                           Examples:
                                             vanic add mathlib
                                             vanic add mathlib@^1.0
                                             vanic add mathlib@1.2.3
+
+    remove <name>                          Remove a dependency: deletes the
+                                          [deps] entry from vani.toml, removes
+                                          vendor/<name>/, and rewrites vani.lock.
+
+    search [<query>]                       Search the Kosh registry for packages.
+                                          Without a query: lists all packages.
+                                          With a query: filters by name substring.
+                                          Shows name, latest version, and count.
+
+    update                                 Re-resolve all registry deps to their
+                                          latest compatible version. Only updates
+                                          deps whose path is ./vendor/<name>.
+                                          Verifies SHA-256 checksums. Rewrites
+                                          vani.toml and vani.lock on change.
 
     vendor [--manifest=<path>]              Copy each dep's source tree into
                                           vendor/<name>/ under the project root
@@ -2143,6 +2158,76 @@ fn run() -> Result<ExitCode, String> {
                 result.version,
                 result.vendor_path.display()
             );
+            Ok(ExitCode::SUCCESS)
+        }
+
+        // vanic remove <name>
+        // Remove a dep from vani.toml, delete vendor/<name>/, rewrite vani.lock.
+        "remove" => {
+            let pkg_name = args.get(2).ok_or_else(|| {
+                "usage: vanic remove <name>".to_string()
+            })?;
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("failed to read cwd: {}", e))?;
+            let manifest_path = vani::manifest::find_manifest(&cwd).ok_or_else(|| {
+                "no vani.toml found in current directory or any parent".to_string()
+            })?;
+            vani::manifest::registry_remove(&manifest_path, pkg_name, |msg| eprintln!("{}", msg))?;
+            eprintln!("remove: {} removed from project", pkg_name);
+            Ok(ExitCode::SUCCESS)
+        }
+
+        // vanic search [<query>]
+        // Search the Kosh registry by name substring.
+        "search" => {
+            let query = args.get(2).map(String::as_str);
+            eprintln!("  searching registry{}...", query.map(|q| format!(" for '{q}'")).unwrap_or_default());
+            let results = vani::manifest::registry_search(
+                vani::manifest::DEFAULT_REGISTRY,
+                query,
+            )?;
+            if results.is_empty() {
+                println!("no packages found{}", query.map(|q| format!(" matching '{q}'")).unwrap_or_default());
+            } else {
+                println!("{:<30} {:<12} {}", "NAME", "LATEST", "VERSIONS");
+                for r in &results {
+                    println!(
+                        "{:<30} {:<12} {}",
+                        r.name,
+                        if r.latest_version.is_empty() { "-" } else { &r.latest_version },
+                        r.version_count,
+                    );
+                }
+                println!("\n{} package(s) found", results.len());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+
+        // vanic update
+        // Re-resolve all registry deps to their latest compatible versions.
+        "update" => {
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("failed to read cwd: {}", e))?;
+            let manifest_path = vani::manifest::find_manifest(&cwd).ok_or_else(|| {
+                "no vani.toml found in current directory or any parent".to_string()
+            })?;
+            let results = vani::manifest::registry_update(
+                &manifest_path,
+                |msg| eprintln!("{}", msg),
+            )?;
+            if results.is_empty() {
+                eprintln!("update: no registry deps to update");
+            } else {
+                let updated: Vec<_> = results.iter().filter(|r| r.updated).collect();
+                let up_to_date = results.len() - updated.len();
+                for r in &updated {
+                    eprintln!("  updated {} v{} → v{}", r.name, r.old_version, r.new_version);
+                }
+                eprintln!(
+                    "update: {} updated, {} already up-to-date",
+                    updated.len(), up_to_date
+                );
+            }
             Ok(ExitCode::SUCCESS)
         }
 

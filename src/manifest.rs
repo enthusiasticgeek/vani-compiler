@@ -513,6 +513,16 @@ pub fn registry_add<F: Fn(&str)>(
     on_status(&format!("  downloading {dl_url}..."));
     http_get_file(&dl_url, &tarball)?;
 
+    on_status("  verifying checksum...");
+    let dl_cksum = sha256_file(&tarball)?;
+    if dl_cksum != entry.cksum {
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        return Err(format!(
+            "checksum mismatch for '{}' v{}: expected {} got {}",
+            entry.name, entry.version, entry.cksum, dl_cksum
+        ));
+    }
+
     let root_dir = manifest_path.parent().unwrap_or(Path::new("."));
     let vendor_dest = root_dir.join("vendor").join(&entry.name);
     on_status(&format!("  extracting to {}...", vendor_dest.display()));
@@ -1072,6 +1082,258 @@ pub fn publish_package<F: Fn(&str)>(
     Ok(PublishResult { name, version, cksum, release_url })
 }
 
+// ── Kosh remove ──────────────────────────────────────────────────────────────
+
+/// Remove a `[deps]` entry from `vani.toml` by name.
+/// Returns `true` if found and removed, `false` if the dep was not present.
+pub fn remove_dep_from_manifest(manifest_path: &Path, name: &str) -> Result<bool, String> {
+    let existing = std::fs::read_to_string(manifest_path)
+        .map_err(|e| format!("read '{}': {e}", manifest_path.display()))?;
+    let mut out: Vec<String> = Vec::new();
+    let mut in_deps = false;
+    let mut found = false;
+    for raw in existing.lines() {
+        let t = raw.trim();
+        if t == "[deps]" {
+            in_deps = true;
+            out.push(raw.to_string());
+            continue;
+        }
+        if t.starts_with('[') {
+            in_deps = false;
+        }
+        if in_deps {
+            let key = t.split('=').next().unwrap_or("").trim();
+            if key == name {
+                found = true;
+                continue;
+            }
+        }
+        out.push(raw.to_string());
+    }
+    if !found {
+        return Ok(false);
+    }
+    let mut content = out.join("\n");
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    std::fs::write(manifest_path, content)
+        .map_err(|e| format!("write '{}': {e}", manifest_path.display()))?;
+    Ok(true)
+}
+
+/// Full `vanic remove` operation: removes dep from `vani.toml`, deletes
+/// `vendor/<name>/`, and rewrites `vani.lock`.
+pub fn registry_remove<F: Fn(&str)>(
+    manifest_path: &Path,
+    pkg_name: &str,
+    on_status: F,
+) -> Result<(), String> {
+    on_status(&format!("  removing {pkg_name} from vani.toml..."));
+    let removed = remove_dep_from_manifest(manifest_path, pkg_name)?;
+    if !removed {
+        return Err(format!("'{pkg_name}' is not in [deps]"));
+    }
+    let root_dir = manifest_path.parent().unwrap_or(Path::new("."));
+    let vendor_dir = root_dir.join("vendor").join(pkg_name);
+    if vendor_dir.exists() {
+        on_status(&format!("  removing vendor/{pkg_name}/..."));
+        std::fs::remove_dir_all(&vendor_dir)
+            .map_err(|e| format!("remove vendor/{pkg_name}: {e}"))?;
+    }
+    let updated = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    write_lockfile(&updated)?;
+    Ok(())
+}
+
+// ── Kosh search ──────────────────────────────────────────────────────────────
+
+/// One row in the `vanic search` output.
+pub struct SearchResult {
+    pub name: String,
+    pub latest_version: String,
+    pub version_count: usize,
+    pub yanked_count: usize,
+}
+
+/// List packages from the registry, optionally filtered by a substring query.
+/// Uses the GitHub Contents API to enumerate `index/*.json` files, then
+/// fetches each via `download_url` (avoids base64 decode).
+pub fn registry_search(
+    _registry: &str,
+    query: Option<&str>,
+) -> Result<Vec<SearchResult>, String> {
+    let api_path = "repos/enthusiasticgeek/kosh-index/contents/index/";
+    let out = std::process::Command::new("gh")
+        .args(["api", api_path])
+        .output()
+        .map_err(|e| format!("gh not found: {e}. Install GitHub CLI to search registry."))?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("gh api failed: {}", msg.trim()));
+    }
+    let files: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("gh api JSON: {e}"))?;
+    let file_arr = files.as_array().ok_or("registry index/ response is not an array")?;
+
+    let mut results: Vec<SearchResult> = Vec::new();
+    for f in file_arr {
+        let fname = f["name"].as_str().unwrap_or("");
+        if !fname.ends_with(".json") {
+            continue;
+        }
+        let pkg_name = fname.trim_end_matches(".json");
+        if let Some(q) = query {
+            if !pkg_name.contains(q) {
+                continue;
+            }
+        }
+        let download_url = f["download_url"].as_str().unwrap_or("");
+        if download_url.is_empty() {
+            continue;
+        }
+        let content = http_get_text(download_url)?;
+        let mut best: Option<(u64, u64, u64)> = None;
+        let mut best_version = String::new();
+        let mut version_count = 0usize;
+        let mut yanked_count = 0usize;
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(line)
+                .map_err(|e| format!("registry: bad JSON for '{pkg_name}': {e}"))?;
+            if v["yanked"].as_bool().unwrap_or(false) {
+                yanked_count += 1;
+                continue;
+            }
+            version_count += 1;
+            let ver_str = v["version"].as_str().unwrap_or("");
+            if let Some(ver) = parse_version(ver_str) {
+                if best.is_none() || ver > best.unwrap() {
+                    best = Some(ver);
+                    best_version = ver_str.to_string();
+                }
+            }
+        }
+        results.push(SearchResult {
+            name: pkg_name.to_string(),
+            latest_version: best_version,
+            version_count,
+            yanked_count,
+        });
+    }
+    Ok(results)
+}
+
+// ── Kosh update ──────────────────────────────────────────────────────────────
+
+/// Per-dep outcome from `vanic update`.
+pub struct UpdateResult {
+    pub name: String,
+    pub old_version: String,
+    pub new_version: String,
+    /// `true` when the dep was actually re-downloaded + extracted.
+    pub updated: bool,
+}
+
+/// Re-resolve all registry deps to their latest allowed version.
+/// Only deps whose `path_rel` starts with `"./vendor/"` are treated as
+/// registry deps; path-only local deps are left untouched.
+pub fn registry_update<F: Fn(&str)>(
+    manifest_path: &Path,
+    on_status: F,
+) -> Result<Vec<UpdateResult>, String> {
+    let manifest = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    let root_dir = manifest_path.parent().unwrap_or(Path::new("."));
+    let mut results: Vec<UpdateResult> = Vec::new();
+
+    for dep in &manifest.deps {
+        if !dep.path_rel.starts_with("./vendor/") {
+            continue;
+        }
+        on_status(&format!("  checking {} for updates...", dep.name));
+        let entry = match fetch_best_version(
+            DEFAULT_REGISTRY,
+            &dep.name,
+            dep.version_req.as_deref(),
+        ) {
+            Ok(e) => e,
+            Err(e) => {
+                on_status(&format!("  warning: could not fetch {}: {e}", dep.name));
+                continue;
+            }
+        };
+
+        let old_version =
+            dep.resolved_version.clone().unwrap_or_else(|| "0.0.0".to_string());
+        let old = parse_version(&old_version).unwrap_or((0, 0, 0));
+        let new = parse_version(&entry.version).unwrap_or((0, 0, 0));
+
+        if new <= old {
+            on_status(&format!("  {} v{} is up-to-date", dep.name, old_version));
+            results.push(UpdateResult {
+                name: dep.name.clone(),
+                old_version,
+                new_version: entry.version,
+                updated: false,
+            });
+            continue;
+        }
+
+        on_status(&format!(
+            "  updating {} v{} → v{}...",
+            dep.name, old_version, entry.version
+        ));
+
+        let dl_url = DEFAULT_DL_TEMPLATE
+            .replace("{name}", &entry.name)
+            .replace("{version}", &entry.version);
+        let tmp_dir = std::env::temp_dir()
+            .join(format!("vanic-update-{}-{}", entry.name, entry.version));
+        let tarball =
+            tmp_dir.join(format!("{}-{}.tar.gz", entry.name, entry.version));
+        std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("temp dir: {e}"))?;
+        http_get_file(&dl_url, &tarball)?;
+
+        on_status("  verifying checksum...");
+        let dl_cksum = sha256_file(&tarball)?;
+        if dl_cksum != entry.cksum {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(format!(
+                "checksum mismatch for '{}' v{}: expected {} got {}",
+                dep.name, entry.version, entry.cksum, dl_cksum
+            ));
+        }
+
+        let vendor_dest = root_dir.join("vendor").join(&entry.name);
+        if vendor_dest.exists() {
+            std::fs::remove_dir_all(&vendor_dest)
+                .map_err(|e| format!("remove old vendor/{}: {e}", entry.name))?;
+        }
+        on_status(&format!("  extracting to {}...", vendor_dest.display()));
+        extract_tar_gz(&tarball, &vendor_dest)?;
+
+        let constraint_str = dep.version_req.clone()
+            .unwrap_or_else(|| format!("^{}", entry.version));
+        add_dep_to_manifest(manifest_path, &dep.name, &dep.path_rel, Some(&constraint_str))?;
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+
+        results.push(UpdateResult {
+            name: dep.name.clone(),
+            old_version,
+            new_version: entry.version,
+            updated: true,
+        });
+    }
+
+    let updated_manifest = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    write_lockfile(&updated_manifest)?;
+    Ok(results)
+}
+
 // ── end Kosh registry ────────────────────────────────────────────────────────
 
 /// Parse a TOML inline-table body (the part between `{` and `}`).
@@ -1462,6 +1724,51 @@ mod tests {
             content.contains("./vendor/mathlib"),
             "should have updated path, got:\n{content}"
         );
+    }
+
+    #[test]
+    fn remove_dep_removes_from_deps_section() {
+        let dir = std::env::temp_dir().join(format!(
+            "vani-remove-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mf = dir.join("vani.toml");
+        std::fs::write(
+            &mf,
+            "[package]\nname = \"myapp\"\nentry = \"src/main.vani\"\n\n[deps]\nmathlib = { path = \"./vendor/mathlib\", version = \"^1.0\" }\nparser = { path = \"./vendor/parser\", version = \"^2.0\" }\n",
+        )
+        .unwrap();
+        let found = remove_dep_from_manifest(&mf, "mathlib").unwrap();
+        let content = std::fs::read_to_string(&mf).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(found, "should return true for found dep");
+        assert!(!content.contains("mathlib"), "should not contain mathlib: {content}");
+        assert!(content.contains("parser"), "should still contain parser: {content}");
+    }
+
+    #[test]
+    fn remove_dep_returns_false_when_not_found() {
+        let dir = std::env::temp_dir().join(format!(
+            "vani-remove-nf-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mf = dir.join("vani.toml");
+        std::fs::write(
+            &mf,
+            "[package]\nname = \"myapp\"\nentry = \"src/main.vani\"\n",
+        )
+        .unwrap();
+        let found = remove_dep_from_manifest(&mf, "nonexistent").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!found, "should return false for missing dep");
     }
 
     #[test]
