@@ -887,11 +887,20 @@ COMMANDS:
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
 
+    add <name>[@<version>]                 Add a package from the Kosh registry.
+                                          Fetches the best matching version,
+                                          downloads + extracts the tarball to
+                                          vendor/<name>/, then updates vani.toml
+                                          and rewrites vani.lock.
+                                          Examples:
+                                            vanic add mathlib
+                                            vanic add mathlib@^1.0
+                                            vanic add mathlib@1.2.3
+
     vendor [--manifest=<path>]              Copy each dep's source tree into
                                           vendor/<name>/ under the project root
                                           and write/update vani.lock. No network
-                                          access; path-deps only. Registry deps
-                                          (vanic add) ship in a future release.
+                                          access; path-deps only.
 
 MANIFEST (vani.toml):
     For run / build / check / emit / ir / ast / tokens, if
@@ -2019,6 +2028,43 @@ fn run() -> Result<ExitCode, String> {
                 Ok(ExitCode::SUCCESS)
             }
         }
+        // vanic add <name>[@<version_constraint>]
+        // Fetch a package from the Kosh registry, extract to vendor/,
+        // update vani.toml + vani.lock.
+        "add" => {
+            if args.len() < 3 {
+                return Err(
+                    "usage: vanic add <name>[@<version>]\n\n\
+                     Examples:\n  vanic add mathlib\n  vanic add mathlib@^1.0"
+                        .to_string(),
+                );
+            }
+            let pkg_arg = &args[2];
+            let (pkg_name, version_constraint) = match pkg_arg.find('@') {
+                Some(at) => (&pkg_arg[..at], Some(&pkg_arg[at + 1..])),
+                None => (pkg_arg.as_str(), None),
+            };
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("failed to read cwd: {}", e))?;
+            let manifest_path = vani::manifest::find_manifest(&cwd)
+                .ok_or_else(|| {
+                    "no vani.toml found in current directory or any parent".to_string()
+                })?;
+            let result = vani::manifest::registry_add(
+                &manifest_path,
+                pkg_name,
+                version_constraint,
+                |msg| eprintln!("{}", msg),
+            )?;
+            eprintln!(
+                "add: {} v{} → {}",
+                result.name,
+                result.version,
+                result.vendor_path.display()
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+
         // vanic vendor [--manifest=<path>]
         // Copy each dep's source tree into vendor/<name>/ and
         // write/update vani.lock.

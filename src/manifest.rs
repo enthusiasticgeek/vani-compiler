@@ -260,6 +260,281 @@ fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// ── Kosh registry: fetch, semver resolution, vanic add ──────────────────────
+
+/// Sparse-index URL for the default Kosh registry.
+pub const DEFAULT_REGISTRY: &str = "https://enthusiasticgeek.github.io/kosh-index";
+
+/// Download URL template for the default registry.
+/// `{name}` and `{version}` are substituted at download time.
+pub const DEFAULT_DL_TEMPLATE: &str =
+    "https://github.com/enthusiasticgeek/kosh-index/releases/download/{name}-v{version}/{name}-{version}.tar.gz";
+
+/// A single version entry from the Kosh sparse index (`index/<name>.json`).
+#[derive(Debug, Clone)]
+pub struct RegistryEntry {
+    pub name: String,
+    pub version: String,
+    pub cksum: String,
+    pub yanked: bool,
+}
+
+/// Return value from `registry_add`.
+pub struct AddResult {
+    pub name: String,
+    pub version: String,
+    pub vendor_path: PathBuf,
+}
+
+/// Parse "X.Y.Z" → `(major, minor, patch)`. Strips pre-release suffixes.
+fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
+    let s = s.trim().split('-').next().unwrap_or(s.trim());
+    let mut it = s.split('.');
+    let major: u64 = it.next()?.parse().ok()?;
+    let minor: u64 = it.next()?.parse().ok()?;
+    let patch: u64 = it.next()?.parse().ok()?;
+    if it.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// True if `ver` satisfies `constraint`.
+/// Supported prefixes: `^`, `~`, `>=`, `>`, `=`, none (exact), `*`.
+fn version_satisfies(ver: (u64, u64, u64), constraint: &str) -> bool {
+    let c = constraint.trim();
+    if c.is_empty() || c == "*" {
+        return true;
+    }
+    if let Some(rest) = c.strip_prefix('^') {
+        return parse_version(rest).map_or(false, |req| {
+            if req.0 > 0 {
+                ver.0 == req.0 && ver >= req
+            } else if req.1 > 0 {
+                ver.0 == 0 && ver.1 == req.1 && ver >= req
+            } else {
+                ver == req
+            }
+        });
+    }
+    if let Some(rest) = c.strip_prefix('~') {
+        return parse_version(rest)
+            .map_or(false, |req| ver.0 == req.0 && ver.1 == req.1 && ver >= req);
+    }
+    if let Some(rest) = c.strip_prefix(">=") {
+        return parse_version(rest.trim()).map_or(false, |req| ver >= req);
+    }
+    if let Some(rest) = c.strip_prefix('>') {
+        return parse_version(rest.trim()).map_or(false, |req| ver > req);
+    }
+    if let Some(rest) = c.strip_prefix('=') {
+        return parse_version(rest.trim()).map_or(false, |req| ver == req);
+    }
+    parse_version(c).map_or(false, |req| ver == req)
+}
+
+/// Fetch the raw text body of a URL via `curl`.
+fn http_get_text(url: &str) -> Result<String, String> {
+    let out = std::process::Command::new("curl")
+        .args(["-fsSL", url])
+        .output()
+        .map_err(|e| format!("curl not found: {e}. Install curl to use registry features."))?;
+    if !out.status.success() {
+        let msg = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("curl failed for '{}': {}", url, msg.trim()));
+    }
+    String::from_utf8(out.stdout)
+        .map_err(|e| format!("registry response is not valid UTF-8: {e}"))
+}
+
+/// Download a URL to `dest` via `curl`.
+fn http_get_file(url: &str, dest: &Path) -> Result<(), String> {
+    let st = std::process::Command::new("curl")
+        .args(["-fsSL", "--output", &dest.to_string_lossy().into_owned(), url])
+        .status()
+        .map_err(|e| format!("curl not found: {e}"))?;
+    if !st.success() {
+        return Err(format!("curl failed downloading '{url}'"));
+    }
+    Ok(())
+}
+
+/// Extract `tarball.tar.gz` into `dest_dir`, stripping the top-level
+/// path component (`tar --strip-components=1`).
+fn extract_tar_gz(tarball: &Path, dest_dir: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dest_dir)
+        .map_err(|e| format!("create '{}': {e}", dest_dir.display()))?;
+    let st = std::process::Command::new("tar")
+        .args([
+            "-xzf",
+            &tarball.to_string_lossy().into_owned(),
+            "-C",
+            &dest_dir.to_string_lossy().into_owned(),
+            "--strip-components=1",
+        ])
+        .status()
+        .map_err(|e| format!("tar not found: {e}. Install tar to use registry features."))?;
+    if !st.success() {
+        return Err(format!("tar extraction failed for '{}'", tarball.display()));
+    }
+    Ok(())
+}
+
+/// Query the Kosh sparse index for the highest version of `name`
+/// that satisfies `constraint` (or the latest if `None`).
+pub fn fetch_best_version(
+    registry: &str,
+    name: &str,
+    constraint: Option<&str>,
+) -> Result<RegistryEntry, String> {
+    let url = format!("{}/index/{}.json", registry.trim_end_matches('/'), name);
+    let body = http_get_text(&url)?;
+    let mut best: Option<((u64, u64, u64), RegistryEntry)> = None;
+    for line in body.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let v: serde_json::Value =
+            serde_json::from_str(line).map_err(|e| format!("registry: bad JSON line: {e}"))?;
+        if v["yanked"].as_bool().unwrap_or(false) {
+            continue;
+        }
+        let ver_str = v["version"].as_str().unwrap_or("").to_string();
+        let cksum = v["cksum"].as_str().unwrap_or("").to_string();
+        let entry_name = v["name"].as_str().unwrap_or(name).to_string();
+        if let Some(ver) = parse_version(&ver_str) {
+            let ok = constraint.map_or(true, |c| version_satisfies(ver, c));
+            if ok && best.as_ref().map_or(true, |(bv, _)| ver > *bv) {
+                best = Some((
+                    ver,
+                    RegistryEntry { name: entry_name, version: ver_str, cksum, yanked: false },
+                ));
+            }
+        }
+    }
+    best.map(|(_, e)| e).ok_or_else(|| match constraint {
+        Some(c) => format!("no version of '{name}' satisfies '{c}'"),
+        None => format!("no versions of '{name}' found in registry"),
+    })
+}
+
+/// Add or update a `[deps]` entry in `vani.toml`.
+///
+/// - Updates the existing line if the dep name is already present.
+/// - Appends to the `[deps]` section if it exists but doesn't have the dep.
+/// - Appends a new `[deps]` section if one doesn't exist yet.
+pub fn add_dep_to_manifest(
+    manifest_path: &Path,
+    name: &str,
+    path_rel: &str,
+    version_req: Option<&str>,
+) -> Result<(), String> {
+    let existing = std::fs::read_to_string(manifest_path)
+        .map_err(|e| format!("read '{}': {e}", manifest_path.display()))?;
+
+    let dep_line = match version_req {
+        Some(req) => format!(r#"{name} = {{ path = "{path_rel}", version = "{req}" }}"#),
+        None => format!(r#"{name} = {{ path = "{path_rel}" }}"#),
+    };
+
+    let mut out: Vec<String> = Vec::new();
+    let mut in_deps = false;
+    let mut dep_found = false;
+    let mut deps_end_pos: Option<usize> = None;
+
+    for raw in existing.lines() {
+        let t = raw.trim();
+        if t == "[deps]" {
+            in_deps = true;
+            out.push(raw.to_string());
+            continue;
+        }
+        if t.starts_with('[') {
+            if in_deps && deps_end_pos.is_none() {
+                deps_end_pos = Some(out.len());
+            }
+            in_deps = false;
+        }
+        if in_deps && !dep_found {
+            let key = t.split('=').next().unwrap_or("").trim();
+            if key == name {
+                out.push(dep_line.clone());
+                dep_found = true;
+                continue;
+            }
+        }
+        out.push(raw.to_string());
+    }
+
+    if !dep_found {
+        if in_deps {
+            out.push(dep_line);
+        } else if let Some(pos) = deps_end_pos {
+            out.insert(pos, dep_line);
+        } else {
+            if out.last().map_or(false, |l| !l.trim().is_empty()) {
+                out.push(String::new());
+            }
+            out.push("[deps]".to_string());
+            out.push(dep_line);
+        }
+    }
+
+    let mut content = out.join("\n");
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    std::fs::write(manifest_path, content)
+        .map_err(|e| format!("write '{}': {e}", manifest_path.display()))
+}
+
+/// Full `vanic add` operation: fetch best version, download + extract
+/// tarball to `vendor/<name>/`, update `vani.toml`, rewrite `vani.lock`.
+pub fn registry_add<F: Fn(&str)>(
+    manifest_path: &Path,
+    pkg_name: &str,
+    version_constraint: Option<&str>,
+    on_status: F,
+) -> Result<AddResult, String> {
+    on_status(&format!("  fetching {pkg_name} from registry..."));
+    let entry = fetch_best_version(DEFAULT_REGISTRY, pkg_name, version_constraint)?;
+    on_status(&format!("  resolved {} v{}", entry.name, entry.version));
+
+    let dl_url = DEFAULT_DL_TEMPLATE
+        .replace("{name}", &entry.name)
+        .replace("{version}", &entry.version);
+
+    let tmp_dir =
+        std::env::temp_dir().join(format!("vanic-add-{}-{}", entry.name, entry.version));
+    let tarball = tmp_dir.join(format!("{}-{}.tar.gz", entry.name, entry.version));
+    std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("temp dir: {e}"))?;
+
+    on_status(&format!("  downloading {dl_url}..."));
+    http_get_file(&dl_url, &tarball)?;
+
+    let root_dir = manifest_path.parent().unwrap_or(Path::new("."));
+    let vendor_dest = root_dir.join("vendor").join(&entry.name);
+    on_status(&format!("  extracting to {}...", vendor_dest.display()));
+    extract_tar_gz(&tarball, &vendor_dest)?;
+
+    let constraint_str = version_constraint
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("^{}", entry.version));
+    let path_rel = format!("./vendor/{}", entry.name);
+
+    add_dep_to_manifest(manifest_path, pkg_name, &path_rel, Some(&constraint_str))?;
+
+    let updated = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    write_lockfile(&updated).map_err(|e| e.to_string())?;
+
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+
+    Ok(AddResult { name: entry.name, version: entry.version, vendor_path: vendor_dest })
+}
+
+// ── end Kosh registry ────────────────────────────────────────────────────────
+
 /// Parse a TOML inline-table body (the part between `{` and `}`).
 /// Handles comma-separated `key = "value"` pairs. Values must be
 /// quoted strings. Returns a map of key → value.
@@ -557,6 +832,97 @@ mod tests {
             }
             _ => panic!("expected Parse error, got {:?}", err),
         }
+    }
+
+    #[test]
+    fn parse_version_three_parts() {
+        assert_eq!(parse_version("1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_version("0.0.0"), Some((0, 0, 0)));
+        assert_eq!(parse_version("1.2.3-alpha"), Some((1, 2, 3)));
+        assert_eq!(parse_version("1.2"), None);
+        assert_eq!(parse_version("1.2.3.4"), None);
+    }
+
+    #[test]
+    fn version_satisfies_caret() {
+        assert!(version_satisfies((1, 2, 4), "^1.2.3"));
+        assert!(version_satisfies((1, 9, 0), "^1.2.3"));
+        assert!(!version_satisfies((2, 0, 0), "^1.2.3"));
+        assert!(!version_satisfies((1, 2, 2), "^1.2.3"));
+        // zero major: ^0.2.3 means >=0.2.3, <0.3.0
+        assert!(version_satisfies((0, 2, 5), "^0.2.3"));
+        assert!(!version_satisfies((0, 3, 0), "^0.2.3"));
+    }
+
+    #[test]
+    fn version_satisfies_tilde() {
+        assert!(version_satisfies((1, 2, 5), "~1.2.3"));
+        assert!(!version_satisfies((1, 3, 0), "~1.2.3"));
+        assert!(!version_satisfies((1, 2, 2), "~1.2.3"));
+    }
+
+    #[test]
+    fn version_satisfies_exact_and_ge() {
+        assert!(version_satisfies((1, 2, 3), "=1.2.3"));
+        assert!(!version_satisfies((1, 2, 4), "=1.2.3"));
+        assert!(version_satisfies((1, 2, 3), "1.2.3"));
+        assert!(version_satisfies((2, 0, 0), ">=1.2.3"));
+        assert!(version_satisfies((1, 2, 3), ">=1.2.3"));
+        assert!(!version_satisfies((1, 2, 2), ">=1.2.3"));
+        assert!(version_satisfies((1, 0, 0), "*"));
+    }
+
+    #[test]
+    fn add_dep_creates_deps_section() {
+        let dir = std::env::temp_dir().join(format!(
+            "vani-adddep-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mf = dir.join("vani.toml");
+        std::fs::write(
+            &mf,
+            "[package]\nname = \"myapp\"\nversion = \"0.1.0\"\nentry = \"src/main.vani\"\n",
+        )
+        .unwrap();
+        add_dep_to_manifest(&mf, "mathlib", "./vendor/mathlib", Some("^1.0")).unwrap();
+        let content = std::fs::read_to_string(&mf).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(content.contains("[deps]"), "should have [deps] section");
+        assert!(
+            content.contains("mathlib = { path = \"./vendor/mathlib\", version = \"^1.0\" }"),
+            "got: {content}"
+        );
+    }
+
+    #[test]
+    fn add_dep_updates_existing_entry() {
+        let dir = std::env::temp_dir().join(format!(
+            "vani-adddep-upd-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mf = dir.join("vani.toml");
+        std::fs::write(
+            &mf,
+            "[package]\nname = \"myapp\"\nentry = \"src/main.vani\"\n\n[deps]\nmathlib = { path = \"../old\" }\n",
+        )
+        .unwrap();
+        add_dep_to_manifest(&mf, "mathlib", "./vendor/mathlib", Some("^1.2")).unwrap();
+        let content = std::fs::read_to_string(&mf).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        let count = content.matches("mathlib =").count();
+        assert_eq!(count, 1, "should have exactly one mathlib entry, got:\n{content}");
+        assert!(
+            content.contains("./vendor/mathlib"),
+            "should have updated path, got:\n{content}"
+        );
     }
 
     #[test]
