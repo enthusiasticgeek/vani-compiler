@@ -887,16 +887,29 @@ COMMANDS:
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
 
+    vendor [--manifest=<path>]              Copy each dep's source tree into
+                                          vendor/<name>/ under the project root
+                                          and write/update vani.lock. No network
+                                          access; path-deps only. Registry deps
+                                          (vanic add) ship in a future release.
+
 MANIFEST (vani.toml):
     For run / build / check / emit / ir / ast / tokens, if
     no source file is given on the command line, the driver
     walks up from the current directory looking for a
     `vani.toml` manifest. When found, its `[package].entry`
-    key supplies the source file. Minimal format:
+    key supplies the source file. `vani.lock` is written
+    (or updated) automatically whenever the manifest is
+    newer than the lock. Full format:
 
         [package]
         name = \"my_project\"
+        version = \"0.1.0\"           # optional semver
         entry = \"src/main.vani\"
+
+        [deps]
+        mathlib = { path = \"../math\" }
+        utils   = { path = \"../utils\", version = \"^1.0\" }
 
 GLOBAL OPTIONS:
     -h, --help        Show this message
@@ -2006,6 +2019,45 @@ fn run() -> Result<ExitCode, String> {
                 Ok(ExitCode::SUCCESS)
             }
         }
+        // vanic vendor [--manifest=<path>]
+        // Copy each dep's source tree into vendor/<name>/ and
+        // write/update vani.lock.
+        "vendor" => {
+            let mut manifest_override: Option<PathBuf> = None;
+            for arg in args.iter().skip(2) {
+                if let Some(val) = arg.strip_prefix("--manifest=") {
+                    manifest_override = Some(PathBuf::from(val));
+                } else {
+                    return Err(format!("unknown flag '{}'\n\nvanic vendor [--manifest=<path>]", arg));
+                }
+            }
+            let manifest_path = if let Some(p) = manifest_override {
+                p
+            } else {
+                let cwd = std::env::current_dir()
+                    .map_err(|e| format!("failed to read cwd: {}", e))?;
+                vani::manifest::find_manifest(&cwd)
+                    .ok_or_else(|| "no vani.toml found in current directory or any parent".to_string())?
+            };
+            let manifest = vani::manifest::load_manifest(&manifest_path)
+                .map_err(|e| e.to_string())?;
+            if manifest.deps.is_empty() {
+                eprintln!("nothing to vendor: [deps] is empty");
+                return Ok(ExitCode::SUCCESS);
+            }
+            let vendored = vani::manifest::vendor_deps(&manifest)
+                .map_err(|e| e.to_string())?;
+            for (name, dest) in &vendored {
+                eprintln!("  vendored {} -> {}", name, dest.display());
+            }
+            vani::manifest::write_lockfile(&manifest).map_err(|e| e.to_string())?;
+            eprintln!(
+                "vendor: {} package{} copied, vani.lock updated",
+                vendored.len(),
+                if vendored.len() == 1 { "" } else { "s" }
+            );
+            Ok(ExitCode::SUCCESS)
+        }
         other => Err(format!("unknown command '{}'\n\n{}", other, HELP)),
     }
 }
@@ -2054,6 +2106,13 @@ fn required_file_at(
     if let Some(manifest_path) = vani::manifest::find_manifest(&cwd) {
         let manifest = vani::manifest::load_manifest(&manifest_path)
             .map_err(|e| e.to_string())?;
+        // Write vani.lock when absent or stale (manifest newer than lock).
+        if vani::manifest::lockfile_is_stale(&manifest_path) {
+            // Non-fatal: warn but don't abort the build.
+            if let Err(e) = vani::manifest::write_lockfile(&manifest) {
+                eprintln!("warning: could not write vani.lock: {}", e);
+            }
+        }
         return Ok((manifest.entry_path, index));
     }
     Err(format!(
