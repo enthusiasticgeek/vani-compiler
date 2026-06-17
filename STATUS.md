@@ -11595,9 +11595,7 @@ fn main() returns i64 {
 
 ### Tier 7 — Backend / runtime polish
 
-21. **Windows `OMP_NUM_THREADS` lookup** — current Win32 parallel-for
-    hardcodes N=4 workers; plumb a runtime query through the existing
-    `WinParArg` (the outlined fn already reads `nt` from it).
+21. ~~**Windows `OMP_NUM_THREADS` lookup**~~ — ✅ SHIPPED 2026-06-17. Codegen-time read of `OMP_NUM_THREADS` (default 4); set before invoking intentc. Runtime lookup (via `@getenv` in LLVM IR) deferred as separate TODO if ever needed.
 22. **`break value` / labeled `continue`** — loop-as-expression form.
     Memorable, no new types, finite parser/checker work.
 
@@ -11698,7 +11696,7 @@ TODO.md keeps the history.
 ### Backend / codegen
 - **Full concurrency surface now flows through SSA on both backends.** `Atomic`, `Mutex`/`Guard`, `Channel`, `parallel for`, and `task`/`join` all use the SSA path; only multi-block task bodies and other shape-recognizer mismatches fall back via `EmitError`. (No active TODO in this row — kept here to document the milestone.)
 - **No cross-compilation.** intentc bakes the host's `target_os` / `target_arch` into the emitted artifact (e.g., `SYS_futex` number, threading dispatch, link flags). A `--target=` flag is out of scope for v1; both C and LLVM backends emit code that only links on the same OS intentc was built for. *Trade-off, not a bug — flag separately if needed.*
-- **Parallel-for thread count is hardcoded N=4 on Windows.** The Win32 fan-out doesn't read `OMP_NUM_THREADS` (or query `GetSystemInfo`) — it always spawns 3 worker threads plus the calling thread. *Trade-off: keeps the LLVM IR portable across LLVM versions without depending on getenv linkage. A future revision can plug in a runtime lookup helper; the per-thread `WinParArg` struct already carries `nt` so the outlined fn would not change.*
+- **Win32 parallel-for thread count reads `OMP_NUM_THREADS` at codegen time (default 4).** The fan-out N is resolved when intentc runs, avoiding `@getenv` linkage in the generated LLVM IR. Set `OMP_NUM_THREADS=N` before invoking intentc to control the worker count (1–256). *A future revision could switch to a runtime lookup if LLVM-version-independent IR is no longer required.*
 
 ### Verifier / SMT
 - **Natural-exit `!cond` post-loop fact omitted when the body can `break`.** Would be unsound; the verifier conservatively drops the fact. *Working as intended.*
@@ -11708,8 +11706,6 @@ TODO.md keeps the history.
 ### Language surface gaps
 - **No mutable references to atomics-as-payloads.** Workaround: pre-extract scalars before spawning a task. *Tracked indirectly by future affine-rules work.*
 - **References are second-class.** `&T` / `&mut T` only as function parameter types; not as returns, let-bindings, or aggregate elements. *Working as intended for v1 — Rust-style first-class references are explicitly out of scope.*
-- **Early `return` from inside a consuming `for x in xs` body leaks the outer Vec buffer.** The post-loop shallow-free is emitted inline by the for-iter backend code and runs only on natural completion / break. `return` skips it. Workaround: use `break` to exit the loop, then return after. *Tracked as a structural-rewrite TODO: introduce a `TypedStmt::ForIterShallowFree` variant and emit it at every Return inside the consuming loop body.*
-
 ### Tooling
 - **`INTENTC_NO_VERIFY=1` skips every SMT round-trip.** Useful for fast iteration; do not set in CI — a violated `ensures` won't surface. Runtime safety guards stay in place. *Working as intended.*
 

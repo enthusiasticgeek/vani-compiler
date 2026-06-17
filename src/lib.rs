@@ -36045,9 +36045,9 @@ função main() -> i64 {
         // (`free(xs.data)`), exactly what we want. Emit a
         // Drop instruction at the loop's exit block.
         //
-        // Known remaining limitation: early `return` from
-        // inside the body still skips this Drop — same
-        // shape documented in STATUS.md's known-issues.
+        // Early-return fix shipped separately (see
+        // `for_iter_early_return_frees_buffer_c` /
+        // `for_iter_early_return_frees_buffer_ssa`).
         let source = r#"
             fn sum(xs: Vec<i64>) -> i64 {
               let total: i64 = 0;
@@ -36079,6 +36079,98 @@ função main() -> i64 {
             sum_body.contains("@intent_vec_i64__free"),
             "expected `@intent_vec_i64__free` call in fn_sum after the for-iter exit:\n{}",
             sum_body
+        );
+    }
+
+    #[test]
+    fn for_iter_early_return_frees_buffer_c() {
+        // ForIterShallowFree (C backend): a `return` inside a consuming
+        // `for x in xs` body must emit a Vec free before the return so
+        // the buffer is not leaked on the early-exit path.
+        let source = r#"
+            fn first_over(xs: Vec<i64>, threshold: i64) -> i64 {
+              for x in xs {
+                if x > threshold {
+                  return x;
+                }
+              }
+              return 0 - 1;
+            }
+
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 5, 10, 3);
+              let v: i64 = first_over(xs, 7);
+              assert v == 10;
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("consuming for-iter with early return compiles");
+        // rfind to skip the forward declaration and land on the definition
+        let fn_start = c
+            .rfind("static int64_t fn_first_over")
+            .expect("fn_first_over definition present");
+        let fn_end = c[fn_start..]
+            .find("\nstatic ")
+            .or_else(|| c[fn_start..].find("\nint main(void)"))
+            .map(|i| fn_start + i)
+            .unwrap_or(c.len());
+        let fn_body = &c[fn_start..fn_end];
+        // C backend spells i64 as int64_t in typedef suffixes.
+        // The checker saves the return value to a temp before cleanup,
+        // so the exact var name is unknown; search for `return ` generically.
+        // The first `return ` in fn_body is inside the if-block early-exit
+        // path; the free must precede it.
+        let free_pos = fn_body
+            .find("intent_vec_int64_t__free")
+            .expect("expected intent_vec_int64_t__free in fn_first_over (early-return path)");
+        let ret_pos = fn_body
+            .find("return ")
+            .expect("expected `return ` in fn_first_over");
+        assert!(
+            free_pos < ret_pos,
+            "free must precede first return in fn_first_over:\n{}",
+            fn_body
+        );
+    }
+
+    #[test]
+    fn for_iter_early_return_frees_buffer_ssa() {
+        // ForIterShallowFree (SSA/LLVM path): a `return` inside a
+        // consuming Vec<i64> for-iter body must emit
+        // @intent_vec_i64__free before the ret instruction.
+        // Vec<i64> is Copy so it routes through the SSA path;
+        // ForIterShallowFree lowers to a Drop that calls the helper.
+        let source = r#"
+            fn first_over(xs: Vec<i64>, threshold: i64) -> i64 {
+              for x in xs {
+                if x > threshold {
+                  return x;
+                }
+              }
+              return 0 - 1;
+            }
+
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 5, 10, 3);
+              let v: i64 = first_over(xs, 7);
+              assert v == 10;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("consuming Vec<i64> for-iter with early return compiles");
+        let fn_start = ll
+            .find("define i64 @fn_first_over")
+            .expect("fn_first_over present");
+        let fn_end = ll[fn_start..]
+            .find("\ndefine ")
+            .map(|i| fn_start + i)
+            .unwrap_or(ll.len());
+        let fn_body = &ll[fn_start..fn_end];
+        assert!(
+            fn_body.contains("@intent_vec_i64__free"),
+            "expected @intent_vec_i64__free in fn_first_over (early-return path):\n{}",
+            fn_body
         );
     }
 

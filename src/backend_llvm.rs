@@ -4059,6 +4059,47 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 emit_stmt(s, ctx, out);
             }
         }
+        TypedStmt::ForIterShallowFree { collection, element_ty } => {
+            // Free the consumed Vec's buffer on an early-return path.
+            // Collection is always a simple binding (consuming for-iter
+            // rejects dotted-path sources at the checker level).
+            let coll_addr = match ctx.locals.get(collection) {
+                Some((_, a)) => a.clone(),
+                None => return,
+            };
+            let s_ty = vec_struct_name(element_ty);
+            if element_ty.is_copy() {
+                let v_loaded = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}, {}* {}\n",
+                    v_loaded, s_ty, s_ty, coll_addr
+                ));
+                let free_name =
+                    format!("@intent_vec_{}__free", vec_struct_tag(element_ty));
+                out.push_str(&format!(
+                    "  call void {}({} {})\n",
+                    free_name, s_ty, v_loaded
+                ));
+            } else {
+                let elt = llvm_type_string(element_ty);
+                let data_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i64 0, i32 0\n",
+                    data_p, s_ty, s_ty, coll_addr
+                ));
+                let data_v = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}*, {}** {}\n",
+                    data_v, elt, elt, data_p
+                ));
+                let data_i8 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast {}* {} to i8*\n",
+                    data_i8, elt, data_v
+                ));
+                out.push_str(&format!("  call void @free(i8* {})\n", data_i8));
+            }
+        }
     }
 }
 
@@ -40865,7 +40906,10 @@ pub(crate) fn walk_body(
                 walk_body(body, declared, order, seen);
                 *declared = saved;
             }
-            TypedStmt::Drop { .. } | TypedStmt::Break | TypedStmt::Continue => {}
+            TypedStmt::Drop { .. }
+            | TypedStmt::Break
+            | TypedStmt::Continue
+            | TypedStmt::ForIterShallowFree { .. } => {}
         }
     }
 }
@@ -41589,27 +41633,33 @@ fn emit_parallel_for_via_gomp(
         ctx_i8, ctx_ty, ctx_alloca
     ));
     if use_win32 {
-        // Win32 dispatch: hardcoded INTENT_WIN_PAR_THREADS=4
-        // worker tasks. tid 0 runs in the current thread;
-        // tids 1..3 are spawned via `@CreateThread`, then
-        // joined with `@WaitForSingleObject` /
-        // `@CloseHandle`. Each thread reads its tid/nt from
-        // its WinParArg struct (already arranged so the
-        // outlined fn matches `i8* (i8*)`, the CreateThread
-        // start-routine ABI).
-        const N: u64 = 4;
+        // Win32 dispatch: tid 0 runs in the current thread;
+        // tids 1..N-1 are spawned via `@CreateThread`, joined
+        // with `@WaitForSingleObject` / `@CloseHandle`. Each
+        // thread reads its tid/nt from its WinParArg struct
+        // (outlined fn matches `i8* (i8*)`, CreateThread ABI).
+        //
+        // N is resolved at codegen time from OMP_NUM_THREADS;
+        // this avoids @getenv linkage in the generated IR while
+        // still letting callers control parallelism by setting
+        // the env-var before invoking intentc. Default: 4.
+        let n: u64 = std::env::var("OMP_NUM_THREADS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v >= 1 && v <= 256)
+            .unwrap_or(4);
         let warr = ctx.fresh_tmp();
         out.push_str(&format!(
             "  {} = alloca [{} x {{ i8*, i64, i64 }}]\n",
-            warr, N
+            warr, n
         ));
         // Populate each per-thread arg slot.
-        let mut wp = Vec::with_capacity(N as usize);
-        for i in 0..N {
+        let mut wp = Vec::with_capacity(n as usize);
+        for i in 0..n {
             let wpi = ctx.fresh_tmp();
             out.push_str(&format!(
                 "  {} = getelementptr [{} x {{ i8*, i64, i64 }}], [{} x {{ i8*, i64, i64 }}]* {}, i64 0, i64 {}\n",
-                wpi, N, N, warr, i
+                wpi, n, n, warr, i
             ));
             let cf = ctx.fresh_tmp();
             out.push_str(&format!(
@@ -41636,20 +41686,20 @@ fn emit_parallel_for_via_gomp(
             ));
             out.push_str(&format!(
                 "  store i64 {}, i64* {}\n",
-                N, nf
+                n, nf
             ));
             wp.push(wpi);
         }
-        // Spawn tids 1..N-1 via CreateThread. Stack-alloca
-        // handle array of size N-1 and remember each handle.
+        // Spawn tids 1..n-1 via CreateThread. Stack-alloca
+        // handle array of size n-1 and remember each handle.
         let hs = ctx.fresh_tmp();
         out.push_str(&format!(
             "  {} = alloca [{} x i8*]\n",
             hs,
-            N - 1
+            n - 1
         ));
-        let mut handle_ps: Vec<String> = Vec::with_capacity((N - 1) as usize);
-        for i in 1..N {
+        let mut handle_ps: Vec<String> = Vec::with_capacity((n - 1) as usize);
+        for i in 1..n {
             let raw = ctx.fresh_tmp();
             out.push_str(&format!(
                 "  {} = bitcast {{ i8*, i64, i64 }}* {} to i8*\n",
@@ -41664,8 +41714,8 @@ fn emit_parallel_for_via_gomp(
             out.push_str(&format!(
                 "  {} = getelementptr [{} x i8*], [{} x i8*]* {}, i64 0, i64 {}\n",
                 hp,
-                N - 1,
-                N - 1,
+                n - 1,
+                n - 1,
                 hs,
                 i - 1
             ));
@@ -43102,12 +43152,12 @@ mod tests {
     #[test]
     fn parallel_for_uses_create_thread_fanout_on_windows() {
         // libgomp isn't available on Windows, so `parallel for`
-        // open-codes a `@CreateThread` fan-out (N=4 hardcoded
-        // worker threads). The outlined fn becomes
-        // `i8* (i8*)` to match CreateThread's start-routine ABI
-        // and reads tid/nt out of a `WinParArg { ctx, tid, nt }`
-        // struct instead of calling `omp_get_*`. GOMP/omp_get_*
-        // declarations are absent.
+        // open-codes a `@CreateThread` fan-out. N is resolved at
+        // codegen time from OMP_NUM_THREADS (default 4). The
+        // outlined fn becomes `i8* (i8*)` to match CreateThread's
+        // start-routine ABI and reads tid/nt out of a per-thread
+        // `WinParArg { ctx, tid, nt }` struct instead of calling
+        // `omp_get_*`. GOMP/omp_get_* declarations are absent.
         let source = r#"
             pure fn square(x: i64) -> i64 {
               return x * x;
@@ -43121,6 +43171,13 @@ mod tests {
         "#;
         let checked = compile(source).expect("parallel-for compiles");
         let ll = LlvmBackend.emit(&checked.ir);
+        // Mirror the backend's N resolution so assertions stay
+        // consistent with whatever OMP_NUM_THREADS is set to.
+        let expected_n: u64 = std::env::var("OMP_NUM_THREADS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v >= 1 && v <= 256)
+            .unwrap_or(4);
         assert!(
             !ll.contains("@GOMP_parallel") && !ll.contains("@omp_get_thread_num"),
             "expected GOMP/omp_get_* to be absent on Windows:\n{ll}"
@@ -43130,24 +43187,27 @@ mod tests {
             "expected outlined fn to use i8* (i8*) ABI:\n{ll}"
         );
         assert!(
-            ll.contains("alloca [4 x { i8*, i64, i64 }]"),
-            "expected per-thread WinParArg array (N=4):\n{ll}"
+            ll.contains(&format!("alloca [{} x {{ i8*, i64, i64 }}]", expected_n)),
+            "expected per-thread WinParArg array (N={}):\n{ll}",
+            expected_n
         );
-        // Three CreateThread calls (tids 1..3); tid 0 runs in
-        // the calling thread.
+        // (N-1) CreateThread calls; tid 0 runs in the calling thread.
         let create_calls = ll
             .matches("call i8* @CreateThread(i8* null, i64 0, i8* (i8*)* @__intent_par_")
             .count();
         assert_eq!(
-            create_calls, 3,
-            "expected 3 CreateThread calls (N-1 workers):\n{ll}"
+            create_calls,
+            (expected_n - 1) as usize,
+            "expected {} CreateThread calls (N-1 workers):\n{ll}",
+            expected_n - 1
         );
         let wait_calls = ll
             .matches("call i32 @WaitForSingleObject(i8* ")
             .count();
         assert!(
-            wait_calls >= 3,
-            "expected at least 3 WaitForSingleObject calls (one per spawned thread):\n{ll}"
+            wait_calls >= (expected_n - 1) as usize,
+            "expected at least {} WaitForSingleObject calls:\n{ll}",
+            expected_n - 1
         );
     }
 

@@ -103,10 +103,10 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 6 — Brahmi-derived non-Devanagari batch (~30h)        │
 │ (depends on PHASE 5b's per-script abstraction)              │
-│   6.1 ▸ Gujarati (close to Marathi grammar)                 │ 6-8h
-│   6.2 ▸ Punjabi-Gurmukhi (Sikh/Indian)                      │ 8-10h
-│   6.3 ▸ Odia                                                │ 6-8h
-│   6.4 ▸ Assamese (Bengali-script-adjacent)                  │ 5-8h
+│   6.1 ▸ Gujarati (close to Marathi grammar)   ✅ SHIPPED 2026-06-08
+│   6.2 ▸ Punjabi-Gurmukhi (Sikh/Indian)        ✅ SHIPPED 2026-06-08
+│   6.3 ▸ Odia                                  ✅ SHIPPED 2026-06-08
+│   6.4 ▸ Assamese (Bengali-script-adjacent)    ✅ SHIPPED 2026-06-08
 └─────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
@@ -117,31 +117,28 @@ refresh landed. Order is rough priority (size + payoff), not strict.
 │         async / parallel / task / embedded / vtable /       │
 │         SMT trace / Devanagari arc / translator ext /       │
 │         new-dialect walkthrough / compiler tour             │
-│   7.2 ▸ TUT-5: GitHub Pages deploy via Actions              │ 4-6h
+│   7.2 ▸ TUT-5: GitHub Pages deploy via Actions  ✅ SHIPPED 2026-06-17
 └─────────────────────────────────────────────────────────────┘
                                  │
               ┌──────────────────┴──────────────────┐
               ▼                                     ▼
 ┌────────────────────────────────┐ ┌────────────────────────┐
 │ PHASE 8a — Dravidian batch     │ │ PHASE 8b — Tier II     │
-│ (~50h)                         │ │ openers (~13h)         │
-│   8a.1 ▸ Tamil                 │ │   8b.1 ▸ Spanish       │ 5h
-│         (Dravidian, no tatsama │ │         (Latin SVO     │
-│         shortcut; ~12-15h)     │ │         easy entry)    │
-│   8a.2 ▸ Telugu (~12-15h)      │ │   8b.2 ▸ Russian       │ 5h
-│   8a.3 ▸ Kannada (~10-12h)     │ │         (Cyrillic SVO) │
-│   8a.4 ▸ Malayalam (~10-12h)   │ │   8b.3 ▸ French        │ 3h
-│   Each needs grammar consultant│ │         (Latin SVO,    │
-│   gating for accuracy.          │ │         trivial after  │
-└────────────────────────────────┘ │         Spanish)       │
-                                   └────────────────────────┘
+│ ✅ ALL SHIPPED 2026-06-08       │ │ ✅ ALL SHIPPED 2026-06-08
+│   8a.1 ▸ Tamil             ✅  │ │   8b.1 ▸ Spanish   ✅  │
+│   8a.2 ▸ Telugu            ✅  │ │   8b.2 ▸ Russian   ✅  │
+│   8a.3 ▸ Kannada           ✅  │ │   8b.3 ▸ French    ✅  │
+│   8a.4 ▸ Malayalam         ✅  │ │                        │
+│   (grammar-consultant review   │ │                        │
+│   still pending — external)    │ │                        │
+└────────────────────────────────┘ └────────────────────────┘
               ┌──────────────────┴──────────────────┐
               ▼                                     ▼
 ┌────────────────────────────────┐ ┌────────────────────────┐
 │ PHASE 9a — ML fine-tune        │ │ PHASE 9b — Japanese    │
-│ (~25h + ~$200 GPU)             │ │ (~12h)                 │
+│ (~25h + ~$200 GPU)             │ │ ✅ SHIPPED 2026-06-08  │
 │   9a.1 ▸ ML-3: LoRA fine-tune  │ │   9b.1 ▸ SOV plumbing   │
-│         on en↔sa↔hi↔mr corpus  │ │         transfers; 3-  │
+│         on en↔sa↔hi↔mr corpus  │ │         transfers; 3-  ✅
 │         from the translator;   │ │         script lexer    │
 │         small Llama-3 8B or    │ │         (Kanji+Hiragana │
 │         Qwen-2.5 7B.           │ │         +Katakana)      │
@@ -150,9 +147,9 @@ refresh landed. Order is rough priority (size + payoff), not strict.
                                  ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ PHASE 10 — German + Mandarin (~55h)                         │
-│   10.1 ▸ German (V2 parser hook + SOV subordinate reuse)    │ 10h
-│   10.2 ▸ Mandarin (CJK tokenizer overhaul — no native       │
-│          whitespace word boundaries)                        │ 30-50h
+│   10.1 ▸ German (V2 parser hook + SOV subordinate reuse)    ✅ SHIPPED 2026-06-08
+│   10.2 ▸ Mandarin (CJK tokenizer — users use whitespace     ✅ SHIPPED 2026-06-08
+│          to separate tokens; no segmenter needed)           │
 └─────────────────────────────────────────────────────────────┘
                                  │
                                  ▼
@@ -237,7 +234,7 @@ All four original feature requests shipped. **Kosh package manager is the active
 | ~~**Big-O annotation in compilation output (flag-gated, default on)**~~ | ✅ DONE (`5b73db7` + earlier) | `--big-o[=auto\|force\|off]` wired to all 3 subcommands. `src/big_o.rs` fully implemented. |
 | ~~**Tutorials — explain CS concepts for non-CS-bg readers**~~ | ✅ DONE (commits `bb9596d` `6c2b6d8` `a8c2d68` `b582d55`) | SUMMARY reordered; 65 chapters have analogy openers; HIGH+MEDIUM feature gaps filled (Option, HashMap/HashSet, vec combinators, string builtins, bitwise ops, math/rng/clone, safety annotations). LOW tier (BTreeMap/Deque/graph algorithms) on request only. |
 | ~~**`volatile_read` / `volatile_write` built-ins (embedded MMIO)**~~ | ✅ DONE (commit `2cea04a`) | All 4 backends. Gated by `INTENT_TARGET_EMBEDDED=1`. `examples/embedded/mmio_blink.vani`. 3 lib tests. |
-| **Kosh package manager (Arc 9 a/b/e/f)** | ACTIVE — ~20-25h total | Registry decided 2026-06-16: GitHub Pages sparse index (`enthusiasticgeek/kosh-index`) + GitHub Release assets. Steps 1-5 unblocked (see `docs/kosh_design.md` migration table). Order: (1) `[package].version` + `[deps]` version constraint in `src/manifest.rs`, (2) `vanic vendor`, (3) `vani.lock` writer, (4) create index repo + `config.json`, (5) registry resolver + `vanic add`/`publish`. |
+| ~~**Kosh package manager (Arc 9 a/b/e/f)**~~ | ✅ DONE 100% (commit `73f1811`) | Full feature set: `vani.toml` manifest, `[deps]` semver constraints, `vani.lock`, `vanic vendor`, `vanic add` (+ checksum verification), `vanic publish` (+ publisher agreement gate), `vanic remove`, `vanic search`, `vanic update`, `vanic apply-publisher`, `vanic registry-approve`, `vanic registry-blacklist`. Registry live at `enthusiasticgeek.github.io/kosh-index`. |
 
 #### 🟡 Tier 2 — Dedicated fresh-session arcs (multi-day)
 

@@ -2309,7 +2309,7 @@ fn walk_stmt(
         }
         TypedStmt::Drop { .. } | TypedStmt::Prove { .. } => {}
         TypedStmt::Break | TypedStmt::Continue => {}
-        TypedStmt::TaskJoin { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 

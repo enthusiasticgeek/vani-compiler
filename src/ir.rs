@@ -292,6 +292,15 @@ pub enum TypedStmt {
         reason: String,
         body: Vec<TypedStmt>,
     },
+    /// Injected before every `Return` inside a consuming `ForIter` body
+    /// so that the Vec buffer is freed on early-exit paths. The normal
+    /// exit path (after the loop's last iteration) already emits a free
+    /// at the `iter_exit` label / SSA drop. Never appears outside
+    /// consuming-Vec ForIter bodies; never has a body of its own.
+    ForIterShallowFree {
+        collection: String,
+        element_ty: Type,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

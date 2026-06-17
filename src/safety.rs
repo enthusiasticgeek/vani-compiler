@@ -1071,6 +1071,7 @@ fn wcet_stmt(
         S::ForIter { .. } => None, // collection length not statically known
         S::TaskSpawn { .. } => None, // concurrent execution; can't model
         S::TaskJoin { .. } => None,
+        S::ForIterShallowFree { .. } => Some(1),
         S::UnsafeBlock { body, .. } => wcet_body(body, fn_map, visiting, recursion_bound),
         S::Break | S::Continue => Some(1),
         S::Drop { .. } => Some(1),

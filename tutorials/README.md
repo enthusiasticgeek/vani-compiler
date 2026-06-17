@@ -22,7 +22,10 @@ is the artifact that gets deployed (eventually — see TUT-5 in
   (async → parallel → concurrency → embedded → vtable layout →
   SMT debug → Devanagari purity → translator → new-dialect
   walkthrough → compiler internals tour).
-- **TUT-5** queued — GitHub Actions deploy to `gh-pages`.
+- **TUT-5** ✅ SHIPPED 2026-06-17 — GitHub Actions workflow
+  (`.github/workflows/deploy-tutorials.yml`) builds with mdBook 0.4.40
+  and deploys to GitHub Pages on every push that touches `tutorials/`.
+  Live at <https://enthusiasticgeek.github.io/vani-compiler/>.
 
 ## Build it locally
 

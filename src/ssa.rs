@@ -1093,6 +1093,27 @@ fn lower_stmt(
         TypedStmt::ForIter { var, element_ty, collection, collection_ty: _, consumes, body } => {
             lower_for_iter(var, element_ty, collection, *consumes, body, b, locals)
         }
+        TypedStmt::ForIterShallowFree { collection, element_ty: _ } => {
+            // Emit a Drop for the collection buffer on an early-return
+            // path. The SSA path only reaches here for Copy-element Vecs
+            // (non-Copy consuming for-iters are routed to the tree backend
+            // by stmts_ssa_supported in main.rs). A Copy-element Vec Drop
+            // emits `intent_vec_T__free` which is a shallow buffer free —
+            // correct since elements need no destructor.
+            if let Some(coll_v) = locals.get(collection.as_str()).copied() {
+                let coll_ty = b.value_type(coll_v).clone();
+                b.emit(
+                    Type::Tuple(Vec::new()),
+                    Span::default(),
+                    InstrKind::Drop {
+                        source: Operand::Value(coll_v),
+                        ty: coll_ty,
+                        name: collection.to_string(),
+                    },
+                );
+            }
+            Ok(())
+        }
     }
 }
 
@@ -1335,6 +1356,7 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::TaskSpawn { .. } => "TaskSpawn",
         TypedStmt::TaskJoin { .. } => "TaskJoin",
         TypedStmt::UnsafeBlock { .. } => "UnsafeBlock",
+        TypedStmt::ForIterShallowFree { .. } => "ForIterShallowFree",
     }
 }
 

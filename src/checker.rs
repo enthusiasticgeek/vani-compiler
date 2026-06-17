@@ -8084,6 +8084,61 @@ struct LoopFrame {
     body_scope_depth: usize,
 }
 
+/// Recursively walks `stmts` and inserts a clone of `free_node` before
+/// every `TypedStmt::Return` it encounters (at any nesting depth inside
+/// If/While/For/ForIter/UnsafeBlock bodies). Used to ensure that a
+/// consuming `for x in xs` frees the Vec buffer on early-return paths;
+/// the normal-exit path already emits a free at the loop's exit point.
+/// TaskSpawn bodies are skipped — a return there is a task-level return,
+/// not a function-level one.
+fn inject_shallow_free_before_returns(
+    stmts: Vec<TypedStmt>,
+    free_node: &TypedStmt,
+) -> Vec<TypedStmt> {
+    let mut out = Vec::with_capacity(stmts.len());
+    for s in stmts {
+        match s {
+            TypedStmt::Return { .. } => {
+                out.push(free_node.clone());
+                out.push(s);
+            }
+            TypedStmt::If { cond, then_body, else_body } => {
+                out.push(TypedStmt::If {
+                    cond,
+                    then_body: inject_shallow_free_before_returns(then_body, free_node),
+                    else_body: inject_shallow_free_before_returns(else_body, free_node),
+                });
+            }
+            TypedStmt::While { cond, body } => {
+                out.push(TypedStmt::While {
+                    cond,
+                    body: inject_shallow_free_before_returns(body, free_node),
+                });
+            }
+            TypedStmt::For { var, ty, start, end, body, parallel, reductions } => {
+                out.push(TypedStmt::For {
+                    var, ty, start, end, parallel, reductions,
+                    body: inject_shallow_free_before_returns(body, free_node),
+                });
+            }
+            TypedStmt::ForIter { var, element_ty, collection, collection_ty, consumes, body } => {
+                out.push(TypedStmt::ForIter {
+                    var, element_ty, collection, collection_ty, consumes,
+                    body: inject_shallow_free_before_returns(body, free_node),
+                });
+            }
+            TypedStmt::UnsafeBlock { reason, body } => {
+                out.push(TypedStmt::UnsafeBlock {
+                    reason,
+                    body: inject_shallow_free_before_returns(body, free_node),
+                });
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 fn check_stmt_list(
     stmts: &[Stmt],
     env: &mut Env,
@@ -10776,13 +10831,26 @@ fn check_one_stmt(
                 );
             }
 
+            let checked_body = if *consumes {
+                if let Type::Vec(ref elem) = collection_ty {
+                    let free_node = TypedStmt::ForIterShallowFree {
+                        collection: collection.clone(),
+                        element_ty: (**elem).clone(),
+                    };
+                    inject_shallow_free_before_returns(inner_stmts, &free_node)
+                } else {
+                    inner_stmts
+                }
+            } else {
+                inner_stmts
+            };
             body.push(TypedStmt::ForIter {
                 var: var.clone(),
                 element_ty,
                 collection: collection.clone(),
                 collection_ty,
                 consumes: *consumes,
-                body: inner_stmts,
+                body: checked_body,
             });
             false
         }
@@ -28650,7 +28718,8 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::ForIter { .. }
         | TypedStmt::TaskSpawn { .. }
         | TypedStmt::TaskJoin { .. }
-        | TypedStmt::UnsafeBlock { .. } => vec![],
+        | TypedStmt::UnsafeBlock { .. }
+        | TypedStmt::ForIterShallowFree { .. } => vec![],
     }
 }
 
@@ -28842,7 +28911,9 @@ fn verify_pure_body(
                     // separately be impure.
                     walk(body, signatures, context, diagnostics);
                 }
-                TypedStmt::Drop { .. } | TypedStmt::Continue => {}
+                TypedStmt::Drop { .. }
+                | TypedStmt::Continue
+                | TypedStmt::ForIterShallowFree { .. } => {}
             }
         }
     }

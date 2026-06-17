@@ -7495,6 +7495,9 @@ fn collect_vec_elements_in_stmt(
             }
         }
         TypedStmt::TaskJoin { .. } => {}
+        TypedStmt::ForIterShallowFree { element_ty, .. } => {
+            collect_vec_elements(element_ty, seen, out);
+        }
     }
 }
 
@@ -10030,7 +10033,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
                 collect_channel_specs_in_stmt(s, seen, out);
             }
         }
-        TypedStmt::TaskJoin { .. } => {}
+        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
     }
 }
 
@@ -12626,6 +12629,24 @@ return __intent_ret; }}\n",
                 emit_stmt(s, out);
             }
             out.push_str("  }\n");
+        }
+        TypedStmt::ForIterShallowFree { collection, element_ty } => {
+            // Free the consumed Vec's buffer on an early-return path.
+            // The normal-exit path (after the last iteration) already
+            // emits this free at the bottom of `emit_for_iter`.
+            let coll_local = format!("v_{}", collection);
+            if element_ty.is_copy() {
+                out.push_str(&format!(
+                    "  {}({});\n",
+                    vec_helper(element_ty, "free"),
+                    coll_local
+                ));
+            } else {
+                // Non-Copy elements were moved into the loop variable
+                // and freed by their scope-exit drop; only the outer
+                // buffer remains to free here.
+                out.push_str(&format!("  free({}.data);\n", coll_local));
+            }
         }
     }
 }
@@ -18638,7 +18659,10 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             TypedStmt::UnsafeBlock { body, .. } => {
                 body.iter().for_each(|s| walk_stmt(s, set));
             }
-            TypedStmt::TaskJoin { .. } | TypedStmt::Break | TypedStmt::Continue => {}
+            TypedStmt::TaskJoin { .. }
+            | TypedStmt::Break
+            | TypedStmt::Continue => {}
+            TypedStmt::ForIterShallowFree { element_ty, .. } => walk_type(element_ty, set),
         }
     }
     let mut set = std::collections::HashSet::new();
