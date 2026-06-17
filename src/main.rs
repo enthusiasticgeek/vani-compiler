@@ -887,6 +887,15 @@ COMMANDS:
                                           stderr (also via VANIC_SMT_DEBUG=1
                                           or legacy INTENTC_SMT_DEBUG=1).
 
+    publish                                Publish the current package to the
+                                          Kosh registry. Reads [package].name
+                                          and [package].version from vani.toml,
+                                          builds a tarball, creates a GitHub
+                                          Release in kosh-index, and appends a
+                                          line to the sparse index. Requires
+                                          the GitHub CLI (`gh`) to be installed
+                                          and authenticated.
+
     add <name>[@<version>]                 Add a package from the Kosh registry.
                                           Fetches the best matching version,
                                           downloads + extracts the tarball to
@@ -2028,6 +2037,26 @@ fn run() -> Result<ExitCode, String> {
                 Ok(ExitCode::SUCCESS)
             }
         }
+        // vanic publish
+        // Build tarball, create GH Release in kosh-index, push NDJSON index line.
+        "publish" => {
+            let cwd = std::env::current_dir()
+                .map_err(|e| format!("failed to read cwd: {}", e))?;
+            let manifest_path = vani::manifest::find_manifest(&cwd)
+                .ok_or_else(|| {
+                    "no vani.toml found in current directory or any parent".to_string()
+                })?;
+            let result = vani::manifest::publish_package(
+                &manifest_path,
+                |msg| eprintln!("{}", msg),
+            )?;
+            eprintln!(
+                "publish: {} v{} → {}",
+                result.name, result.version, result.release_url
+            );
+            Ok(ExitCode::SUCCESS)
+        }
+
         // vanic add <name>[@<version_constraint>]
         // Fetch a package from the Kosh registry, extract to vendor/,
         // update vani.toml + vani.lock.

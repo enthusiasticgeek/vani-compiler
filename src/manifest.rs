@@ -533,6 +533,240 @@ pub fn registry_add<F: Fn(&str)>(
     Ok(AddResult { name: entry.name, version: entry.version, vendor_path: vendor_dest })
 }
 
+// ── Kosh publish ─────────────────────────────────────────────────────────────
+
+/// Result returned by `publish_package`.
+pub struct PublishResult {
+    pub name: String,
+    pub version: String,
+    pub cksum: String,
+    pub release_url: String,
+}
+
+/// Standard base64 encoding (RFC 4648, with `=` padding).
+fn base64_encode(data: &[u8]) -> String {
+    const T: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut s = String::with_capacity((data.len() + 2) / 3 * 4);
+    for c in data.chunks(3) {
+        let n = match c.len() {
+            1 => (c[0] as u32) << 16,
+            2 => ((c[0] as u32) << 16) | ((c[1] as u32) << 8),
+            _ => ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32),
+        };
+        s.push(T[(n >> 18 & 63) as usize] as char);
+        s.push(T[(n >> 12 & 63) as usize] as char);
+        s.push(if c.len() > 1 { T[(n >> 6 & 63) as usize] as char } else { '=' });
+        s.push(if c.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+    }
+    s
+}
+
+/// Compute the SHA-256 hex digest of a file.
+/// Tries `sha256sum` first (Linux/macOS/Git-Bash), then `certutil` (Windows).
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let p = path.to_string_lossy().into_owned();
+    if let Ok(out) = std::process::Command::new("sha256sum").arg(&p).output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(h) = s.split_whitespace().next() {
+                return Ok(h.to_string());
+            }
+        }
+    }
+    let out = std::process::Command::new("certutil")
+        .args(["-hashfile", &p, "SHA256"])
+        .output()
+        .map_err(|e| format!("sha256sum / certutil not found: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("certutil failed on '{}'", path.display()));
+    }
+    let s = String::from_utf8_lossy(&out.stdout);
+    for line in s.lines().skip(1) {
+        let h = line.trim().replace(' ', "");
+        if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Ok(h.to_lowercase());
+        }
+    }
+    Err("could not parse SHA-256 from certutil output".to_string())
+}
+
+/// Build `<name>-<version>.tar.gz` from `src_dir` into `out_dir`.
+/// The archive top-level directory is `<name>-<version>/`.
+fn build_tarball(
+    src_dir: &Path,
+    name: &str,
+    version: &str,
+    out_dir: &Path,
+) -> Result<PathBuf, String> {
+    let stage_name = format!("{}-{}", name, version);
+    let stage_dir = out_dir.join(&stage_name);
+    copy_dir_vani(src_dir, &stage_dir)?;
+    let tarball = out_dir.join(format!("{}.tar.gz", stage_name));
+    let st = std::process::Command::new("tar")
+        .args([
+            "-czf",
+            &tarball.to_string_lossy().into_owned(),
+            "-C",
+            &out_dir.to_string_lossy().into_owned(),
+            &stage_name,
+        ])
+        .status()
+        .map_err(|e| format!("tar not found: {e}"))?;
+    if !st.success() {
+        return Err(format!("tar failed creating '{}'", tarball.display()));
+    }
+    let _ = std::fs::remove_dir_all(&stage_dir);
+    Ok(tarball)
+}
+
+/// Fetch the current `index/<name>.json` from kosh-index via GitHub API.
+/// Returns `(raw_content, file_sha)` if it exists, `None` if not found.
+fn fetch_index_file(name: &str) -> Result<Option<(String, String)>, String> {
+    let api_path = format!(
+        "repos/enthusiasticgeek/kosh-index/contents/index/{}.json",
+        name
+    );
+    let out = std::process::Command::new("gh")
+        .args(["api", &api_path])
+        .output()
+        .map_err(|e| format!("gh not found: {e}. Install GitHub CLI to publish."))?;
+    if !out.status.success() {
+        return Ok(None); // 404 → file does not exist yet
+    }
+    let meta: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("gh api JSON: {e}"))?;
+    let file_sha = meta["sha"].as_str().unwrap_or("").to_string();
+    let download_url = meta["download_url"].as_str().unwrap_or("").to_string();
+    if download_url.is_empty() {
+        return Err("gh api: missing download_url in response".to_string());
+    }
+    let content = http_get_text(&download_url)?;
+    Ok(Some((content, file_sha)))
+}
+
+/// Push updated `index/<name>.json` to kosh-index via the GitHub Contents API.
+/// If `file_sha` is `Some`, this is an update; if `None`, a new file is created.
+fn push_index_update(
+    name: &str,
+    new_content: &str,
+    file_sha: Option<&str>,
+    commit_msg: &str,
+) -> Result<(), String> {
+    let api_path = format!(
+        "repos/enthusiasticgeek/kosh-index/contents/index/{}.json",
+        name
+    );
+    let encoded = base64_encode(new_content.as_bytes());
+    let mut body = serde_json::json!({
+        "message": commit_msg,
+        "content": encoded,
+    });
+    if let Some(sha) = file_sha {
+        body["sha"] = serde_json::Value::String(sha.to_string());
+    }
+    let body_str = body.to_string();
+    let mut child = std::process::Command::new("gh")
+        .args(["api", &api_path, "--method", "PUT", "--input", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("gh not found: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use std::io::Write;
+        stdin
+            .write_all(body_str.as_bytes())
+            .map_err(|e| format!("gh stdin: {e}"))?;
+    }
+    let result = child.wait_with_output().map_err(|e| format!("gh wait: {e}"))?;
+    if !result.status.success() {
+        let msg = String::from_utf8_lossy(&result.stderr);
+        return Err(format!("gh api PUT failed: {}", msg.trim()));
+    }
+    Ok(())
+}
+
+/// Publish the current package to the Kosh registry.
+///
+/// 1. Builds a `<name>-<version>.tar.gz` tarball (*.vani + vani.toml only).
+/// 2. Computes its SHA-256.
+/// 3. Creates a GitHub Release in `kosh-index` with the tarball as asset.
+/// 4. Appends a NDJSON line to `index/<name>.json` in `kosh-index`.
+pub fn publish_package<F: Fn(&str)>(
+    manifest_path: &Path,
+    on_status: F,
+) -> Result<PublishResult, String> {
+    let manifest = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    let version = manifest.package_version.clone().ok_or_else(|| {
+        "vani.toml: [package].version is required for `vanic publish`".to_string()
+    })?;
+    let name = manifest.package_name.clone();
+
+    on_status(&format!("  building tarball for {} v{}...", name, version));
+    let tmp = std::env::temp_dir().join(format!("vanic-publish-{}-{}", name, version));
+    std::fs::create_dir_all(&tmp).map_err(|e| format!("temp dir: {e}"))?;
+    let tarball = build_tarball(&manifest.root_dir, &name, &version, &tmp)?;
+
+    on_status("  computing SHA-256...");
+    let cksum = sha256_file(&tarball)?;
+    on_status(&format!("  cksum: {cksum}"));
+
+    let tag = format!("{}-v{}", name, version);
+    on_status(&format!("  creating GitHub release {tag}..."));
+    let rel = std::process::Command::new("gh")
+        .args([
+            "release",
+            "create",
+            &tag,
+            "--repo",
+            "enthusiasticgeek/kosh-index",
+            "--title",
+            &format!("{} v{}", name, version),
+            "--notes",
+            "Published via `vanic publish`.",
+            &tarball.to_string_lossy().into_owned(),
+        ])
+        .output()
+        .map_err(|e| format!("gh not found: {e}"))?;
+    if !rel.status.success() {
+        let msg = String::from_utf8_lossy(&rel.stderr);
+        return Err(format!("gh release create failed: {}", msg.trim()));
+    }
+    let release_url = String::from_utf8_lossy(&rel.stdout).trim().to_string();
+    on_status(&format!("  release: {release_url}"));
+
+    on_status("  updating registry index...");
+    let new_line = serde_json::json!({
+        "name": name,
+        "version": version,
+        "deps": [],
+        "cksum": cksum,
+        "yanked": false,
+    })
+    .to_string();
+
+    let (new_content, file_sha) = match fetch_index_file(&name)? {
+        Some((mut existing, sha)) => {
+            if !existing.ends_with('\n') {
+                existing.push('\n');
+            }
+            existing.push_str(&new_line);
+            existing.push('\n');
+            (existing, Some(sha))
+        }
+        None => (format!("{new_line}\n"), None),
+    };
+
+    let commit_msg = format!("index: add {} v{}", name, version);
+    push_index_update(&name, &new_content, file_sha.as_deref(), &commit_msg)?;
+    on_status("  index updated.");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    Ok(PublishResult { name, version, cksum, release_url })
+}
+
 // ── end Kosh registry ────────────────────────────────────────────────────────
 
 /// Parse a TOML inline-table body (the part between `{` and `}`).
