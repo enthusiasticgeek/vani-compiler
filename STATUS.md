@@ -10,9 +10,11 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 📋 NEXT SESSION HANDOFF — 2026-06-17
+## 📋 NEXT SESSION HANDOFF — 2026-06-18
 
 **State**: `break value` / labeled loops shipped (commit `02a624a`).
+`forall` quantifiers shipped (commit `13b93cd`).
+`enum` payload exhaustiveness shipped (commit `3e1260c`).
 All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 `volatile_read`/`volatile_write` builtins shipped. Elaboration 100% (597/597).
 Windows async-TCP unblocked (WSAECONNRESET fix, commit `8193760`).
@@ -22,7 +24,7 @@ Big-O wired into all three subcommands.
 
 | # | Item | Deps | Notes |
 |---|------|------|-------|
-| 1 | `forall` quantifiers in invariants | — | Parser + checker; SMT layer already speaks `forall` |
+| ~~1~~ | ~~`forall` quantifiers in invariants~~ | — | ✅ DONE commit `13b93cd` |
 | ~~2~~ | ~~`enum` payload exhaustiveness checking~~ | — | ✅ DONE commit `3e1260c` |
 | 3 | Closures (captures, map/filter/fold HOF) | — | Lift + capture analysis already partially scaffolded |
 | 4 | **Generics** (foundational) | — | Unblocks items 5–8; biggest lift |
@@ -31,7 +33,7 @@ Big-O wired into all three subcommands.
 | 7 | Parametric `Channel<T>` | generics | |
 | 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | |
 
-Next: item 1 (`forall`, ≤ 1 day) then item 3 (closures), then item 4 (generics — big lift).
+Next: item 3 (closures), then item 4 (generics — big lift).
 
 ### Completed since 2026-06-13
 
