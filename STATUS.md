@@ -23,7 +23,7 @@ Big-O wired into all three subcommands.
 | # | Item | Deps | Notes |
 |---|------|------|-------|
 | 1 | `forall` quantifiers in invariants | — | Parser + checker; SMT layer already speaks `forall` |
-| 2 | `enum` payload exhaustiveness checking | — | Pattern match completeness; type-checker only |
+| ~~2~~ | ~~`enum` payload exhaustiveness checking~~ | — | ✅ DONE commit `3e1260c` |
 | 3 | Closures (captures, map/filter/fold HOF) | — | Lift + capture analysis already partially scaffolded |
 | 4 | **Generics** (foundational) | — | Unblocks items 5–8; biggest lift |
 | 5 | Traits/interfaces phase 2 | generics | Blanket impls, default methods |
@@ -31,7 +31,7 @@ Big-O wired into all three subcommands.
 | 7 | Parametric `Channel<T>` | generics | |
 | 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | |
 
-Start with item 1 or 2 (both ≤ 1 day); item 4 is the big unblocking lift.
+Next: item 1 (`forall`, ≤ 1 day) then item 3 (closures), then item 4 (generics — big lift).
 
 ### Completed since 2026-06-13
 
