@@ -46549,5 +46549,37 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // Parametric Mutex<T>
+    #[test]
+    fn mutex_bool_emits_parametric_bundle() {
+        // Mutex<bool> must emit `intent_mutex_bool` / `intent_guard_bool`
+        // structs and helpers, distinct from the i64 bundle.
+        let source = r#"
+            fn main() -> i64 {
+              let m: Mutex<bool> = mutex_new(false);
+              let g: Guard<bool> = mutex_lock(ref m);
+              let v: bool = guard_get(ref g);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Mutex<bool> program must compile");
+        assert!(
+            c.contains("intent_mutex_bool"),
+            "expected intent_mutex_bool struct in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_guard_bool"),
+            "expected intent_guard_bool struct in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_mutex_bool_new("),
+            "expected intent_mutex_bool_new helper:\n{c}"
+        );
+        assert!(
+            c.contains("intent_guard_bool_unlock("),
+            "expected intent_guard_bool_unlock helper:\n{c}"
+        );
+    }
+
 }
 

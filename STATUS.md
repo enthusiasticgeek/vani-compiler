@@ -29,12 +29,12 @@ All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 | ~~3~~ | ~~Closures (captures, map/filter/fold HOF)~~ | — | ✅ DONE (already fully implemented) |
 | ~~4~~ | ~~**Generics** (foundational)~~ | — | ✅ DONE commit `c89cfb5` — methods + iface impls on generic instantiations |
 | **0** | **Cut `v0.1.0` release** | G1+G2+G3 | Bump Cargo.toml, tag, push tag to trigger release workflow |
-| 5 | Traits/interfaces phase 2 | generics | Blanket impls, default methods |
-| 6 | Parametric `Mutex<T>` / `Guard<T>` | generics | |
+| ~~5~~ | ~~Traits/interfaces phase 2~~ | generics | ✅ DONE commit `e97ea6a` — default methods + blanket impls |
+| ~~6~~ | ~~Parametric `Mutex<T>` / `Guard<T>`~~ | generics | ✅ DONE — checker infers T from args; tree-C emits per-T bundles via `collect_mutex_specs` + `emit_mutex_bundle` |
 | 7 | Parametric `Channel<T>` | generics | |
 | 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | |
 
-Next: cut `v0.1.0` release (edit Cargo.toml, git tag, git push origin v0.1.0), then item 5.
+Next: item 7 (parametric Channel<T>).
 
 ### Completed since 2026-06-13
 

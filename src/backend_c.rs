@@ -234,6 +234,8 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let mut element_types: Vec<Type> = Vec::new();
     let mut channel_seen = BTreeSet::<String>::new();
     let mut channel_specs: Vec<(Type, u64)> = Vec::new();
+    let mut mutex_seen = BTreeSet::<String>::new();
+    let mut mutex_specs: Vec<Type> = Vec::new();
     let mut tuple_seen = BTreeSet::<String>::new();
     let mut tuple_shapes: Vec<Vec<Type>> = Vec::new();
     for function in &program.functions {
@@ -243,6 +245,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
             &mut channel_seen,
             &mut channel_specs,
         );
+        collect_mutex_specs(&function.return_type, &mut mutex_seen, &mut mutex_specs);
         collect_tuple_shapes(
             &function.return_type,
             &mut tuple_seen,
@@ -251,11 +254,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
         for param in &function.params {
             collect_vec_elements(&param.ty, &mut vec_elements, &mut element_types);
             collect_channel_specs(&param.ty, &mut channel_seen, &mut channel_specs);
+            collect_mutex_specs(&param.ty, &mut mutex_seen, &mut mutex_specs);
             collect_tuple_shapes(&param.ty, &mut tuple_seen, &mut tuple_shapes);
         }
         for stmt in &function.body {
             collect_vec_elements_in_stmt(stmt, &mut vec_elements, &mut element_types);
             collect_channel_specs_in_stmt(stmt, &mut channel_seen, &mut channel_specs);
+            collect_mutex_specs_in_stmt(stmt, &mut mutex_seen, &mut mutex_specs);
             collect_tuple_shapes_in_stmt(stmt, &mut tuple_seen, &mut tuple_shapes);
         }
     }
@@ -1315,7 +1320,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_str_repeat_c(&mut out);
     emit_intent_str_case_c(&mut out);
     emit_intent_i64_to_str_c(&mut out);
-    emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs);
+    emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs, &mutex_specs);
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
@@ -7163,8 +7168,8 @@ fn emit_concurrency_runtime_helpers(
     out: &mut String,
     body: &str,
     channel_specs: &[(Type, u64)],
+    mutex_specs: &[Type],
 ) {
-    let needs_mutex = body.contains("intent_mutex_i64") || body.contains("intent_guard_i64");
     let needs_condvar = body.contains("intent_condvar");
     let needs_tasks = body.contains("intent_task_handle");
     if needs_tasks {
@@ -7179,8 +7184,13 @@ fn emit_concurrency_runtime_helpers(
     for (element, capacity) in channel_specs {
         emit_channel_bundle(element, *capacity, out);
     }
-    if needs_mutex {
-        emit_intent_mutex_helpers_c(out);
+    // Emit the shared futex/WaitOnAddress primitives once if any mutex is needed,
+    // then per-T structs + helpers for each element type used.
+    if !mutex_specs.is_empty() {
+        emit_intent_mutex_primitives_c(out);
+        for element in mutex_specs {
+            emit_mutex_bundle(element, out);
+        }
     }
     if needs_condvar {
         emit_intent_condvar_helpers_c(out);
@@ -7283,7 +7293,66 @@ pub(crate) fn emit_intent_condvar_helpers_c(out: &mut String) {
 /// always-safe to emit, but typically only fires when the
 /// program actually uses `Mutex<i64>` / `Guard<i64>` (the
 /// caller does the substring check).
+/// Emit the platform-level futex/WaitOnAddress primitives shared by all
+/// per-T mutex bundles. Does NOT emit any type-specific structs — callers
+/// follow this with `emit_mutex_bundle` for each element type used.
+fn emit_intent_mutex_primitives_c(out: &mut String) {
+    out.push_str(
+        "/* Drepper-style three-state futex lock — shared platform primitives.\n\
+             \x20  Per-type structs and helpers are emitted below via emit_mutex_bundle. */\n\
+             #if defined(__linux__)\n\
+             # include <linux/futex.h>\n\
+             # include <sys/syscall.h>\n\
+             # include <unistd.h>\n\
+             static long intent_mutex_futex_wait(_Atomic int* p, int v) INTENT_UNUSED;\n\
+             static long intent_mutex_futex_wait(_Atomic int* p, int v) {\n\
+             \x20 return syscall(SYS_futex, (int*)p, FUTEX_WAIT_PRIVATE, v, (void*)0, (void*)0, 0);\n\
+             }\n\
+             static long intent_mutex_futex_wake(_Atomic int* p, int n) INTENT_UNUSED;\n\
+             static long intent_mutex_futex_wake(_Atomic int* p, int n) {\n\
+             \x20 return syscall(SYS_futex, (int*)p, FUTEX_WAKE_PRIVATE, n, (void*)0, (void*)0, 0);\n\
+             }\n\
+             #elif defined(_WIN32)\n\
+             static long intent_mutex_futex_wait(_Atomic int* p, int v) INTENT_UNUSED;\n\
+             static long intent_mutex_futex_wait(_Atomic int* p, int v) {\n\
+             \x20 int compare = v;\n\
+             \x20 WaitOnAddress((volatile VOID*)p, &compare, sizeof(int), INFINITE);\n\
+             \x20 return 0;\n\
+             }\n\
+             static long intent_mutex_futex_wake(_Atomic int* p, int n) INTENT_UNUSED;\n\
+             static long intent_mutex_futex_wake(_Atomic int* p, int n) {\n\
+             \x20 if (n == 1) WakeByAddressSingle((PVOID)p);\n\
+             \x20 else WakeByAddressAll((PVOID)p);\n\
+             \x20 return 0;\n\
+             }\n\
+             #endif\n",
+    );
+}
+
+/// Legacy: emit full i64 mutex helpers (platform primitives + i64 bundle).
+/// Used by the condvar helper (which still references intent_guard_i64).
 pub(crate) fn emit_intent_mutex_helpers_c(out: &mut String) {
+    emit_intent_mutex_primitives_c(out);
+    emit_mutex_bundle(&Type::I64, out);
+    out.push_str(
+        "/* Legacy aliases so condvar code referencing intent_guard_i64 compiles. */\n\
+             typedef intent_mutex_int64_t intent_mutex_i64;\n\
+             typedef intent_guard_int64_t intent_guard_i64;\n\
+             static inline intent_guard_i64 intent_mutex_i64_lock(intent_mutex_i64* m) INTENT_UNUSED;\n\
+             static inline intent_guard_i64 intent_mutex_i64_lock(intent_mutex_i64* m) { return intent_mutex_int64_t_lock(m); }\n\
+             static inline void intent_guard_i64_unlock(intent_guard_i64* g) INTENT_UNUSED;\n\
+             static inline void intent_guard_i64_unlock(intent_guard_i64* g) { intent_guard_int64_t_unlock(g); }\n\n",
+    );
+}
+
+/// `pub(crate)` re-export consumed by the SSA-C backend.
+pub(crate) fn emit_intent_mutex_helpers_c_pub(out: &mut String) {
+    emit_intent_mutex_helpers_c(out);
+}
+
+// Legacy body-scan version — kept so the condvar runtime emitter
+// doesn't need to be changed.
+fn _emit_intent_mutex_helpers_with_i64_structs(out: &mut String) {
     out.push_str(
         "/* Drepper-style three-state futex lock. State 0 = unlocked, 1 =\n\
              \x20  locked-no-waiters, 2 = locked-waiters-present. Lock attempts\n\
@@ -7383,6 +7452,67 @@ pub(crate) fn emit_intent_mutex_helpers_c(out: &mut String) {
              #endif\n\
              }\n\n",
     );
+}
+
+/// Emit one per-T mutex + guard bundle. The struct names are derived
+/// from `c_mutex_storage(element)` / `c_guard_storage(element)` so
+/// each element type gets a distinct C struct. The i64 bundle is the
+/// same as the old `intent_mutex_i64` / `intent_guard_i64` runtime.
+fn emit_mutex_bundle(element: &Type, out: &mut String) {
+    let m_ty = c_mutex_storage(element);
+    let g_ty = c_guard_storage(element);
+    let c_elt = c_leaf_type(element);
+    out.push_str(&format!(
+        "typedef struct {{ {c_elt} value; _Atomic int locked; }} {m_ty};\n\
+         typedef struct {{ {m_ty}* m; }} {g_ty};\n\
+         static {m_ty} {m_ty}_new({c_elt} initial) INTENT_UNUSED;\n\
+         static {m_ty} {m_ty}_new({c_elt} initial) {{\n\
+         \x20 {m_ty} m;\n\
+         \x20 m.value = initial;\n\
+         \x20 atomic_store_explicit(&m.locked, 0, memory_order_seq_cst);\n\
+         \x20 return m;\n\
+         }}\n\
+         static {g_ty} {m_ty}_lock({m_ty}* m) INTENT_UNUSED;\n\
+         static {g_ty} {m_ty}_lock({m_ty}* m) {{\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20 int c = 0;\n\
+         \x20 if (!atomic_compare_exchange_strong_explicit(&m->locked, &c, 1, memory_order_seq_cst, memory_order_seq_cst)) {{\n\
+         \x20   if (c != 2) c = atomic_exchange_explicit(&m->locked, 2, memory_order_seq_cst);\n\
+         \x20   while (c != 0) {{\n\
+         \x20     intent_mutex_futex_wait(&m->locked, 2);\n\
+         \x20     c = atomic_exchange_explicit(&m->locked, 2, memory_order_seq_cst);\n\
+         \x20   }}\n\
+         \x20 }}\n\
+         #else\n\
+         \x20 int expected = 0;\n\
+         \x20 int spins = 0;\n\
+         \x20 while (!atomic_compare_exchange_weak_explicit(&m->locked, &expected, 1, memory_order_seq_cst, memory_order_seq_cst)) {{\n\
+         \x20   expected = 0;\n\
+         \x20   spins++;\n\
+         \x20   if (spins >= 32) {{ intent_thread_yield(); spins = 0; }}\n\
+         \x20 }}\n\
+         #endif\n\
+         \x20 {g_ty} g;\n\
+         \x20 g.m = m;\n\
+         \x20 return g;\n\
+         }}\n\
+         static {c_elt} {g_ty}_get(const {g_ty}* g) INTENT_UNUSED;\n\
+         static {c_elt} {g_ty}_get(const {g_ty}* g) {{ return g->m->value; }}\n\
+         static {c_elt} {g_ty}_set(const {g_ty}* g, {c_elt} v) INTENT_UNUSED;\n\
+         static {c_elt} {g_ty}_set(const {g_ty}* g, {c_elt} v) {{ g->m->value = v; return v; }}\n\
+         static void {g_ty}_unlock({g_ty}* g) INTENT_UNUSED;\n\
+         static void {g_ty}_unlock({g_ty}* g) {{\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20 if (atomic_fetch_sub_explicit(&g->m->locked, 1, memory_order_seq_cst) != 1) {{\n\
+         \x20   atomic_store_explicit(&g->m->locked, 0, memory_order_seq_cst);\n\
+         \x20   intent_mutex_futex_wake(&g->m->locked, 1);\n\
+         \x20 }}\n\
+         #else\n\
+         \x20 atomic_store_explicit(&g->m->locked, 0, memory_order_seq_cst);\n\
+         #endif\n\
+         }}\n\n",
+        c_elt = c_elt, m_ty = m_ty, g_ty = g_ty
+    ));
 }
 
 fn collect_vec_elements(
@@ -9917,6 +10047,38 @@ pub(crate) fn c_channel_storage(element: &Type, capacity: u64) -> String {
     format!("intent_channel_{}_{}", element_tag(element), capacity)
 }
 
+/// Per-T mutex storage type name: e.g. `intent_mutex_int64_t`.
+pub(crate) fn c_mutex_storage(element: &Type) -> String {
+    format!("intent_mutex_{}", element_tag(element))
+}
+
+/// Per-T guard storage type name: e.g. `intent_guard_int64_t`.
+pub(crate) fn c_guard_storage(element: &Type) -> String {
+    format!("intent_guard_{}", element_tag(element))
+}
+
+/// Recover the element type T from `&Mutex<T>` / `&mut Mutex<T>`.
+pub(crate) fn mutex_element_from_ref_c(ty: &Type) -> Type {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::Mutex(elt) => *elt.clone(),
+            _ => unreachable!("mutex ref inner must be Mutex<T>"),
+        },
+        _ => unreachable!("mutex arg must be &Mutex<T>"),
+    }
+}
+
+/// Recover the element type T from `&Guard<T>` / `&mut Guard<T>`.
+pub(crate) fn guard_element_from_ref_c(ty: &Type) -> Type {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::Guard(elt) => *elt.clone(),
+            _ => unreachable!("guard ref inner must be Guard<T>"),
+        },
+        _ => unreachable!("guard arg must be &Guard<T>"),
+    }
+}
+
 /// Per-(T, N) channel helper name: e.g. `_send` / `_recv` /
 /// `_new`.
 pub(crate) fn c_channel_helper(element: &Type, capacity: u64, op: &str) -> String {
@@ -10060,6 +10222,109 @@ pub(crate) fn collect_channel_specs_in_expr(
             collect_channel_specs_in_expr(index, seen, out);
         }
         TypedExprKind::Len { array, .. } => collect_channel_specs_in_expr(array, seen, out),
+        _ => {}
+    }
+}
+
+/// Walk `ty` and collect each unique Mutex element type into `out`.
+/// `seen` dedups by the mutex storage name so nested types don't emit twice.
+pub(crate) fn collect_mutex_specs(ty: &Type, seen: &mut BTreeSet<String>, out: &mut Vec<Type>) {
+    match ty {
+        Type::Mutex(element) | Type::Guard(element) => {
+            let key = c_mutex_storage(element);
+            if seen.insert(key) {
+                out.push((**element).clone());
+            }
+            collect_mutex_specs(element, seen, out);
+        }
+        Type::Vec(element) | Type::Atomic(element) | Type::Channel(element, _) => {
+            collect_mutex_specs(element, seen, out);
+        }
+        Type::Array { element, .. } => collect_mutex_specs(element, seen, out),
+        Type::Ref(inner) | Type::RefMut(inner) => collect_mutex_specs(inner, seen, out),
+        _ => {}
+    }
+}
+
+pub(crate) fn collect_mutex_specs_in_stmt(
+    stmt: &TypedStmt,
+    seen: &mut BTreeSet<String>,
+    out: &mut Vec<Type>,
+) {
+    match stmt {
+        TypedStmt::Let { ty, expr, .. } | TypedStmt::Reassign { ty, expr, .. } => {
+            collect_mutex_specs(ty, seen, out);
+            collect_mutex_specs_in_expr(expr, seen, out);
+        }
+        TypedStmt::Drop { ty, .. } => collect_mutex_specs(ty, seen, out),
+        TypedStmt::Discard { expr } => collect_mutex_specs_in_expr(expr, seen, out),
+        TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } => collect_mutex_specs_in_expr(expr, seen, out),
+        TypedStmt::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    collect_mutex_specs_in_expr(e, seen, out);
+                }
+            }
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            collect_mutex_specs_in_expr(cond, seen, out);
+            for s in then_body { collect_mutex_specs_in_stmt(s, seen, out); }
+            for s in else_body { collect_mutex_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::While { cond, body, .. } => {
+            collect_mutex_specs_in_expr(cond, seen, out);
+            for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
+        TypedStmt::IndexAssign { index, value, base_ty, .. } => {
+            collect_mutex_specs(base_ty, seen, out);
+            collect_mutex_specs_in_expr(index, seen, out);
+            collect_mutex_specs_in_expr(value, seen, out);
+        }
+        TypedStmt::FieldAssign { object, value, .. } => {
+            collect_mutex_specs_in_expr(object, seen, out);
+            collect_mutex_specs_in_expr(value, seen, out);
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            collect_mutex_specs_in_expr(start, seen, out);
+            collect_mutex_specs_in_expr(end, seen, out);
+            for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::ForIter { element_ty, collection_ty, body, .. } => {
+            collect_mutex_specs(element_ty, seen, out);
+            collect_mutex_specs(collection_ty, seen, out);
+            for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { collect_mutex_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+    }
+}
+
+pub(crate) fn collect_mutex_specs_in_expr(
+    expr: &TypedExpr,
+    seen: &mut BTreeSet<String>,
+    out: &mut Vec<Type>,
+) {
+    collect_mutex_specs(&expr.ty, seen, out);
+    match &expr.kind {
+        TypedExprKind::Unary { expr, .. } => collect_mutex_specs_in_expr(expr, seen, out),
+        TypedExprKind::Binary { left, right, .. } => {
+            collect_mutex_specs_in_expr(left, seen, out);
+            collect_mutex_specs_in_expr(right, seen, out);
+        }
+        TypedExprKind::Call { args, .. } | TypedExprKind::ArrayLit { elements: args } => {
+            for arg in args { collect_mutex_specs_in_expr(arg, seen, out); }
+        }
+        TypedExprKind::Cast { expr, .. } => collect_mutex_specs_in_expr(expr, seen, out),
+        TypedExprKind::Index { array, index, .. } => {
+            collect_mutex_specs_in_expr(array, seen, out);
+            collect_mutex_specs_in_expr(index, seen, out);
+        }
+        TypedExprKind::Len { array, .. } => collect_mutex_specs_in_expr(array, seen, out),
         _ => {}
     }
 }
@@ -11701,12 +11966,14 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
-            Type::Guard(_) => {
+            Type::Guard(elt) => {
                 // RAII: dropping a guard releases the lock.
                 // The guard's `m` field still points at the
                 // mutex storage; the unlock helper resets the
                 // `locked` flag.
-                out.push_str("  intent_guard_i64_unlock(&");
+                out.push_str("  ");
+                out.push_str(&c_guard_storage(elt));
+                out.push_str("_unlock(&");
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
@@ -13289,7 +13556,7 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 Type::Array { .. } => format!("{}{}{}", local_name(object), sep, field),
                 _ if needs_const_strip => {
                     let storage = match &**inner_ty {
-                        Type::Mutex(_) => "intent_mutex_i64".to_string(),
+                        Type::Mutex(element) => c_mutex_storage(element),
                         Type::Atomic(element) => c_atomic_storage(element),
                         Type::Channel(element, capacity) => {
                             c_channel_storage(element, *capacity)
@@ -14337,17 +14604,46 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             );
         }
         "mutex_new" => {
-            return format!("intent_mutex_i64_new({})", emit_expr(&args[0]));
+            // result_ty is Mutex<T>; extract T for the storage name.
+            let elt = match result_ty {
+                Type::Mutex(e) => e.as_ref().clone(),
+                _ => Type::I64,
+            };
+            return format!("{}_new({})", c_mutex_storage(&elt), emit_expr(&args[0]));
         }
         "mutex_lock" => {
-            return format!("intent_mutex_i64_lock({})", emit_expr(&args[0]));
+            // result_ty is Guard<T>; extract T from args[0] which is &Mutex<T>.
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Mutex(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_lock({})", c_mutex_storage(&elt), emit_expr(&args[0]));
         }
         "guard_get" => {
-            return format!("intent_guard_i64_get({})", emit_expr(&args[0]));
+            // args[0] is &Guard<T>; extract T for the function name.
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Guard(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_get({})", c_guard_storage(&elt), emit_expr(&args[0]));
         }
         "guard_set" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Guard(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
             return format!(
-                "intent_guard_i64_set({}, {})",
+                "{}_set({}, {})",
+                c_guard_storage(&elt),
                 emit_expr(&args[0]),
                 emit_expr(&args[1])
             );

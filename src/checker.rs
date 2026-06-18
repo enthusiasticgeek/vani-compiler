@@ -18978,15 +18978,37 @@ fn channel_capacity_is_pow2(n: u64) -> bool {
     n > 0 && (n & (n - 1)) == 0
 }
 
-/// Type-check the four mutex/guard builtins. v1 supports
-/// `Mutex<i64>` only.
+/// Extract the element type T from `&Mutex<T>` or `&mut Mutex<T>`.
+fn mutex_element_from_ref(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::Mutex(elt) => Some(*elt.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Extract the element type T from `&Guard<T>` or `&mut Guard<T>`.
+fn guard_element_from_ref(ty: &Type) -> Option<Type> {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::Guard(elt) => Some(*elt.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Type-check the four mutex/guard builtins. Phase 2: parametric
+/// over T — any scalar / struct type is accepted.
 ///
-///   mutex_new(initial: i64) -> Mutex<i64>     // affine handle
-///   mutex_lock(m: &Mutex<i64>) -> Guard<i64>  // affine guard
-///   guard_get(g: &Guard<i64>) -> i64          // read under lock
-///   guard_set(g: &Guard<i64>, v: i64) -> i64  // write under lock
+///   mutex_new(initial: T) -> Mutex<T>         // affine handle
+///   mutex_lock(m: &Mutex<T>) -> Guard<T>      // affine guard
+///   guard_get(g: &Guard<T>) -> T              // read under lock
+///   guard_set(g: &Guard<T>, v: T) -> T        // write under lock
 ///
-/// The `Guard<i64>` handle is affine. Scope-exit drops the
+/// The `Guard<T>` handle is affine. Scope-exit drops the
 /// guard, which the backend lowers to a runtime
 /// `mutex_unlock`. The user does not write `mutex_unlock`
 /// explicitly — RAII via the existing drop machinery.
@@ -18998,6 +19020,8 @@ fn check_mutex_builtin(
     span: Span,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CheckedExpr {
+    // Element type is inferred from the argument; fall back to i64
+    // for error-recovery paths so the rest of the error path compiles.
     let element = Type::I64;
     let mutex_ty = Type::Mutex(Box::new(element.clone()));
     let guard_ty = Type::Guard(Box::new(element.clone()));
@@ -19014,21 +19038,17 @@ fn check_mutex_builtin(
                 ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
                 return CheckedExpr::fallback(mutex_ty, span);
             }
+            // Phase 2: infer T from the initial value's type.
             let initial = check_expr(&args[0], env, signatures, diagnostics);
-            let initial = coerce_checked(
-                initial,
-                &element,
-                args[0].span,
-                "mutex_new initial value",
-                diagnostics,
-            );
+            let inferred_element = initial.ty().clone();
+            let inferred_mutex_ty = Type::Mutex(Box::new(inferred_element.clone()));
             CheckedExpr::new(
                 TypedExprKind::Call {
                     name: "mutex_new".to_string(),
                     name_span: span,
                     args: vec![initial.expr],
                 },
-                mutex_ty,
+                inferred_mutex_ty,
                 None,
                 span,
             )
@@ -19042,16 +19062,18 @@ fn check_mutex_builtin(
                 return CheckedExpr::fallback(guard_ty, span);
             }
             let m = check_expr(&args[0], env, signatures, diagnostics);
-            if !is_mutex_ref(m.ty(), &element) {
+            // Phase 2: extract T from &Mutex<T>.
+            let inferred_element = mutex_element_from_ref(m.ty()).unwrap_or_else(|| {
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!(
-                        "'mutex_lock' requires a reference to Mutex<{}>, got {}",
-                        element,
+                        "'mutex_lock' requires a reference to Mutex<T>, got {}",
                         m.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-            }
+                Type::I64
+            });
+            let inferred_guard_ty = Type::Guard(Box::new(inferred_element));
             // Static double-acquire check. When the
             // `mutex_lock` argument is a syntactic &Var(name)
             // reference, scan env for any live guard
@@ -19096,7 +19118,7 @@ fn check_mutex_builtin(
                     name_span: span,
                     args: vec![m.expr],
                 },
-                guard_ty,
+                inferred_guard_ty,
                 None,
                 span,
             )
@@ -19110,23 +19132,24 @@ fn check_mutex_builtin(
                 return CheckedExpr::fallback(element.clone(), span);
             }
             let g = check_expr(&args[0], env, signatures, diagnostics);
-            if !is_guard_ref(g.ty(), &element) {
+            // Phase 2: extract T from &Guard<T>.
+            let inferred_element = guard_element_from_ref(g.ty()).unwrap_or_else(|| {
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!(
-                        "'guard_get' requires a reference to Guard<{}>, got {}",
-                        element,
+                        "'guard_get' requires a reference to Guard<T>, got {}",
                         g.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-            }
+                Type::I64
+            });
             CheckedExpr::new(
                 TypedExprKind::Call {
                     name: "guard_get".to_string(),
                     name_span: span,
                     args: vec![g.expr],
                 },
-                element,
+                inferred_element,
                 None,
                 span,
             )
@@ -19140,20 +19163,21 @@ fn check_mutex_builtin(
                 return CheckedExpr::fallback(element.clone(), span);
             }
             let g = check_expr(&args[0], env, signatures, diagnostics);
-            if !is_guard_ref(g.ty(), &element) {
+            // Phase 2: extract T from &Guard<T>.
+            let inferred_element = guard_element_from_ref(g.ty()).unwrap_or_else(|| {
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!(
-                        "'guard_set' requires a reference to Guard<{}>, got {}",
-                        element,
+                        "'guard_set' requires a reference to Guard<T>, got {}",
                         g.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-            }
+                Type::I64
+            });
             let v = check_expr(&args[1], env, signatures, diagnostics);
             let v = coerce_checked(
                 v,
-                &element,
+                &inferred_element,
                 args[1].span,
                 "guard_set value argument",
                 diagnostics,
@@ -19164,7 +19188,7 @@ fn check_mutex_builtin(
                     name_span: span,
                     args: vec![g.expr, v.expr],
                 },
-                element,
+                inferred_element,
                 None,
                 span,
             )
