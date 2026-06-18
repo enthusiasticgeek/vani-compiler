@@ -16,8 +16,8 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes, diagnostic improvements, performance, docs |
 | `-dev`  | Unreleased development build — no stability promise |
 
-**Current version: `0.1.0-dev`** (Cargo.toml).  
-All G1–G3 gates are now satisfied (2026-06-18). Ready to cut `0.1.0`.
+**Current version: `0.1.0`** (Cargo.toml).  
+All G1–G3 gates satisfied (2026-06-18). Tagged `v0.1.0`.
 
 ---
 

@@ -1,6 +1,6 @@
 # Kosh package manager — design notes
 
-**Status**: ✅ MVP shipped 2026-06-17.
+**Status**: ✅ MVP shipped 2026-06-17. vāṇी `0.1.0` released 2026-06-18.
 Registry live at `https://enthusiasticgeek.github.io/kosh-index/`.
 
 `Kosh` = कोश ("treasure / repository"). The package manager for
@@ -183,8 +183,9 @@ domain, only that file changes — no compiler update required.
 
 ### Tamper evidence
 
-SHA-256 checksums are recorded in `vani.lock`. Future: verify
-checksum at `vanic add` download time (not yet implemented).
+SHA-256 checksums are recorded in `vani.lock` and verified at `vanic add`
+download time. Future (v3): cryptographic signing of index entries (see
+governance roadmap above).
 
 ---
 
@@ -207,6 +208,36 @@ SHA-256 checksums in `vani.lock` provide tamper evidence without signing.
 
 `"verified": true` in an index entry means all exported items carry
 `requires` / `ensures` contracts that discharge under Z3. Informational only in v1.
+
+### Q4b. TLS / PKI strategy
+
+Kosh has **three layers of integrity** at different maturity levels:
+
+| Layer | v1 (now) | v3 (future) |
+|---|---|---|
+| Transport | HTTPS (GitHub Pages + GitHub Releases) — TLS provided by GitHub's CA chain | same |
+| Index integrity | SHA-256 checksum in `vani.lock`; verified at `vanic add` download time | same + Merkle tree |
+| Publisher identity | GitHub OAuth (`gh` CLI token) — GitHub is the identity provider | per-package signing key in `governance.json` |
+
+**What TLS gives you**: encrypted transit; prevents passive eavesdropping and
+trivial MitM. The server certificate is issued by a CA that the OS/browser
+trusts. GitHub Pages uses Let's Encrypt + GitHub's own intermediate CA.
+
+**What TLS does NOT give you**: it says nothing about whether the *content* at
+that URL is what the author intended. A compromised registry host (or a
+malicious GitHub Actions run) could silently replace a tarball.
+
+That gap is why `vani.lock` stores SHA-256 digests and `vanic add` refuses a
+tarball that doesn't match. This is the same model crates.io / npm use in v1.
+
+**Future: per-package signing (v3)**  
+The industry standard is Sigstore / `cosign` — the package author signs the
+tarball with a short-lived OIDC-issued certificate (no long-lived key to
+leak), and the signature + certificate chain are recorded in a transparency log
+(Rekor). Verifiers check the signature without trusting the registry host.
+This is what `cargo` is moving toward (Crates.io Signing RFC #3081) and what
+npm is adopting via `npm audit signatures`. Kosh will follow the same path
+once there is a publisher community that makes it worthwhile.
 
 ### Q4. Mirror policy
 
