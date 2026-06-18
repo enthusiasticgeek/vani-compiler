@@ -17,7 +17,7 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `-dev`  | Unreleased development build — no stability promise |
 
 **Current version: `0.1.0-dev`** (Cargo.toml).  
-No formal release has been cut yet. The `-dev` suffix makes this explicit.
+All G1–G3 gates are now satisfied (2026-06-18). Ready to cut `0.1.0`.
 
 ---
 
@@ -29,12 +29,12 @@ No formal release has been cut yet. The `-dev` suffix makes this explicit.
 
 | # | Item | Status |
 |---|------|--------|
-| G1 | Generics (`Vec<T>`, `Option<T>`, user-defined `struct Foo<T>`) | pending |
-| G2 | `match` exhaustiveness checking for enum payloads | pending |
-| G3 | First-class closures (captures, `map`/`filter`/`fold` as HOF) | pending |
+| G1 | Generics (`Vec<T>`, `Option<T>`, user-defined `struct Foo<T>`, methods + iface impls on generic instantiations) | ✅ done commit `c89cfb5` |
+| G2 | `match` exhaustiveness checking for enum payloads | ✅ done commit `3e1260c` |
+| G3 | First-class closures (captures, `map`/`filter`/`fold` as HOF) | ✅ done |
 
-**Nice-to-have for 0.1.0** (can slip to 0.1.1):
-- `forall` quantifiers in invariants (SMT layer already speaks `forall`)
+**Nice-to-have for 0.1.0** — also shipped:
+- `forall` quantifiers in invariants — ✅ done commit `13b93cd`
 
 Once G1–G3 land and the test suite is green on all platforms, bump
 `Cargo.toml` to `0.1.0`, tag `v0.1.0`, trigger the GitHub release workflow.
@@ -93,3 +93,4 @@ Criteria (not time-boxed):
 |------|----------|-----------|
 | 2026-06-17 | Bumped `0.1.0` → `0.1.0-dev` | No formal release cut yet; `-dev` makes pre-release state explicit |
 | 2026-06-17 | Set G1/G2/G3 gate for `0.1.0` | Generics + closures + exhaustiveness are the minimum for a language to feel complete to an external user |
+| 2026-06-18 | All G1–G3 gates satisfied | G2/G3 landed in prior sessions; G1 completed today (methods + iface impls on generic struct instantiations). `forall` nice-to-have also shipped. Ready to tag `v0.1.0`. |

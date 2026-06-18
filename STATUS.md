@@ -12,13 +12,13 @@
 
 ## 📋 NEXT SESSION HANDOFF — 2026-06-18
 
-**State**: `break value` / labeled loops shipped (commit `02a624a`).
+**State**: All 0.1.0 gate items (G1/G2/G3) satisfied. Ready to tag `v0.1.0`.
 `forall` quantifiers shipped (commit `13b93cd`).
 `enum` payload exhaustiveness shipped (commit `3e1260c`).
+Closures (captures, HOF) complete.
+Generic functions + structs + methods + interface impls on generic instantiations complete (commit `c89cfb5`).
 All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 `volatile_read`/`volatile_write` builtins shipped. Elaboration 100% (597/597).
-Windows async-TCP unblocked (WSAECONNRESET fix, commit `8193760`).
-Big-O wired into all three subcommands.
 
 ### Active work queue (pick top-to-bottom)
 
@@ -26,14 +26,15 @@ Big-O wired into all three subcommands.
 |---|------|------|-------|
 | ~~1~~ | ~~`forall` quantifiers in invariants~~ | — | ✅ DONE commit `13b93cd` |
 | ~~2~~ | ~~`enum` payload exhaustiveness checking~~ | — | ✅ DONE commit `3e1260c` |
-| 3 | Closures (captures, map/filter/fold HOF) | — | Lift + capture analysis already partially scaffolded |
-| 4 | **Generics** (foundational) | — | Unblocks items 5–8; biggest lift |
+| ~~3~~ | ~~Closures (captures, map/filter/fold HOF)~~ | — | ✅ DONE (already fully implemented) |
+| ~~4~~ | ~~**Generics** (foundational)~~ | — | ✅ DONE commit `c89cfb5` — methods + iface impls on generic instantiations |
+| **0** | **Cut `v0.1.0` release** | G1+G2+G3 | Bump Cargo.toml, tag, push tag to trigger release workflow |
 | 5 | Traits/interfaces phase 2 | generics | Blanket impls, default methods |
 | 6 | Parametric `Mutex<T>` / `Guard<T>` | generics | |
 | 7 | Parametric `Channel<T>` | generics | |
 | 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | |
 
-Next: item 3 (closures), then item 4 (generics — big lift).
+Next: cut `v0.1.0` release (edit Cargo.toml, git tag, git push origin v0.1.0), then item 5.
 
 ### Completed since 2026-06-13
 
