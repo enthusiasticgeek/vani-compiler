@@ -3845,3 +3845,124 @@ fn echo_loop_windows_byte_count_matches_c() {
          IOCP parity not yet achieved (see STATUS.md item 6)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Enum payload exhaustiveness — regression tests (2026-06-18)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn enum_non_exhaustive_missing_variant_is_rejected() {
+    let src = write_tmp_vani(
+        "exhaust_missing_variant",
+        r#"
+enum Color { Red, Green, Blue }
+fn f(c: Color) -> i64 {
+  return match c {
+    Color.Red   then 1,
+    Color.Green then 2,
+  };
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "expected non-exhaustive error; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("non-exhaustive") && stderr.contains("Color.Blue"),
+        "expected missing-arm diagnostic for Color.Blue; got: {stderr}"
+    );
+}
+
+#[test]
+fn enum_binding_on_payload_less_variant_is_rejected() {
+    let src = write_tmp_vani(
+        "exhaust_bad_bind",
+        r#"
+enum Shape { Circle(i64), Triangle }
+fn f(s: Shape) -> i64 {
+  return match s {
+    Shape.Circle(r) then r,
+    Shape.Triangle(x) then 0,
+  };
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "expected binding-on-payload-less error; stderr: {stderr}"
+    );
+    assert!(
+        stderr.contains("no payload") || stderr.contains("carries no payload"),
+        "expected 'no payload' diagnostic for Triangle; got: {stderr}"
+    );
+}
+
+#[test]
+fn enum_exhaustive_with_wildcard_is_accepted() {
+    let src = write_tmp_vani(
+        "exhaust_wildcard_ok",
+        r#"
+enum Color { Red, Green, Blue }
+fn f(c: Color) -> i64 {
+  return match c {
+    Color.Red then 1,
+    _         then 0,
+  };
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "exhaustive-with-wildcard should compile; stderr: {stderr}"
+    );
+}
+
+#[test]
+fn enum_tag_only_match_on_payload_variant_is_accepted() {
+    let src = write_tmp_vani(
+        "exhaust_tag_only_ok",
+        r#"
+enum Shape { Circle(i64), Square(i64), Triangle }
+fn classify(s: Shape) -> i64 {
+  return match s {
+    Shape.Circle   then 1,
+    Shape.Square   then 2,
+    Shape.Triangle then 3,
+  };
+}
+fn main() -> i64 { return 0; }
+"#,
+    );
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let output = Command::new(binary)
+        .args(["check", src.to_str().unwrap()])
+        .output()
+        .expect("intentc check");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "tag-only match on payloaded variant should compile; stderr: {stderr}"
+    );
+}

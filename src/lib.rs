@@ -41195,16 +41195,7 @@ função main() -> i64 {
 
     #[test]
     fn no_recursion_accepts_iterative() {
-        let source = r#"
-            #[no_recursion]
-            fn iter(n: i64) -> i64 {
-              let mut: i64 = 0;
-              return mut + n;
-            }
-            fn main() -> i64 { return iter(5); }
-        "#;
-        // Note: "mut" is a reserved keyword, so this might fail.
-        // Use a normal name:
+        // Note: "mut" is a reserved keyword; use a normal name:
         let source = r#"
             #[no_recursion]
             fn iter(n: i64) -> i64 {

@@ -1611,7 +1611,7 @@ mod tests {
                     zero_expr(expr);
                     *span = crate::span::Span::new(0, 0);
                 }
-                Stmt::Break { span } | Stmt::Continue { span } => {
+                Stmt::Break { span, .. } | Stmt::Continue { span, .. } => {
                     *span = crate::span::Span::new(0, 0);
                 }
                 Stmt::IndexAssign { index, value, span, .. } => {

@@ -14655,11 +14655,24 @@ fn check_expr(
                             continue;
                         };
                         // Variant must have a payload to bind.
-                        if enum_decl.variants[tag].is_empty() {
-                            // payload-less; this would be a checker
-                            // error in stricter v1, but we just
-                            // ignore the binding for now.
-                            let _ = enum_decl;
+                        if enum_decl.payload_types[tag].is_none() {
+                            diagnostics.push(Diagnostic::new(
+                                arm.pattern_span,
+                                format!(
+                                    "variant '{}.{}' carries no payload; \
+                                     use `{}.{}` without a binding pattern",
+                                    enum_name, pat_variant, enum_name, pat_variant,
+                                ),
+                            ).with_elaboration(
+                                crate::diagnostic_elaborations::match_wrong_pattern_type(
+                                    "binding pattern",
+                                    "payload-less variant",
+                                ),
+                            ));
+                            // Still count it as seen so exhaustiveness
+                            // check doesn't double-report.
+                            seen_variants.push(pat_variant);
+                            continue;
                         }
                         if seen_variants.contains(&pat_variant.as_str()) {
                             diagnostics.push(Diagnostic::new(
