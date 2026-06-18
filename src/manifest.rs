@@ -28,6 +28,10 @@ pub struct Manifest {
     /// Absolute path to `vani.toml` itself (for lockfile staleness).
     pub manifest_path: PathBuf,
     pub deps: Vec<Dependency>,
+    /// Optional path to a CA certificate bundle for private registries.
+    /// Set via `[registry]\ncafile = "/path/to/ca.pem"` in `vani.toml`.
+    /// `VANI_HTTP_CAINFO` env var overrides this value.
+    pub registry_cafile: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -140,6 +144,10 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
             resolved_version: dep_loaded.package_version,
         });
     }
+    let registry_cafile = sections
+        .get("registry")
+        .and_then(|s| s.get("cafile"))
+        .cloned();
     Ok(Manifest {
         package_name: name,
         package_version,
@@ -147,6 +155,7 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
         root_dir,
         manifest_path: manifest_path.to_path_buf(),
         deps,
+        registry_cafile,
     })
 }
 
@@ -267,8 +276,63 @@ pub const DEFAULT_REGISTRY: &str = "https://enthusiasticgeek.github.io/kosh-inde
 
 /// Download URL template for the default registry.
 /// `{name}` and `{version}` are substituted at download time.
+/// Used as a fallback when `config.json` cannot be fetched or has no `dl` field.
 pub const DEFAULT_DL_TEMPLATE: &str =
     "https://github.com/enthusiasticgeek/kosh-index/releases/download/{name}-v{version}/{name}-{version}.tar.gz";
+
+// ── CA certificate thread-local ──────────────────────────────────────────────
+//
+// Registry operations set this at the start of each public fn so that
+// every `curl` call in the call tree picks up the right cafile without
+// threading an extra parameter through every helper.
+//
+// Priority (highest first):
+//   1. `VANI_HTTP_CAINFO` environment variable
+//   2. `[registry] cafile` in the project's `vani.toml`
+//   3. Nothing — curl uses the OS cert store (correct for the public registry)
+
+thread_local! {
+    static CAFILE: std::cell::RefCell<Option<String>> =
+        std::cell::RefCell::new(None);
+}
+
+/// Set the per-operation cafile (from `vani.toml`'s `[registry] cafile`).
+/// Called once at the start of each public registry operation.
+fn set_cafile(cafile: Option<String>) {
+    CAFILE.with(|c| *c.borrow_mut() = cafile);
+}
+
+/// Return the effective CA bundle path: env var beats manifest cafile.
+fn get_cafile() -> Option<String> {
+    if let Ok(v) = std::env::var("VANI_HTTP_CAINFO") {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    CAFILE.with(|c| c.borrow().clone())
+}
+
+// ── Registry config.json fetch ───────────────────────────────────────────────
+
+/// Fetch `{registry}/config.json` and return the `dl` URL template.
+/// Falls back to `DEFAULT_DL_TEMPLATE` if the fetch fails or `dl` is absent.
+///
+/// Calling this at the start of `vanic add` / `vanic update` means a single
+/// edit to `config.json` in the kosh-index repo updates all clients without a
+/// compiler release — the pre-condition for a seamless CDN migration.
+fn fetch_registry_dl_template(registry: &str) -> String {
+    let url = format!("{}/config.json", registry.trim_end_matches('/'));
+    if let Ok(text) = http_get_text(&url) {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) {
+            if let Some(dl) = v["dl"].as_str() {
+                if !dl.is_empty() {
+                    return dl.to_string();
+                }
+            }
+        }
+    }
+    DEFAULT_DL_TEMPLATE.to_string()
+}
 
 /// A single version entry from the Kosh sparse index (`index/<name>.json`).
 #[derive(Debug, Clone)]
@@ -334,8 +398,13 @@ fn version_satisfies(ver: (u64, u64, u64), constraint: &str) -> bool {
 }
 
 /// Fetch the raw text body of a URL via `curl`.
+/// Passes `--cacert <path>` when a CA file is configured (see `get_cafile`).
 fn http_get_text(url: &str) -> Result<String, String> {
-    let out = std::process::Command::new("curl")
+    let mut cmd = std::process::Command::new("curl");
+    if let Some(ca) = get_cafile() {
+        cmd.args(["--cacert", &ca]);
+    }
+    let out = cmd
         .args(["-fsSL", url])
         .output()
         .map_err(|e| format!("curl not found: {e}. Install curl to use registry features."))?;
@@ -348,8 +417,13 @@ fn http_get_text(url: &str) -> Result<String, String> {
 }
 
 /// Download a URL to `dest` via `curl`.
+/// Passes `--cacert <path>` when a CA file is configured (see `get_cafile`).
 fn http_get_file(url: &str, dest: &Path) -> Result<(), String> {
-    let st = std::process::Command::new("curl")
+    let mut cmd = std::process::Command::new("curl");
+    if let Some(ca) = get_cafile() {
+        cmd.args(["--cacert", &ca]);
+    }
+    let st = cmd
         .args(["-fsSL", "--output", &dest.to_string_lossy().into_owned(), url])
         .status()
         .map_err(|e| format!("curl not found: {e}"))?;
@@ -497,11 +571,17 @@ pub fn registry_add<F: Fn(&str)>(
     version_constraint: Option<&str>,
     on_status: F,
 ) -> Result<AddResult, String> {
+    // Set cafile from manifest so all HTTP calls in this operation use it.
+    if let Ok(m) = load_manifest(manifest_path) {
+        set_cafile(m.registry_cafile);
+    }
+
     on_status(&format!("  fetching {pkg_name} from registry..."));
+    let dl_template = fetch_registry_dl_template(DEFAULT_REGISTRY);
     let entry = fetch_best_version(DEFAULT_REGISTRY, pkg_name, version_constraint)?;
     on_status(&format!("  resolved {} v{}", entry.name, entry.version));
 
-    let dl_url = DEFAULT_DL_TEMPLATE
+    let dl_url = dl_template
         .replace("{name}", &entry.name)
         .replace("{version}", &entry.version);
 
@@ -1009,6 +1089,10 @@ pub fn publish_package<F: Fn(&str)>(
     manifest_path: &Path,
     on_status: F,
 ) -> Result<PublishResult, String> {
+    // Set cafile before any HTTP calls (auth check fetches governance.json).
+    if let Ok(m) = load_manifest(manifest_path) {
+        set_cafile(m.registry_cafile);
+    }
     on_status("  checking publish authorization...");
     check_publish_auth(DEFAULT_REGISTRY)?;
 
@@ -1247,6 +1331,8 @@ pub fn registry_update<F: Fn(&str)>(
     on_status: F,
 ) -> Result<Vec<UpdateResult>, String> {
     let manifest = load_manifest(manifest_path).map_err(|e| e.to_string())?;
+    set_cafile(manifest.registry_cafile.clone());
+    let dl_template = fetch_registry_dl_template(DEFAULT_REGISTRY);
     let root_dir = manifest_path.parent().unwrap_or(Path::new("."));
     let mut results: Vec<UpdateResult> = Vec::new();
 
@@ -1288,7 +1374,7 @@ pub fn registry_update<F: Fn(&str)>(
             dep.name, old_version, entry.version
         ));
 
-        let dl_url = DEFAULT_DL_TEMPLATE
+        let dl_url = dl_template
             .replace("{name}", &entry.name)
             .replace("{version}", &entry.version);
         let tmp_dir = std::env::temp_dir()
@@ -1404,7 +1490,7 @@ fn parse_toml_minimal(
             })?;
             let name = trimmed[1..end].trim();
             match name {
-                "package" | "deps" => {}
+                "package" | "deps" | "registry" => {}
                 other => return Err(ManifestError::UnknownSection(other.into())),
             }
             current_section = Some(name.to_string());
@@ -1769,6 +1855,43 @@ mod tests {
         let found = remove_dep_from_manifest(&mf, "nonexistent").unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert!(!found, "should return false for missing dep");
+    }
+
+    #[test]
+    fn registry_section_cafile_parsed() {
+        let s = r#"
+            [package]
+            name = "myapp"
+            entry = "src/main.vani"
+
+            [registry]
+            cafile = "/etc/ssl/private/internal-ca.pem"
+        "#;
+        let (sections, _) = parse_toml_minimal(s).expect("parses");
+        assert_eq!(
+            sections["registry"]["cafile"],
+            "/etc/ssl/private/internal-ca.pem"
+        );
+    }
+
+    #[test]
+    fn registry_section_absent_yields_none_cafile() {
+        let s = r#"
+            [package]
+            name = "myapp"
+            entry = "src/main.vani"
+        "#;
+        let (sections, _) = parse_toml_minimal(s).expect("parses");
+        assert!(sections.get("registry").is_none());
+    }
+
+    #[test]
+    fn dl_template_fallback_when_config_json_unreachable() {
+        // With no network / real registry, fetch_registry_dl_template must
+        // return the compile-time DEFAULT_DL_TEMPLATE constant.
+        let result =
+            fetch_registry_dl_template("https://localhost:1/nonexistent-registry");
+        assert_eq!(result, DEFAULT_DL_TEMPLATE);
     }
 
     #[test]
