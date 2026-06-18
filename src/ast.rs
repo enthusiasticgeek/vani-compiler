@@ -481,8 +481,8 @@ pub struct EnumVariant {
 
 /// `interface Cmp { fn cmp(self, other: ref Self) returns i64; }`
 /// Declares abstract methods that types can opt into via
-/// `implement Cmp for Point { … }`. v1: no inheritance, no
-/// default methods, no associated types. T1.5.
+/// `implement Cmp for Point { … }`. Phase 2 adds optional
+/// default bodies and blanket impls.
 #[derive(Clone, Debug, PartialEq)]
 pub struct InterfaceDecl {
     pub name: String,
@@ -498,13 +498,24 @@ pub struct InterfaceMethod {
     pub params: Vec<Param>,
     pub return_type: Type,
     pub span: Span,
+    /// Phase 2: optional default body. If `Some`, an `implement`
+    /// block that omits this method inherits the default body.
+    /// The body is declared with the same parameter names as
+    /// declared in the interface signature.
+    pub default_body: Option<Vec<Stmt>>,
 }
 
 /// `implement Cmp for Point { fn cmp(self, other: ref Self) returns i64 { … } }`
 /// Binds an interface's methods to a concrete type. T1.5.
+/// Phase 2: `type_params` and `where_clauses` enable blanket impls.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImplDecl {
     pub interface_name: String,
+    /// Type parameters for blanket impls: `implement<T> Iface for Wrapper<T>`.
+    /// Empty for concrete impls.
+    pub type_params: Vec<String>,
+    /// Bounds on blanket impl type params: `where T is Iface`.
+    pub where_clauses: Vec<WhereClause>,
     pub for_type: Type,
     pub methods: Vec<Function>,
     pub span: Span,

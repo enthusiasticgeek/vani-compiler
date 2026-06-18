@@ -46437,5 +46437,117 @@ fn main() -> i64 { return 0; }
         compile_to_c(source).expect("methods on Pair<i64> and Sumable impl must compile");
     }
 
+    // Phase 2: default interface methods
+    #[test]
+    fn interface_default_method_injected() {
+        // An interface method with a default body is injected when the
+        // implement block omits it. `norm_gt_10` calls `norm_sq` which
+        // is explicitly provided; the default body is synthesized.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+
+            interface Metric {
+                fn norm_sq(self: Point) -> i64;
+                fn norm_gt_10(self: Point) -> bool {
+                    return self.norm_sq() > 10;
+                }
+            }
+
+            implement Metric for Point {
+                fn norm_sq(self: Point) -> i64 {
+                    return self.x * self.x + self.y * self.y;
+                }
+            }
+
+            fn main() -> i64 {
+                let p: Point = Point { x: 3, y: 4 };
+                if p.norm_gt_10() {
+                    return 1;
+                }
+                return 0;
+            }
+        "#;
+        compile_to_c(source).expect("default method norm_gt_10 must be injected for Point");
+    }
+
+    #[test]
+    fn interface_default_method_overridable() {
+        // When an implement block explicitly provides a default method,
+        // the explicit version wins (not the default body).
+        let source = r#"
+            struct Score { val: i64 }
+
+            interface Classify {
+                fn label(self: Score) -> i64 {
+                    return 0;
+                }
+            }
+
+            implement Classify for Score {
+                fn label(self: Score) -> i64 {
+                    return self.val;
+                }
+            }
+
+            fn main() -> i64 {
+                let s: Score = Score { val: 42 };
+                return s.label();
+            }
+        "#;
+        compile_to_c(source).expect("explicit label must override default body");
+    }
+
+    // Phase 2: blanket impls
+    #[test]
+    fn blanket_impl_expands_for_concrete_type() {
+        // `implement<T> Labeled for Wrap<T>` (no bounds) must expand to a
+        // concrete impl for `Wrap__i64` via the blanket expansion pass.
+        // The interface declares the concrete signature for `Wrap<i64>`;
+        // the blanket impl body is instantiated at expansion time.
+        let source = r#"
+            struct Wrap<T> { val: T }
+
+            interface Labeled {
+                fn get_label(self: Wrap<i64>) -> i64;
+            }
+
+            implement<T> Labeled for Wrap<T> {
+                fn get_label(self: Wrap<T>) -> i64 { return 99; }
+            }
+
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { val: 0 };
+                return w.get_label();
+            }
+        "#;
+        compile_to_c(source).expect("blanket impl must expand Wrap__i64 automatically");
+    }
+
+    #[test]
+    fn blanket_impl_bound_blocks_unsatisfied_type() {
+        // `where T is Labeled` must prevent expansion when no concrete
+        // `implement Labeled for i64` exists. The call must be rejected.
+        let source = r#"
+            struct Wrap<T> { val: T }
+
+            interface Labeled {
+                fn get_label(self: Wrap<i64>) -> i64;
+            }
+
+            implement<T> Labeled for Wrap<T> where T is Labeled {
+                fn get_label(self: Wrap<T>) -> i64 { return 99; }
+            }
+
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { val: 0 };
+                return w.get_label();
+            }
+        "#;
+        assert!(
+            compile_to_c(source).is_err(),
+            "blanket impl with unsatisfied bound must be rejected"
+        );
+    }
+
 }
 

@@ -5264,6 +5264,11 @@ fn hoist_impls_into_functions(
                 }
             };
             // Validate signature: parameter count + return type.
+            // Blanket-expanded impls (type_params was non-empty before
+            // expansion) use concrete param types that differ from the
+            // interface's generic-instantiated param types — skip the
+            // per-param type check; only count and return type matter.
+            let is_blanket = !imp.type_params.is_empty();
             if method.params.len() != iface_method.params.len() {
                 diagnostics.push(Diagnostic::new(
                     method.span,
@@ -5276,7 +5281,10 @@ fn hoist_impls_into_functions(
                 ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(iface_method.params.len(), method.params.len())));
                 continue;
             }
-            if method.return_type != iface_method.return_type {
+            // For concrete (non-blanket) impls, verify return type matches.
+            // Blanket impls may legitimately substitute T in the return type,
+            // which differs from what the interface signature shows.
+            if !is_blanket && method.return_type != iface_method.return_type {
                 diagnostics.push(Diagnostic::new(
                     method.span,
                     format!(
@@ -5310,9 +5318,41 @@ fn hoist_impls_into_functions(
             renamed.name = mangled;
             hoisted.push(renamed);
         }
-        // Validate exhaustive coverage.
+        // Validate exhaustive coverage; inject defaults for missing methods.
         for iface_method in &iface.methods {
-            if !covered.contains(&iface_method.name) {
+            if covered.contains(&iface_method.name) {
+                continue;
+            }
+            if let Some(default_body) = &iface_method.default_body {
+                // Phase 2: inject default implementation for this concrete type.
+                let mangled = format!("{}_{}", type_name, iface_method.name);
+                if !program.functions.iter().any(|f| f.name == mangled)
+                    && !hoisted.iter().any(|f| f.name == mangled)
+                {
+                    hoisted.push(crate::ast::Function {
+                        name: mangled,
+                        type_params: Vec::new(),
+                        where_clauses: Vec::new(),
+                        params: iface_method.params.clone(),
+                        return_type: iface_method.return_type.clone(),
+                        requires: Vec::new(),
+                        ensures: Vec::new(),
+                        body: default_body.clone(),
+                        span: iface_method.span,
+                        is_pure: false,
+                        recursion_bound: None,
+                        no_heap: false,
+                        no_float: false,
+                        no_recursion: false,
+                        interrupt: false,
+                        safety_standard: None,
+                        bounded_stack: None,
+                        wcet_cycles: None,
+                        deterministic_timing: false,
+                        is_extern: false,
+                    });
+                }
+            } else {
                 diagnostics.push(
                     Diagnostic::new(
                         imp.span,
@@ -6990,6 +7030,18 @@ fn monomorphize_type_decls_in_program(
             }
         }
     }
+    // Phase 2: expand blanket impls — `implement<T> Iface for Wrapper<T>`.
+    // For each blanket impl (type_params non-empty), look for all known
+    // monomorphizations of the base type and instantiate the impl with
+    // T bound to each concrete arg, provided the bound is satisfied.
+    // NOTE: struct_names/enum_names contain TEMPLATE names (e.g. "Wrap").
+    // expand_blanket_impls needs the MONOMORPHIZED names (e.g. "Wrap__i64"),
+    // which are now in program.structs/enums after the retain+extend above.
+    let mono_struct_names: std::collections::HashSet<String> =
+        program.structs.iter().map(|s| s.name.clone()).collect();
+    let mono_enum_names: std::collections::HashSet<String> =
+        program.enums.iter().map(|e| e.name.clone()).collect();
+    expand_blanket_impls(program, &mono_struct_names, &mono_enum_names, &struct_names, &enum_names);
     // Rewrite Type::Apply in `methods on T` blocks.
     for mb in program.methods_blocks.iter_mut() {
         rewrite_apply_in_ty(&mut mb.for_type, &struct_names, &enum_names);
@@ -7003,6 +7055,215 @@ fn monomorphize_type_decls_in_program(
             }
         }
     }
+}
+
+/// Phase 2: expand blanket impls.
+/// For each `implement<T> Iface for Wrapper<T> where T is Bound` in
+/// `program.impls`, enumerate all known monomorphizations of `Wrapper`
+/// (i.e. `Wrapper__Foo`, `Wrapper__Bar`, …) that exist in struct_names/
+/// enum_names, check the where-clause bounds, and synthesize a concrete
+/// `ImplDecl { for_type: Struct("Wrapper__Foo"), type_params: [], … }`
+/// with T substituted by the concrete arg everywhere. The synthesized
+/// impls are appended to `program.impls` so the normal hoist pass
+/// processes them.
+fn expand_blanket_impls(
+    program: &mut Program,
+    struct_names: &std::collections::HashSet<String>,
+    enum_names: &std::collections::HashSet<String>,
+    // Template names (e.g. "Wrap") used by rewrite_apply_in_ty to convert
+    // Type::Apply { "Wrap", [i64] } → Type::Struct("Wrap__i64") in synthesized impls.
+    tmpl_struct_names: &std::collections::HashSet<String>,
+    tmpl_enum_names: &std::collections::HashSet<String>,
+) {
+    // Collect concrete impls already registered so we can check bounds.
+    // Key: (iface_name, for_type_name).
+    let concrete_impls: std::collections::HashSet<(String, String)> = program
+        .impls
+        .iter()
+        .filter(|imp| imp.type_params.is_empty())
+        .filter_map(|imp| {
+            let tn = match &imp.for_type {
+                Type::Struct(n) | Type::Enum(n) => Some(n.clone()),
+                _ => None,
+            }?;
+            Some((imp.interface_name.clone(), tn))
+        })
+        .collect();
+
+    let mut new_impls: Vec<crate::ast::ImplDecl> = Vec::new();
+
+    for imp in program.impls.iter() {
+        if imp.type_params.is_empty() {
+            continue; // concrete impl — skip
+        }
+        // Only handle single-param blanket impls for now:
+        //   `implement<T> Iface for Wrapper<T>`
+        // The for_type must be Type::Apply { name: "Wrapper", args: [Type::Param("T")] }.
+        let (base_name, param_name) = match &imp.for_type {
+            Type::Apply { name, args } if args.len() == 1 => {
+                if let Type::Param(p) = &args[0] {
+                    (name.clone(), p.clone())
+                } else {
+                    continue;
+                }
+            }
+            _ => continue,
+        };
+        // Find all monomorphizations of base_name in the known name sets.
+        // They are named `<base_name>__<mangled_arg>`.
+        let prefix = format!("{}__", base_name);
+        let mono_names: Vec<String> = struct_names
+            .iter()
+            .chain(enum_names.iter())
+            .filter(|n| n.starts_with(&prefix))
+            .cloned()
+            .collect();
+
+        for mono_name in mono_names {
+            // Already have a concrete impl for this type?
+            if concrete_impls.contains(&(imp.interface_name.clone(), mono_name.clone()))
+                || new_impls.iter().any(|ni| {
+                    ni.interface_name == imp.interface_name
+                        && matches!(&ni.for_type, Type::Struct(n) | Type::Enum(n) if *n == mono_name)
+                })
+            {
+                continue;
+            }
+            // Recover the concrete arg type from the mangled name suffix.
+            let arg_mangled = &mono_name[prefix.len()..];
+            // We need to reconstruct a Type from the mangled suffix. For simple
+            // cases (single concrete struct/enum or primitive), use a heuristic:
+            // look in struct_names/enum_names first, then try parse as primitive.
+            let concrete_arg: Type = if struct_names.contains(arg_mangled) {
+                Type::Struct(arg_mangled.to_string())
+            } else if enum_names.contains(arg_mangled) {
+                Type::Enum(arg_mangled.to_string())
+            } else {
+                match arg_mangled {
+                    "i64" => Type::I64, "i32" => Type::I32, "i16" => Type::I16, "i8" => Type::I8,
+                    "u64" => Type::U64, "u32" => Type::U32, "u16" => Type::U16, "u8" => Type::U8,
+                    "f32" => Type::F32, "f64" => Type::F64,
+                    "bool" => Type::Bool, "str" => Type::Str,
+                    _ => continue, // unrecognized arg — skip
+                }
+            };
+            // Check where-clause bounds: for each `T is Bound`, verify
+            // that `implement Bound for concrete_arg` exists.
+            let bounds_satisfied = imp.where_clauses.iter().all(|wc| {
+                if wc.type_param != param_name {
+                    return true; // unrelated param — assume ok
+                }
+                let concrete_type_name = match &concrete_arg {
+                    Type::Struct(n) | Type::Enum(n) => n.clone(),
+                    Type::I64 => "i64".to_string(), Type::I32 => "i32".to_string(),
+                    Type::I16 => "i16".to_string(), Type::I8 => "i8".to_string(),
+                    Type::U64 => "u64".to_string(), Type::U32 => "u32".to_string(),
+                    Type::U16 => "u16".to_string(), Type::U8 => "u8".to_string(),
+                    Type::F32 => "f32".to_string(), Type::F64 => "f64".to_string(),
+                    Type::Bool => "bool".to_string(), Type::Str => "str".to_string(),
+                    _ => return false,
+                };
+                concrete_impls.contains(&(wc.interface_name.clone(), concrete_type_name.clone()))
+                    || new_impls.iter().any(|ni| {
+                        ni.interface_name == wc.interface_name
+                            && matches!(&ni.for_type, Type::Struct(n) | Type::Enum(n) if *n == concrete_type_name)
+                    })
+            });
+            if !bounds_satisfied {
+                continue;
+            }
+            // Substitute T → concrete_arg everywhere in param types, return type, body.
+            fn subst_ty(ty: &Type, param: &str, concrete: &Type) -> Type {
+                match ty {
+                    Type::Param(p) if p == param => concrete.clone(),
+                    Type::Apply { name, args } => Type::Apply {
+                        name: name.clone(),
+                        args: args.iter().map(|a| subst_ty(a, param, concrete)).collect(),
+                    },
+                    Type::Vec(inner) => Type::Vec(Box::new(subst_ty(inner, param, concrete))),
+                    Type::Ref(inner) => Type::Ref(Box::new(subst_ty(inner, param, concrete))),
+                    Type::RefMut(inner) => Type::RefMut(Box::new(subst_ty(inner, param, concrete))),
+                    other => other.clone(),
+                }
+            }
+            fn subst_expr(expr: &crate::ast::Expr, param: &str, concrete: &Type) -> crate::ast::Expr {
+                use crate::ast::ExprKind;
+                let new_kind = match &expr.kind {
+                    ExprKind::Cast { expr: inner, ty } => ExprKind::Cast {
+                        expr: Box::new(subst_expr(inner, param, concrete)),
+                        ty: subst_ty(ty, param, concrete),
+                    },
+                    ExprKind::Call { name, name_span, args } => ExprKind::Call {
+                        name: name.clone(),
+                        name_span: *name_span,
+                        args: args.iter().map(|a| subst_expr(a, param, concrete)).collect(),
+                    },
+                    ExprKind::MethodCall { receiver, method, method_span, args } => ExprKind::MethodCall {
+                        receiver: Box::new(subst_expr(receiver, param, concrete)),
+                        method: method.clone(),
+                        method_span: *method_span,
+                        args: args.iter().map(|a| subst_expr(a, param, concrete)).collect(),
+                    },
+                    other => other.clone(),
+                };
+                crate::ast::Expr { kind: new_kind, span: expr.span }
+            }
+            fn subst_stmt(stmt: &crate::ast::Stmt, param: &str, concrete: &Type) -> crate::ast::Stmt {
+                use crate::ast::Stmt;
+                match stmt {
+                    Stmt::Let { name, annotation, expr, span } => Stmt::Let {
+                        name: name.clone(),
+                        annotation: annotation.as_ref().map(|t| subst_ty(t, param, concrete)),
+                        expr: subst_expr(expr, param, concrete),
+                        span: *span,
+                    },
+                    Stmt::Return { expr, span } => Stmt::Return {
+                        expr: subst_expr(expr, param, concrete),
+                        span: *span,
+                    },
+                    other => other.clone(),
+                }
+            }
+            let mut methods: Vec<crate::ast::Function> = imp.methods.iter().map(|m| {
+                let mut m2 = m.clone();
+                for p in m2.params.iter_mut() {
+                    p.ty = subst_ty(&p.ty, &param_name, &concrete_arg);
+                }
+                m2.return_type = subst_ty(&m2.return_type, &param_name, &concrete_arg);
+                m2.body = m2.body.iter().map(|s| subst_stmt(s, &param_name, &concrete_arg)).collect();
+                m2
+            }).collect();
+            // After T→concrete substitution, types may still contain
+            // `Type::Apply { "Wrap", [i64] }` (from `Wrap<T>` after
+            // subst). Rewrite those to `Type::Struct("Wrap__i64")`
+            // using the template-name sets (the same pass the rest of
+            // the program went through before expand_blanket_impls ran).
+            for method in methods.iter_mut() {
+                for p in method.params.iter_mut() {
+                    rewrite_apply_in_ty(&mut p.ty, tmpl_struct_names, tmpl_enum_names);
+                }
+                rewrite_apply_in_ty(&mut method.return_type, tmpl_struct_names, tmpl_enum_names);
+                for stmt in method.body.iter_mut() {
+                    rewrite_apply_in_stmt(stmt, tmpl_struct_names, tmpl_enum_names);
+                }
+            }
+
+            new_impls.push(crate::ast::ImplDecl {
+                interface_name: imp.interface_name.clone(),
+                type_params: Vec::new(), // concrete
+                where_clauses: Vec::new(),
+                for_type: if struct_names.contains(&mono_name) {
+                    Type::Struct(mono_name.clone())
+                } else {
+                    Type::Enum(mono_name.clone())
+                },
+                methods,
+                span: imp.span,
+                home_module: imp.home_module.clone(),
+            });
+        }
+    }
+    program.impls.extend(new_impls);
 }
 
 fn mangle_generic_decl(name: &str, args: &[Type]) -> String {

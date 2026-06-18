@@ -734,13 +734,27 @@ impl Parser {
                 |k| matches!(k, TokenKind::Arrow),
             )?;
             let return_type = self.parse_type()?;
-            let semi = self.expect_keyword("';'", |k| matches!(k, TokenKind::Semicolon))?;
+            // Phase 2: default body — `{ ... }` instead of `;`
+            let (default_body, end_span) =
+                if self.check(|k| matches!(k, TokenKind::LBrace)) {
+                    let body = self.parse_block()?;
+                    let end = if let Some(last) = body.last() {
+                        last.span()
+                    } else {
+                        fn_tok.span
+                    };
+                    (Some(body), end)
+                } else {
+                    let semi = self.expect_keyword("';'", |k| matches!(k, TokenKind::Semicolon))?;
+                    (None, semi.span)
+                };
             methods.push(InterfaceMethod {
                 name: m_name,
                 name_span: m_name_span,
                 params,
                 return_type,
-                span: fn_tok.span.merge(semi.span),
+                span: fn_tok.span.merge(end_span),
+                default_body,
             });
         }
         let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
@@ -754,6 +768,25 @@ impl Parser {
 
     fn parse_impl_decl(&mut self) -> Result<ImplDecl, Diagnostic> {
         let start = self.expect_keyword("'implement'", |k| matches!(k, TokenKind::Implement))?;
+        // Phase 2: blanket impl type params — `implement<T> Iface for Type<T>`
+        let mut impl_type_params: Vec<String> = Vec::new();
+        if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
+            loop {
+                let tp_tok = self.expect_ident()?;
+                impl_type_params.push(ident_text(tp_tok));
+                if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
+                    break;
+                }
+                if self.check(|k| matches!(k, TokenKind::Greater | TokenKind::GreaterGreater)) {
+                    break;
+                }
+            }
+            self.expect_close_angle()?;
+            // Register as type params so parse_type resolves them as Type::Param
+            for tp in &impl_type_params {
+                self.current_type_params.insert(tp.clone());
+            }
+        }
         let iface_tok = self.expect_ident()?;
         let interface_name = ident_text(iface_tok);
         // `for` is a reserved keyword (used in `for i from … to
@@ -763,14 +796,53 @@ impl Parser {
             matches!(k, TokenKind::For)
         })?;
         let for_type = self.parse_type()?;
+        // Phase 2: optional `where T is Iface` bounds on blanket impls.
+        let mut impl_where_clauses: Vec<WhereClause> = Vec::new();
+        if self.match_token(|k| matches!(k, TokenKind::Where)).is_some() {
+            loop {
+                let tp_tok = self.expect_ident()?;
+                let tp_span = tp_tok.span;
+                let tp_name = ident_text(tp_tok);
+                self.expect_keyword("'is'", |k| matches!(k, TokenKind::Is))?;
+                let iface_tok = self.expect_ident()?;
+                let iface_span = iface_tok.span;
+                let iface_name = ident_text(iface_tok);
+                impl_where_clauses.push(WhereClause {
+                    type_param: tp_name,
+                    interface_name: iface_name,
+                    span: tp_span.merge(iface_span),
+                });
+                if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
+                    break;
+                }
+                if self.check(|k| matches!(k, TokenKind::LBrace)) {
+                    break;
+                }
+            }
+        }
+        // Clean up blanket type params from current_type_params after parsing
+        // for_type and where clauses (before parsing method bodies).
+        for tp in &impl_type_params {
+            self.current_type_params.remove(tp);
+        }
+        // Re-register for method body parsing.
+        for tp in &impl_type_params {
+            self.current_type_params.insert(tp.clone());
+        }
         self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
         let mut methods = Vec::new();
         while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
             methods.push(self.parse_function()?);
         }
         let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        // Remove blanket type params from scope after impl block.
+        for tp in &impl_type_params {
+            self.current_type_params.remove(tp);
+        }
         Ok(ImplDecl {
             interface_name,
+            type_params: impl_type_params,
+            where_clauses: impl_where_clauses,
             for_type,
             methods,
             span: start.span.merge(close.span),
