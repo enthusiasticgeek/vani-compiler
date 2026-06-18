@@ -46411,5 +46411,31 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    #[test]
+    fn generic_struct_methods_and_iface_impl_compile() {
+        // `implement Iface for Pair<i64>` and method calls on
+        // a generic struct instantiation. The hoist passes must
+        // accept Type::Apply and mangle it to `Pair__i64`.
+        let source = r#"
+            struct Pair<T> { first: T, second: T }
+
+            interface Sumable {
+                fn sum(self: Pair<i64>) -> i64;
+            }
+
+            implement Sumable for Pair<i64> {
+                fn sum(self: Pair<i64>) -> i64 {
+                    return self.first + self.second;
+                }
+            }
+
+            fn main() -> i64 {
+              let p: Pair<i64> = Pair { first: 10, second: 32 };
+              return p.sum();
+            }
+        "#;
+        compile_to_c(source).expect("methods on Pair<i64> and Sumable impl must compile");
+    }
+
 }
 

@@ -4910,6 +4910,16 @@ fn hoist_methods_into_functions(
     for block in &program.methods_blocks {
         let type_name = match &block.for_type {
             Type::Struct(name) | Type::Enum(name) => name.clone(),
+            // Generic instantiation: `methods on Pair<i64> { … }` —
+            // mangle to the monomorphized struct name (`Pair__i64`)
+            // so the hoisted functions live under the same name the
+            // monomorphizer will produce for `struct Pair<T>`.
+            Type::Apply { name, args } => {
+                let mangled_args: Vec<String> = args.iter()
+                    .map(|a| type_mangle_for_decl(a))
+                    .collect();
+                format!("{}__{}", name, mangled_args.join("__"))
+            }
             other => {
                 diagnostics.push(Diagnostic::new(
                     block.for_type_span,
@@ -5062,6 +5072,12 @@ fn hoist_impls_into_functions(
         .filter_map(|imp| {
             let type_name = match &imp.for_type {
                 Type::Struct(n) | Type::Enum(n) => Some(n.clone()),
+                Type::Apply { name, args } => {
+                    let mangled_args: Vec<String> = args.iter()
+                        .map(|a| type_mangle_for_decl(a))
+                        .collect();
+                    Some(format!("{}__{}", name, mangled_args.join("__")))
+                }
                 _ => None,
             }?;
             Some((imp.interface_name.clone(), type_name))
@@ -5078,11 +5094,21 @@ fn hoist_impls_into_functions(
     let mut iface_impls_list: std::collections::HashMap<String, Vec<String>> =
         std::collections::HashMap::new();
     for imp in &program.impls {
-        if let Type::Struct(n) | Type::Enum(n) = &imp.for_type {
+        let type_name_opt = match &imp.for_type {
+            Type::Struct(n) | Type::Enum(n) => Some(n.clone()),
+            Type::Apply { name, args } => {
+                let mangled_args: Vec<String> = args.iter()
+                    .map(|a| type_mangle_for_decl(a))
+                    .collect();
+                Some(format!("{}__{}", name, mangled_args.join("__")))
+            }
+            _ => None,
+        };
+        if let Some(n) = type_name_opt {
             iface_impls_list
                 .entry(imp.interface_name.clone())
                 .or_default()
-                .push(n.clone());
+                .push(n);
         }
     }
     crate::ast::set_iface_impls_list(iface_impls_list);
@@ -5197,6 +5223,12 @@ fn hoist_impls_into_functions(
         // for_type must be a nominal type (struct or enum).
         let type_name = match &imp.for_type {
             Type::Struct(n) | Type::Enum(n) => n.clone(),
+            Type::Apply { name, args } => {
+                let mangled_args: Vec<String> = args.iter()
+                    .map(|a| type_mangle_for_decl(a))
+                    .collect();
+                format!("{}__{}", name, mangled_args.join("__"))
+            }
             other => {
                 diagnostics.push(Diagnostic::new(
                     imp.span,
@@ -6942,6 +6974,32 @@ fn monomorphize_type_decls_in_program(
         for v in e.variants.iter_mut() {
             for p_ty in v.payload.iter_mut() {
                 rewrite_apply_in_ty(p_ty, &struct_names, &enum_names);
+            }
+        }
+    }
+    // Rewrite Type::Apply in `implement Iface for T` blocks.
+    for imp in program.impls.iter_mut() {
+        rewrite_apply_in_ty(&mut imp.for_type, &struct_names, &enum_names);
+        for method in imp.methods.iter_mut() {
+            for p in method.params.iter_mut() {
+                rewrite_apply_in_ty(&mut p.ty, &struct_names, &enum_names);
+            }
+            rewrite_apply_in_ty(&mut method.return_type, &struct_names, &enum_names);
+            for stmt in method.body.iter_mut() {
+                rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
+            }
+        }
+    }
+    // Rewrite Type::Apply in `methods on T` blocks.
+    for mb in program.methods_blocks.iter_mut() {
+        rewrite_apply_in_ty(&mut mb.for_type, &struct_names, &enum_names);
+        for method in mb.methods.iter_mut() {
+            for p in method.params.iter_mut() {
+                rewrite_apply_in_ty(&mut p.ty, &struct_names, &enum_names);
+            }
+            rewrite_apply_in_ty(&mut method.return_type, &struct_names, &enum_names);
+            for stmt in method.body.iter_mut() {
+                rewrite_apply_in_stmt(stmt, &struct_names, &enum_names);
             }
         }
     }
