@@ -258,6 +258,7 @@ API-naming question for function names. No issue. (2026-06-16)
 
 ## See also
 
+- [`SECURITY.md`](../SECURITY.md) — full TLS/PKI trust model, `cafile` private-registry design, Sigstore roadmap.
 - [`src/manifest.rs`](../src/manifest.rs) — manifest parser + Kosh registry code.
 - [`kosh-index`](https://github.com/enthusiasticgeek/kosh-index) — live registry.
 - [TODO.md](../TODO.md) — Kosh arc status.
