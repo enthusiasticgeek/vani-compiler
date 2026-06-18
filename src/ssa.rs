@@ -2466,6 +2466,10 @@ fn lower_expr_to_operand(
                       (vtables Phase 3 — route through tree backend)".to_string(),
             span: expr.span,
         }),
+        TypedExprKind::Forall { .. } => Err(LowerError {
+            message: "forall quantifiers are proof-only and cannot be lowered to SSA".to_string(),
+            span: expr.span,
+        }),
     }
 }
 
@@ -2502,6 +2506,7 @@ fn expr_kind_name(kind: &TypedExprKind) -> &'static str {
         TypedExprKind::Block { .. } => "Block",
         TypedExprKind::DynDispatch { .. } => "DynDispatch",
         TypedExprKind::DynCoerce { .. } => "DynCoerce",
+        TypedExprKind::Forall { .. } => "Forall",
     }
 }
 

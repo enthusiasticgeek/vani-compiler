@@ -46365,5 +46365,51 @@ fn main() -> i64 { return 0; }
             "trivial must be Constant; got {:?}", c);
     }
 
+    #[test]
+    fn forall_quantifier_parses_and_typechecks() {
+        // A `forall` in a `prove` position must parse and typecheck.
+        let source = r#"
+            fn main() -> i64 {
+              prove forall x: i64, x + 0 == x;
+              return 0;
+            }
+        "#;
+        // We don't expect the SMT to necessarily verify this (Z3 not always
+        // available in CI), but the compiler must at least accept it without
+        // a type-check diagnostic.
+        let result = compile(source);
+        match &result {
+            Ok(_) => {}
+            Err(errs) => {
+                let has_type_err = errs.iter().any(|d| {
+                    d.message.contains("type") || d.message.contains("parse")
+                        || d.message.contains("expected")
+                });
+                assert!(
+                    !has_type_err,
+                    "forall should parse and typecheck; got: {:?}",
+                    errs
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn forall_body_must_be_bool() {
+        // A `forall` whose body is not Bool should produce a type error.
+        let source = r#"
+            fn main() -> i64 {
+              prove forall x: i64, x + 1;
+              return 0;
+            }
+        "#;
+        let errs = compile(source).expect_err("forall with non-bool body should fail");
+        assert!(
+            errs.iter().any(|d| d.message.contains("forall") || d.message.contains("bool")),
+            "expected forall type error, got: {:?}",
+            errs
+        );
+    }
+
 }
 

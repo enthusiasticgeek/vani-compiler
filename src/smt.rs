@@ -1403,6 +1403,31 @@ fn encode_expr(
         ExprKind::Try { .. } => Err(EncodeError::Unsupported(
             "try expressions not supported in SMT v1".into(),
         )),
+        ExprKind::Forall { var, ty, body } => {
+            let sort = if ty.is_integer() {
+                int_bv_sort(ty).ok_or_else(|| {
+                    EncodeError::Unsupported(format!("unsupported integer sort in forall: {}", ty))
+                })?
+            } else if ty.is_float() {
+                fp_sort(ty)
+                    .map(|s| s.to_string())
+                    .ok_or_else(|| {
+                        EncodeError::Unsupported(format!("unsupported float sort in forall: {}", ty))
+                    })?
+            } else if matches!(ty, Type::Bool) {
+                "Bool".to_string()
+            } else {
+                return Err(EncodeError::Unsupported(format!(
+                    "forall bound variable '{}' has unsupported type '{}'",
+                    var, ty
+                )));
+            };
+            // Extend vars with the bound variable so the body can reference it.
+            let mut inner_vars = vars.clone();
+            inner_vars.insert(var.clone(), ty.clone());
+            let body_smt = encode_expr(body, &inner_vars, Some(&Type::Bool), versions)?;
+            Ok(format!("(forall (({} {})) {})", var, sort, body_smt))
+        }
         ExprKind::AnonFn { .. } => Err(EncodeError::Unsupported(
             "anonymous fn expressions not supported in SMT v1".into(),
         )),

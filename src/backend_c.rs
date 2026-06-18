@@ -13980,6 +13980,11 @@ fn emit_expr(expr: &TypedExpr) -> String {
                 ),
             }
         }
+        TypedExprKind::Forall { .. } => {
+            // Forall is proof-only; it never reaches codegen.
+            // Surface as a 1 literal so any wrapping assert stays compilable.
+            "1".to_string()
+        }
     }
 }
 

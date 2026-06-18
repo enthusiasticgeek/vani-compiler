@@ -4222,6 +4222,30 @@ impl Parser {
                     span: open_span.merge(close.span),
                 })
             }
+            TokenKind::Forall => {
+                // `forall var: type, body`
+                // Parses a universally quantified proof expression.
+                // Only meaningful in proof positions (invariant/
+                // requires/ensures/prove); checker enforces this.
+                let open_span = token.span;
+                let var_tok = self.bump();
+                let var = match var_tok.kind {
+                    TokenKind::Ident(name) => name,
+                    _ => return Err(Diagnostic::new(
+                        var_tok.span,
+                        format!("expected variable name after 'forall', got {:?}", var_tok.kind),
+                    )),
+                };
+                self.expect_keyword("':' after forall variable", |k| matches!(k, TokenKind::Colon))?;
+                let ty = self.parse_type()?;
+                self.expect_keyword("',' after forall type", |k| matches!(k, TokenKind::Comma))?;
+                let body = self.parse_expr()?;
+                let end_span = body.span;
+                Ok(Expr {
+                    kind: ExprKind::Forall { var, ty, body: Box::new(body) },
+                    span: open_span.merge(end_span),
+                })
+            }
             TokenKind::Try => {
                 // `try EXPR` — parse inner at call-expr
                 // precedence so common forms like

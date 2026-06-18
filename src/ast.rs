@@ -1725,6 +1725,16 @@ pub enum ExprKind {
         cond: Box<Expr>,
         body: Vec<Stmt>,
     },
+    /// Universal quantifier — `forall var: ty, body`.
+    /// `body` must be Bool-typed. Only meaningful in proof
+    /// positions (`invariant`, `requires`, `ensures`, `prove`).
+    /// The checker type-checks the body with `var` in scope;
+    /// the SMT encoder emits `(forall ((var Sort)) body)`.
+    Forall {
+        var: String,
+        ty: Type,
+        body: Box<Expr>,
+    },
     /// Anonymous fn expression — `fn(p: T) -> R { body }`
     /// in value position. v1 has no captured environment:
     /// the body sees only the listed params + top-level

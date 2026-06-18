@@ -2525,6 +2525,10 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         ExprKind::WhileLoop { cond, body, .. } => {
             expr_mentions_var(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
         }
+        ExprKind::Forall { var, body, .. } => {
+            // The bound variable shadows `name` inside the body.
+            if var == name { false } else { expr_mentions_var(body, name) }
+        }
         ExprKind::AnonFn { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
     }
 }
@@ -2717,6 +2721,11 @@ fn walk_expr_for_captures(
                 walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen);
             }
         }
+        ExprKind::Forall { var, body, .. } => {
+            bound.insert(var.clone());
+            walk_expr_for_captures(body, bound, env, top_level_names, captures, seen);
+            bound.remove(var.as_str());
+        }
         ExprKind::AnonFn { .. } => {
             // Nested anon fns are lifted independently; their
             // own captures aren't ours to track.
@@ -2905,6 +2914,13 @@ fn rename_vars_in_expr(
                 rename_vars_in_stmt(s, rename);
             }
         }
+        ExprKind::Forall { var, body, .. } => {
+            // Only recurse into the body if the bound variable is not
+            // in the rename map (so it won't be incorrectly renamed inside).
+            if !rename.contains_key(var.as_str()) {
+                rename_vars_in_expr(body, rename);
+            }
+        }
         ExprKind::AnonFn { .. } => {}
     }
 }
@@ -3089,6 +3105,9 @@ fn rewrite_closure_calls_in_expr(
             for s in body {
                 rewrite_closure_calls_in_stmt(s, closures);
             }
+        }
+        ExprKind::Forall { body, .. } => {
+            rewrite_closure_calls_in_expr(body, closures);
         }
         ExprKind::AnonFn { .. } => {}
     }
@@ -3277,6 +3296,9 @@ fn lift_expr_anon_fn(
             for s in body {
                 lift_stmt_anon_fn(s, counter, hoisted);
             }
+        }
+        ExprKind::Forall { body, .. } => {
+            lift_expr_anon_fn(body, counter, hoisted);
         }
     }
 }
@@ -4479,6 +4501,10 @@ fn resolve_enum_types_in_expr(
                 resolve_enum_types_in_stmt(s, enums);
             }
         }
+        ExprKind::Forall { ty, body, .. } => {
+            resolve_enum_types_in_type(ty, enums);
+            resolve_enum_types_in_expr(body, enums);
+        }
     }
 }
 
@@ -4862,6 +4888,10 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
             for s in body {
                 sub_aliases_in_stmt(s, aliases);
             }
+        }
+        ExprKind::Forall { ty, body, .. } => {
+            sub_aliases_in_type(ty, aliases);
+            sub_aliases_in_expr(body, aliases);
         }
     }
 }
@@ -8471,6 +8501,9 @@ fn walk_branch_mutations_in_expr(
             for s in body {
                 walk_branch_mutations(std::slice::from_ref(s), out);
             }
+        }
+        ExprKind::Forall { body, .. } => {
+            walk_branch_mutations_in_expr(body, out);
         }
         ExprKind::AnonFn { .. } => {
             // Anon fn body is lifted to a top-level fn before
@@ -15274,6 +15307,45 @@ fn check_expr(
                  `let x: T = while ... { break val; };`",
             ));
             CheckedExpr::fallback_integer(expr.span)
+        }
+        ExprKind::Forall { var, ty, body } => {
+            // Push the bound variable into scope, check body must be Bool.
+            env.push_scope();
+            env.insert_current(var.clone(), VarInfo {
+                ty: ty.clone(),
+                constant: None,
+                moved: None,
+                decl_span: expr.span,
+                vec_literal_elements: None,
+                array_version: 0,
+                guarded_mutex: None,
+                no_drop: true,
+                is_const: false,
+                struct_literal_fields: None,
+                moved_fields: std::collections::BTreeMap::new(),
+                ref_aliases: Vec::new(),
+            });
+            let body_checked = check_expr(body, env, signatures, diagnostics);
+            env.pop_scope();
+            if *body_checked.ty() != Type::Bool {
+                diagnostics.push(Diagnostic::new(
+                    body.span,
+                    format!(
+                        "`forall` body must have type `bool`, got `{}`",
+                        body_checked.ty()
+                    ),
+                ));
+            }
+            CheckedExpr::new(
+                TypedExprKind::Forall {
+                    var: var.clone(),
+                    ty: ty.clone(),
+                    body: Box::new(body_checked.expr),
+                },
+                Type::Bool,
+                None,
+                expr.span,
+            )
         }
         ExprKind::AnonFn { .. } => {
             // Anon fns are lifted to top-level `__anon_fn_<N>`
@@ -28500,6 +28572,17 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
             cond: Box::new(substitute_expr(cond, subs)),
             body: body.clone(),
         },
+        ExprKind::Forall { var, ty, body } => {
+            // Only substitute into the body if the bound variable doesn't
+            // shadow a substitution target.
+            let mut inner_subs = subs.clone();
+            inner_subs.remove(var.as_str());
+            ExprKind::Forall {
+                var: var.clone(),
+                ty: ty.clone(),
+                body: Box::new(substitute_expr(body, &inner_subs)),
+            }
+        }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before contract substitution runs.
             unreachable!("AnonFn should have been lifted before substitute_expr")
@@ -28614,6 +28697,10 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
         ExprKind::Try { inner } => expr_mentions(inner, name),
         ExprKind::WhileLoop { cond, body, .. } => {
             expr_mentions(cond, name) || body.iter().any(|s| stmt_mentions_var(s, name))
+        }
+        ExprKind::Forall { var, body, .. } => {
+            // The bound variable is locally scoped — don't count it.
+            if var == name { false } else { expr_mentions(body, name) }
         }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before fact-tracking analysis runs.
@@ -29421,6 +29508,9 @@ fn verify_pure_body(
             TypedExprKind::DynCoerce { value, .. } => {
                 walk_expr(value, signatures, context, diagnostics);
             }
+            TypedExprKind::Forall { body, .. } => {
+                walk_expr(body, signatures, context, diagnostics);
+            }
         }
     }
     walk(body, signatures, context, diagnostics);
@@ -29523,6 +29613,13 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
                 if let Stmt::Let { expr, .. } = s {
                     pin_var_to_version(expr, name, version);
                 }
+            }
+        }
+        ExprKind::Forall { var, body, .. } => {
+            // Don't pin inside the body if the quantified variable
+            // shadows the outer name being pinned.
+            if var != name {
+                pin_var_to_version(body, name, version);
             }
         }
         ExprKind::AnonFn { .. } => {
@@ -30286,6 +30383,9 @@ fn pretty_expr(expr: &Expr) -> String {
         ExprKind::WhileLoop { .. } => {
             "while … { … }".to_string()
         }
+        ExprKind::Forall { var, ty, body } => {
+            format!("forall {}: {}, {}", var, ty, pretty_expr(body))
+        }
         ExprKind::AnonFn { params, return_type, .. } => {
             let parts: Vec<String> = params
                 .iter()
@@ -30760,6 +30860,11 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
             args: args.iter().map(typed_to_expr).collect(),
         },
         TypedExprKind::DynCoerce { value, .. } => typed_to_expr(value).kind,
+        TypedExprKind::Forall { var, ty, body } => ExprKind::Forall {
+            var: var.clone(),
+            ty: ty.clone(),
+            body: Box::new(typed_to_expr(body)),
+        },
     };
     Expr { kind, span: t.span }
 }

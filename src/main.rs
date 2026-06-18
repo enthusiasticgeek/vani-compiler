@@ -688,6 +688,8 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
         // through tree backends; SSA vtable lowering lands
         // with Phase 3.
         TypedExprKind::DynDispatch { .. } | TypedExprKind::DynCoerce { .. } => false,
+        // Forall is proof-only; never reaches codegen.
+        TypedExprKind::Forall { .. } => false,
     }
 }
 

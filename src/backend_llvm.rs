@@ -40193,6 +40193,7 @@ fn collect_strings_in_expr<F>(
         TypedExprKind::RefMutIndex { index, .. } => {
             collect_strings_in_expr(index, msgs, idx, intern);
         }
+        TypedExprKind::Forall { .. } => {}
         TypedExprKind::Int(_)
         | TypedExprKind::Float(_)
         | TypedExprKind::Bool(_)
@@ -40818,6 +40819,9 @@ pub(crate) fn walk_expr(
         }
         TypedExprKind::DynCoerce { value, .. } => {
             walk_expr(value, declared, order, seen);
+        }
+        TypedExprKind::Forall { body, .. } => {
+            walk_expr(body, declared, order, seen);
         }
     }
 }

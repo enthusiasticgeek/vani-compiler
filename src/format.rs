@@ -1349,6 +1349,14 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
             }
             out.push('}');
         }
+        ExprKind::Forall { var, ty, body } => {
+            out.push_str("forall ");
+            out.push_str(var);
+            out.push_str(": ");
+            out.push_str(&crate::format::type_to_source(ty));
+            out.push_str(", ");
+            format_expr(body, false, out);
+        }
     }
 }
 

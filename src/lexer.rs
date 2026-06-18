@@ -113,6 +113,7 @@ pub enum TokenKind {
     Invariant,
     Assert,
     Prove,
+    Forall,
     Print,
     /// `try EXPR` — error-propagation sugar over payloaded
     /// enums. If `EXPR` evaluates to the enum's payload-less
@@ -6227,6 +6228,7 @@ impl<'a> Lexer<'a> {
             "invariant" => TokenKind::Invariant,
             "assert" => TokenKind::Assert,
             "prove" => TokenKind::Prove,
+            "forall" => TokenKind::Forall,
             // Output: `print` (legacy / C-Python heritage) /
             // `write` (matches `write(stdout, ...)` style).
             // `write` is preferred in new code; both currently

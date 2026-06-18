@@ -554,6 +554,13 @@ pub enum TypedExprKind {
         stmts: Vec<TypedStmt>,
         tail: Box<TypedExpr>,
     },
+    /// Universal quantifier — `forall var: ty, body`.
+    /// Only appears in proof positions; never lowered to codegen.
+    Forall {
+        var: String,
+        ty: crate::ast::Type,
+        body: Box<TypedExpr>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
