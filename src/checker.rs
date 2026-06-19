@@ -557,7 +557,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
     // built-in `Type::Task`, leading to confusing
     // "got Task" errors deep in the pipeline.
     const RESERVED_TYPE_NAMES: &[&str] = &[
-        "Task", "Atomic", "Mutex", "Guard", "Channel", "Condvar", "Barrier", "Deque", "HashSet", "HashMap", "BTreeSet", "BTreeMap", "UnionFind", "BinaryHeap", "BloomFilter", "Bst", "Graph", "Trie", "SkipList", "OwnedStr", "Self",
+        "Task", "Atomic", "Mutex", "Guard", "Channel", "Condvar", "Barrier", "RwLock", "ReadGuard", "WriteGuard", "Deque", "HashSet", "HashMap", "BTreeSet", "BTreeMap", "UnionFind", "BinaryHeap", "BloomFilter", "Bst", "Graph", "Trie", "SkipList", "OwnedStr", "Self",
     ];
     for decl in &program.structs {
         if RESERVED_TYPE_NAMES.contains(&decl.name.as_str()) {
@@ -18127,6 +18127,14 @@ fn check_call(
         "barrier_new" | "barrier_wait" => {
             return check_barrier_builtin(name, args, env, signatures, span, diagnostics);
         }
+        "rwlock_new"
+        | "rwlock_read"
+        | "rwlock_write"
+        | "read_guard_get"
+        | "write_guard_get"
+        | "write_guard_set" => {
+            return check_rwlock_builtin(name, args, env, signatures, span, diagnostics);
+        }
         _ => {}
     }
 
@@ -19626,6 +19634,249 @@ fn check_barrier_builtin(
             )
         }
         _ => unreachable!("dispatched only on barrier_new / barrier_wait"),
+    }
+}
+
+/// Type-check the six RwLock builtins.
+///
+///   rwlock_new(value: T) -> RwLock<T>
+///   rwlock_read(rw: &mut RwLock<T>) -> ReadGuard<T>
+///   rwlock_write(rw: &mut RwLock<T>) -> WriteGuard<T>
+///   read_guard_get(g: &ReadGuard<T>) -> T
+///   write_guard_get(g: &WriteGuard<T>) -> T
+///   write_guard_set(g: &mut WriteGuard<T>, value: T) -> T
+///
+/// `RwLock<T>` is affine, stack-by-value. Both guard types are
+/// affine handles that release the lock at scope exit.
+fn check_rwlock_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    match name {
+        "rwlock_new" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'rwlock_new' takes 1 argument (initial value), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::RwLock(Box::new(Type::I64)), span);
+            }
+            let v = check_expr(&args[0], env, signatures, diagnostics);
+            let element = v.ty().clone();
+            let ret_ty = Type::RwLock(Box::new(element));
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "rwlock_new".to_string(),
+                    name_span: span,
+                    args: vec![v.expr],
+                },
+                ret_ty,
+                None,
+                span,
+            )
+        }
+        "rwlock_read" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'rwlock_read' takes 1 argument (&mut RwLock<T>), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::ReadGuard(Box::new(Type::I64)), span);
+            }
+            let rw = check_expr(&args[0], env, signatures, diagnostics);
+            let element = match rw.ty() {
+                Type::RefMut(inner) => match inner.as_ref() {
+                    Type::RwLock(e) => (**e).clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("'rwlock_read' requires `mut ref RwLock<T>`, got {}", other),
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                        return CheckedExpr::fallback(Type::ReadGuard(Box::new(Type::I64)), span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        args[0].span,
+                        format!("'rwlock_read' requires `mut ref RwLock<T>`, got {}", other),
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                    return CheckedExpr::fallback(Type::ReadGuard(Box::new(Type::I64)), span);
+                }
+            };
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "rwlock_read".to_string(),
+                    name_span: span,
+                    args: vec![rw.expr],
+                },
+                Type::ReadGuard(Box::new(element)),
+                None,
+                span,
+            )
+        }
+        "rwlock_write" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'rwlock_write' takes 1 argument (&mut RwLock<T>), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::WriteGuard(Box::new(Type::I64)), span);
+            }
+            let rw = check_expr(&args[0], env, signatures, diagnostics);
+            let element = match rw.ty() {
+                Type::RefMut(inner) => match inner.as_ref() {
+                    Type::RwLock(e) => (**e).clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("'rwlock_write' requires `mut ref RwLock<T>`, got {}", other),
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                        return CheckedExpr::fallback(Type::WriteGuard(Box::new(Type::I64)), span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        args[0].span,
+                        format!("'rwlock_write' requires `mut ref RwLock<T>`, got {}", other),
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                    return CheckedExpr::fallback(Type::WriteGuard(Box::new(Type::I64)), span);
+                }
+            };
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "rwlock_write".to_string(),
+                    name_span: span,
+                    args: vec![rw.expr],
+                },
+                Type::WriteGuard(Box::new(element)),
+                None,
+                span,
+            )
+        }
+        "read_guard_get" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'read_guard_get' takes 1 argument (&ReadGuard<T>), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let g = check_expr(&args[0], env, signatures, diagnostics);
+            let element = match g.ty() {
+                Type::Ref(inner) => match inner.as_ref() {
+                    Type::ReadGuard(e) => (**e).clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("'read_guard_get' requires `ref ReadGuard<T>`, got {}", other),
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        args[0].span,
+                        format!("'read_guard_get' requires `ref ReadGuard<T>`, got {}", other),
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                    return CheckedExpr::fallback(Type::I64, span);
+                }
+            };
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "read_guard_get".to_string(),
+                    name_span: span,
+                    args: vec![g.expr],
+                },
+                element,
+                None,
+                span,
+            )
+        }
+        "write_guard_get" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'write_guard_get' takes 1 argument (&WriteGuard<T>), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let g = check_expr(&args[0], env, signatures, diagnostics);
+            let element = match g.ty() {
+                Type::Ref(inner) => match inner.as_ref() {
+                    Type::WriteGuard(e) => (**e).clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("'write_guard_get' requires `ref WriteGuard<T>`, got {}", other),
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        args[0].span,
+                        format!("'write_guard_get' requires `ref WriteGuard<T>`, got {}", other),
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                    return CheckedExpr::fallback(Type::I64, span);
+                }
+            };
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "write_guard_get".to_string(),
+                    name_span: span,
+                    args: vec![g.expr],
+                },
+                element,
+                None,
+                span,
+            )
+        }
+        "write_guard_set" => {
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'write_guard_set' takes 2 arguments (&mut WriteGuard<T>, value: T), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let g = check_expr(&args[0], env, signatures, diagnostics);
+            let element = match g.ty() {
+                Type::RefMut(inner) => match inner.as_ref() {
+                    Type::WriteGuard(e) => (**e).clone(),
+                    other => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("'write_guard_set' requires `mut ref WriteGuard<T>`, got {}", other),
+                        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        args[0].span,
+                        format!("'write_guard_set' requires `mut ref WriteGuard<T>`, got {}", other),
+                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                    return CheckedExpr::fallback(Type::I64, span);
+                }
+            };
+            let v = check_expr(&args[1], env, signatures, diagnostics);
+            let v = coerce_checked(v, &element, args[1].span, "write_guard_set value", diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "write_guard_set".to_string(),
+                    name_span: span,
+                    args: vec![g.expr, v.expr],
+                },
+                element,
+                None,
+                span,
+            )
+        }
+        _ => unreachable!("dispatched only on the six rwlock builtin names"),
     }
 }
 

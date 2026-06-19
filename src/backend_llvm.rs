@@ -339,8 +339,10 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         }
         Type::Channel(_, _) => 32, // ring buffer header — generous
         Type::Task => 16, // pthread_t + ctx*
-        Type::Condvar => 8, // pointer to heap-allocated cv state
+        Type::Condvar => 8,
         Type::Barrier => 24, // { i64 count, i64 n, i32 gen, pad } = 20+4 pad
+        Type::RwLock(inner) => llvm_byte_size(inner).max(8) + 8, // T + state(i32) + pad
+        Type::ReadGuard(_) | Type::WriteGuard(_) => 8, // pointer to RwLock
         Type::Box(inner) => match &**inner {
             // L2 Phase 3b: Box<dyn Iface> is the 16-byte
             // fat-pointer struct (with owning .data), not 8-byte T*.
@@ -1002,6 +1004,11 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // `{ _Atomic int64_t count; int64_t n; _Atomic int gen; }`
     // padded to 24 bytes for 8-byte alignment.
     out.push_str("%intent_barrier = type { i64, i64, i32, i32 }\n");
+    // RwLock<i64> (stack-by-value): i64 payload + i32 state
+    // (0=unlocked, N>0=N readers, -1=write-locked) + i32 pad.
+    out.push_str("%intent_rwlock_i64 = type { i64, i32, i32 }\n");
+    out.push_str("%intent_read_guard_i64 = type { %intent_rwlock_i64* }\n");
+    out.push_str("%intent_write_guard_i64 = type { %intent_rwlock_i64* }\n");
     // Deque<i64> (closure #303): { data*, front, len, cap }.
     out.push_str("%intent_deque_i64 = type { i64*, i64, i64, i64 }\n");
     // HashSet<i64> (closure #304): { keys*, occ*, len, cap }.
@@ -6010,6 +6017,213 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     result, lbl_last, lbl_spin
                 ));
                 return result;
+            }
+            // RwLock builtins. `%intent_rwlock_i64 = type { i64, i32, i32 }`:
+            //   field 0 = value (i64), field 1 = state (i32 atomic), field 2 = _pad.
+            // ReadGuard / WriteGuard: `{ %intent_rwlock_i64* }`.
+            if name == "rwlock_new" {
+                let v = emit_expr(&args[0], ctx, out);
+                let s1 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_rwlock_i64 undef, i64 {}, 0\n",
+                    s1, v
+                ));
+                let s2 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_rwlock_i64 {}, i32 0, 1\n",
+                    s2, s1
+                ));
+                let s3 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_rwlock_i64 {}, i32 0, 2\n",
+                    s3, s2
+                ));
+                return s3;
+            }
+            if name == "rwlock_read" {
+                // rw_ptr = &RwLock; spin until state >= 0, then CAS increment.
+                let rw_ptr = emit_expr(&args[0], ctx, out);
+                let state_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
+                    state_p, rw_ptr
+                ));
+                let lbl_try = ctx.fresh_label("rw_read_try");
+                let lbl_park = ctx.fresh_label("rw_read_park");
+                let lbl_done = ctx.fresh_label("rw_read_done");
+                out.push_str(&format!("  br label %{}\n", lbl_try));
+                out.push_str(&format!("{}:\n", lbl_try));
+                let s = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load atomic i32, i32* {} seq_cst, align 4\n",
+                    s, state_p
+                ));
+                let is_non_neg = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp sge i32 {}, 0\n", is_non_neg, s));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_non_neg, lbl_done, lbl_park
+                ));
+                out.push_str(&format!("{}:\n", lbl_park));
+                if host_uses_win32_threading() {
+                    let cmp_slot = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = alloca i32\n", cmp_slot));
+                    out.push_str(&format!("  store i32 {}, i32* {}\n", s, cmp_slot));
+                    let addr_i8 = ctx.fresh_tmp();
+                    let cmp_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n", addr_i8, state_p
+                    ));
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n", cmp_i8, cmp_slot
+                    ));
+                    let _wait = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i32 @WaitOnAddress(i8* {}, i8* {}, i64 4, i32 -1)\n",
+                        _wait, addr_i8, cmp_i8
+                    ));
+                } else {
+                    let _futex = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 128, i32 {}, i8* null, i8* null, i32 0)\n",
+                        _futex, sys_futex_for_host(), state_p, s
+                    ));
+                }
+                out.push_str(&format!("  br label %{}\n", lbl_try));
+                // Got a non-negative state; CAS increment.
+                out.push_str(&format!("{}:\n", lbl_done));
+                let s_for_cas = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load atomic i32, i32* {} seq_cst, align 4\n",
+                    s_for_cas, state_p
+                ));
+                let new_s = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i32 {}, 1\n", new_s, s_for_cas));
+                let _cx = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = cmpxchg i32* {}, i32 {}, i32 {} seq_cst seq_cst\n",
+                    _cx, state_p, s_for_cas, new_s
+                ));
+                let g = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_read_guard_i64 undef, %intent_rwlock_i64* {}, 0\n",
+                    g, rw_ptr
+                ));
+                return g;
+            }
+            if name == "rwlock_write" {
+                let rw_ptr = emit_expr(&args[0], ctx, out);
+                let state_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
+                    state_p, rw_ptr
+                ));
+                let lbl_try = ctx.fresh_label("rw_write_try");
+                let lbl_park = ctx.fresh_label("rw_write_park");
+                let lbl_done = ctx.fresh_label("rw_write_done");
+                out.push_str(&format!("  br label %{}\n", lbl_try));
+                out.push_str(&format!("{}:\n", lbl_try));
+                // CAS 0 → -1
+                let cx = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = cmpxchg i32* {}, i32 0, i32 -1 seq_cst seq_cst\n",
+                    cx, state_p
+                ));
+                let won = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = extractvalue {{ i32, i1 }} {}, 1\n",
+                    won, cx
+                ));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    won, lbl_done, lbl_park
+                ));
+                out.push_str(&format!("{}:\n", lbl_park));
+                let cur_s = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = extractvalue {{ i32, i1 }} {}, 0\n",
+                    cur_s, cx
+                ));
+                if host_uses_win32_threading() {
+                    let cmp_slot = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = alloca i32\n", cmp_slot));
+                    out.push_str(&format!("  store i32 {}, i32* {}\n", cur_s, cmp_slot));
+                    let addr_i8 = ctx.fresh_tmp();
+                    let cmp_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n", addr_i8, state_p
+                    ));
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n", cmp_i8, cmp_slot
+                    ));
+                    let _wait = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i32 @WaitOnAddress(i8* {}, i8* {}, i64 4, i32 -1)\n",
+                        _wait, addr_i8, cmp_i8
+                    ));
+                } else {
+                    let _futex = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 128, i32 {}, i8* null, i8* null, i32 0)\n",
+                        _futex, sys_futex_for_host(), state_p, cur_s
+                    ));
+                }
+                out.push_str(&format!("  br label %{}\n", lbl_try));
+                out.push_str(&format!("{}:\n", lbl_done));
+                let g = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_write_guard_i64 undef, %intent_rwlock_i64* {}, 0\n",
+                    g, rw_ptr
+                ));
+                return g;
+            }
+            if name == "read_guard_get" || name == "write_guard_get" {
+                let is_read = name == "read_guard_get";
+                let guard_ty = if is_read {
+                    "%intent_read_guard_i64"
+                } else {
+                    "%intent_write_guard_i64"
+                };
+                let g_ptr = emit_expr(&args[0], ctx, out);
+                let rw_pp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    rw_pp, guard_ty, guard_ty, g_ptr
+                ));
+                let rw_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
+                    rw_ptr, rw_pp
+                ));
+                let val_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 0\n",
+                    val_p, rw_ptr
+                ));
+                let val = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", val, val_p));
+                return val;
+            }
+            if name == "write_guard_set" {
+                let g_ptr = emit_expr(&args[0], ctx, out);
+                let v = emit_expr(&args[1], ctx, out);
+                let rw_pp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_write_guard_i64, %intent_write_guard_i64* {}, i32 0, i32 0\n",
+                    rw_pp, g_ptr
+                ));
+                let rw_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
+                    rw_ptr, rw_pp
+                ));
+                let val_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 0\n",
+                    val_p, rw_ptr
+                ));
+                out.push_str(&format!("  store i64 {}, i64* {}\n", v, val_p));
+                return v;
             }
             // Closure #358: i64_to_str.
             if name == "i64_to_str" {
@@ -42198,6 +42412,9 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         Type::Guard(_) => "%intent_guard_i64",
         Type::Condvar => "%intent_condvar",
         Type::Barrier => "%intent_barrier",
+        Type::RwLock(_) => "%intent_rwlock_i64",
+        Type::ReadGuard(_) => "%intent_read_guard_i64",
+        Type::WriteGuard(_) => "%intent_write_guard_i64",
         Type::Deque(_) => "%intent_deque_i64",
         Type::HashSet(_) => "%intent_hashset_i64",
         Type::HashMap(_, _) => "%intent_hashmap_i64_i64",

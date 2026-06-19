@@ -2244,6 +2244,27 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Guard(Box::new(element)));
             }
+            if name == "RwLock" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::RwLock(Box::new(element)));
+            }
+            if name == "ReadGuard" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::ReadGuard(Box::new(element)));
+            }
+            if name == "WriteGuard" {
+                self.bump();
+                self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                let element = self.parse_type()?;
+                self.expect_close_angle()?;
+                return Ok(Type::WriteGuard(Box::new(element)));
+            }
             // Single-letter or "T"-prefixed names that match
             // an in-scope type parameter resolve to
             // `Type::Param` so the checker's substitution

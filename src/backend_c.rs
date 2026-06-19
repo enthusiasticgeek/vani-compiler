@@ -236,6 +236,8 @@ pub fn emit_c(program: &TypedProgram) -> String {
     let mut channel_specs: Vec<(Type, u64)> = Vec::new();
     let mut mutex_seen = BTreeSet::<String>::new();
     let mut mutex_specs: Vec<Type> = Vec::new();
+    let mut rwlock_seen = BTreeSet::<String>::new();
+    let mut rwlock_specs: Vec<Type> = Vec::new();
     let mut tuple_seen = BTreeSet::<String>::new();
     let mut tuple_shapes: Vec<Vec<Type>> = Vec::new();
     for function in &program.functions {
@@ -246,6 +248,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
             &mut channel_specs,
         );
         collect_mutex_specs(&function.return_type, &mut mutex_seen, &mut mutex_specs);
+        collect_rwlock_specs(&function.return_type, &mut rwlock_seen, &mut rwlock_specs);
         collect_tuple_shapes(
             &function.return_type,
             &mut tuple_seen,
@@ -255,12 +258,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
             collect_vec_elements(&param.ty, &mut vec_elements, &mut element_types);
             collect_channel_specs(&param.ty, &mut channel_seen, &mut channel_specs);
             collect_mutex_specs(&param.ty, &mut mutex_seen, &mut mutex_specs);
+            collect_rwlock_specs(&param.ty, &mut rwlock_seen, &mut rwlock_specs);
             collect_tuple_shapes(&param.ty, &mut tuple_seen, &mut tuple_shapes);
         }
         for stmt in &function.body {
             collect_vec_elements_in_stmt(stmt, &mut vec_elements, &mut element_types);
             collect_channel_specs_in_stmt(stmt, &mut channel_seen, &mut channel_specs);
             collect_mutex_specs_in_stmt(stmt, &mut mutex_seen, &mut mutex_specs);
+            collect_rwlock_specs_in_stmt(stmt, &mut rwlock_seen, &mut rwlock_specs);
             collect_tuple_shapes_in_stmt(stmt, &mut tuple_seen, &mut tuple_shapes);
         }
     }
@@ -1320,7 +1325,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_str_repeat_c(&mut out);
     emit_intent_str_case_c(&mut out);
     emit_intent_i64_to_str_c(&mut out);
-    emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs, &mutex_specs);
+    emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs, &mutex_specs, &rwlock_specs);
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
@@ -6924,7 +6929,10 @@ pub(crate) fn program_uses_i64_array(program: &TypedProgram) -> bool {
             | Type::RefMut(inner)
             | Type::Atomic(inner)
             | Type::Mutex(inner)
-            | Type::Guard(inner) => ty_uses(inner),
+            | Type::Guard(inner)
+            | Type::RwLock(inner)
+            | Type::ReadGuard(inner)
+            | Type::WriteGuard(inner) => ty_uses(inner),
             Type::Channel(inner, _) => ty_uses(inner),
             Type::Tuple(es) => es.iter().any(ty_uses),
             Type::FnPtr(ps, r) => ps.iter().any(ty_uses) || ty_uses(r),
@@ -7169,14 +7177,11 @@ fn emit_concurrency_runtime_helpers(
     body: &str,
     channel_specs: &[(Type, u64)],
     mutex_specs: &[Type],
+    rwlock_specs: &[Type],
 ) {
     let needs_condvar = body.contains("intent_condvar");
     let needs_tasks = body.contains("intent_task_handle");
     if needs_tasks {
-        // Handle: pthread thread id + ctx pointer (for free
-        // at join time). Task body lowering emits an outline
-        // function per spawn site whose signature is
-        // `void* fn(void* ctx)`.
         out.push_str(
             "typedef struct { intent_thread_t thread; void* ctx; } intent_task_handle;\n\n",
         );
@@ -7184,24 +7189,26 @@ fn emit_concurrency_runtime_helpers(
     for (element, capacity) in channel_specs {
         emit_channel_bundle(element, *capacity, out);
     }
-    // Emit the shared futex/WaitOnAddress primitives once if any mutex is needed,
-    // then per-T structs + helpers for each element type used.
-    if !mutex_specs.is_empty() {
+    // Emit the shared futex/WaitOnAddress primitives once if any
+    // mutex, rwlock, condvar, or barrier is needed.
+    let needs_futex_primitives = !mutex_specs.is_empty()
+        || !rwlock_specs.is_empty()
+        || needs_condvar
+        || body.contains("intent_barrier");
+    if needs_futex_primitives {
         emit_intent_mutex_primitives_c(out);
-        for element in mutex_specs {
-            emit_mutex_bundle(element, out);
-        }
+    }
+    for element in mutex_specs {
+        emit_mutex_bundle(element, out);
+    }
+    for element in rwlock_specs {
+        emit_rwlock_bundle(element, out);
     }
     if needs_condvar {
         emit_intent_condvar_helpers_c(out);
     }
     let needs_barrier = body.contains("intent_barrier");
     if needs_barrier {
-        // Barrier uses the same futex/WaitOnAddress primitives as Mutex.
-        // Emit them if not already emitted (mutex_specs may have been empty).
-        if mutex_specs.is_empty() {
-            emit_intent_mutex_primitives_c(out);
-        }
         emit_intent_barrier_helpers_c(out);
     }
 }
@@ -7560,6 +7567,86 @@ fn emit_mutex_bundle(element: &Type, out: &mut String) {
          #endif\n\
          }}\n\n",
         c_elt = c_elt, m_ty = m_ty, g_ty = g_ty
+    ));
+}
+
+/// Emit one per-T rwlock + read_guard + write_guard bundle.
+/// State encoding: 0=unlocked, N>0=N readers, -1=write-locked.
+/// Uses the same futex/WaitOnAddress helpers as Mutex.
+fn emit_rwlock_bundle(element: &Type, out: &mut String) {
+    let rw_ty = c_rwlock_storage(element);
+    let rg_ty = c_read_guard_storage(element);
+    let wg_ty = c_write_guard_storage(element);
+    let c_elt = c_element_storage(element);
+    out.push_str(&format!(
+        "typedef struct {{ {c_elt} value; _Atomic int state; }} {rw_ty};\n\
+         typedef struct {{ {rw_ty}* rw; }} {rg_ty};\n\
+         typedef struct {{ {rw_ty}* rw; }} {wg_ty};\n\
+         static {rw_ty} {rw_ty}_new({c_elt} initial) INTENT_UNUSED;\n\
+         static {rw_ty} {rw_ty}_new({c_elt} initial) {{\n\
+         \x20 {rw_ty} r;\n\
+         \x20 r.value = initial;\n\
+         \x20 atomic_store_explicit(&r.state, 0, memory_order_seq_cst);\n\
+         \x20 return r;\n\
+         }}\n\
+         static {rg_ty} {rw_ty}_read({rw_ty}* rw) INTENT_UNUSED;\n\
+         static {rg_ty} {rw_ty}_read({rw_ty}* rw) {{\n\
+         \x20 for (;;) {{\n\
+         \x20   int s = atomic_load_explicit(&rw->state, memory_order_seq_cst);\n\
+         \x20   if (s >= 0) {{\n\
+         \x20     if (atomic_compare_exchange_weak_explicit(&rw->state, &s, s + 1,\n\
+         \x20             memory_order_seq_cst, memory_order_seq_cst)) break;\n\
+         \x20   }} else {{\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20     intent_mutex_futex_wait(&rw->state, s);\n\
+         #else\n\
+         \x20     intent_thread_yield();\n\
+         #endif\n\
+         \x20   }}\n\
+         \x20 }}\n\
+         \x20 {rg_ty} g;\n\
+         \x20 g.rw = rw;\n\
+         \x20 return g;\n\
+         }}\n\
+         static {wg_ty} {rw_ty}_write({rw_ty}* rw) INTENT_UNUSED;\n\
+         static {wg_ty} {rw_ty}_write({rw_ty}* rw) {{\n\
+         \x20 for (;;) {{\n\
+         \x20   int expected = 0;\n\
+         \x20   if (atomic_compare_exchange_weak_explicit(&rw->state, &expected, -1,\n\
+         \x20           memory_order_seq_cst, memory_order_seq_cst)) break;\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20   intent_mutex_futex_wait(&rw->state, expected);\n\
+         #else\n\
+         \x20   intent_thread_yield();\n\
+         #endif\n\
+         \x20 }}\n\
+         \x20 {wg_ty} g;\n\
+         \x20 g.rw = rw;\n\
+         \x20 return g;\n\
+         }}\n\
+         static {c_elt} {rg_ty}_get(const {rg_ty}* g) INTENT_UNUSED;\n\
+         static {c_elt} {rg_ty}_get(const {rg_ty}* g) {{ return g->rw->value; }}\n\
+         static {c_elt} {wg_ty}_get(const {wg_ty}* g) INTENT_UNUSED;\n\
+         static {c_elt} {wg_ty}_get(const {wg_ty}* g) {{ return g->rw->value; }}\n\
+         static {c_elt} {wg_ty}_set(const {wg_ty}* g, {c_elt} v) INTENT_UNUSED;\n\
+         static {c_elt} {wg_ty}_set(const {wg_ty}* g, {c_elt} v) {{ g->rw->value = v; return v; }}\n\
+         static void {rg_ty}_unlock({rg_ty}* g) INTENT_UNUSED;\n\
+         static void {rg_ty}_unlock({rg_ty}* g) {{\n\
+         \x20 int prev = atomic_fetch_sub_explicit(&g->rw->state, 1, memory_order_seq_cst);\n\
+         \x20 if (prev == 1) {{\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20   intent_mutex_futex_wake(&g->rw->state, 1);\n\
+         #endif\n\
+         \x20 }}\n\
+         }}\n\
+         static void {wg_ty}_unlock({wg_ty}* g) INTENT_UNUSED;\n\
+         static void {wg_ty}_unlock({wg_ty}* g) {{\n\
+         \x20 atomic_store_explicit(&g->rw->state, 0, memory_order_seq_cst);\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20 intent_mutex_futex_wake(&g->rw->state, 0x7fffffff);\n\
+         #endif\n\
+         }}\n\n",
+        c_elt = c_elt, rw_ty = rw_ty, rg_ty = rg_ty, wg_ty = wg_ty
     ));
 }
 
@@ -10127,6 +10214,162 @@ pub(crate) fn guard_element_from_ref_c(ty: &Type) -> Type {
     }
 }
 
+/// Per-T rwlock storage name: e.g. `intent_rwlock_i64`.
+pub(crate) fn c_rwlock_storage(element: &Type) -> String {
+    format!("intent_rwlock_{}", element_tag(element))
+}
+
+/// Per-T read_guard storage name.
+pub(crate) fn c_read_guard_storage(element: &Type) -> String {
+    format!("intent_read_guard_{}", element_tag(element))
+}
+
+/// Per-T write_guard storage name.
+pub(crate) fn c_write_guard_storage(element: &Type) -> String {
+    format!("intent_write_guard_{}", element_tag(element))
+}
+
+/// Recover the element type T from `&RwLock<T>` / `&mut RwLock<T>`.
+pub(crate) fn rwlock_element_from_ref_c(ty: &Type) -> Type {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::RwLock(elt) => *elt.clone(),
+            _ => unreachable!("rwlock ref inner must be RwLock<T>"),
+        },
+        _ => unreachable!("rwlock arg must be &RwLock<T>"),
+    }
+}
+
+/// Recover T from `&ReadGuard<T>` / `&mut ReadGuard<T>`.
+pub(crate) fn read_guard_element_from_ref_c(ty: &Type) -> Type {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::ReadGuard(elt) => *elt.clone(),
+            _ => unreachable!("read_guard ref inner must be ReadGuard<T>"),
+        },
+        _ => unreachable!("read_guard arg must be &ReadGuard<T>"),
+    }
+}
+
+/// Recover T from `&WriteGuard<T>` / `&mut WriteGuard<T>`.
+pub(crate) fn write_guard_element_from_ref_c(ty: &Type) -> Type {
+    match ty {
+        Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+            Type::WriteGuard(elt) => *elt.clone(),
+            _ => unreachable!("write_guard ref inner must be WriteGuard<T>"),
+        },
+        _ => unreachable!("write_guard arg must be &WriteGuard<T>"),
+    }
+}
+
+/// Walk `ty` and collect each unique RwLock element type into `out`.
+pub(crate) fn collect_rwlock_specs(
+    ty: &Type,
+    seen: &mut BTreeSet<String>,
+    out: &mut Vec<Type>,
+) {
+    match ty {
+        Type::RwLock(element) | Type::ReadGuard(element) | Type::WriteGuard(element) => {
+            let key = c_rwlock_storage(element);
+            if seen.insert(key) {
+                out.push((**element).clone());
+            }
+            collect_rwlock_specs(element, seen, out);
+        }
+        Type::Vec(element) | Type::Atomic(element) | Type::Channel(element, _)
+        | Type::Mutex(element) | Type::Guard(element) => {
+            collect_rwlock_specs(element, seen, out);
+        }
+        Type::Array { element, .. } => collect_rwlock_specs(element, seen, out),
+        Type::Ref(inner) | Type::RefMut(inner) => collect_rwlock_specs(inner, seen, out),
+        _ => {}
+    }
+}
+
+/// Walk a statement tree to collect rwlock element types.
+pub(crate) fn collect_rwlock_specs_in_stmt(
+    stmt: &TypedStmt,
+    seen: &mut BTreeSet<String>,
+    out: &mut Vec<Type>,
+) {
+    match stmt {
+        TypedStmt::Let { ty, expr, .. } | TypedStmt::Reassign { ty, expr, .. } => {
+            collect_rwlock_specs(ty, seen, out);
+            collect_rwlock_specs_in_expr(expr, seen, out);
+        }
+        TypedStmt::Drop { ty, .. } => collect_rwlock_specs(ty, seen, out),
+        TypedStmt::Discard { expr } => collect_rwlock_specs_in_expr(expr, seen, out),
+        TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } => collect_rwlock_specs_in_expr(expr, seen, out),
+        TypedStmt::Print { items } => {
+            for it in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = it {
+                    collect_rwlock_specs_in_expr(e, seen, out);
+                }
+            }
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            collect_rwlock_specs_in_expr(cond, seen, out);
+            for s in then_body { collect_rwlock_specs_in_stmt(s, seen, out); }
+            for s in else_body { collect_rwlock_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::While { cond, body, .. } => {
+            collect_rwlock_specs_in_expr(cond, seen, out);
+            for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => {}
+        TypedStmt::IndexAssign { index, value, base_ty, .. } => {
+            collect_rwlock_specs(base_ty, seen, out);
+            collect_rwlock_specs_in_expr(index, seen, out);
+            collect_rwlock_specs_in_expr(value, seen, out);
+        }
+        TypedStmt::FieldAssign { object, value, .. } => {
+            collect_rwlock_specs_in_expr(object, seen, out);
+            collect_rwlock_specs_in_expr(value, seen, out);
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            collect_rwlock_specs_in_expr(start, seen, out);
+            collect_rwlock_specs_in_expr(end, seen, out);
+            for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::ForIter { element_ty, collection_ty, body, .. } => {
+            collect_rwlock_specs(element_ty, seen, out);
+            collect_rwlock_specs(collection_ty, seen, out);
+            for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::TaskSpawn { body, .. } | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { collect_rwlock_specs_in_stmt(s, seen, out); }
+        }
+        TypedStmt::TaskJoin { .. } | TypedStmt::ForIterShallowFree { .. } => {}
+    }
+}
+
+pub(crate) fn collect_rwlock_specs_in_expr(
+    expr: &TypedExpr,
+    seen: &mut BTreeSet<String>,
+    out: &mut Vec<Type>,
+) {
+    collect_rwlock_specs(&expr.ty, seen, out);
+    match &expr.kind {
+        TypedExprKind::Unary { expr, .. } => collect_rwlock_specs_in_expr(expr, seen, out),
+        TypedExprKind::Binary { left, right, .. } => {
+            collect_rwlock_specs_in_expr(left, seen, out);
+            collect_rwlock_specs_in_expr(right, seen, out);
+        }
+        TypedExprKind::Call { args, .. } | TypedExprKind::ArrayLit { elements: args } => {
+            for arg in args { collect_rwlock_specs_in_expr(arg, seen, out); }
+        }
+        TypedExprKind::Cast { expr, .. } => collect_rwlock_specs_in_expr(expr, seen, out),
+        TypedExprKind::Index { array, index, .. } => {
+            collect_rwlock_specs_in_expr(array, seen, out);
+            collect_rwlock_specs_in_expr(index, seen, out);
+        }
+        TypedExprKind::Len { array, .. } => collect_rwlock_specs_in_expr(array, seen, out),
+        _ => {}
+    }
+}
+
 /// Per-(T, N) channel helper name: e.g. `_send` / `_recv` /
 /// `_new`.
 pub(crate) fn c_channel_helper(element: &Type, capacity: u64, op: &str) -> String {
@@ -12021,6 +12264,20 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 // `locked` flag.
                 out.push_str("  ");
                 out.push_str(&c_guard_storage(elt));
+                out.push_str("_unlock(&");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
+            Type::ReadGuard(elt) => {
+                out.push_str("  ");
+                out.push_str(&c_read_guard_storage(elt));
+                out.push_str("_unlock(&");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
+            Type::WriteGuard(elt) => {
+                out.push_str("  ");
+                out.push_str(&c_write_guard_storage(elt));
                 out.push_str("_unlock(&");
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
@@ -14725,6 +14982,68 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         "barrier_wait" => {
             return format!("intent_barrier_wait({})", emit_expr(&args[0]));
+        }
+        "rwlock_new" => {
+            let elt = match result_ty {
+                Type::RwLock(e) => e.as_ref().clone(),
+                _ => Type::I64,
+            };
+            return format!("{}_new({})", c_rwlock_storage(&elt), emit_expr(&args[0]));
+        }
+        "rwlock_read" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::RwLock(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_read({})", c_rwlock_storage(&elt), emit_expr(&args[0]));
+        }
+        "rwlock_write" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::RwLock(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_write({})", c_rwlock_storage(&elt), emit_expr(&args[0]));
+        }
+        "read_guard_get" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::ReadGuard(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_get({})", c_read_guard_storage(&elt), emit_expr(&args[0]));
+        }
+        "write_guard_get" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::WriteGuard(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!("{}_get({})", c_write_guard_storage(&elt), emit_expr(&args[0]));
+        }
+        "write_guard_set" => {
+            let elt = match &args[0].ty {
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::WriteGuard(e) => e.as_ref().clone(),
+                    _ => Type::I64,
+                },
+                _ => Type::I64,
+            };
+            return format!(
+                "{}_set({}, {})",
+                c_write_guard_storage(&elt),
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            );
         }
         "try_vec" => {
             // Closure #284: try_vec(n) -> Result<Vec<i64>,
@@ -18231,6 +18550,12 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // `Barrier` stores an atomic count + total + generation counter.
         // Stack-by-value; no heap allocation.
         Type::Barrier => "intent_barrier",
+        // `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` — like Mutex
+        // but with shared-reader / exclusive-writer semantics. Fall back
+        // to i64 form; per-T spelling goes through c_rwlock_storage.
+        Type::RwLock(_) => "intent_rwlock_i64",
+        Type::ReadGuard(_) => "intent_read_guard_i64",
+        Type::WriteGuard(_) => "intent_write_guard_i64",
         // `Deque<T>` is a ring buffer with heap data. v1 i64
         // only; the type spelling is fixed at the i64 form
         // since c_leaf_type can't synthesize per-T strings.
@@ -18788,7 +19113,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -18820,6 +19145,9 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Guard(_)
         | Type::Condvar
         | Type::Barrier
+        | Type::RwLock(_)
+        | Type::ReadGuard(_)
+        | Type::WriteGuard(_)
         | Type::Deque(_)
         | Type::HashSet(_)
         | Type::HashMap(_, _)

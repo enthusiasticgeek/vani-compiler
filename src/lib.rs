@@ -46645,5 +46645,43 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // RwLock<T> — C backend emits per-T structs + helpers
+    #[test]
+    fn rwlock_i64_emits_parametric_bundle() {
+        // RwLock<i64> must emit intent_rwlock_i64 struct,
+        // ReadGuard/WriteGuard typedefs, and read/write/unlock helpers.
+        let source = r#"
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(42);
+              let rg: ReadGuard<i64> = rwlock_read(mut ref rw);
+              let v: i64 = read_guard_get(ref rg);
+              let wg: WriteGuard<i64> = rwlock_write(mut ref rw);
+              let _ = write_guard_set(mut ref wg, v + 1);
+              return write_guard_get(ref wg);
+            }
+        "#;
+        let c = compile_to_c(source).expect("RwLock<i64> program must compile");
+        assert!(
+            c.contains("intent_rwlock_int64_t"),
+            "expected intent_rwlock_int64_t struct in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_read_guard_int64_t"),
+            "expected intent_read_guard_int64_t in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_write_guard_int64_t"),
+            "expected intent_write_guard_int64_t in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_rwlock_int64_t_read("),
+            "expected intent_rwlock_int64_t_read helper:\n{c}"
+        );
+        assert!(
+            c.contains("intent_rwlock_int64_t_write("),
+            "expected intent_rwlock_int64_t_write helper:\n{c}"
+        );
+    }
+
 }
 

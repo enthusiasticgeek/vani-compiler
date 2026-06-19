@@ -222,6 +222,8 @@ fn type_size(ty: &Type) -> u64 {
         Task => 16,
         Condvar => 8,
         Barrier => 24, // { i64 count, i64 n, i32 gen, pad }
+        RwLock(inner) => type_size(inner).max(8) + 8, // T + state + pad
+        ReadGuard(_) | WriteGuard(_) => 8, // pointer to RwLock
         Box(_) => 8, // L2 Phase 1: Box<T> = T* (8 bytes on x86-64)
         Atomic(inner) | Mutex(inner) | Guard(inner) => type_size(inner).max(8),
         Channel(_, _) => 32,
