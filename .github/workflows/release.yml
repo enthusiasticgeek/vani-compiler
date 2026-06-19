@@ -96,6 +96,19 @@ jobs:
       - name: Flatten artifact directory
         run: find dist/ -type f | xargs -I{} mv {} dist/ 2>/dev/null || true
 
+      - name: Resolve release notes
+        id: notes
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NOTES_FILE="RELEASE_NOTES/${TAG}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            echo "body_path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+            echo "generate=false"        >> "$GITHUB_OUTPUT"
+          else
+            echo "body_path="            >> "$GITHUB_OUTPUT"
+            echo "generate=true"         >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
@@ -103,7 +116,8 @@ jobs:
           name: vāṇी ${{ github.event.inputs.tag || github.ref_name }}
           draft: false
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.body_path }}
+          generate_release_notes: ${{ steps.notes.outputs.generate }}
           files: |
             dist/vanic-linux-x86_64.tar.gz
             dist/vanic-linux-aarch64.tar.gz
