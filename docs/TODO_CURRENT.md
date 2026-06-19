@@ -12,6 +12,8 @@ Last updated: 2026-06-18
 - [ ] **1. Publish to crates.io** — `cargo publish`. All required fields present in
   `Cargo.toml`. Gives `cargo install vanic` to Rust users. See
   [docs/decisions.md](decisions.md) for rationale.
+  **BLOCKED**: needs crates.io API token (`cargo login <TOKEN>` or `$env:CARGO_REGISTRY_TOKEN`).
+  v0.1.2 is tagged and ready; run `cargo publish` from repo root once token is available.
 
 - [x] **2. Update RELEASING.md** — Point at `0.1.2-dev`; document `RELEASE_NOTES/`
   workflow and `body_path` release step. ✅ done 2026-06-19
@@ -97,3 +99,4 @@ Last updated: 2026-06-18
 | Grammar consultant pass | External native-speaker review |
 | Windows IOCP async-TCP (`tcp_echo_epoll` etc.) | Readiness-vs-completion model mismatch (R8 in decisions.md) |
 | Arc 7 Win64 / AArch64 CI wiring | CI runner setup |
+| crates.io publish (item 1) — v0.1.2 tagged and ready | crates.io API token needed (`cargo login`) |
