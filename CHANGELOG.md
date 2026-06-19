@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.3] — 2026-06-19
+
+### Added — Installation docs
+
+- **System requirements table** in `INSTALL.md` — minimum tool versions
+  (Rust 1.75+, z3 4.8+, LLVM 14–22, gcc/clang 9+, Python 3.8+ optional).
+- **Tested OS matrix** — explicit per-row verification status across Ubuntu
+  20.04 / 22.04 / 24.04, Debian 10 / 12, Arch, Fedora, Windows 11 (GNU),
+  WSL2; macOS marked ⚠️ unverified pending hardware.
+- **Older Linux (Debian 10 Buster) subsection** — step-by-step guide to
+  install z3 4.8.17 from the GitHub pre-built binary (glibc 2.27, compatible
+  with Buster's glibc 2.28) when the apt repo only ships z3 4.4.1 (too old).
+  Includes fallback `--backend=c` note to avoid the older LLVM 7 in Buster's apt.
+
+### Changed — Docs
+
+- `INSTALL.md` test counts updated to **2421+** throughout (was 2089).
+- Windows status note updated to 2026-06-19.
+
+---
+
 ## [0.1.2] — 2026-06-19
 
 ### Added — Language / Parser
@@ -193,7 +214,7 @@ generics, async/await, and a package manager.
 
 ---
 
-## [Unreleased] — 0.1.3-dev
+## [Unreleased] — 0.1.4-dev
 
 Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
 [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.

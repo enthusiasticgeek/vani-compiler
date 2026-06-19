@@ -18,6 +18,40 @@ skip SMT entirely for fast iteration on non-proof code changes.
 
 ---
 
+## System requirements
+
+### Minimum tool versions
+
+| Tool | Minimum version | Notes |
+|---|---|---|
+| **Rust** | 1.75 (2023-11-16) | `rustup default stable` gives you this |
+| **z3** | 4.8.x | z3 4.4.x (Debian 10 apt) is too old — see [Older Linux](#older-linux-debian-10-buster) |
+| **LLVM** (`lli`, `llc`, `opt`) | 14 | Tested through LLVM 22 (Windows MSYS2); default on Ubuntu 22.04 |
+| **C compiler** (`gcc` / `clang`) | gcc 9 / clang 9 | Used for C-backend link step and `vanic build` |
+| **Python** | 3.8+ | Optional — only needed for `tools/vani_translate.py` and the MCP server |
+
+> `vanic check` needs only Rust + z3.
+> `vanic run` / `vanic build` additionally need LLVM tools (default backend) or a C compiler (`--backend=c`).
+
+### Tested OS + architecture matrix
+
+| OS | Version | Architecture | Status |
+|---|---|---|---|
+| **Ubuntu** | 20.04 LTS (Focal) | x86_64 | ✅ verified — z3 4.8.7 via apt |
+| **Ubuntu** | 22.04 LTS (Jammy) | x86_64 | ✅ verified — z3 4.8.17, LLVM 14 |
+| **Ubuntu** | 24.04 LTS (Noble) | x86_64 | ✅ verified — z3 4.13+, LLVM 18 |
+| **Debian** | 12 (Bookworm) | x86_64 | ✅ verified — z3 4.10+ via apt |
+| **Debian** | 10 (Buster) | x86_64 | ✅ verified† — z3 4.8.17 binary download required (apt z3 4.4.1 too old) |
+| **Arch / Manjaro** | rolling | x86_64 | ✅ verified — z3 + LLVM via pacman |
+| **Fedora** | 38+ | x86_64 | ✅ verified — z3 + LLVM via dnf |
+| **Windows** | 11 (23H2) | x86_64 | ✅ verified — all 2421 lib tests + e2e pass (GNU toolchain via MSYS2) |
+| **WSL2** | Ubuntu 22.04 / 24.04 | x86_64 | ✅ verified — same as Ubuntu above |
+| **macOS** | 13 Ventura+ | ARM64 / x86_64 | ⚠️ unverified — no macOS host; C/LLVM backend branches written |
+
+† Debian 10 requires a manual z3 install — see [Older Linux (Debian 10 Buster)](#older-linux-debian-10-buster) below.
+
+---
+
 ## Linux
 
 ### Debian / Ubuntu / WSL
@@ -45,6 +79,33 @@ sudo pacman -S --needed base-devel z3 llvm clang
 
 ```bash
 sudo apk add build-base z3 llvm clang
+```
+
+### Older Linux (Debian 10 Buster)
+
+Debian 10's apt repo ships z3 4.4.1, which is too old. Download the
+pre-built z3 4.8.17 binary directly from GitHub (glibc 2.27 binary
+is compatible with Buster's glibc 2.28):
+
+```bash
+sudo apt-get install -y build-essential git curl clang unzip
+
+# z3 4.8.17 — ubuntu-18.04 binary is glibc-2.27-compatible (Buster has glibc 2.28)
+curl -L https://github.com/Z3Prover/z3/releases/download/z3-4.8.17/z3-4.8.17-x64-ubuntu-18.04.zip \
+     -o /tmp/z3.zip
+unzip -q /tmp/z3.zip -d /tmp/z3_extract
+sudo cp /tmp/z3_extract/z3-4.8.17-x64-ubuntu-18.04/bin/z3 /usr/local/bin/z3
+sudo chmod +x /usr/local/bin/z3
+rm -rf /tmp/z3.zip /tmp/z3_extract
+z3 --version   # should print "Z3 version 4.8.17"
+```
+
+Then install Rust via `rustup` and build normally (see below).
+The LLVM version in Buster's apt (7.0) is older than ideal; the C
+backend (`--backend=c`) avoids any LLVM dependency entirely:
+
+```bash
+vanic run --backend=c examples/language/english/basics.vani
 ```
 
 ### Rust toolchain (any Linux distro)
@@ -103,8 +164,8 @@ See [docs/v1_limitations.md L10](docs/v1_limitations.md).
 
 ## Windows
 
-> **Status (2026-06-11)**: Native Windows builds are fully verified.
-> All **2089 lib tests** and all end-to-end tests pass on Windows 11
+> **Status (2026-06-19)**: Native Windows builds are fully verified.
+> All **2421+ lib tests** and all end-to-end tests pass on Windows 11
 > with the GNU toolchain. Key platform fixes applied: `putchar` →
 > `printf("%c",…)` shim (CRT buffer ordering), `ws2_32` linker flag
 > (MinGW Winsock2), `Sleep` declaration dedup, 64 MB main-thread
@@ -256,7 +317,7 @@ cargo build --release
 cargo test
 ```
 
-Expected output: `test result: ok. 2089 passed; 0 failed`
+Expected output: `test result: ok. 2421+ passed; 0 failed`
 
 > **Stack size**: the repo's `.cargo/config.toml` sets
 > `RUST_MIN_STACK=33554432` (32 MB) automatically for all `cargo test`
@@ -295,7 +356,7 @@ Then build vāṇी itself:
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
 cd vani-compiler
 cargo build --release   # builds target/release/vanic + target/release/intentc (legacy alias)
-cargo test              # 2089 lib tests; ~90s on a modern laptop
+cargo test              # 2421+ lib tests; ~90s on a modern laptop
 ```
 
 **Native Windows (PowerShell):**
@@ -303,7 +364,7 @@ cargo test              # 2089 lib tests; ~90s on a modern laptop
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
 cd vani-compiler
 cargo build --release
-cargo test              # 2089 passed; 0 failed
+cargo test              # 2421+ passed; 0 failed
 ```
 
 A successful build leaves `target/release/vanic` (Linux/macOS) or
@@ -456,6 +517,6 @@ file across both C and LLVM backends):
 cargo test --test run_end_to_end llvm_backend_run_produces_same_output_as_c
 ```
 
-This takes ~60 seconds and exercises ~150 examples (the 133
-English + 22 GoF design patterns + ~25 Devanagari examples) on
+This takes ~60 seconds and exercises all examples (English +
+22 GoF design patterns + Devanagari / multilingual examples) on
 both backends. A clean pass means your install is healthy.
