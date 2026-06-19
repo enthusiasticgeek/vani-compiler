@@ -5,6 +5,36 @@
 > the workaround currently in use, and a pointer to the place
 > the user-visible workaround appears.
 
+> **⚠️ Reader notice — many of these limitations have already been fixed.**
+>
+> This catalog was started at v0.1.0 and is kept as a permanent reference.
+> Entries that have been resolved carry a **✅ SHIPPED (version / date)**
+> badge in their heading. Only the items **without** a ✅ badge are still
+> open in the current release.
+>
+> **At v0.1.3 (2026-06-19): 12 of 17 entries fully resolved; 1 partially
+> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14).**
+>
+> | # | Summary | Status |
+> |---|---|---|
+> | L1 | Enum destructure-bindings of affine payloads | ✅ Resolved v0.1.0 (2026-06-07) |
+> | L2 | `Box<T>` owning heap pointer | ✅ Resolved v0.1.0 (2026-06-08) |
+> | L3 | Pattern-match scrutinee must be by value | ✅ Resolved v0.1.0 (2026-06-07) |
+> | L4 | Reference types in let/struct/Vec/return positions | ✅ Resolved v0.1.0 (2026-06-09); path-D deferred by design |
+> | L5 | `let mut x` not supported | ⬜ By design — use `mut ref` parameter |
+> | L6 | `for VAR in xs` consumes; borrow with `ref` | ⬜ By design — write `for v in ref xs` |
+> | L7 | `for VAR in ref obj.field` | ✅ Resolved v0.1.0 (2026-06-07) |
+> | L8 | C-codegen: `Vec<dyn Iface>` collision in struct fields | ✅ Resolved v0.1.0 (2026-06-07) |
+> | L9 | LLVM backend: non-ASCII identifiers | ✅ Resolved v0.1.0 (2026-06-08) |
+> | L10 | macOS runtime unverified; Windows fully verified | ⬜ macOS deferred (no host); Windows ✅ 2026-06-16 |
+> | L11 | Runtime PRINT output uses ASCII numerals in Devanagari mode | ✅ Resolved v0.1.0 (2026-06-07) |
+> | L12 | SMT can't prove across function-call boundaries | ✅ Resolved v0.1.0 |
+> | L13 | SOV reshape: `match`-as-statement stays keyword-first | ⬜ Partially resolved 2026-06-19 — `fn`/`struct`/`enum` SOV ✅; match by design |
+> | L14 | Dialect-aware errors translate prefix only | ⬜ By design for v1 |
+> | L15 | `Mutex<T>` payload limited to `i64` | ✅ Resolved v0.1.1 (2026-06-18) |
+> | L16 | `Barrier` synchronization primitive missing | ✅ Resolved v0.1.1 (2026-06-18) |
+> | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
+
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
 - [`STATUS.md`](../STATUS.md) — per-feature status banners
