@@ -48,9 +48,9 @@ Last updated: 2026-06-18
 
 ## Medium (4–8 h each)
 
-- [ ] **10. Condense `STATUS.md` / `TODO.md`** — Both are 500 KB+. Extract
-  pre-Arc-5 shipped history to `STATUS_ARCHIVE.md` / `TODO_ARCHIVE.md`. Keep main
-  files as current-state ledgers (last 3–4 releases + open items only).
+- [x] **10. Condense `STATUS.md` / `TODO.md`** — Both are 500 KB+. Extract
+  pre-Arc-8 shipped history to `STATUS_ARCHIVE.md` / `TODO_ARCHIVE.md`. Keep main
+  files as current-state ledgers. ✅ done 2026-06-19 (STATUS.md: 11741→306 lines; TODO.md: 10585→40 lines)
 
 - [ ] **11. A.2 Examples reorganization** — Verify all Devanagari examples live under
   `examples/language/{sanskrit,hindi,marathi}/`; add `// श्री।` header to each.
