@@ -27,8 +27,8 @@ cc --version
 The compiler **runs** without the LLVM tools — `vanic check` only
 needs Rust and z3. `vanic run --backend=llvm` needs `lli`; `vanic
 build` needs `llc` + `cc` (+ optional `opt`). The C backend (`run
---backend=c`) needs `cc`. (`intentc` is the legacy alias for
-`vanic`, kept for one release — see TODO.md §*CLI rename*.)
+--backend=c`) needs `cc`. (`intentc` is kept as a legacy alias
+for one release cycle; prefer `vanic`.)
 
 `VANIC_NO_VERIFY=1` (or the legacy `INTENTC_NO_VERIFY=1`) skips
 SMT entirely for fast iteration on non-proof code changes. Don't
@@ -38,7 +38,7 @@ set it in CI.
 
 ```bash
 cargo build                         # Quick build
-cargo test                          # Full suite (1928 lib + 54 e2e + 14 other, ~90s)
+cargo test                          # Full suite (~2091 lib + 54 e2e + 14 other, ~90s)
                                     # (`.cargo/config.toml` sets RUST_MIN_STACK=32MB
                                     # so parallel-for + reduction tests have room to run.)
 cargo test smt_                     # Subset matching a prefix
@@ -193,7 +193,7 @@ as ahead) include:
 
 - CFG/SSA IR refactor.
 - Parallelism (`parallel for` / reductions / atomics / channels
-  / mutexes / tasks / `Condvar`).
+  / mutexes / tasks / `Condvar` / `Barrier` / `RwLock<T>`).
 - Ownership-in-verifier (affine types, Drop, vec/owned-str heap
   tracking).
 - Payloaded enums + match (incl. mixed-payload enums).
