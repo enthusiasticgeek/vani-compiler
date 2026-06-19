@@ -75,11 +75,12 @@ area = 16
 ## Why it works that way
 
 - **`interface Name { fn ...; }`** declares an interface (Rust
-  calls these *traits*). Methods are listed with their full
-  signature — no body in v1 (no default methods).
+  calls these *traits*). Methods may have full signatures only,
+  or a **default body** — see *Default methods* below.
 - **`implement Iface for Type { fn ...; }`** provides the
-  concrete method bodies. Every interface method must be
-  implemented; partial implementations are rejected.
+  concrete method bodies. Methods with defaults can be omitted;
+  methods without defaults must be implemented. Partial
+  implementations (missing a required method) are rejected.
 - **The interface method's `self` is the concrete struct, not
   `Self`**. In v1 you write `fn area(self: Circle)` inside
   `implement Drawable for Circle`. The interface declaration
@@ -91,6 +92,68 @@ area = 16
   overhead.
 - **Dynamic dispatch** (`dyn Iface`) is a separate path —
   covered in [§5 — Dynamic dispatch](05_dyn.md).
+
+## Default methods (v0.1.1+)
+
+An interface can provide a default body for a method. Types
+that implement the interface can override it or inherit the
+default.
+
+```vani
+interface Describable {
+  fn name(self: Self) -> Str;          // required — no default
+
+  fn describe(self: Self) -> Str {     // default body
+    return "I am something.";
+  }
+}
+
+struct Dog { breed: Str }
+struct Cat {}
+
+implement Describable for Dog {
+  fn name(self: Dog) -> Str { return self.breed; }
+  // describe() is NOT overridden — Dog inherits the default
+}
+
+implement Describable for Cat {
+  fn name(self: Cat) -> Str { return "Cat"; }
+  fn describe(self: Cat) -> Str { return "I am a cat."; }  // override
+}
+
+fn main() -> i64 {
+  let d: Dog = Dog { breed: "Lab" };
+  let c: Cat = Cat {};
+  print d.describe();   // "I am something."  (default)
+  print c.describe();   // "I am a cat."       (override)
+  return 0;
+}
+```
+
+## Blanket implementations (v0.1.1+)
+
+A blanket impl lets you implement an interface for **any type
+`T` that satisfies another bound** — the `Wrapper<T>` example
+below automatically gets `Printable` for every `T` that is
+already `Printable`:
+
+```vani
+interface Printable {
+  fn print_it(self: Self) -> i64;
+}
+
+struct Wrapper<T> { inner: T }
+
+implement<T> Printable for Wrapper<T> where T is Printable {
+  fn print_it(self: Wrapper<T>) -> i64 {
+    return self.inner.print_it();
+  }
+}
+```
+
+The compiler checks that every method required by `Printable`
+is present on `T` (satisfiability check) before accepting the
+blanket impl.
 
 ## Choosing static vs dynamic dispatch
 
