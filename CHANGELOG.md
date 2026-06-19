@@ -6,6 +6,32 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.1] — 2026-06-18
+
+### Added — Language
+
+- **`Barrier`** — N-thread rendezvous primitive (`barrier_new(n)` / `barrier_wait(mut ref b) -> bool`).
+  Stack-by-value, affine. Uses a generation counter to prevent ABA races under futex/WaitOnAddress.
+  Both C and LLVM backends with inline IR lowering.
+- **`RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>`** — readers-writer lock parametric over any value
+  type T. `rwlock_read` acquires a shared read guard; `rwlock_write` acquires an exclusive write guard.
+  RAII drop releases the lock. State encoding: 0=unlocked, N>0=N concurrent readers, -1=write-locked.
+  Per-T C struct bundles + LLVM preamble types. Both backends.
+- **Parametric `Mutex<T>` / `Guard<T>`** — previously i64-only; now any element type (integers,
+  bool, struct, enum). Per-T C bundles via `collect_mutex_specs` + `emit_mutex_bundle`.
+- **Parametric `Channel<T, N>`** — struct and enum element types now accepted in addition to
+  integer widths and bool. C backend uses `c_element_storage` + `memset` zero-init; LLVM backend
+  uses `channel_slot_llvm_string` for aggregate slots. Naming is consistent across both backends.
+- **Traits phase 2** — default methods in interface declarations; blanket impls (`implement<T> Iface for Wrapper<T> where T is Iface`).
+  Satisfiability checking with bounded generics.
+
+### Added — Package manager (kosh)
+
+- Runtime download URL configurable via `config.json`; custom CA certificate file support for
+  private registries via `cafile` field.
+
+---
+
 ## [0.1.0] — 2026-06-18
 
 First public release. vāṇी compiles, verifies, and runs programs written

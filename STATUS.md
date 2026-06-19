@@ -28,7 +28,7 @@ All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 | ~~2~~ | ~~`enum` payload exhaustiveness checking~~ | — | ✅ DONE commit `3e1260c` |
 | ~~3~~ | ~~Closures (captures, map/filter/fold HOF)~~ | — | ✅ DONE (already fully implemented) |
 | ~~4~~ | ~~**Generics** (foundational)~~ | — | ✅ DONE commit `c89cfb5` — methods + iface impls on generic instantiations |
-| **0** | **Cut `v0.1.0` release** | G1+G2+G3 | Bump Cargo.toml, tag, push tag to trigger release workflow |
+| ~~0~~ | ~~Cut `v0.1.0` release~~ | G1+G2+G3 | ✅ DONE — tagged `v0.1.0`; `v0.1.1` ships items 5–8 |
 | ~~5~~ | ~~Traits/interfaces phase 2~~ | generics | ✅ DONE commit `e97ea6a` — default methods + blanket impls |
 | ~~6~~ | ~~Parametric `Mutex<T>` / `Guard<T>`~~ | generics | ✅ DONE — checker infers T from args; tree-C emits per-T bundles via `collect_mutex_specs` + `emit_mutex_bundle` |
 | ~~7~~ | ~~Parametric `Channel<T>`~~ | generics | ✅ DONE — checker allows struct/enum elements; tree-C uses `c_element_storage`+`memset`; LLVM uses `channel_slot_llvm_string` for aggregate slots |
