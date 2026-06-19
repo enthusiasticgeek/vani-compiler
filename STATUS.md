@@ -32,9 +32,7 @@ All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 | ~~5~~ | ~~Traits/interfaces phase 2~~ | generics | ✅ DONE commit `e97ea6a` — default methods + blanket impls |
 | ~~6~~ | ~~Parametric `Mutex<T>` / `Guard<T>`~~ | generics | ✅ DONE — checker infers T from args; tree-C emits per-T bundles via `collect_mutex_specs` + `emit_mutex_bundle` |
 | ~~7~~ | ~~Parametric `Channel<T>`~~ | generics | ✅ DONE — checker allows struct/enum elements; tree-C uses `c_element_storage`+`memset`; LLVM uses `channel_slot_llvm_string` for aggregate slots |
-| 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | Barrier ✅ DONE commit `01bc0b3` — `Type::Barrier`; C+LLVM backends; gen-counter wait protocol; `RwLock<T>` + `CondVar` remain |
-
-Next: item 8 continued — `CondVar` builtin or `RwLock<T>`.
+| ~~8~~ | ~~`RwLock<T>` / `Barrier` / `CondVar`~~ | generics | ✅ DONE — Barrier commit `01bc0b3`; RwLock<T>/ReadGuard/WriteGuard commit `3365c07`; CondVar was already complete |
 
 ### Completed since 2026-06-13
 
