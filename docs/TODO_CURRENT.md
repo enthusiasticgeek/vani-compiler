@@ -65,9 +65,13 @@ Last updated: 2026-06-18
   HFA + scalar≤16; platform-dispatching is_ffi_safe_struct; platform-specific error hints;
   7 new lib tests gated by cfg(target_arch/os))
 
-- [ ] **13. Finer Sanskrit / Hindi / Marathi purity gate** — Tighten the
+- [x] **13. Finer Sanskrit / Hindi / Marathi purity gate** — Tighten the
   `// vani-lang:` pragma in `lexer.rs` to distinguish the three dialects (currently
-  only English vs Devanagari at script level).
+  only English vs Devanagari at script level). ✅ done 2026-06-19
+  (gate already implemented via `spelling_supports_dialect`; updated stale doc comment
+  in `enforce_language_purity`; added 2 new dialect-rejection tests:
+  `dialect_gate_marathi_pragma_rejects_sanskrit_only_keyword` +
+  `dialect_gate_hindi_pragma_rejects_marathi_only_keyword`)
 
 ---
 

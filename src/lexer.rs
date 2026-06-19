@@ -4191,11 +4191,12 @@ pub fn set_current_print_lang_mode(mode: PrintLangMode) {
 /// "language mismatch" diagnostic so the reader doesn't have to
 /// mentally parse two structure-keyword systems at once.
 ///
-/// V1 enforces script-level purity (English vs Devanagari).
-/// Finer-grained Sanskrit / Hindi / Marathi distinction within
-/// Devanagari is deferred — the existing alias table maps some
-/// words ambiguously (e.g. `यदि` is both Sanskrit and Hindi).
-/// Grammar-consultant review is the gate for that next step.
+/// V1 enforces both script-level purity (English vs Devanagari)
+/// and finer-grained sub-dialect purity (Sanskrit / Hindi /
+/// Marathi) within Devanagari via `spelling_supports_dialect`.
+/// Every structure keyword alias maps to at least one dialect;
+/// cross-dialect use (e.g. Hindi `अगर` in a Sanskrit-pragma file)
+/// is rejected with a "keyword not in dialect" diagnostic.
 ///
 /// Type names (`i64`, `bool`, `Vec`, …) and the boolean literals
 /// (`true`/`false`) stay neutral so a Hindi file can still write

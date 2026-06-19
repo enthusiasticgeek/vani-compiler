@@ -35075,6 +35075,53 @@ função main() -> i64 {
     }
 
     #[test]
+    fn dialect_gate_marathi_pragma_rejects_sanskrit_only_keyword() {
+        // `अन्यथा` (anyathā) is tagged Sanskrit-only in
+        // spelling_supports_dialect; a Marathi-pragma file should
+        // reject it with a per-dialect diagnostic.
+        let source = r#"
+            // vani-lang: marathi
+            उद्देश्य "marathi dialect gate";
+            कार्य main() -> i64 {
+              माना x: i64 = 1;
+              जर x > 0 { x परत; } अन्यथा { 0 परत; }
+            }
+        "#;
+        let err = compile(source).expect_err(
+            "Sanskrit-only `अन्यथा` in Marathi-pragma file should be rejected"
+        );
+        assert!(
+            err.iter().any(|d| d.message.contains("vani-lang pragma declared `marathi`")
+                && d.message.contains("अन्यथा")),
+            "expected per-dialect rejection for अन्यथा, got: {:?}",
+            err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn dialect_gate_hindi_pragma_rejects_marathi_only_keyword() {
+        // `थांब` (thāmba) is tagged Marathi-only; a Hindi-pragma
+        // file should reject it.
+        let source = r#"
+            // vani-lang: hindi
+            उद्देश्य "hindi dialect gate";
+            कार्य main() -> i64 {
+              जबतक 1 > 2 { थांब; }
+              0 लौटाओ;
+            }
+        "#;
+        let err = compile(source).expect_err(
+            "Marathi-only `थांब` in Hindi-pragma file should be rejected"
+        );
+        assert!(
+            err.iter().any(|d| d.message.contains("vani-lang pragma declared `hindi`")
+                && d.message.contains("थांब")),
+            "expected per-dialect rejection for थांब, got: {:?}",
+            err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn sov_s8_no_pragma_allows_mixed_devanagari_aliases() {
         // SOV-S8: without a pragma, the per-dialect gate is off
         // (back-compat). Mixing Devanagari aliases across
