@@ -1004,6 +1004,22 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, String> {
     let args: Vec<String> = env::args().collect();
+
+    // Deprecation warning when invoked as `intentc` (legacy alias).
+    // The `intentc` [[bin]] entry will be removed at the v0.2.0
+    // release boundary. See docs/decisions.md 2026-06-06 entry.
+    if args
+        .first()
+        .and_then(|a| std::path::Path::new(a).file_stem())
+        .and_then(|s| s.to_str())
+        == Some("intentc")
+    {
+        eprintln!(
+            "warning: `intentc` is deprecated and will be removed in v0.2.0. \
+             Use `vanic` instead."
+        );
+    }
+
     if args.len() < 2 {
         return Err(HELP.to_string());
     }

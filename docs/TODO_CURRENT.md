@@ -16,9 +16,10 @@ Last updated: 2026-06-18
 - [x] **2. Update RELEASING.md** — Point at `0.1.2-dev`; document `RELEASE_NOTES/`
   workflow and `body_path` release step. ✅ done 2026-06-19
 
-- [ ] **3. Remove `intentc` legacy binary** — Delete `[[bin]] name = "intentc"` from
+- [x] **3. Remove `intentc` legacy binary** — Delete `[[bin]] name = "intentc"` from
   `Cargo.toml` at next release boundary (v0.1.x → v0.2 or when the release cycle
-  ends). Add a compiler warning to `main.rs` when invoked as `intentc`.
+  ends). Add a compiler warning to `main.rs` when invoked as `intentc`. ✅ done 2026-06-19
+  (deprecation warning added to run(); [[bin]] intentc removal deferred to v0.2.0 boundary)
 
 ---
 
