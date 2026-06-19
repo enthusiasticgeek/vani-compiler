@@ -2039,6 +2039,10 @@ impl Parser {
                 self.bump();
                 return Ok(Type::Condvar);
             }
+            if name == "Barrier" {
+                self.bump();
+                return Ok(Type::Barrier);
+            }
             if name == "Deque" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;

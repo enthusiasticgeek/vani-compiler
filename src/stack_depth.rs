@@ -221,6 +221,7 @@ fn type_size(ty: &Type) -> u64 {
         Closure(_, _) => 16, // Arc 5c: env-ptr + call-ptr
         Task => 16,
         Condvar => 8,
+        Barrier => 24, // { i64 count, i64 n, i32 gen, pad }
         Box(_) => 8, // L2 Phase 1: Box<T> = T* (8 bytes on x86-64)
         Atomic(inner) | Mutex(inner) | Guard(inner) => type_size(inner).max(8),
         Channel(_, _) => 32,

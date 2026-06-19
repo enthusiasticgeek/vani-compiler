@@ -7195,6 +7195,15 @@ fn emit_concurrency_runtime_helpers(
     if needs_condvar {
         emit_intent_condvar_helpers_c(out);
     }
+    let needs_barrier = body.contains("intent_barrier");
+    if needs_barrier {
+        // Barrier uses the same futex/WaitOnAddress primitives as Mutex.
+        // Emit them if not already emitted (mutex_specs may have been empty).
+        if mutex_specs.is_empty() {
+            emit_intent_mutex_primitives_c(out);
+        }
+        emit_intent_barrier_helpers_c(out);
+    }
 }
 
 /// Closure: condition-variable runtime helpers. The cv state
@@ -7342,6 +7351,45 @@ pub(crate) fn emit_intent_mutex_helpers_c(out: &mut String) {
              static inline intent_guard_i64 intent_mutex_i64_lock(intent_mutex_i64* m) { return intent_mutex_int64_t_lock(m); }\n\
              static inline void intent_guard_i64_unlock(intent_guard_i64* g) INTENT_UNUSED;\n\
              static inline void intent_guard_i64_unlock(intent_guard_i64* g) { intent_guard_int64_t_unlock(g); }\n\n",
+    );
+}
+
+/// Emit the `intent_barrier` struct and `barrier_new` / `barrier_wait` helpers.
+/// Uses the same futex/WaitOnAddress primitives as Mutex (must call
+/// `emit_intent_mutex_primitives_c` first). Stack-by-value, no Drop needed.
+fn emit_intent_barrier_helpers_c(out: &mut String) {
+    out.push_str(
+        "/* Barrier runtime: n-thread rendezvous. */\n\
+         typedef struct { _Atomic int64_t count; int64_t n; _Atomic int gen; } intent_barrier;\n\
+         static intent_barrier intent_barrier_new(int64_t n) INTENT_UNUSED;\n\
+         static intent_barrier intent_barrier_new(int64_t n) {\n\
+         \x20 intent_barrier b;\n\
+         \x20 atomic_store_explicit(&b.count, 0, memory_order_seq_cst);\n\
+         \x20 b.n = n;\n\
+         \x20 atomic_store_explicit(&b.gen, 0, memory_order_seq_cst);\n\
+         \x20 return b;\n\
+         }\n\
+         static bool intent_barrier_wait(intent_barrier* b) INTENT_UNUSED;\n\
+         static bool intent_barrier_wait(intent_barrier* b) {\n\
+         \x20 int g = atomic_load_explicit(&b->gen, memory_order_seq_cst);\n\
+         \x20 int64_t arrived = atomic_fetch_add_explicit(&b->count, 1, memory_order_seq_cst) + 1;\n\
+         \x20 if (arrived == b->n) {\n\
+         \x20   atomic_store_explicit(&b->count, 0, memory_order_seq_cst);\n\
+         \x20   atomic_fetch_add_explicit(&b->gen, 1, memory_order_seq_cst);\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20   intent_mutex_futex_wake(&b->gen, 0x7fffffff);\n\
+         #endif\n\
+         \x20   return true;\n\
+         \x20 }\n\
+         \x20 while (atomic_load_explicit(&b->gen, memory_order_seq_cst) == g) {\n\
+         #if defined(__linux__) || defined(_WIN32)\n\
+         \x20   intent_mutex_futex_wait(&b->gen, g);\n\
+         #else\n\
+         \x20   intent_thread_yield();\n\
+         #endif\n\
+         \x20 }\n\
+         \x20 return false;\n\
+         }\n\n",
     );
 }
 
@@ -14672,6 +14720,12 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "condvar_notify_all" => {
             return format!("intent_condvar_notify_all({})", emit_expr(&args[0]));
         }
+        "barrier_new" => {
+            return format!("intent_barrier_new({})", emit_expr(&args[0]));
+        }
+        "barrier_wait" => {
+            return format!("intent_barrier_wait({})", emit_expr(&args[0]));
+        }
         "try_vec" => {
             // Closure #284: try_vec(n) -> Result<Vec<i64>,
             // AllocError>. Emits a GCC statement-expression
@@ -18174,6 +18228,9 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // futex / WaitOnAddress seq counter under the hood. The
         // affine handle is just a pointer to that storage.
         Type::Condvar => "intent_condvar",
+        // `Barrier` stores an atomic count + total + generation counter.
+        // Stack-by-value; no heap allocation.
+        Type::Barrier => "intent_barrier",
         // `Deque<T>` is a ring buffer with heap data. v1 i64
         // only; the type spelling is fixed at the i64 form
         // since c_leaf_type can't synthesize per-T strings.
@@ -18731,7 +18788,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -18762,6 +18819,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Mutex(_)
         | Type::Guard(_)
         | Type::Condvar
+        | Type::Barrier
         | Type::Deque(_)
         | Type::HashSet(_)
         | Type::HashMap(_, _)

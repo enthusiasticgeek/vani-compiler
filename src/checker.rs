@@ -557,7 +557,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
     // built-in `Type::Task`, leading to confusing
     // "got Task" errors deep in the pipeline.
     const RESERVED_TYPE_NAMES: &[&str] = &[
-        "Task", "Atomic", "Mutex", "Guard", "Channel", "Condvar", "Deque", "HashSet", "HashMap", "BTreeSet", "BTreeMap", "UnionFind", "BinaryHeap", "BloomFilter", "Bst", "Graph", "Trie", "SkipList", "OwnedStr", "Self",
+        "Task", "Atomic", "Mutex", "Guard", "Channel", "Condvar", "Barrier", "Deque", "HashSet", "HashMap", "BTreeSet", "BTreeMap", "UnionFind", "BinaryHeap", "BloomFilter", "Bst", "Graph", "Trie", "SkipList", "OwnedStr", "Self",
     ];
     for decl in &program.structs {
         if RESERVED_TYPE_NAMES.contains(&decl.name.as_str()) {
@@ -18124,6 +18124,9 @@ fn check_call(
         | "condvar_notify_all" => {
             return check_condvar_builtin(name, args, env, signatures, span, diagnostics);
         }
+        "barrier_new" | "barrier_wait" => {
+            return check_barrier_builtin(name, args, env, signatures, span, diagnostics);
+        }
         _ => {}
     }
 
@@ -19549,6 +19552,80 @@ fn check_condvar_builtin(
             )
         }
         _ => unreachable!("dispatched only on the five condvar builtin names"),
+    }
+}
+
+/// Type-check the two barrier builtins.
+///
+///   barrier_new(n: i64) -> Barrier
+///   barrier_wait(b: &mut Barrier) -> bool
+///
+/// `Barrier` is affine, stack-by-value (no heap allocation).
+/// `barrier_new(n)` creates a barrier that blocks n threads.
+/// `barrier_wait(mut ref b)` blocks until all n threads arrive;
+/// returns `true` for the "last" thread, `false` for the others.
+fn check_barrier_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    match name {
+        "barrier_new" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'barrier_new' takes 1 argument (n: i64), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::Barrier, span);
+            }
+            let n = check_expr(&args[0], env, signatures, diagnostics);
+            let n = coerce_checked(n, &Type::I64, args[0].span, "barrier_new count", diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "barrier_new".to_string(),
+                    name_span: span,
+                    args: vec![n.expr],
+                },
+                Type::Barrier,
+                None,
+                span,
+            )
+        }
+        "barrier_wait" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'barrier_wait' takes 1 argument (&mut Barrier), got {}", args.len()),
+                ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(1, args.len())));
+                return CheckedExpr::fallback(Type::Bool, span);
+            }
+            let b = check_expr(&args[0], env, signatures, diagnostics);
+            let is_barrier_ref_mut = matches!(b.ty(), Type::RefMut(inner) if matches!(inner.as_ref(), Type::Barrier));
+            if !is_barrier_ref_mut {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "'barrier_wait' requires `mut ref Barrier`, got {}",
+                        b.ty()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                return CheckedExpr::fallback(Type::Bool, span);
+            }
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "barrier_wait".to_string(),
+                    name_span: span,
+                    args: vec![b.expr],
+                },
+                Type::Bool,
+                None,
+                span,
+            )
+        }
+        _ => unreachable!("dispatched only on barrier_new / barrier_wait"),
     }
 }
 

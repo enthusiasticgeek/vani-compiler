@@ -46613,5 +46613,37 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // Barrier — C backend emits struct + helpers
+    #[test]
+    fn barrier_new_emits_c_helpers() {
+        // barrier_new(2) must emit the intent_barrier struct typedef,
+        // intent_barrier_new helper, and intent_barrier_wait helper.
+        // The wait protocol uses the generation counter to avoid ABA races.
+        let source = r#"
+            fn main() -> i64 {
+              let b: Barrier = barrier_new(2);
+              let _: bool = barrier_wait(mut ref b);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("barrier program must compile");
+        assert!(
+            c.contains("intent_barrier"),
+            "expected intent_barrier struct in C output:\n{c}"
+        );
+        assert!(
+            c.contains("intent_barrier_new("),
+            "expected intent_barrier_new helper:\n{c}"
+        );
+        assert!(
+            c.contains("intent_barrier_wait("),
+            "expected intent_barrier_wait helper:\n{c}"
+        );
+        assert!(
+            c.contains("_Atomic int64_t count"),
+            "expected atomic count field in barrier struct:\n{c}"
+        );
+    }
+
 }
 

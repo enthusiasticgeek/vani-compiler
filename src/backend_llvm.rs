@@ -340,6 +340,7 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Channel(_, _) => 32, // ring buffer header — generous
         Type::Task => 16, // pthread_t + ctx*
         Type::Condvar => 8, // pointer to heap-allocated cv state
+        Type::Barrier => 24, // { i64 count, i64 n, i32 gen, pad } = 20+4 pad
         Type::Box(inner) => match &**inner {
             // L2 Phase 3b: Box<dyn Iface> is the 16-byte
             // fat-pointer struct (with owning .data), not 8-byte T*.
@@ -996,6 +997,11 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // i32 seq counter accessed atomically. Notify ops bump
     // seq + futex-wake; wait snapshots seq + futex-waits.
     out.push_str("%intent_condvar = type { i32 }\n");
+    // Barrier (stack-by-value): count (i64 atomic), n (i64),
+    // gen (i32 atomic), _pad (i32). Layout matches the C struct
+    // `{ _Atomic int64_t count; int64_t n; _Atomic int gen; }`
+    // padded to 24 bytes for 8-byte alignment.
+    out.push_str("%intent_barrier = type { i64, i64, i32, i32 }\n");
     // Deque<i64> (closure #303): { data*, front, len, cap }.
     out.push_str("%intent_deque_i64 = type { i64*, i64, i64, i64 }\n");
     // HashSet<i64> (closure #304): { keys*, occ*, len, cap }.
@@ -5843,6 +5849,167 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     ));
                 }
                 return "0".to_string();
+            }
+            // Barrier builtins. Stack-by-value `%intent_barrier
+            // = type { i64, i64, i32, i32 }`: count, n, gen, _pad.
+            // `barrier_new` constructs the struct; `barrier_wait`
+            // does atomic fetch_add on count, last thread resets
+            // count + bumps gen + wakes all, others spin/park on gen.
+            if name == "barrier_new" {
+                let n = emit_expr(&args[0], ctx, out);
+                let s1 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_barrier undef, i64 0, 0\n",
+                    s1
+                ));
+                let s2 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_barrier {}, i64 {}, 1\n",
+                    s2, s1, n
+                ));
+                let s3 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_barrier {}, i32 0, 2\n",
+                    s3, s2
+                ));
+                let s4 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue %intent_barrier {}, i32 0, 3\n",
+                    s4, s3
+                ));
+                return s4;
+            }
+            if name == "barrier_wait" {
+                let b_ptr = emit_expr(&args[0], ctx, out);
+                // Pointer to gen (field 2 = i32 atomic).
+                let gen_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_barrier, %intent_barrier* {}, i32 0, i32 2\n",
+                    gen_p, b_ptr
+                ));
+                // Snapshot gen before incrementing count.
+                let g = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load atomic i32, i32* {} seq_cst, align 4\n",
+                    g, gen_p
+                ));
+                // Pointer to count (field 0 = i64 atomic).
+                let count_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_barrier, %intent_barrier* {}, i32 0, i32 0\n",
+                    count_p, b_ptr
+                ));
+                // Atomic fetch_add count; arrived = old + 1.
+                let old_count = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = atomicrmw add i64* {}, i64 1 seq_cst\n",
+                    old_count, count_p
+                ));
+                let arrived = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = add i64 {}, 1\n", arrived, old_count));
+                // Pointer to n (field 1 = i64).
+                let n_p = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr %intent_barrier, %intent_barrier* {}, i32 0, i32 1\n",
+                    n_p, b_ptr
+                ));
+                let n_val = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", n_val, n_p));
+                let is_last = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = icmp eq i64 {}, {}\n",
+                    is_last, arrived, n_val
+                ));
+                let lbl_last = ctx.fresh_label("barrier_last");
+                let lbl_spin = ctx.fresh_label("barrier_spin");
+                let lbl_park = ctx.fresh_label("barrier_park");
+                let lbl_done = ctx.fresh_label("barrier_done");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    is_last, lbl_last, lbl_spin
+                ));
+                // Last thread: reset count, bump gen, wake all.
+                out.push_str(&format!("{}:\n", lbl_last));
+                out.push_str(&format!(
+                    "  store atomic i64 0, i64* {} seq_cst, align 8\n",
+                    count_p
+                ));
+                let _bump_gen = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = atomicrmw add i32* {}, i32 1 seq_cst\n",
+                    _bump_gen, gen_p
+                ));
+                if host_uses_win32_threading() {
+                    let gen_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n",
+                        gen_i8, gen_p
+                    ));
+                    out.push_str(&format!(
+                        "  call void @WakeByAddressAll(i8* {})\n",
+                        gen_i8
+                    ));
+                } else {
+                    let _wake = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 129, i32 0x7fffffff, i8* null, i8* null, i32 0)\n",
+                        _wake, sys_futex_for_host(), gen_p
+                    ));
+                }
+                out.push_str(&format!("  br label %{}\n", lbl_done));
+                // Waiting threads: spin on gen until it advances.
+                out.push_str(&format!("{}:\n", lbl_spin));
+                let gen_now = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load atomic i32, i32* {} seq_cst, align 4\n",
+                    gen_now, gen_p
+                ));
+                let gen_changed = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = icmp ne i32 {}, {}\n",
+                    gen_changed, gen_now, g
+                ));
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    gen_changed, lbl_done, lbl_park
+                ));
+                // Park until the last thread bumps gen.
+                out.push_str(&format!("{}:\n", lbl_park));
+                if host_uses_win32_threading() {
+                    let cmp_slot = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = alloca i32\n", cmp_slot));
+                    out.push_str(&format!("  store i32 {}, i32* {}\n", g, cmp_slot));
+                    let gen_i8 = ctx.fresh_tmp();
+                    let cmp_i8 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n",
+                        gen_i8, gen_p
+                    ));
+                    out.push_str(&format!(
+                        "  {} = bitcast i32* {} to i8*\n",
+                        cmp_i8, cmp_slot
+                    ));
+                    let _wait = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i32 @WaitOnAddress(i8* {}, i8* {}, i64 4, i32 -1)\n",
+                        _wait, gen_i8, cmp_i8
+                    ));
+                } else {
+                    let _futex = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 128, i32 {}, i8* null, i8* null, i32 0)\n",
+                        _futex, sys_futex_for_host(), gen_p, g
+                    ));
+                }
+                out.push_str(&format!("  br label %{}\n", lbl_spin));
+                // Done: true if last thread, false otherwise.
+                out.push_str(&format!("{}:\n", lbl_done));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = phi i1 [ true, %{} ], [ false, %{} ]\n",
+                    result, lbl_last, lbl_spin
+                ));
+                return result;
             }
             // Closure #358: i64_to_str.
             if name == "i64_to_str" {
@@ -41815,7 +41982,7 @@ fn is_scalar(ty: &Type) -> bool {
         // <ty> <v>, <ty>* …` work uniformly. The builtins
         // (channel_new, mutex_new, mutex_lock) return SSA
         // values of these struct types.
-        || matches!(ty, Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList)
+        || matches!(ty, Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList)
         // Function pointers are pointer-sized scalars. The
         // alloca holds a single value of fn-ptr type (the
         // load returns a function-pointer SSA value the
@@ -42030,6 +42197,7 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         Type::Mutex(_) => "%intent_mutex_i64",
         Type::Guard(_) => "%intent_guard_i64",
         Type::Condvar => "%intent_condvar",
+        Type::Barrier => "%intent_barrier",
         Type::Deque(_) => "%intent_deque_i64",
         Type::HashSet(_) => "%intent_hashset_i64",
         Type::HashMap(_, _) => "%intent_hashmap_i64_i64",
