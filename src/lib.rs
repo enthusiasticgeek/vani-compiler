@@ -46865,5 +46865,60 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    #[test]
+    fn sov_s6_fn_name_first_compiles() {
+        // SOV-S6 (2026-06-19): fn keyword after the signature.
+        // `add(a: i64, b: i64) -> i64 fn { … }` rewrites to the
+        // canonical `fn add(a: i64, b: i64) -> i64 { … }` before
+        // parse_function() sees it.
+        let source = r#"
+            intent "sov fn";
+            add(a: i64, b: i64) -> i64 fn {
+                return a + b;
+            }
+            fn main() -> i64 {
+                return 0;
+            }
+        "#;
+        compile(source).expect("SOV fn (name-first) compiles");
+    }
+
+    #[test]
+    fn sov_s6_struct_name_first_compiles() {
+        // SOV-S6 (2026-06-19): struct keyword after the name.
+        // `Point struct { x: i64, y: i64, }` is the SOV shape;
+        // parse_sov_struct_decl reads name, then expects `struct`.
+        let source = r#"
+            intent "sov struct";
+            Point struct {
+                x: i64,
+                y: i64,
+            }
+            fn main() -> i64 {
+                let p = Point { x: 3, y: 4 };
+                return p.x;
+            }
+        "#;
+        compile(source).expect("SOV struct (name-first) compiles");
+    }
+
+    #[test]
+    fn sov_s6_enum_name_first_compiles() {
+        // SOV-S6 (2026-06-19): enum keyword after the name.
+        // `Dir enum { North, South, }` is the SOV shape;
+        // parse_sov_enum_decl reads name, then expects `enum`.
+        let source = r#"
+            intent "sov enum";
+            Dir enum {
+                North,
+                South,
+            }
+            fn main() -> i64 {
+                return 0;
+            }
+        "#;
+        compile(source).expect("SOV enum (name-first) compiles");
+    }
+
 }
 

@@ -98,7 +98,41 @@ impl Parser {
                 }
                 continue;
             }
-            if self.check(|kind| matches!(kind, TokenKind::Intent)) {
+            // SOV-S6 (2026-06-19): top-level SOV declarations.
+            // Check before keyword-first dispatchers because the
+            // current token is Ident (name) rather than a keyword.
+            if self.looks_like_sov_fn() {
+                match self.parse_sov_fn() {
+                    Ok(f) => functions.push(f),
+                    Err(e) => { self.errors.push(e); self.sync_to_top_level(); }
+                }
+            } else if self.looks_like_sov_struct() {
+                match self.parse_sov_struct_decl() {
+                    Ok(s) => {
+                        crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+                            let fields: Vec<(String, Type)> = s.fields.iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(s.name.clone(), fields);
+                        });
+                        structs.push(s);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_to_top_level(); }
+                }
+            } else if self.looks_like_sov_enum() {
+                match self.parse_sov_enum_decl() {
+                    Ok(e) => {
+                        crate::ast::V31_ENUM_REGISTRY.with(|reg| {
+                            let variants: Vec<(String, Vec<Type>)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(e.name.clone(), variants);
+                        });
+                        enums.push(e);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_to_top_level(); }
+                }
+            } else if self.check(|kind| matches!(kind, TokenKind::Intent)) {
                 match self.parse_intent() {
                     Ok(i) => intents.push(i),
                     Err(e) => {
@@ -466,7 +500,47 @@ impl Parser {
                 continue;
             }
 
-            if self.check(|k| matches!(k, TokenKind::Struct)) {
+            // SOV-S6: SOV declarations inside module bodies.
+            if self.looks_like_sov_fn() {
+                match self.parse_sov_fn() {
+                    Ok(f) => {
+                        functions.push(f);
+                        vis.functions_pub.push(is_pub);
+                        vis.functions_kosh_only.push(is_kosh_only);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_past_brace(); }
+                }
+            } else if self.looks_like_sov_struct() {
+                match self.parse_sov_struct_decl() {
+                    Ok(s) => {
+                        crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
+                            let fields: Vec<(String, Type)> = s.fields.iter()
+                                .map(|f| (f.name.clone(), f.ty.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(s.name.clone(), fields);
+                        });
+                        structs.push(s);
+                        vis.structs_pub.push(is_pub);
+                        vis.structs_kosh_only.push(is_kosh_only);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_past_brace(); }
+                }
+            } else if self.looks_like_sov_enum() {
+                match self.parse_sov_enum_decl() {
+                    Ok(e) => {
+                        crate::ast::V31_ENUM_REGISTRY.with(|reg| {
+                            let variants: Vec<(String, Vec<Type>)> = e.variants.iter()
+                                .map(|v| (v.name.clone(), v.payload.clone()))
+                                .collect();
+                            reg.borrow_mut().insert(e.name.clone(), variants);
+                        });
+                        enums.push(e);
+                        vis.enums_pub.push(is_pub);
+                        vis.enums_kosh_only.push(is_kosh_only);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_past_brace(); }
+                }
+            } else if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
                         // Phase 3d — same registry population as
@@ -2771,6 +2845,227 @@ impl Parser {
         )
     }
 
+    /// SOV-S6 top-level detectors (2026-06-19).
+
+    /// `Name संरचना { … }` — struct keyword after the name.
+    /// Scans past optional `<T>` generics.
+    fn looks_like_sov_struct(&self) -> bool {
+        if !matches!(self.current().kind, TokenKind::Ident(_)) {
+            return false;
+        }
+        let mut i = self.pos + 1;
+        // Skip optional `< T, U, … >`
+        if matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Less)) {
+            let mut depth = 1i32;
+            i += 1;
+            while let Some(t) = self.tokens.get(i) {
+                match &t.kind {
+                    TokenKind::Less => depth += 1,
+                    TokenKind::Greater => { depth -= 1; if depth == 0 { i += 1; break; } }
+                    TokenKind::GreaterGreater => { depth -= 2; if depth <= 0 { i += 1; break; } }
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Struct))
+    }
+
+    /// `Name विकल्प/गणन { … }` — enum keyword after the name.
+    fn looks_like_sov_enum(&self) -> bool {
+        if !matches!(self.current().kind, TokenKind::Ident(_)) {
+            return false;
+        }
+        let mut i = self.pos + 1;
+        if matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Less)) {
+            let mut depth = 1i32;
+            i += 1;
+            while let Some(t) = self.tokens.get(i) {
+                match &t.kind {
+                    TokenKind::Less => depth += 1,
+                    TokenKind::Greater => { depth -= 1; if depth == 0 { i += 1; break; } }
+                    TokenKind::GreaterGreater => { depth -= 2; if depth <= 0 { i += 1; break; } }
+                    TokenKind::Eof => return false,
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+        matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Enum))
+    }
+
+    /// `[pure] name(…) [-> T] [where …] [req/ens …] fn { … }`
+    /// Detects SOV fn: `fn` at paren-depth-0 followed by `{`.
+    fn looks_like_sov_fn(&self) -> bool {
+        let start = match &self.current().kind {
+            TokenKind::Ident(_) => self.pos,
+            TokenKind::Pure => {
+                if !matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::Ident(_))) {
+                    return false;
+                }
+                self.pos
+            }
+            _ => return false,
+        };
+        let mut depth: i32 = 0;
+        let mut i = start + 1;
+        loop {
+            let Some(tok) = self.tokens.get(i) else { return false; };
+            match &tok.kind {
+                TokenKind::Fn if depth == 0 => {
+                    return matches!(
+                        self.tokens.get(i + 1).map(|t| &t.kind),
+                        Some(TokenKind::LBrace)
+                    );
+                }
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    depth -= 1;
+                    if depth < 0 { return false; }
+                }
+                TokenKind::Semicolon if depth == 0 => return false,
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Scan forward to find the `fn` token position for SOV fn rewrite.
+    fn sov_fn_keyword_pos(&self) -> usize {
+        let mut depth: i32 = 0;
+        // Start after Pure (if present) + name ident.
+        let skip = if matches!(self.current().kind, TokenKind::Pure) { 2 } else { 1 };
+        let mut i = self.pos + skip;
+        loop {
+            let tok = &self.tokens[i];
+            match &tok.kind {
+                TokenKind::Fn if depth == 0 => return i,
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth -= 1,
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    /// Parse an SOV struct declaration: `Name [<T>] संरचना { fields }`.
+    fn parse_sov_struct_decl(&mut self) -> Result<StructDecl, Diagnostic> {
+        let name_tok = self.expect_ident()?;
+        let name_span = name_tok.span;
+        let name = ident_text(name_tok);
+        let mut type_params: Vec<String> = Vec::new();
+        if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
+            loop {
+                let tp_tok = self.expect_ident()?;
+                type_params.push(ident_text(tp_tok));
+                if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() { break; }
+                if self.check(|k| matches!(k, TokenKind::Greater | TokenKind::GreaterGreater)) { break; }
+            }
+            self.expect_close_angle()?;
+        }
+        // Consume the SOV struct keyword (संरचना / struct).
+        self.expect_keyword("'struct' (SOV)", |k| matches!(k, TokenKind::Struct))?;
+        let saved_tp = self.current_type_params.clone();
+        for tp in &type_params {
+            self.current_type_params.insert(tp.clone());
+        }
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut fields = Vec::new();
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            let field_name_tok = self.expect_ident()?;
+            let field_name_span = field_name_tok.span;
+            let field_name = ident_text(field_name_tok);
+            self.expect_keyword("':'", |k| matches!(k, TokenKind::Colon))?;
+            let ty = self.parse_type()?;
+            let comma_seen = self.match_token(|k| matches!(k, TokenKind::Comma)).is_some();
+            fields.push(StructField { name: field_name, ty, span: field_name_span });
+            if !comma_seen && !self.check(|k| matches!(k, TokenKind::RBrace)) {
+                return Err(Diagnostic::new(self.current().span, "expected ',' between struct fields or '}' to close"));
+            }
+        }
+        let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        self.current_type_params = saved_tp;
+        Ok(StructDecl {
+            name,
+            name_span,
+            type_params,
+            fields,
+            span: name_span.merge(close.span),
+        })
+    }
+
+    /// Parse an SOV enum declaration: `Name [<T>] विकल्प/गणन { variants }`.
+    fn parse_sov_enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
+        let name_tok = self.expect_ident()?;
+        let name_span = name_tok.span;
+        let name = ident_text(name_tok);
+        let mut type_params: Vec<String> = Vec::new();
+        if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
+            loop {
+                let tp_tok = self.expect_ident()?;
+                type_params.push(ident_text(tp_tok));
+                if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() { break; }
+                if self.check(|k| matches!(k, TokenKind::Greater | TokenKind::GreaterGreater)) { break; }
+            }
+            self.expect_close_angle()?;
+        }
+        // Consume the SOV enum keyword (विकल्प / गणन / enum).
+        self.expect_keyword("'enum' (SOV)", |k| matches!(k, TokenKind::Enum))?;
+        let saved_tp = self.current_type_params.clone();
+        for tp in &type_params {
+            self.current_type_params.insert(tp.clone());
+        }
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut variants = Vec::new();
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            let v_tok = self.expect_ident()?;
+            let v_span = v_tok.span;
+            let v_name = ident_text(v_tok);
+            let mut payload: Vec<Type> = Vec::new();
+            if self.match_token(|k| matches!(k, TokenKind::LParen)).is_some() {
+                if !self.check(|k| matches!(k, TokenKind::RParen)) {
+                    loop {
+                        payload.push(self.parse_type()?);
+                        if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() { break; }
+                    }
+                }
+                self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+            }
+            let comma_seen = self.match_token(|k| matches!(k, TokenKind::Comma)).is_some();
+            variants.push(EnumVariant { name: v_name, name_span: v_span, payload });
+            if !comma_seen && !self.check(|k| matches!(k, TokenKind::RBrace)) {
+                return Err(Diagnostic::new(self.current().span, "expected ',' between enum variants or '}' to close"));
+            }
+        }
+        let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        self.current_type_params = saved_tp;
+        Ok(EnumDecl {
+            name,
+            name_span,
+            type_params,
+            variants,
+            span: name_span.merge(close.span),
+        })
+    }
+
+    /// Rewrite SOV fn token stream then call `parse_function`.
+    /// Input:  `[pure] name(…) [-> T] [where …] [req/ens …] fn {`
+    /// Output: `[pure] fn name(…) [-> T] [where …] [req/ens …] {`
+    fn parse_sov_fn(&mut self) -> Result<Function, Diagnostic> {
+        let fn_pos = self.sov_fn_keyword_pos();
+        let fn_tok = self.tokens.remove(fn_pos);
+        // Insert after `pure` if present, otherwise at self.pos.
+        let insert_at = if matches!(self.current().kind, TokenKind::Pure) {
+            self.pos + 1
+        } else {
+            self.pos
+        };
+        self.tokens.insert(insert_at, fn_tok);
+        self.parse_function()
+    }
+
     /// `<ident> (. <ident>)+ =` — a chain of field accesses
     /// followed by an `=`. Used to disambiguate
     /// `p.x = expr;` (field assignment) from a method call.
@@ -3649,6 +3944,81 @@ impl Parser {
         })
     }
 
+    /// Parse a match-expression body starting at `{`:
+    /// `{ pat then expr, ... }`. Consumes the `{`, all arms,
+    /// and the `}`. Called by both the keyword-first match
+    /// expression parser and the SOV-match statement handler so
+    /// arm-parsing logic lives in exactly one place.
+    fn parse_match_arms_block(&mut self) -> Result<(Vec<MatchArm>, Span), Diagnostic> {
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut arms = Vec::new();
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            let (pattern, pat_span) = if self.check(|k| matches!(k, TokenKind::True)) {
+                let tok = self.bump();
+                (Pattern::Bool(true), tok.span)
+            } else if self.check(|k| matches!(k, TokenKind::False)) {
+                let tok = self.bump();
+                (Pattern::Bool(false), tok.span)
+            } else if self.check(|k| matches!(k, TokenKind::Str(_))) {
+                let tok = self.bump();
+                let span = tok.span;
+                let text = match tok.kind { TokenKind::Str(s) => s, _ => unreachable!() };
+                (Pattern::Str(text), span)
+            } else if self.check(|k| matches!(k, TokenKind::Minus | TokenKind::Int(_) | TokenKind::Float(_))) {
+                let pat_start = self.current().span;
+                let negative = self.match_token(|k| matches!(k, TokenKind::Minus)).is_some();
+                let lit_tok = self.bump();
+                let lit_span = lit_tok.span;
+                match lit_tok.kind {
+                    TokenKind::Int(v) => {
+                        let value = if negative {
+                            v.checked_neg().ok_or_else(|| Diagnostic::new(
+                                pat_start.merge(lit_span),
+                                "integer pattern overflow when negating",
+                            ))?
+                        } else { v };
+                        (Pattern::Int(value), pat_start.merge(lit_span))
+                    }
+                    TokenKind::Float(v) => {
+                        let value = if negative { -v } else { v };
+                        (Pattern::Float(value), pat_start.merge(lit_span))
+                    }
+                    _ => return Err(Diagnostic::new(lit_span, "expected integer or float literal in match pattern")),
+                }
+            } else {
+                let first_tok = self.expect_ident()?;
+                let pat_start = first_tok.span;
+                let first_text = ident_text(first_tok);
+                if first_text == "_" {
+                    (Pattern::Wildcard, pat_start)
+                } else {
+                    self.expect_keyword("'.' (variant in match pattern)", |k| matches!(k, TokenKind::Dot))?;
+                    let variant_tok = self.expect_ident()?;
+                    let mut pat_span = pat_start.merge(variant_tok.span);
+                    let variant = ident_text(variant_tok);
+                    if self.check(|k| matches!(k, TokenKind::LParen)) {
+                        self.bump();
+                        let binding_tok = self.expect_ident()?;
+                        let binding = ident_text(binding_tok);
+                        let close = self.expect_keyword("')' (variant payload binding close)", |k| matches!(k, TokenKind::RParen))?;
+                        pat_span = pat_start.merge(close.span);
+                        (Pattern::VariantWithBinding { enum_name: first_text, variant, binding }, pat_span)
+                    } else {
+                        (Pattern::Variant { enum_name: first_text, variant }, pat_span)
+                    }
+                }
+            };
+            self.expect_keyword("'then'", |k| matches!(k, TokenKind::Then))?;
+            let body = self.parse_expr()?;
+            arms.push(MatchArm { pattern, pattern_span: pat_span, body });
+            if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
+                break;
+            }
+        }
+        let close = self.expect_keyword("'}' (match body)", |k| matches!(k, TokenKind::RBrace))?;
+        Ok((arms, close.span))
+    }
+
     /// SOV-form verb-at-end statement dispatch (closure #266).
     /// `looks_like_sov_verb_at_end` has already scanned ahead
     /// and identified which verb closes this statement; we
@@ -3734,17 +4104,17 @@ impl Parser {
                     span: start_span.merge(close.span),
                 })
             }
-            // `match` at statement position is uncommon (vāṇी
-            // match is an expression). The SOV-match shape is
-            // implicitly available through SOV-let:
-            //   `let r: i64 = scrutinee match { ... } माना;`
-            // wraps a match-expression in a SOV-let. The
-            // detector reaches here only when match is at
-            // statement position WITHOUT an enclosing let, which
-            // is unusual; report a clear diagnostic.
+            // `match` at statement position: vāṇī match is an
+            // expression, so its result must be bound. Use the
+            // SOV-let form to capture it: `let r: T = scrutinee
+            // match { ... } माना;`. Keyword-first form also
+            // requires explicit binding: `let r = match x { … };`
             TokenKind::Match => Err(Diagnostic::new(
                 verb_tok.span,
-                "SOV-match at statement position is unsupported. Match is an expression in vāṇी; wrap it in a SOV-let (`let r: T = scrutinee match { ... } माना;`) or use the keyword-first form (`match scrutinee { ... }`).".to_string(),
+                "SOV-match at statement position requires a let binding. \
+                 Use: `r: T = scrutinee match { … } माना;` \
+                 or keyword-first `let r = match scrutinee { … };`"
+                    .to_string(),
             )),
             other => Err(Diagnostic::new(
                 verb_tok.span,
@@ -4595,153 +4965,13 @@ impl Parser {
             }
             TokenKind::Match => {
                 let scrutinee = self.parse_expr()?;
-                self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
-                let mut arms = Vec::new();
-                while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
-                    // Five pattern shapes in v1:
-                    //   - `_` wildcard
-                    //   - `42` / `-1` integer literal
-                    //   - `true` / `false` bool literal
-                    //   - `"foo"` string literal
-                    //   - `EnumName.VariantName` variant
-                    // Dispatch on the first token: Minus or
-                    // Int → integer; True/False → bool; Str
-                    // → string; identifier `_` → wildcard;
-                    // any other identifier → variant.
-                    // T1.3 wildcard + integer-literal pattern.
-                    let (pattern, pat_span) = if self
-                        .check(|k| matches!(k, TokenKind::True))
-                    {
-                        let tok = self.bump();
-                        (Pattern::Bool(true), tok.span)
-                    } else if self.check(|k| matches!(k, TokenKind::False)) {
-                        let tok = self.bump();
-                        (Pattern::Bool(false), tok.span)
-                    } else if self.check(|k| matches!(k, TokenKind::Str(_))) {
-                        let tok = self.bump();
-                        let span = tok.span;
-                        let text = match tok.kind {
-                            TokenKind::Str(s) => s,
-                            _ => unreachable!(),
-                        };
-                        (Pattern::Str(text), span)
-                    } else if self
-                        .check(|k| matches!(k, TokenKind::Minus | TokenKind::Int(_) | TokenKind::Float(_)))
-                    {
-                        let pat_start = self.current().span;
-                        let mut negative = false;
-                        if self
-                            .match_token(|k| matches!(k, TokenKind::Minus))
-                            .is_some()
-                        {
-                            negative = true;
-                        }
-                        let lit_tok = self.bump();
-                        let lit_span = lit_tok.span;
-                        match lit_tok.kind {
-                            TokenKind::Int(v) => {
-                                let value = if negative {
-                                    match v.checked_neg() {
-                                        Some(neg) => neg,
-                                        None => {
-                                            return Err(Diagnostic::new(
-                                                pat_start.merge(lit_span),
-                                                "integer pattern overflow when negating",
-                                            ));
-                                        }
-                                    }
-                                } else {
-                                    v
-                                };
-                                (Pattern::Int(value), pat_start.merge(lit_span))
-                            }
-                            // Closure #278: float literal pattern.
-                            // Scrutinee must be `f32` / `f64`;
-                            // dispatch is via `==`. A wildcard arm
-                            // is required since the float space is
-                            // open. NaN scrutinees never match any
-                            // literal arm (IEEE 754).
-                            TokenKind::Float(v) => {
-                                let value = if negative { -v } else { v };
-                                (Pattern::Float(value), pat_start.merge(lit_span))
-                            }
-                            _ => {
-                                return Err(Diagnostic::new(
-                                    lit_span,
-                                    "expected integer or float literal in match pattern",
-                                ));
-                            }
-                        }
-                    } else {
-                        let first_tok = self.expect_ident()?;
-                        let pat_start = first_tok.span;
-                        let first_text = ident_text(first_tok);
-                        if first_text == "_" {
-                            (Pattern::Wildcard, pat_start)
-                        } else {
-                            self.expect_keyword(
-                                "'.' (variant access in match pattern)",
-                                |k| matches!(k, TokenKind::Dot),
-                            )?;
-                            let variant_tok = self.expect_ident()?;
-                            let mut pat_span = pat_start.merge(variant_tok.span);
-                            let variant = ident_text(variant_tok);
-                            // Optional `(binding)` after the variant
-                            // name — payloaded destructure. T1.3
-                            // phase 2b. v1 accepts the single-binding
-                            // form (`Some(x)`) only; multi-binding
-                            // tuple-style destructure is deferred.
-                            if self.check(|k| matches!(k, TokenKind::LParen)) {
-                                self.bump();
-                                let binding_tok = self.expect_ident()?;
-                                let binding = ident_text(binding_tok);
-                                let close = self.expect_keyword(
-                                    "')' (variant payload binding close)",
-                                    |k| matches!(k, TokenKind::RParen),
-                                )?;
-                                pat_span = pat_start.merge(close.span);
-                                (
-                                    Pattern::VariantWithBinding {
-                                        enum_name: first_text,
-                                        variant,
-                                        binding,
-                                    },
-                                    pat_span,
-                                )
-                            } else {
-                                (
-                                    Pattern::Variant {
-                                        enum_name: first_text,
-                                        variant,
-                                    },
-                                    pat_span,
-                                )
-                            }
-                        }
-                    };
-                    self.expect_keyword("'then'", |k| matches!(k, TokenKind::Then))?;
-                    let body = self.parse_expr()?;
-                    arms.push(MatchArm {
-                        pattern,
-                        pattern_span: pat_span,
-                        body,
-                    });
-                    // Comma between arms required; trailing
-                    // comma before `}` allowed.
-                    if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
-                        break;
-                    }
-                }
-                let close = self.expect_keyword(
-                    "'}' (match expression)",
-                    |k| matches!(k, TokenKind::RBrace),
-                )?;
+                let (arms, close_span) = self.parse_match_arms_block()?;
                 Ok(Expr {
                     kind: ExprKind::Match {
                         scrutinee: Box::new(scrutinee),
                         arms,
                     },
-                    span: token.span.merge(close.span),
+                    span: token.span.merge(close_span),
                 })
             }
             TokenKind::Ident(first_name) => {
