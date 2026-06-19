@@ -18950,11 +18950,11 @@ fn channel_element_of(ty: &Type) -> Option<Type> {
     }
 }
 
-/// Element types currently supported for `Channel<T, N>`.
-/// Integer widths `i8 .. i64` / `u8 .. u64` plus `bool`. The
-/// LLVM lowering stores bool slots as `[N x i8]` (the same
-/// shadow trick `Atomic<bool>` uses, since `[N x i1]` isn't
-/// byte-addressable). C uses `bool buf[N]` directly.
+/// Element types supported for `Channel<T, N>`.
+/// Integer widths, bool, and user-declared struct/enum types.
+/// The LLVM lowering stores bool slots as `[N x i8]` (the same
+/// shadow trick `Atomic<bool>` uses). Struct elements map to
+/// their named LLVM struct type `%Struct_<Name>`.
 fn is_supported_channel_element(ty: &Type) -> bool {
     matches!(
         ty,
@@ -18967,6 +18967,8 @@ fn is_supported_channel_element(ty: &Type) -> bool {
             | Type::U32
             | Type::U64
             | Type::Bool
+            | Type::Struct(_)
+            | Type::Enum(_)
     )
 }
 

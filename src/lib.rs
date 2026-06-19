@@ -12647,11 +12647,12 @@ fn main() -> i64 {
         );
         let llvm = crate::backend_llvm::LlvmBackend
             .emit(&compile(source).expect("LLVM compiles").ir);
-        // LLVM stores bool channels via i8 shadow — the struct
-        // name uses i8 (not i1) and the buf array is [N x i8].
+        // LLVM stores bool channels via i8 shadow: the buf array is [N x i8],
+        // but the struct name now uses the source-level element tag "bool"
+        // (consistent with the C backend) rather than the storage type "i8".
         assert!(
-            llvm.contains("%intent_channel_i8_4 = type { [4 x i8], [4 x i64], i64, i64 }"),
-            "expected i8-shadowed bool channel struct:\n{llvm}"
+            llvm.contains("%intent_channel_bool_4 = type { [4 x i8], [4 x i64], i64, i64 }"),
+            "expected i8-shadowed bool channel struct with 'bool' tag in name:\n{llvm}"
         );
         // zext of the value at send time; icmp ne i8 .., 0 at
         // recv time.
@@ -46546,6 +46547,37 @@ fn main() -> i64 { return 0; }
         assert!(
             compile_to_c(source).is_err(),
             "blanket impl with unsatisfied bound must be rejected"
+        );
+    }
+
+    // Parametric Channel<T> — struct element type
+    #[test]
+    fn channel_struct_element_emits_parametric_bundle() {
+        // Channel<Msg, 4> must emit `intent_channel_Struct_Msg_4` with
+        // `Struct_Msg buf[4]` as the element type. The zero-init uses
+        // `memset` so the channel new helper compiles for aggregate elements.
+        let source = r#"
+            struct Msg { val: i64 }
+            fn main() -> i64 {
+              let ch: Channel<Msg, 4> = channel_new();
+              let m: Msg = Msg { val: 7 };
+              let _ = channel_send(ref ch, m);
+              let r: Msg = channel_recv(ref ch);
+              return r.val;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Channel<Msg, 4> must compile");
+        assert!(
+            c.contains("intent_channel_Struct_Msg_4"),
+            "expected per-(T,N) struct name for struct-element channel:\n{c}"
+        );
+        assert!(
+            c.contains("Struct_Msg buf["),
+            "expected Struct_Msg element type in channel buf field:\n{c}"
+        );
+        assert!(
+            c.contains("memset(c.buf"),
+            "expected memset zero-init for struct-element channel:\n{c}"
         );
     }
 

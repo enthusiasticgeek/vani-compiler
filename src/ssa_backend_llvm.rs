@@ -439,7 +439,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     }
     for (element, capacity) in &chan_specs {
         let struct_ty = crate::backend_llvm::llvm_channel_struct(element, *capacity);
-        let slot = crate::backend_llvm::channel_slot_llvm(element);
+        let slot = crate::backend_llvm::channel_slot_llvm_string(element);
         // Layout matches tree-LLVM:
         //   { [N x slot] buf, [N x i64] seq, i64 head, i64 tail }
         out.push_str(&format!(
@@ -3874,7 +3874,7 @@ fn emit_instr(
                 };
                 let struct_ty =
                     crate::backend_llvm::llvm_channel_struct(&element, capacity);
-                let slot = crate::backend_llvm::channel_slot_llvm(&element);
+                let slot = crate::backend_llvm::channel_slot_llvm_string(&element);
                 let n = instr.result.0;
                 out.push_str(&format!(
                     "  %v_{} = alloca {}, align 8\n",
@@ -3947,7 +3947,7 @@ fn emit_instr(
                 let (element, capacity) = channel_inner_from_ty_llvm(&chan_ty)?;
                 let struct_ty =
                     crate::backend_llvm::llvm_channel_struct(&element, capacity);
-                let slot = crate::backend_llvm::channel_slot_llvm(&element);
+                let slot = crate::backend_llvm::channel_slot_llvm_string(&element);
                 let mask = capacity - 1;
                 let p = operand_str(chan);
                 let n = instr.result.0;
@@ -4062,7 +4062,7 @@ fn emit_instr(
                 let (element, capacity) = channel_inner_from_ty_llvm(&chan_ty)?;
                 let struct_ty =
                     crate::backend_llvm::llvm_channel_struct(&element, capacity);
-                let slot = crate::backend_llvm::channel_slot_llvm(&element);
+                let slot = crate::backend_llvm::channel_slot_llvm_string(&element);
                 let mask = capacity - 1;
                 let p = operand_str(chan);
                 let n = instr.result.0;

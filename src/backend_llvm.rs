@@ -110,21 +110,29 @@ impl Backend for LlvmBackend {
 /// mentions the actual backing type rather than `i1` — the
 /// runtime slot ops match it.
 pub(crate) fn llvm_channel_struct(element: &Type, capacity: u64) -> String {
+    // Use element_tag (C backend naming) for the identifier so the
+    // channel struct name is a valid LLVM identifier even for struct
+    // element types (e.g. `%intent_channel_Struct_Point_4`).
     format!(
         "%intent_channel_{}_{}",
-        channel_slot_llvm(element),
+        crate::backend_c::element_tag(element),
         capacity
     )
 }
 
 /// LLVM storage type for one slot of a `Channel<T, N>` buf
-/// array. Identical to `llvm_type(element)` for integer
-/// widths; for `bool`, returns `"i8"` (the slot is an i8
-/// shadow because `[N x i1]` storage isn't byte-addressable).
-pub(crate) fn channel_slot_llvm(element: &Type) -> &'static str {
+/// array. For integer widths: the LLVM integer type. For `bool`:
+/// `"i8"` (the slot is an i8 shadow because `[N x i1]` isn't
+/// byte-addressable). For struct/aggregate types: the named LLVM
+/// struct type spelling via `llvm_type_string`.
+pub(crate) fn channel_slot_llvm_string(element: &Type) -> String {
     match element {
-        Type::Bool => "i8",
-        _ => llvm_type(element),
+        Type::Bool => "i8".to_string(),
+        // Aggregate types (Struct, Tuple, etc.) use llvm_type_string.
+        Type::Struct(_) | Type::Enum(_) | Type::Tuple(_) | Type::Vec(_) => {
+            llvm_type_string(element)
+        }
+        _ => llvm_type(element).to_string(),
     }
 }
 
@@ -967,7 +975,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
                 "{} = type {{ [{} x {}], [{} x i64], i64, i64 }}\n",
                 struct_name,
                 capacity,
-                channel_slot_llvm(element),
+                channel_slot_llvm_string(element),
                 capacity,
             ));
         }
@@ -5033,9 +5041,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     _ => unreachable!("channel_new must return Channel<T, N>"),
                 };
                 let struct_ty = llvm_channel_struct(&element, capacity);
-                // Slot storage uses `channel_slot_llvm`, not
-                // `llvm_type`, so bool slots become i8.
-                let elem_ty = channel_slot_llvm(&element);
+                // Slot storage uses `channel_slot_llvm_string`, not
+                // `llvm_type`, so bool/struct slots get the right type.
+                let elem_ty = channel_slot_llvm_string(&element);
                 // seq is initialized to [i64 0, i64 1, ..., N-1]
                 // so slot i is ready for round i. Materialize
                 // the constant array literal at codegen time.
@@ -5080,7 +5088,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     _ => unreachable!("channel_send arg must be &Channel<T, N>"),
                 };
                 let struct_ty = llvm_channel_struct(&element, capacity);
-                let elem_ty = channel_slot_llvm(&element);
+                let elem_ty = channel_slot_llvm_string(&element);
                 let mask = capacity - 1;
                 let p = emit_expr(&args[0], ctx, out);
                 let v_in = emit_expr(&args[1], ctx, out);
@@ -5175,10 +5183,10 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     _ => unreachable!("channel_recv arg must be &Channel<T, N>"),
                 };
                 let struct_ty = llvm_channel_struct(&element, capacity);
-                // Slot storage uses `channel_slot_llvm` so
+                // Slot storage uses `channel_slot_llvm_string` so
                 // bool slots are i8 — the load below sees i8
                 // and we trunc back to i1 before returning.
-                let elem_ty = channel_slot_llvm(&element);
+                let elem_ty = channel_slot_llvm_string(&element);
                 let mask = capacity - 1;
                 let p = emit_expr(&args[0], ctx, out);
                 let head_p = ctx.fresh_tmp();

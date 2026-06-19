@@ -31,7 +31,7 @@ All v1 limitations (L1–L12) closed. All 62 dialects shipped.
 | **0** | **Cut `v0.1.0` release** | G1+G2+G3 | Bump Cargo.toml, tag, push tag to trigger release workflow |
 | ~~5~~ | ~~Traits/interfaces phase 2~~ | generics | ✅ DONE commit `e97ea6a` — default methods + blanket impls |
 | ~~6~~ | ~~Parametric `Mutex<T>` / `Guard<T>`~~ | generics | ✅ DONE — checker infers T from args; tree-C emits per-T bundles via `collect_mutex_specs` + `emit_mutex_bundle` |
-| 7 | Parametric `Channel<T>` | generics | |
+| ~~7~~ | ~~Parametric `Channel<T>`~~ | generics | ✅ DONE — checker allows struct/enum elements; tree-C uses `c_element_storage`+`memset`; LLVM uses `channel_slot_llvm_string` for aggregate slots |
 | 8 | `RwLock<T>` / `Barrier` / `CondVar` | generics | |
 
 Next: item 7 (parametric Channel<T>).

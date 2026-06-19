@@ -7095,7 +7095,7 @@ fn emit_channel_bundle(element: &Type, capacity: u64, out: &mut String) {
     let struct_name_upper = struct_name.to_uppercase();
     let cap_macro = format!("{}_CAP", struct_name_upper);
     let mask_expr = format!("({} - 1)", cap_macro);
-    let elem_c = c_leaf_type(element);
+    let elem_c = c_element_storage(element);
     let new_fn = c_channel_helper(element, capacity, "new");
     let send_fn = c_channel_helper(element, capacity, "send");
     let recv_fn = c_channel_helper(element, capacity, "recv");
@@ -7147,7 +7147,7 @@ fn emit_channel_bundle(element: &Type, capacity: u64, out: &mut String) {
          static {struct_name} {new}(void) INTENT_UNUSED;\n\
          static {struct_name} {new}(void) {{\n\
          \x20 {struct_name} c;\n\
-         \x20 for (int i = 0; i < {cap}; i++) c.buf[i] = ({elem})0;\n\
+         \x20 memset(c.buf, 0, sizeof(c.buf));\n\
          \x20 for (int i = 0; i < {cap}; i++) atomic_store_explicit(&c.seq[i], (int64_t)i, memory_order_seq_cst);\n\
          \x20 atomic_store_explicit(&c.head, 0, memory_order_seq_cst);\n\
          \x20 atomic_store_explicit(&c.tail, 0, memory_order_seq_cst);\n\
@@ -7461,7 +7461,7 @@ fn _emit_intent_mutex_helpers_with_i64_structs(out: &mut String) {
 fn emit_mutex_bundle(element: &Type, out: &mut String) {
     let m_ty = c_mutex_storage(element);
     let g_ty = c_guard_storage(element);
-    let c_elt = c_leaf_type(element);
+    let c_elt = c_element_storage(element);
     out.push_str(&format!(
         "typedef struct {{ {c_elt} value; _Atomic int locked; }} {m_ty};\n\
          typedef struct {{ {m_ty}* m; }} {g_ty};\n\
