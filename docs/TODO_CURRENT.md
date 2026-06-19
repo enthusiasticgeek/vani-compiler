@@ -82,8 +82,11 @@ Last updated: 2026-06-18
 - [ ] **14. Homebrew formula** — `homebrew-vanic` tap repo. **Gate**: wait until
   macOS is empirically verified on a Darwin host.
 
-- [ ] **15. B.1 Cross-language `.vani` translator CLI** — `tools/vani_translate.py`
-  already has `ALIASES`; build a proper round-trip CLI (~4–6 h).
+- [x] **15. B.1 Cross-language `.vani` translator CLI** — `tools/vani_translate.py`
+  already has `ALIASES`; build a proper round-trip CLI (~4–6 h). ✅ done 2026-06-19
+  (auto-detect source lang from pragma; --verify round-trip flag; --list-keywords markdown
+  table; --batch directory mode; --inplace with .bak backup; UTF-8 stdout fix for Windows;
+  tested: 166/166 english→marathi batch, verify english↔hindi↔english, english↔sanskrit↔english)
 
 - [ ] **16. C.x SOV completion (mechanical parser side)** — Verb-at-end shapes for
   `let` / `fn` / `if` / `while` / `match` / `struct` / `enum` (~10–15 h). Grammar
