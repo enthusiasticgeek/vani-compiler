@@ -35191,6 +35191,37 @@ função main() -> i64 {
     }
 
     #[test]
+    fn devanagari_sov_s7_type_alias_prakaar() {
+        // SOV-S7: `प्रकार` is the Devanagari alias for the `type`
+        // keyword (type alias declaration). Verify the lexer routes
+        // it to TokenKind::Type so the parser sees a valid alias.
+        let source = r#"
+            प्रकार अंक = i64;
+            fn main() -> i64 {
+              let x: अंक = 42;
+              return x;
+            }
+        "#;
+        compile(source).expect("Devanagari प्रकार (type alias) compiles");
+    }
+
+    #[test]
+    fn devanagari_sov_s7_extern_baahya() {
+        // SOV-S7: `बाह्य` is the Devanagari alias for `extern`.
+        // The lexer must map it to TokenKind::Extern so the parser
+        // accepts an FFI prototype.
+        let source = r#"
+            बाह्य "C" fn atoi(x: Str) -> i32;
+
+            fn main() -> i64 {
+              let a: i32 = atoi("7");
+              return a as i64;
+            }
+        "#;
+        compile(source).expect("Devanagari बाह्य (extern) compiles");
+    }
+
+    #[test]
     fn sov_verb_at_end_english_form_still_works() {
         // Regression guard: the English `return X;` / `print X;`
         // / `assert X;` / `prove X;` forms still parse after
