@@ -24,25 +24,25 @@ Last updated: 2026-06-18
 
 ## Short (2–4 h each)
 
-- [ ] **4. Add 4 missing Devanagari aliases to lexer** — `extern` / `type` / `intent`
+- [x] **4. Add 4 missing Devanagari aliases to lexer** — `extern` / `type` / `intent`
   / `invariant` are shown in the README table but may not be wired in `lexer.rs`.
-  Verify + add if missing; add lib tests.
+  Verify + add if missing; add lib tests. ✅ done 2026-06-19 (all 4 already wired; added tests for प्रकार + बाह्य)
 
-- [ ] **5. Groom `docs/v1_limitations.md`** — Mark limitations resolved since
+- [x] **5. Groom `docs/v1_limitations.md`** — Mark limitations resolved since
   2026-06-09 ✅; add entries for parametric `Mutex<T>` (no longer i64-only),
-  `Barrier`, `RwLock<T>/ReadGuard/WriteGuard`.
+  `Barrier`, `RwLock<T>/ReadGuard/WriteGuard`. ✅ done 2026-06-19 (L15/L16/L17)
 
-- [ ] **6. Tutorial: Barrier primer** — `tutorials/src/advanced/02b_barrier_primer.md`.
-  Same format as `02a_parallelism_primer.md`. Add to `SUMMARY.md`.
+- [x] **6. Tutorial: Barrier primer** — `tutorials/src/advanced/02b_barrier_primer.md`.
+  Same format as `02a_parallelism_primer.md`. Add to `SUMMARY.md`. ✅ done 2026-06-19
 
-- [ ] **7. Tutorial: RwLock primer** — `tutorials/src/advanced/02c_rwlock_primer.md`.
-  Add to `SUMMARY.md`.
+- [x] **7. Tutorial: RwLock primer** — `tutorials/src/advanced/02c_rwlock_primer.md`.
+  Add to `SUMMARY.md`. ✅ done 2026-06-19
 
-- [ ] **8. Tutorial: default methods + blanket impls primer** —
-  `tutorials/src/intermediate/04d_default_methods_primer.md`. Add to `SUMMARY.md`.
+- [x] **8. Tutorial: default methods + blanket impls primer** —
+  `tutorials/src/intermediate/04d_default_methods_primer.md`. Add to `SUMMARY.md`. ✅ done 2026-06-19
 
-- [ ] **9. Update `tutorials/src/SUMMARY.md`** — Add the three new primer entries
-  above to the book index.
+- [x] **9. Update `tutorials/src/SUMMARY.md`** — Add the three new primer entries
+  above to the book index. ✅ done 2026-06-19
 
 ---
 

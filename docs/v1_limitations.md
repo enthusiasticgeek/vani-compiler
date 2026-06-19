@@ -650,6 +650,74 @@ Tracked in [`docs/grammar_review_queue.md`](grammar_review_queue.md).
 
 ---
 
+## Concurrency limitations
+
+### L15 — `Mutex<T>` payload limited to `i64` ✅ SHIPPED v0.1.1 (2026-06-18)
+
+**Status**: Resolved. `Mutex<T>` is now parametric over any element type.
+
+Previously `mutex_new` / `mutex_lock` / `guard_get` / `guard_set` only
+accepted `i64` payloads. As of v0.1.1, `T` can be any type: scalars,
+`bool`, structs, enums, `Vec<T>`, `OwnedStr`.
+
+```vani
+struct Config { limit: i64, debug: bool }
+let cfg: Mutex<Config> = mutex_new(Config { limit: 100, debug: false });
+{
+  let g: Guard<Config> = mutex_lock(ref cfg);
+  let c: Config = guard_get(ref g);
+  print "limit =", c.limit;
+}
+```
+
+`Atomic<T>` payload remains i64-width only (i8..i64, u8..u64, bool).
+
+### L16 — `Barrier` synchronization primitive missing ✅ SHIPPED v0.1.1 (2026-06-18)
+
+**Status**: Resolved. `barrier_new(n)` / `barrier_wait(mut ref b)` shipped
+on all backends (Linux, Windows, macOS).
+
+A Barrier makes all N threads wait at a checkpoint until every thread
+has arrived. Uses a generation counter to prevent ABA races — safe to
+reuse in a loop. `barrier_wait` returns `true` for exactly the last
+thread to arrive.
+
+```vani
+let b: Barrier = barrier_new(3);
+let t1: Task<i64> = task stage_one(1, mut ref b);
+let t2: Task<i64> = task stage_one(2, mut ref b);
+let _ = stage_one(3, mut ref b);  // main thread is the third
+let _ = join t1;
+let _ = join t2;
+```
+
+### L17 — `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` missing ✅ SHIPPED v0.1.1 (2026-06-18)
+
+**Status**: Resolved. `rwlock_new` / `rwlock_read` / `rwlock_write` /
+`read_guard_get` / `write_guard_set` shipped on all backends.
+State encoding: `0` = unlocked, `N > 0` = N concurrent readers, `-1` =
+write-locked. Both guard types are affine; their Drop triggers the
+appropriate unlock automatically (RAII). Parametric over any element
+type `T`.
+
+```vani
+let rw: RwLock<i64> = rwlock_new(0);
+
+let r: ReadGuard<i64> = rwlock_read(ref rw);
+let v: i64 = read_guard_get(ref r);
+// ReadGuard drops here — read lock released
+
+let w: WriteGuard<i64> = rwlock_write(mut ref rw);
+let _ = write_guard_set(mut ref w, v + 1);
+// WriteGuard drops here — write lock released
+```
+
+**Channel<T, N>** also became parametric over any element type in v0.1.1
+(previously scalar-only). No L-number assigned because it was documented
+as a missing feature in STATUS.md rather than a listed limitation here.
+
+---
+
 ## Adding to this catalog
 
 When you hit a new v1 deviation:
