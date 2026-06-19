@@ -10,7 +10,39 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
-## 📋 NEXT SESSION HANDOFF — 2026-06-18
+## 📋 NEXT SESSION HANDOFF — 2026-06-19
+
+**State**: `v0.1.2` tagged + published. `0.1.3-dev` active. All TODO_CURRENT
+items within our control are done. Remaining open work is in the Blocked table.
+
+### Shipped this session (2026-06-19) — v0.1.2
+
+| Item | What shipped |
+|------|-------------|
+| SOV fn / struct / enum | `Name(…) fn { … }` / `Name struct { … }` / `Name enum { … }` top-level shapes. Token-rewrite + `parse_function` reuse. 3 new lib tests. |
+| Win64 / AArch64 ABI | `is_ffi_safe_struct_win64` (size ∈ {1,2,4,8}) + `is_ffi_safe_struct_aarch64` (HFA + scalar≤16). Platform-dispatch + hints. 7 new lib tests. |
+| Dialect purity docs | `enforce_language_purity` doc-comment corrected. 2 new dialect-rejection tests. |
+| Devanagari aliases | `बाह्य`/`प्रकार`/`उद्देश्य`/`अपरिवर्तनीय` verified wired; 2 new tests. |
+| `intentc` deprecation | Startup deprecation warning; `[[bin]]` removal deferred to v0.2.0. |
+| Tutorials | Barrier primer, RwLock primer, default-methods primer. All added to SUMMARY. |
+| Examples reorg | 14 Sanskrit + 12 Hindi + 12 Marathi under `examples/language/`; `// श्री।` headers. |
+| `tools/vani_translate.py` v2 | Auto-detect, `--verify`, `--list-keywords`, `--batch`, `--inplace`. Tested 166/166 batch. |
+| `parse_match_arms_block` | Refactored arm parsing out of keyword-first match; SOV match → clear error. |
+| v1_limitations.md | L13 updated (SOV fn/struct/enum resolved); L15/L16/L17 marked shipped. |
+| STATUS / TODO condensed | Pre-Arc-8 history archived to `*_ARCHIVE.md` files. |
+| CHANGELOG | v0.1.2 entry added. |
+| crates.io | `v0.1.2` tagged; publish blocked on API token (see Blocked table). |
+
+### Key numbers (2026-06-19)
+- **Lib tests**: 2421+ passing
+- **E2e tests**: all pass (Linux + Windows)
+- **Elaboration coverage**: 597/597 (100%)
+- **Dialects**: 62 across 26 scripts
+- **Cargo.toml version**: `0.1.3-dev`
+
+---
+
+## 📋 PREV SESSION HANDOFF — 2026-06-18
 
 **State**: All 0.1.0 gate items (G1/G2/G3) satisfied. Ready to tag `v0.1.0`.
 `forall` quantifiers shipped (commit `13b93cd`).

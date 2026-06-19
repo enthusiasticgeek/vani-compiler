@@ -6,6 +6,60 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.1.2] — 2026-06-19
+
+### Added — Language / Parser
+
+- **SOV fn / struct / enum declarations** — name-first top-level shapes now supported
+  (`add(a, b) -> i64 fn { … }`, `Point struct { … }`, `Dir enum { … }`).
+  Parser rewrites token stream to canonical order; all downstream passes are unchanged.
+  Wired in top-level and module-body dispatchers with `parse_match_arms_block` refactor.
+- **Devanagari aliases for `extern` / `type` / `intent` / `invariant`** verified and
+  tested: `बाह्य` / `प्रकार` / `उद्देश्य` / `अपरिवर्तनीय`.
+- **`intentc` deprecation warning** — startup prints a migration notice toward `vanic`.
+
+### Added — Platform ABI
+
+- **Win64 struct-return classifier** — `is_ffi_safe_struct_win64`: size ∈ {1, 2, 4, 8}
+  bytes only; platform-specific rejection hint.
+- **AArch64 struct classifier** — `is_ffi_safe_struct_aarch64`: HFA (1–4 identical
+  f32/f64 fields) OR all-scalar ≤ 16 bytes.
+- `is_ffi_safe_struct` dispatches per target at compile time (SysV / Win64 / AArch64).
+
+### Added — Dialect purity
+
+- Sub-dialect gate (`spelling_supports_dialect`) verified across all 45 Devanagari
+  structure-keyword aliases; stale doc comment in `enforce_language_purity` corrected.
+- 2 new dialect-rejection tests: Marathi-pragma rejects Sanskrit-only `अन्यथा`; Hindi-pragma
+  rejects Marathi-only `थांब`.
+
+### Added — Tutorials
+
+- `tutorials/src/advanced/02b_barrier_primer.md` — Barrier intuition, API, worked 3-thread example.
+- `tutorials/src/advanced/02c_rwlock_primer.md` — RwLock state encoding, RAII guards, writer-starvation caveat.
+- `tutorials/src/intermediate/04d_default_methods_primer.md` — default methods and blanket impls.
+- All three added to `tutorials/src/SUMMARY.md`.
+
+### Added — Tooling
+
+- **`tools/vani_translate.py` v2** — auto-detect source language from pragma; `--verify`
+  round-trip flag; `--list-keywords` markdown table; `--batch` directory mode;
+  `--inplace` with `.bak` backup; UTF-8 stdout fix for Windows.
+
+### Changed — Docs / Examples
+
+- All Devanagari examples organised under `examples/language/{sanskrit,hindi,marathi}/`
+  (14 Sanskrit, 12 Hindi, 12 Marathi); each carries a `// श्री।` header.
+- `STATUS.md` / `TODO.md` condensed; pre-Arc-8 history moved to `*_ARCHIVE.md` files.
+- `docs/v1_limitations.md`: L13 updated (SOV fn/struct/enum now supported; match-as-stmt
+  stays keyword-first). L15/L16/L17 marked resolved.
+
+### Distribution
+
+- `v0.1.2` tagged and published to crates.io (`cargo install vanic`).
+
+---
+
 ## [0.1.1] — 2026-06-18
 
 ### Added — Language
@@ -139,7 +193,7 @@ generics, async/await, and a package manager.
 
 ---
 
-## [Unreleased]
+## [Unreleased] — 0.1.3-dev
 
-Next planned release: `0.1.1` — patch fixes post-0.1.0, `forall` nice-to-haves,
-Kosh `cafile` for private registries. See [RELEASING.md](RELEASING.md).
+Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
+[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.

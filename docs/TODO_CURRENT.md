@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 ---
 

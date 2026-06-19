@@ -611,22 +611,34 @@ the actionable hint suggesting one be added:
 
 ## Language-surface limitations
 
-### L13 — SOV reshape only for some constructs
+### L13 — SOV reshape: `match`-as-statement stays keyword-first ✅ Partially resolved 2026-06-19
 
-vāṇी's SOV (Subject–Object–Verb) parser hooks cover 8 statement
-shapes (`let` / `return` / `print` / `assert` / `prove` /
-range-`for` / `if`/`else` / `while`). The remaining 4 — `fn`
-declarations, `struct` / `enum` declarations, `match`-as-stmt —
-stay keyword-first.
+vāṇी's SOV (Subject–Object–Verb) parser covers:
+- 8 statement verb-at-end shapes: `let` / `return` / `print` / `assert` / `prove` / range-`for` / `if`/`else` / `while`
+- **3 top-level declaration shapes (new in item 16, 2026-06-19)**: `fn` (name-first), `struct` (name-first), `enum` (name-first)
 
-**Why**: Indo-Aryan grammar reads those constructs naturally
-keyword-first (`यदि...तर्हि`, `मेल x { ... }`); forcing verb-
-at-end would feel forced rather than natural.
+The one remaining keyword-first-only construct is **`match`-as-statement**. `match` is expression-only in vāṇी; there is no `;`-terminated match statement in either keyword-first or SOV form.
 
-**Workaround**: use the keyword-first form for those four
-constructs. SOV-S2/S4/S5/S6 are documented as "declined as
-design" in
-[TODO.md §*Why some constructs stay keyword-first*](../TODO.md).
+**Why**: `match x { … }` is already natural in SOV files — the scrutinee `x` comes before the verb-like `match` keyword. Forcing a terminal verb (`x match { … } ;`) would be awkward and is "declined as design" for v1.
+
+**Workaround**: use SOV-let to bind a match result:
+```vani
+r: i64 = x match { 0 then 0, _ then 1 } माना;
+```
+or use the keyword-first form: `let r = match x { … };`
+
+**SOV fn/struct/enum surface (item 16, 2026-06-19)**:
+```vani
+// SOV fn — verb after the signature:
+add(a: i64, b: i64) -> i64 fn { return a + b; }
+
+// SOV struct — keyword after the name:
+Point struct { x: i64, y: i64, }
+
+// SOV enum — keyword after the name:
+Dir enum { North, South, }
+```
+The parser rewrites the token stream to canonical keyword-first order before dispatching to the existing parse functions, so downstream passes are unaware of the surface form.
 
 ### L14 — Dialect-aware errors translate prefix only
 
