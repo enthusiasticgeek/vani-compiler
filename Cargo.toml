@@ -1,9 +1,13 @@
 [package]
 name = "vani"
-version = "0.1.2-dev"
+version = "0.1.2"
 edition = "2021"
 description = "VANI (वाणी) — Verbose Alternative Natural Interface: a verifiable language designed to read like speech, not punctuation."
 license = "MIT"
+repository = "https://github.com/enthusiasticgeek/vani-compiler"
+readme = "README.md"
+keywords = ["compiler", "language", "devanagari", "verification", "sanskrit"]
+categories = ["compilers", "development-tools"]
 # `vanic` is the primary CLI as of 2026-06-06 (renamed from
 # `intentc`, which stays as a legacy alias for one release cycle).
 # `intent-lsp` is a sibling binary invoked by editors. Naming the

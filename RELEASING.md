@@ -16,8 +16,8 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes, diagnostic improvements, performance, docs |
 | `-dev`  | Unreleased development build — no stability promise |
 
-**Current version: `0.1.2-dev`** (Cargo.toml).  
-`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config).
+**Current version: `0.1.3-dev`** (Cargo.toml, post-release bump).  
+`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish).
 
 ---
 
@@ -52,8 +52,10 @@ Once G1–G3 land and the test suite is green on all platforms, bump
 
 ### `0.1.x` — Patch series
 
-- `0.1.2-dev` (current): diagnostics improvements, new example programs,
-  additional dialect keyword tables, doc fixes.
+- `0.1.2` ✅ shipped 2026-06-19: Win64/AArch64 ABI classifiers, dialect purity docs,
+  `intentc` deprecation warning, new tutorials (Barrier, RwLock, default methods),
+  examples reorganisation, first crates.io publish.
+- `0.1.3-dev` (current): active development.
 
 ### `0.2.0` — Package manager + cross-platform I/O
 
@@ -113,3 +115,5 @@ Criteria (not time-boxed):
 | 2026-06-18 | Bumped to `0.1.2-dev` | Active development continues post v0.1.1. |
 | 2026-06-18 | Added `RELEASE_NOTES/` infrastructure | Per-release hand-written notes in `RELEASE_NOTES/<tag>.md`; release workflow uses `body_path` when present, auto-generates otherwise. |
 | 2026-06-18 | crates.io publish as next distribution step | `cargo install vanic` for Rust users. Homebrew tap deferred until macOS empirically verified. See docs/decisions.md. |
+| 2026-06-19 | Tagged `v0.1.2` | Win64/AArch64 ABI, dialect purity, tutorials, first crates.io publish. |
+| 2026-06-19 | Bumped to `0.1.3-dev` | Active development continues post v0.1.2. |
