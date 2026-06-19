@@ -1,6 +1,12 @@
 # Next-session design notes: liveness optimization + L4 (B)
 
-**Status (updated 2026-06-09)**:
+> **Archive (2026-06-18):** All items in this document are fully
+> shipped. Retained as a reference for the implementation
+> decisions made. See [STATUS.md](../STATUS.md) for the full
+> commit ledger and [TODO.md](../TODO.md) for the current open
+> queue.
+
+**Status (updated 2026-06-09 — ALL DONE):**
   - Item 1 — liveness optimization → ✅ SHIPPED (commit `2a693fb`)
   - Item 2 — L4 (B) Phase 1 → ✅ SHIPPED (commit `229852b`).
   - Item 2 — L4 (B) Phase 3 + scope-escape analyzer → ✅ SHIPPED

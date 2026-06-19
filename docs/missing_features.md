@@ -213,9 +213,9 @@ treat the name as the return type.
 
 ### `async fn` with generic return types
 
-**Shipped** (Arc 8 v3.1 Phase 4c-broad — `async fn
-identity<T>(...) -> T`). One blocker remaining: see
-[ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md).
+**Fully shipped** (Arc 8 v3.1 Phase 4c-broad — `async fn
+identity<T>(...) -> T` compiles and runs end-to-end on both
+backends). See [ARC8_V3_PLAN.md](../ARC8_V3_PLAN.md).
 
 ### `Stream<T>` (async iterator)
 
@@ -546,7 +546,7 @@ checking these as the compiler evolves.
 | `Result<Box<T>, E>` | Same — enum-payload restriction. | Same workarounds. |
 | `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | The tuple's non-Copy restriction propagates through Vec. | Wrap the tuple in a named struct (the struct can be a Vec element). |
 | `HashMap<K, V>` with non-scalar V | `hashmap_insert` v1 supports scalar V only (i64-shaped). | Use `Vec<KvPair>` (sorted) + linear or binary search; or wrap the V in an i64 index into a side `Vec<V>`. |
-| `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | v1 Mutex/Atomic payload is i64-shaped only. | Channel-transfer ownership between threads; or hold the Vec in main and pass refs after acquiring an external `Mutex<i64>` flag. |
+| `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | `Mutex<T>` is now parametric over any T (v0.1.1) — `Mutex<Vec<i64>>` works. `Atomic<T>` payload is still i64-width–shaped only. | For Atomic, use a `Mutex<Vec<T>>` instead; or channel-transfer ownership. |
 | Closure capturing non-Copy binding | Closures + tasks reject affine captures (rejected with `closure_captures_affine` elaboration). | Pre-extract scalar fields from the affine value, or pass it as a closure-fn argument rather than capturing. |
 | `box(X { ... } as dyn Iface)` inline | **Was a compiler panic; fixed 2026-06-09.** Now works on both backends. | Pinned by a lib regression test; previously the workaround was `let v = X { ... }; box(v as dyn Iface);` — the let-bind form was always safe. |
 | `enum Outer { Wrap(Inner) }` where Inner is also an enum | **Was a rejection ("payload must be assignable to Inner, got Inner"); fixed 2026-06-09.** | Pinned by `nested_enum_payload_accepts_enum_construction`; the parser-stamped `Type::Struct(Inner)` is now resolved to `Type::Enum(Inner)` for enum variant payloads (the resolve pass missed them before). |

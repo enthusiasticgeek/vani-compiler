@@ -315,8 +315,8 @@ semantic model **borrowed from Rust** and a code-generator that
   (`reduce x with +`, `*`, `&&`, `||`, `&` / `|` / `^`, `min`, `max`).
 - `task <name> { … }` / `join <name>;` with real pthread (Linux)
   and CreateThread (Windows) backing. `Atomic<T>` for shared
-  counters, `Mutex<T>` + `Guard<T>` for critical sections,
-  `Channel<T, N>` for queues.
+  counters, `Mutex<T>` + `Guard<T>` for critical sections (parametric over any element type T since v0.1.1),
+  `Channel<T, N>` for queues (struct/enum element types since v0.1.1).
 - `Condvar` — `condvar_new` / `condvar_wait(ref cv, mut ref g) /
   condvar_wait_timeout / notify_one / notify_all`. Pairs with
   `Mutex` + `Guard` for "wait until predicate" patterns. ✅
@@ -324,6 +324,16 @@ semantic model **borrowed from Rust** and a code-generator that
   helpers (futex/WaitOnAddress/spin-yield); tree-LLVM uses
   inline IR; SSA-LLVM falls back to tree-LLVM. See
   [examples/condvar.vani](examples/condvar.vani).
+- `Barrier` — N-thread rendezvous (`barrier_new(n)` /
+  `barrier_wait(mut ref b) -> bool`). Stack-by-value, affine.
+  Generation counter prevents ABA races. Last thread to arrive
+  returns `true`. Both C and LLVM backends.
+- `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` — readers-writer
+  lock parametric over any element type T. `rwlock_read` acquires
+  a shared guard; `rwlock_write` acquires an exclusive guard. RAII
+  Drop releases the lock. State: 0=unlocked, N>0=N readers, -1=write-locked.
+  Both C and LLVM backends. Blanket impl + default methods in
+  interfaces also ship in v0.1.1 (Traits phase 2).
 
 **Namespaces + modules:**
 - `module foo { … }` (inline + nested + deep `a::b::c::Item` paths).
@@ -502,10 +512,19 @@ below.
 - **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258.
 - **Arc 9 a/b/e — Kosh package manager MVP — SHIPPED 2026-06-17**: `vani.toml` manifest with `[package].version` and `[deps]` version constraints; `vani.lock` writer; `vanic vendor`; live sparse registry at **[enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/)**; `vanic add <name>[@constraint]` (fetches from registry → `vendor/` → updates manifest + lockfile); `vanic publish` (builds tarball, creates GitHub Release, appends NDJSON index entry); publish gate via `governance.allowed_publishers` in `config.json` (governance transfers without a compiler change). See [docs/kosh_design.md](docs/kosh_design.md).
 
-**Test ledger at 2026-06-11: 2089 lib green** —
+**v0.1.1 — concurrency + generics sweep (2026-06-18):**
+- **Traits phase 2** — default methods in interface declarations; blanket impls (`implement<T> Iface for Wrapper<T> where T is Iface`); satisfiability checking with bounded generics.
+- **Parametric `Mutex<T>` / `Guard<T>`** — previously i64-only; now any element type (integers, bool, struct, enum). Per-T C struct bundles synthesized by `collect_mutex_specs`.
+- **Parametric `Channel<T, N>`** — struct and enum element types now accepted in addition to integer widths and bool. C backend uses `memset` zero-init for aggregate slots.
+- **`Barrier`** — N-thread rendezvous primitive (`barrier_new(n)` / `barrier_wait(mut ref b) -> bool`). Stack-by-value, affine. Generation counter prevents ABA races under futex/WaitOnAddress. Both backends.
+- **`RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>`** — readers-writer lock parametric over any value type T. RAII drop releases the lock. State encoding: 0=unlocked, N>0=N concurrent readers, -1=write-locked. Per-T C struct bundles. Both backends.
+- **Kosh**: runtime download URL + custom CA cert file configurable via `config.json`.
+
+**Test ledger at 2026-06-18: ~2091 lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-11 — **Windows full e2e parity** (all lib +
+Latest ship 2026-06-18 — **v0.1.1: Barrier + RwLock<T> + parametric Mutex/Channel + Traits phase 2**.
+Previous notable ship 2026-06-11 — **Windows full e2e parity** (all lib +
 e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
 deferred). Previous notable ship 2026-06-09 — **L4 (C) closure:
 lifetime elision**.
@@ -1093,7 +1112,8 @@ Supported today (800 lib + 47 e2e tests passing):
 - `INTENTC_NO_VERIFY=1` opt-out for fast dev iteration.
 
 ### Affine ownership
-- Arrays, `Vec`, `OwnedStr`, `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`
+- Arrays, `Vec`, `OwnedStr`, `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`,
+  `Barrier`, `RwLock`, `ReadGuard`, `WriteGuard`
   are affine — moved on use, dropped at end of scope.
 - Use-after-move is a compile error with related-span notes pointing at the
   prior move site.

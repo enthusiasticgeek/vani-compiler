@@ -1232,37 +1232,34 @@ Total: ~113-148h, 16-25 sessions
 
 ---
 
-## Recommended first session
+## Status summary — ALL PHASES COMPLETE (2026-06-18)
 
-**Phase 0 — Foundation.** Smallest, lowest-risk, unblocks
-everything else.
+All Arc 8 phases are done. This section is kept as a historical
+note for the recommended execution order that was followed.
 
-Specific tasks for the next session (≤8h):
-1. Add a `host_is_linux()` helper alongside
-   `host_uses_win32_threading()` and use it to gate the
-   `emit_intent_epoll_helpers_c` / `_llvm` +
-   `emit_intent_tcp_helpers_c` / `_llvm` +
-   `emit_intent_sleep_ms_helper_c` / `_llvm` emits. Emit
-   a `#error` directive (C backend) /
-   `; ERROR: Linux-only` comment (LLVM backend) + a
-   diagnostic message when non-Linux.
-2. Add `intent_event_loop_run<T>(task: T) -> T` builtin
-   (Phase 0 scope A0.2). Signature stub + checker +
-   both-backend codegen + lib test.
-3. Add `sleep_ms_async(ms: i64) -> i64` + `sleep_ms_finish(fd) -> i64`
-   builtins (Phase 0 scope A0.3). Use `timerfd_create` +
-   `timerfd_settime` (Linux-only for now).
-4. Add `examples/timer_async.vani` — composes
-   `sleep_ms_async` + `epoll_wait_one` + `sleep_ms_finish`
-   for a cooperative timer. Parity-green.
-5. Add `examples/tcp_echo_event_loop.vani` — rewrites
-   `tcp_echo_state_machine.vani`'s hand-rolled
-   `drive_task` loop into a `intent_event_loop_run(et)`
-   call. Identical stdout.
-6. Update STATUS.md / TODO.md / ARCS.md / memory ledgers
-   marking Phase 0 ✅ complete.
+**Phases 0–4c-broad**: v3.1 compiler sugar — linear core,
+control flow (all sub-phases), affine integration, advanced
+features (nested async, multi-task, generic async fns). All
+acceptance examples cross-backend parity-green.
 
-**Expected delta:** 1817 → ~1830 lib + 54 → 56 parity green.
+**Phase 5**: macOS kqueue + EVFILT_TIMER + `__error()` errno
+shim — C backend via `#ifdef __APPLE__`, LLVM IR via
+host-conditional inline IR. macOS empirical verification
+deferred (no host access); hot spots documented in Phase 5
+section above.
 
-After Phase 0 ships, the next session picks up Phase 1
-(linear core) cold via the spec in this doc.
+**Phase 6**: Windows IOCP + winsock2 + WSAStartup + `Sleep`.
+**Fully verified 2026-06-11** on Windows 11 GNU toolchain:
+all 2089 lib tests + all e2e tests pass. IOCP async-TCP tests
+(`tcp_echo_epoll`, `echo_loop`, `async_showcase`) remain
+skipped pending overlapped-I/O wiring.
+
+**Remaining Arc 8 work (open):**
+- macOS empirical verification on a Darwin host (see Phase 5
+  hot spots above).
+- IOCP async-TCP wiring for `tcp_echo_epoll` / `async_showcase`
+  on Windows (Phase 6 IOCP completions vs. readiness model).
+- `generic async fn` ABI quirk documentation (Phase 4c-broad
+  note: T=i64 specialized fns use field-return ABI from the
+  template's non-i64 path — different from a hand-written
+  non-generic Task<i64>; acceptable for v1).

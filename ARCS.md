@@ -1,32 +1,31 @@
 # Multi-Session Arc Plan (Arcs 1–10)
 
-> **Status (2026-06-06 end-of-day):** Arcs 1–6 ✅ COMPLETE.
+> **Status (2026-06-18):** Arcs 1–9 ✅ COMPLETE.
 > Arc 7 SysV ✅ COMPLETE; Win64 / AArch64 gated on cross-
-> platform CI. Arc 8 **FULLY COMPLETE through v3.1 Phase
-> 4c-broad** + **Phase 5 (macOS) + Phase 6 (Windows) C-backend
-> + LLVM IR** all shipped this session (commits `4feb5fc` →
-> `d139691`). Generic async fns (`async fn identity<T>(...) -> T`)
-> compile + run end-to-end on Linux via both backends. macOS +
-> Windows code paths in place; **VERIFICATION DEFERRED** for both
-> (no host access at landing). Arc 9 c/d ✅ COMPLETE; a/b/e/f
-> deferred pending registry choice. Arc 10 **PARTIALLY SHIPPED**
-> (Devanagari aliases for 41 of 45 keywords + SOV for range-for
-> + 4 verb-at-end statements; see TODO §*Sanskrit-derived SOV
-> completion* for the rest — the user's PRIMARY language target).
-> Safety-standard alignment ✅ COMPLETE; seven `intentc` audit
-> CLIs all on `main`. See [STATUS.md](STATUS.md) for per-commit
-> ledger.
+> platform CI. Arc 8 **FULLY COMPLETE** — v3.1 Phases 0–4c-broad
+> + Phase 5 (macOS kqueue) + Phase 6 (Windows IOCP) all shipped.
+> **Windows fully verified 2026-06-11** (2089 lib + all e2e tests
+> pass on Windows 11 GNU toolchain). macOS verification deferred
+> (no host). Arc 9 a/b/c/d/e ✅ COMPLETE — Kosh package manager
+> MVP shipped 2026-06-17 (manifest, lockfile, vendor, add, publish,
+> search, update, registry governance). Arc 10 **PARTIALLY SHIPPED**
+> (62 dialects across 26 scripts; SOV for range-for + 4 verb-at-end
+> statements; full SOV coverage still queued). A.1 CLI rename
+> ✅ COMPLETE — `vanic` is the default binary. v0.1.1 shipped
+> 2026-06-18: Barrier, RwLock<T>/ReadGuard/WriteGuard, parametric
+> Mutex<T>/Channel<T>, Traits phase 2, Kosh config improvements.
+> See [STATUS.md](STATUS.md) for per-commit ledger.
 >
-> **Open queue — DEPENDENCY-ORDERED (refreshed 2026-06-06 evening):**
+> **Open queue — DEPENDENCY-ORDERED (refreshed 2026-06-18):**
 > Full dependency graph in [TODO.md](TODO.md). Headline sequence:
 >
-> **Tier A** (ergonomics; do first):
-> 1. **A.1 CLI rename** — `intentc` → `vanic`.
+> **Tier A** (ergonomics):
+> 1. ~~**A.1 CLI rename** — `intentc` → `vanic`.~~ ✅ DONE.
 > 2. **A.2 Examples reorganization** —
 >    `examples/language/{english,sanskrit,hindi,marathi}/` +
->    `// श्री।` Devanagari header.
+>    `// श्री।` Devanagari header. Still open.
 >
-> **Tier B** (cross-language tooling; depends on Tier A):
+> **Tier B** (cross-language tooling; depends on A.2):
 > 3. **B.1 Cross-language `.vani` translator tool** —
 >    rewrite a source's keywords between English / Sanskrit /
 >    Hindi / Marathi (Python v1; round-trip parity required).
@@ -41,8 +40,7 @@
 >    Devanagari example coverage.
 >
 > **Tier D** (independent):
-> 5. **D.1 Windows LLVM TCP IR** ✅ SHIPPED 2026-06-06. i64-SOCKET + winsock2
->    declare surface (deferred from Phase 6).
+> 5. ~~**D.1 Windows LLVM TCP IR**~~ ✅ SHIPPED 2026-06-06.
 >
 > **Tier E** (depends on Tier C; Indian-subcontinent-first, then
 > global, per user direction 2026-06-06):
@@ -62,11 +60,11 @@
 >    language effort estimates.
 >
 > **Tier F** (external dependencies):
-> 7. **F.1 macOS empirical verification** — Darwin host needed.
-> 8. **F.2 Windows empirical verification** — Win host needed.
-> 9. **F.3 Arc 9 a/b/e/f** — Kosh package manager, registry
->    choice pending.
-> 10. **F.4 Arc 7** Win64 / AArch64 — CI wiring.
+> 7. **F.1 macOS empirical verification** — Darwin host needed
+>    (IOCP/kqueue hot spots documented in ARC8_V3_PLAN.md).
+> 8. ~~**F.2 Windows empirical verification**~~ ✅ DONE 2026-06-11.
+> 9. ~~**F.3 Arc 9 a/b/e/f**~~ ✅ DONE 2026-06-17 (Kosh shipped).
+> 10. **F.4 Arc 7** Win64 / AArch64 — CI wiring still open.
 
 ## Arcs 5–10 — granular sub-step plan
 
