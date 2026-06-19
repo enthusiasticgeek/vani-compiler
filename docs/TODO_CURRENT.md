@@ -88,9 +88,13 @@ Last updated: 2026-06-18
   table; --batch directory mode; --inplace with .bak backup; UTF-8 stdout fix for Windows;
   tested: 166/166 english→marathi batch, verify english↔hindi↔english, english↔sanskrit↔english)
 
-- [ ] **16. C.x SOV completion (mechanical parser side)** — Verb-at-end shapes for
+- [x] **16. C.x SOV completion (mechanical parser side)** — Verb-at-end shapes for
   `let` / `fn` / `if` / `while` / `match` / `struct` / `enum` (~10–15 h). Grammar
-  consultant review is separate; this is just the parser work.
+  consultant review is separate; this is just the parser work. ✅ done 2026-06-19
+  (looks_like_sov_fn/struct/enum detectors; parse_sov_fn token-rewrite + parse_function reuse;
+  parse_sov_struct_decl + parse_sov_enum_decl with optional generics;
+  parse_match_arms_block refactor; SOV match at stmt pos → helpful error;
+  wired in top-level + module-body dispatchers; 3 new lib tests pass)
 
 ---
 
