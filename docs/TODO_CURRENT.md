@@ -52,9 +52,11 @@ Last updated: 2026-06-18
   pre-Arc-8 shipped history to `STATUS_ARCHIVE.md` / `TODO_ARCHIVE.md`. Keep main
   files as current-state ledgers. ✅ done 2026-06-19 (STATUS.md: 11741→306 lines; TODO.md: 10585→40 lines)
 
-- [ ] **11. A.2 Examples reorganization** — Verify all Devanagari examples live under
+- [x] **11. A.2 Examples reorganization** — Verify all Devanagari examples live under
   `examples/language/{sanskrit,hindi,marathi}/`; add `// श्री।` header to each.
-  Move any English examples not yet under `examples/language/english/`.
+  Move any English examples not yet under `examples/language/english/`. ✅ done 2026-06-19
+  (14 Sanskrit + 12 Hindi + 12 Marathi — all have // श्री। header; moved path_c_ref_returns.vani
+  and vec_of_ref.vani from examples/ root to examples/language/english/)
 
 - [ ] **12. Arc 7 Win64 / AArch64 ABI** — Complete float-class + mixed struct
   Win64 struct-return classifier (~6–8 h). Code work only; CI wiring is separate.

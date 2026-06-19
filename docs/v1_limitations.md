@@ -315,7 +315,7 @@ Copy, `__free` skips per-element drop. The scope-escape analyzer
 extends to `push(mut ref vec, ref X)`: when X's binding sits at
 a deeper scope than the Vec receiver, the analyzer rejects with
 a "ref to '{X}' would dangle when '{X}'s scope ends" diagnostic.
-Acceptance: `examples/vec_of_ref.vani` (ASan + LSan clean on the
+Acceptance: `examples/language/english/vec_of_ref.vani` (ASan + LSan clean on the
 C backend; cross-backend stdout parity).
 
 **Path (C) shipped 2026-06-09**: `fn foo(p: ref T) -> ref T`
@@ -326,7 +326,7 @@ returns reject with clear diagnostics suggesting refactoring.
 Call sites propagate the source's lifetime through to subsequent
 escape checks (push/FieldAssign/Return), so a chain of ref-
 returning calls is correctly bound to the original source. See
-[`examples/path_c_ref_returns.vani`](../examples/path_c_ref_returns.vani)
+[`examples/language/english/path_c_ref_returns.vani`](../examples/language/english/path_c_ref_returns.vani)
 for the canonical shapes.
 
 **Still rejected** (path-D territory, deferred indefinitely):
