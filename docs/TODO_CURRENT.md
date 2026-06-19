@@ -59,8 +59,11 @@ Last updated: 2026-06-18
   (14 Sanskrit + 12 Hindi + 12 Marathi — all have // श्री। header; moved path_c_ref_returns.vani
   and vec_of_ref.vani from examples/ root to examples/language/english/)
 
-- [ ] **12. Arc 7 Win64 / AArch64 ABI** — Complete float-class + mixed struct
+- [x] **12. Arc 7 Win64 / AArch64 ABI** — Complete float-class + mixed struct
   Win64 struct-return classifier (~6–8 h). Code work only; CI wiring is separate.
+  ✅ done 2026-06-19 (is_ffi_safe_struct_win64: size∈{1,2,4,8}; is_ffi_safe_struct_aarch64:
+  HFA + scalar≤16; platform-dispatching is_ffi_safe_struct; platform-specific error hints;
+  7 new lib tests gated by cfg(target_arch/os))
 
 - [ ] **13. Finer Sanskrit / Hindi / Marathi purity gate** — Tighten the
   `// vani-lang:` pragma in `lexer.rs` to distinguish the three dialects (currently

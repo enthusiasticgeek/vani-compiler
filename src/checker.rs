@@ -7968,16 +7968,14 @@ fn ffi_byte_size(ty: &Type) -> u64 {
     }
 }
 
-// Closure #285 + Arc 7 remainder: classifies a struct as
-// FFI-safe-by-value under SysV x86-64 rules. A struct passes
-// directly when (a) every field is a scalar (integer-class
-// OR floating-point), and (b) total size ≤ 16 bytes. Aggregate-
-// in-aggregate (struct fields holding nested structs / tuples
-// / arrays) still falls through to rejection — that would
-// need recursive per-eightbyte classification which v1 leaves
-// to the C compiler's discretion (we just don't promise
-// correctness for those shapes yet).
-fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
+// Arc 7 — Win64 ABI (x86-64 Windows calling convention).
+// Structs of exactly 1, 2, 4, or 8 bytes with all-scalar
+// fields pass by value in a single integer register. All
+// other structs (including 12 / 16 byte) are passed via a
+// hidden pointer; the caller allocates the buffer. Unlike
+// SysV there is no "two-eightbyte" split — the struct is
+// treated as a single opaque unit.
+fn is_ffi_safe_struct_win64(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
     let Some(info) = structs.get(name) else {
         return false;
     };
@@ -7985,10 +7983,85 @@ fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> boo
         return false;
     }
     let total: u64 = info.fields.iter().map(|(_, t)| ffi_byte_size(t)).sum();
+    // Win64: only 1/2/4/8-byte structs pass by value.
+    if !matches!(total, 1 | 2 | 4 | 8) {
+        return false;
+    }
+    info.fields.iter().all(|(_, t)| is_ffi_safe_scalar(t))
+}
+
+// Arc 7 — AArch64 AAPCS64 ABI.
+// Two pass-by-value cases:
+//   HFA (Homogeneous Floating-point Aggregate): 1–4 fields all
+//   of the same type (all f32 OR all f64). Passed in v0–v7
+//   floating-point registers.
+//   Scalar-only, total ≤ 16 bytes: passed in x0–x7 integer
+//   registers (may span two registers for 9–16-byte structs).
+// Structs > 16 bytes or with non-scalar fields require a
+// hidden-pointer (caller allocates).
+fn is_ffi_hfa_aarch64(info: &StructInfo) -> bool {
+    let n = info.fields.len();
+    if n < 1 || n > 4 {
+        return false;
+    }
+    let all_f32 = info.fields.iter().all(|(_, t)| matches!(t, Type::F32));
+    let all_f64 = info.fields.iter().all(|(_, t)| matches!(t, Type::F64));
+    all_f32 || all_f64
+}
+
+fn is_ffi_safe_struct_aarch64(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
+    let Some(info) = structs.get(name) else {
+        return false;
+    };
+    if info.fields.is_empty() {
+        return false;
+    }
+    if is_ffi_hfa_aarch64(info) {
+        return true;
+    }
+    let total: u64 = info.fields.iter().map(|(_, t)| ffi_byte_size(t)).sum();
     if total > 16 {
         return false;
     }
     info.fields.iter().all(|(_, t)| is_ffi_safe_scalar(t))
+}
+
+// Closure #285 + Arc 7: classifies a struct as FFI-safe-by-value.
+// Dispatches to the platform-specific classifier at compile time:
+//   Win64 (x86-64 Windows): scalar-only, size ∈ {1,2,4,8}
+//   AArch64 (AAPCS64): HFA (1–4 same float) OR scalar-only ≤ 16 B
+//   SysV x86-64 (Linux/macOS): scalar-only, total ≤ 16 B
+//
+// Aggregate-in-aggregate (struct fields holding nested structs /
+// tuples / arrays) falls through to rejection on all platforms —
+// recursive per-eightbyte classification is left to the C compiler
+// when the user passes by pointer.
+fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> bool {
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    return is_ffi_safe_struct_win64(name, structs);
+
+    #[cfg(target_arch = "aarch64")]
+    return is_ffi_safe_struct_aarch64(name, structs);
+
+    #[cfg(not(any(
+        all(target_arch = "x86_64", target_os = "windows"),
+        target_arch = "aarch64"
+    )))]
+    {
+        // SysV x86-64 (Linux / macOS) and any other platform:
+        // scalar-only, total ≤ 16 bytes.
+        let Some(info) = structs.get(name) else {
+            return false;
+        };
+        if info.fields.is_empty() {
+            return false;
+        }
+        let total: u64 = info.fields.iter().map(|(_, t)| ffi_byte_size(t)).sum();
+        if total > 16 {
+            return false;
+        }
+        info.fields.iter().all(|(_, t)| is_ffi_safe_scalar(t))
+    }
 }
 
 fn extern_param_rejection_hint(
@@ -8010,14 +8083,27 @@ fn extern_param_rejection_hint(
         // calls it through the pointer.
         Type::FnPtr(_, _) => None,
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
-        Type::Struct(name) => Some(format!(
-            "pass struct '{}' by reference instead — write `ref {}` \
-             (v1 FFI passes by value only for structs whose fields are \
-             all scalars — integer / float / bool / Str / ref — and \
-             total ≤ 16 bytes; this struct has aggregates, generics, \
-             or exceeds the size)",
-            name, name
-        )),
+        Type::Struct(name) => {
+            let rule = if cfg!(all(target_arch = "x86_64", target_os = "windows")) {
+                "Win64 ABI: struct must have all-scalar fields \
+                 and total size in {1,2,4,8} bytes to pass by value; \
+                 larger structs must use a hidden pointer"
+            } else if cfg!(target_arch = "aarch64") {
+                "AArch64 AAPCS64: struct must be an HFA (1-4 identical \
+                 float/double fields) or have all-scalar fields with \
+                 total <= 16 bytes to pass by value"
+            } else {
+                "SysV x86-64: struct must have all-scalar fields \
+                 (integer / float / bool / Str / ref) and total <= 16 bytes \
+                 to pass by value"
+            };
+            Some(format!(
+                "pass struct '{}' by reference instead — write `ref {}` \
+                 ({}; this struct has aggregates, generics, or exceeds \
+                 the platform size limit)",
+                name, name, rule
+            ))
+        }
         Type::Tuple(_) => Some(
             "pass the tuple by reference instead — write `ref (…)` \
              (tuples have ABI-dependent packing that v1 FFI doesn't model)"
@@ -8072,8 +8158,9 @@ fn extern_return_rejection_hint(
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
         Type::Struct(name) | Type::Enum(name) => Some(format!(
             "return a pointer instead — declare the return type as \
-             `ref {}` (struct/enum return-by-value has ABI-dependent \
-             packing that v1 FFI doesn't model)",
+             `ref {}` (struct/enum return-by-value requires platform-specific \
+             ABI handling; only all-scalar structs within the platform size \
+             limit pass by value — see extern_param_rejection_hint for details)",
             name
         )),
         Type::Tuple(_) | Type::Array { .. } => Some(

@@ -40147,6 +40147,110 @@ função main() -> i64 {
     }
 
     #[test]
+    fn extern_small_scalar_struct_accepted_on_all_platforms() {
+        // An all-scalar struct ≤ 8 bytes (4 bytes here) is accepted
+        // by value on every platform: SysV (≤16 B), Win64 (∈{1,2,4,8}),
+        // and AArch64 (scalar ≤16 B). Regression guard so the
+        // per-platform dispatch doesn't over-reject small structs.
+        let source = r#"
+            struct Point { x: i32, y: i32 }
+
+            extern "C" fn get_point() -> Point;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("4-byte all-scalar struct is FFI-safe on all platforms");
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    fn extern_12byte_struct_rejected_on_win64() {
+        // Win64 ABI: structs > 8 bytes must use a hidden pointer,
+        // even if all fields are scalars. A {i32, i32, i32} = 12 bytes
+        // must be rejected with the Win64 ABI hint.
+        let source = r#"
+            struct Triple { a: i32, b: i32, c: i32 }
+
+            extern "C" fn get_triple() -> Triple;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("12-byte struct rejected on Win64");
+        assert!(
+            errs.iter().any(|d| d.message.contains("Win64 ABI")),
+            "expected Win64 ABI hint, got: {:?}", errs
+        );
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    fn extern_8byte_struct_accepted_on_win64() {
+        // Win64: {i32, i32} = 8 bytes exactly — passes by value in RAX.
+        let source = r#"
+            struct Pair { x: i32, y: i32 }
+
+            extern "C" fn get_pair() -> Pair;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("8-byte all-scalar struct accepted on Win64");
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn extern_hfa_f64_struct_accepted_on_aarch64() {
+        // AArch64 AAPCS64: HFA with 2 f64 fields passes in v0/v1.
+        // Must be accepted by the classifier (not rejected as too large
+        // or as mixed).
+        let source = r#"
+            struct Vec2 { x: f64, y: f64 }
+
+            extern "C" fn get_vec2() -> Vec2;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("f64 HFA struct accepted on AArch64");
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn extern_hfa_4xf32_struct_accepted_on_aarch64() {
+        // AArch64: HFA with 4 f32 fields — the maximum allowed HFA
+        // size. Passes in v0–v3.
+        let source = r#"
+            struct Quad { a: f32, b: f32, c: f32, d: f32 }
+
+            extern "C" fn get_quad() -> Quad;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("4xf32 HFA struct accepted on AArch64");
+    }
+
+    #[test]
+    #[cfg(target_arch = "aarch64")]
+    fn extern_mixed_int_float_hfa_rejected_on_aarch64() {
+        // AArch64: mixed int/float is NOT an HFA and > 8 bytes —
+        // 9 bytes of fields, which rounds to 16 bytes with padding.
+        // Accepted as scalar-only ≤16 B, but a {i64, f64} is
+        // actually accepted on AArch64 (16 bytes, scalar-only).
+        // This test pins a REJECTED shape: 3 fields, not same type.
+        let source = r#"
+            struct BigMixed { a: i64, b: f64, c: i32 }
+
+            extern "C" fn get_big() -> BigMixed;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        // 20 bytes > 16 — rejected on AArch64.
+        let errs = compile(source).expect_err("20-byte struct rejected on AArch64");
+        assert!(
+            errs.iter().any(|d| d.message.contains("AArch64") || d.message.contains("ref BigMixed")),
+            "expected AArch64 ABI hint, got: {:?}", errs
+        );
+    }
+
+    #[test]
     fn extern_c_fn_emits_llvm_declare() {
         let source = r#"
             extern "C" fn atoi(x: Str) -> i32;
