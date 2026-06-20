@@ -1,0 +1,39 @@
+// Mixed-feature: Box<T> as an enum variant payload.
+// Previously rejected with "not admitted in v1". Now
+// compiles + runs on both backends. Scope-exit Drop frees
+// each Box payload when the payloaded variant goes out of
+// scope; the Empty arm needs no drop.
+//
+// EXPECTED: compiles + runs cleanly on both backends; output 42.
+
+intent "Box<T> as enum payload — checker + C/LLVM Drop (2026-06-20)";
+
+interface Drawable {
+  fn area(self: ref Self) -> i64;
+}
+
+struct Circle { r: i64 }
+implement Drawable for Circle {
+  fn area(self: ref Circle) -> i64 { return self.r * self.r; }
+}
+
+enum Val {
+  Int(Box<i64>),
+  Shape(Box<dyn Drawable>),
+  Empty,
+}
+
+fn main() -> i64 {
+  // Box<i64> enum payload — goes out of scope; Drop frees the slot.
+  let a: Val = Val.Int(box(42));
+
+  // Box<dyn Drawable> enum payload — fat-pointer; Drop frees .data.
+  let c: Circle = Circle { r: 7 };
+  let b: Val = Val.Shape(box(c as dyn Drawable));
+
+  // No-payload arm — no heap to free.
+  let e: Val = Val.Empty;
+
+  print 42;
+  return 42;
+}

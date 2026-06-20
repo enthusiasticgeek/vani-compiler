@@ -542,8 +542,8 @@ checking these as the compiler evolves.
 |---|---|---|
 | `(Box<T>, U)` tuple element | v1 tuples are Copy-only; Box<T> is affine. The checker rejects with "tuple element N has non-Copy type X — v1 tuples are Copy-only". | Wrap the pair in a named struct: `struct Pair { box: Box<T>, other: U }`. Structs accept non-Copy fields. |
 | `(OwnedStr, U)` tuple element | Same reason — OwnedStr is non-Copy. | Same — named struct. |
-| `Option<Box<T>>` enum payload | v1 enum variants admit Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel payloads; Box<T> isn't in that list. | (a) Wrap Box<T> in a struct that has Vec<Box<T>> of length 0 or 1; (b) use a tag + separate Box<T> field with a default-init convention. |
-| `Result<Box<T>, E>` | Same — enum-payload restriction. | Same workarounds. |
+| `Option<Box<T>>` enum payload | ✅ **Fixed (v0.1.4, 2026-06-20)** — checker now admits `Box<T>` in enum variant payloads; C + LLVM backends emit correct scope-exit Drop for Box payloads. Regression test: `mix_box_enum_payload.vani`. | No workaround needed. |
+| `Result<Box<T>, E>` | ✅ **Fixed (v0.1.4, 2026-06-20)** — same fix as above; `Box<T>` is now a valid payload for any enum variant, including Result-style enums. | No workaround needed. |
 | `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | The tuple's non-Copy restriction propagates through Vec. | Wrap the tuple in a named struct (the struct can be a Vec element). |
 | `HashMap<K, V>` with non-scalar V | ✅ **Fixed (Arc 4)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values. Full K-V matrix shipped. | No workaround needed. |
 | `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | `Mutex<T>` is now parametric over any T (v0.1.1) — `Mutex<Vec<i64>>` works. `Atomic<T>` payload is still i64-width–shaped only. | For Atomic, use a `Mutex<Vec<T>>` instead; or channel-transfer ownership. |

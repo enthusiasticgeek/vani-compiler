@@ -2913,6 +2913,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 let heap_kind = match &payload_ty {
                     Some(Type::OwnedStr) => Some("owned_str"),
                     Some(Type::Vec(_)) => Some("vec"),
+                    Some(Type::Box(_)) => Some("box"),
                     _ => None,
                 };
                 if let Some(kind) = heap_kind {
@@ -2979,6 +2980,89 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                                         "  call void {}({} {})\n",
                                         free_name, v_struct, payload
                                     ));
+                                }
+                            }
+                            "box" => {
+                                if let Some(Type::Box(inner)) = &payload_ty {
+                                    match &**inner {
+                                        // Box<dyn Iface>: payload is the fat-pointer
+                                        // struct; extract field 1 (the data i8*) and free.
+                                        Type::Object(iface_name) => {
+                                            let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                                            let data = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = extractvalue {} {}, 1\n",
+                                                data, dyn_ty, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void @free(i8* {})\n",
+                                                data
+                                            ));
+                                        }
+                                        // Box<Vec<T>>: payload is Vec_T*; load the
+                                        // Vec value, call vec_free, then free the ptr.
+                                        Type::Vec(element) => {
+                                            let free_name = format!(
+                                                "@intent_vec_{}__free",
+                                                vec_struct_tag(element)
+                                            );
+                                            let v_struct = vec_struct_name(element);
+                                            let vec_val = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = load {}, {}* {}\n",
+                                                vec_val, v_struct, v_struct, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void {}({} {})\n",
+                                                free_name, v_struct, vec_val
+                                            ));
+                                            let as_i8 = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = bitcast {}* {} to i8*\n",
+                                                as_i8, v_struct, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void @free(i8* {})\n",
+                                                as_i8
+                                            ));
+                                        }
+                                        // Box<OwnedStr>: payload is i8**; load the
+                                        // string i8*, free it, then free the ptr.
+                                        Type::OwnedStr => {
+                                            let str_val = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = load i8*, i8** {}\n",
+                                                str_val, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void @free(i8* {})\n",
+                                                str_val
+                                            ));
+                                            let as_i8 = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = bitcast i8** {} to i8*\n",
+                                                as_i8, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void @free(i8* {})\n",
+                                                as_i8
+                                            ));
+                                        }
+                                        // Box<T> scalar/struct: payload is T*;
+                                        // bitcast to i8* and free.
+                                        other => {
+                                            let llvm_inner = llvm_type_string(other);
+                                            let as_i8 = ctx.fresh_tmp();
+                                            out.push_str(&format!(
+                                                "  {} = bitcast {}* {} to i8*\n",
+                                                as_i8, llvm_inner, payload
+                                            ));
+                                            out.push_str(&format!(
+                                                "  call void @free(i8* {})\n",
+                                                as_i8
+                                            ));
+                                        }
+                                    }
                                 }
                             }
                             _ => {}

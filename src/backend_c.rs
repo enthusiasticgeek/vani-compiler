@@ -11716,6 +11716,22 @@ pub(crate) fn c_element_drop_old(slot: &str, ty: &Type) -> String {
                     helper = vec_helper(element, "free"),
                     slot = slot
                 )),
+                Some(Type::Box(inner)) => Some(match &**inner {
+                    Type::Object(_iface) => format!(
+                        "free({slot}.payload.data);",
+                        slot = slot
+                    ),
+                    Type::Vec(element) => format!(
+                        "{{ {helper}(*{slot}.payload); free({slot}.payload); }}",
+                        helper = vec_helper(element, "free"),
+                        slot = slot
+                    ),
+                    Type::OwnedStr => format!(
+                        "{{ free((void*)*{slot}.payload); free({slot}.payload); }}",
+                        slot = slot
+                    ),
+                    _ => format!("free({slot}.payload);", slot = slot),
+                }),
                 _ => None,
             };
             let Some(free_call) = free_expr else {
@@ -12552,6 +12568,30 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                         vec_helper(element, "free"),
                         local
                     )),
+                    Some(Type::Box(inner)) => Some(match &**inner {
+                        // Box<dyn Iface>: fat-pointer struct; free the
+                        // owning .data field (the concrete heap slot).
+                        Type::Object(_iface) => format!(
+                            "free({local}.payload.data)",
+                            local = local
+                        ),
+                        // Box<Vec<T>>: free Vec's data buffer, then
+                        // free the Box's heap slot for the Vec struct.
+                        Type::Vec(element) => format!(
+                            "{{ {helper}(*{local}.payload); free({local}.payload); }}",
+                            helper = vec_helper(element, "free"),
+                            local = local
+                        ),
+                        // Box<OwnedStr>: free the string buffer, then
+                        // free the Box's heap slot for the i8* pointer.
+                        Type::OwnedStr => format!(
+                            "{{ free((void*)*{local}.payload); free({local}.payload); }}",
+                            local = local
+                        ),
+                        // Box<T> for scalar/struct T: payload is T*;
+                        // simply free the heap slot.
+                        _ => format!("free({local}.payload)", local = local),
+                    }),
                     _ => None,
                 };
                 if let Some(free_call) = free_expr {

@@ -930,6 +930,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                         payload_ty,
                         Type::OwnedStr
                             | Type::Vec(_)
+                            | Type::Box(_)
                             | Type::Task
                             | Type::Atomic(_)
                             | Type::Mutex(_)
@@ -942,9 +943,10 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                         format!(
                             "enum '{}' variant '{}' payload type {} is not \
                              admitted in v1 — supported payloads are Copy \
-                             types, OwnedStr, Vec<T>, [T;N] of Copy elements, \
-                             Task, Atomic<T>, Mutex<T>, and Channel<T, N>; \
-                             only Guard<T> still needs codegen work",
+                             types, OwnedStr, Vec<T>, Box<T>, [T;N] of Copy \
+                             elements, Task, Atomic<T>, Mutex<T>, and \
+                             Channel<T, N>; only Guard<T> still needs \
+                             codegen work",
                             decl.name,
                             decl.variants[i].name,
                             payload_ty
