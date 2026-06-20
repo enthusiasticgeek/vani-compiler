@@ -1219,6 +1219,10 @@ impl Type {
             // (OwnedStr in v1) are also affine; the Drop
             // emission switches on the tag to free.
             Type::Enum(name) => !enum_has_non_copy_payload(name),
+            // Tuples are Copy only when ALL elements are Copy.
+            // A (OwnedStr, i64) tuple owns a heap buffer and
+            // must be dropped exactly once at scope exit.
+            Type::Tuple(elements) => elements.iter().all(|e| e.is_copy()),
             _ => true,
         }
     }

@@ -540,11 +540,11 @@ checking these as the compiler evolves.
 
 | Combination | Why it rejects | Workaround |
 |---|---|---|
-| `(Box<T>, U)` tuple element | v1 tuples are Copy-only; Box<T> is affine. The checker rejects with "tuple element N has non-Copy type X — v1 tuples are Copy-only". | Wrap the pair in a named struct: `struct Pair { box: Box<T>, other: U }`. Structs accept non-Copy fields. |
-| `(OwnedStr, U)` tuple element | Same reason — OwnedStr is non-Copy. | Same — named struct. |
+| `(Box<T>, U)` tuple element | ✅ **Fixed (v0.1.4, 2026-06-20)** — tuples now allow non-Copy elements; the tuple itself becomes non-Copy; scope-exit Drop walks each element; moving a non-Copy var into a tuple marks it moved; LetTuple destructuring marks the source binding moved. Regression test: `mix_tuple_non_copy.vani`. | No workaround needed. |
+| `(OwnedStr, U)` tuple element | ✅ **Fixed (v0.1.4, 2026-06-20)** — same fix as above. | No workaround needed. |
 | `Option<Box<T>>` enum payload | ✅ **Fixed (v0.1.4, 2026-06-20)** — checker now admits `Box<T>` in enum variant payloads; C + LLVM backends emit correct scope-exit Drop for Box payloads. Regression test: `mix_box_enum_payload.vani`. | No workaround needed. |
 | `Result<Box<T>, E>` | ✅ **Fixed (v0.1.4, 2026-06-20)** — same fix as above; `Box<T>` is now a valid payload for any enum variant, including Result-style enums. | No workaround needed. |
-| `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | The tuple's non-Copy restriction propagates through Vec. | Wrap the tuple in a named struct (the struct can be a Vec element). |
+| `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | Tuples themselves now allow non-Copy elements (v0.1.4), but `Vec<non-Copy-tuple>` has not been verified end-to-end yet. | If you hit issues, wrap the tuple in a named struct (structs with non-Copy fields in Vecs are well-tested). |
 | `HashMap<K, V>` with non-scalar V | ✅ **Fixed (Arc 4)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values. Full K-V matrix shipped. | No workaround needed. |
 | `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | `Mutex<T>` is now parametric over any T (v0.1.1) — `Mutex<Vec<i64>>` works. `Atomic<T>` payload is still i64-width–shaped only. | For Atomic, use a `Mutex<Vec<T>>` instead; or channel-transfer ownership. |
 | Closure capturing non-Copy binding | Closures + tasks reject affine captures (rejected with `closure_captures_affine` elaboration). | Pre-extract scalar fields from the affine value, or pass it as a closure-fn argument rather than capturing. |

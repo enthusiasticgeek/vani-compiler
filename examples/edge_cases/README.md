@@ -46,6 +46,7 @@ shapes the per-feature tests don't reach.
 | [`mix_struct_in_struct_deep.vani`](mix_struct_in_struct_deep.vani) | 3-deep struct nesting + OwnedStr + Vec field at each level | Compiles + runs; output `42`. Affine drops chain correctly through all three layers. |
 | [`mix_box_dyn_in_struct.vani`](mix_box_dyn_in_struct.vani) | Struct field is `Vec<Box<dyn Iface>>`; struct also has Vec\<i64\> + OwnedStr fields | Compiles + runs after the inline-box-dyn fix. |
 | [`mix_box_enum_payload.vani`](mix_box_enum_payload.vani) | `Box<T>` and `Box<dyn Iface>` as enum variant payloads | **PREVIOUSLY REJECTED** (`Option<Box<T>>` not admitted); fixed 2026-06-20. Now compiles + runs on both backends; output `42`. C + LLVM Drop dispatch frees payload Box correctly. |
+| [`mix_tuple_non_copy.vani`](mix_tuple_non_copy.vani) | `(OwnedStr, i64)` tuple — non-Copy element in tuple | **PREVIOUSLY REJECTED** (v1 tuples were Copy-only); fixed 2026-06-20. Now compiles + runs on both backends; output `42`. Scope-exit Drop walks each element; move-into-tuple marks source as moved; LetTuple destructuring marks source binding as moved. |
 
 ## Tests that fail by design (rejection is the success case)
 
@@ -66,8 +67,8 @@ restructure rather than wonder if it's a bug.
 
 | Combination | Status | Workaround |
 |---|---|---|
-| `(Box<T>, U)` tuple element | ⬜ Rejected — v1 tuples are Copy-only | Wrap in a named struct; structs accept non-Copy fields |
-| `(OwnedStr, U)` tuple element | ⬜ Rejected — same reason | Same — named struct |
+| `(Box<T>, U)` tuple element | ✅ **FIXED (v0.1.4, 2026-06-20)** — non-Copy elements allowed in tuples; tuple becomes non-Copy; scope-exit Drop frees heap elements; regression test: `mix_tuple_non_copy.vani` | No workaround needed |
+| `(OwnedStr, U)` tuple element | ✅ **FIXED (v0.1.4, 2026-06-20)** — same fix; regression test: `mix_tuple_non_copy.vani` | No workaround needed |
 | `Option<Box<T>>` enum payload | ✅ **FIXED (v0.1.4, 2026-06-20)** — checker now admits `Box<T>` in enum variant payloads; C + LLVM backends emit correct Drop; regression test: `mix_box_enum_payload.vani` | No workaround needed |
 | `HashMap<K, V>` with non-scalar V | ✅ **FIXED (Arc 4, pre-v0.1.0)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values; full K-V type matrix shipped | No workaround needed |
 | `Mutex<Vec<T>>` | ✅ **FIXED (v0.1.1, 2026-06-18)** — `Mutex<T>` is now parametric over any element type including `Vec<T>` | No workaround needed |

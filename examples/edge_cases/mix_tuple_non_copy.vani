@@ -1,0 +1,28 @@
+// Mixed-feature: tuple with non-Copy element types.
+// Previously rejected with "v1 tuples are Copy-only". Now
+// compiles + runs on both backends. Scope-exit Drop frees
+// the OwnedStr element when the tuple goes out of scope.
+//
+// Tuples with non-Copy elements must be destructured via
+// `let (a, b) = tup` to access the non-Copy element;
+// direct `.N` access on non-Copy elements is rejected.
+//
+// EXPECTED: compiles + runs cleanly on both backends; output 42.
+
+intent "Tuple with non-Copy elements — OwnedStr+i64 (2026-06-20)";
+
+fn make_pair(msg: OwnedStr, val: i64) -> (OwnedStr, i64) {
+  return (msg, val);
+}
+
+fn main() -> i64 {
+  // (OwnedStr, i64) tuple — OwnedStr is non-Copy.
+  let pair: (OwnedStr, i64) = make_pair("hello" + "", 42);
+
+  // Destructure to access the non-Copy element.
+  let (s, n) = pair;
+
+  // The destructured OwnedStr goes out of scope here; Drop frees it.
+  print n;
+  return n;
+}

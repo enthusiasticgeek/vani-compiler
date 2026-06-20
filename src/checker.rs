@@ -11951,6 +11951,17 @@ fn check_one_stmt(
                     },
                 );
             }
+            // If the RHS is a direct variable reference, mark it as moved so
+            // the scope-exit Drop pass does not also free the same heap data
+            // that the per-element bindings now own. Without this, both `pair`
+            // and the extracted `s` binding would be dropped — double-free.
+            if let ExprKind::Var(src_name) = &expr.kind {
+                if let Some(info_mut) = env.lookup_mut(src_name) {
+                    if !info_mut.ty.is_copy() {
+                        info_mut.moved = Some(*span);
+                    }
+                }
+            }
             false
         }
     }
@@ -14482,15 +14493,20 @@ fn check_expr(
                 .iter()
                 .map(|e| check_expr(e, env, signatures, diagnostics))
                 .collect();
-            for (i, ce) in typed.iter().enumerate() {
-                if !ce.ty().is_copy() {
-                    diagnostics.push(Diagnostic::new(
-                        elements[i].span,
-                        format!(
-                            "tuple element {} has non-Copy type {} — v1 tuples are Copy-only",
-                            i, ce.ty()
-                        ),
-                    ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+            // Non-Copy elements are now allowed in tuples. The
+            // tuple itself becomes non-Copy; scope-exit Drop walks
+            // each element and frees heap-owning ones.
+            //
+            // When a variable is moved into the tuple, mark it as
+            // moved so the scope-exit Drop pass doesn't also free
+            // it — that would double-free the same heap buffer.
+            for (elem_expr, checked) in elements.iter().zip(typed.iter()) {
+                if let ExprKind::Var(src_name) = &elem_expr.kind {
+                    if !checked.ty().is_copy() {
+                        if let Some(info_mut) = env.lookup_mut(src_name) {
+                            info_mut.moved = Some(elem_expr.span);
+                        }
+                    }
                 }
             }
             let elem_types: Vec<Type> = typed.iter().map(|c| c.ty().clone()).collect();
@@ -14527,6 +14543,22 @@ fn check_expr(
                     return CheckedExpr::fallback_integer(expr.span);
                 }
             };
+            // Direct `.N` access of a non-Copy element would alias
+            // the tuple's heap data without consuming the tuple,
+            // creating a double-free at scope exit. Require tuple
+            // destructuring `let (a, b) = tup` instead.
+            if !elt_ty.is_copy() {
+                diagnostics.push(Diagnostic::new(
+                    expr.span,
+                    format!(
+                        "tuple element {} has non-Copy type {} — direct `.{}` \
+                         access would alias the tuple's heap data. Use tuple \
+                         destructuring `let ({}, ...) = tup` to move elements out.",
+                        index, elt_ty, index,
+                        (0..=*index).map(|i| if i == *index { "v".to_string() } else { "_".to_string() }).collect::<Vec<_>>().join(", ")
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+            }
             CheckedExpr::new(
                 TypedExprKind::TupleAccess {
                     tuple: Box::new(inner.expr),

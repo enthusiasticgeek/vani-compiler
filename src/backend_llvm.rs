@@ -2748,6 +2748,103 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     out.push_str(&format!("  {} = load i8*, i8** {}\n", ptr, addr));
                     out.push_str(&format!("  call void @free(i8* {})\n", ptr));
                 }
+            } else if let Type::Tuple(elements) = ty {
+                // Scope-exit Drop for a tuple with non-Copy elements.
+                // Tuples lower to LLVM anonymous struct types:
+                // `{ T1, T2, ... }`. GEP uses the inline type string.
+                // Walk elements in reverse (Rust RAII convention) and
+                // free heap-owning elements (OwnedStr, Vec, Box).
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    let t_ty = llvm_type_string(ty);
+                    for (idx, elt_ty) in elements.iter().enumerate().rev() {
+                        match elt_ty {
+                            Type::OwnedStr => {
+                                let fp = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                                    fp, t_ty, t_ty, addr, idx
+                                ));
+                                let s_ptr = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = load i8*, i8** {}\n",
+                                    s_ptr, fp
+                                ));
+                                out.push_str(&format!(
+                                    "  call void @free(i8* {})\n",
+                                    s_ptr
+                                ));
+                            }
+                            Type::Vec(element) => {
+                                let v_struct = vec_struct_name(element);
+                                let fp = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                                    fp, t_ty, t_ty, addr, idx
+                                ));
+                                let v_loaded = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = load {}, {}* {}\n",
+                                    v_loaded, v_struct, v_struct, fp
+                                ));
+                                let free_name = format!(
+                                    "@intent_vec_{}__free",
+                                    vec_struct_tag(element)
+                                );
+                                out.push_str(&format!(
+                                    "  call void {}({} {})\n",
+                                    free_name, v_struct, v_loaded
+                                ));
+                            }
+                            Type::Box(inner) => match &**inner {
+                                Type::Object(iface_name) => {
+                                    let dyn_ty = format!("%intent_dyn_{}", iface_name);
+                                    let fp = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                                        fp, t_ty, t_ty, addr, idx
+                                    ));
+                                    let fat = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = load {}, {}* {}\n",
+                                        fat, dyn_ty, dyn_ty, fp
+                                    ));
+                                    let data_i8 = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = extractvalue {} {}, 1\n",
+                                        data_i8, dyn_ty, fat
+                                    ));
+                                    out.push_str(&format!(
+                                        "  call void @free(i8* {})\n",
+                                        data_i8
+                                    ));
+                                }
+                                other => {
+                                    let llvm_inner = llvm_type_string(other);
+                                    let fp = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = getelementptr {}, {}* {}, i64 0, i32 {}\n",
+                                        fp, t_ty, t_ty, addr, idx
+                                    ));
+                                    let box_ptr = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = load {}*, {}** {}\n",
+                                        box_ptr, llvm_inner, llvm_inner, fp
+                                    ));
+                                    let as_i8 = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = bitcast {}* {} to i8*\n",
+                                        as_i8, llvm_inner, box_ptr
+                                    ));
+                                    out.push_str(&format!(
+                                        "  call void @free(i8* {})\n",
+                                        as_i8
+                                    ));
+                                }
+                            },
+                            _ => {}
+                        }
+                    }
+                }
             } else if let Type::Struct(struct_name) = ty {
                 // Auto-call the user's `Drop` impl. Two flavors
                 // (mirrors backend_c):

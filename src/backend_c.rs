@@ -12506,6 +12506,26 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                     out,
                 );
             }
+            Type::Tuple(elements) => {
+                // Scope-exit Drop for a tuple with non-Copy elements.
+                // The tuple lowers to `intent_tuple_<shape>` with
+                // fields `_0`, `_1`, ... — reuse emit_struct_field_drops
+                // by converting elements to named field pairs.
+                let fields: Vec<(String, Type)> = elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ty)| (format!("_{}", i), ty.clone()))
+                    .collect();
+                let empty: std::collections::HashSet<&String> =
+                    std::collections::HashSet::new();
+                emit_struct_field_drops(
+                    &local_name(name),
+                    "tuple",
+                    &fields,
+                    &empty,
+                    out,
+                );
+            }
             Type::Enum(enum_name) => {
                 // Payloaded enums with a heap-shaped payload
                 // free the payload when the active variant
