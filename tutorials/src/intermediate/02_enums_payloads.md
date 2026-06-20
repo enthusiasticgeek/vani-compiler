@@ -1,4 +1,4 @@
-# Intermediate 2 — Enums with payloads + match arms
+﻿# Intermediate 2 â€” Enums with payloads + match arms
 
 > **Learning goal**: declare a tagged-union enum, construct
 > variants with payload data, and destructure them with
@@ -8,7 +8,7 @@ An enum is like a multiple-choice form field: the value is
 ALWAYS one of a fixed set of options, and each option can carry
 its own data. Think of a delivery status: it's either
 `Shipped(tracking_number)`, `Delivered(timestamp)`, or
-`Failed(reason)` — never more than one at a time, and each
+`Failed(reason)` â€” never more than one at a time, and each
 variant carries different information. `match` is the natural
 companion: it lets you write separate instructions for each
 possible status, and the compiler ensures you handle ALL of
@@ -17,7 +17,7 @@ them (so no delivery status goes unprocessed).
 ## The program
 
 ```vani
-intent "Intermediate 2 worked example — enums with payloads.";
+intent "Intermediate 2 worked example â€” enums with payloads.";
 
 enum Result { Ok(i64), Err(i64) }
 
@@ -62,22 +62,22 @@ Output:
 - **`enum Name { V1(T1), V2(T2), V3 }`** declares a tagged union.
   Each variant can be either a tag (no payload) or a tag+payload.
   The payload type goes in parentheses after the variant name.
-- **v1 restriction**: a single payload type *per variant* only —
+- **v1 restriction**: a single payload type *per variant* only â€”
   multi-payload tuples (`Ok(i64, Str)`) aren't supported. Wrap
   multi-field variants in a struct instead, and put the struct
   type in the payload.
-- **Construction**: `Result.Ok(42)` — note the dot, not the
+- **Construction**: `Result.Ok(42)` â€” note the dot, not the
   double-colon. This is one of the small surface-syntax diffs
   from Rust.
 - **Match destructuring**: `Result.Ok(v) then v` extracts the
   payload as a fresh `v` binding scoped to the arm. `Result.Err(_)`
   matches but discards the payload.
-- **Match is an expression** (Beginner §8). Return its value
+- **Match is an expression** (Beginner Â§8). Return its value
   with `return match ... { ... };`.
 
 ## v1 limitations to know about
 
-These are listed in [`docs/v1_limitations.md`](https://github.com/anthropics/claude-code/blob/main/docs/v1_limitations.md) — keep them in mind:
+These are listed in [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md) â€” keep them in mind:
 
 - **No enum-destructure in `let`**: `let Result.Ok(v) = r;`
   doesn't work. You always go through `match`.
@@ -121,4 +121,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§3 — Affine ownership →](03_affine.md)
+**Next**: [Â§3 â€” Affine ownership â†’](03_affine.md)

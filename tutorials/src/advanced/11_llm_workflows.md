@@ -17,7 +17,7 @@ tools and shows the write-verify-iterate loop end to end.
 
 ## What ships
 
-Two scripts under [`tools/llm_context/`](https://github.com/.../tools/llm_context/):
+Two scripts under [`tools/llm_context/`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/llm_context/):
 
 - **`bundle.py`** (Phase ML-1, 2026-06-07) — a static Markdown
   context bundle, ~13K tokens full, ~7K with `--no-examples`.
@@ -251,7 +251,7 @@ plumbing, tighter loop.
 
 ## What's queued (not shipped today)
 
-The roadmap (see [TODO.md `🤖 ML model that learns vāṇी`](https://github.com/.../TODO.md))
+The roadmap (see [TODO.md `🤖 ML model that learns vāṇी`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md))
 has two further phases that haven't started:
 
 - **Phase ML-3** (~20-30h focused + ~$100-300 GPU credits):
@@ -298,7 +298,7 @@ young.
 
 ## Cross-reference
 
-- [`tools/llm_context/README.md`](https://github.com/.../tools/llm_context/README.md)
+- [`tools/llm_context/README.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/llm_context/README.md)
   — the canonical setup doc; mirror of this chapter for
   maintainers
 - [Intermediate 10b — Runtime errors + panic-free design](../intermediate/10b_runtime_errors_primer.md)

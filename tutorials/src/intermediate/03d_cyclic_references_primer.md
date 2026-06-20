@@ -272,7 +272,7 @@ In a Vec-of-Node list, deleting a middle node has a choice:
 2. **Mark deleted** without removing — add a `dead: bool`
    field, skip over dead nodes when traversing. Indices
    stay valid forever, but the Vec grows monotonically.
-3. **Use a `Pool<T>`** (vāṇी [unsafe.md](../unsafe.md)
+3. **Use a `Pool<T>`** (vāṇी [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
    Layer 2). Generation-tagged handles: deleting a slot
    bumps the generation; `pool.get(h)` returns `None` for
    a stale handle. Same memory layout, type-safe slot
@@ -413,7 +413,7 @@ For these, vāṇी's answer is:
    doesn't trade safety silently — you're explicitly opting
    out for one named reason.
 3. **Wait for v2 regions.** `region { ... }` blocks with
-   `&'arena T` (Layer 5 in [unsafe.md](../unsafe.md))
+   `&'arena T` (Layer 5 in [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
    permit cycles between same-region allocations and free
    them together at region exit. Zero runtime cost, no Rc
    semantics required.
@@ -487,6 +487,6 @@ and the language's affine guarantees cover the rest.
 - [Intermediate 5 — Dynamic dispatch](05_dyn.md) —
   `Vec<Box<dyn Iface>>` for the observer pattern's
   heterogeneous observer list
-- [Advanced 4a — Embedded primer](04a_embedded_primer.md) —
+- [Advanced 4a — Embedded primer](../advanced/04a_embedded_primer.md) —
   region typing (v2 future) for cycles with compile-time
   lifetimes

@@ -1,11 +1,11 @@
-# Advanced 4 — Embedded targets + `unsafe` + region typing
+﻿# Advanced 4 â€” Embedded targets + `unsafe` + region typing
 
 > **Learning goal**: opt into the `unsafe` operations needed
 > for embedded / systems work (raw pointers, region-scoped
-> arenas, manual memory) — and understand how vāṇी keeps the
+> arenas, manual memory) â€” and understand how vÄá¹‡à¥€ keeps the
 > safety boundary explicit at the source level.
 
-> **New to this?** Read [Advanced 4a — Embedded primer](04a_embedded_primer.md) first.
+> **New to this?** Read [Advanced 4a â€” Embedded primer](04a_embedded_primer.md) first.
 
 Think of `unsafe` like a "service door" in a shopping mall.
 The mall's public corridors are safe, well-lit, and governed
@@ -13,28 +13,28 @@ by posted rules. The service door lets authorized staff (the
 ones who KNOW the rules) step behind the scenes to do things
 the public corridors can't: move large equipment, access
 electrical panels, interact with the building's raw
-infrastructure. `unsafe(reason = "raw pointer write — hardware register") {}` in vāṇी works the same way:
+infrastructure. `unsafe(reason = "raw pointer write â€” hardware register") {}` in vÄá¹‡à¥€ works the same way:
 the rest of the language's safety rules still apply everywhere
 else; the `unsafe` block is a clearly-marked zone where the
 compiler relaxes exactly the restrictions that embedded
-hardware access requires — raw pointer reads, memory-mapped
-I/O — while keeping the boundary visible so reviewers know
+hardware access requires â€” raw pointer reads, memory-mapped
+I/O â€” while keeping the boundary visible so reviewers know
 which code needs extra scrutiny.
 
 ## The `unsafe` block
 
 ```vani
-intent "Advanced 4 — raw pointer + region-scoped arena.";
+intent "Advanced 4 â€” raw pointer + region-scoped arena.";
 
 fn poke(addr: *mut i32, val: i32) -> i64 {
-  unsafe(reason = "raw pointer write — hardware register") {
+  unsafe(reason = "raw pointer write â€” hardware register") {
     *addr = val;
   }
   return 0;
 }
 ```
 
-- `unsafe(reason = "raw pointer write — hardware register") { ... }` blocks are the only place where the
+- `unsafe(reason = "raw pointer write â€” hardware register") { ... }` blocks are the only place where the
   following are allowed:
   - Dereferencing a raw pointer (`*p`).
   - Calling a `pure extern "C" fn` that's marked `unsafe`.
@@ -50,7 +50,7 @@ allocators:
 
 ```vani
 fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {
-  unsafe(reason = "raw pointer write — hardware register") {
+  unsafe(reason = "raw pointer write â€” hardware register") {
     *(base + offset) = value;
   }
   return 0;
@@ -62,11 +62,11 @@ LLVM backend uses `load` / `store` instructions.
 
 ## Region typing: `Pool<T>` + `Handle<T>`
 
-For embedded targets without a malloc, vāṇी provides an
+For embedded targets without a malloc, vÄá¹‡à¥€ provides an
 arena-style allocator scoped to a `region` block:
 
 ```vani
-intent "Advanced 4 — region-scoped Pool<i64>.";
+intent "Advanced 4 â€” region-scoped Pool<i64>.";
 
 fn use_pool() -> i64 {
   region {
@@ -88,7 +88,7 @@ fn use_pool() -> i64 {
   with N slots backed by a stack-allocated array (no malloc).
 - **`Handle<T>`** is an affine reference into the pool. Read
   with `handle_read`; write with `handle_write`.
-- The C lowering is a static array + an index counter — zero
+- The C lowering is a static array + an index counter â€” zero
   runtime allocator overhead.
 
 ## What's safe vs unsafe in this layer
@@ -98,16 +98,16 @@ fn use_pool() -> i64 {
 | 1.1 | `*const T` / `*mut T` deref | unsafe |
 | 1.2 | `Pool<T>` / `Handle<T>` | safe (region typed) |
 | 2 | C extern fn call | safe (caller's responsibility) |
-| 3 | `unsafe(reason = "raw pointer write — hardware register") { ... }` block | author's responsibility |
+| 3 | `unsafe(reason = "raw pointer write â€” hardware register") { ... }` block | author's responsibility |
 | 4.1 | `-fstack-protector-strong` | safe (opt-in build flag) |
 
-See [`unsafe.md`](https://github.com/anthropics/claude-code/blob/main/unsafe.md)
+See [`unsafe.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
 in the repo for the full layered design.
 
 ## Compile-time safety annotations
 
-For embedded and safety-critical targets, vāṇī provides four
-attributes that the compiler enforces statically — no runtime
+For embedded and safety-critical targets, vÄá¹‡Ä« provides four
+attributes that the compiler enforces statically â€” no runtime
 overhead.
 
 ### `#[no_heap]`
@@ -130,8 +130,8 @@ the chain.
 
 ### `#[bounded_stack(bytes=N)]`
 
-Asserts that the function's stack frame — plus all transitive
-callees — fits within N bytes. Useful when targeting MCUs with
+Asserts that the function's stack frame â€” plus all transitive
+callees â€” fits within N bytes. Useful when targeting MCUs with
 a few kilobytes of stack.
 
 ```vani
@@ -149,7 +149,7 @@ produces a diagnostic with the measured size.
 ### `#[deterministic_timing]`
 
 Rejects `while` loops, unbounded `for`, and `if` arms with
-different call costs — anything that would make execution time
+different call costs â€” anything that would make execution time
 depend on the input. The function must be straight-line or use
 only `for` loops with a compile-time-constant upper bound.
 
@@ -203,15 +203,15 @@ fn critical_isr(x: i64) -> i64 {
 - **DMA** descriptors and ring buffers.
 - **Custom allocators** for game engines or hot loops.
 
-For everything else, stay in the safe subset — the productivity
+For everything else, stay in the safe subset â€” the productivity
 gain from the SMT verifier and affine ownership is the whole
 point.
 
 ## Examples in the repo
 
-- `examples/language/english/region_pool.vani` — Pool/Handle
+- `examples/language/english/region_pool.vani` â€” Pool/Handle
   end-to-end.
-- `examples/language/english/raw_ptr_*.vani` — raw-pointer
+- `examples/language/english/raw_ptr_*.vani` â€” raw-pointer
   variants.
 
 ## Challenge
@@ -222,4 +222,4 @@ Return a sentinel from `pop` when empty.
 
 ---
 
-**Next**: [§5 — The `dyn` vtable layout + safety boundary →](05_vtables.md)
+**Next**: [Â§5 â€” The `dyn` vtable layout + safety boundary â†’](05_vtables.md)

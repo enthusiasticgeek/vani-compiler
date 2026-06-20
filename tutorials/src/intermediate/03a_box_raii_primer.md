@@ -336,8 +336,8 @@ ownership of that heap allocation tied to my scope.
 
 That's `Box<T>`. The intermediate-track chapter on dyn
 dispatch ([5](05_dyn.md)) uses `Box<dyn Iface>` in real code;
-[`examples/language/english/box_dyn_iface.vani`](https://github.com/.../box_dyn_iface.vani)
-and [`box_recursive_drop.vani`](https://github.com/.../box_recursive_drop.vani)
+[`examples/language/english/box_dyn_iface.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_dyn_iface.vani)
+and [`box_recursive_drop.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/box_recursive_drop.vani)
 are the worked examples.
 
 ## Cross-reference

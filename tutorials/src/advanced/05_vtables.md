@@ -1,4 +1,4 @@
-# Advanced 5 — The `dyn` vtable layout + safety boundary
+﻿# Advanced 5 â€” The `dyn` vtable layout + safety boundary
 
 > **Learning goal**: understand how `dyn Iface` is represented
 > at runtime, when the compiler can prove a call is safe, and
@@ -9,11 +9,11 @@ regardless of which concrete type is inside the envelope. This
 chapter shows you the machinery that makes that work: the
 **vtable** (virtual dispatch table). Think of a vtable as a
 printed directory card stapled inside each envelope. The card
-lists the methods the interface promises ("area → page 7,
-draw → page 12") with each entry pointing to the concrete
+lists the methods the interface promises ("area â†’ page 7,
+draw â†’ page 12") with each entry pointing to the concrete
 function for the specific type inside. When the runtime calls
 `d.area()`, it flips to the right entry in the card and jumps
-there — one extra pointer dereference, but no branching or
+there â€” one extra pointer dereference, but no branching or
 type-checking. This chapter is for readers who want to know
 EXACTLY what memory is laid out and why.
 
@@ -23,8 +23,8 @@ A `dyn Iface` value is a 16-byte struct on a 64-bit target:
 
 ```c
 typedef struct {
-  const intent_vtbl_Iface* vtable;  // 8 bytes — table of method pointers
-  void* data;                       // 8 bytes — pointer to the concrete value
+  const intent_vtbl_Iface* vtable;  // 8 bytes â€” table of method pointers
+  void* data;                       // 8 bytes â€” pointer to the concrete value
 } intent_dyn_Iface;
 ```
 
@@ -69,14 +69,14 @@ dyn_iface.vtable->m1(dyn_iface.data, arg)
 ```
 
 One indirection through the vtable pointer. There's no
-type-tag check at runtime — the type system has already proved
+type-tag check at runtime â€” the type system has already proved
 the vtable is the right one for the data behind it.
 
 ## The safety boundary
 
 The static type system ensures:
 
-1. A `T → dyn Iface` coercion only happens when
+1. A `T â†’ dyn Iface` coercion only happens when
    `implement Iface for T` is in scope.
 2. The data pointer stays alive for at least as long as the
    `dyn Iface` value (let-bound source, or heap-promoted slot
@@ -87,12 +87,12 @@ The static type system ensures:
 
 If those invariants hold, dispatch is memory-safe with the
 same guarantees as the static-dispatch generic in
-[Intermediate §4](../intermediate/04_generics_iface.md). The
-runtime cost is one extra load — the vtable indirection.
+[Intermediate Â§4](../intermediate/04_generics_iface.md). The
+runtime cost is one extra load â€” the vtable indirection.
 
 ## What this means for `Vec<dyn Iface>`
 
-The Phase 1.2 fix ([L8 in v1_limitations.md](https://github.com/anthropics/claude-code/blob/main/docs/v1_limitations.md))
+The Phase 1.2 fix ([L8 in v1_limitations.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md))
 solved a real bug: `Vec<dyn Drawable>` and `Vec<dyn Loggable>`
 stored as struct fields used to share one bundle typedef.
 Per-Iface naming (`intent_vec_dyn_Drawable` /
@@ -107,7 +107,7 @@ that holds the right fat-pointer type.
   in `src/backend_c.rs`.
 - **Coercion checker**: `check_dyn_coerce` in `src/checker.rs`.
 - **End-to-end examples**: the 22 GoF design patterns at
-  `examples/language/english/design_patterns/` — `observer.vani`,
+  `examples/language/english/design_patterns/` â€” `observer.vani`,
   `strategy.vani`, `factory_method.vani` all use `dyn Iface`
   in different shapes.
 
@@ -116,22 +116,22 @@ that holds the right fat-pointer type.
 Most user code doesn't need to know the vtable layout. Reach
 for this knowledge when:
 
-- You're debugging a "method not found" diagnostic — usually
+- You're debugging a "method not found" diagnostic â€” usually
   the coercion source isn't a let-bound variable.
 - You're profiling and the vtable indirection is on a hot
-  path — switch to the static-dispatch generic.
+  path â€” switch to the static-dispatch generic.
 - You're writing FFI that exposes a `dyn Iface` value to a C
-  caller — you need to know the layout to write the C-side
+  caller â€” you need to know the layout to write the C-side
   struct.
 
 ## Challenge
 
 Read `examples/language/english/dyn_dispatch.vani`. Run
-`vanic emit … --backend=c` and find the emitted vtable
+`vanic emit â€¦ --backend=c` and find the emitted vtable
 struct for the `Drawable` interface. Trace one method call
 from the `dyn_dispatch` source line through the C output to
 the underlying `intent_fn_Circle_area_thunk` body.
 
 ---
 
-**Next**: [§6 — SMT trace debugging →](06_smt_debug.md)
+**Next**: [Â§6 â€” SMT trace debugging â†’](06_smt_debug.md)

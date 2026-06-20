@@ -219,7 +219,7 @@ callbacks.
   — the actual syntax + worked examples
 - [Beginner 6a — Pointers and references primer](../beginner/06a_pointers_refs_primer.md)
   — references map naturally to C pointers
-- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md)
+- [Advanced 4 — Embedded targets + `unsafe`](../advanced/04_embedded.md)
   — the `unsafe(reason = "...")` block is shared between FFI
   and embedded use cases
 - [Beginner 6c — Ownership primer](../beginner/06c_ownership_primer.md)

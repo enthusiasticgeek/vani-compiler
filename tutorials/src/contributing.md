@@ -1,10 +1,10 @@
-# Contributing to the tutorials
+﻿# Contributing to the tutorials
 
 The tutorials site is an mdBook. Each lesson is a single
 Markdown file under `tutorials/src/`. To contribute:
 
 1. **Pick a lesson** from [SUMMARY.md](SUMMARY.md). Stub
-   lessons (everything except *Beginner 1 — Hello, World*) are
+   lessons (everything except *Beginner 1 â€” Hello, World*) are
    open for writing.
 2. **Use the template** from
    [`beginner/01_hello_world.md`](beginner/01_hello_world.md):
@@ -21,7 +21,7 @@ Markdown file under `tutorials/src/`. To contribute:
    the `tutorials/` directory. The page hot-reloads on save.
 5. **Cross-reference v1 limitations**. If a lesson is about a
    feature with documented v1 deviations (see
-   [`docs/v1_limitations.md`](https://github.com/anthropics/claude-code/blob/main/docs/v1_limitations.md)),
+   [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)),
    call them out in the *"Why it works that way"* section so
    readers don't get surprised when their textbook version
    doesn't compile.
@@ -52,5 +52,5 @@ mdbook serve --open
 mdbook clean
 ```
 
-GitHub Pages deployment is queued as **TUT-5** — see
-[TODO.md](https://github.com/anthropics/claude-code/blob/main/TODO.md).
+GitHub Pages deployment is queued as **TUT-5** â€” see
+[TODO.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md).

@@ -90,7 +90,7 @@ diagnostic, NOT a buffer overrun into adjacent memory.
 
 `unsafe(reason = "...")` is rejected by the hosted-build
 path. It only opens on `--target embedded`, and even there,
-Layer 1–3 of the safety net ([unsafe.md](../unsafe.md))
+Layer 1–3 of the safety net ([unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
 catches the majority of pointer-class mistakes.
 
 ### What this rules out
