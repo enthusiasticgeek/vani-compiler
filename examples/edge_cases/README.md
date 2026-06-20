@@ -11,7 +11,7 @@
 > fixed (see below). Run with `vanic run <file>
 > --backend=c` (or `--backend=llvm`) to verify.
 
-Last verified 2026-06-09 against `vanic` HEAD.
+Last verified 2026-06-09 against `vanic` HEAD; mixed-feature gap table updated 2026-06-20 for v0.1.1/v0.1.2/v0.1.3 changes.
 
 > **Why mixed-feature tests matter.** A feature working in
 > isolation is necessary but not sufficient. `Box<T>` works.
@@ -65,12 +65,12 @@ restructure rather than wonder if it's a bug.
 
 | Combination | Status | Workaround |
 |---|---|---|
-| `(Box<T>, U)` tuple element | Rejected — v1 tuples are Copy-only | Wrap in a named struct; structs accept non-Copy fields |
-| `(OwnedStr, U)` tuple element | Rejected — same reason | Same — named struct |
-| `Option<Box<T>>` enum payload | Rejected — v1 admits Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel only | Use Vec<Box<T>> of length 0 or 1, or wrap in a struct field with custom None handling |
-| `HashMap<K, V>` with non-scalar V | Rejected at use-site (`hashmap_insert`) | v1 HashMap is (i64, i64) only; index-into-Vec for non-scalar values |
-| `Mutex<Vec<T>>` | Not supported | Channel-transfer ownership instead |
-| Closure capturing non-Copy binding | Rejected with `closure_captures_affine` elaboration | Pre-extract scalar / pass as fn arg |
+| `(Box<T>, U)` tuple element | ⬜ Rejected — v1 tuples are Copy-only | Wrap in a named struct; structs accept non-Copy fields |
+| `(OwnedStr, U)` tuple element | ⬜ Rejected — same reason | Same — named struct |
+| `Option<Box<T>>` enum payload | ⬜ Rejected — v1 admits Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel only; Box not in the list | Use `Vec<Box<T>>` of length 0 or 1, or wrap in a struct field with custom None handling |
+| `HashMap<K, V>` with non-scalar V | ✅ **FIXED (Arc 4, pre-v0.1.0)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values; full K-V type matrix shipped | No workaround needed |
+| `Mutex<Vec<T>>` | ✅ **FIXED (v0.1.1, 2026-06-18)** — `Mutex<T>` is now parametric over any element type including `Vec<T>` | No workaround needed |
+| Closure capturing non-Copy binding | ⬜ Rejected with `closure_captures_affine` elaboration | Pre-extract scalar / pass as fn arg |
 
 ## What's been tried and works correctly
 
@@ -164,7 +164,7 @@ already runs for these — letting it pick them up resolves
 the ordering. Regression:
 `async_fn_returning_ref_to_user_struct_compiles_on_c_backend`.
 
-### Bug 4 — `Vec<Box<T>>` panicked both backends (FIXED, partial)
+### Bug 4 — `Vec<Box<T>>` panicked both backends (C backend FIXED; LLVM backend still leaks)
 
 `Vec<Box<T>>` previously panicked both backends with placeholder-
 identifier emission (C: `intent_vec_/*_Box<T>_*/__from(...)`;

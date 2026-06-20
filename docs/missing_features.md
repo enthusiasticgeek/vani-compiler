@@ -2,7 +2,7 @@
 
 > Audience: experienced systems programmers asking "does
 > vāṇी have X?" and what to do when the honest answer is no.
-> Updated 2026-06-09.
+> Updated 2026-06-20 (HashMap + Mutex entries corrected for v0.1.1/Arc-4 fixes).
 
 vāṇी ships with a deliberately small feature surface — the
 goal is everything that's there is fully verified and
@@ -271,10 +271,10 @@ need to alias across `await` points.
 Sharing a raw `Vec<i64>` between threads is rejected.
 
 **Workaround:** `Atomic<T>` for single-value counters /
-flags. `Mutex<Vec<i64>>` is not in v1 (the wrapped type is
-limited to `i64`); for collection-shared-mutate, copy out
-via channel or use the `task` + `join` pattern with
-ownership transfer.
+flags. `Mutex<Vec<i64>>` **now works** (v0.1.1 made `Mutex<T>`
+parametric over any element type). For `Atomic<T>`, the
+payload is still i64-width–shaped only; use `Mutex<T>` for
+collection payloads.
 
 ---
 
@@ -545,7 +545,7 @@ checking these as the compiler evolves.
 | `Option<Box<T>>` enum payload | v1 enum variants admit Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel payloads; Box<T> isn't in that list. | (a) Wrap Box<T> in a struct that has Vec<Box<T>> of length 0 or 1; (b) use a tag + separate Box<T> field with a default-init convention. |
 | `Result<Box<T>, E>` | Same — enum-payload restriction. | Same workarounds. |
 | `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | The tuple's non-Copy restriction propagates through Vec. | Wrap the tuple in a named struct (the struct can be a Vec element). |
-| `HashMap<K, V>` with non-scalar V | `hashmap_insert` v1 supports scalar V only (i64-shaped). | Use `Vec<KvPair>` (sorted) + linear or binary search; or wrap the V in an i64 index into a side `Vec<V>`. |
+| `HashMap<K, V>` with non-scalar V | ✅ **Fixed (Arc 4)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values. Full K-V matrix shipped. | No workaround needed. |
 | `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | `Mutex<T>` is now parametric over any T (v0.1.1) — `Mutex<Vec<i64>>` works. `Atomic<T>` payload is still i64-width–shaped only. | For Atomic, use a `Mutex<Vec<T>>` instead; or channel-transfer ownership. |
 | Closure capturing non-Copy binding | Closures + tasks reject affine captures (rejected with `closure_captures_affine` elaboration). | Pre-extract scalar fields from the affine value, or pass it as a closure-fn argument rather than capturing. |
 | `box(X { ... } as dyn Iface)` inline | **Was a compiler panic; fixed 2026-06-09.** Now works on both backends. | Pinned by a lib regression test; previously the workaround was `let v = X { ... }; box(v as dyn Iface);` — the let-bind form was always safe. |
