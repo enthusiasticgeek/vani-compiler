@@ -183,6 +183,14 @@ pub fn compile_to_c(source: &str) -> Result<String, Vec<Diagnostic>> {
     Ok(backend_c::CBackend.emit(&checked.ir))
 }
 
+/// Like `compile_to_c` but with `--no-std` mode: omits libc headers and
+/// emits a minimal bare-metal typedef block instead. Intended for
+/// cross-compilation targets like `arm-none-eabi` or `riscv32-unknown-none-elf`.
+pub fn compile_to_c_no_std(source: &str) -> Result<String, Vec<Diagnostic>> {
+    let checked = compile(source)?;
+    Ok(backend_c::emit_c_no_std(&checked.ir))
+}
+
 pub fn compile_to_llvm(source: &str) -> Result<String, Vec<Diagnostic>> {
     let checked = compile(source)?;
     Ok(backend_llvm::LlvmBackend.emit(&checked.ir))
@@ -190,7 +198,7 @@ pub fn compile_to_llvm(source: &str) -> Result<String, Vec<Diagnostic>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile, compile_to_c, compile_to_llvm};
+    use super::{compile, compile_to_c, compile_to_c_no_std, compile_to_llvm};
     use crate::backend::Backend;
 
     #[test]
@@ -47073,6 +47081,36 @@ fn main() -> i64 { return reset_vec(); }
         assert!(
             c.contains(".vectors"),
             "expected .vectors section attribute in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn no_std_omits_stdio_include() {
+        let src = r#"
+intent "no_std test";
+fn main() -> i64 { return 42; }
+"#;
+        let c = compile_to_c_no_std(src).expect("no_std must compile");
+        assert!(
+            !c.contains("#include <stdio.h>"),
+            "stdio.h must not appear in --no-std output:\n{c}"
+        );
+        assert!(
+            c.contains("uint8_t"),
+            "minimal typedefs must appear in --no-std output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn no_std_regular_compile_still_has_stdio() {
+        let src = r#"
+intent "std test";
+fn main() -> i64 { return 42; }
+"#;
+        let c = compile_to_c(src).expect("regular compile must work");
+        assert!(
+            c.contains("#include"),
+            "regular compile must still include system headers:\n{c}"
         );
     }
 

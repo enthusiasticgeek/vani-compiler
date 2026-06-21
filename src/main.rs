@@ -1217,10 +1217,34 @@ fn run() -> Result<ExitCode, String> {
             // CLI. The legacy alias pins backend=c regardless of flags.
             let cmd_name = args[1].clone();
             let file = required_file(&args, 2, &cmd_name)?;
-            let (backend_kind, out, big_o_mode) = parse_emit_args(&args, 3, &cmd_name)?;
+            // Pre-scan for --no-std and --target before parse_emit_args
+            // (which handles the remaining positional flags).
+            let no_std = args[3..].iter().any(|a| a == "--no-std")
+                || args[3..].iter().any(|a| {
+                    if let Some(t) = a.strip_prefix("--target=") {
+                        t.contains("none") || t.contains("eabi") || t.contains("-elf")
+                    } else {
+                        false
+                    }
+                });
+            // Filter out --no-std and --target= before parsing remaining flags.
+            let filtered_args: Vec<String> = {
+                let mut v = vec![args[0].clone(), args[1].clone(), args[2].clone()];
+                v.extend(args[3..].iter().filter(|a| {
+                    *a != "--no-std" && !a.starts_with("--target=")
+                }).cloned());
+                v
+            };
+            let (backend_kind, out, big_o_mode) = parse_emit_args(&filtered_args, 3, &cmd_name)?;
             let checked = compile_path_or_report(&file)?;
             let body = match backend_kind {
-                BackendKind::C => emit_c_via_ssa(&checked.ir),
+                BackendKind::C => {
+                    if no_std {
+                        vani::backend_c::emit_c_no_std(&checked.ir)
+                    } else {
+                        emit_c_via_ssa(&checked.ir)
+                    }
+                }
                 BackendKind::Llvm => emit_llvm_via_ssa(&checked.ir),
             };
             // User-direction item (2026-06-08): Big-O comment

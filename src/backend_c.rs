@@ -36,6 +36,9 @@ impl Backend for CBackend {
 }
 
 thread_local! {
+    /// When true (set by `emit_c_no_std`), the prelude emits a
+    /// minimal bare-metal typedef block instead of libc includes.
+    static NO_STD_MODE: std::cell::Cell<bool> = std::cell::Cell::new(false);
     /// Per-program buffer for outlined task bodies. emit_stmt
     /// for `TypedStmt::TaskSpawn` appends one `static void*
     /// intent_task_<n>(void* ctx_raw) { … }` per spawn site
@@ -150,6 +153,15 @@ pub(crate) fn enum_variant_member(variant: &str) -> String {
 /// checker has already validated uniformity. T1.3 phase 2b.
 fn enum_common_payload_ty(decl: &crate::ir::TypedEnumDecl) -> Option<Type> {
     decl.payload_types.iter().find_map(|p| p.clone())
+}
+
+/// Emit C with bare-metal (`--no-std`) mode: replaces libc headers with
+/// a minimal typedef block. No `#include <stdio.h>` or similar.
+pub fn emit_c_no_std(program: &TypedProgram) -> String {
+    NO_STD_MODE.with(|f| f.set(true));
+    let result = emit_c(program);
+    NO_STD_MODE.with(|f| f.set(false));
+    result
 }
 
 pub fn emit_c(program: &TypedProgram) -> String {
@@ -1303,14 +1315,38 @@ pub fn emit_c(program: &TypedProgram) -> String {
     body.push_str("}\n");
 
     let mut out = String::new();
-    out.push_str("#include <assert.h>\n");
-    out.push_str("#include <stdatomic.h>\n");
-    out.push_str("#include <stdbool.h>\n");
-    out.push_str("#include <stdint.h>\n");
-    out.push_str("#include <stdio.h>\n");
-    out.push_str("#include <stdlib.h>\n");
-    out.push_str("#include <string.h>\n");
-    out.push_str("#include <math.h>\n");
+    let no_std = NO_STD_MODE.with(|f| f.get());
+    if no_std {
+        out.push_str("/* vani --no-std: bare-metal build — no libc, no hosted headers */\n");
+        out.push_str("typedef unsigned char      uint8_t;\n");
+        out.push_str("typedef unsigned short     uint16_t;\n");
+        out.push_str("typedef unsigned int       uint32_t;\n");
+        out.push_str("typedef unsigned long long uint64_t;\n");
+        out.push_str("typedef signed char        int8_t;\n");
+        out.push_str("typedef short              int16_t;\n");
+        out.push_str("typedef int                int32_t;\n");
+        out.push_str("typedef long long          int64_t;\n");
+        out.push_str("typedef __SIZE_TYPE__      size_t;\n");
+        out.push_str("typedef unsigned long      uintptr_t;\n");
+        out.push_str("#define NULL ((void*)0)\n");
+        out.push_str("/* malloc/free — will fail at link time if called; use #[no_heap] */\n");
+        out.push_str("void* malloc(size_t n);\n");
+        out.push_str("void  free(void* p);\n");
+        out.push_str("/* abort — minimal implementation required by the runtime */\n");
+        out.push_str("void  abort(void);\n");
+        out.push_str("#define true  1\n");
+        out.push_str("#define false 0\n");
+        out.push_str("typedef int bool;\n");
+    } else {
+        out.push_str("#include <assert.h>\n");
+        out.push_str("#include <stdatomic.h>\n");
+        out.push_str("#include <stdbool.h>\n");
+        out.push_str("#include <stdint.h>\n");
+        out.push_str("#include <stdio.h>\n");
+        out.push_str("#include <stdlib.h>\n");
+        out.push_str("#include <string.h>\n");
+        out.push_str("#include <math.h>\n");
+    }
     // INTENT_UNUSED is referenced by every Vec helper and
     // by the threading wrappers below, so define it
     // unconditionally even if no runtime guard helpers
