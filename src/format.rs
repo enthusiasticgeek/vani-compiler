@@ -893,9 +893,11 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             format_expr(expr, false, out);
             out.push_str(";\n");
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             out.push_str(&pad);
-            out.push_str("print ");
+            let keyword = if matches!(s, Stmt::EPrint { .. }) { "eprint" } else { "print" };
+            out.push_str(keyword);
+            out.push(' ');
             for (i, item) in items.iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
@@ -1593,7 +1595,7 @@ mod tests {
                     zero_expr(expr);
                     *span = crate::span::Span::new(0, 0);
                 }
-                Stmt::Print { items, span } => {
+                Stmt::Print { items, span } | Stmt::EPrint { items, span } => {
                     for it in items {
                         if let PrintItem::Expr(e) = it {
                             zero_expr(e);

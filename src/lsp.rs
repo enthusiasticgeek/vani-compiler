@@ -2259,7 +2259,7 @@ fn walk_stmt(
         TypedStmt::Reassign { expr, .. } => walk_expr(expr, offset, best),
         TypedStmt::Discard { expr } => walk_expr(expr, offset, best),
         TypedStmt::Return { expr } => walk_expr(expr, offset, best),
-        TypedStmt::Print { items } => {
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for item in items {
                 if let TypedPrintItem::Expr(e) = item {
                     walk_expr(e, offset, best);

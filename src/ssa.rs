@@ -996,6 +996,17 @@ fn lower_stmt(
             );
             Ok(())
         }
+        TypedStmt::EPrint { items } => {
+            // EPrint is not yet lowered through SSA — fall back to tree.
+            // This arm simply prevents a non-exhaustive-patterns error;
+            // stmts_ssa_supported() will return false for EPrint bodies
+            // so the SSA path is never actually reached in practice.
+            let _ = items;
+            return Err(LowerError {
+                message: "eprint is not in the v1 SSA subset; use the tree backend".to_string(),
+                span: crate::span::Span::default(),
+            });
+        }
         TypedStmt::Print { items } => {
             // Mirror tree-LLVM's `emit_print_items` shape:
             //   <item>  [' ' <item>]*  '\n'
@@ -1344,6 +1355,7 @@ fn stmt_kind_name(stmt: &TypedStmt) -> &'static str {
         TypedStmt::Assert { .. } => "Assert",
         TypedStmt::Prove { .. } => "Prove",
         TypedStmt::Print { .. } => "Print",
+        TypedStmt::EPrint { .. } => "EPrint",
         TypedStmt::If { .. } => "If",
         TypedStmt::While { .. } => "While",
         TypedStmt::Discard { .. } => "Discard",

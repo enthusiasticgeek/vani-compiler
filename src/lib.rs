@@ -46920,5 +46920,104 @@ fn main() -> i64 { return 0; }
         compile(source).expect("SOV enum (name-first) compiles");
     }
 
+    // ── file I/O tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn file_handle_type_is_non_copy() {
+        // FileHandle is affine — moving it into a second binding must
+        // be rejected (the first binding no longer holds the resource).
+        let source = r#"
+            fn main() -> i64 {
+                let f: FileHandle = file_open("/dev/null", "r");
+                let g: FileHandle = f;
+                let _: i64 = file_close(f);
+                let _: i64 = file_close(g);
+                return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(
+            result.is_err(),
+            "FileHandle must be non-Copy: double-use of a moved FileHandle should be rejected"
+        );
+    }
+
+    #[test]
+    fn file_open_write_read_compiles_c() {
+        // A complete file open/write/close/open/read/close cycle
+        // must lower to valid C that calls fopen/fputs/fclose.
+        let source = r#"
+            fn main() -> i64 {
+                let f: FileHandle = file_open("/tmp/vani_test_io.txt", "w");
+                if file_is_ok(ref f) {
+                    let _w: i64 = file_write(ref f, "hello\n");
+                    let _c: i64 = file_close(f);
+                }
+                let f2: FileHandle = file_open("/tmp/vani_test_io.txt", "r");
+                if file_is_ok(ref f2) {
+                    let line = file_read_line(ref f2);
+                    print line;
+                    let _c2: i64 = file_close(f2);
+                }
+                return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("file_open/write/read program must compile to C");
+        assert!(c.contains("fopen"), "expected fopen() in C output:\n{c}");
+        assert!(c.contains("fputs"), "expected fputs() in C output:\n{c}");
+        assert!(c.contains("fclose"), "expected fclose() in C output:\n{c}");
+    }
+
+    #[test]
+    fn eprint_compiles_c() {
+        // `eprint` writes to stderr; it must lower to valid C that
+        // uses fprintf(stderr, ...) or equivalent.
+        let source = r#"
+            fn main() -> i64 {
+                eprint "error: something went wrong";
+                return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("eprint program must compile to C");
+        assert!(
+            c.contains("stderr"),
+            "expected stderr reference in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn stdin_read_line_compiles() {
+        // stdin_read_line() must compile to C (returns OwnedStr from stdin).
+        let source = r#"
+            fn main() -> i64 {
+                let line = stdin_read_line();
+                print line;
+                return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("stdin_read_line program must compile to C");
+        assert!(
+            c.contains("intent_stdin_read_line") || c.contains("stdin"),
+            "expected stdin_read_line helper in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn flush_stdout_compiles() {
+        // flush_stdout() must compile to C that calls fflush(stdout).
+        let source = r#"
+            fn main() -> i64 {
+                print "hello";
+                let _: i64 = flush_stdout();
+                return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("flush_stdout program must compile to C");
+        assert!(
+            c.contains("fflush"),
+            "expected fflush() in C output:\n{c}"
+        );
+    }
+
 }
 

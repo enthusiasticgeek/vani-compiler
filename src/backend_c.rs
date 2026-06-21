@@ -1329,6 +1329,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
+    emit_intent_file_io_helpers_c(&mut out, &body);
     // Force TCP helpers to emit when epoll helpers do so the
     // `accept()` / `recv()` declares + the thread-local buffer
     // are available to the nb variants AND `read()` lands for
@@ -1939,6 +1940,33 @@ fn emit_intent_sleep_ms_helper_c(out: &mut String, body: &str) {
          \x20 return 0;\n\
          }\n\
          #endif\n\n",
+    );
+}
+
+fn emit_intent_file_io_helpers_c(out: &mut String, body: &str) {
+    if !body.contains("intent_file_read_line") && !body.contains("intent_stdin_read_line") {
+        return;
+    }
+    out.push_str(
+        "/* file I/O helpers */\n\
+         static char* intent_file_read_line(FILE* f) INTENT_UNUSED;\n\
+         static char* intent_file_read_line(FILE* f) {\n\
+         \x20 if (!f) { char* e = (char*)malloc(1); e[0] = '\\0'; return e; }\n\
+         \x20 size_t cap = 256; size_t len = 0;\n\
+         \x20 char* buf = (char*)malloc(cap);\n\
+         \x20 int c;\n\
+         \x20 while ((c = fgetc(f)) != EOF && c != '\\n') {\n\
+         \x20   if (len + 1 >= cap) { cap *= 2; buf = (char*)realloc(buf, cap); }\n\
+         \x20   buf[len++] = (char)c;\n\
+         \x20 }\n\
+         \x20 if (len == 0 && c == EOF) { free(buf); char* e2 = (char*)malloc(1); e2[0] = '\\0'; return e2; }\n\
+         \x20 buf[len] = '\\0';\n\
+         \x20 return buf;\n\
+         }\n\
+         static char* intent_stdin_read_line(void) INTENT_UNUSED;\n\
+         static char* intent_stdin_read_line(void) {\n\
+         \x20 return intent_file_read_line(stdin);\n\
+         }\n\n",
     );
 }
 
@@ -7698,7 +7726,7 @@ fn collect_vec_elements_in_stmt(
         TypedStmt::Return { expr }
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => collect_vec_elements_in_expr(expr, seen, out),
-        TypedStmt::Print { items } => {
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
                 if let crate::ir::TypedPrintItem::Expr(e) = it {
                     collect_vec_elements_in_expr(e, seen, out);
@@ -10302,7 +10330,7 @@ pub(crate) fn collect_rwlock_specs_in_stmt(
         TypedStmt::Return { expr }
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => collect_rwlock_specs_in_expr(expr, seen, out),
-        TypedStmt::Print { items } => {
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
                 if let crate::ir::TypedPrintItem::Expr(e) = it {
                     collect_rwlock_specs_in_expr(e, seen, out);
@@ -10435,7 +10463,7 @@ pub(crate) fn collect_channel_specs_in_stmt(
         TypedStmt::Return { expr }
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => collect_channel_specs_in_expr(expr, seen, out),
-        TypedStmt::Print { items } => {
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
                 if let crate::ir::TypedPrintItem::Expr(e) = it {
                     collect_channel_specs_in_expr(e, seen, out);
@@ -10552,7 +10580,7 @@ pub(crate) fn collect_mutex_specs_in_stmt(
         TypedStmt::Return { expr }
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => collect_mutex_specs_in_expr(expr, seen, out),
-        TypedStmt::Print { items } => {
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
                 if let crate::ir::TypedPrintItem::Expr(e) = it {
                     collect_mutex_specs_in_expr(e, seen, out);
@@ -12444,6 +12472,16 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                 out.push_str(&local_name(name));
                 out.push_str(");\n");
             }
+            Type::FileHandle => {
+                // RAII: fclose at scope exit if handle is nonzero.
+                // Calling fclose(NULL) is UB; the zero check guards
+                // against a file_open that returned 0 (failed open).
+                out.push_str("  if (");
+                out.push_str(&local_name(name));
+                out.push_str(") fclose((FILE*)");
+                out.push_str(&local_name(name));
+                out.push_str(");\n");
+            }
             Type::Struct(struct_name) => {
                 // Auto-call the user's `Drop` impl when one
                 // exists. Two flavors:
@@ -12932,6 +12970,7 @@ return __intent_ret; }}\n",
             out.push_str(" */\n");
         }
         TypedStmt::Print { items } => emit_print_items(items, out),
+        TypedStmt::EPrint { items } => emit_eprint_items(items, out),
         TypedStmt::If {
             cond,
             then_body,
@@ -13797,6 +13836,69 @@ fn emit_print_expr_no_newline(expr: &TypedExpr, out: &mut String) {
                 out.push_str(&emit_expr(expr));
                 out.push_str("));\n");
             }
+        }
+    }
+}
+
+fn emit_eprint_items(items: &[crate::ir::TypedPrintItem], out: &mut String) {
+    use crate::ir::TypedPrintItem;
+    for (i, item) in items.iter().enumerate() {
+        match item {
+            TypedPrintItem::Str(s) => {
+                out.push_str("  fputs(\"");
+                out.push_str(&escape_c_string(s));
+                out.push_str("\", stderr);\n");
+            }
+            TypedPrintItem::Expr(expr) => emit_eprint_expr_no_newline(expr, out),
+        }
+        if i + 1 < items.len() {
+            out.push_str("  fputs(\" \", stderr);\n");
+        }
+    }
+    out.push_str("  fputc('\\n', stderr);\n");
+}
+
+fn emit_eprint_expr_no_newline(expr: &TypedExpr, out: &mut String) {
+    match &expr.ty {
+        Type::Bool => {
+            out.push_str("  fputs(");
+            out.push_str(&emit_expr(expr));
+            out.push_str(" ? \"true\" : \"false\", stderr);\n");
+        }
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 => {
+            out.push_str("  fprintf(stderr, \"%llu\", (unsigned long long)(");
+            out.push_str(&emit_expr(expr));
+            out.push_str("));\n");
+        }
+        Type::F32 | Type::F64 => {
+            out.push_str("  fprintf(stderr, \"%g\", (double)(");
+            out.push_str(&emit_expr(expr));
+            out.push_str("));\n");
+        }
+        Type::Str => {
+            out.push_str("  fputs(");
+            out.push_str(&emit_expr(expr));
+            out.push_str(", stderr);\n");
+        }
+        Type::OwnedStr => {
+            let is_fresh = crate::ir::is_fresh_owned_str(expr);
+            if is_fresh {
+                out.push_str("  {\n    char* _intent_eprint_tmp = ");
+                out.push_str(&emit_expr(expr));
+                out.push_str(";\n");
+                out.push_str("    fputs(_intent_eprint_tmp, stderr);\n");
+                out.push_str("    free((void*)_intent_eprint_tmp);\n");
+                out.push_str("  }\n");
+            } else {
+                out.push_str("  fputs(");
+                out.push_str(&emit_expr(expr));
+                out.push_str(", stderr);\n");
+            }
+        }
+        _ => {
+            out.push_str("  fprintf(stderr, \"%lld\", (long long)(");
+            out.push_str(&emit_expr(expr));
+            out.push_str("));\n");
         }
     }
 }
@@ -15042,6 +15144,31 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         "barrier_wait" => {
             return format!("intent_barrier_wait({})", emit_expr(&args[0]));
+        }
+        // File I/O builtins — FILE* wrapped as int64_t.
+        "file_open" => {
+            return format!("(int64_t)fopen({}, {})", emit_expr(&args[0]), emit_expr(&args[1]));
+        }
+        "file_is_ok" => {
+            return format!("(*(int64_t*){} != 0)", emit_expr(&args[0]));
+        }
+        "file_read_line" => {
+            return format!("intent_file_read_line((FILE*)(*(int64_t*){}))", emit_expr(&args[0]));
+        }
+        "file_write" => {
+            return format!("(int64_t)fputs({}, (FILE*)(*(int64_t*){}))", emit_expr(&args[1]), emit_expr(&args[0]));
+        }
+        "file_close" => {
+            return format!("(int64_t)fclose((FILE*){})", emit_expr(&args[0]));
+        }
+        "file_flush" => {
+            return format!("(int64_t)fflush((FILE*)(*(int64_t*){}))", emit_expr(&args[0]));
+        }
+        "stdin_read_line" => {
+            return "intent_stdin_read_line()".to_string();
+        }
+        "flush_stdout" => {
+            return "(int64_t)fflush(stdout)".to_string();
         }
         "rwlock_new" => {
             let elt = match result_ty {
@@ -18610,6 +18737,9 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // `Barrier` stores an atomic count + total + generation counter.
         // Stack-by-value; no heap allocation.
         Type::Barrier => "intent_barrier",
+        // `FileHandle` wraps FILE* as an i64. Stack-by-value.
+        // Scope-exit Drop calls fclose if nonzero.
+        Type::FileHandle => "int64_t",
         // `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` — like Mutex
         // but with shared-reader / exclusive-writer semantics. Fall back
         // to i64 form; per-T spelling goes through c_rwlock_storage.
@@ -19173,7 +19303,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -19205,6 +19335,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Guard(_)
         | Type::Condvar
         | Type::Barrier
+        | Type::FileHandle
         | Type::RwLock(_)
         | Type::ReadGuard(_)
         | Type::WriteGuard(_)
@@ -19365,7 +19496,7 @@ pub(crate) fn collect_used_dyn_ifaces(program: &TypedProgram) -> std::collection
             TypedStmt::Discard { expr } => walk_expr(expr, set),
             TypedStmt::Return { expr } => walk_expr(expr, set),
             TypedStmt::Assert { expr, .. } | TypedStmt::Prove { expr } => walk_expr(expr, set),
-            TypedStmt::Print { items } => {
+            TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
                 for item in items {
                     if let crate::ir::TypedPrintItem::Expr(e) = item {
                         walk_expr(e, set);

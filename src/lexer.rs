@@ -115,6 +115,7 @@ pub enum TokenKind {
     Prove,
     Forall,
     Print,
+    EPrint,
     /// `try EXPR` — error-propagation sugar over payloaded
     /// enums. If `EXPR` evaluates to the enum's payload-less
     /// "early-return" variant (e.g. `Opt.None`), the enclosing
@@ -5478,6 +5479,7 @@ fn is_structure_keyword_kind(kind: &TokenKind) -> bool {
             | TokenKind::Assert
             | TokenKind::Prove
             | TokenKind::Print
+            | TokenKind::EPrint
             | TokenKind::Try
             | TokenKind::Module
             | TokenKind::Pub
@@ -6235,6 +6237,7 @@ impl<'a> Lexer<'a> {
             // `write` is preferred in new code; both currently
             // accepted.
             "print" | "write" => TokenKind::Print,
+            "eprint" => TokenKind::EPrint,
             "try" => TokenKind::Try,
             "len" => TokenKind::Len,
             "as" => TokenKind::As,

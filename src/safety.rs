@@ -1040,14 +1040,14 @@ fn wcet_stmt(
         S::FieldAssign { value, .. } => {
             Some(3 + wcet_expr(value, fn_map, visiting, recursion_bound)?)
         }
-        S::Print { items } => {
+        S::Print { items } | S::EPrint { items } => {
             let mut total: u64 = 0;
             for it in items {
                 if let crate::ir::TypedPrintItem::Expr(e) = it {
                     total = total.saturating_add(wcet_expr(e, fn_map, visiting, recursion_bound)?);
                 }
             }
-            // print itself is a syscall — treat as 50 cycles
+            // print/eprint itself is a syscall — treat as 50 cycles
             // baseline (conservative; real cost is much higher).
             Some(total.saturating_add(50))
         }

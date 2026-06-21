@@ -1274,6 +1274,7 @@ impl Parser {
                     | TokenKind::Assert
                     | TokenKind::Prove
                     | TokenKind::Print
+                    | TokenKind::EPrint
                     | TokenKind::If
                     | TokenKind::While
                     | TokenKind::For
@@ -2117,6 +2118,10 @@ impl Parser {
                 self.bump();
                 return Ok(Type::Barrier);
             }
+            if name == "FileHandle" {
+                self.bump();
+                return Ok(Type::FileHandle);
+            }
             if name == "Deque" {
                 self.bump();
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
@@ -2459,6 +2464,8 @@ impl Parser {
             self.parse_prove_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Print)) {
             self.parse_print_stmt()
+        } else if self.check(|kind| matches!(kind, TokenKind::EPrint)) {
+            self.parse_eprint_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::If)) {
             self.parse_if_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
@@ -2814,6 +2821,7 @@ impl Parser {
                         prev.kind,
                         TokenKind::Return
                             | TokenKind::Print
+                            | TokenKind::EPrint
                             | TokenKind::Assert
                             | TokenKind::Prove
                             | TokenKind::Let
@@ -3944,6 +3952,26 @@ impl Parser {
         })
     }
 
+    fn parse_eprint_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.expect_keyword("'eprint'", |kind| matches!(kind, TokenKind::EPrint))?;
+        let mut items = Vec::new();
+        loop {
+            items.push(self.parse_print_item()?);
+            if self
+                .match_token(|kind| matches!(kind, TokenKind::Comma))
+                .is_some()
+            {
+                continue;
+            }
+            break;
+        }
+        let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
+        Ok(Stmt::EPrint {
+            items,
+            span: start.span.merge(semi.span),
+        })
+    }
+
     /// Parse a match-expression body starting at `{`:
     /// `{ pat then expr, ... }`. Consumes the `{`, all arms,
     /// and the `}`. Called by both the keyword-first match
@@ -4672,6 +4700,8 @@ impl Parser {
                         stmts.push(self.parse_let_stmt()?);
                     } else if self.check(|k| matches!(k, TokenKind::Print)) {
                         stmts.push(self.parse_print_stmt()?);
+                    } else if self.check(|k| matches!(k, TokenKind::EPrint)) {
+                        stmts.push(self.parse_eprint_stmt()?);
                     } else {
                         break;
                     }

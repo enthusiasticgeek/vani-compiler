@@ -176,6 +176,9 @@ pub enum TypedStmt {
     Print {
         items: Vec<TypedPrintItem>,
     },
+    EPrint {
+        items: Vec<TypedPrintItem>,
+    },
     If {
         cond: TypedExpr,
         then_body: Vec<TypedStmt>,

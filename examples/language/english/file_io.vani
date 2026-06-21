@@ -1,0 +1,32 @@
+// file_io.vani — Native file I/O demonstration using FileHandle.
+//
+// FileHandle is an affine (non-Copy) type that wraps FILE* as i64.
+// The compiler inserts an automatic fclose() at scope exit when a
+// FileHandle goes out of scope and the handle is nonzero.
+
+fn main() -> i64 {
+    // --- write a temporary file ---
+    let path = "/tmp/vani_file_io_test.txt";
+    let f: FileHandle = file_open(path, "w");
+    if file_is_ok(ref f) {
+        let _w: i64 = file_write(ref f, "hello, file I/O\n");
+        let _fl: i64 = file_flush(ref f);
+        let _c: i64 = file_close(f);
+    }
+
+    // --- read back the file ---
+    let f2: FileHandle = file_open(path, "r");
+    if file_is_ok(ref f2) {
+        let line = file_read_line(ref f2);
+        print line;
+        let _c2: i64 = file_close(f2);
+    }
+
+    // --- eprint writes to stderr ---
+    eprint "file I/O example complete";
+
+    // --- flush stdout ---
+    let _fs: i64 = flush_stdout();
+
+    return 0;
+}

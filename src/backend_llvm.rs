@@ -341,6 +341,7 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Task => 16, // pthread_t + ctx*
         Type::Condvar => 8,
         Type::Barrier => 24, // { i64 count, i64 n, i32 gen, pad } = 20+4 pad
+        Type::FileHandle => 8, // FILE* stored as i64
         Type::RwLock(inner) => llvm_byte_size(inner).max(8) + 8, // T + state(i32) + pad
         Type::ReadGuard(_) | Type::WriteGuard(_) => 8, // pointer to RwLock
         Type::Box(inner) => match &**inner {
@@ -759,6 +760,12 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
     out.push_str("declare i8* @realloc(i8*, i64)\n");
+    // File I/O primitives — FileHandle builtin support.
+    out.push_str("declare i8* @fopen(i8*, i8*)\n");
+    out.push_str("declare i32 @fclose(i8*)\n");
+    out.push_str("declare i32 @fputs(i8*, i8*)\n");
+    out.push_str("declare i32 @fflush(i8*)\n");
+    out.push_str("declare i32 @fgetc(i8*)\n");
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memset(i8*, i32, i64)\n");
@@ -2717,6 +2724,30 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 }
                 return;
             }
+            // FileHandle: scope-exit fclose if the handle is nonzero.
+            // The local is an i64 alloca storing FILE* cast to int64.
+            // Load it; if nonzero, bitcast to i8* and call @fclose.
+            if matches!(ty, Type::FileHandle) {
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    let raw = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = load i64, i64* {}\n", raw, addr));
+                    let ok_lbl = ctx.fresh_label("fh_close");
+                    let skip_lbl = ctx.fresh_label("fh_skip");
+                    let cmp = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", cmp, raw));
+                    out.push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}\n",
+                        cmp, ok_lbl, skip_lbl
+                    ));
+                    out.push_str(&format!("{}:\n", ok_lbl));
+                    let fp = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = inttoptr i64 {} to i8*\n", fp, raw));
+                    out.push_str(&format!("  call i32 @fclose(i8* {})\n", fp));
+                    out.push_str(&format!("  br label %{}\n", skip_lbl));
+                    out.push_str(&format!("{}:\n", skip_lbl));
+                }
+                return;
+            }
             // For `Vec<T>`, route through the per-element-type
             // `@intent_vec_<tag>__free` helper. The helper
             // walks elements first for non-Copy element types
@@ -3451,6 +3482,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             out.push_str(&format!("{}:\n", ok));
         }
         TypedStmt::Print { items } => emit_print_items(items, ctx, out),
+        TypedStmt::EPrint { items } => emit_eprint_items_llvm(items, ctx, out),
         TypedStmt::While { cond, body, .. } => {
             let header = ctx.fresh_label("loop_header");
             let body_lbl = ctx.fresh_label("loop_body");
@@ -6197,6 +6229,104 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = phi i1 [ true, %{} ], [ false, %{} ]\n",
                     result, lbl_last, lbl_spin
                 ));
+                return result;
+            }
+            // File I/O builtins — FileHandle backed by i64 storing FILE*.
+            if name == "file_open" {
+                // file_open(path: str, mode: str) -> FileHandle (i64)
+                let path = emit_expr(&args[0], ctx, out);
+                let mode = emit_expr(&args[1], ctx, out);
+                let fp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @fopen(i8* {}, i8* {})\n",
+                    fp, path, mode
+                ));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = ptrtoint i8* {} to i64\n", result, fp));
+                return result;
+            }
+            if name == "file_is_ok" {
+                // file_is_ok(f: ref FileHandle) -> bool
+                let f_ptr = emit_expr(&args[0], ctx, out);
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", raw, f_ptr));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp ne i64 {}, 0\n", result, raw));
+                return result;
+            }
+            if name == "file_read_line" {
+                // file_read_line(f: ref FileHandle) -> str
+                let f_ptr = emit_expr(&args[0], ctx, out);
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", raw, f_ptr));
+                let fp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = inttoptr i64 {} to i8*\n", fp, raw));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @intent_file_read_line(i8* {})\n",
+                    result, fp
+                ));
+                return result;
+            }
+            if name == "file_write" {
+                // file_write(f: ref FileHandle, s: str) -> i64
+                let f_ptr = emit_expr(&args[0], ctx, out);
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", raw, f_ptr));
+                let fp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = inttoptr i64 {} to i8*\n", fp, raw));
+                let s = emit_expr(&args[1], ctx, out);
+                let r = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = call i32 @fputs(i8* {}, i8* {})\n", r, s, fp));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sext i32 {} to i64\n", result, r));
+                return result;
+            }
+            if name == "file_close" {
+                // file_close(f: FileHandle) -> i64  (consumes; f moved)
+                let raw = emit_expr(&args[0], ctx, out);
+                let fp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = inttoptr i64 {} to i8*\n", fp, raw));
+                let r = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = call i32 @fclose(i8* {})\n", r, fp));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sext i32 {} to i64\n", result, r));
+                return result;
+            }
+            if name == "file_flush" {
+                // file_flush(f: ref FileHandle) -> i64
+                let f_ptr = emit_expr(&args[0], ctx, out);
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load i64, i64* {}\n", raw, f_ptr));
+                let fp = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = inttoptr i64 {} to i8*\n", fp, raw));
+                let r = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = call i32 @fflush(i8* {})\n", r, fp));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sext i32 {} to i64\n", result, r));
+                return result;
+            }
+            if name == "stdin_read_line" {
+                // stdin_read_line() -> str
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @intent_stdin_read_line()\n",
+                    result
+                ));
+                return result;
+            }
+            if name == "flush_stdout" {
+                // flush_stdout() -> i64
+                let null_fp = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr i8, i8* null, i64 0\n",
+                    null_fp
+                ));
+                // fflush(NULL) flushes all open output streams
+                let r = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = call i32 @fflush(i8* null)\n", r));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = sext i32 {} to i64\n", result, r));
                 return result;
             }
             // RwLock builtins. `%intent_rwlock_i64 = type { i64, i32, i32 }`:
@@ -15678,6 +15808,149 @@ fn emit_print_items(
         nl
     ));
     out.push_str(&format!("  call i32 (i8*, ...) @printf(i8* {}, i32 10)\n", nl));
+}
+
+/// Lower `eprint item1, item2, …;` — same as `emit_print_items` but writes
+/// to stderr (fd 2) using `dprintf` instead of `printf`.
+fn emit_eprint_items_llvm(
+    items: &[crate::ir::TypedPrintItem],
+    ctx: &mut FnCtx,
+    out: &mut String,
+) {
+    use crate::ir::TypedPrintItem;
+    for (i, item) in items.iter().enumerate() {
+        match item {
+            TypedPrintItem::Str(text) => {
+                if let Some(&idx) = ctx.print_str_indices.get(text) {
+                    let bytes = text.len() + 1;
+                    let str_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr [{} x i8], [{} x i8]* @.print_str.{}, i64 0, i64 0\n",
+                        str_p, bytes, bytes, idx
+                    ));
+                    let fmt_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.s, i64 0, i64 0\n",
+                        fmt_p
+                    ));
+                    out.push_str(&format!(
+                        "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
+                        fmt_p, str_p
+                    ));
+                }
+            }
+            TypedPrintItem::Expr(expr) => emit_eprint_expr_no_newline_llvm(expr, ctx, out),
+        }
+        if i + 1 < items.len() {
+            let sp = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n",
+                sp
+            ));
+            out.push_str(&format!("  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i32 32)\n", sp));
+        }
+    }
+    let nl = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.c, i64 0, i64 0\n",
+        nl
+    ));
+    out.push_str(&format!("  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i32 10)\n", nl));
+}
+
+fn emit_eprint_expr_no_newline_llvm(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) {
+    let value = emit_expr(expr, ctx, out);
+    match &expr.ty {
+        Type::Bool => {
+            let t_lbl = ctx.fresh_label("ep_true");
+            let f_lbl = ctx.fresh_label("ep_false");
+            let m_lbl = ctx.fresh_label("ep_done");
+            out.push_str(&format!(
+                "  br i1 {}, label %{}, label %{}\n",
+                value, t_lbl, f_lbl
+            ));
+            out.push_str(&format!("{}:\n", t_lbl));
+            let t_fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.true, i64 0, i64 0\n",
+                t_fmt
+            ));
+            out.push_str(&format!("  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {})\n", t_fmt));
+            out.push_str(&format!("  br label %{}\n", m_lbl));
+            out.push_str(&format!("{}:\n", f_lbl));
+            let f_fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [6 x i8], [6 x i8]* @.fmt.false, i64 0, i64 0\n",
+                f_fmt
+            ));
+            out.push_str(&format!("  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {})\n", f_fmt));
+            out.push_str(&format!("  br label %{}\n", m_lbl));
+            out.push_str(&format!("{}:\n", m_lbl));
+        }
+        ty if ty.is_unsigned_integer() => {
+            let widened = widen_int_to_64(&value, ty, ctx, out, false);
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.llu, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {})\n",
+                fmt, widened
+            ));
+        }
+        ty if ty.is_signed_integer() => {
+            let widened = widen_int_to_64(&value, ty, ctx, out, true);
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [5 x i8], [5 x i8]* @.fmt.lld, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i64 {})\n",
+                fmt, widened
+            ));
+        }
+        Type::F64 => {
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {})\n",
+                fmt, value
+            ));
+        }
+        Type::F32 => {
+            let dbl = ctx.fresh_tmp();
+            out.push_str(&format!("  {} = fpext float {} to double\n", dbl, value));
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.g, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, double {})\n",
+                fmt, dbl
+            ));
+        }
+        Type::Str | Type::OwnedStr => {
+            let fmt = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr [3 x i8], [3 x i8]* @.fmt.s, i64 0, i64 0\n",
+                fmt
+            ));
+            out.push_str(&format!(
+                "  call i32 (i32, i8*, ...) @dprintf(i32 2, i8* {}, i8* {})\n",
+                fmt, value
+            ));
+        }
+        ty => unreachable!(
+            "checker rejects eprint of {:?} but the LLVM backend was asked to lower it",
+            ty
+        ),
+    }
 }
 
 fn emit_print_expr_no_newline(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) {
@@ -41418,7 +41691,7 @@ pub(crate) fn walk_body(
             | TypedStmt::Prove { expr } => {
                 walk_expr(expr, declared, order, seen);
             }
-            TypedStmt::Print { items } => {
+            TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
                 for it in items {
                     if let crate::ir::TypedPrintItem::Expr(e) = it {
                         walk_expr(e, declared, order, seen);
@@ -42430,6 +42703,9 @@ fn is_scalar(ty: &Type) -> bool {
         // the machine level (T*). The scalar Let path's
         // `alloca T*` and `store T*` work uniformly.
         || matches!(ty, Type::Box(_))
+        // FileHandle wraps a FILE* as i64; it's a scalar i64
+        // alloca just like any integer binding.
+        || matches!(ty, Type::FileHandle)
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -42631,6 +42907,8 @@ pub(crate) fn llvm_type(ty: &Type) -> &'static str {
         // Enums lower to a 32-bit tag — see `llvm_type_string`
         // for the same. T1.3.
         Type::Enum(_) => "i32",
+        // FileHandle wraps FILE* as int64_t; LLVM type is i64.
+        Type::FileHandle => "i64",
         // Function pointers don't fit into `&'static str` —
         // their spelling depends on parameter / return types.
         // Callers must route through `llvm_type_string`.

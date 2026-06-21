@@ -8,6 +8,9 @@ use std::collections::{BTreeMap, HashMap};
 
 const BUILTIN_FUNCTION_NAMES: &[&str] =
     &["vec", "push", "pop", "set", "sort", "sort_by", "sort_desc", "vec_swap", "vec_remove_at", "vec_replace_all", "reverse", "dedup", "find", "contains", "binary_search", "swap_remove", "insert", "clear", "str_contains", "str_starts_with", "str_ends_with", "str_trim", "str_replace", "str_split", "parse_int", "parse_float", "i64_to_str", "f64_to_str", "bool_to_str", "str_index_of", "substring", "str_repeat", "str_to_upper", "str_to_lower", "parse_bool", "str_join", "str_pad_left", "str_pad_right", "str_lines", "str_chars", "str_reverse", "str_strip_prefix", "str_strip_suffix", "str_count_char", "pow", "sqrt", "sin", "cos", "tan", "floor", "ceil", "abs", "log", "log2", "log10", "exp", "atan2", "f64_is_nan", "f64_is_inf", "f64_is_finite", "f64_pi", "f64_e", "f64_inf", "f64_nan", "f64_round", "f64_trunc_to_i64", "i64_gcd", "i64_lcm", "i64_pow", "i64_abs_diff", "i64_signum", "f64_signum", "is_ascii_digit", "is_ascii_alpha", "is_ascii_alphanumeric", "is_ascii_whitespace", "i64_count_set_bits", "i64_leading_zeros", "i64_trailing_zeros", "i64_bswap", "i64_rotate_left", "i64_rotate_right", "f64_to_bits", "f64_from_bits", "i64_min_value", "i64_max_value", "f64_max_finite", "i64_div_floor", "i64_mod_floor", "f64_lerp", "f64_clamp01", "i64_log2_floor", "i64_log2_ceil", "i64_is_power_of_2", "i64_next_power_of_2", "i64_saturating_add", "i64_saturating_sub", "i64_saturating_mul", "i64_min", "i64_max", "i64_clamp", "f64_min", "f64_max", "f64_clamp", "i64_isqrt", "f64_hypot", "f64_to_radians", "f64_to_degrees", "asin", "acos", "atan", "sinh", "cosh", "tanh", "f64_epsilon", "f64_min_positive", "f64_min_subnormal", "f64_copysign", "f64_fma", "f64_remainder", "f64_is_normal", "f64_is_subnormal", "f64_sign_bit", "f64_next_up", "f64_next_down", "i64_div_ceil", "i64_div_round", "f64_trunc", "f64_frac", "i64_count_digits", "i64_log10_floor", "i64_log10_ceil", "i64_pow_mod", "i64_is_prime", "i64_factorial", "i64_fibonacci", "i64_binomial", "i64_perm", "i64_avg", "i64_wrap", "f64_wrap", "f64_mod_floor", "i64_min_3", "i64_max_3", "f64_min_3", "f64_max_3", "f64_sigmoid", "f64_softsign", "f64_step", "f64_smoothstep", "f64_smoothstep5", "f64_inv_lerp", "f64_chebyshev", "f64_l1_norm", "i64_isqrt_ceil", "i64_is_perfect_square", "i64_divisor_count", "i64_divisor_sum", "i64_totient", "i64_radical", "i64_next_prime", "i64_prev_prime", "i64_mod_inverse", "i64_set_bit", "i64_clear_bit", "i64_toggle_bit", "i64_test_bit", "i64_reverse_bits", "f64_relu", "f64_leaky_relu", "f64_softplus", "f64_swish", "f64_logit", "f64_sinc", "f64_safe_div", "f64_safe_sqrt", "i64_safe_div", "f64_safe_log", "f64_geometric_mean", "f64_harmonic_mean", "f64_quadratic_mean", "f64_log_b", "f64_erf", "f64_erfc", "f64_tgamma", "f64_lgamma", "f64_cbrt", "f64_expm1", "f64_log1p", "f64_exp2", "f64_exp10", "f64_inv_sqrt", "f64_round_to", "f64_sec", "f64_csc", "f64_cot", "f64_normal_pdf", "f64_normal_cdf", "f64_lerp_clamp", "f64_atan2_deg", "f64_uniform_random", "f64_inv_smoothstep", "f64_atan_deg", "f64_rgb_to_grayscale", "i64_pack_rgb", "i64_unpack_rgb_r", "i64_unpack_rgb_g", "i64_unpack_rgb_b", "f64_remap", "str_byte_at", "str_len_bytes", "str_starts_with_byte", "str_ends_with_byte", "str_byte_count", "str_index_of_byte", "str_last_index_of_byte", "str_count_ascii_digits", "str_count_ascii_alpha", "str_count_ascii_alphanumeric", "str_count_ascii_whitespace", "str_count_ascii_upper", "str_count_ascii_lower", "str_count_ascii_punct", "str_count_ascii_control", "str_first_byte", "str_last_byte", "seed_rng", "rand_i64", "rand_in_range", "hash_i64", "hash_f64", "hash_str", "hash_combine", "siphash_i64", "siphash_str", "heap_push", "heap_pop", "heap_peek", "heapify", "deque_new", "deque_push_back", "deque_push_front", "deque_pop_back", "deque_pop_front", "deque_peek_back", "deque_peek_front", "deque_len", "deque_clear", "hashset_new", "hashset_insert", "hashset_contains", "hashset_remove", "hashset_len", "hashset_clear", "hashmap_new", "hashmap_insert", "hashmap_get", "hashmap_contains_key", "hashmap_remove", "hashmap_len", "hashmap_clear", "btreeset_new", "btreeset_insert", "btreeset_contains", "btreeset_remove", "btreeset_len", "btreeset_range", "btreeset_min", "btreeset_max", "btreeset_clear", "btreemap_new", "btreemap_insert", "btreemap_get", "btreemap_contains_key", "btreemap_remove", "btreemap_len", "btreemap_range_keys", "btreemap_range_values", "btreemap_min_key", "btreemap_max_key", "btreemap_clear", "vec_map", "vec_fold", "vec_filter", "vec_position", "vec_count_if", "vec_max_by", "vec_min_by", "vec_zip_with", "vec_take", "vec_drop", "vec_take_while", "vec_drop_while", "vec_map_fold", "vec_filter_fold", "vec_map_filter", "vec_map_filter_fold", "vec_sum", "vec_product", "vec_min", "vec_max", "vec_count", "vec_any", "vec_all", "vec_chain", "vec_range", "vec_repeat", "vec_extend", "vec_concat", "vec_reverse_copy", "vec_unique", "vec_iota", "vec_first", "vec_last", "vec_running_sum", "vec_dot", "vec_intersect", "vec_difference", "vec_union", "option_unwrap_or", "option_is_some", "option_is_none", "option_map", "option_filter", "option_or", "option_and_then", "option_unwrap_or_f64", "option_is_some_f64", "option_is_none_f64", "union_find_new", "union_find_union", "union_find_find", "union_find_connected", "union_find_count", "union_find_clear", "binary_heap_new", "binary_heap_push", "binary_heap_pop", "binary_heap_peek", "binary_heap_len", "binary_heap_clear", "bloom_filter_new", "bloom_filter_insert", "bloom_filter_contains", "bloom_filter_len", "bloom_filter_count", "bloom_filter_clear", "bst_new", "bst_insert", "bst_contains", "bst_remove", "bst_len", "bst_min", "bst_max", "bst_clear", "graph_new", "graph_add_edge", "graph_num_nodes", "graph_num_edges", "graph_bfs_reach", "graph_dfs_reach", "graph_dijkstra", "graph_has_cycle", "graph_mst_kruskal", "graph_mst_prim", "graph_astar", "graph_topo_sort", "graph_clear", "trie_new", "trie_insert", "trie_contains", "trie_starts_with", "trie_delete", "trie_len", "trie_node_count", "trie_clear", "skiplist_new", "skiplist_insert", "skiplist_contains", "skiplist_remove", "skiplist_len", "skiplist_min", "skiplist_max", "skiplist_clear", "clone", "clone_at", "hash_combine_3", "hash_combine_4", "hash_pair", "hash_triple", "f64_hash_pair", "f64_hash_triple", "str_hash_pair", "str_hash_triple", "vec_argmin", "vec_argmax", "vec_count_value", "vec_index_of_value", "vec_last_index_of_value", "vec_cumulative_max", "vec_cumulative_min", "vec_running_product", "vec_running_xor", "vec_running_and", "vec_running_or", "vec_all_equal", "vec_is_sorted_asc", "vec_is_sorted_desc", "vec_is_palindrome", "vec_sliding_max", "vec_sliding_min", "vec_sliding_sum", "vec_sliding_product", "vec_abs", "vec_negate", "vec_signum", "vec_square", "vec_add_scalar", "vec_sub_scalar", "vec_mul_scalar", "vec_div_scalar", "vec_eq_mask", "vec_ne_mask", "vec_lt_mask", "vec_le_mask", "vec_gt_mask", "vec_ge_mask", "vec_min_with_scalar", "vec_max_with_scalar", "vec_clamp_scalar", "vec_add_pairwise", "vec_sub_pairwise", "vec_mul_pairwise", "vec_min_pairwise", "vec_max_pairwise", "vec_mod_scalar", "vec_pow_scalar", "vec_shl_scalar", "vec_shr_scalar", "vec_rotate_left", "vec_rotate_right", "vec_shift_left", "vec_shift_right", "vec_subset_of", "vec_disjoint", "vec_equal_set", "vec_equal_seq", "vec_diff", "vec_pad_left", "vec_pad_right", "vec_replace_value", "vec_count_distinct", "vec_indices_of_value", "vec_dedup_consecutive", "vec_mean", "vec_merge_sorted", "vec_insert_sorted", "vec_is_sorted_unique", "vec_range_span", "vec_mode", "vec_kth_smallest", "vec_median", "i64_byte_at", "i64_set_byte", "i64_count_leading_ones", "i64_count_trailing_ones", "f64_asin_deg", "f64_acos_deg", "f64_sec_deg", "f64_csc_deg", "f64_cot_deg", "str_is_ascii", "str_is_digit_only", "str_is_alpha_only", "str_is_alphanumeric_only", "str_is_whitespace_only", "str_is_empty", "rand_f64", "rand_in_range_f64", "rand_bool", "rand_choice", "rand_normal", "vec_chunks", "vec_windows", "vec_flatten", "vec_group_by_value", "i64_parity", "i64_mod_pos", "i64_cube_root", "f64_pow_int", "f64_round_to_multiple", "f64_quadratic_root", "vec_running_mean", "vec_intersperse", "pool_new", "pool_alloc", "pool_get", "pool_free", "taint", "assert_safe", "raw_load", "raw_store", "unsafe_alloc", "unsafe_free", "bptr_new", "bptr_get", "bptr_set", "bptr_len", "region_new", "region_alloc_i64", "region_len", "region_borrow_i64", "aref_load", "aref_store", "mmio_read_u32", "mmio_write_u32", "sleep_ms",
+    // File I/O primitives — POSIX FILE* wrapped as i64 FileHandle.
+    "file_open", "file_is_ok", "file_read_line", "file_write",
+    "file_close", "file_flush", "stdin_read_line", "flush_stdout",
     // Arc 8 step 8e proper — TCP networking primitives. Real
     // sockets via libc; thread-local 4KB recv/send buffer.
     "tcp_listen", "tcp_socket_port", "tcp_accept",
@@ -1374,7 +1377,7 @@ fn compute_indirect_locks(
                 walk_expr(object, param_names, signatures, out);
                 walk_expr(value, param_names, signatures, out);
             }
-            Stmt::Print { items, .. } => {
+            Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for item in items {
                     if let crate::ast::PrintItem::Expr(e) = item {
                         walk_expr(e, param_names, signatures, out);
@@ -2445,7 +2448,7 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
         | S::Assert { expr, .. }
         | S::Prove { expr, .. }
         | S::Assign { expr, .. } => expr_mentions_var(expr, name),
-        S::Print { items, .. } => items.iter().any(|it| match it {
+        S::Print { items, .. } | S::EPrint { items, .. } => items.iter().any(|it| match it {
             crate::ast::PrintItem::Expr(e) => expr_mentions_var(e, name),
             _ => false,
         }),
@@ -2579,7 +2582,7 @@ fn walk_stmt_for_captures(
         | S::Assign { expr, .. } => {
             walk_expr_for_captures(expr, bound, env, top_level_names, captures, seen);
         }
-        S::Print { items, .. } => {
+        S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     walk_expr_for_captures(e, bound, env, top_level_names, captures, seen);
@@ -2772,7 +2775,7 @@ fn rename_vars_in_stmt(
         | S::Assign { expr, .. } => {
             rename_vars_in_expr(expr, rename);
         }
-        S::Print { items, .. } => {
+        S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     rename_vars_in_expr(e, rename);
@@ -2945,7 +2948,7 @@ fn rewrite_closure_calls_in_stmt(
         | S::Assign { expr, .. } => {
             rewrite_closure_calls_in_expr(expr, closures);
         }
-        S::Print { items, .. } => {
+        S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     rewrite_closure_calls_in_expr(e, closures);
@@ -3130,7 +3133,7 @@ fn lift_stmt_anon_fn(
         | S::Assign { expr, .. } => {
             lift_expr_anon_fn(expr, counter, hoisted);
         }
-        S::Print { items, .. } => {
+        S::Print { items, .. } | S::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     lift_expr_anon_fn(e, counter, hoisted);
@@ -3618,7 +3621,7 @@ fn flatten_modules_in_program(
                 | Stmt::Prove { expr, .. } | Stmt::Assign { expr, .. } => {
                     rewrite_expr(expr, qualify);
                 }
-                Stmt::Print { items, .. } => {
+                Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                     for item in items {
                         if let crate::ast::PrintItem::Expr(e) = item {
                             rewrite_expr(e, qualify);
@@ -4100,7 +4103,7 @@ fn rewrite_stmt_for_alias(
         | Stmt::Prove { expr, .. } | Stmt::Assign { expr, .. } => {
             rewrite_expr_for_alias(expr, qualify);
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     rewrite_expr_for_alias(e, qualify);
@@ -4388,7 +4391,7 @@ fn resolve_enum_types_in_stmt(
             resolve_enum_types_in_expr(object, enums);
             resolve_enum_types_in_expr(value, enums);
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     resolve_enum_types_in_expr(e, enums);
@@ -4779,7 +4782,7 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
             sub_aliases_in_expr(object, aliases);
             sub_aliases_in_expr(value, aliases);
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     sub_aliases_in_expr(e, aliases);
@@ -5723,6 +5726,7 @@ fn try_rewrite_at_top(
             s,
             Stmt::Let { .. }
                 | Stmt::Print { .. }
+                | Stmt::EPrint { .. }
                 | Stmt::Assign { .. }
                 | Stmt::While { .. }
         )
@@ -6139,7 +6143,7 @@ fn collect_generic_calls_in_stmt(
         Stmt::Assign { expr, .. } | Stmt::Return { expr, .. } => {
             collect_generic_calls_in_expr(expr, generics, needed, scope, diagnostics);
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for it in items {
                 if let crate::ast::PrintItem::Expr(e) = it {
                     collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
@@ -6388,7 +6392,7 @@ fn rewrite_generic_calls_in_stmt(
         Stmt::Assign { expr, .. } | Stmt::Return { expr, .. } => {
             rewrite_generic_calls_in_expr(expr, generics, scope);
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             for it in items.iter_mut() {
                 if let crate::ast::PrintItem::Expr(e) = it {
                     rewrite_generic_calls_in_expr(e, generics, scope);
@@ -6792,7 +6796,7 @@ fn monomorphize_type_decls_in_program(
             | Stmt::Assign { expr, .. } => f(expr),
             Stmt::IndexAssign { index, value, .. } => { f(index); f(value); }
             Stmt::FieldAssign { object, value, .. } => { f(object); f(value); }
-            Stmt::Print { items, .. } => {
+            Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for it in items {
                     if let crate::ast::PrintItem::Expr(e) = it { f(e); }
                 }
@@ -8761,7 +8765,7 @@ fn walk_branch_mutations(
             | Stmt::Prove { expr, .. } => {
                 walk_branch_mutations_in_expr(expr, out);
             }
-            Stmt::Print { items, .. } => {
+            Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for item in items {
                     if let crate::ast::PrintItem::Expr(e) = item {
                         walk_branch_mutations_in_expr(e, out);
@@ -10060,9 +10064,10 @@ fn check_one_stmt(
             body.push(TypedStmt::Prove { expr: e });
             false
         }
-        Stmt::Print { items, .. } => {
+        Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             use crate::ast::PrintItem;
             use crate::ir::TypedPrintItem;
+            let is_eprint = matches!(stmt, Stmt::EPrint { .. });
             let mut typed_items: Vec<TypedPrintItem> = Vec::with_capacity(items.len());
             for item in items {
                 match item {
@@ -10098,7 +10103,11 @@ fn check_one_stmt(
                     }
                 }
             }
-            body.push(TypedStmt::Print { items: typed_items });
+            if is_eprint {
+                body.push(TypedStmt::EPrint { items: typed_items });
+            } else {
+                body.push(TypedStmt::Print { items: typed_items });
+            }
             false
         }
         Stmt::If {
@@ -15452,7 +15461,8 @@ fn check_expr(
                             expr: rhs_checked.expr,
                         });
                     }
-                    Stmt::Print { items, .. } => {
+                    Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
+                        let is_ep = matches!(s, Stmt::EPrint { .. });
                         let mut typed_items: Vec<crate::ir::TypedPrintItem> =
                             Vec::with_capacity(items.len());
                         for item in items {
@@ -15466,7 +15476,11 @@ fn check_expr(
                                 }
                             }
                         }
-                        typed_stmts.push(TypedStmt::Print { items: typed_items });
+                        if is_ep {
+                            typed_stmts.push(TypedStmt::EPrint { items: typed_items });
+                        } else {
+                            typed_stmts.push(TypedStmt::Print { items: typed_items });
+                        }
                     }
                     Stmt::Assign { name: rname, expr: rhs, .. } => {
                         // Block-expr Reassign: rebind an existing
@@ -15565,7 +15579,8 @@ fn check_expr(
                                         drop_old: false,
                                     });
                                 }
-                                Stmt::Print { items, .. } => {
+                                Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
+                                    let is_ep = matches!(inner, Stmt::EPrint { .. });
                                     let mut typed_items: Vec<crate::ir::TypedPrintItem> =
                                         Vec::with_capacity(items.len());
                                     for item in items {
@@ -15580,7 +15595,11 @@ fn check_expr(
                                             }
                                         }
                                     }
-                                    body_typed.push(TypedStmt::Print { items: typed_items });
+                                    if is_ep {
+                                        body_typed.push(TypedStmt::EPrint { items: typed_items });
+                                    } else {
+                                        body_typed.push(TypedStmt::Print { items: typed_items });
+                                    }
                                 }
                                 _ => {
                                     diagnostics.push(Diagnostic::new(
@@ -18248,6 +18267,10 @@ fn check_call(
         "barrier_new" | "barrier_wait" => {
             return check_barrier_builtin(name, args, env, signatures, span, diagnostics);
         }
+        "file_open" | "file_is_ok" | "file_read_line" | "file_write" |
+        "file_close" | "file_flush" | "stdin_read_line" | "flush_stdout" => {
+            return check_file_builtin(name, args, env, signatures, span, diagnostics);
+        }
         "rwlock_new"
         | "rwlock_read"
         | "rwlock_write"
@@ -19397,7 +19420,7 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                     walk_expr(object, param_names, locks);
                     walk_expr(value, param_names, locks);
                 }
-                Stmt::Print { items, .. } => {
+                Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                     for item in items {
                         if let crate::ast::PrintItem::Expr(e) = item {
                             walk_expr(e, param_names, locks);
@@ -19755,6 +19778,198 @@ fn check_barrier_builtin(
             )
         }
         _ => unreachable!("dispatched only on barrier_new / barrier_wait"),
+    }
+}
+
+/// Type-check the file I/O builtins.
+///
+///   file_open(path: Str, mode: Str) -> FileHandle
+///   file_is_ok(f: ref FileHandle) -> bool
+///   file_read_line(f: mut ref FileHandle) -> OwnedStr
+///   file_write(f: mut ref FileHandle, s: Str) -> i64
+///   file_close(f: FileHandle) -> i64  (consumes the handle)
+///   file_flush(f: mut ref FileHandle) -> i64
+///   stdin_read_line() -> OwnedStr
+///   flush_stdout() -> i64
+///
+/// `FileHandle` is affine — it wraps a FILE* as i64 and is dropped
+/// at scope exit via fclose if nonzero.
+fn check_file_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    match name {
+        "file_open" => {
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_open' takes 2 arguments (path: Str, mode: Str), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::FileHandle, span);
+            }
+            let path = check_expr(&args[0], env, signatures, diagnostics);
+            let mode = check_expr(&args[1], env, signatures, diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_open".to_string(),
+                    name_span: span,
+                    args: vec![path.expr, mode.expr],
+                },
+                Type::FileHandle,
+                None,
+                span,
+            )
+        }
+        "file_is_ok" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_is_ok' takes 1 argument (ref FileHandle), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::Bool, span);
+            }
+            let f = check_expr(&args[0], env, signatures, diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_is_ok".to_string(),
+                    name_span: span,
+                    args: vec![f.expr],
+                },
+                Type::Bool,
+                None,
+                span,
+            )
+        }
+        "file_read_line" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_read_line' takes 1 argument (mut ref FileHandle), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::OwnedStr, span);
+            }
+            let f = check_expr(&args[0], env, signatures, diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_read_line".to_string(),
+                    name_span: span,
+                    args: vec![f.expr],
+                },
+                Type::OwnedStr,
+                None,
+                span,
+            )
+        }
+        "file_write" => {
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_write' takes 2 arguments (mut ref FileHandle, Str), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let f = check_expr(&args[0], env, signatures, diagnostics);
+            let s = check_expr(&args[1], env, signatures, diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_write".to_string(),
+                    name_span: span,
+                    args: vec![f.expr, s.expr],
+                },
+                Type::I64,
+                None,
+                span,
+            )
+        }
+        "file_close" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_close' takes 1 argument (FileHandle), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let f = check_expr(&args[0], env, signatures, diagnostics);
+            // Mark the source as moved (file_close consumes the handle).
+            if let ExprKind::Var(src_name) = &args[0].kind {
+                if let Some(info) = env.lookup_mut(src_name) {
+                    if info.moved.is_none() {
+                        info.moved = Some(args[0].span);
+                    }
+                }
+            }
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_close".to_string(),
+                    name_span: span,
+                    args: vec![f.expr],
+                },
+                Type::I64,
+                None,
+                span,
+            )
+        }
+        "file_flush" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'file_flush' takes 1 argument (mut ref FileHandle), got {}", args.len()),
+                ));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let f = check_expr(&args[0], env, signatures, diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "file_flush".to_string(),
+                    name_span: span,
+                    args: vec![f.expr],
+                },
+                Type::I64,
+                None,
+                span,
+            )
+        }
+        "stdin_read_line" => {
+            if !args.is_empty() {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'stdin_read_line' takes 0 arguments, got {}", args.len()),
+                ));
+            }
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "stdin_read_line".to_string(),
+                    name_span: span,
+                    args: vec![],
+                },
+                Type::OwnedStr,
+                None,
+                span,
+            )
+        }
+        "flush_stdout" => {
+            if !args.is_empty() {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("'flush_stdout' takes 0 arguments, got {}", args.len()),
+                ));
+            }
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "flush_stdout".to_string(),
+                    name_span: span,
+                    args: vec![],
+                },
+                Type::I64,
+                None,
+                span,
+            )
+        }
+        _ => unreachable!("dispatched only on file_* builtins"),
     }
 }
 
@@ -29866,7 +30081,7 @@ fn stmt_reads(stmt: &TypedStmt) -> Vec<&TypedExpr> {
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => vec![expr],
         TypedStmt::Discard { expr } => vec![expr],
-        TypedStmt::Print { items } => items
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => items
             .iter()
             .filter_map(|i| match i {
                 crate::ir::TypedPrintItem::Expr(e) => Some(e),
@@ -29903,7 +30118,7 @@ fn verify_pure_body(
     ) {
         for stmt in stmts {
             match stmt {
-                TypedStmt::Print { items } => {
+                TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
                     // Use the first item's span when one exists so
                     // the diagnostic underlines the print line.
                     let span = items

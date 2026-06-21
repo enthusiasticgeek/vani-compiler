@@ -228,6 +228,8 @@ fn stmt_ssa_supported(stmt: &TypedStmt, extra_reject: &impl Fn(&TypedStmt) -> bo
             TypedPrintItem::Expr(e) => expr_ssa_supported(e),
             TypedPrintItem::Str(_) => true,
         }),
+        // eprint is not in the v1 SSA subset — always route to tree.
+        TypedStmt::EPrint { .. } => false,
         TypedStmt::Let { ty, expr, .. } | TypedStmt::Reassign { ty, expr, .. } => {
             ssa_type_supported(ty) && expr_ssa_supported(expr)
         }
