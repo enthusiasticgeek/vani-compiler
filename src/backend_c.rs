@@ -16774,6 +16774,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
+        "mmio_read_u8" => format!(
+            "(*((const volatile uint8_t*)((uintptr_t)({}))))",
+            emit_expr(&args[0])
+        ),
+        "mmio_read_u16" => format!(
+            "(*((const volatile uint16_t*)((uintptr_t)({}))))",
+            emit_expr(&args[0])
+        ),
+        "mmio_write_u8" => format!(
+            "((*((volatile uint8_t*)((uintptr_t)({})))) = (uint8_t)({}), (int64_t)0)",
+            emit_expr(&args[0]), emit_expr(&args[1])
+        ),
+        "mmio_write_u16" => format!(
+            "((*((volatile uint16_t*)((uintptr_t)({})))) = (uint16_t)({}), (int64_t)0)",
+            emit_expr(&args[0]), emit_expr(&args[1])
+        ),
         // T2.2 — `volatile_read(ptr: ref i64) -> i64` and
         // `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
         // The `ref` arg emits as the address of the local (`&v_x`),

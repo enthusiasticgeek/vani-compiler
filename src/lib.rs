@@ -47019,5 +47019,32 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    #[test]
+    fn mmio_read_u8_compiles_c() {
+        let src = r#"
+intent "mmio u8 read";
+fn main() -> i64 {
+  let v: u8 = mmio_read_u8(0x40021000);
+  return 0;
+}
+"#;
+        let c = compile_to_c(src).expect("mmio_read_u8 must compile to C");
+        assert!(c.contains("uint8_t"), "expected uint8_t in C output:\n{c}");
+    }
+
+    #[test]
+    fn mmio_write_u16_compiles_c() {
+        let src = r#"
+intent "mmio u16 write";
+fn main() -> i64 {
+  let val: u16 = 0xFF00;
+  let _ = mmio_write_u16(0x40021004, val);
+  return 0;
+}
+"#;
+        let c = compile_to_c(src).expect("mmio_write_u16 must compile to C");
+        assert!(c.contains("uint16_t"), "expected uint16_t in C output:\n{c}");
+    }
+
 }
 

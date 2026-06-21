@@ -9691,6 +9691,82 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return "0".to_string();
             }
+            if name == "mmio_read_u8" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ptr, addr
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load volatile i8, i8* {}, align 1\n",
+                    raw, ptr
+                ));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = zext i8 {} to i64\n",
+                    result, raw
+                ));
+                return result;
+            }
+            if name == "mmio_read_u16" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i16*\n",
+                    ptr, addr
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load volatile i16, i16* {}, align 2\n",
+                    raw, ptr
+                ));
+                let result = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = zext i16 {} to i64\n",
+                    result, raw
+                ));
+                return result;
+            }
+            if name == "mmio_write_u8" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let val = emit_expr(&args[1], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    ptr, addr
+                ));
+                let trunc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = trunc i64 {} to i8\n",
+                    trunc, val
+                ));
+                out.push_str(&format!(
+                    "  store volatile i8 {}, i8* {}, align 1\n",
+                    trunc, ptr
+                ));
+                return "0".to_string();
+            }
+            if name == "mmio_write_u16" {
+                let addr = emit_expr(&args[0], ctx, out);
+                let val = emit_expr(&args[1], ctx, out);
+                let ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i16*\n",
+                    ptr, addr
+                ));
+                let trunc = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = trunc i64 {} to i16\n",
+                    trunc, val
+                ));
+                out.push_str(&format!(
+                    "  store volatile i16 {}, i16* {}, align 2\n",
+                    trunc, ptr
+                ));
+                return "0".to_string();
+            }
             // T2.2 — volatile_read / volatile_write.
             // The `ref i64` arg emits as the alloca pointer
             // (i64*), so load/store volatile straight through it.
