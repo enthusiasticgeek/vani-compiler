@@ -207,9 +207,12 @@ match.
   scope tracking; allocations can't escape the region.
 
 Together these let vāṇी target embedded shapes without losing
-the safety story. The next chapter ([Advanced 4](04_embedded.md))
-shows the actual syntax + worked examples for an LED-blink
-firmware + a packet-parsing handler.
+the safety story. The next two chapters cover the rest:
+- [Advanced 4b — Cross-compilation primer](04b_cross_compile_primer.md)
+  — `--target <triple>`, `--no-std`, `#[no_mangle]`, `#[link_section]`,
+  MMIO u8/u16, QEMU user-mode run
+- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md)
+  — worked examples for LED-blink firmware + packet-parsing handler
 
 ## Cross-reference
 
@@ -221,5 +224,7 @@ firmware + a packet-parsing handler.
 - [Intermediate 9a — FFI primer](../intermediate/09a_ffi_primer.md)
   — embedded code often interops with legacy C firmware via
   `extern "C"` + `unsafe`
+- [Advanced 4b — Cross-compilation primer](04b_cross_compile_primer.md)
+  — `--target`, `--no-std`, `#[no_mangle]`, `#[link_section]`, MMIO u8/u16
 - [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md)
   — the actual syntax + worked examples
