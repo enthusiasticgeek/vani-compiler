@@ -77,6 +77,64 @@ Last updated: 2026-06-19
 
 ---
 
+## Bare-metal / OS (high priority — L19)
+
+These five items together unlock vāṇी as the primary language for a
+custom OS or bare-metal board firmware. See
+[L19 in docs/v1_limitations.md](v1_limitations.md) for full context,
+workarounds, and the exact design goal for each.
+
+- [ ] **18. `--target <triple>` cross-compilation flag** (G1 — highest impact)
+  Add `--target arm-none-eabi` / `--target riscv32-unknown-none-elf` etc.
+  to the LLVM backend path. Instead of running `lli` (JIT on host), invoke
+  `llc -march=<arch>` to produce object code, then the appropriate cross
+  linker. Also wire `--target` into `vanic build` / `vanic run` (run via
+  QEMU if a target emulator is available).
+  - Entry point: `src/main.rs` — add `--target` CLI flag; `src/backend_llvm.rs`
+    — replace `lli` invocation with `llc` + cross linker path.
+  - **Effort**: ~6–10 h. Unlocks the LLVM backend for real cross-compilation.
+
+- [ ] **19. `--no-std` mode — omit libc prelude in C backend** (G2)
+  A `--no-std` flag (or inferred from `--target` when it's a bare-metal
+  triple) that makes `vanic emit-c` / `vanic build --backend=c` skip the
+  `#include <stdio.h>` / `#include <stdlib.h>` / `#include <string.h>` etc.
+  headers and instead emit only minimal forward declarations for what the
+  program actually uses.
+  - Entry point: `src/backend_c.rs` — the prelude-emit function; gate
+    includes behind a `no_std: bool` flag threaded from `src/main.rs`.
+  - **Effort**: ~3–4 h.
+
+- [ ] **20. `#[link_section = "..."]` attribute** (G3)
+  Allow `fn` declarations and top-level `let` bindings to be placed in
+  a named linker section. Emits `__attribute__((section("...")))` in C,
+  `section` metadata in LLVM IR.
+  - Required for: interrupt vector tables, `.rodata` placement, boot code
+    at the reset vector address.
+  - Entry point: `src/ast.rs` — add `link_section: Option<String>` to
+    `Function`; `src/parser.rs` — parse `#[link_section = "..."]`;
+    `src/backend_c.rs` + `src/backend_llvm.rs` — emit the attribute.
+  - **Effort**: ~4–6 h.
+
+- [ ] **21. `#[no_mangle]` attribute — suppress symbol name mangling** (G4)
+  Allow `fn` declarations to opt out of the `intent_` prefix and name
+  mangling so the linker script can reference them by their literal vāṇी
+  name (e.g. `Reset_Handler`, `_start`, `HardFault_Handler`).
+  - Entry point: `src/ast.rs` — add `no_mangle: bool` to `Function`;
+    `src/backend_c.rs` + `src/backend_llvm.rs` — skip `function_name()`
+    mangling when `no_mangle` is set; `src/parser.rs` — parse `#[no_mangle]`.
+  - **Effort**: ~2–3 h (mostly parser + two codegen paths).
+
+- [ ] **22. MMIO 8-bit and 16-bit variants** (G5)
+  Add `mmio_read_u8(addr: i64) -> u8`, `mmio_read_u16(addr: i64) -> u16`,
+  `mmio_write_u8(addr: i64, val: u8)`, `mmio_write_u16(addr: i64, val: u16)`.
+  Lower to `*(volatile uint8_t*)` / `*(volatile uint16_t*)` in C and to
+  a volatile `i8`/`i16` `load`/`store` in LLVM IR.
+  - Entry point: `src/checker.rs` — add to `check_mmio_builtin`;
+    `src/backend_c.rs` + `src/backend_llvm.rs` — add codegen arms.
+  - **Effort**: ~2–3 h (same pattern as existing `mmio_read_u32`).
+
+---
+
 ## Larger (dedicated session)
 
 - [ ] **14. Homebrew formula** — `homebrew-vanic` tap repo. **Gate**: wait until

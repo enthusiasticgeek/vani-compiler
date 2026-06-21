@@ -12,8 +12,8 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.1.5 (2026-06-21): 13 of 18 entries fully resolved; 1 partially
-> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14).**
+> **At v0.1.5 (2026-06-21): 13 of 19 entries fully resolved; 1 partially
+> resolved (L13); 5 remain open (L5, L6, L10-macOS, L14, L19).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -35,6 +35,7 @@
 > | L16 | `Barrier` synchronization primitive missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L18 | File I/O, stdin, stderr, flush — no native surface | ✅ Resolved v0.1.5 (2026-06-21) |
+> | L19 | Bare-metal / custom OS — five gaps block production use | ⬜ High priority — see TODO items 18–22 |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -892,6 +893,138 @@ print "line one\nline two";  // trailing \n still appended — gives 3 lines
 **Tutorial reference**: [Intermediate 9 — FFI](../tutorials/src/intermediate/09_ffi.md)
 shows the `--link-with` pattern for device I/O (UART/serial) that
 still requires a C shim.
+
+---
+
+## Bare-metal / OS limitations
+
+### L19 — Five gaps block bare-metal / custom OS production use
+
+**Status**: Open — high priority. Five distinct missing features prevent
+using vāṇी as the primary language for a custom OS or bare-metal
+firmware on a microcontroller board. Each is tracked in
+[`docs/TODO_CURRENT.md`](TODO_CURRENT.md) items 18–22.
+
+What **already ships** and works on bare metal today:
+- `#[no_heap]` — compiler rejects any transitive `malloc` call
+- `#[bounded_stack(N)]` — enforces stack budget across call graph
+- `#[recursion_bound(N)]` — bounded recursion
+- `#[interrupt]` — ISR calling convention
+- `mmio_read_u32` / `mmio_write_u32` — 32-bit MMIO register access
+- `volatile_read` / `volatile_write` — volatile memory operations
+- `unsafe_alloc` / `unsafe_free` — raw manual allocation
+- `region_new` / `region_alloc_i64` — bump/arena allocator
+- `pool_new` / `pool_alloc` / `pool_free` — typed pool allocator
+- `bptr_new` / `bptr_get` / `bptr_set` — bounded pointer (safe array-in-a-slab)
+- FFI via `extern "C"` — call assembly startup code, C HAL drivers
+- SMT `requires`/`ensures`/`prove` — formally-verified critical paths
+- Affine types — use-after-free impossible at compile time
+
+The five gaps:
+
+---
+
+#### G1 — No cross-compilation target flag (TODO 18)
+
+`vanic run` / `vanic build` use the LLVM JIT (`lli`) for the LLVM
+backend, which only runs on the host. There is no `--target arm-none-eabi`
+or `--target riscv32-unknown-none-elf` flag. To cross-compile today you
+must use the C backend (`--backend=c`) and invoke a cross compiler
+yourself:
+
+```bash
+vanic emit-c firmware.vani > firmware.c
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -nostdlib \
+  -T linker.ld firmware.c startup.c -o firmware.elf
+```
+
+**Fix**: add `--target <triple>` to the LLVM backend path, invoking
+`llc` + the appropriate cross linker instead of `lli`.
+
+---
+
+#### G2 — No `no_std` mode — C prelude always includes libc headers (TODO 19)
+
+The C backend always emits `#include <stdio.h>`, `#include <stdlib.h>`,
+etc. at the top of the generated file. A bare-metal cross compiler has
+no libc; the includes fail or pull in unexpected stubs.
+
+**Workaround**: strip the prelude manually from `vanic emit-c` output,
+or post-process with `sed`.
+
+**Fix**: a `--no-std` flag on `vanic emit-c` / `vanic build` that omits
+the libc includes and instead emits only what the program actually uses
+(a minimal set of forward declarations).
+
+---
+
+#### G3 — No `#[link_section]` attribute (TODO 20)
+
+Bare-metal linker scripts require code and data to land at specific
+addresses (`.text` at 0x08000000, `.rodata` at 0x08020000, stack at
+0x20010000, etc.). There is no way to annotate a vāṇी function or
+`static`-equivalent binding with a linker section.
+
+**Workaround**: use C wrappers (`__attribute__((section(".vectors")))`
+on a C file compiled alongside via `--link-with vectors.c`).
+
+**Fix**: `#[link_section = ".vectors"]` attribute on `fn` / top-level
+`let` bindings, emitted as `__attribute__((section(...)))` in C and
+`section` metadata in LLVM IR.
+
+---
+
+#### G4 — No `#[no_mangle]` — generated symbols are name-mangled (TODO 21)
+
+vāṇī mangles all generated C/LLVM symbol names (e.g. `main` →
+`intent_main`). A bare-metal reset handler must be named `Reset_Handler`
+or `_start` exactly so the linker script can reference it. There is no
+way to suppress mangling today.
+
+**Workaround**: wrap in a C file:
+```c
+extern int64_t intent_main(void);
+void Reset_Handler(void) { intent_main(); }
+```
+
+**Fix**: `#[no_mangle]` attribute that emits the function with its
+literal vāṇी name (no `intent_` prefix, no mangling).
+
+---
+
+#### G5 — MMIO only 32-bit — no `u8`/`u16` register access (TODO 22)
+
+`mmio_read_u32` / `mmio_write_u32` cover 32-bit MMIO registers. Many
+peripherals (UART status registers, GPIO pins, I2C data registers) are
+8-bit or 16-bit. There is no `mmio_read_u8`, `mmio_read_u16`,
+`mmio_write_u8`, `mmio_write_u16`.
+
+**Workaround**: declare `extern "C"` helpers in a C file and use FFI.
+
+**Fix**: add the four missing width variants; they lower to
+`*(volatile uint8_t*)addr` / `*(volatile uint16_t*)addr` in C and
+to a volatile i8/i16 `load`/`store` in LLVM IR.
+
+---
+
+#### Current bare-metal recipe (until gaps are closed)
+
+```bash
+# 1. Emit C
+vanic emit-c --backend=c firmware.vani > firmware.c
+
+# 2. Strip libc includes (G2 workaround)
+sed -i '/#include <std/d; /#include <string/d' firmware.c
+
+# 3. Add your own forward decls and compile
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -nostdlib -ffreestanding \
+  -T linker.ld firmware.c startup.c hal.c -o firmware.elf
+```
+
+Use `#[no_heap]` on every function to get a compile error if any path
+accidentally calls `malloc`. Use `mmio_read_u32`/`mmio_write_u32` for
+32-bit peripheral registers; use FFI + C shims for 8/16-bit registers
+until G5 is fixed.
 
 ---
 
