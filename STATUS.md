@@ -10,6 +10,50 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-06-21
+
+**State**: `v0.1.5` + `v0.1.6` tagged. `0.1.6` is the live version. All bare-metal
+gaps (L19) and file I/O gap (L18) are resolved. Remaining open work is in the
+Blocked table below.
+
+### Shipped this session (2026-06-21) — v0.1.5 + v0.1.6
+
+| Item | What shipped |
+|------|-------------|
+| `FileHandle` type | Affine RAII handle; auto-`fclose`d at scope exit. Both C and LLVM backends. |
+| File I/O builtins | `file_open`, `file_is_ok`, `file_read_line`, `file_write`, `file_close`, `file_flush` |
+| Stdin / stdout helpers | `stdin_read_line() -> OwnedStr`, `flush_stdout() -> i64` |
+| `eprint` statement | Writes to stderr; same multi-item syntax as `print` |
+| L18 resolved | `docs/v1_limitations.md` item L18 (native file I/O) marked shipped |
+| `--target=<triple>` | Cross-compilation flag on `vanic build` / `vanic run`; bare-metal triples suppress libc/OpenMP/pthread |
+| `--no-std` | Suppresses all `#include <std*.h>` in C backend; auto-activates for bare-metal triples |
+| `#[link_section = "..."]` | `__attribute__((section(...)))` in C; `section "..."` in LLVM IR |
+| `#[no_mangle]` | Suppresses `intent_` prefix and Unicode mangling in both backends |
+| `mmio_read/write_u8` | 8-bit volatile MMIO builtins (both backends) |
+| `mmio_read/write_u16` | 16-bit volatile MMIO builtins (both backends) |
+| QEMU user-mode run | `vanic run --target=<linux-triple>` invokes `qemu-<arch>-static` |
+| L19 fully resolved | All 5 bare-metal gaps closed in `docs/v1_limitations.md` |
+| `RELEASE_NOTES/v0.1.5.md` | File I/O release notes |
+| `RELEASE_NOTES/v0.1.6.md` | Bare-metal release notes |
+
+### Key numbers (2026-06-21)
+- **Lib tests**: 2434+ passing
+- **E2e tests**: all pass (Linux + Windows)
+- **Elaboration coverage**: 597/597 (100%)
+- **Dialects**: 62 across 26 scripts
+- **Cargo.toml version**: `0.1.6`
+
+### Blocked (4 items, external dependencies)
+
+| # | Item | Blocker |
+|---|------|---------|
+| B1 | crates.io publish | Needs API token |
+| B2 | macOS verification | No macOS hardware |
+| B3 | Grammar consultant pass | External reviewer needed |
+| B4 | Windows IOCP async-TCP | ~25–35 h; readiness-vs-completion mismatch |
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-06-19
 
 **State**: `v0.1.2` tagged + published. `0.1.3-dev` active. All TODO_CURRENT

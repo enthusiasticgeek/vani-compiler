@@ -16,8 +16,8 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes, diagnostic improvements, performance, docs |
 | `-dev`  | Unreleased development build — no stability promise |
 
-**Current version: `0.1.3-dev`** (Cargo.toml, post-release bump).  
-`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish).
+**Current version: `0.1.6`** (Cargo.toml).  
+`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish). `v0.1.3` tagged 2026-06-20 (patch series). `v0.1.4` tagged 2026-06-20 (non-Copy tuples, Box<T> enum payloads, tutorial link fixes). `v0.1.5` tagged 2026-06-21 (native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint). `v0.1.6` tagged 2026-06-21 (bare-metal: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run).
 
 ---
 
@@ -55,7 +55,15 @@ Once G1–G3 land and the test suite is green on all platforms, bump
 - `0.1.2` ✅ shipped 2026-06-19: Win64/AArch64 ABI classifiers, dialect purity docs,
   `intentc` deprecation warning, new tutorials (Barrier, RwLock, default methods),
   examples reorganisation, first crates.io publish.
-- `0.1.3-dev` (current): active development.
+- `0.1.3` ✅ shipped 2026-06-20: patch series fixes.
+- `0.1.4` ✅ shipped 2026-06-20: non-Copy elements in tuples, `Box<T>` as enum variant
+  payload, tutorial site broken-link sweep (19 files).
+- `0.1.5` ✅ shipped 2026-06-21: native file I/O — `FileHandle` (affine RAII), `file_open` /
+  `file_is_ok` / `file_read_line` / `file_write` / `file_close` / `file_flush`,
+  `stdin_read_line`, `flush_stdout`, `eprint` statement. L18 resolved.
+- `0.1.6` ✅ shipped 2026-06-21: bare-metal / cross-compilation — `--target=<triple>`,
+  `--no-std`, `#[no_mangle]`, `#[link_section = "..."]`, `mmio_read/write_u8`,
+  `mmio_read/write_u16`, QEMU user-mode run. L19 fully resolved (all 5 gaps).
 
 ### `0.2.0` — Package manager + cross-platform I/O
 
@@ -117,3 +125,7 @@ Criteria (not time-boxed):
 | 2026-06-18 | crates.io publish as next distribution step | `cargo install vanic` for Rust users. Homebrew tap deferred until macOS empirically verified. See docs/decisions.md. |
 | 2026-06-19 | Tagged `v0.1.2` | Win64/AArch64 ABI, dialect purity, tutorials, first crates.io publish. |
 | 2026-06-19 | Bumped to `0.1.3-dev` | Active development continues post v0.1.2. |
+| 2026-06-20 | Tagged `v0.1.3` | Patch series. |
+| 2026-06-20 | Tagged `v0.1.4` | Non-Copy tuples, Box<T> enum payloads, tutorial link sweep. |
+| 2026-06-21 | Tagged `v0.1.5` | Native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint. L18 resolved. |
+| 2026-06-21 | Tagged `v0.1.6` | Bare-metal arc: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run. L19 fully resolved. |

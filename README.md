@@ -520,10 +520,26 @@ below.
 - **`RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>`** — readers-writer lock parametric over any value type T. RAII drop releases the lock. State encoding: 0=unlocked, N>0=N concurrent readers, -1=write-locked. Per-T C struct bundles. Both backends.
 - **Kosh**: runtime download URL + custom CA cert file configurable via `config.json`.
 
-**Test ledger at 2026-06-18: ~2091 lib green** —
+**v0.1.5 — native file I/O (2026-06-21):**
+- **`FileHandle`** — affine RAII file handle; auto-`fclose`d at scope exit on both C and LLVM backends.
+- **`file_open` / `file_is_ok` / `file_read_line` / `file_write` / `file_close` / `file_flush`** — full typed file I/O API.
+- **`stdin_read_line() -> OwnedStr`** / **`flush_stdout() -> i64`** — stdin and stdout helpers.
+- **`eprint` statement** — writes to stderr, same multi-item syntax as `print`.
+- **L18 resolved** (`docs/v1_limitations.md`). Example: `examples/language/english/file_io.vani`.
+
+**v0.1.6 — bare-metal / cross-compilation (2026-06-21):**
+- **`--target=<triple>`** on `vanic build` / `vanic run` — passes `--mtriple` to `llc`, selects cross-linker, suppresses libc/OpenMP/pthread for bare-metal triples.
+- **`--no-std`** on `vanic emit --backend=c` / `vanic emit-c` — suppresses all `#include <std*.h>`, emits minimal typedef block; auto-activates for bare-metal triples.
+- **`#[link_section = "..."]`** attribute on `fn` — `__attribute__((section(...)))` in C, `section "..."` in LLVM IR.
+- **`#[no_mangle]`** attribute on `fn` — suppresses `intent_` prefix and Unicode mangling in both backends.
+- **`mmio_read_u8` / `mmio_write_u8` / `mmio_read_u16` / `mmio_write_u16`** — volatile 8/16-bit MMIO (joins existing u32 builtins).
+- **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently invokes `qemu-<arch>-static`.
+- **L19 fully resolved** (all 5 bare-metal gaps). Example: `examples/language/english/bare_metal.vani`.
+
+**Test ledger at 2026-06-21: ~2434+ lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-18 — **v0.1.1: Barrier + RwLock<T> + parametric Mutex/Channel + Traits phase 2**.
+Latest ship 2026-06-21 — **v0.1.6: bare-metal cross-compilation + `--target` + `--no-std` + `#[no_mangle]` + `#[link_section]` + MMIO u8/u16**.
 Previous notable ship 2026-06-11 — **Windows full e2e parity** (all lib +
 e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
 deferred). Previous notable ship 2026-06-09 — **L4 (C) closure:
@@ -1111,9 +1127,25 @@ Supported today (800 lib + 47 e2e tests passing):
 - Compile-time const overflow and divide-by-zero detection.
 - `INTENTC_NO_VERIFY=1` opt-out for fast dev iteration.
 
+### File I/O (v0.1.5+)
+- **`FileHandle`** — affine RAII handle; auto-`fclose`d at scope exit. Both C and LLVM backends.
+- `file_open(path: Str, mode: Str) -> FileHandle`, `file_is_ok(ref fh) -> bool`,
+  `file_read_line(mut ref fh) -> OwnedStr`, `file_write(mut ref fh, s) -> i64`,
+  `file_close(fh) -> i64`, `file_flush(mut ref fh) -> i64`.
+- `stdin_read_line() -> OwnedStr`, `flush_stdout() -> i64`.
+- `eprint` statement — writes to stderr (same multi-item syntax as `print`).
+
+### Bare-metal / embedded (v0.1.6+)
+- **`#[no_mangle]`** attribute on `fn` — suppresses `intent_` prefix and Unicode mangling in both backends.
+- **`#[link_section = "..."]`** attribute on `fn` — `__attribute__((section(...)))` in C; `section "..."` on LLVM IR `define` line.
+- **`mmio_read_u8(addr) -> u8`** / **`mmio_write_u8(addr, val) -> i64`** — 8-bit volatile MMIO.
+- **`mmio_read_u16(addr) -> u16`** / **`mmio_write_u16(addr, val) -> i64`** — 16-bit volatile MMIO.
+- **`--target=<triple>`** on `vanic build` / `vanic run` — cross-compilation; bare-metal triples suppress libc/OpenMP/pthread.
+- **`--no-std`** on `vanic emit --backend=c` — suppresses all `#include <std*.h>`; auto-activates for bare-metal triples.
+
 ### Affine ownership
 - Arrays, `Vec`, `OwnedStr`, `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`,
-  `Barrier`, `RwLock`, `ReadGuard`, `WriteGuard`
+  `Barrier`, `RwLock`, `ReadGuard`, `WriteGuard`, `FileHandle`
   are affine — moved on use, dropped at end of scope.
 - Use-after-move is a compile error with related-span notes pointing at the
   prior move site.
@@ -1458,14 +1490,47 @@ lifetime.
   reads better; the postfix form chains naturally as
   `foo()?.bar()?`). `assert` triggers a deterministic `abort()`.
 
-### Embedded targets — current position (2026-06-01)
+### Embedded targets — current position (updated 2026-06-21)
 
 vāṇी's v1 target is hosted (Linux / Windows / macOS). Embedded
-(`no_std`, bare-metal, MCU) is a **first-class planned target** —
-shaped by the same affine + checked-by-default commitments,
-with a **narrowly scoped `unsafe { ... }` escape hatch reserved
-for embedded builds** to cover the operations the compiler
-genuinely cannot prove safe.
+(`no_std`, bare-metal, MCU) is a **first-class supported target**
+(fully supported as of v0.1.6) — shaped by the same affine +
+checked-by-default commitments, with a **narrowly scoped
+`unsafe { ... }` escape hatch reserved for embedded builds** to
+cover the operations the compiler genuinely cannot prove safe.
+
+**Bare-metal native workflow (v0.1.6+):**
+
+```sh
+# Cross-compile for ARM Cortex-M (bare-metal, no libc)
+vanic build --target=thumbv7m-none-eabi src/main.vani
+
+# Emit no-std C (suppresses all #include <std*.h>)
+vanic emit --backend=c --no-std src/main.vani
+
+# Run a Linux cross-binary via QEMU user-mode
+vanic run --target=aarch64-linux-gnu src/main.vani
+```
+
+Attributes for bare-metal linking:
+```vani
+#[no_mangle]
+#[link_section = ".text.reset_handler"]
+fn reset_handler() -> i64 { return 0; }
+```
+
+Volatile MMIO (8, 16, and 32-bit):
+```vani
+let v8:  u8  = mmio_read_u8(0x4000_0000);
+let v16: u16 = mmio_read_u16(0x4000_0002);
+let v32: u32 = mmio_read_u32(0x4000_0004);
+let _ = mmio_write_u8(0x4000_0001, 0xFF);
+let _ = mmio_write_u16(0x4000_0003, 0x1234);
+let _ = mmio_write_u32(0x4000_0005, 0xDEAD_BEEF);
+```
+
+See [`examples/language/english/bare_metal.vani`](examples/language/english/bare_metal.vani)
+and `docs/v1_limitations.md` (L19 fully resolved).
 
 - **Pointers in the source language.** None of the raw kind on
   the safe path. The full safe pointer-shaped vocabulary is
@@ -1482,9 +1547,9 @@ genuinely cannot prove safe.
   On embedded builds, `unsafe { ... }` is the **opt-in** path
   for the narrow set of operations the compiler cannot
   prove safe:
-  - Raw MMIO outside the `mmio_read_u32` / `mmio_write_u32`
-    builtins (e.g. wider register types or dynamically computed
-    register addresses).
+  - Raw MMIO outside the typed builtins (`mmio_read_u8/u16/u32` /
+    `mmio_write_u8/u16/u32`) — e.g. 64-bit wide registers or
+    dynamically computed register addresses.
   - Inline assembly and platform intrinsics.
   - `transmute`-style reinterpretation between layout-equivalent
     types (DMA buffer ↔ packed-struct view).
@@ -1517,12 +1582,23 @@ genuinely cannot prove safe.
   targets `malloc` may not exist. A `no_std` mode gates those
   primitives off and leans on fixed-size arrays, stack-allocated
   strings, and a fallible-allocation API (`try_vec`).
-- **What's missing for bare-metal that the language has no
-  syntax for yet.** Memory-mapped I/O with guaranteed-`volatile`
-  load/store, fixed-address linker sections (vector tables, DMA
-  buffers), interrupt-service-routine calling conventions,
-  bit-precise / packed register layouts, worst-case stack-usage
-  bounds. Design notes for these live in
+- **What ships for bare-metal (as of v0.1.6):**
+  - `--target=<triple>` on `vanic build` / `vanic run` — selects the
+    cross-linker, passes `--mtriple` to `llc`, suppresses libc/OpenMP/
+    pthread for bare-metal triples automatically.
+  - `--no-std` on `vanic emit --backend=c` — strips all `#include <std*.h>`,
+    emits a freestanding typedef block; auto-activates for bare-metal triples.
+  - `#[no_mangle]` — suppresses the `intent_` prefix and Unicode mangling so
+    linker scripts can reference the bare symbol name.
+  - `#[link_section = "..."]` — places the function in a named ELF/COFF
+    section (vector tables, `.text.isr`, DMA descriptor regions).
+  - `mmio_read_u8` / `mmio_write_u8` / `mmio_read_u16` / `mmio_write_u16` —
+    volatile 8/16-bit MMIO builtins (joins the existing 32-bit pair).
+  - QEMU user-mode transparent run for Linux cross-targets.
+  - L19 in `docs/v1_limitations.md` is **fully resolved** (all 5 gaps).
+  What remains deferred: interrupt-service-routine calling conventions,
+  bit-precise / packed register layouts, worst-case stack-usage bounds,
+  inline assembly, `transmute`-style reinterpretation. Design notes live in
   [TODO.md](TODO.md) → *Embedded targets — design considerations*.
 - **The goal is to make `unsafe` rare on embedded too.** Three
   already-feasible compile-time extensions cover most of what
@@ -1595,10 +1671,12 @@ tiers + four standard composites are on `main`:
   a non-pure function call is rejected for `pure fn` and any
   function with a standard-composite tag (short-circuit
   evaluation would make the side effect order-dependent).
-- **MMIO volatile load/store (T2.1):** `mmio_read_u32(addr)` /
+- **MMIO volatile load/store (T2.1):** `mmio_read_u8` / `mmio_write_u8` /
+  `mmio_read_u16` / `mmio_write_u16` / `mmio_read_u32(addr)` /
   `mmio_write_u32(addr, v)` builtins emit a `volatile` qualifier
   in both backends — required for peripheral registers where
-  reads clear IRQ flags and writes latch state.
+  reads clear IRQ flags and writes latch state. The 8 and 16-bit
+  widths ship as of v0.1.6.
 - **Compose by union — most restrictive wins.** Composites set
   a baseline; primitives tighten further.
 - **Opt-in by design.** Without any tag, vāṇี behaves exactly
