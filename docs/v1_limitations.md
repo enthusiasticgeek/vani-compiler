@@ -12,8 +12,8 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.1.5 (2026-06-21): 13 of 19 entries fully resolved; 1 partially
-> resolved (L13); 5 remain open (L5, L6, L10-macOS, L14, L19).**
+> **At v0.1.6 (2026-06-21): 18 of 19 entries fully resolved; 1 partially
+> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14). L19 fully closed.**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -35,7 +35,7 @@
 > | L16 | `Barrier` synchronization primitive missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L18 | File I/O, stdin, stderr, flush — no native surface | ✅ Resolved v0.1.5 (2026-06-21) |
-> | L19 | Bare-metal / custom OS — five gaps block production use | ⬜ High priority — see TODO items 18–22 |
+> | L19 | Bare-metal / custom OS — five gaps block production use | ✅ All 5 gaps resolved v0.1.6 (2026-06-21) |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -898,11 +898,11 @@ still requires a C shim.
 
 ## Bare-metal / OS limitations
 
-### L19 — Five gaps block bare-metal / custom OS production use
+### L19 — Five gaps block bare-metal / custom OS production use ✅ All gaps resolved v0.1.6 (2026-06-21)
 
-**Status**: Open — high priority. Five distinct missing features prevent
-using vāṇी as the primary language for a custom OS or bare-metal
-firmware on a microcontroller board. Each is tracked in
+**Status**: All five gaps resolved. G2–G5 shipped 2026-06-21 (see commits
+0f15440, 10118c1, 1bef47b). G1 (`--target <triple>`) shipped 2026-06-21
+(cross-compile LLVM backend). Each was tracked in
 [`docs/TODO_CURRENT.md`](TODO_CURRENT.md) items 18–22.
 
 What **already ships** and works on bare metal today:
@@ -924,90 +924,93 @@ The five gaps:
 
 ---
 
-#### G1 — No cross-compilation target flag (TODO 18)
+#### G1 — No cross-compilation target flag (TODO 18) ✅ SHIPPED v0.1.6 2026-06-21
 
-`vanic run` / `vanic build` use the LLVM JIT (`lli`) for the LLVM
-backend, which only runs on the host. There is no `--target arm-none-eabi`
-or `--target riscv32-unknown-none-elf` flag. To cross-compile today you
-must use the C backend (`--backend=c`) and invoke a cross compiler
-yourself:
+`vanic build` now accepts `--target=<triple>` (or `--target <triple>`).
+It passes `--mtriple=<triple>` to `llc` and selects the cross-linker
+via `$CROSS_CC` or `<triple>-gcc` (stripping `unknown-` from the triple).
+Bare-metal triples (`*-none-eabi`, `*-elf`) suppress host libc/libm/OpenMP
+link flags and auto-activate `--no-std` mode.
+
+`vanic run --target=<triple>` also works:
+- Bare-metal triples → helpful error pointing to `vanic build` + QEMU.
+- Linux cross-targets → builds an ELF and runs via QEMU user-mode
+  (`qemu-<arch>-static` on PATH or `$QEMU_<ARCH>` env var).
 
 ```bash
-vanic emit-c firmware.vani > firmware.c
-arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -nostdlib \
+# ARM Cortex-M bare-metal
+vanic build firmware.vani --target=arm-none-eabi -o firmware.elf \
+  --link-with startup.c --link-with linker.ld
+
+# RISC-V 32-bit bare-metal (CROSS_CC override if toolchain differs)
+CROSS_CC=riscv32-elf-gcc vanic build blink.vani \
+  --target=riscv32-unknown-none-elf -o blink.elf
+
+# AArch64 Linux cross-compile + QEMU run
+vanic run hello.vani --target=aarch64-unknown-linux-gnu
+```
+
+---
+
+#### G2 — No `no_std` mode — C prelude always includes libc headers (TODO 19) ✅ SHIPPED v0.1.6 2026-06-21
+
+`vanic emit --backend=c --no-std` (and `vanic emit-c --no-std`) suppress
+all `#include <std*.h>` lines and emit a minimal typedef block instead
+(`uint8_t`, `int64_t`, `size_t`, `uintptr_t`, `NULL`, plus forward
+declarations for `malloc`/`free`/`abort` only). Bare-metal triples via
+`--target` auto-activate no-std.
+
+---
+
+#### G3 — No `#[link_section]` attribute (TODO 20) ✅ SHIPPED v0.1.6 2026-06-21
+
+`#[link_section = ".vectors"]` on `fn` declarations now emits
+`__attribute__((section(".vectors")))` in C and `section ".vectors"` in
+the LLVM IR `define` line.
+
+---
+
+#### G4 — No `#[no_mangle]` — generated symbols are name-mangled (TODO 21) ✅ SHIPPED v0.1.6 2026-06-21
+
+`#[no_mangle]` on `fn` declarations now emits the bare name (no
+`intent_` prefix, no Unicode mangling) in both C and LLVM backends.
+Linker scripts can reference `Reset_Handler`, `_start`, `HardFault_Handler`
+etc. directly.
+
+---
+
+#### G5 — MMIO only 32-bit — no `u8`/`u16` register access (TODO 22) ✅ SHIPPED v0.1.6 2026-06-21
+
+`mmio_read_u8(addr)`, `mmio_read_u16(addr)`, `mmio_write_u8(addr, val)`,
+`mmio_write_u16(addr, val)` all ship. They lower to
+`*(volatile uint8_t*)` / `*(volatile uint16_t*)` in C and to volatile
+`i8`/`i16` load/store with `zext`/`trunc` in LLVM IR.
+
+---
+
+#### Native bare-metal workflow (all gaps closed)
+
+```bash
+# ARM Cortex-M4 — single command, LLVM backend
+vanic build firmware.vani \
+  --target=arm-none-eabi \
+  --link-with startup.c \
+  -o firmware.elf
+
+# Explicit no-std C emission (for review / hand-edit)
+vanic emit firmware.vani --backend=c --no-std -o firmware.c
+arm-none-eabi-gcc -mcpu=cortex-m4 -mthumb -nostdlib -ffreestanding \
   -T linker.ld firmware.c startup.c -o firmware.elf
+
+# RISC-V 32-bit
+CROSS_CC=riscv32-elf-gcc \
+  vanic build blink.vani --target=riscv32-unknown-none-elf -o blink.elf
+
+# 8/16-bit MMIO (previously needed FFI shims)
+# mmio_write_u8(0x40020018, 0x05);  -- works natively now
 ```
 
-**Fix**: add `--target <triple>` to the LLVM backend path, invoking
-`llc` + the appropriate cross linker instead of `lli`.
-
----
-
-#### G2 — No `no_std` mode — C prelude always includes libc headers (TODO 19)
-
-The C backend always emits `#include <stdio.h>`, `#include <stdlib.h>`,
-etc. at the top of the generated file. A bare-metal cross compiler has
-no libc; the includes fail or pull in unexpected stubs.
-
-**Workaround**: strip the prelude manually from `vanic emit-c` output,
-or post-process with `sed`.
-
-**Fix**: a `--no-std` flag on `vanic emit-c` / `vanic build` that omits
-the libc includes and instead emits only what the program actually uses
-(a minimal set of forward declarations).
-
----
-
-#### G3 — No `#[link_section]` attribute (TODO 20)
-
-Bare-metal linker scripts require code and data to land at specific
-addresses (`.text` at 0x08000000, `.rodata` at 0x08020000, stack at
-0x20010000, etc.). There is no way to annotate a vāṇी function or
-`static`-equivalent binding with a linker section.
-
-**Workaround**: use C wrappers (`__attribute__((section(".vectors")))`
-on a C file compiled alongside via `--link-with vectors.c`).
-
-**Fix**: `#[link_section = ".vectors"]` attribute on `fn` / top-level
-`let` bindings, emitted as `__attribute__((section(...)))` in C and
-`section` metadata in LLVM IR.
-
----
-
-#### G4 — No `#[no_mangle]` — generated symbols are name-mangled (TODO 21)
-
-vāṇī mangles all generated C/LLVM symbol names (e.g. `main` →
-`intent_main`). A bare-metal reset handler must be named `Reset_Handler`
-or `_start` exactly so the linker script can reference it. There is no
-way to suppress mangling today.
-
-**Workaround**: wrap in a C file:
-```c
-extern int64_t intent_main(void);
-void Reset_Handler(void) { intent_main(); }
-```
-
-**Fix**: `#[no_mangle]` attribute that emits the function with its
-literal vāṇी name (no `intent_` prefix, no mangling).
-
----
-
-#### G5 — MMIO only 32-bit — no `u8`/`u16` register access (TODO 22)
-
-`mmio_read_u32` / `mmio_write_u32` cover 32-bit MMIO registers. Many
-peripherals (UART status registers, GPIO pins, I2C data registers) are
-8-bit or 16-bit. There is no `mmio_read_u8`, `mmio_read_u16`,
-`mmio_write_u8`, `mmio_write_u16`.
-
-**Workaround**: declare `extern "C"` helpers in a C file and use FFI.
-
-**Fix**: add the four missing width variants; they lower to
-`*(volatile uint8_t*)addr` / `*(volatile uint16_t*)addr` in C and
-to a volatile i8/i16 `load`/`store` in LLVM IR.
-
----
-
-#### Current bare-metal recipe (until gaps are closed)
+#### Legacy workaround (obsolete since v0.1.6)
 
 ```bash
 # 1. Emit C

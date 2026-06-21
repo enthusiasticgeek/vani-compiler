@@ -1,0 +1,33 @@
+// श्री।
+intent "Bare-metal cross-compilation example — ARM Cortex-M";
+
+// #[no_mangle] makes Reset_Handler appear with its literal name in the ELF
+// so the linker script can set it as the reset vector.
+#[no_mangle]
+#[link_section = ".text.Reset_Handler"]
+fn Reset_Handler() -> i64 {
+  // Read the GPIOA ODR register (bare-metal MMIO, Cortex-M address)
+  let led_port: i64 = 0x40020014;
+  let current: u32 = mmio_read_u32(led_port);
+  // Toggle bit 5 (LED on PA5 on STM32 Nucleo-64)
+  let toggled: i64 = (current as i64) ^ 0x20;
+  let _ = mmio_write_u32(led_port, toggled as u32);
+  return 0;
+}
+
+// UART status register (16-bit read, e.g. STM32 USART1_SR at 0x40011000)
+fn uart_tx_ready() -> bool {
+  let sr: u16 = mmio_read_u16(0x40011000);
+  return (sr as i64) & 0x80 != 0;
+}
+
+// Write one byte to UART data register (8-bit)
+fn uart_send(byte: u8) -> i64 {
+  let _ = mmio_write_u8(0x40011004, byte);
+  return 0;
+}
+
+fn main() -> i64 {
+  let _ = Reset_Handler();
+  return 0;
+}

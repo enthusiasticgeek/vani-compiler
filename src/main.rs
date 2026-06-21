@@ -782,18 +782,30 @@ COMMANDS:
         [--link-with PATH ...]            Compile and run a program. Default
         [-l<name> ...]                    backend is 'llvm' (emits LLVM IR
         [--big-o[=<auto|force|off>]]      and runs it via $LLI or `lli`).
-                                          With --backend=c, invokes $CC or
+        [--target=<triple>]               With --backend=c, invokes $CC or
                                           `cc` on the C output.
                                           --link-with / -l<name> require
                                           --backend=c (LLVM-JIT auto-resolves
                                           host symbols). --big-o prints per-fn
                                           complexity to stderr before running.
+                                          --target=<triple> cross-targets:
+                                          bare-metal triples (*-none-eabi /
+                                          *-elf) produce an ELF and run via
+                                          QEMU if available (QEMU_<ARCH> or
+                                          qemu-<arch>-static on PATH).
     build <file.vani> [-o out]          AOT-compile to a native binary.
           [--link-with PATH ...]          Lowers via the LLVM backend, calls
           [-l<name> ...]                  $LLC (or `llc`) for object code,
-                                          then $CC (or `cc`) to link with
-                                          libc. Output defaults to the
+          [--target=<triple>]             then $CC (or `cc`) to link with
+          [--no-std]                      libc. Output defaults to the
                                           source file's stem in the cwd.
+                                          --target=<triple> cross-compiles:
+                                          passes --mtriple to llc and uses
+                                          $CROSS_CC or <triple>-gcc as the
+                                          cross linker. Bare-metal triples
+                                          (*-none-eabi / *-elf) also
+                                          suppress libc/libm/OpenMP flags
+                                          and auto-activate --no-std.
                                           --link-with adds an extra object
                                           or source file to the link line
                                           (e.g. foo.o, foo.c) for `extern
@@ -1297,7 +1309,7 @@ fn run() -> Result<ExitCode, String> {
         }
         "run" => {
             let (file, flag_start) = required_file_at(&args, 2, "run")?;
-            let (backend_kind, link_args, big_o_mode) = parse_run_args(&args, flag_start)?;
+            let (backend_kind, link_args, big_o_mode, target) = parse_run_args(&args, flag_start)?;
             match backend_kind {
                 BackendKind::C => run_program(&file, &link_args, big_o_mode),
                 BackendKind::Llvm => {
@@ -1310,14 +1322,27 @@ fn run() -> Result<ExitCode, String> {
                                 .to_string(),
                         );
                     }
+                    if let Some(triple) = &target {
+                        if is_bare_metal_triple(triple) {
+                            return Err(format!(
+                                "bare-metal target '{}' cannot run via LLVM-JIT.\n\
+                                 Use `vanic build --target={} -o out.elf` to \
+                                 produce an ELF, then run it on your board or \
+                                 via QEMU: qemu-system-<arch> -kernel out.elf",
+                                triple, triple
+                            ));
+                        }
+                        // Linux cross-targets: build an ELF and try QEMU user-mode.
+                        return run_program_llvm_target(&file, big_o_mode, triple);
+                    }
                     run_program_llvm(&file, big_o_mode)
                 }
             }
         }
         "build" => {
             let (file, flag_start) = required_file_at(&args, 2, "build")?;
-            let (out, link_args) = parse_build_args(&args, flag_start)?;
-            build_program_llvm(&file, out.as_deref(), &link_args)
+            let (out, link_args, target) = parse_build_args(&args, flag_start)?;
+            build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref())
         }
         "tokens" => {
             // Debug subcommand: dump the token stream to stdout.
@@ -2407,10 +2432,11 @@ enum BackendKind {
 fn parse_run_args(
     args: &[String],
     from: usize,
-) -> Result<(BackendKind, Vec<String>, Option<vani::big_o::BigOMode>), String> {
+) -> Result<(BackendKind, Vec<String>, Option<vani::big_o::BigOMode>, Option<String>), String> {
     let mut backend = BackendKind::Llvm;
     let mut link_args: Vec<String> = Vec::new();
     let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
+    let mut target: Option<String> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if let Some(value) = arg.strip_prefix("--backend=") {
@@ -2456,19 +2482,29 @@ fn parse_run_args(
                     ));
                 }
             }
+        } else if let Some(triple) = arg.strip_prefix("--target=") {
+            target = Some(triple.to_string());
+            idx += 1;
+        } else if arg == "--target" {
+            let triple = args
+                .get(idx + 1)
+                .ok_or_else(|| "expected a triple after '--target'".to_string())?;
+            target = Some(triple.clone());
+            idx += 2;
         } else {
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((backend, link_args, big_o_mode))
+    Ok((backend, link_args, big_o_mode, target))
 }
 
 fn parse_build_args(
     args: &[String],
     from: usize,
-) -> Result<(Option<PathBuf>, Vec<String>), String> {
+) -> Result<(Option<PathBuf>, Vec<String>, Option<String>), String> {
     let mut out: Option<PathBuf> = None;
     let mut link_args: Vec<String> = Vec::new();
+    let mut target: Option<String> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if arg == "-o" || arg == "--out" {
@@ -2489,11 +2525,24 @@ fn parse_build_args(
         } else if arg.starts_with("-l") && arg.len() > 2 {
             link_args.push(arg.clone());
             idx += 1;
+        } else if let Some(triple) = arg.strip_prefix("--target=") {
+            target = Some(triple.to_string());
+            idx += 1;
+        } else if arg == "--target" {
+            let triple = args
+                .get(idx + 1)
+                .ok_or_else(|| "expected a triple after '--target'".to_string())?;
+            target = Some(triple.clone());
+            idx += 2;
+        } else if arg == "--no-std" {
+            // Accepted here; build_program_llvm auto-activates no-std for
+            // bare-metal triples, but the explicit flag is also honoured.
+            idx += 1;
         } else {
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((out, link_args))
+    Ok((out, link_args, target))
 }
 
 fn parse_emit_args(
@@ -2884,10 +2933,14 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
 /// AOT-compile to a native binary via the LLVM backend.
 /// Pipeline: emit `.ll` → `llc -filetype=obj` → `.o` → `cc -o` → binary.
 /// `out_path` overrides the default (source-stem in the cwd).
+/// `target` is an optional LLVM target triple (e.g. `arm-none-eabi`).
+/// When set, `--mtriple=<triple>` is passed to `llc` and the appropriate
+/// cross-linker (`$CROSS_CC` or `<triple>-gcc`) replaces the host `cc`.
 fn build_program_llvm(
     path: &Path,
     out_path: Option<&Path>,
     link_args: &[String],
+    target: Option<&str>,
 ) -> Result<ExitCode, String> {
     let checked = compile_path_or_report(path)?;
     let ll = emit_llvm_via_ssa(&checked.ir);
@@ -2937,17 +2990,29 @@ fn build_program_llvm(
     };
 
     let llc = env::var("LLC").unwrap_or_else(|_| "llc".to_string());
-    let llc_out = Command::new(&llc)
-        .arg("-filetype=obj")
-        .arg("-relocation-model=pic")
-        // Default to -O=2. The verifier proves safety upstream so
-        // the optimizer is free to assume no UB on the proved paths.
-        // Users can override the optimization level by setting LLC
-        // to a wrapper script if they need a different level.
-        .arg("-O=2")
-        .arg("-o")
-        .arg(&obj_path)
-        .arg(&llc_input)
+    let mut llc_cmd = Command::new(&llc);
+    llc_cmd.arg("-filetype=obj");
+    // For cross-compilation, pass the target triple so llc selects
+    // the right instruction-set backend. Without this the host triple
+    // is used (x86-64 on most dev machines).
+    if let Some(triple) = target {
+        llc_cmd.arg(format!("--mtriple={}", triple));
+        // Bare-metal / noOS targets need position-independent code
+        // disabled (PIE relocations don't exist on ELF-for-ROM).
+        // For Linux cross-targets keep PIC — the dynamic linker needs it.
+        if !is_bare_metal_triple(triple) {
+            llc_cmd.arg("-relocation-model=pic");
+        }
+    } else {
+        llc_cmd.arg("-relocation-model=pic");
+    }
+    // Default to -O=2. The verifier proves safety upstream so
+    // the optimizer is free to assume no UB on the proved paths.
+    // Users can override the optimization level by setting LLC
+    // to a wrapper script if they need a different level.
+    llc_cmd.arg("-O=2");
+    llc_cmd.arg("-o").arg(&obj_path).arg(&llc_input);
+    let llc_out = llc_cmd
         .output()
         .map_err(|error| format!("failed to invoke {}: {}", llc, error))?;
     if !llc_out.status.success() {
@@ -2965,29 +3030,39 @@ fn build_program_llvm(
         Some(p) => p.to_path_buf(),
         None => PathBuf::from(stem),
     };
-    let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
-    // Linkage shape depends on host:
-    //   - POSIX: the LLVM backend's `parallel for` lowering
-    //     calls `@GOMP_parallel` / `@omp_get_*` from libgomp,
-    //     so we link via `-fopenmp` (covers gcc + clang).
-    //     Programs without parallel-for still link cleanly —
-    //     the linker drops the unused dep.
-    //   - Windows: libgomp isn't available; parallel-for
-    //     open-codes `@CreateThread` (kernel32, auto-linked)
-    //     and the mutex fast path calls `@WaitOnAddress` /
-    //     `@WakeByAddressSingle` from synchronization.lib —
-    //     so we add `-lsynchronization` and skip `-fopenmp`.
+    // Select the linker. For cross-compilation:
+    //   1. $CROSS_CC env var (explicit override)
+    //   2. <triple>-gcc, stripping "unknown-" from the triple
+    //      (arm-none-eabi-gcc, riscv32-elf-gcc, aarch64-linux-gnu-gcc …)
+    //   3. $CC / cc for host builds
+    let (cc, is_cross) = if let Some(triple) = target {
+        (cross_cc_for_triple(triple), true)
+    } else {
+        (env::var("CC").unwrap_or_else(|_| "cc".to_string()), false)
+    };
+    let bare_metal = target.map(is_bare_metal_triple).unwrap_or(false);
     let mut link_cmd = Command::new(&cc);
     link_cmd.arg(&obj_path);
-    if cfg!(target_os = "windows") {
+    if bare_metal {
+        // Bare-metal: no libc, no libm, no OpenMP, no host thread libs.
+        // The user supplies their own linker script via link_args if needed.
+    } else if is_cross {
+        // Linux cross-targets: keep libm; skip -fopenmp (cross libgomp
+        // path is non-trivial — leave it to the user via link_args).
+        link_cmd.arg("-lm");
+    } else if cfg!(target_os = "windows") {
+        // Host Windows build
         link_cmd.arg("-lsynchronization");
         link_cmd.arg("-lws2_32");
     } else {
+        // Host POSIX build
         link_cmd.arg("-fopenmp");
     }
     // Layer 4.1 of `unsafe.md` — same toolchain hardening on
     // the LLVM-backend link path. See `apply_embedded_cc_hardening`.
-    apply_embedded_cc_hardening(&mut link_cmd);
+    if !bare_metal {
+        apply_embedded_cc_hardening(&mut link_cmd);
+    }
     // FFI follow-up: user-supplied link inputs follow the vāṇī
     // object so symbol resolution sees vāṇī's `extern "C" fn` call
     // sites first and then the providing object/library.
@@ -3056,6 +3131,130 @@ fn apply_embedded_cc_hardening(cmd: &mut Command) {
     }
 }
 
+/// Returns true for target triples that target bare-metal / no-OS environments.
+/// These triples have no C runtime, no kernel ABI, and cannot be JIT-run on the host.
+fn is_bare_metal_triple(triple: &str) -> bool {
+    triple.contains("none") || triple.contains("eabi") || triple.ends_with("-elf")
+        || triple.contains("-unknown-elf")
+}
+
+/// Derive the cross-linker for a given LLVM target triple.
+/// Priority: $CROSS_CC > <triple>-gcc (with "unknown-" stripped).
+fn cross_cc_for_triple(triple: &str) -> String {
+    if let Ok(cc) = env::var("CROSS_CC") {
+        return cc;
+    }
+    // Strip "unknown-" which is conventional filler; most cross-toolchains
+    // use the shorter form. e.g.:
+    //   arm-unknown-none-eabi   → arm-none-eabi-gcc
+    //   riscv32-unknown-none-elf → riscv32-none-elf-gcc (or riscv32-elf-gcc)
+    //   aarch64-unknown-linux-gnu → aarch64-linux-gnu-gcc
+    let prefix = triple.replace("-unknown-", "-");
+    format!("{}-gcc", prefix)
+}
+
+/// Probe the system for a QEMU user-mode emulator suitable for `triple`.
+/// Returns the binary name (e.g. "qemu-arm-static") if found on PATH,
+/// or None if no emulator is available.
+fn qemu_for_triple(triple: &str) -> Option<String> {
+    // Extract the architecture prefix from the triple
+    // arm-unknown-linux-gnueabihf → arm
+    // aarch64-unknown-linux-gnu → aarch64
+    // riscv64-unknown-linux-gnu → riscv64
+    let arch = triple.split('-').next().unwrap_or("");
+    // $QEMU_<ARCH> env var override
+    let env_key = format!("QEMU_{}", arch.to_uppercase());
+    if let Ok(q) = env::var(&env_key) {
+        return Some(q);
+    }
+    // Common QEMU user-mode binary names
+    let candidates = [
+        format!("qemu-{}-static", arch),
+        format!("qemu-{}", arch),
+    ];
+    for candidate in &candidates {
+        if which_on_path(candidate) {
+            return Some(candidate.clone());
+        }
+    }
+    None
+}
+
+/// Returns true if `name` resolves to an executable on PATH.
+fn which_on_path(name: &str) -> bool {
+    env::var_os("PATH")
+        .map(|path_os| {
+            env::split_paths(&path_os).any(|dir| {
+                let full = dir.join(name);
+                full.is_file()
+                    || {
+                        // On Unix, executable is signalled by the +x bit;
+                        // on Windows, by the extension. Check existence only —
+                        // if the binary is found we assume it is executable.
+                        cfg!(target_os = "windows")
+                            && [".exe", ".cmd", ".bat"].iter().any(|ext| {
+                                dir.join(format!("{}{}", name, ext)).is_file()
+                            })
+                    }
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Cross-compile via the LLVM backend for `triple` and run via QEMU user-mode.
+/// Used for `vanic run --target=<linux-cross-triple>`.
+fn run_program_llvm_target(
+    path: &Path,
+    big_o_mode: Option<vani::big_o::BigOMode>,
+    triple: &str,
+) -> Result<ExitCode, String> {
+    // Build a temporary ELF in a temp dir
+    let stem = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("program");
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let elf_path = env::temp_dir().join(format!("vanic-{}-{}-{}.elf", stem, pid, nanos));
+    if let Some(mode) = big_o_mode {
+        if mode != vani::big_o::BigOMode::Off {
+            let checked = compile_path_or_report(path)?;
+            for (name, complexity) in vani::big_o::annotate_program(&checked.ir, mode) {
+                eprintln!("  fn {}: {}", name, complexity);
+            }
+        }
+    }
+    build_program_llvm(path, Some(&elf_path), &[], Some(triple))?;
+    // Try QEMU user-mode
+    match qemu_for_triple(triple) {
+        Some(qemu) => {
+            let status = Command::new(&qemu)
+                .arg(&elf_path)
+                .status()
+                .map_err(|e| format!("failed to invoke {}: {}", qemu, e))?;
+            let _ = fs::remove_file(&elf_path);
+            Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+        }
+        None => {
+            eprintln!(
+                "note: ELF written to '{}' (no QEMU emulator found for '{}')",
+                elf_path.display(),
+                triple
+            );
+            eprintln!(
+                "hint: install qemu-user-static and set QEMU_{} or add \
+                 qemu-{}-static to PATH",
+                triple.split('-').next().unwrap_or("ARCH").to_uppercase(),
+                triple.split('-').next().unwrap_or("arch"),
+            );
+            Ok(ExitCode::from(1))
+        }
+    }
+}
+
 fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {
     let stem = source_path
         .file_stem()
@@ -3070,4 +3269,42 @@ fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {
     let c_path = env::temp_dir().join(format!("vanic-{}.c", unique));
     let bin_path = env::temp_dir().join(format!("vanic-{}", unique));
     (c_path, bin_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_metal_triple_detection() {
+        assert!(is_bare_metal_triple("arm-none-eabi"),
+            "arm-none-eabi is bare metal");
+        assert!(is_bare_metal_triple("riscv32-unknown-none-elf"),
+            "riscv32-unknown-none-elf is bare metal");
+        assert!(is_bare_metal_triple("thumbv7em-none-eabihf"),
+            "thumbv7em-none-eabihf is bare metal (eabi)");
+        assert!(!is_bare_metal_triple("aarch64-unknown-linux-gnu"),
+            "aarch64-linux is not bare metal");
+        assert!(!is_bare_metal_triple("x86_64-unknown-linux-musl"),
+            "x86_64-musl is not bare metal");
+    }
+
+    #[test]
+    fn cross_cc_derivation() {
+        // Ensure CROSS_CC is not set so we test the fallback path.
+        std::env::remove_var("CROSS_CC");
+        assert_eq!(
+            cross_cc_for_triple("arm-none-eabi"),
+            "arm-none-eabi-gcc"
+        );
+        assert_eq!(
+            cross_cc_for_triple("aarch64-unknown-linux-gnu"),
+            "aarch64-linux-gnu-gcc",
+            "unknown- must be stripped from the toolchain prefix"
+        );
+        assert_eq!(
+            cross_cc_for_triple("riscv32-unknown-none-elf"),
+            "riscv32-none-elf-gcc"
+        );
+    }
 }

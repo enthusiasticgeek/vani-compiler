@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-06-19
+Last updated: 2026-06-21
 
 ---
 
@@ -84,54 +84,38 @@ custom OS or bare-metal board firmware. See
 [L19 in docs/v1_limitations.md](v1_limitations.md) for full context,
 workarounds, and the exact design goal for each.
 
-- [ ] **18. `--target <triple>` cross-compilation flag** (G1 — highest impact)
-  Add `--target arm-none-eabi` / `--target riscv32-unknown-none-elf` etc.
-  to the LLVM backend path. Instead of running `lli` (JIT on host), invoke
-  `llc -march=<arch>` to produce object code, then the appropriate cross
-  linker. Also wire `--target` into `vanic build` / `vanic run` (run via
-  QEMU if a target emulator is available).
-  - Entry point: `src/main.rs` — add `--target` CLI flag; `src/backend_llvm.rs`
-    — replace `lli` invocation with `llc` + cross linker path.
-  - **Effort**: ~6–10 h. Unlocks the LLVM backend for real cross-compilation.
+- [x] **18. `--target <triple>` cross-compilation flag** (G1 — highest impact) ✅ done 2026-06-21
+  `vanic build --target=<triple>` passes `--mtriple=<triple>` to `llc`;
+  selects cross-linker via `$CROSS_CC` or `<triple>-gcc`; bare-metal
+  triples suppress libc/OpenMP/pthread link flags and auto-activate no-std.
+  `vanic run --target=<triple>` errors helpfully for bare-metal; for Linux
+  cross-targets it builds an ELF and runs via QEMU user-mode.
+  `is_bare_metal_triple` + `cross_cc_for_triple` helper fns in `src/main.rs`.
+  4 new tests: 2 lib (bare-metal LLVM IR + no-std C), 2 binary (triple
+  detection + CC derivation). L19 fully resolved in `docs/v1_limitations.md`.
 
-- [ ] **19. `--no-std` mode — omit libc prelude in C backend** (G2)
-  A `--no-std` flag (or inferred from `--target` when it's a bare-metal
-  triple) that makes `vanic emit-c` / `vanic build --backend=c` skip the
-  `#include <stdio.h>` / `#include <stdlib.h>` / `#include <string.h>` etc.
-  headers and instead emit only minimal forward declarations for what the
-  program actually uses.
-  - Entry point: `src/backend_c.rs` — the prelude-emit function; gate
-    includes behind a `no_std: bool` flag threaded from `src/main.rs`.
-  - **Effort**: ~3–4 h.
+- [x] **19. `--no-std` mode — omit libc prelude in C backend** (G2) ✅ done 2026-06-21
+  `--no-std` flag on `vanic emit --backend=c` / `vanic emit-c` suppresses
+  all `#include <std*.h>` and emits a minimal bare-metal typedef block.
+  Auto-activates when `--target` triple is bare-metal. `NO_STD_MODE`
+  thread-local in `src/backend_c.rs`; `emit_c_no_std()` public API in
+  `src/lib.rs`.
 
-- [ ] **20. `#[link_section = "..."]` attribute** (G3)
-  Allow `fn` declarations and top-level `let` bindings to be placed in
-  a named linker section. Emits `__attribute__((section("...")))` in C,
-  `section` metadata in LLVM IR.
-  - Required for: interrupt vector tables, `.rodata` placement, boot code
-    at the reset vector address.
-  - Entry point: `src/ast.rs` — add `link_section: Option<String>` to
-    `Function`; `src/parser.rs` — parse `#[link_section = "..."]`;
-    `src/backend_c.rs` + `src/backend_llvm.rs` — emit the attribute.
-  - **Effort**: ~4–6 h.
+- [x] **20. `#[link_section = "..."]` attribute** (G3) ✅ done 2026-06-21
+  Emits `__attribute__((section("...")))` in C and `section "..."` on the
+  LLVM IR `define` line. Parser in `src/parser.rs`; `link_section:
+  Option<String>` on `Function` in `src/ast.rs`/`src/ir.rs`.
 
-- [ ] **21. `#[no_mangle]` attribute — suppress symbol name mangling** (G4)
-  Allow `fn` declarations to opt out of the `intent_` prefix and name
-  mangling so the linker script can reference them by their literal vāṇी
-  name (e.g. `Reset_Handler`, `_start`, `HardFault_Handler`).
-  - Entry point: `src/ast.rs` — add `no_mangle: bool` to `Function`;
-    `src/backend_c.rs` + `src/backend_llvm.rs` — skip `function_name()`
-    mangling when `no_mangle` is set; `src/parser.rs` — parse `#[no_mangle]`.
-  - **Effort**: ~2–3 h (mostly parser + two codegen paths).
+- [x] **21. `#[no_mangle]` attribute — suppress symbol name mangling** (G4) ✅ done 2026-06-21
+  `fn` declarations with `#[no_mangle]` emit the bare vāṇी name in both
+  C and LLVM backends. `NO_MANGLE_FN_REGISTRY` / `LLVM_NO_MANGLE_FN_REGISTRY`
+  thread-locals track which functions are bare so call-sites use the right
+  symbol.
 
-- [ ] **22. MMIO 8-bit and 16-bit variants** (G5)
-  Add `mmio_read_u8(addr: i64) -> u8`, `mmio_read_u16(addr: i64) -> u16`,
-  `mmio_write_u8(addr: i64, val: u8)`, `mmio_write_u16(addr: i64, val: u16)`.
-  Lower to `*(volatile uint8_t*)` / `*(volatile uint16_t*)` in C and to
-  a volatile `i8`/`i16` `load`/`store` in LLVM IR.
-  - Entry point: `src/checker.rs` — add to `check_mmio_builtin`;
-    `src/backend_c.rs` + `src/backend_llvm.rs` — add codegen arms.
-  - **Effort**: ~2–3 h (same pattern as existing `mmio_read_u32`).
+- [x] **22. MMIO 8-bit and 16-bit variants** (G5) ✅ done 2026-06-21
+  `mmio_read_u8`, `mmio_read_u16`, `mmio_write_u8`, `mmio_write_u16` now
+  ship. Lowers to `*(volatile uint8_t*)` / `*(volatile uint16_t*)` in C;
+  volatile `i8`/`i16` load/store with `zext`/`trunc` in LLVM IR.
 
 ---
 

@@ -47114,5 +47114,51 @@ fn main() -> i64 { return 42; }
         );
     }
 
+    #[test]
+    fn cross_compile_bare_metal_llvm_ir_uses_bare_name() {
+        // A #[no_mangle] + #[link_section] function for bare-metal should
+        // emit LLVM IR using the bare symbol name (no intent_ prefix) and
+        // include a section attribute — both required for cross-compilation
+        // via `llc --mtriple=arm-none-eabi`.
+        let src = r#"
+intent "bare-metal cross-compile IR";
+#[no_mangle]
+#[link_section = ".text.reset"]
+fn Reset_Handler() -> i64 { return 0; }
+fn main() -> i64 { return Reset_Handler(); }
+"#;
+        let ll = compile_to_llvm(src).expect("bare-metal program must compile to LLVM IR");
+        assert!(
+            ll.contains("@Reset_Handler"),
+            "no_mangle must emit bare symbol name in LLVM IR:\n{ll}"
+        );
+        assert!(
+            ll.contains(".text.reset"),
+            "link_section must appear in LLVM IR define line:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn cross_compile_no_std_no_stdio_llvm_compatible() {
+        // A --no-std C emission for a simple bare-metal entry point must
+        // contain the minimal typedef block and must not include stdio.h.
+        // This is the C that a cross-compiler (arm-none-eabi-gcc) sees.
+        let src = r#"
+intent "bare-metal no-std";
+#[no_mangle]
+fn _start() -> i64 { return 0; }
+fn main() -> i64 { return _start(); }
+"#;
+        let c = compile_to_c_no_std(src).expect("no-std program must compile");
+        assert!(
+            !c.contains("#include <stdio.h>"),
+            "stdio.h must be absent in no-std output:\n{c}"
+        );
+        assert!(
+            c.contains("_start"),
+            "_start symbol must appear in no-std output:\n{c}"
+        );
+    }
+
 }
 
