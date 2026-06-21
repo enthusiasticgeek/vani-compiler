@@ -1582,6 +1582,8 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            no_mangle: false,
+            link_section: None,
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
@@ -1615,6 +1617,8 @@ impl Parser {
         let mut no_float = false;
         let mut no_recursion = false;
         let mut interrupt = false;
+        let mut no_mangle = false;
+        let mut link_section: Option<String> = None;
         let mut bounded_stack: Option<u64> = None;
         let mut wcet_cycles: Option<u64> = None;
         let mut deterministic_timing = false;
@@ -1647,6 +1651,23 @@ impl Parser {
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
                 "interrupt" => interrupt = true,
+                "no_mangle" => no_mangle = true,
+                "link_section" => {
+                    self.expect_keyword(
+                        "'=' after `link_section`",
+                        |k| matches!(k, TokenKind::Equal),
+                    )?;
+                    let s_tok = self.bump();
+                    match s_tok.kind {
+                        TokenKind::Str(s) => link_section = Some(s),
+                        _ => {
+                            return Err(Diagnostic::new(
+                                s_tok.span,
+                                "expected a string literal after `#[link_section =`",
+                            ));
+                        }
+                    }
+                }
                 "deterministic_timing" => deterministic_timing = true,
                 // T3.1: `#[bounded_stack(bytes=N)]` — declare a
                 // per-fn stack budget. The post-check pass runs
@@ -1752,6 +1773,7 @@ impl Parser {
                             "unknown attribute '#[{}]' — recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
+                             `#[no_mangle]`, `#[link_section = \"s\"]`, \
                              `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
                              `#[deterministic_timing]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
@@ -1785,6 +1807,8 @@ impl Parser {
         f.no_heap = no_heap || interrupt || composite_no_heap;
         f.no_recursion = no_recursion || interrupt || composite_no_recursion;
         f.interrupt = interrupt;
+        f.no_mangle = no_mangle;
+        f.link_section = link_section;
         f.safety_standard = safety_standard;
         f.bounded_stack = bounded_stack;
         f.wcet_cycles = wcet_cycles;
@@ -1853,6 +1877,8 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            no_mangle: false,
+            link_section: None,
             safety_standard: None,
             bounded_stack: None,
             wcet_cycles: None,
@@ -8878,6 +8904,8 @@ pub(crate) fn try_v31_transform(
         no_float: false,
         no_recursion: false,
         interrupt: false,
+        no_mangle: false,
+        link_section: None,
         safety_standard: None,
         bounded_stack: None,
         wcet_cycles: None,

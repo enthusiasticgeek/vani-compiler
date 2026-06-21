@@ -294,6 +294,12 @@ thread_local! {
     pub(crate) static LLVM_EXTERN_FN_REGISTRY:
         std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Set of `#[no_mangle]` fn names. Populated at the start of
+    /// `emit_llvm`. Consulted by the Call emitter to use the bare
+    /// vāṇी name (no `fn_` prefix) for calls to these functions.
+    static LLVM_NO_MANGLE_FN_REGISTRY:
+        std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
     pub(crate) static LLVM_USER_DROP_REGISTRY:
         std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
@@ -705,6 +711,16 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         reg.clear();
         for f in &program.functions {
             if f.is_extern {
+                reg.insert(f.name.clone());
+            }
+        }
+    });
+    // Populate no_mangle registry for bare-symbol emission.
+    LLVM_NO_MANGLE_FN_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if f.no_mangle {
                 reg.insert(f.name.clone());
             }
         }
@@ -1908,7 +1924,17 @@ fn emit_function(
         out.push_str(")\n");
         return;
     }
-    out.push_str(&format!("define {} @fn_{}(", ret_ty, llvm_mangle_ident(&function.name)));
+    // Determine the LLVM symbol name: bare for no_mangle, prefixed otherwise.
+    let llvm_sym = if function.no_mangle {
+        format!("@{}", function.name)
+    } else {
+        format!("@fn_{}", llvm_mangle_ident(&function.name))
+    };
+    // section attribute for link_section.
+    let section_suffix = function.link_section.as_ref()
+        .map(|s| format!(" section \"{}\"", s))
+        .unwrap_or_default();
+    out.push_str(&format!("define {} {}(", ret_ty, llvm_sym));
     for (i, param) in function.params.iter().enumerate() {
         if i > 0 {
             out.push_str(", ");
@@ -1919,7 +1945,7 @@ fn emit_function(
             param.name
         ));
     }
-    out.push_str(") {\n");
+    out.push_str(&format!("){} {{\n", section_suffix));
 
     let mut ctx = FnCtx::new(assert_msg_indices, print_str_indices);
     // Closure #289 tree-LLVM: record the fn's bounded-name
@@ -14500,6 +14526,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // the codegen expects.
             let is_extern = LLVM_EXTERN_FN_REGISTRY
                 .with(|r| r.borrow().contains(name.as_str()));
+            let is_no_mangle = LLVM_NO_MANGLE_FN_REGISTRY
+                .with(|r| r.borrow().contains(name.as_str()));
             // Closure #288: when calling an extern fn that
             // takes a struct-by-value, bitcast the struct value
             // to its System V x86-64 packed-register form
@@ -14542,7 +14570,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 })
                 .collect();
             let dest = ctx.fresh_tmp();
-            let symbol = if is_extern {
+            let symbol = if is_extern || is_no_mangle {
                 format!("@{}", name)
             } else {
                 format!("@fn_{}", llvm_mangle_ident(name))

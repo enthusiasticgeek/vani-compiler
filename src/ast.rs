@@ -652,6 +652,18 @@ pub struct Function {
     /// parallel-for. Composable with other primitives — the
     /// union of constraints applies.
     pub interrupt: bool,
+    /// When true (`#[no_mangle]`), both codegen backends emit this
+    /// function using its literal vāṇī name — no `intent_` prefix,
+    /// no Unicode escaping — so linker scripts and assembly startup
+    /// code can reference it by exact name (`Reset_Handler`, `_start`,
+    /// `HardFault_Handler`). Composable with `#[interrupt]`.
+    pub no_mangle: bool,
+    /// When `Some(s)` (`#[link_section = "s"]`), both codegen backends
+    /// place this function in linker section `s`. Emits
+    /// `__attribute__((section("s")))` in C and `section "s"` in LLVM IR.
+    /// Required for interrupt vector tables and boot code at fixed
+    /// addresses.
+    pub link_section: Option<String>,
     /// Safety-standard composite tag — names the standard the
     /// function is intended to be compliant with. The parser
     /// expands the tag into the primitive set the standard

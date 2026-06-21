@@ -85,6 +85,13 @@ pub struct TypedFunction {
     /// pass (no_heap + no_recursion + no_lock + no_spawn)
     /// via `safety::enforce_interrupt`.
     pub interrupt: bool,
+    /// Forwarded from `ast::Function::no_mangle`. When true,
+    /// both backends emit the function with its literal vāṇī name
+    /// (no `intent_` prefix, no Unicode escaping).
+    pub no_mangle: bool,
+    /// Forwarded from `ast::Function::link_section`. When `Some(s)`,
+    /// both backends place the function in linker section `s`.
+    pub link_section: Option<String>,
     /// Standard composite tag forwarded from
     /// `ast::Function::safety_standard`. Populated by the
     /// parser when one of `#[misra_c_2012]`, `#[asil_d]`,

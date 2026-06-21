@@ -53,6 +53,12 @@ thread_local! {
     pub(crate) static C_EXTERN_FN_REGISTRY:
         std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// Set of `#[no_mangle]` fn names. Populated at the start of
+    /// `emit_c`. Consulted by the Call emitter to use the bare
+    /// vāṇī name (no `fn_` prefix) for calls to these functions.
+    static NO_MANGLE_FN_REGISTRY:
+        std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
     /// Per-program registry of enum payload types. Populated
     /// at the start of `emit_c` from `program.enums`. Maps
     /// each enum name → `Some(payload_ty)` if any variant has
@@ -157,6 +163,16 @@ pub fn emit_c(program: &TypedProgram) -> String {
         reg.clear();
         for f in &program.functions {
             if f.is_extern {
+                reg.insert(f.name.clone());
+            }
+        }
+    });
+    // Populate no_mangle registry so Call emitter uses bare names.
+    NO_MANGLE_FN_REGISTRY.with(|r| {
+        let mut reg = r.borrow_mut();
+        reg.clear();
+        for f in &program.functions {
+            if f.no_mangle {
                 reg.insert(f.name.clone());
             }
         }
@@ -11903,6 +11919,26 @@ fn emit_prototype(function: &TypedFunction, out: &mut String) {
         out.push_str(");\n");
         return;
     }
+    if function.no_mangle {
+        // no_mangle: emit with bare name, no static storage class.
+        if let Some(section) = &function.link_section {
+            out.push_str(&format!(
+                "__attribute__((section(\"{}\")))\n", section
+            ));
+        }
+        out.push_str(&c_type_name(&function.return_type));
+        out.push(' ');
+        out.push_str(&function.name);
+        out.push('(');
+        emit_params(function, out);
+        out.push_str(");\n");
+        return;
+    }
+    if let Some(section) = &function.link_section {
+        out.push_str(&format!(
+            "__attribute__((section(\"{}\")))\n", section
+        ));
+    }
     out.push_str("static ");
     out.push_str(&c_type_name(&function.return_type));
     out.push(' ');
@@ -11927,6 +11963,16 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
         out.push_str(");\n");
         return;
     }
+    // Determine the emitted symbol name: bare for no_mangle, prefixed otherwise.
+    let sym_name = if function.no_mangle {
+        function.name.clone()
+    } else {
+        function_name(&function.name)
+    };
+    // Emit link_section attribute if requested.
+    let section_attr = function.link_section.as_ref().map(|s| {
+        format!("__attribute__((section(\"{}\")))\n", s)
+    });
     // Closure #286: `#[bounded(N)]` attribute emits a
     // thread-local depth counter + bound check at fn entry.
     // GCC's __attribute__((cleanup)) ensures the decrement
@@ -11942,10 +11988,15 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
             "static void {}(int* __u) {{ (void)__u; --{}; }}\n",
             dec_helper, counter_name
         ));
-        out.push_str("static ");
+        if let Some(attr) = &section_attr {
+            out.push_str(attr);
+        }
+        if !function.no_mangle {
+            out.push_str("static ");
+        }
         out.push_str(&c_type_name(&function.return_type));
         out.push(' ');
-        out.push_str(&function_name(&function.name));
+        out.push_str(&sym_name);
         out.push('(');
         emit_params(function, out);
         out.push_str(") {\n");
@@ -11971,10 +12022,15 @@ fn emit_function(function: &TypedFunction, out: &mut String) {
         out.push_str("}\n");
         return;
     }
-    out.push_str("static ");
+    if let Some(attr) = &section_attr {
+        out.push_str(attr);
+    }
+    if !function.no_mangle {
+        out.push_str("static ");
+    }
     out.push_str(&c_type_name(&function.return_type));
     out.push(' ');
-    out.push_str(&function_name(&function.name));
+    out.push_str(&sym_name);
     out.push('(');
     emit_params(function, out);
     out.push_str(") {\n");
@@ -18447,9 +18503,12 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             // call (no `fn_` prefix). The C_EXTERN_FN_REGISTRY
             // gets populated at backend entry from the
             // program's extern fn list.
+            // `#[no_mangle]` fns also use their bare vāṇī name.
             let is_extern = C_EXTERN_FN_REGISTRY
                 .with(|r| r.borrow().contains(name));
-            let symbol = if is_extern {
+            let is_no_mangle = NO_MANGLE_FN_REGISTRY
+                .with(|r| r.borrow().contains(name));
+            let symbol = if is_extern || is_no_mangle {
                 name.to_string()
             } else {
                 function_name(name)

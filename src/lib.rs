@@ -47046,5 +47046,35 @@ fn main() -> i64 {
         assert!(c.contains("uint16_t"), "expected uint16_t in C output:\n{c}");
     }
 
+    #[test]
+    fn no_mangle_emits_bare_name_in_c() {
+        let src = r#"
+intent "no_mangle";
+#[no_mangle]
+fn Reset_Handler() -> i64 { return 0; }
+fn main() -> i64 { return Reset_Handler(); }
+"#;
+        let c = compile_to_c(src).expect("no_mangle must compile");
+        assert!(
+            c.contains("Reset_Handler("),
+            "expected bare symbol name in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn link_section_emits_attribute_in_c() {
+        let src = r#"
+intent "link_section";
+#[link_section = ".vectors"]
+fn reset_vec() -> i64 { return 0; }
+fn main() -> i64 { return reset_vec(); }
+"#;
+        let c = compile_to_c(src).expect("link_section must compile");
+        assert!(
+            c.contains(".vectors"),
+            "expected .vectors section attribute in C output:\n{c}"
+        );
+    }
+
 }
 
