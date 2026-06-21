@@ -82,25 +82,13 @@ Last updated: 2026-06-19
 - [ ] **14. Homebrew formula** — `homebrew-vanic` tap repo. **Gate**: wait until
   macOS is empirically verified on a Darwin host.
 
-- [ ] **17. Native file I/O — eliminate FFI workaround for flat files + stdin**
-  ([L18 in docs/v1_limitations.md](v1_limitations.md)).
-  Currently all file/device I/O requires `extern "C"` FFI shims. Design and
-  implement native builtins:
-  - Affine `FileHandle` type (RAII auto-close at scope exit, like `OwnedStr`)
-  - `file_open(path: Str, mode: OpenMode) -> FileHandle` — modes: Read, Write, Append
-  - `file_read_line(f: mut ref FileHandle) -> OwnedStr` — reads one line (strips `\n`)
-  - `file_write(f: mut ref FileHandle, s: Str) -> i64` — writes bytes
-  - `file_close(f: FileHandle) -> i64` — explicit early close (also auto at scope exit)
-  - `file_flush(f: mut ref FileHandle) -> i64`
-  - `stdin_read_line() -> OwnedStr` — reads one line from stdin
-  - `eprint` statement — mirrors `print` but writes to stderr
-  - `flush_stdout()` builtin
-  - Both C and LLVM backends; `Result<T, E>` error surface for open failures
-  
-  **Out of scope for this item**: device I/O (UART / I2C / SPI / RS485) — those
-  are kernel-ioctl-specific and remain a C-shim + FFI pattern by design.
-  
-  **Effort**: ~10–15 h (checker + both backends + tutorial chapter + lib tests).
+- [x] **17. Native file I/O — eliminate FFI workaround for flat files + stdin** ✅ done 2026-06-21
+  ([L18 resolved in docs/v1_limitations.md](v1_limitations.md)).
+  Ships: `FileHandle` (affine RAII, auto-fclose at scope exit), `file_open`, `file_is_ok`,
+  `file_read_line`, `file_write`, `file_close`, `file_flush`, `stdin_read_line`,
+  `flush_stdout`, `eprint` statement — both C and LLVM backends, 5 lib tests.
+  Device I/O (UART/I2C/SPI/RS485) stays FFI + C-shim by design (kernel ioctl
+  ABI is platform-specific and aggregate-by-value).
 
 - [x] **15. B.1 Cross-language `.vani` translator CLI** — `tools/vani_translate.py`
   already has `ALIASES`; build a proper round-trip CLI (~4–6 h). ✅ done 2026-06-19

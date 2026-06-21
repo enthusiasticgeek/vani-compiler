@@ -105,9 +105,16 @@ vanic build foo.vani -o foo -lm -lcurl
 
 ## File I/O and device I/O via FFI
 
-vāṇी v1 has no built-in file I/O ([limitation L18](../../docs/v1_limitations.md)).
-Until native `FileHandle` / `read_line` / `eprint` land, the FFI path
-covers the common cases.
+> **v0.1.5 update**: native `FileHandle`, `file_open`, `file_read_line`,
+> `file_write`, `file_close`, `file_flush`, `stdin_read_line`,
+> `flush_stdout`, and the `eprint` statement all ship natively — no FFI
+> needed for flat files or stdin.
+> See [`examples/language/english/file_io.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/file_io.vani).
+>
+> The FFI patterns below are now only needed for **device I/O**:
+> serial ports (RS232/RS485/UART), I2C, SPI, and other kernel-ioctl
+> interfaces where the C `struct termios` / `struct ifreq` ABI is
+> aggregate-by-value (rejected at vāṇी's FFI boundary).
 
 ### Flat file (append log)
 

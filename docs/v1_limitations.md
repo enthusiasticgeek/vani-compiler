@@ -12,8 +12,8 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.1.4 (2026-06-20): 12 of 18 entries fully resolved; 1 partially
-> resolved (L13); 5 remain open (L5, L6, L10-macOS, L14, L18).**
+> **At v0.1.5 (2026-06-21): 13 of 18 entries fully resolved; 1 partially
+> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -34,7 +34,7 @@
 > | L15 | `Mutex<T>` payload limited to `i64` | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L16 | `Barrier` synchronization primitive missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
-> | L18 | File I/O, stdin, stderr, flush — no native surface | ⬜ Use FFI workaround; native I/O queued |
+> | L18 | File I/O, stdin, stderr, flush — no native surface | ✅ Resolved v0.1.5 (2026-06-21) |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -763,12 +763,47 @@ as a missing feature in STATUS.md rather than a listed limitation here.
 
 ## I/O limitations
 
-### L18 — File I/O, stdin, stderr, flush — no native surface
+### L18 — File I/O, stdin, stderr, flush ✅ SHIPPED v0.1.5 (2026-06-21)
 
-vāṇी v1 has no built-in file I/O layer. The only I/O primitive in
-the language surface is `print` / `write`, which always writes to
-**stdout** with a trailing newline (via `fputs` / `printf` /
-`putchar('\n')`).
+**Status**: Resolved. Native `FileHandle`, `file_open`, `file_read_line`,
+`file_write`, `file_close`, `file_flush`, `stdin_read_line`,
+`flush_stdout`, and the `eprint` statement all ship in v0.1.5 on both
+C and LLVM backends.
+
+```vani
+let f: FileHandle = file_open("/tmp/log.txt", "w");
+if file_is_ok(ref f) {
+  let _ = file_write(mut ref f, "hello\n");
+  let _ = file_flush(mut ref f);
+}
+// f auto-closes at scope exit (RAII)
+
+let line: OwnedStr = stdin_read_line();
+let _ = flush_stdout();
+eprint "fatal:", 42;
+```
+
+See [`examples/language/english/file_io.vani`](../examples/language/english/file_io.vani)
+for the full worked example.
+
+**Remaining scope** (device I/O — UART / I2C / SPI / RS485): these
+are kernel-ioctl-specific and remain a C-shim + FFI pattern by
+design. The `struct termios` ABI is aggregate-by-value (rejected at
+the v1 FFI boundary), so write a thin C shim and use `--link-with`.
+
+---
+
+*Historical note (pre-v0.1.5): vāṇी v1 had no built-in file I/O layer.
+The only I/O primitive was `print` / `write` to stdout.*
+
+| Feature | v1 status (pre-v0.1.5) |
+|---|---|
+| `print` / `write` → stdout | ✅ shipped |
+| `eprint` / stderr output | ❌ no language surface |
+| stdin / `read_line` | ❌ no language surface |
+| Flat file I/O (`open`, `read`, `write`, `close`) | ❌ no language surface |
+| Device I/O (RS232 / RS485 / UART / `ioctl`) | ❌ no language surface |
+| `flush` / `setbuf` / unbuffered stdout | ❌ no language surface |
 
 | Feature | v1 status |
 |---|---|
@@ -854,16 +889,9 @@ print "line two";
 print "line one\nline two";  // trailing \n still appended — gives 3 lines
 ```
 
-**Roadmap**: native file I/O (affine `FileHandle`, `read_line`,
-`eprint`, `flush`) is tracked in
-[`docs/TODO_CURRENT.md`](TODO_CURRENT.md) item 17. Design goal:
-eliminate the FFI workaround for the flat-file and stdin cases; device
-I/O (UART / I2C / SPI) will remain a C-shim + FFI pattern because the
-kernel ioctl interface is inherently platform-specific.
-
 **Tutorial reference**: [Intermediate 9 — FFI](../tutorials/src/intermediate/09_ffi.md)
-shows the `--link-with` pattern and the `extern "C"` declaration
-surface that the workaround above relies on.
+shows the `--link-with` pattern for device I/O (UART/serial) that
+still requires a C shim.
 
 ---
 
