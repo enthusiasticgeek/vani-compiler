@@ -103,6 +103,109 @@ vanic build foo.vani -o foo -lm -lcurl
   pass to elide calls or invariants in surprising ways.
   Verify your declarations against the man page.
 
+## File I/O and device I/O via FFI
+
+vāṇी v1 has no built-in file I/O ([limitation L18](../../docs/v1_limitations.md)).
+Until native `FileHandle` / `read_line` / `eprint` land, the FFI path
+covers the common cases.
+
+### Flat file (append log)
+
+```vani
+extern "C" fn fopen(path: Str, mode: Str) -> i64;   // FILE* as i64
+extern "C" fn fclose(fp: i64) -> i32;
+extern "C" fn fputs_f(s: Str, fp: i64) -> i32;      // maps to C fputs
+extern "C" fn fflush(fp: i64) -> i32;
+
+fn append_log(path: Str, line: Str) -> i64 {
+  let fp: i64 = fopen(path, "a");
+  if fp == 0 { return 0 - 1; }
+  let _ = fputs_f(line, fp);
+  let _ = fputs_f("\n", fp);
+  let _ = fflush(fp);
+  let _ = fclose(fp);
+  return 0;
+}
+```
+
+> `fputs_f` needs a one-line C shim because `fputs` is a macro on
+> some platforms. Add `int fputs_f(const char *s, FILE *f) { return fputs(s, f); }`
+> to a helper file and compile with `--link-with helper.c`.
+
+### Reading stdin
+
+```vani
+extern "C" fn getchar() -> i32;   // returns next byte or -1 (EOF)
+```
+
+For line-level reading, use `fgets` with a fixed-size buffer wrapped
+in a C helper that returns an `OwnedStr`-compatible `i8*`.
+
+### Stderr
+
+There's no `eprint` statement yet. Write to stderr via a shim:
+
+```c
+// helper.c
+#include <stdio.h>
+void eprint(const char *s) { fputs(s, stderr); fputs("\n", stderr); }
+```
+
+```vani
+extern "C" fn eprint(s: Str) -> i64;
+
+fn main() -> i64 {
+  eprint("fatal: something went wrong");
+  return 1;
+}
+```
+
+### Linux serial device (RS232 / RS485 / UART)
+
+`struct termios` is aggregate-by-value, which v1 rejects at the FFI
+boundary. Write a scalar-interface C shim and link it:
+
+```c
+// uart.c
+#include <termios.h>
+#include <fcntl.h>
+#include <unistd.h>
+int  uart_open (const char *p, int baud);   // open + configure
+int  uart_write(int fd, const char *b, int n) { return write(fd,b,n); }
+int  uart_read (int fd,       char *b, int n) { return read (fd,b,n); }
+int  uart_close(int fd)                       { return close(fd);      }
+```
+
+```vani
+extern "C" fn uart_open(path: Str, baud: i32) -> i32;
+extern "C" fn uart_write(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn uart_read(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn uart_close(fd: i32) -> i32;
+
+fn main() -> i64 {
+  let fd: i32 = uart_open("/dev/ttyUSB0", 115200);
+  let _ = uart_write(fd, "AT\r\n", 4);
+  let _ = uart_close(fd);
+  return 0;
+}
+```
+
+```bash
+vanic build my_uart.vani -o my_uart --link-with uart.c
+```
+
+### Buffering and flush
+
+`print` writes through libc's fully-buffered stdout. To flush
+explicitly or switch to line-buffered / unbuffered mode:
+
+```vani
+extern "C" fn fflush_stdout() -> i32;   // shim: fflush(stdout)
+extern "C" fn set_unbuffered() -> i32;  // shim: setvbuf(stdout,NULL,_IONBF,0)
+```
+
+---
+
 ## Challenge
 
 Declare an `extern "C" fn strlen(s: Str) -> u64;` and write a

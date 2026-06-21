@@ -82,6 +82,26 @@ Last updated: 2026-06-19
 - [ ] **14. Homebrew formula** — `homebrew-vanic` tap repo. **Gate**: wait until
   macOS is empirically verified on a Darwin host.
 
+- [ ] **17. Native file I/O — eliminate FFI workaround for flat files + stdin**
+  ([L18 in docs/v1_limitations.md](v1_limitations.md)).
+  Currently all file/device I/O requires `extern "C"` FFI shims. Design and
+  implement native builtins:
+  - Affine `FileHandle` type (RAII auto-close at scope exit, like `OwnedStr`)
+  - `file_open(path: Str, mode: OpenMode) -> FileHandle` — modes: Read, Write, Append
+  - `file_read_line(f: mut ref FileHandle) -> OwnedStr` — reads one line (strips `\n`)
+  - `file_write(f: mut ref FileHandle, s: Str) -> i64` — writes bytes
+  - `file_close(f: FileHandle) -> i64` — explicit early close (also auto at scope exit)
+  - `file_flush(f: mut ref FileHandle) -> i64`
+  - `stdin_read_line() -> OwnedStr` — reads one line from stdin
+  - `eprint` statement — mirrors `print` but writes to stderr
+  - `flush_stdout()` builtin
+  - Both C and LLVM backends; `Result<T, E>` error surface for open failures
+  
+  **Out of scope for this item**: device I/O (UART / I2C / SPI / RS485) — those
+  are kernel-ioctl-specific and remain a C-shim + FFI pattern by design.
+  
+  **Effort**: ~10–15 h (checker + both backends + tutorial chapter + lib tests).
+
 - [x] **15. B.1 Cross-language `.vani` translator CLI** — `tools/vani_translate.py`
   already has `ALIASES`; build a proper round-trip CLI (~4–6 h). ✅ done 2026-06-19
   (auto-detect source lang from pragma; --verify round-trip flag; --list-keywords markdown

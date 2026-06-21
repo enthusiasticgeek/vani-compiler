@@ -12,8 +12,8 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.1.3 (2026-06-19): 12 of 17 entries fully resolved; 1 partially
-> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14).**
+> **At v0.1.4 (2026-06-20): 12 of 18 entries fully resolved; 1 partially
+> resolved (L13); 5 remain open (L5, L6, L10-macOS, L14, L18).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -34,6 +34,7 @@
 > | L15 | `Mutex<T>` payload limited to `i64` | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L16 | `Barrier` synchronization primitive missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
+> | L18 | File I/O, stdin, stderr, flush — no native surface | ⬜ Use FFI workaround; native I/O queued |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -757,6 +758,112 @@ let _ = write_guard_set(mut ref w, v + 1);
 **Channel<T, N>** also became parametric over any element type in v0.1.1
 (previously scalar-only). No L-number assigned because it was documented
 as a missing feature in STATUS.md rather than a listed limitation here.
+
+---
+
+## I/O limitations
+
+### L18 — File I/O, stdin, stderr, flush — no native surface
+
+vāṇी v1 has no built-in file I/O layer. The only I/O primitive in
+the language surface is `print` / `write`, which always writes to
+**stdout** with a trailing newline (via `fputs` / `printf` /
+`putchar('\n')`).
+
+| Feature | v1 status |
+|---|---|
+| `print` / `write` → stdout | ✅ Ships (always newline-terminated) |
+| `eprint` / stderr output | ❌ No language surface |
+| stdin / `read_line` | ❌ No language surface |
+| Flat file I/O (`open`, `read`, `write`, `close`) | ❌ No language surface |
+| Device I/O (RS232 / RS485 / UART / `ioctl`) | ❌ No language surface |
+| `flush` / `setbuf` / unbuffered stdout | ❌ No language surface |
+
+**Why**: stdout-only `print` covers the primary use case (programs that
+compute and report). Full file I/O requires affine `FileHandle` types,
+a `Result<T, E>` error surface, and per-platform device abstractions —
+a dedicated Arc.
+
+**Workaround — FFI**: declare `extern "C"` bindings to libc or POSIX
+and use `--link-with` for any C shim layer.
+
+```vani
+// ── flat file (libc) ─────────────────────────────────────────────
+extern "C" fn fopen(path: Str, mode: Str) -> i64;   // FILE* as i64
+extern "C" fn fclose(fp: i64) -> i32;
+extern "C" fn fputs_file(s: Str, fp: i64) -> i32;   // C: fputs
+extern "C" fn fgets(buf: Str, n: i32, fp: i64) -> i64;
+extern "C" fn fflush(fp: i64) -> i32;
+
+fn write_log(path: Str, msg: Str) -> i64 {
+  let fp: i64 = fopen(path, "a");
+  if fp == 0 { return 0 - 1; }
+  let _ = fputs_file(msg, fp);
+  let _ = fflush(fp);
+  let _ = fclose(fp);
+  return 0;
+}
+
+// ── stdin ─────────────────────────────────────────────────────────
+extern "C" fn getchar() -> i32;   // read one byte from stdin
+
+// ── stderr ────────────────────────────────────────────────────────
+extern "C" fn fputs_stderr(s: Str) -> i32;   // thin C wrapper: fputs(s, stderr)
+```
+
+For **device I/O** (Linux serial ports / UART), the `struct termios`
+ABI is aggregate-by-value, which v1 rejects at the FFI boundary.
+Write a thin C shim (`uart_helper.c`) that exposes scalar-only
+functions and compile with `--link-with uart_helper.c`:
+
+```c
+// uart_helper.c
+#include <termios.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int uart_open(const char *path, int baud) {
+    int fd = open(path, O_RDWR | O_NOCTTY | O_SYNC);
+    // ... configure termios, set baud ...
+    return fd;
+}
+int uart_write(int fd, const char *buf, int n) { return write(fd, buf, n); }
+int uart_read(int fd, char *buf, int n)        { return read(fd, buf, n); }
+int uart_close(int fd)                         { return close(fd); }
+```
+
+```vani
+extern "C" fn uart_open(path: Str, baud: i32) -> i32;
+extern "C" fn uart_write(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn uart_read(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn uart_close(fd: i32) -> i32;
+```
+
+```bash
+vanic build my_uart.vani -o my_uart --link-with uart_helper.c
+```
+
+**Multi-line print**: `print` always emits exactly one trailing
+newline. To print multiple lines use multiple `print` statements, or
+embed `\n` escape sequences inside a string literal:
+
+```vani
+print "line one";
+print "line two";
+// OR:
+print "line one\nline two";  // trailing \n still appended — gives 3 lines
+```
+
+**Roadmap**: native file I/O (affine `FileHandle`, `read_line`,
+`eprint`, `flush`) is tracked in
+[`docs/TODO_CURRENT.md`](TODO_CURRENT.md) item 17. Design goal:
+eliminate the FFI workaround for the flat-file and stdin cases; device
+I/O (UART / I2C / SPI) will remain a C-shim + FFI pattern because the
+kernel ioctl interface is inherently platform-specific.
+
+**Tutorial reference**: [Intermediate 9 — FFI](../tutorials/src/intermediate/09_ffi.md)
+shows the `--link-with` pattern and the `extern "C"` declaration
+surface that the workaround above relies on.
 
 ---
 
