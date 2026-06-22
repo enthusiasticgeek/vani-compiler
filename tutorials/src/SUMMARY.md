@@ -5,6 +5,7 @@
 
 # Beginner
 
+- [CLI reference — `vanic` commands and flags](beginner/00_cli_reference.md)
 - [Hello, World](beginner/01_hello_world.md)
 - [Variables, types, operators](beginner/02_variables.md)
 - [Functions and the four return aliases](beginner/03_functions.md)
@@ -61,6 +62,7 @@
 - [Option<T> and the option builtins](intermediate/13_option.md)
 - [HashMap<K,V> and HashSet<T>](intermediate/14_collections.md)
 - [Math, random numbers, and clone](intermediate/15_math_rng.md)
+- [Vec statistics and combinators](intermediate/15b_vec_stats.md)
 - [Packages with Kosh](intermediate/16_packages.md)
 
 # Advanced
@@ -72,10 +74,13 @@
 - [RwLock: shared reads, exclusive writes — intuition primer](advanced/02c_rwlock_primer.md)
 - [`parallel for` + reductions + race-freedom](advanced/02_parallel.md)
 - [`task` / `join` + atomics / mutexes / channels / barriers / rwlocks](advanced/03_concurrency.md)
+- [Condition variables: wait-until-predicate — intuition primer](advanced/03b_condvar_primer.md)
 - [Embedded, `unsafe`, and regions — intuition primer](advanced/04a_embedded_primer.md)
 - [Cross-compilation and bare-metal targets — intuition primer](advanced/04b_cross_compile_primer.md)
 - [Embedded targets + `unsafe` + region typing](advanced/04_embedded.md)
+- [Function attributes reference](advanced/04c_attributes_reference.md)
 - [The `dyn` vtable layout + safety boundary](advanced/05_vtables.md)
+- [Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque](advanced/05b_advanced_collections.md)
 - [SMT trace debugging](advanced/06_smt_debug.md)
 - [Devanagari purity arc](advanced/07_devanagari_purity.md)
 - [Writing a cross-language translator extension](advanced/08_translator.md)
