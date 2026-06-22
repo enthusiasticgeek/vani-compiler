@@ -16,8 +16,8 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes, diagnostic improvements, performance, docs |
 | `-dev`  | Unreleased development build — no stability promise |
 
-**Current version: `0.1.6`** (Cargo.toml).  
-`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish). `v0.1.3` tagged 2026-06-20 (patch series). `v0.1.4` tagged 2026-06-20 (non-Copy tuples, Box<T> enum payloads, tutorial link fixes). `v0.1.5` tagged 2026-06-21 (native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint). `v0.1.6` tagged 2026-06-21 (bare-metal: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run).
+**Current version: `0.1.7`** (Cargo.toml).  
+`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish). `v0.1.3` tagged 2026-06-20 (patch series). `v0.1.4` tagged 2026-06-20 (non-Copy tuples, Box<T> enum payloads, tutorial link fixes). `v0.1.5` tagged 2026-06-21 (native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint). `v0.1.6` tagged 2026-06-21 (bare-metal: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run). `v0.1.7` tagged 2026-06-21 (tutorial coverage expansion: 10 new pages covering CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections).
 
 ---
 
@@ -64,6 +64,10 @@ Once G1–G3 land and the test suite is green on all platforms, bump
 - `0.1.6` ✅ shipped 2026-06-21: bare-metal / cross-compilation — `--target=<triple>`,
   `--no-std`, `#[no_mangle]`, `#[link_section = "..."]`, `mmio_read/write_u8`,
   `mmio_read/write_u16`, QEMU user-mode run. L19 fully resolved (all 5 gaps).
+- `0.1.7` ✅ shipped 2026-06-21: tutorial coverage expansion — 10 new pages covering the
+  full CLI reference, function pointers, native file I/O, math deep-dive (special fns +
+  ML activations + bit ops), vec statistics, condvar primer, cross-compile primer,
+  function attributes reference, and advanced collections. No compiler changes.
 
 ### `0.2.0` — Package manager + cross-platform I/O
 
@@ -129,3 +133,4 @@ Criteria (not time-boxed):
 | 2026-06-20 | Tagged `v0.1.4` | Non-Copy tuples, Box<T> enum payloads, tutorial link sweep. |
 | 2026-06-21 | Tagged `v0.1.5` | Native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint. L18 resolved. |
 | 2026-06-21 | Tagged `v0.1.6` | Bare-metal arc: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run. L19 fully resolved. |
+| 2026-06-21 | Tagged `v0.1.7` | Tutorial coverage expansion: 10 new pages — CLI ref, FnPtr primer, file I/O primer+worked, math deep-dive, vec stats, condvar primer, cross-compile primer, attributes reference, advanced collections. No compiler changes. |

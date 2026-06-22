@@ -536,10 +536,23 @@ below.
 - **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently invokes `qemu-<arch>-static`.
 - **L19 fully resolved** (all 5 bare-metal gaps). Example: `examples/language/english/bare_metal.vani`.
 
+**v0.1.7 — tutorial coverage expansion (2026-06-21):**
+- **10 new tutorial pages** across beginner, intermediate, and advanced tracks — no compiler changes.
+- **`beginner/00_cli_reference.md`** — complete `vanic` CLI reference: all subcommands, flags, and environment variables.
+- **`intermediate/06c_fnptr_primer.md`** — function pointers (`fn(A)->R`) as first-class values, higher-order functions, `Vec<fn(A)->R>` dispatch tables.
+- **`intermediate/09b_file_io_primer.md` + `09c_file_io.md`** — `FileHandle` concept primer and worked examples (write/read/stdin/append).
+- **`intermediate/15a_math_deep.md`** — full math library coverage: logs, special functions (erf, gamma, hypot, cbrt), ML activations (relu, sigmoid, swish, softplus, logit), extended number theory, and complete bit-manipulation API (set/clear/toggle/test_bit, rotate, bswap, clz/ctz, popcount, parity).
+- **`intermediate/15b_vec_stats.md`** — vec sorting, argmin/argmax/kth, statistical aggregates, cumulative ops, set operations, combinators.
+- **`advanced/03b_condvar_primer.md`** — condition variable mental model, spurious wakeups, wait-loop idiom, `condvar_wait_timeout`.
+- **`advanced/04b_cross_compile_primer.md`** — target triple system, `--no-std`, all 6 MMIO widths, QEMU user-mode.
+- **`advanced/04c_attributes_reference.md`** — all 8 function attributes with code examples and runtime-cost table.
+- **`advanced/05b_advanced_collections.md`** — Graph, BST/AVL, Trie, SkipList, UnionFind, BloomFilter, Deque with API tables and decision guide.
+
 **Test ledger at 2026-06-21: ~2434+ lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-21 — **v0.1.6: bare-metal cross-compilation + `--target` + `--no-std` + `#[no_mangle]` + `#[link_section]` + MMIO u8/u16**.
+Latest ship 2026-06-21 — **v0.1.7: tutorial coverage expansion — 10 new pages; full CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections**.
+Previous ship 2026-06-21 — **v0.1.6: bare-metal cross-compilation + `--target` + `--no-std` + `#[no_mangle]` + `#[link_section]` + MMIO u8/u16**.
 Previous notable ship 2026-06-11 — **Windows full e2e parity** (all lib +
 e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
 deferred). Previous notable ship 2026-06-09 — **L4 (C) closure:
