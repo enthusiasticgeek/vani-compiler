@@ -46,6 +46,7 @@
 - [Closures and lambda lifting — intuition primer](intermediate/06a_closures_primer.md)
 - [Iterators and combinators — intuition primer](intermediate/06b_iterators_primer.md)
 - [Closures and iterator combinators](intermediate/06_closures.md)
+- [Function pointers — intuition primer](intermediate/06c_fnptr_primer.md)
 - [Tuples and tuple destructure](intermediate/07_tuples.md)
 - [Multi-file projects + `vani.toml`](intermediate/08_manifest.md)
 - [FFI — intuition primer](intermediate/09a_ffi_primer.md)
@@ -62,6 +63,7 @@
 - [Option<T> and the option builtins](intermediate/13_option.md)
 - [HashMap<K,V> and HashSet<T>](intermediate/14_collections.md)
 - [Math, random numbers, and clone](intermediate/15_math_rng.md)
+- [Math library deep-dive: special functions, ML activations, bit ops](intermediate/15a_math_deep.md)
 - [Vec statistics and combinators](intermediate/15b_vec_stats.md)
 - [Packages with Kosh](intermediate/16_packages.md)
 
