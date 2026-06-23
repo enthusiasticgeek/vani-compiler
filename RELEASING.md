@@ -16,8 +16,8 @@ MAJOR.MINOR.PATCH[-PRERELEASE]
 | `PATCH` | Bug fixes, diagnostic improvements, performance, docs |
 | `-dev`  | Unreleased development build — no stability promise |
 
-**Current version: `0.1.8`** (Cargo.toml).  
-`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish). `v0.1.3` tagged 2026-06-20 (patch series). `v0.1.4` tagged 2026-06-20 (non-Copy tuples, Box<T> enum payloads, tutorial link fixes). `v0.1.5` tagged 2026-06-21 (native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint). `v0.1.6` tagged 2026-06-21 (bare-metal: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run). `v0.1.7` tagged 2026-06-21 (tutorial coverage expansion: 10 new pages covering CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections). `v0.1.8` tagged 2026-06-23 (three new language features: block comments `/* ... */` with nesting, print blocks `print { ... }`, positional break `break inner/middle/outer`).
+**Current version: `0.1.9`** (Cargo.toml).  
+`v0.1.0` tagged 2026-06-18. `v0.1.1` tagged 2026-06-18 (Barrier, RwLock<T>, parametric Mutex<T>/Channel<T>, Traits phase 2, kosh config). `v0.1.2` tagged 2026-06-19 (Win64/AArch64 ABI, dialect purity, first crates.io publish). `v0.1.3` tagged 2026-06-20 (patch series). `v0.1.4` tagged 2026-06-20 (non-Copy tuples, Box<T> enum payloads, tutorial link fixes). `v0.1.5` tagged 2026-06-21 (native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint). `v0.1.6` tagged 2026-06-21 (bare-metal: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run). `v0.1.7` tagged 2026-06-21 (tutorial coverage expansion: 10 new pages covering CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections). `v0.1.8` tagged 2026-06-23 (three new language features: block comments `/* ... */` with nesting, print blocks `print { ... }`, positional break `break inner/middle/outer`). `v0.1.9` tagged 2026-06-23 (named loop labels: `name: for/while`, `break name`, `continue name`; replaces positional break; compile error on undefined label).
 
 ---
 
@@ -134,3 +134,5 @@ Criteria (not time-boxed):
 | 2026-06-21 | Tagged `v0.1.5` | Native file I/O: FileHandle, file_open/read/write/close, stdin_read_line, eprint. L18 resolved. |
 | 2026-06-21 | Tagged `v0.1.6` | Bare-metal arc: --target, --no-std, #[no_mangle], #[link_section], mmio u8/u16, QEMU run. L19 fully resolved. |
 | 2026-06-21 | Tagged `v0.1.7` | Tutorial coverage expansion: 10 new pages — CLI ref, FnPtr primer, file I/O primer+worked, math deep-dive, vec stats, condvar primer, cross-compile primer, attributes reference, advanced collections. No compiler changes. |
+| 2026-06-23 | Tagged `v0.1.8` | Three new language features: block comments `/* ... */` with nesting, print blocks `print { ... }`, positional break `break inner/middle/outer`. |
+| 2026-06-23 | Tagged `v0.1.9` | Named loop labels: `name: for/while`, `break name`, `continue name`. Replaces positional break. Compile error on undefined label. |
