@@ -2538,6 +2538,18 @@ impl Parser {
             let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
+            } else if let TokenKind::Ident(n) = &self.current().kind {
+                // `break inner;` / `break middle;` / `break outer;` — positional targets
+                if matches!(n.as_str(), "inner" | "middle" | "outer")
+                    && self.tokens.get(self.pos + 1)
+                        .map(|t| matches!(t.kind, TokenKind::Semicolon))
+                        .unwrap_or(false)
+                {
+                    let t = self.bump();
+                    if let TokenKind::Ident(name) = t.kind { Some(name) } else { unreachable!() }
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -3958,6 +3970,29 @@ impl Parser {
 
     fn parse_print_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'print'", |kind| matches!(kind, TokenKind::Print))?;
+        // Block form: `print { items1; items2; items3; }` — each `;`-terminated
+        // group becomes a separate output line.
+        if self.check(|kind| matches!(kind, TokenKind::LBrace)) {
+            self.bump(); // consume `{`
+            let mut groups: Vec<Vec<crate::ast::PrintItem>> = Vec::new();
+            while !self.check(|kind| matches!(kind, TokenKind::RBrace | TokenKind::Eof)) {
+                let mut items = Vec::new();
+                loop {
+                    items.push(self.parse_print_item()?);
+                    if self.match_token(|kind| matches!(kind, TokenKind::Comma)).is_some() {
+                        continue;
+                    }
+                    break;
+                }
+                self.expect_keyword("';' after print group", |kind| matches!(kind, TokenKind::Semicolon))?;
+                groups.push(items);
+            }
+            let end = self.expect_keyword("'}'", |kind| matches!(kind, TokenKind::RBrace))?;
+            return Ok(Stmt::PrintBlock {
+                groups,
+                span: start.span.merge(end.span),
+            });
+        }
         // Comma-separated items: each is a string literal or an
         // expression. `print "x =", x, "(done)";` is legal.
         let mut items = Vec::new();

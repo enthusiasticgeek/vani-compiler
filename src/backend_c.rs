@@ -13084,7 +13084,7 @@ return __intent_ret; }}\n",
             }
             out.push('\n');
         }
-        TypedStmt::While { cond, body, .. } => {
+        TypedStmt::While { cond, body, label } => {
             out.push_str("  while (");
             out.push_str(&emit_expr(cond));
             out.push_str(") {\n");
@@ -13092,9 +13092,16 @@ return __intent_ret; }}\n",
                 emit_stmt(s, out);
             }
             out.push_str("  }\n");
+            if let Some(name) = label {
+                out.push_str(&format!("  __vani_break_{}:;\n", name));
+            }
         }
-        TypedStmt::Break { .. } => {
-            out.push_str("  break;\n");
+        TypedStmt::Break { label } => {
+            if let Some(name) = label {
+                out.push_str(&format!("  goto __vani_break_{};\n", name));
+            } else {
+                out.push_str("  break;\n");
+            }
         }
         TypedStmt::Continue { .. } => {
             out.push_str("  continue;\n");
@@ -13229,6 +13236,7 @@ return __intent_ret; }}\n",
             body,
             parallel,
             reductions,
+            label,
             ..
         } => {
             let local = local_name(var);
@@ -13263,6 +13271,9 @@ return __intent_ret; }}\n",
                 emit_stmt(s, out);
             }
             out.push_str("  }\n");
+            if let Some(name) = label {
+                out.push_str(&format!("  __vani_break_{}:;\n", name));
+            }
         }
         TypedStmt::ForIter {
             var,
@@ -13271,16 +13282,14 @@ return __intent_ret; }}\n",
             collection_ty,
             consumes,
             body,
+            label,
             ..
-        } => emit_for_iter(
-            var,
-            element_ty,
-            collection,
-            collection_ty,
-            *consumes,
-            body,
-            out,
-        ),
+        } => {
+            emit_for_iter(var, element_ty, collection, collection_ty, *consumes, body, out);
+            if let Some(name) = label {
+                out.push_str(&format!("  __vani_break_{}:;\n", name));
+            }
+        }
         TypedStmt::TaskSpawn { name, body, captures } => {
             // Spawn the task on a real pthread. Allocate a
             // per-spawn outline ID, emit the outline + ctx

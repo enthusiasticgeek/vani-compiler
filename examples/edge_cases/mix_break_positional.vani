@@ -1,0 +1,46 @@
+fn main() -> i64 {
+  /* Test break outer: exits the outer while loop */
+  let i: i64 = 0;
+  while i < 5 {
+    let j: i64 = 0;
+    while j < 5 {
+      if j == 2 {
+        break outer;
+      }
+      j = j + 1;
+    }
+    i = i + 1;
+  }
+  /* i should be 0 because break outer fired on first outer iteration */
+  print i;
+
+  /* Test break middle in three-deep loop */
+  let a: i64 = 0;
+  while a < 3 {
+    let b: i64 = 0;
+    while b < 3 {
+      let c: i64 = 0;
+      while c < 3 {
+        if c == 1 {
+          break middle;
+        }
+        c = c + 1;
+      }
+      b = b + 1;
+    }
+    a = a + 1;
+  }
+  print a;
+
+  /* Test break inner: same as plain break */
+  let x: i64 = 0;
+  while x < 10 {
+    if x == 3 {
+      break inner;
+    }
+    x = x + 1;
+  }
+  print x;
+
+  return 0;
+}

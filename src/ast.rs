@@ -1498,6 +1498,13 @@ pub enum Stmt {
         items: Vec<PrintItem>,
         span: Span,
     },
+    /// `print { items1; items2; items3; }` — each semicolon-terminated
+    /// group is a separate output line. Desugars to multiple `Print`
+    /// statements in the checker.
+    PrintBlock {
+        groups: Vec<Vec<PrintItem>>,
+        span: Span,
+    },
     If {
         cond: Expr,
         then_body: Vec<Stmt>,
@@ -1635,6 +1642,7 @@ impl Stmt {
             | Stmt::Prove { span, .. }
             | Stmt::Print { span, .. }
             | Stmt::EPrint { span, .. }
+            | Stmt::PrintBlock { span, .. }
             | Stmt::If { span, .. }
             | Stmt::While { span, .. }
             | Stmt::Assign { span, .. }

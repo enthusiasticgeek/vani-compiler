@@ -2100,6 +2100,7 @@ struct FnCtx<'a> {
 struct LoopFrame {
     header: String,
     exit: String,
+    label: Option<String>,
 }
 
 impl<'a> FnCtx<'a> {
@@ -3509,7 +3510,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
         }
         TypedStmt::Print { items } => emit_print_items(items, ctx, out),
         TypedStmt::EPrint { items } => emit_eprint_items_llvm(items, ctx, out),
-        TypedStmt::While { cond, body, .. } => {
+        TypedStmt::While { cond, body, label } => {
             let header = ctx.fresh_label("loop_header");
             let body_lbl = ctx.fresh_label("loop_body");
             let exit = ctx.fresh_label("loop_exit");
@@ -3527,6 +3528,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.push(LoopFrame {
                 header: header.clone(),
                 exit: exit.clone(),
+                label: label.clone(),
             });
             let outer_terminated = ctx.terminated;
             ctx.terminated = false;
@@ -3555,8 +3557,14 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // predecessors").
             ctx.current_block = exit;
         }
-        TypedStmt::Break { .. } => {
-            if let Some(frame) = ctx.loops.last() {
+        TypedStmt::Break { label } => {
+            let frame = if let Some(name) = label {
+                // Labeled break: find the enclosing loop with this label.
+                ctx.loops.iter().rev().find(|f| f.label.as_deref() == Some(name))
+            } else {
+                ctx.loops.last()
+            };
+            if let Some(frame) = frame {
                 out.push_str(&format!("  br label %{}\n", frame.exit));
                 ctx.terminated = true;
             } else {
@@ -3571,7 +3579,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; continue outside a loop\n");
             }
         }
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions, .. } => {
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions, label, .. } => {
             if !ty.is_integer() {
                 // The parser only accepts integer literals on the
                 // bounds and the checker enforces integer type on
@@ -3647,6 +3655,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.push(LoopFrame {
                 header: step.clone(),
                 exit: exit.clone(),
+                label: label.clone(),
             });
             let outer_terminated = ctx.terminated;
             ctx.terminated = false;
@@ -3979,6 +3988,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             collection_ty,
             consumes,
             body,
+            label,
             ..
         } => {
             // Standard counter loop: i = 0..len(collection), body
@@ -4168,6 +4178,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             ctx.loops.push(LoopFrame {
                 header: step.clone(),
                 exit: exit.clone(),
+                label: label.clone(),
             });
             let outer_terminated = ctx.terminated;
             ctx.terminated = false;
@@ -42499,6 +42510,7 @@ fn emit_parallel_for_via_gomp(
     outlined_ctx.loops.push(LoopFrame {
         header: "step".to_string(),
         exit: "exit".to_string(),
+        label: None,
     });
     for s in &rewritten {
         emit_stmt(s, &mut outlined_ctx, &mut deferred);

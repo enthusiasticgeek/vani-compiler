@@ -722,8 +722,8 @@ fn lower_stmt(
         TypedStmt::If { cond, then_body, else_body } => {
             lower_if(cond, then_body, else_body, b, locals)
         }
-        TypedStmt::While { cond, body, .. } => lower_while(cond, body, b, locals),
-        TypedStmt::For { var, ty, start, end, body, parallel, reductions, .. } => {
+        TypedStmt::While { cond, body, label } => lower_while(cond, body, label.clone(), b, locals),
+        TypedStmt::For { var, ty, start, end, body, parallel, reductions, label, .. } => {
             if *parallel {
                 // Sequential lowering preserves correctness
                 // (the verifier already proved race-freedom).
@@ -767,7 +767,7 @@ fn lower_stmt(
                         shape: placeholder_shape,
                     }),
                 );
-                let shape_info = lower_integer_for(var, ty, start, end, body, b, locals)?;
+                let shape_info = lower_integer_for(var, ty, start, end, body, label.clone(), b, locals)?;
                 let real_shape = ParallelForShape {
                     counter_name: shape_info.counter_name,
                     counter_header_value: shape_info.counter_header_value,
@@ -795,7 +795,7 @@ fn lower_stmt(
                 );
                 Ok(())
             } else {
-                lower_integer_for(var, ty, start, end, body, b, locals).map(|_| ())
+                lower_integer_for(var, ty, start, end, body, label.clone(), b, locals).map(|_| ())
             }
         }
         TypedStmt::TaskSpawn { name, body, .. } => {
@@ -863,8 +863,13 @@ fn lower_stmt(
             );
             Ok(())
         }
-        TypedStmt::Break { .. } => {
-            let Some(frame) = b.loops.last().cloned() else {
+        TypedStmt::Break { label } => {
+            let frame = if let Some(name) = label {
+                b.loops.iter().rev().find(|f| f.label.as_deref() == Some(name)).cloned()
+            } else {
+                b.loops.last().cloned()
+            };
+            let Some(frame) = frame else {
                 return Err(LowerError {
                     message: "break outside any loop reached the SSA lowerer".into(),
                     span: Span::default(),
@@ -1101,8 +1106,8 @@ fn lower_stmt(
             // type-check time.
             Ok(())
         }
-        TypedStmt::ForIter { var, element_ty, collection, collection_ty: _, consumes, body, .. } => {
-            lower_for_iter(var, element_ty, collection, *consumes, body, b, locals)
+        TypedStmt::ForIter { var, element_ty, collection, collection_ty: _, consumes, body, label, .. } => {
+            lower_for_iter(var, element_ty, collection, *consumes, body, label.clone(), b, locals)
         }
         TypedStmt::ForIterShallowFree { collection, element_ty: _ } => {
             // Emit a Drop for the collection buffer on an early-return
@@ -1134,6 +1139,7 @@ fn lower_for_iter(
     collection: &str,
     consumes: bool,
     body: &[TypedStmt],
+    label: Option<String>,
     b: &mut FunctionBuilder,
     locals: &mut Locals,
 ) -> Result<(), LowerError> {
@@ -1271,6 +1277,7 @@ fn lower_for_iter(
         header: step,
         exit,
         carry: step_carry.clone(),
+        label,
     });
     lower_stmts(body, b, &mut body_locals)?;
     if b.current_block_terminator().is_none() {
@@ -1390,6 +1397,8 @@ struct LoopFrame {
     /// order — so break jumps and the normal "header observed
     /// cond false" path agree on the merge.
     carry: Vec<(String, ValueId, Type)>,
+    /// Loop label for `break 'label` / `break outer` etc.
+    label: Option<String>,
 }
 
 fn loop_carry_args(frame: &LoopFrame, locals: &Locals) -> Vec<Operand> {
@@ -1483,6 +1492,7 @@ fn modified_in_body(body: &[TypedStmt]) -> std::collections::BTreeSet<String> {
 fn lower_while(
     cond: &TypedExpr,
     body: &[TypedStmt],
+    label: Option<String>,
     b: &mut FunctionBuilder,
     locals: &mut Locals,
 ) -> Result<(), LowerError> {
@@ -1559,6 +1569,7 @@ fn lower_while(
         header,
         exit,
         carry: carry.clone(),
+        label,
     });
     let mut body_locals = loop_locals.clone();
     lower_stmts(body, b, &mut body_locals)?;
@@ -1617,6 +1628,7 @@ fn lower_integer_for(
     start: &TypedExpr,
     end: &TypedExpr,
     body: &[TypedStmt],
+    label: Option<String>,
     b: &mut FunctionBuilder,
     locals: &mut Locals,
 ) -> Result<IntegerForShape, LowerError> {
@@ -1729,6 +1741,7 @@ fn lower_integer_for(
         header: step,
         exit,
         carry: step_carry.clone(),
+        label,
     });
     let mut body_locals = loop_locals.clone();
     lower_stmts(body, b, &mut body_locals)?;

@@ -913,6 +913,30 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             }
             out.push_str(";\n");
         }
+        Stmt::PrintBlock { groups, .. } => {
+            out.push_str(&pad);
+            out.push_str("print {\n");
+            let inner_pad = "    ".repeat(depth + 1);
+            for items in groups {
+                out.push_str(&inner_pad);
+                for (i, item) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    match item {
+                        PrintItem::Expr(e) => format_expr(e, false, out),
+                        PrintItem::Str(s) => {
+                            out.push('"');
+                            out.push_str(&escape_string(s));
+                            out.push('"');
+                        }
+                    }
+                }
+                out.push_str(";\n");
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+        }
         Stmt::If { cond, then_body, else_body, span } => {
             out.push_str(&pad);
             out.push_str("if ");
@@ -1599,6 +1623,16 @@ mod tests {
                     for it in items {
                         if let PrintItem::Expr(e) = it {
                             zero_expr(e);
+                        }
+                    }
+                    *span = crate::span::Span::new(0, 0);
+                }
+                Stmt::PrintBlock { groups, span } => {
+                    for items in groups {
+                        for it in items {
+                            if let PrintItem::Expr(e) = it {
+                                zero_expr(e);
+                            }
                         }
                     }
                     *span = crate::span::Span::new(0, 0);

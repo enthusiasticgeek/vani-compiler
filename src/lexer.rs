@@ -5673,6 +5673,22 @@ pub fn extract_comments(source: &str) -> Vec<Comment> {
                     span: Span::new(start, i),
                 });
             }
+            b'/' if i + 1 < bytes.len() && bytes[i + 1] == b'*' => {
+                // Skip block comment content (not collected as a Comment node).
+                i += 2;
+                let mut depth: usize = 1;
+                while i < bytes.len() && depth > 0 {
+                    if bytes[i] == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                        i += 2;
+                        depth += 1;
+                    } else if bytes[i] == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                        i += 2;
+                        depth -= 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
             _ => i += 1,
         }
     }
@@ -5716,6 +5732,7 @@ impl<'a> Lexer<'a> {
             match byte {
                 b' ' | b'\r' | b'\t' | b'\n' => {}
                 b'/' if self.match_byte(b'/') => self.skip_line_comment(),
+                b'/' if self.match_byte(b'*') => self.skip_block_comment()?,
                 b'0'..=b'9' => self.lex_number(start)?,
                 b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.lex_ident(start),
                 // Non-ASCII byte: start of a UTF-8 multi-byte
@@ -6415,6 +6432,38 @@ impl<'a> Lexer<'a> {
         while !matches!(self.peek(), None | Some(b'\n')) {
             self.advance();
         }
+    }
+
+    fn skip_block_comment(&mut self) -> Result<(), Diagnostic> {
+        // Supports nested block comments: /* outer /* inner */ still-outer */
+        let start = self.pos.saturating_sub(2); // points at the opening /*
+        let mut depth: usize = 1;
+        while depth > 0 {
+            match self.peek() {
+                None => {
+                    return Err(Diagnostic::new(
+                        Span::new(start, self.pos),
+                        "unterminated block comment: missing closing `*/`",
+                    ));
+                }
+                Some(b'/') => {
+                    self.advance();
+                    if self.peek() == Some(b'*') {
+                        self.advance();
+                        depth += 1;
+                    }
+                }
+                Some(b'*') => {
+                    self.advance();
+                    if self.peek() == Some(b'/') {
+                        self.advance();
+                        depth -= 1;
+                    }
+                }
+                _ => { self.advance(); }
+            }
+        }
+        Ok(())
     }
 
     fn is_at_end(&self) -> bool {

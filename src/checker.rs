@@ -1384,6 +1384,15 @@ fn compute_indirect_locks(
                     }
                 }
             }
+            Stmt::PrintBlock { groups, .. } => {
+                for items in groups {
+                    for item in items {
+                        if let crate::ast::PrintItem::Expr(e) = item {
+                            walk_expr(e, param_names, signatures, out);
+                        }
+                    }
+                }
+            }
             Stmt::If { cond, then_body, else_body, .. } => {
                 walk_expr(cond, param_names, signatures, out);
                 walk_stmts(then_body, param_names, signatures, out);
@@ -2454,6 +2463,10 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
             crate::ast::PrintItem::Expr(e) => expr_mentions_var(e, name),
             _ => false,
         }),
+        S::PrintBlock { groups, .. } => groups.iter().any(|items| items.iter().any(|it| match it {
+            crate::ast::PrintItem::Expr(e) => expr_mentions_var(e, name),
+            _ => false,
+        })),
         S::If { cond, then_body, else_body, .. } => {
             expr_mentions_var(cond, name)
                 || then_body.iter().any(|s| stmt_mentions_var(s, name))
@@ -2588,6 +2601,15 @@ fn walk_stmt_for_captures(
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     walk_expr_for_captures(e, bound, env, top_level_names, captures, seen);
+                }
+            }
+        }
+        S::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        walk_expr_for_captures(e, bound, env, top_level_names, captures, seen);
+                    }
                 }
             }
         }
@@ -2784,6 +2806,15 @@ fn rename_vars_in_stmt(
                 }
             }
         }
+        S::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        rename_vars_in_expr(e, rename);
+                    }
+                }
+            }
+        }
         S::If { cond, then_body, else_body, .. } => {
             rename_vars_in_expr(cond, rename);
             for s in then_body {
@@ -2954,6 +2985,15 @@ fn rewrite_closure_calls_in_stmt(
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     rewrite_closure_calls_in_expr(e, closures);
+                }
+            }
+        }
+        S::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        rewrite_closure_calls_in_expr(e, closures);
+                    }
                 }
             }
         }
@@ -3139,6 +3179,15 @@ fn lift_stmt_anon_fn(
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     lift_expr_anon_fn(e, counter, hoisted);
+                }
+            }
+        }
+        S::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        lift_expr_anon_fn(e, counter, hoisted);
+                    }
                 }
             }
         }
@@ -3632,6 +3681,15 @@ fn flatten_modules_in_program(
                         }
                     }
                 }
+                Stmt::PrintBlock { groups, .. } => {
+                    for items in groups {
+                        for item in items {
+                            if let crate::ast::PrintItem::Expr(e) = item {
+                                rewrite_expr(e, qualify);
+                            }
+                        }
+                    }
+                }
                 Stmt::If { cond, then_body, else_body, .. } => {
                     rewrite_expr(cond, qualify);
                     for s in then_body { rewrite_stmt(s, qualify); }
@@ -4114,6 +4172,15 @@ fn rewrite_stmt_for_alias(
                 }
             }
         }
+        Stmt::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        rewrite_expr_for_alias(e, qualify);
+                    }
+                }
+            }
+        }
         Stmt::If { cond, then_body, else_body, .. } => {
             rewrite_expr_for_alias(cond, qualify);
             for s in then_body { rewrite_stmt_for_alias(s, qualify); }
@@ -4399,6 +4466,15 @@ fn resolve_enum_types_in_stmt(
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     resolve_enum_types_in_expr(e, enums);
+                }
+            }
+        }
+        Stmt::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        resolve_enum_types_in_expr(e, enums);
+                    }
                 }
             }
         }
@@ -4790,6 +4866,15 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
             for item in items {
                 if let crate::ast::PrintItem::Expr(e) = item {
                     sub_aliases_in_expr(e, aliases);
+                }
+            }
+        }
+        Stmt::PrintBlock { groups, .. } => {
+            for items in groups {
+                for item in items {
+                    if let crate::ast::PrintItem::Expr(e) = item {
+                        sub_aliases_in_expr(e, aliases);
+                    }
                 }
             }
         }
@@ -5733,6 +5818,7 @@ fn try_rewrite_at_top(
             Stmt::Let { .. }
                 | Stmt::Print { .. }
                 | Stmt::EPrint { .. }
+                | Stmt::PrintBlock { .. }
                 | Stmt::Assign { .. }
                 | Stmt::While { .. }
         )
@@ -6156,6 +6242,15 @@ fn collect_generic_calls_in_stmt(
                 }
             }
         }
+        Stmt::PrintBlock { groups, .. } => {
+            for items in groups {
+                for it in items {
+                    if let crate::ast::PrintItem::Expr(e) = it {
+                        collect_generic_calls_in_expr(e, generics, needed, scope, diagnostics);
+                    }
+                }
+            }
+        }
         Stmt::If { cond, then_body, else_body, .. } => {
             collect_generic_calls_in_expr(cond, generics, needed, scope, diagnostics);
             for s in then_body {
@@ -6402,6 +6497,15 @@ fn rewrite_generic_calls_in_stmt(
             for it in items.iter_mut() {
                 if let crate::ast::PrintItem::Expr(e) = it {
                     rewrite_generic_calls_in_expr(e, generics, scope);
+                }
+            }
+        }
+        Stmt::PrintBlock { groups, .. } => {
+            for items in groups.iter_mut() {
+                for it in items.iter_mut() {
+                    if let crate::ast::PrintItem::Expr(e) = it {
+                        rewrite_generic_calls_in_expr(e, generics, scope);
+                    }
                 }
             }
         }
@@ -6805,6 +6909,13 @@ fn monomorphize_type_decls_in_program(
             Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
                 for it in items {
                     if let crate::ast::PrintItem::Expr(e) = it { f(e); }
+                }
+            }
+            Stmt::PrintBlock { groups, .. } => {
+                for items in groups {
+                    for it in items {
+                        if let crate::ast::PrintItem::Expr(e) = it { f(e); }
+                    }
                 }
             }
             Stmt::If { cond, then_body, else_body, .. } => {
@@ -8784,6 +8895,15 @@ fn walk_branch_mutations(
                     }
                 }
             }
+            Stmt::PrintBlock { groups, .. } => {
+                for items in groups {
+                    for item in items {
+                        if let crate::ast::PrintItem::Expr(e) = item {
+                            walk_branch_mutations_in_expr(e, out);
+                        }
+                    }
+                }
+            }
             Stmt::If {
                 cond,
                 then_body,
@@ -9414,7 +9534,7 @@ fn check_while_loop_as_let_init(
     });
     let mut inner_stmts = Vec::new();
     check_stmt_list(loop_body, env, signatures, function, loops, smt_facts, &mut inner_stmts, diagnostics);
-    loops.pop();
+    let popped_loop_expr = loops.pop().unwrap();
     if !inner_stmts.is_empty() {
         emit_current_scope_drops(env, &mut inner_stmts, diagnostics);
     }
@@ -9424,7 +9544,7 @@ fn check_while_loop_as_let_init(
 
     // Emit: while 'lbl? cond { body }
     body.push(TypedStmt::While {
-        label: loop_label.clone(),
+        label: popped_loop_expr.label,
         cond: cond_checked.expr,
         body: inner_stmts,
     });
@@ -10076,6 +10196,49 @@ fn check_one_stmt(
             body.push(TypedStmt::Prove { expr: e });
             false
         }
+        Stmt::PrintBlock { groups, .. } => {
+            use crate::ast::PrintItem;
+            use crate::ir::TypedPrintItem;
+            for items in groups {
+                let mut typed_items: Vec<TypedPrintItem> = Vec::with_capacity(items.len());
+                for item in items {
+                    match item {
+                        PrintItem::Str(s) => typed_items.push(TypedPrintItem::Str(s.clone())),
+                        PrintItem::Expr(e) => {
+                            verify_call_args_in_expr(e, smt_facts, env, signatures, diagnostics);
+                            let checked = check_expr(e, env, signatures, diagnostics);
+                            let ty = checked.ty();
+                            if ty.is_array() || ty.is_vec() {
+                                diagnostics.push(Diagnostic::new(
+                                    e.span,
+                                    "cannot print an array or Vec directly; index it first",
+                                ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                            } else if matches!(ty, Type::Struct(_)) {
+                                diagnostics.push(Diagnostic::new(
+                                    e.span,
+                                    "cannot print a struct directly; print individual fields instead",
+                                ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                            } else if matches!(ty, Type::Tuple(_)) {
+                                diagnostics.push(Diagnostic::new(
+                                    e.span,
+                                    "cannot print a tuple directly; print individual elements via `.0` / `.1`",
+                                ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                            } else if matches!(ty, Type::Enum(_)) {
+                                diagnostics.push(Diagnostic::new(
+                                    e.span,
+                                    "cannot print an enum directly; use `match` to convert to an integer or string",
+                                ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                            }
+                            let mut t = checked.expr;
+                            try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures);
+                            typed_items.push(TypedPrintItem::Expr(t));
+                        }
+                    }
+                }
+                body.push(TypedStmt::Print { items: typed_items });
+            }
+            false
+        }
         Stmt::Print { items, .. } | Stmt::EPrint { items, .. } => {
             use crate::ast::PrintItem;
             use crate::ir::TypedPrintItem;
@@ -10385,7 +10548,9 @@ fn check_one_stmt(
                 &mut inner_stmts,
                 diagnostics,
             );
-            loops.pop();
+            // Use the popped frame's label — a nested `break outer/middle` may
+            // have assigned a synthetic label to this frame while it was on the stack.
+            let popped_while = loops.pop().unwrap();
 
             // Preservation: at body fall-through, invariants must still
             // hold. Use the smt_facts as they stand at body end and apply
@@ -10447,7 +10612,7 @@ fn check_one_stmt(
             }
 
             body.push(TypedStmt::While {
-                label: label.clone(),
+                label: popped_while.label,
                 cond: cond_checked.expr,
                 body: inner_stmts,
             });
@@ -11102,7 +11267,7 @@ fn check_one_stmt(
                 &mut inner_stmts,
                 diagnostics,
             );
-            loops.pop();
+            let popped_for = loops.pop().unwrap();
 
             // Preservation: substitute each user-visible reassignment in the
             // body, plus the implicit `var = var + 1` for the for-loop step.
@@ -11268,7 +11433,7 @@ fn check_one_stmt(
                 );
             }
             body.push(TypedStmt::For {
-                label: label.clone(),
+                label: popped_for.label,
                 var: var.clone(),
                 ty: loop_ty,
                 start: start_coerced.expr,
@@ -11495,7 +11660,7 @@ fn check_one_stmt(
                 &mut inner_stmts,
                 diagnostics,
             );
-            loops.pop();
+            let popped_foriter = loops.pop().unwrap();
 
             if !body_terminated {
                 emit_current_scope_drops(env, &mut inner_stmts, diagnostics);
@@ -11535,7 +11700,7 @@ fn check_one_stmt(
                 inner_stmts
             };
             body.push(TypedStmt::ForIter {
-                label: label.clone(),
+                label: popped_foriter.label,
                 var: var.clone(),
                 element_ty,
                 collection: collection.clone(),
@@ -11546,17 +11711,53 @@ fn check_one_stmt(
             false
         }
         Stmt::Break { label, value, span } => {
-            let Some(frame) = loops.last().cloned() else {
+            if loops.is_empty() {
                 diagnostics.push(Diagnostic::new(
                     *span,
                     "'break' is only valid inside a loop",
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("break")));
                 return false;
+            }
+            // Resolve positional break targets.
+            //   `break inner;`  → innermost loop (same as plain `break`)
+            //   `break outer;`  → outermost enclosing loop
+            //   `break middle;` → second-from-innermost loop
+            // All three assign a synthetic label to the target frame when it
+            // has none, so the backends can emit a labeled exit.
+            let (target_idx, emit_label): (usize, Option<String>) = match label.as_deref() {
+                None | Some("inner") => {
+                    // Plain break or explicit `break inner;` — always innermost,
+                    // no label needed in the IR.
+                    (loops.len() - 1, None)
+                }
+                Some("outer") => {
+                    let idx = 0;
+                    let lbl = loops[idx].label.get_or_insert_with(|| {
+                        format!("__vani_pos_{}", span.start)
+                    }).clone();
+                    (idx, Some(lbl))
+                }
+                Some("middle") => {
+                    let idx = if loops.len() >= 2 { loops.len() - 2 } else { 0 };
+                    let lbl = loops[idx].label.get_or_insert_with(|| {
+                        format!("__vani_pos_{}", span.start)
+                    }).clone();
+                    (idx, Some(lbl))
+                }
+                Some(other) => {
+                    // Explicit `'label` style — find the matching frame.
+                    let idx = loops
+                        .iter()
+                        .rposition(|f| f.label.as_deref() == Some(other))
+                        .unwrap_or(loops.len() - 1);
+                    (idx, Some(other.to_string()))
+                }
             };
+            let target_frame = loops[target_idx].clone();
+            let innermost_frame = loops.last().cloned().unwrap();
             if let Some(val_expr) = value {
-                // break value: assign into the loop's value-temp if present,
-                // otherwise error (break value only valid in loop-expressions).
-                if let Some(ref temp_name) = frame.value_temp {
+                // break value: assign into the innermost loop's value-temp.
+                if let Some(ref temp_name) = innermost_frame.value_temp {
                     let checked_val = check_expr(val_expr, env, signatures, diagnostics);
                     let temp_name = temp_name.clone();
                     let val_ty = checked_val.ty().clone();
@@ -11573,15 +11774,15 @@ fn check_one_stmt(
                     ));
                 }
             }
-            emit_drops_through_loop(env, frame.body_scope_depth, body);
+            emit_drops_through_loop(env, target_frame.body_scope_depth, body);
             validate_loop_balance(
-                &frame.pre_env,
+                &target_frame.pre_env,
                 env,
                 *span,
                 "break with inconsistent move state",
                 diagnostics,
             );
-            body.push(TypedStmt::Break { label: label.clone() });
+            body.push(TypedStmt::Break { label: emit_label });
             true
         }
         Stmt::Continue { label, span } => {
@@ -15494,6 +15695,24 @@ fn check_expr(
                             typed_stmts.push(TypedStmt::Print { items: typed_items });
                         }
                     }
+                    Stmt::PrintBlock { groups, .. } => {
+                        for items in groups {
+                            let mut typed_items: Vec<crate::ir::TypedPrintItem> =
+                                Vec::with_capacity(items.len());
+                            for item in items {
+                                match item {
+                                    crate::ast::PrintItem::Str(s) => typed_items
+                                        .push(crate::ir::TypedPrintItem::Str(s.clone())),
+                                    crate::ast::PrintItem::Expr(e) => {
+                                        let ce = check_expr(e, env, signatures, diagnostics);
+                                        typed_items
+                                            .push(crate::ir::TypedPrintItem::Expr(ce.expr));
+                                    }
+                                }
+                            }
+                            typed_stmts.push(TypedStmt::Print { items: typed_items });
+                        }
+                    }
                     Stmt::Assign { name: rname, expr: rhs, .. } => {
                         // Block-expr Reassign: rebind an existing
                         // let-bound name to a new value of the
@@ -15610,6 +15829,25 @@ fn check_expr(
                                     if is_ep {
                                         body_typed.push(TypedStmt::EPrint { items: typed_items });
                                     } else {
+                                        body_typed.push(TypedStmt::Print { items: typed_items });
+                                    }
+                                }
+                                Stmt::PrintBlock { groups, .. } => {
+                                    for items in groups {
+                                        let mut typed_items: Vec<crate::ir::TypedPrintItem> =
+                                            Vec::with_capacity(items.len());
+                                        for item in items {
+                                            match item {
+                                                crate::ast::PrintItem::Str(s) => typed_items
+                                                    .push(crate::ir::TypedPrintItem::Str(s.clone())),
+                                                crate::ast::PrintItem::Expr(e) => {
+                                                    let ce = check_expr(e, env, signatures, diagnostics);
+                                                    typed_items.push(
+                                                        crate::ir::TypedPrintItem::Expr(ce.expr),
+                                                    );
+                                                }
+                                            }
+                                        }
                                         body_typed.push(TypedStmt::Print { items: typed_items });
                                     }
                                 }
@@ -19436,6 +19674,15 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                     for item in items {
                         if let crate::ast::PrintItem::Expr(e) = item {
                             walk_expr(e, param_names, locks);
+                        }
+                    }
+                }
+                Stmt::PrintBlock { groups, .. } => {
+                    for items in groups {
+                        for item in items {
+                            if let crate::ast::PrintItem::Expr(e) = item {
+                                walk_expr(e, param_names, locks);
+                            }
                         }
                     }
                 }

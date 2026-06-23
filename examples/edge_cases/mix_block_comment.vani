@@ -1,0 +1,10 @@
+/* Block comment before the function. */
+fn main() -> i64 {
+  /* This is a block comment
+     spanning multiple lines. */
+  let x: i64 = 10; /* inline block comment */
+  /* nested /* block */ comment */
+  let y: i64 = x + 5; // and a line comment
+  print y;
+  return 0;
+}
