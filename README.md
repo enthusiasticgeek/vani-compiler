@@ -536,6 +536,11 @@ below.
 - **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently invokes `qemu-<arch>-static`.
 - **L19 fully resolved** (all 5 bare-metal gaps). Example: `examples/language/english/bare_metal.vani`.
 
+**v0.1.8 — block comments, print blocks, positional break (2026-06-23):**
+- **Block comments `/* ... */`** — multi-line, nestable to any depth; unterminated → clean diagnostic.
+- **Print block `print { line1; line2; }`** — group multiple output lines under one keyword; each `;`-group is a separate line.
+- **Positional break** — `break inner` (innermost), `break middle` (second-from-innermost), `break outer` (outermost); C + LLVM backends.
+
 **v0.1.7 — tutorial coverage expansion (2026-06-21):**
 - **10 new tutorial pages** across beginner, intermediate, and advanced tracks — no compiler changes.
 - **`beginner/00_cli_reference.md`** — complete `vanic` CLI reference: all subcommands, flags, and environment variables.
@@ -551,7 +556,8 @@ below.
 **Test ledger at 2026-06-21: ~2434+ lib green** —
 **62 dialects across 26 scripts** with Mandarin Chinese (中文)
 joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-21 — **v0.1.7: tutorial coverage expansion — 10 new pages; full CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections**.
+Latest ship 2026-06-23 — **v0.1.8: block comments `/* */`, print blocks, `break inner/middle/outer` — C + LLVM backends**.
+Previous ship 2026-06-21 — **v0.1.7: tutorial coverage expansion — 10 new pages; full CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections**.
 Previous ship 2026-06-21 — **v0.1.6: bare-metal cross-compilation + `--target` + `--no-std` + `#[no_mangle]` + `#[link_section]` + MMIO u8/u16**.
 Previous notable ship 2026-06-11 — **Windows full e2e parity** (all lib +
 e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
