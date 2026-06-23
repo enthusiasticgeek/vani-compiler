@@ -13091,6 +13091,9 @@ return __intent_ret; }}\n",
             for s in body {
                 emit_stmt(s, out);
             }
+            if let Some(name) = label {
+                out.push_str(&format!("  __vani_continue_{}:;\n", name));
+            }
             out.push_str("  }\n");
             if let Some(name) = label {
                 out.push_str(&format!("  __vani_break_{}:;\n", name));
@@ -13103,8 +13106,12 @@ return __intent_ret; }}\n",
                 out.push_str("  break;\n");
             }
         }
-        TypedStmt::Continue { .. } => {
-            out.push_str("  continue;\n");
+        TypedStmt::Continue { label } => {
+            if let Some(name) = label {
+                out.push_str(&format!("  goto __vani_continue_{};\n", name));
+            } else {
+                out.push_str("  continue;\n");
+            }
         }
         TypedStmt::IndexAssign {
             name,
@@ -13269,6 +13276,9 @@ return __intent_ret; }}\n",
             ));
             for s in body {
                 emit_stmt(s, out);
+            }
+            if let Some(name) = label {
+                out.push_str(&format!("  __vani_continue_{}:;\n", name));
             }
             out.push_str("  }\n");
             if let Some(name) = label {

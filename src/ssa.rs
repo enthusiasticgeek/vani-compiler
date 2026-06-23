@@ -882,8 +882,13 @@ fn lower_stmt(
             });
             Ok(())
         }
-        TypedStmt::Continue { .. } => {
-            let Some(frame) = b.loops.last().cloned() else {
+        TypedStmt::Continue { label } => {
+            let frame = if let Some(name) = label {
+                b.loops.iter().rev().find(|f| f.label.as_deref() == Some(name)).cloned()
+            } else {
+                b.loops.last().cloned()
+            };
+            let Some(frame) = frame else {
                 return Err(LowerError {
                     message: "continue outside any loop reached the SSA lowerer".into(),
                     span: Span::default(),

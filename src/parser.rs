@@ -2496,6 +2496,8 @@ impl Parser {
             self.parse_if_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
             self.parse_labeled_loop_stmt()
+        } else if self.looks_like_plain_ident_label_stmt() {
+            self.parse_plain_ident_label_loop_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::While)) {
             self.parse_while_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::For)) {
@@ -2538,12 +2540,11 @@ impl Parser {
             let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
-            } else if let TokenKind::Ident(n) = &self.current().kind {
-                // `break inner;` / `break middle;` / `break outer;` — positional targets
-                if matches!(n.as_str(), "inner" | "middle" | "outer")
-                    && self.tokens.get(self.pos + 1)
-                        .map(|t| matches!(t.kind, TokenKind::Semicolon))
-                        .unwrap_or(false)
+            } else if let TokenKind::Ident(_) = &self.current().kind {
+                // `break label_name;` — any named loop label
+                if self.tokens.get(self.pos + 1)
+                    .map(|t| matches!(t.kind, TokenKind::Semicolon))
+                    .unwrap_or(false)
                 {
                     let t = self.bump();
                     if let TokenKind::Ident(name) = t.kind { Some(name) } else { unreachable!() }
@@ -2569,6 +2570,17 @@ impl Parser {
             let label = if self.check(|kind| matches!(kind, TokenKind::Label(_))) {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
+            } else if let TokenKind::Ident(_) = &self.current().kind {
+                // `continue label_name;` — any named loop label
+                if self.tokens.get(self.pos + 1)
+                    .map(|t| matches!(t.kind, TokenKind::Semicolon))
+                    .unwrap_or(false)
+                {
+                    let t = self.bump();
+                    if let TokenKind::Ident(name) = t.kind { Some(name) } else { unreachable!() }
+                } else {
+                    None
+                }
             } else {
                 None
             };
@@ -3792,6 +3804,34 @@ impl Parser {
             invariants.push(expr);
         }
         Ok(invariants)
+    }
+
+    fn looks_like_plain_ident_label_stmt(&self) -> bool {
+        matches!(self.current().kind, TokenKind::Ident(_))
+            && self.tokens.get(self.pos + 1).map(|t| matches!(t.kind, TokenKind::Colon)).unwrap_or(false)
+            && self.tokens.get(self.pos + 2).map(|t| matches!(t.kind, TokenKind::While | TokenKind::For)).unwrap_or(false)
+    }
+
+    fn parse_plain_ident_label_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let label_tok = self.bump();
+        let label_name = if let TokenKind::Ident(name) = label_tok.kind { name } else { unreachable!() };
+        self.expect_keyword("':' after loop label", |kind| matches!(kind, TokenKind::Colon))?;
+        if self.check(|kind| matches!(kind, TokenKind::While)) {
+            let mut stmt = self.parse_while_stmt()?;
+            if let Stmt::While { ref mut label, .. } = stmt { *label = Some(label_name); }
+            Ok(stmt)
+        } else if self.check(|kind| matches!(kind, TokenKind::For)) {
+            let mut stmt = self.parse_for_stmt()?;
+            match stmt {
+                Stmt::For { ref mut label, .. } | Stmt::ForIter { ref mut label, .. } => {
+                    *label = Some(label_name);
+                }
+                _ => {}
+            }
+            Ok(stmt)
+        } else {
+            Err(Diagnostic::new(label_tok.span, "loop label must be followed by 'while' or 'for'"))
+        }
     }
 
     fn parse_labeled_loop_stmt(&mut self) -> Result<Stmt, Diagnostic> {

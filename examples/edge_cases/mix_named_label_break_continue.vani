@@ -1,0 +1,26 @@
+/* named label break + continue across 3 nested for-loops */
+fn main() -> i64 {
+  let sum: i64 = 0;
+
+  outer: for i from 0 to 5 {
+    middle: for j from 0 to 5 {
+      inner: for k from 0 to 10 {
+        if k == 2 { break inner; }       /* exits k-loop; i and j continue */
+        if j == 3 { continue outer; }    /* skips rest of outer body, next i */
+        if i == 4 { break middle; }      /* exits j+k loops; i-loop continues */
+        sum = sum + 1;
+      }
+    }
+  }
+
+  /* Expected: for i in 0..4 (i==4 hits break middle before any j runs):
+       i=0: j=0..2 -> k=0,1 (+2 each j) = 6; j=3 -> continue outer
+         sum += 6
+       i=1: same = 6
+       i=2: same = 6
+       i=3: same = 6
+       i=4: j=0 -> k=0 -> i==4 -> break middle; no sum increment
+     total = 24 */
+  print sum;
+  return 0;
+}

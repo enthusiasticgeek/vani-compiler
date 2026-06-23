@@ -1,0 +1,7 @@
+/* break targeting a label that does not exist — must be rejected */
+fn main() -> i64 {
+  outer: for i from 0 to 3 {
+    break nonexistent;
+  }
+  return 0;
+}

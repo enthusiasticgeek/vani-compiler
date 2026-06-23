@@ -3571,8 +3571,13 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 out.push_str("  ; break outside a loop (checker should have rejected this)\n");
             }
         }
-        TypedStmt::Continue { .. } => {
-            if let Some(frame) = ctx.loops.last() {
+        TypedStmt::Continue { label } => {
+            let frame = if let Some(name) = label {
+                ctx.loops.iter().rev().find(|f| f.label.as_deref() == Some(name))
+            } else {
+                ctx.loops.last()
+            };
+            if let Some(frame) = frame {
                 out.push_str(&format!("  br label %{}\n", frame.header));
                 ctx.terminated = true;
             } else {

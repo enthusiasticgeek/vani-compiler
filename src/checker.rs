@@ -11718,39 +11718,20 @@ fn check_one_stmt(
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("break")));
                 return false;
             }
-            // Resolve positional break targets.
-            //   `break inner;`  → innermost loop (same as plain `break`)
-            //   `break outer;`  → outermost enclosing loop
-            //   `break middle;` → second-from-innermost loop
-            // All three assign a synthetic label to the target frame when it
-            // has none, so the backends can emit a labeled exit.
+            // Resolve break target by named label or default to innermost.
             let (target_idx, emit_label): (usize, Option<String>) = match label.as_deref() {
-                None | Some("inner") => {
-                    // Plain break or explicit `break inner;` — always innermost,
-                    // no label needed in the IR.
-                    (loops.len() - 1, None)
-                }
-                Some("outer") => {
-                    let idx = 0;
-                    let lbl = loops[idx].label.get_or_insert_with(|| {
-                        format!("__vani_pos_{}", span.start)
-                    }).clone();
-                    (idx, Some(lbl))
-                }
-                Some("middle") => {
-                    let idx = if loops.len() >= 2 { loops.len() - 2 } else { 0 };
-                    let lbl = loops[idx].label.get_or_insert_with(|| {
-                        format!("__vani_pos_{}", span.start)
-                    }).clone();
-                    (idx, Some(lbl))
-                }
-                Some(other) => {
-                    // Explicit `'label` style — find the matching frame.
-                    let idx = loops
-                        .iter()
-                        .rposition(|f| f.label.as_deref() == Some(other))
-                        .unwrap_or(loops.len() - 1);
-                    (idx, Some(other.to_string()))
+                None => (loops.len() - 1, None),
+                Some(name) => {
+                    match loops.iter().rposition(|f| f.label.as_deref() == Some(name)) {
+                        Some(idx) => (idx, Some(name.to_string())),
+                        None => {
+                            diagnostics.push(Diagnostic::new(
+                                *span,
+                                format!("no enclosing loop is labeled '{}'", name),
+                            ));
+                            return false;
+                        }
+                    }
                 }
             };
             let target_frame = loops[target_idx].clone();
@@ -11786,12 +11767,26 @@ fn check_one_stmt(
             true
         }
         Stmt::Continue { label, span } => {
-            let Some(frame) = loops.last().cloned() else {
+            if loops.is_empty() {
                 diagnostics.push(Diagnostic::new(
                     *span,
                     "'continue' is only valid inside a loop",
                 ).with_elaboration(crate::diagnostic_elaborations::loop_control_outside_loop("continue")));
                 return false;
+            }
+            let frame = if let Some(name) = label {
+                match loops.iter().rposition(|f| f.label.as_deref() == Some(name)) {
+                    Some(idx) => loops[idx].clone(),
+                    None => {
+                        diagnostics.push(Diagnostic::new(
+                            *span,
+                            format!("no enclosing loop is labeled '{}'", name),
+                        ));
+                        return false;
+                    }
+                }
+            } else {
+                loops.last().cloned().unwrap()
             };
             emit_drops_through_loop(env, frame.body_scope_depth, body);
             validate_loop_balance(
