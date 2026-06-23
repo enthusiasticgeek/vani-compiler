@@ -5,15 +5,15 @@
 > The canonical current work queue (actionable, checkbox-ordered) is in
 > **[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md)**.
 
-## Current status (as of 2026-06-19)
+## Current status (as of 2026-06-23)
 
-- **Version**: `0.1.4-dev` (tagged `v0.1.0`, `v0.1.1`, `v0.1.2`, `v0.1.3`; `v0.1.3` shipped
-  2026-06-19 with system requirements tables + Debian Buster guide + test-count
-  updates; `v0.1.2` shipped same day with Win64/AArch64 ABI, dialect purity,
-  SOV fn/struct/enum, translator CLI v2, tutorials, examples reorganisation).
-- **Tests**: 2421+ lib + 54 e2e parity-green on Linux and Windows.
+- **Version**: `0.1.8` (tagged `v0.1.0` through `v0.1.8`; `v0.1.8` shipped 2026-06-23 with
+  block comments `/* ... */`, print blocks `print { ... }`, and positional break
+  `break inner/middle/outer`; `v0.1.7` shipped 2026-06-21 with 10 tutorial pages;
+  `v0.1.5`/`v0.1.6` shipped 2026-06-21 with native file I/O and bare-metal support).
+- **Tests**: 2434+ lib + e2e parity-green on Linux and Windows.
 - **Dialects**: 62 across 26 scripts.
-- **Blocked**: macOS hardware, grammar consultant, proper IOCP, AArch64 CI.
+- **Blocked**: macOS hardware, grammar consultant, proper IOCP, AArch64 CI, crates.io API token.
 
 ## Open items (summary)
 

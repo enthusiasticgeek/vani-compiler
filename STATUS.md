@@ -10,6 +10,40 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-06-23
+
+**State**: `v0.1.7` + `v0.1.8` tagged. `0.1.8` is the live version. Three new language features shipped (block comments, print blocks, positional break). All prior L18/L19 gaps remain resolved.
+
+### Shipped this session (2026-06-23) — v0.1.7 + v0.1.8
+
+| Item | What shipped |
+|------|-------------|
+| Tutorial expansion (v0.1.7) | 10 new pages: CLI ref, FnPtr primer, file I/O primer + worked example, math deep-dive (special fns + ML activations + bit ops), vec statistics, condvar primer, cross-compile primer, attributes reference, advanced collections. No compiler changes. |
+| Block comments `/* ... */` | Multi-line, nestable to any depth; empty `/**/` supported; unterminated comment → clean diagnostic (no panic). Lexer change only. |
+| Print block `print { ... }` | Group multiple print lines under one `print` keyword; each `;`-terminated group → separate output line. Desugared in checker to `TypedStmt::Print`; works in loops; both C and LLVM backends. |
+| Positional break | `break inner` (innermost), `break middle` (second-from-innermost), `break outer` (outermost enclosing loop). Checker assigns synthetic labels `__vani_pos_N`; both SSA-C and LLVM backends search by label. |
+| 8 adversarial tests | `examples/edge_cases/` — deeply nested comments, empty `/**/`, unterminated comment (xfail), print block inside `for`, break outer single-loop, break middle two-loops, break inner 3-deep nest (count=399). All pass on C + LLVM backends. |
+| `RELEASE_NOTES/v0.1.7.md` | Tutorial expansion release notes |
+| `RELEASE_NOTES/v0.1.8.md` | Block comments, print blocks, positional break release notes |
+
+### Key numbers (2026-06-23)
+- **Lib tests**: 2434+ passing
+- **E2e tests**: all pass (Linux + Windows)
+- **Elaboration coverage**: 597/597 (100%)
+- **Dialects**: 62 across 26 scripts
+- **Cargo.toml version**: `0.1.8`
+
+### Blocked (4 items, external dependencies)
+
+| # | Item | Blocker |
+|---|------|---------|
+| B1 | crates.io publish | Needs API token |
+| B2 | macOS verification | No macOS hardware |
+| B3 | Grammar consultant pass | External reviewer needed |
+| B4 | Windows IOCP async-TCP | ~25–35 h; readiness-vs-completion mismatch |
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-06-21
 
 **State**: `v0.1.5` + `v0.1.6` tagged. `0.1.6` is the live version. All bare-metal
