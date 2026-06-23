@@ -1,0 +1,12 @@
+fn main() -> i64 {
+  /* print block inside a for loop */
+  for i from 0 to 3 {
+    print {
+      "i=", i;
+      "sq=", i * i;
+    }
+  }
+  /* single-group print block */
+  print { "done"; }
+  return 0;
+}

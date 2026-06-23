@@ -1,0 +1,23 @@
+/* break inner in a 3-deep nest should only exit the innermost loop */
+fn main() -> i64 {
+  let count: i64 = 0;
+  for i from 0 to 3 {
+    for j from 0 to 3 {
+      for k from 0 to 3 {
+        if k == 1 {
+          break inner;  /* exits only the k-loop */
+        }
+        count = count + 1;
+      }
+      count = count + 10;
+    }
+    count = count + 100;
+  }
+  /* Each i: j goes 0..2 (3 iters):
+       each j: k=0 runs (count += 1), k=1 fires break inner
+       then count += 10
+     per i: 3*(1+10) = 33, then +100 = 133
+     total: 3*133 = 399 */
+  print count;
+  return 0;
+}

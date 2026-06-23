@@ -1,0 +1,4 @@
+fn main() -> i64 {
+  /* this comment is never closed
+  return 0;
+}

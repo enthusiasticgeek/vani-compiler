@@ -1,0 +1,8 @@
+/* outer /* middle /* inner */ back-to-middle */ back-to-outer */
+fn main() -> i64 {
+  /* empty: /**/ */
+  let x: i64 = /* inline /* nested */ comment */ 42;
+  /**/
+  print x;
+  return 0;
+}

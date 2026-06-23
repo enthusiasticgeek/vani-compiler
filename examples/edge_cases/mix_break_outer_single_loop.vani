@@ -1,0 +1,28 @@
+/* break outer in a single-loop context should behave like plain break */
+fn main() -> i64 {
+  let x: i64 = 0;
+  while x < 10 {
+    if x == 5 {
+      break outer;
+    }
+    x = x + 1;
+  }
+  print x;
+
+  /* break middle with only two loops: middle = loops[max(0, len-2)] = loops[0] = outer */
+  let a: i64 = 0;
+  while a < 10 {
+    let b: i64 = 0;
+    while b < 10 {
+      if b == 3 {
+        break middle;
+      }
+      b = b + 1;
+    }
+    a = a + 1;
+  }
+  /* break middle with two loops exits the outer (loops[0]) so a stays 0 */
+  print a;
+
+  return 0;
+}
