@@ -1,4 +1,4 @@
-# Beginner 5c — Named Loop Labels
+# Beginner 5c -- Named Loop Labels
 
 > **Learning goal**: label a loop by name and use `break label` /
 > `continue label` to exit or skip iterations of a *specific* enclosing
@@ -9,7 +9,7 @@
 ## Why plain `break` is sometimes not enough
 
 Plain `break` always exits the **innermost** loop. That's the right
-behavior most of the time — but when loops are nested, you sometimes
+behavior most of the time -- but when loops are nested, you sometimes
 want to exit a *specific* outer loop, not just the one you're currently
 inside:
 
@@ -23,7 +23,7 @@ for i from 0 to 5 {
 }
 ```
 
-If `some_condition` means "we're completely done — stop everything,"
+If `some_condition` means "we're completely done -- stop everything,"
 plain `break` doesn't cut it. You'd need a flag variable and an extra
 check after the inner loop, which is messy.
 
@@ -46,12 +46,12 @@ search: while has_more_data {
 ```
 
 Any valid identifier works as a label name. Common choices are `outer`,
-`inner`, `middle`, `search`, `retry`, `scan` — whatever is meaningful
+`inner`, `middle`, `search`, `retry`, `scan` -- whatever is meaningful
 at the call site.
 
 ---
 
-## `break label` — exit a specific loop
+## `break label` -- exit a specific loop
 
 `break label_name;` exits the loop *named* `label_name` and everything
 nested inside it. Execution continues after that loop's closing `}`:
@@ -89,7 +89,7 @@ done
 
 ---
 
-## `continue label` — skip to next iteration of a specific loop
+## `continue label` -- skip to next iteration of a specific loop
 
 `continue label_name;` skips the rest of the **labeled loop's** body
 (including everything nested inside it) and starts that loop's next
@@ -104,7 +104,7 @@ fn main() -> i64 {
       }
       print i, " ", j;
     }
-    print "tail of outer";   /* never reached — continue outer skips this */
+    print "tail of outer";   /* never reached -- continue outer skips this */
   }
   return 0;
 }
@@ -123,12 +123,12 @@ Output (each `i` stops at `j=2` and jumps to the next `i`):
 3 1
 ```
 
-Notice "tail of outer" never prints — `continue outer` skips all
+Notice "tail of outer" never prints -- `continue outer` skips all
 remaining code in the outer loop body, not just the inner loop.
 
 ---
 
-## Three nested loops — the real power
+## Three nested loops -- the real power
 
 With three or more nesting levels, named labels let you pick exactly
 which layer to break or continue without any flag variables:
@@ -164,10 +164,10 @@ fn main() -> i64 {
 
 ---
 
-## Undefined label → compile error
+## Undefined label -> compile error
 
 Using a label that doesn't exist on any enclosing loop is caught at
-compile time — no runtime surprise:
+compile time -- no runtime surprise:
 
 ```vani
 outer: for i from 0 to 3 {
@@ -193,7 +193,7 @@ fn search(target: i64) -> i64 {
     let j: i64 = 0;
     while j < 100 {
       if i * j == target {
-        break found;   /* done — exit both loops */
+        break found;   /* done -- exit both loops */
       }
       j = j + 1;
     }
@@ -212,13 +212,13 @@ fn search(target: i64) -> i64 {
 name: for var from start to end { ... }
 name: while condition { ... }
 
-/* Targeted break — exits named loop and everything inside it */
+/* Targeted break -- exits named loop and everything inside it */
 break name;
 
-/* Targeted continue — skips to next iteration of named loop */
+/* Targeted continue -- skips to next iteration of named loop */
 continue name;
 
-/* Plain break/continue still work — they target the innermost loop */
+/* Plain break/continue still work -- they target the innermost loop */
 break;
 continue;
 ```
@@ -228,7 +228,7 @@ continue;
 ## Challenge
 
 Write a program that finds the first pair `(i, j)` where `i * j == 42`
-and `0 <= i, j < 20`. Print the pair and stop — don't print any other pairs.
+and `0 <= i, j < 20`. Print the pair and stop -- don't print any other pairs.
 Use a labeled `break` to exit both loops at once.
 
 <details>
@@ -254,5 +254,5 @@ Output: `found: 6 * 7 = 42`
 
 ---
 
-**Previous**: [§5b — Print blocks →](05b_print_block_primer.md)  
-**Next**: [§6 — Strings →](06_strings.md)
+**Previous**: [Sec.5b -- Print blocks ->](05b_print_block_primer.md)  
+**Next**: [Sec.6 -- Strings ->](06_strings.md)

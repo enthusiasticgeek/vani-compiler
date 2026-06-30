@@ -1,10 +1,10 @@
-# Advanced 3b — Condition variables: wait-until-predicate (primer)
+# Advanced 3b -- Condition variables: wait-until-predicate (primer)
 
 > **Learning goal**: understand why condition variables exist,
 > what the wait-loop idiom guarantees, and how `Condvar` pairs
 > with `Mutex<T>` in vāṇी.
-> Reading order: [Advanced 3 — Concurrency](03_concurrency.md)
-> → here → [Advanced 4a — Embedded primer](04a_embedded_primer.md).
+> Reading order: [Advanced 3 -- Concurrency](03_concurrency.md)
+> -> here -> [Advanced 4a -- Embedded primer](04a_embedded_primer.md).
 
 This chapter has **no compiler code**. Pure intuition, then the
 one-page API reference.
@@ -44,12 +44,12 @@ locked office (the mutex):
 ```
 Thread 1 (waiter):
   1. Enter the office (lock the mutex).
-  2. Check: is the work ready?  → No.
+  2. Check: is the work ready?  -> No.
   3. Step into the waiting room (release mutex + park thread).
-     ← zero CPU; thread is suspended
+     <- zero CPU; thread is suspended
   4. Door opens: notification arrives, thread wakes.
   5. Re-enter the office (re-acquire mutex).
-  6. Check again: is the work ready?  → Yes.
+  6. Check again: is the work ready?  -> Yes.
   7. Do the work, leave the office.
 
 Thread 2 (producer):
@@ -64,10 +64,10 @@ and "park" where a notification could be missed.
 
 ---
 
-## Spurious wakeups — why you always use a loop
+## Spurious wakeups -- why you always use a loop
 
 On some OS implementations, a thread can wake up from a condvar
-wait for *no reason* — this is called a **spurious wakeup**. It's
+wait for *no reason* -- this is called a **spurious wakeup**. It's
 a real phenomenon, not just a theoretical concern.
 
 This is why the wait-loop idiom is always:
@@ -78,7 +78,7 @@ while !predicate {
 }
 ```
 
-Never `if !predicate { condvar_wait(…); }`. The `while` re-checks
+Never `if !predicate { condvar_wait(...); }`. The `while` re-checks
 after every wakeup (spurious or real) and only proceeds when the
 predicate is actually true.
 
@@ -137,7 +137,7 @@ safer habit.
 
 ---
 
-## `wait_timeout` — bounded waiting
+## `wait_timeout` -- bounded waiting
 
 ```vani
 let cv: Condvar   = condvar_new();
@@ -147,7 +147,7 @@ let g:  Guard<i64> = mutex_lock(mut ref mx);
 // Wait at most 200 ms for the predicate
 let signaled: bool = condvar_wait_timeout(ref cv, mut ref g, 200);
 if !signaled {
-    print "timeout — no event in 200 ms";
+    print "timeout -- no event in 200 ms";
 }
 mutex_unlock(g);
 ```
@@ -174,7 +174,7 @@ Use `Condvar` when: the predicate is complex (multiple fields), the waiting thre
 
 - A **condvar** lets a thread park (zero CPU) until another
   thread signals that a predicate may now be true.
-- **Always use a `while` loop** around `condvar_wait` — spurious
+- **Always use a `while` loop** around `condvar_wait` -- spurious
   wakeups are real.
 - `condvar_wait` **atomically** releases the mutex and parks;
   re-acquires before returning.
@@ -184,6 +184,6 @@ Use `Condvar` when: the predicate is complex (multiple fields), the waiting thre
 
 ## Cross-reference
 
-- [Advanced 3 — `task`/`join` + atomics/mutexes/channels](03_concurrency.md) — the full concurrency worked-example chapter
-- [Advanced 2a — Parallelism primer](02a_parallelism_primer.md) — race-freedom model
-- [`examples/language/english/condvar.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/condvar.vani) — runnable condvar example
+- [Advanced 3 -- `task`/`join` + atomics/mutexes/channels](03_concurrency.md) -- the full concurrency worked-example chapter
+- [Advanced 2a -- Parallelism primer](02a_parallelism_primer.md) -- race-freedom model
+- [`examples/language/english/condvar.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/condvar.vani) -- runnable condvar example

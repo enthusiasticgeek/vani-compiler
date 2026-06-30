@@ -1,11 +1,11 @@
-# Advanced 4a — Embedded, `unsafe`, and regions (intuition primer)
+# Advanced 4a -- Embedded, `unsafe`, and regions (intuition primer)
 
 > **Learning goal**: build a mental model of "embedded
-> programming" — what's different about running on tiny
-> hardware — and the language features vāṇी provides for it
+> programming" -- what's different about running on tiny
+> hardware -- and the language features vāṇी provides for it
 > (`unsafe(reason = "...")` blocks + region typing). Reading
 > order: [Beginner 6b heap/stack primer](../beginner/06b_heap_vs_stack_primer.md)
-> → this → [Advanced 4 — Embedded](04_embedded.md).
+> -> this -> [Advanced 4 -- Embedded](04_embedded.md).
 
 This chapter has **no compiler code**. Pure intuition.
 
@@ -21,7 +21,7 @@ heap allocation + I/O.
 running INSIDE physical objects. A thermostat. A pacemaker. A
 satellite. A keyboard's firmware. The constraints:
 
-- **Memory**: 8KB to 256KB of RAM. Not gigabytes — kilobytes.
+- **Memory**: 8KB to 256KB of RAM. Not gigabytes -- kilobytes.
 - **CPU**: maybe 16 MHz to 200 MHz. A laptop is 3000+ MHz.
 - **No OS** (often): your code runs directly on the metal.
   No filesystem, no threads, no `print`. Just the CPU + the
@@ -35,9 +35,9 @@ satellite. A keyboard's firmware. The constraints:
   precious.
 
 Code that works fine on a server explodes here. A `Vec<i64>`
-that auto-grows? Forbidden — there's no heap. A recursive
-function with no bound? Forbidden — stack overflow. An
-unbounded loop? Maybe forbidden — could miss a real-time
+that auto-grows? Forbidden -- there's no heap. A recursive
+function with no bound? Forbidden -- stack overflow. An
+unbounded loop? Maybe forbidden -- could miss a real-time
 deadline.
 
 vāṇी has language-level features specifically for this
@@ -96,7 +96,7 @@ statically predictable:
 - Calls to non-`#[deterministic_timing]` functions.
 
 What remains is straight-line code + bounded loops + bounded
-recursion — execution time you can analyze with
+recursion -- execution time you can analyze with
 worst-case-execution-time (WCET) tools.
 
 ## The fourth feature: `unsafe(reason = "...")`
@@ -111,7 +111,7 @@ Sometimes you genuinely need to:
 For these, you write:
 
 ```vani
-unsafe(reason = "GPIO pin 13 toggle — hardware-defined memory address") {
+unsafe(reason = "GPIO pin 13 toggle -- hardware-defined memory address") {
   let gpio_pin_13: *mut u32 = 0x40020000 as *mut u32;
   write_volatile(gpio_pin_13, 1);
 }
@@ -120,14 +120,14 @@ unsafe(reason = "GPIO pin 13 toggle — hardware-defined memory address") {
 Two things matter:
 
 1. **`unsafe` is a BLOCK, not a function modifier**. The unsafe
-   region is *visible in the source* — anyone reading the
+   region is *visible in the source* -- anyone reading the
    code sees exactly where vāṇी's safety guarantees stop. The
    rest of your code is still type-checked.
 
 2. **`reason = "..."`** is MANDATORY. You can't just write
    `unsafe { ... }`. Every unsafe block must explain why it's
    needed. The reason becomes part of your code review
-   evidence — "is this *really* necessary, and is the
+   evidence -- "is this *really* necessary, and is the
    explanation correct?"
 
 These two design choices distinguish vāṇी's `unsafe` from
@@ -153,7 +153,7 @@ region scratch[4096] {
 
 Inside the region, allocations are essentially free (just a
 pointer bump). The compiler tracks that `temp_a` and `temp_b`
-are tied to `scratch`'s lifetime — they can't escape the
+are tied to `scratch`'s lifetime -- they can't escape the
 region's scope. When the region ends, all allocations within
 it are released together.
 
@@ -167,12 +167,12 @@ heap-free code can still use regions for scratch space.
 A surprising number of "embedded" disciplines pay off in
 server / desktop code too:
 
-- **`no_heap` for a hot loop** — guarantee the loop doesn't
+- **`no_heap` for a hot loop** -- guarantee the loop doesn't
   trigger GC-style pauses, even if your overall program does
   use the heap.
-- **`bounded_stack` for recursive parsers** — catch the bug
+- **`bounded_stack` for recursive parsers** -- catch the bug
   where a malicious input triggers stack overflow.
-- **Regions for batch processing** — process N items, all
+- **Regions for batch processing** -- process N items, all
   allocations live in one region, drop the whole region
   between batches. No fragmentation, no leak risk.
 
@@ -184,8 +184,8 @@ discipline anywhere.
 
 For ordinary application code (a web server, a desktop tool, a
 script), you usually don't need any of these. The default vāṇी
-shape — ownership-tracked heap allocation, automatic Drop,
-unbounded recursion within reason — is fine. The embedded
+shape -- ownership-tracked heap allocation, automatic Drop,
+unbounded recursion within reason -- is fine. The embedded
 features are *opt-in*; you reach for them when the constraints
 match.
 
@@ -208,23 +208,23 @@ match.
 
 Together these let vāṇी target embedded shapes without losing
 the safety story. The next two chapters cover the rest:
-- [Advanced 4b — Cross-compilation primer](04b_cross_compile_primer.md)
-  — `--target <triple>`, `--no-std`, `#[no_mangle]`, `#[link_section]`,
+- [Advanced 4b -- Cross-compilation primer](04b_cross_compile_primer.md)
+  -- `--target <triple>`, `--no-std`, `#[no_mangle]`, `#[link_section]`,
   MMIO u8/u16, QEMU user-mode run
-- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md)
-  — worked examples for LED-blink firmware + packet-parsing handler
+- [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md)
+  -- worked examples for LED-blink firmware + packet-parsing handler
 
 ## Cross-reference
 
-- [Beginner 6b — Heap and stack primer](../beginner/06b_heap_vs_stack_primer.md)
-  — foundation: why heap is heavy, why embedded code avoids it
-- [Beginner 6c — Ownership primer](../beginner/06c_ownership_primer.md)
-  — region typing is ownership tracking with explicit scope
+- [Beginner 6b -- Heap and stack primer](../beginner/06b_heap_vs_stack_primer.md)
+  -- foundation: why heap is heavy, why embedded code avoids it
+- [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
+  -- region typing is ownership tracking with explicit scope
   boundaries
-- [Intermediate 9a — FFI primer](../intermediate/09a_ffi_primer.md)
-  — embedded code often interops with legacy C firmware via
+- [Intermediate 9a -- FFI primer](../intermediate/09a_ffi_primer.md)
+  -- embedded code often interops with legacy C firmware via
   `extern "C"` + `unsafe`
-- [Advanced 4b — Cross-compilation primer](04b_cross_compile_primer.md)
-  — `--target`, `--no-std`, `#[no_mangle]`, `#[link_section]`, MMIO u8/u16
-- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md)
-  — the actual syntax + worked examples
+- [Advanced 4b -- Cross-compilation primer](04b_cross_compile_primer.md)
+  -- `--target`, `--no-std`, `#[no_mangle]`, `#[link_section]`, MMIO u8/u16
+- [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md)
+  -- the actual syntax + worked examples

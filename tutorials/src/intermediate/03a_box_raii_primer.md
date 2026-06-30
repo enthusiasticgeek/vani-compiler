@@ -1,17 +1,17 @@
-# Intermediate 3a — `Box<T>` and RAII (intuition primer)
+# Intermediate 3a -- `Box<T>` and RAII (intuition primer)
 
 > **Learning goal**: understand what `Box<T>` is, why you'd
 > reach for it, and the "RAII" pattern it embodies. Reading
 > order: [Beginner 6a/6b/6c primers](../beginner/06a_pointers_refs_primer.md)
-> → [Intermediate 3 affine ownership](03_affine.md) → here.
+> -> [Intermediate 3 affine ownership](03_affine.md) -> here.
 
 This chapter has **no compiler code**. Pure intuition.
 
 ## The problem: where do I put this?
 
 You know from the heap-vs-stack primer that big or dynamic
-values live on the heap. You've used `Vec<T>` — a heap-living
-sequence — and the compiler handles its allocation +
+values live on the heap. You've used `Vec<T>` -- a heap-living
+sequence -- and the compiler handles its allocation +
 cleanup automatically.
 
 But sometimes you want a SINGLE value on the heap, not a
@@ -21,21 +21,21 @@ sequence. Why?
 
 ```
 struct Drawer {
-  shape: dyn Shape,   // ← problem: which size?
+  shape: dyn Shape,   // <- problem: which size?
 }
 ```
 
 `Circle` is 8 bytes, `Square` is 8, but `Triangle` might be 24
 (three coordinates). The compiler can't reserve "the right
-amount" — it doesn't know which type will be inside.
+amount" -- it doesn't know which type will be inside.
 
 Solution: store a `dyn Shape` *handle* in `Drawer`, with the
 actual shape value on the heap. The handle is fixed-size (16
-bytes — vtable + data pointer), so `Drawer` has a known size.
+bytes -- vtable + data pointer), so `Drawer` has a known size.
 
 ```
 struct Drawer {
-  shape: Box<dyn Shape>,   // ← 16 bytes regardless of inner type
+  shape: Box<dyn Shape>,   // <- 16 bytes regardless of inner type
 }
 ```
 
@@ -46,7 +46,7 @@ struct Drawer {
 ```
 struct Node {
   value: i64,
-  next: Node,    // ← problem: how big is Node?
+  next: Node,    // <- problem: how big is Node?
 }
 ```
 
@@ -70,21 +70,21 @@ on the heap.
 A `Box<T>` is exactly two things:
 
 1. **A pointer** to a heap allocation that holds a `T`.
-2. **Ownership** of that allocation — when the `Box` goes out
+2. **Ownership** of that allocation -- when the `Box` goes out
    of scope, the heap allocation is freed.
 
 In memory:
 
 ```
 The binding "b" (on the stack, 8 bytes):
-┌─────────────────────────────────┐
-│  pointer to heap location       │
-└────────────────┬────────────────┘
-                 ↓
++---------------------------------+
+|  pointer to heap location       |
++----------------+----------------+
+                 v
 The heap location (sizeof(T) bytes):
-┌─────────────────────────────────┐
-│  the actual T value             │
-└─────────────────────────────────┘
++---------------------------------+
+|  the actual T value             |
++---------------------------------+
 ```
 
 `box(value)` is the operation that:
@@ -93,7 +93,7 @@ The heap location (sizeof(T) bytes):
 3. Returns a `Box<T>` (the pointer) wrapping it.
 
 When the `Box<T>` binding goes out of scope, the compiler:
-1. Runs the inner T's destructor (if it has one — e.g. if T is
+1. Runs the inner T's destructor (if it has one -- e.g. if T is
    itself a Vec).
 2. Frees the heap allocation.
 
@@ -102,7 +102,7 @@ ownership rule.
 
 ## What "RAII" means
 
-**RAII** = **Resource Acquisition Is Initialization** — a name
+**RAII** = **Resource Acquisition Is Initialization** -- a name
 from C++ but the idea generalizes. The rule:
 
 > A value's CLEANUP is tied to its SCOPE.
@@ -110,13 +110,13 @@ from C++ but the idea generalizes. The rule:
 `Box<T>` is one example: when the binding's scope ends, the
 heap is freed. Other examples in vāṇี:
 
-- `Vec<T>` — when the binding's scope ends, the buffer is
+- `Vec<T>` -- when the binding's scope ends, the buffer is
   freed.
-- `OwnedStr` — when the binding's scope ends, the bytes are
+- `OwnedStr` -- when the binding's scope ends, the bytes are
   freed.
-- `Guard<T>` from `mutex_lock` — when the guard's scope ends,
+- `Guard<T>` from `mutex_lock` -- when the guard's scope ends,
   the mutex is unlocked.
-- `Task` from `task t { ... }` — joined / consumed at scope
+- `Task` from `task t { ... }` -- joined / consumed at scope
   end.
 
 The reason RAII matters: you NEVER have to remember to
@@ -130,7 +130,7 @@ This is why vāṇी programs don't have:
 - `close()` calls (in v1; file handles are queued)
 - `dispose()` calls
 
-— all of those happen via the scope-exit auto-cleanup of the
+-- all of those happen via the scope-exit auto-cleanup of the
 owning binding.
 
 ## The two paths a `Box<T>` value takes
@@ -157,7 +157,7 @@ let n: i64 = read_foo(ref b);   // borrows; b still owns
 `read_foo` gets temporary access to the Box. `b` is still
 valid afterward.
 
-## `Box<T>` vs `Vec<T>` — what's the difference?
+## `Box<T>` vs `Vec<T>` -- what's the difference?
 
 Both put data on the heap. The difference:
 
@@ -168,7 +168,7 @@ Both put data on the heap. The difference:
 You'd use `Box<T>`:
 - For a single struct that needs to be on the heap (recursion,
   size, dyn-coercion).
-- When you need a **stable pointer** — the T's address doesn't
+- When you need a **stable pointer** -- the T's address doesn't
   change as the program runs (a Vec's buffer can move when it
   resizes).
 
@@ -176,18 +176,18 @@ You'd use `Vec<T>`:
 - For sequences of any kind.
 
 You'd use both:
-- `Vec<Box<T>>` — a sequence of heap-allocated Ts. Each
+- `Vec<Box<T>>` -- a sequence of heap-allocated Ts. Each
   element is its own heap allocation; the Vec stores pointers
   to them. Useful when individual elements are expensive to
   move OR when you need pointer-stability per element.
 
-## Variations — what Box wraps in real programs
+## Variations -- what Box wraps in real programs
 
 You've seen `Box<Foo>` for a single user-struct. The shape
-works for far more — and the recursive-drop wiring in vāṇी
+works for far more -- and the recursive-drop wiring in vāṇी
 makes the affine combinations work too.
 
-### `Box<Vec<T>>` — heap-pointer to a heap-allocated Vec
+### `Box<Vec<T>>` -- heap-pointer to a heap-allocated Vec
 
 ```vani
 struct Bag { contents: Box<Vec<i64>> }
@@ -202,17 +202,17 @@ The Box holds a *pointer to the Vec struct*. The Vec struct
 on another heap allocation. Two-level heap structure:
 
 ```
-Box's location → Vec struct → data buffer (the actual elements)
+Box's location -> Vec struct -> data buffer (the actual elements)
 ```
 
 When `b` goes out of scope, the compiler drops in order:
-1. `intent_vec_int64_t__free(*b)` — free the data buffer.
-2. `free(b)` — free the Vec struct allocation.
+1. `intent_vec_int64_t__free(*b)` -- free the data buffer.
+2. `free(b)` -- free the Vec struct allocation.
 
 This is why vāṇी's recursive-drop wiring matters: BOTH layers
 need cleanup. The compiler emits both calls automatically.
 
-### `Box<OwnedStr>` — heap-pointer to a heap char buffer
+### `Box<OwnedStr>` -- heap-pointer to a heap char buffer
 
 ```vani
 let s: OwnedStr = "hello" + "!";
@@ -221,13 +221,13 @@ let b: Box<OwnedStr> = box(s);
 
 `OwnedStr` is itself a heap pointer (to char bytes). Wrapping
 it in `Box` adds another level. The drop chain:
-1. `free(*b)` — free the char buffer.
-2. `free(b)` — free the slot holding the char pointer.
+1. `free(*b)` -- free the char buffer.
+2. `free(b)` -- free the slot holding the char pointer.
 
 Less common in practice than `Box<Vec<T>>`. Useful when you
 need a stable heap address for a single string.
 
-### `Box<dyn Iface>` — heap-allocated value behind an interface
+### `Box<dyn Iface>` -- heap-allocated value behind an interface
 
 ```vani
 struct Drawer { rend: Box<dyn Renderer> }
@@ -244,7 +244,7 @@ points at it; `.vtable` slot picks the right `render` method.
 When `d` drops:
 1. The dyn fat pointer's vtable picks the concrete's
    destructor (if any).
-2. `free(.data)` — the heap-allocated Circle.
+2. `free(.data)` -- the heap-allocated Circle.
 
 Phase 1 + 3 + 3b of the L2 lift (described earlier in the
 session ledger) wired this end-to-end on both backends.
@@ -258,9 +258,9 @@ let pair: Box<(i64, OwnedStr)> = box((42, "answer" + ""));
 A Box wrapping a tuple. Useful when you have a multi-component
 value you want allocated together on the heap rather than
 inline. Less common than Box<Struct> because tuples don't have
-a name to reference — but the compiler accepts it.
+a name to reference -- but the compiler accepts it.
 
-### `Box<Box<T>>` — pointer to a pointer
+### `Box<Box<T>>` -- pointer to a pointer
 
 ```vani
 let inner: Box<i64> = box(99);
@@ -273,7 +273,7 @@ inner Box pointer), one for the inner Box's slot (holds the
 definitions where one Box layer doesn't add the right
 indirection.
 
-### `Vec<Box<T>>` — sequence of heap-allocated Ts
+### `Vec<Box<T>>` -- sequence of heap-allocated Ts
 
 ```vani
 let drawers: Vec<Box<dyn Renderer>> = vec(
@@ -287,10 +287,10 @@ Each element's actual data is its own heap allocation. The
 Vec's buffer is contiguous; the element data points elsewhere.
 
 This is the canonical "heterogeneous collection of trait
-objects" pattern — when you don't know how many shapes you'll
+objects" pattern -- when you don't know how many shapes you'll
 add or which types, store `Box<dyn Iface>` in a Vec.
 
-### `Option<Box<T>>` — explicit nullable pointer
+### `Option<Box<T>>` -- explicit nullable pointer
 
 ```vani
 struct Node {
@@ -301,7 +301,7 @@ struct Node {
 
 A linked-list node: either points at the next node (`Some(box(...))`)
 or terminates the list (`None`). The `Option` makes the "null
-pointer" case explicit at the type level — you have to match
+pointer" case explicit at the type level -- you have to match
 on it before dereferencing. No silent nullptr crashes.
 
 This is THE canonical recursive data-structure shape in vāṇी /
@@ -310,7 +310,7 @@ Rust.
 ## When NOT to use `Box<T>`
 
 If your value is small and Copy (e.g. `Box<i64>`), you almost
-never want this — just use `i64`. The Box adds a heap
+never want this -- just use `i64`. The Box adds a heap
 allocation per value with no benefit.
 
 If your struct is small (< 64 bytes) and the recursion / size
@@ -342,12 +342,12 @@ are the worked examples.
 
 ## Cross-reference
 
-- [Beginner 6a — pointers/references primer](../beginner/06a_pointers_refs_primer.md)
-- [Beginner 6b — heap/stack primer](../beginner/06b_heap_vs_stack_primer.md)
-- [Beginner 6c — ownership/move primer](../beginner/06c_ownership_primer.md)
-- [Intermediate 3 — Affine ownership](03_affine.md)
-- [Intermediate 4a — `dyn Iface` primer](04a_dyn_iface_primer.md) —
+- [Beginner 6a -- pointers/references primer](../beginner/06a_pointers_refs_primer.md)
+- [Beginner 6b -- heap/stack primer](../beginner/06b_heap_vs_stack_primer.md)
+- [Beginner 6c -- ownership/move primer](../beginner/06c_ownership_primer.md)
+- [Intermediate 3 -- Affine ownership](03_affine.md)
+- [Intermediate 4a -- `dyn Iface` primer](04a_dyn_iface_primer.md) --
   `Box<dyn Iface>` combines this chapter's heap allocation
   with that chapter's dynamic dispatch.
-- [Intermediate 5 — Dynamic dispatch](05_dyn.md) — the actual
+- [Intermediate 5 -- Dynamic dispatch](05_dyn.md) -- the actual
   code.

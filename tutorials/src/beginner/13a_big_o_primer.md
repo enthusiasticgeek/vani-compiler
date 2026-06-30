@@ -1,10 +1,10 @@
-# Beginner 13a — Big-O notation (intuition primer)
+# Beginner 13a -- Big-O notation (intuition primer)
 
 > **Learning goal**: read and write Big-O complexity annotations
 > the way the `--big-o` flag emits them. Reading order: this is
-> short + foundational; read it any time after [Beginner 7 — Vec
+> short + foundational; read it any time after [Beginner 7 -- Vec
 > and arrays](07_vec_arrays.md). Pairs with the compiler's
-> `--big-o` flag — `vanic check foo.vani --big-o` prints a
+> `--big-o` flag -- `vanic check foo.vani --big-o` prints a
 > per-fn `O(...)` annotation that this chapter teaches you to
 > read.
 
@@ -17,15 +17,15 @@ how slow does it get as the list gets bigger?
 
 Concrete numbers don't generalize. "0.3 seconds on my laptop"
 tells you nothing about a server, or a Raspberry Pi, or a list
-that's 10× bigger.
+that's 10x bigger.
 
 **Big-O** answers a different question: as the input size grows,
-how does the running time GROW? Not "how long does it take" —
+how does the running time GROW? Not "how long does it take" --
 "how does the time grow when n doubles."
 
-If `n` doubles and your time doubles → linear → `O(n)`.
-If `n` doubles and your time quadruples → quadratic → `O(n²)`.
-If `n` doubles and your time stays the same → constant →
+If `n` doubles and your time doubles -> linear -> `O(n)`.
+If `n` doubles and your time quadruples -> quadratic -> `O(n^2)`.
+If `n` doubles and your time stays the same -> constant ->
 `O(1)`.
 
 The notation is a compact label for the **growth shape**, not
@@ -39,10 +39,10 @@ the actual milliseconds.
 | `O(log n)` | logarithmic | grows by a constant | binary search, BTreeMap get/insert |
 | `O(n)` | linear | doubles | scan a Vec, find/contains, linear search |
 | `O(n log n)` | "n log n" | a bit more than doubles | sort, sort_by |
-| `O(n²)` | quadratic | quadruples | nested loops over the same list |
+| `O(n^2)` | quadratic | quadruples | nested loops over the same list |
 
-There are slower shapes (`O(n³)`, `O(2ⁿ)`, `O(n!)`) and a few
-weirder ones (`O(α(n))` for union-find), but 90% of code lives
+There are slower shapes (`O(n^3)`, `O(2^n)`, `O(n!)`) and a few
+weirder ones (`O(alpha(n))` for union-find), but 90% of code lives
 in these five.
 
 ## Why "n doubles" matters
@@ -51,29 +51,29 @@ Start with `n = 100`. Imagine each step takes 1 microsecond.
 
 | Shape | 100 steps cost | 1,000 cost | 10,000 cost | 1,000,000 cost |
 |---|---|---|---|---|
-| `O(1)` | 1 µs | 1 µs | 1 µs | 1 µs |
-| `O(log n)` | 7 µs | 10 µs | 13 µs | 20 µs |
-| `O(n)` | 100 µs | 1 ms | 10 ms | 1 sec |
-| `O(n log n)` | 700 µs | 10 ms | 130 ms | 20 sec |
-| `O(n²)` | 10 ms | 1 sec | 100 sec | ~12 days |
+| `O(1)` | 1 us | 1 us | 1 us | 1 us |
+| `O(log n)` | 7 us | 10 us | 13 us | 20 us |
+| `O(n)` | 100 us | 1 ms | 10 ms | 1 sec |
+| `O(n log n)` | 700 us | 10 ms | 130 ms | 20 sec |
+| `O(n^2)` | 10 ms | 1 sec | 100 sec | ~12 days |
 
-The `O(n²)` row is why beginners frequently write a program
+The `O(n^2)` row is why beginners frequently write a program
 that works fine on test data and times out in production.
 "Fast enough on 100 items" is not "fast enough on a million
-items" — the growth shape predicts the wall.
+items" -- the growth shape predicts the wall.
 
 ## How the compiler infers complexity
 
 vāṇी's `--big-o` flag walks each function and looks at:
 
-1. **Loop nesting depth.** Zero loops → `O(1)` baseline. One
-   loop → `O(n)`. Two nested → `O(n²)`. K nested → `O(n^k)`.
+1. **Loop nesting depth.** Zero loops -> `O(1)` baseline. One
+   loop -> `O(n)`. Two nested -> `O(n^2)`. K nested -> `O(n^k)`.
 2. **Builtin call asymptotics.** `sort(...)` injects `O(n log n)`
    into the body's cost. `binary_search` injects `O(log n)`.
    `find` injects `O(n)`. These multiply with the surrounding
    loop nesting.
 3. **Self-recursion.** A function that calls itself gets
-   `O(recursive)` — no recurrence solver in v1, so the
+   `O(recursive)` -- no recurrence solver in v1, so the
    compiler honestly reports "I can't bound this."
 
 So a function like:
@@ -85,7 +85,7 @@ fn sort_then_search(xs: mut ref Vec<i64>, key: i64) -> i64 {
 }
 ```
 
-ships annotated as `O(n log n)` — the sort dominates the
+ships annotated as `O(n log n)` -- the sort dominates the
 binary_search.
 
 A function like:
@@ -96,7 +96,7 @@ fn all_pairs(xs: ref Vec<i64>) -> i64 {
 }
 ```
 
-ships annotated as `O(n²)`.
+ships annotated as `O(n^2)`.
 
 ## Reading vāṇी's annotation output
 
@@ -104,14 +104,14 @@ ships annotated as `O(n²)`.
 
 ```
   fn one_loop: O(n)
-  fn nested_loops: O(n²)
+  fn nested_loops: O(n^2)
   fn just_sort: O(n log n)
   fn recursive: O(recursive)
 ```
 
 `--big-o=auto` (the default) skips `O(1)` fns to keep output
 focused on the interesting cases. `--big-o=force` prints
-every fn including the trivial ones — useful when reviewing
+every fn including the trivial ones -- useful when reviewing
 to confirm "yes, this helper IS O(1) by design."
 
 `vanic emit foo.vani --backend=c --big-o` prepends the same
@@ -120,18 +120,18 @@ reading the output also see the complexity contract.
 
 ## When the annotation is wrong (or the analyzer gives up)
 
-The analyzer is conservative and local — it can over-report,
+The analyzer is conservative and local -- it can over-report,
 under-report, or honestly admit it can't bound the work.
 
 ### Cases the analyzer handles correctly (refined 2026-06-09)
 
 - **Bounded loops.** `for i from 0 to 16` and `for x in ref
-  arr` where `arr: [T; N]` stay `O(1)` — the iteration count
+  arr` where `arr: [T; N]` stay `O(1)` -- the iteration count
   is part of the type or a literal constant.
 - **Cross-fn propagation.** A fn that calls an O(n log n)
   helper inside an O(n) loop correctly classifies as
-  O(n² log n). Tarjan SCC + topo-walk; callees analyzed first.
-- **Mutual recursion.** SCC of size > 1 → every member is
+  O(n^2 log n). Tarjan SCC + topo-walk; callees analyzed first.
+- **Mutual recursion.** SCC of size > 1 -> every member is
   Recursive.
 
 ### Cases the analyzer **cannot** compute
@@ -149,16 +149,16 @@ variant) or falls back to the conservative `O(recursive)` /
    iterations), the annotation will over-report.
 2. **Recurrence-driven recursion.** Merge sort
    (`T(n) = 2T(n/2) + O(n) = O(n log n)`) is honestly
-   `O(recursive)` in vāṇी today — no closed-form recurrence
+   `O(recursive)` in vāṇी today -- no closed-form recurrence
    solver in v1.
 3. **Indirect calls via `dyn Iface`.** A method call through
    a `dyn` trait object dispatches at runtime; the compiler
    sees the iface name but doesn't know which concrete
    implementation's complexity will run. Treated as `O(1)`
-   conservatively — accurate when every impl is `O(1)`,
+   conservatively -- accurate when every impl is `O(1)`,
    under-reporting if any impl is heavier.
 4. **Closures stored in a binding.** `fn(...) -> R` and
-   `Closure<T1, T2>` fat pointers route the same way — the
+   `Closure<T1, T2>` fat pointers route the same way -- the
    analyzer doesn't follow the closure's body across the call.
 5. **`extern "C"` FFI calls.** Opaque to the analyzer.
    Treated as `O(1)`; the user's responsibility to know the
@@ -166,7 +166,7 @@ variant) or falls back to the conservative `O(recursive)` /
 6. **HashMap / BTreeMap with user-defined `Hash` impls.**
    The builtin asymptotic table assumes `O(1)` hashing for
    HashMap and `O(log n)` for BTreeMap. If the user's `Hash
-   for K` impl is itself non-constant (rare but possible —
+   for K` impl is itself non-constant (rare but possible --
    e.g. hashing a Vec by its full contents), the analyzer
    doesn't pull through. Slight under-report.
 7. **Calls to user-defined helpers analyzed AFTER the caller.**
@@ -181,7 +181,7 @@ variant) or falls back to the conservative `O(recursive)` /
   delta / 2; }` converges in O(log(initial/epsilon)) iterations,
   not O(n). Analyzer says O(n).
 - **Bounded recursion via SMT.** A function with `requires n
-  < 10` recurses at most 10 times — bounded — but the
+  < 10` recurses at most 10 times -- bounded -- but the
   analyzer doesn't read `requires` clauses to refine. Reports
   `O(recursive)`.
 
@@ -205,7 +205,7 @@ source when the complexity matters for correctness:
 - Anything calling out via FFI.
 
 For the cases the analyzer handles, the bound is correct
-within v1's modeling — and the more code you write through
+within v1's modeling -- and the more code you write through
 the bounded paths (arrays, fixed-size loops, simple
 recursion), the more reliable the annotation becomes.
 
@@ -214,30 +214,30 @@ recursion), the more reliable the annotation becomes.
 - Big-O = how running time GROWS with input size, not how long
   it takes in milliseconds.
 - The five shapes to know: `O(1)`, `O(log n)`, `O(n)`,
-  `O(n log n)`, `O(n²)`.
+  `O(n log n)`, `O(n^2)`.
 - vāṇी's `--big-o` flag walks each fn statically and prints
   the inferred annotation. Three modes: `auto` (default, skip
   O(1)), `force` (every fn), `off`.
 - Annotation lives in the check output AND as a comment
   prepended to the emitted artifact, so reviewers see the
   cost contract alongside the code.
-- The analyzer is conservative + local — over-reports on
+- The analyzer is conservative + local -- over-reports on
   bounded loops, under-reports across helpers. Always sanity-
   check the source when complexity matters.
 
 The takeaway: **complexity is a growth shape, not a clock
 reading.** Reading Big-O notation is the same skill as
-reading types — once you see `O(n²)`, you know what shape of
+reading types -- once you see `O(n^2)`, you know what shape of
 work to expect.
 
 ## Cross-reference
 
-- [Beginner 7 — Vec and arrays](07_vec_arrays.md) — the data
+- [Beginner 7 -- Vec and arrays](07_vec_arrays.md) -- the data
   structure most Big-O reasoning is about
-- [Intermediate 12a — SMT primer](../intermediate/12a_smt_primer.md)
-  — proving stronger bounds at compile time (the SMT layer
+- [Intermediate 12a -- SMT primer](../intermediate/12a_smt_primer.md)
+  -- proving stronger bounds at compile time (the SMT layer
   can sometimes lift a runtime `O(?)` to a static `O(...)`
   via `requires` / `ensures` clauses)
-- [Advanced 10 — Compiler internals tour](../advanced/10_internals.md)
-  — the static-analysis pass that builds the annotation lives
+- [Advanced 10 -- Compiler internals tour](../advanced/10_internals.md)
+  -- the static-analysis pass that builds the annotation lives
   in `src/big_o.rs`

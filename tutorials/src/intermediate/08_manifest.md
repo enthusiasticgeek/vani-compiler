@@ -1,4 +1,4 @@
-# Intermediate 8 — Multi-file projects + `vani.toml`
+# Intermediate 8 -- Multi-file projects + `vani.toml`
 
 > **Learning goal**: split a program across multiple `.vani`
 > files, wire them together with a `vani.toml` manifest, and
@@ -17,10 +17,10 @@ automatically without you listing every file by hand.
 
 ```
 int8_proj/
-├── vani.toml
-└── src/
-    ├── main.vani
-    └── math.vani
++-- vani.toml
++-- src/
+    +-- main.vani
+    +-- math.vani
 ```
 
 `vani.toml`:
@@ -53,7 +53,7 @@ module math {
 use "math.vani";
 use math::{square, cube};
 
-intent "Multi-file demo — uses the math helpers next door.";
+intent "Multi-file demo -- uses the math helpers next door.";
 
 fn main() -> i64 {
   print "square(5) =", square(5);
@@ -71,7 +71,7 @@ cd int8_proj
 vanic run
 ```
 
-(No file argument — the driver walks up looking for `vani.toml`
+(No file argument -- the driver walks up looking for `vani.toml`
 and uses its `[package].entry` as the source file.)
 
 Output:
@@ -95,8 +95,8 @@ cube(3)   = 27
   this brings the specific item into bare-name scope. Multi-
   item form: `use module::{a, b, c};`.
 - **`pub` requires a module**. Top-level `pub fn` outside a
-  `module { ... }` block doesn't parse — wrap your helpers
-  in a `module name { ... }` (per Beginner §10) before
+  `module { ... }` block doesn't parse -- wrap your helpers
+  in a `module name { ... }` (per Beginner Sec.10) before
   marking them `pub`.
 - **No transitive includes**: a `use "a.vani";` in
   `b.vani` doesn't propagate `a`'s items to whichever file
@@ -105,7 +105,7 @@ cube(3)   = 27
 
 ## Caveats in v1
 
-- **One file per `use`** in v1 — globbing (`use "*.vani";`) is
+- **One file per `use`** in v1 -- globbing (`use "*.vani";`) is
   deferred.
 - **Cyclic includes** are silently dropped: each file is
   included at most once across the dependency tree. Don't
@@ -125,4 +125,4 @@ another `use` and call it.
 
 ---
 
-**Next**: [§9 — FFI: `extern "C"` + `--link-with` →](09_ffi.md)
+**Next**: [Sec.9 -- FFI: `extern "C"` + `--link-with` ->](09_ffi.md)

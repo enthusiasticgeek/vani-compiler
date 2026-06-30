@@ -1,13 +1,13 @@
-# Advanced 2 — `parallel for` + reductions + race-freedom
+# Advanced 2 -- `parallel for` + reductions + race-freedom
 
 > **Learning goal**: turn a sequential loop into a `parallel
 > for`, declare a `reduce` accumulator, and understand how the
 > affine type system proves race-freedom at compile time.
 
-> **New to this?** Read [Advanced 2a — Parallelism and race-freedom primer](02a_parallelism_primer.md) first.
+> **New to this?** Read [Advanced 2a -- Parallelism and race-freedom primer](02a_parallelism_primer.md) first.
 
 Imagine ten accountants each adding up a separate stack of
-receipts simultaneously — each one works on their own stack,
+receipts simultaneously -- each one works on their own stack,
 never touching anyone else's, and at the end a supervisor
 adds up all their sub-totals. No two accountants can possibly
 interfere because the stacks are separate. That's a parallel
@@ -15,12 +15,12 @@ reduction: split the work into non-overlapping pieces, do them
 simultaneously, combine the results. `parallel for ... reduce`
 expresses this pattern; the compiler verifies at compile time
 that loop iterations don't share writeable data (race-freedom
-— no accountant steals from another's stack mid-tally).
+-- no accountant steals from another's stack mid-tally).
 
 ## The program
 
 ```vani
-intent "Advanced 2 worked example — parallel for + reduction.";
+intent "Advanced 2 worked example -- parallel for + reduction.";
 
 fn main() -> i64 {
   // Sum 1..100 sequentially first as the reference.
@@ -72,7 +72,7 @@ the semantics.
   variables (`seq = seq + i`) commit before the next iteration.
 - **`parallel for`** lifts the body to run on N threads. The
   compiler **statically rejects** loops whose body has
-  iteration-to-iteration data dependencies — assignments to
+  iteration-to-iteration data dependencies -- assignments to
   array slots, mutable captures without a `reduce` clause, etc.
   This is the safety boundary.
 - **`reduce <var> with <op>;`** declares an accumulator variable
@@ -91,7 +91,7 @@ the semantics.
 | Allowed | Rejected |
 |---|---|
 | Reads of captured `let` bindings | Writes to non-reduce captures |
-| Writes through `mut ref` parameters | Indexed assignment `xs[i] = …` on a captured Vec |
+| Writes through `mut ref` parameters | Indexed assignment `xs[i] = ...` on a captured Vec |
 | Calls to pure fns | Calls to impure fns (FFI, IO) without `unsafe` |
 | `reduce var with +`/`*`/`max`/`min` | Multiple `reduce` clauses on the same variable |
 
@@ -117,7 +117,7 @@ where `i` ranges over the iteration variable's domain).
 ## Challenge
 
 Write `dot_product(a: ref Vec<i64>, b: ref Vec<i64>) -> i64`
-that returns Σ aᵢ·bᵢ. Use `parallel for` with `reduce sum with
+that returns Sigma ai*bi. Use `parallel for` with `reduce sum with
 +`. Assume `len(a) == len(b)`.
 
 <details>
@@ -142,4 +142,4 @@ requires len(a) == len(b);
 
 ---
 
-**Next**: [§3 — `task` / `join` + atomics / mutexes / channels →](03_concurrency.md)
+**Next**: [Sec.3 -- `task` / `join` + atomics / mutexes / channels ->](03_concurrency.md)

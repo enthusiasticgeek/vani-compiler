@@ -2,7 +2,7 @@
 
 ## Quick install (pre-built binary)
 
-The fastest path — no Rust toolchain needed.
+The fastest path -- no Rust toolchain needed.
 
 **Linux / macOS:**
 
@@ -29,9 +29,9 @@ This downloads the Windows binary and installs it to `%LOCALAPPDATA%\vanic\bin`,
 
 Before you can follow any lesson you need three things on your machine:
 
-1. **Rust toolchain** — to build the `vanic` compiler from source
-2. **z3** — the SMT solver (`requires` / `ensures` / `prove` contracts use it)
-3. **A C compiler + LLVM tools** — for the two code-emission backends
+1. **Rust toolchain** -- to build the `vanic` compiler from source
+2. **z3** -- the SMT solver (`requires` / `ensures` / `prove` contracts use it)
+3. **A C compiler + LLVM tools** -- for the two code-emission backends
 
 > `vanic check` (type-check + SMT only) needs just Rust + z3.
 > `vanic run` (the command every lesson uses) additionally needs either
@@ -81,10 +81,10 @@ cargo build --release
 ### Add vanic to PATH
 
 ```bash
-# Option A — symlink into an already-on-PATH directory:
+# Option A -- symlink into an already-on-PATH directory:
 sudo ln -sf "$(pwd)/target/release/vanic" /usr/local/bin/vanic
 
-# Option B — add the release dir to PATH permanently (in ~/.bashrc or ~/.zshrc):
+# Option B -- add the release dir to PATH permanently (in ~/.bashrc or ~/.zshrc):
 echo 'export PATH="$HOME/vani-compiler/target/release:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
@@ -132,7 +132,7 @@ sudo ln -sf "$(pwd)/target/release/vanic" /usr/local/bin/vanic
 Two options. **WSL2 is recommended** because it gives you a full Linux
 runtime and all async I/O features work without the IOCP limitation.
 
-### Option 1 — WSL2 (recommended)
+### Option 1 -- WSL2 (recommended)
 
 Open **Administrator PowerShell**:
 
@@ -144,11 +144,11 @@ wsl --set-default-version 2
 
 Inside your WSL2 shell, follow the **Linux (Debian/Ubuntu)** steps above.
 
-### Option 2 — Native Windows 11
+### Option 2 -- Native Windows 11
 
 Verified: all **2089 compiler tests** pass on Windows 11 with this setup.
 
-#### Step 1 — Rust (GNU toolchain)
+#### Step 1 -- Rust (GNU toolchain)
 
 ```powershell
 winget install Rustlang.Rustup --accept-package-agreements --accept-source-agreements
@@ -163,9 +163,9 @@ rustup default stable-x86_64-pc-windows-gnu
 
 > The GNU target uses `gcc` from MSYS2 (Step 2) and has no extra
 > dependency. If you already have Visual Studio 2017+, the default
-> MSVC toolchain also works — skip the `rustup default` switch.
+> MSVC toolchain also works -- skip the `rustup default` switch.
 
-#### Step 2 — GCC via MSYS2
+#### Step 2 -- GCC via MSYS2
 
 Download and install MSYS2 from <https://www.msys2.org>.
 The installer adds `C:\msys64\mingw64\bin` to your **system** PATH.
@@ -176,7 +176,7 @@ Verify in a **new** PowerShell window:
 gcc --version
 ```
 
-#### Step 3 — LLVM tools (`lli`, `llc`, `opt`)
+#### Step 3 -- LLVM tools (`lli`, `llc`, `opt`)
 
 `winget install LLVM.LLVM` ships Clang but **not** `lli`/`llc`/`opt`.
 Install the full LLVM set via MSYS2:
@@ -190,7 +190,7 @@ This places `lli.exe`, `llc.exe`, and `opt.exe` under `C:\msys64\mingw64\bin`.
 > `lli` is only needed for `vanic run --backend=llvm`.
 > The C backend (`--backend=c`) needs only `gcc` and works without `lli`.
 
-#### Step 4 — z3 SMT solver
+#### Step 4 -- z3 SMT solver
 
 ```powershell
 C:\msys64\usr\bin\pacman.exe -Sy mingw-w64-x86_64-z3 --noconfirm
@@ -204,7 +204,7 @@ Verify:
 z3 --version   # Z3 version 4.x
 ```
 
-#### Step 5 — Build vanic
+#### Step 5 -- Build vanic
 
 ```powershell
 git clone https://github.com/enthusiasticgeek/vani-compiler.git
@@ -212,9 +212,9 @@ cd vani-compiler
 cargo build --release
 ```
 
-#### Step 6 — Add vanic to PATH
+#### Step 6 -- Add vanic to PATH
 
-Open **System Properties → Environment Variables → User variables → Path → New**
+Open **System Properties -> Environment Variables -> User variables -> Path -> New**
 and add:
 
 ```
@@ -264,7 +264,7 @@ gcc --version
 
 ---
 
-## Quick smoke test — Hello, World
+## Quick smoke test -- Hello, World
 
 **Linux / macOS / WSL2:**
 
@@ -280,7 +280,7 @@ vanic run examples\language\english\basics.vani
 
 Expected output: `42`
 
-If you see `42`, your install is healthy and you're ready for [Lesson 1 →](beginner/01_hello_world.md).
+If you see `42`, your install is healthy and you're ready for [Lesson 1 ->](beginner/01_hello_world.md).
 
 ---
 
@@ -305,7 +305,7 @@ sudo ln -sf "$(pwd)/target/release/intent-lsp" /usr/local/bin/intent-lsp
 ```
 
 ```powershell
-# Windows — add target\release\ to your PATH (same as vanic above)
+# Windows -- add target\release\ to your PATH (same as vanic above)
 ```
 
 ### Neovim (nvim-lspconfig)
@@ -359,9 +359,9 @@ vim.filetype.add({ extension = { vani = 'vani' } })
 | Rename | Rename across the file; keyword-collision check |
 | Completion | Keywords (English + 30 dialects), types, builtins, in-scope names |
 | Code actions | Auto-insert missing `;` `)` `}` and other single-char tokens |
-| Semantic tokens | Functions, parameters, types, keywords, numbers, strings — IR-driven |
+| Semantic tokens | Functions, parameters, types, keywords, numbers, strings -- IR-driven |
 
-**Dialect-aware completion** — add `// vani-lang: korean` (or any supported
+**Dialect-aware completion** -- add `// vani-lang: korean` (or any supported
 tag) at the top of your file and the completion popup will include that
 dialect's native keywords alongside English.
 
@@ -377,7 +377,7 @@ dialect's native keywords alongside English.
 
 ### `lli: command not found`
 
-- **Linux/macOS**: LLVM not on PATH — check `llvm` package installation
+- **Linux/macOS**: LLVM not on PATH -- check `llvm` package installation
 - **macOS Homebrew**: re-run the `brew --prefix llvm` PATH export
 - **Windows**: install via MSYS2 (`pacman -Sy mingw-w64-x86_64-llvm`)
 - Note: `lli` is only needed for `--backend=llvm`; `--backend=c` works without it
@@ -391,7 +391,7 @@ dialect's native keywords alongside English.
 ### `cargo: command not found` (Windows)
 
 Add `C:\Users\<you>\.cargo\bin` to your **system** PATH (not just user PATH):
-System Properties → Environment Variables → System variables → Path → New.
+System Properties -> Environment Variables -> System variables -> Path -> New.
 Then restart the terminal.
 
 ### `pacman` mirrors unreachable (Windows)
@@ -419,4 +419,4 @@ $env:RUST_MIN_STACK = "33554432"
 
 ---
 
-**→ Ready? [Begin with Hello, World](beginner/01_hello_world.md)**
+**-> Ready? [Begin with Hello, World](beginner/01_hello_world.md)**

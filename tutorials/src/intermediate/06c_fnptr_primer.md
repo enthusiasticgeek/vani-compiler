@@ -1,16 +1,16 @@
-# Intermediate 6c — Function pointers: `fn(A) -> R`
+# Intermediate 6c -- Function pointers: `fn(A) -> R`
 
 > **Learning goal**: store functions as values, pass them as
 > arguments, return them from functions, and collect them in
 > `Vec<fn(A)->R>`.
 
-> **Prerequisites**: [Intermediate 6 — Closures and iterator combinators](06_closures.md).
+> **Prerequisites**: [Intermediate 6 -- Closures and iterator combinators](06_closures.md).
 
 ---
 
 ## The concept
 
-In vāṇी a function name can be used as a *value* — not just called,
+In vāṇी a function name can be used as a *value* -- not just called,
 but stored in a variable or passed to another function. The type of
 such a value is written `fn(A, B) -> R`, mirroring the parameter
 and return types of the function itself.
@@ -26,7 +26,7 @@ fn main() -> i64 {
 }
 ```
 
-No `&` or `*` — the syntax is the same as a named function type.
+No `&` or `*` -- the syntax is the same as a named function type.
 
 ---
 
@@ -52,7 +52,7 @@ fn main() -> i64 {
 }
 ```
 
-The `f: fn(i64) -> i64` parameter is just a typed variable — `apply`
+The `f: fn(i64) -> i64` parameter is just a typed variable -- `apply`
 doesn't know at compile time which function it will call.
 
 ---
@@ -102,7 +102,7 @@ fn main() -> i64 {
 
 ---
 
-## `Vec<fn(A) -> R>` — tables of functions
+## `Vec<fn(A) -> R>` -- tables of functions
 
 A `Vec` of function pointers is a *dispatch table*. Push named
 functions in, iterate, call them all:
@@ -136,15 +136,15 @@ fn main() -> i64 {
 |-----------|--------|
 | Named function used as value | Inferred as `fn(<params>) -> <ret>` |
 | Anonymous `fn` literal | Same type as its declared signature |
-| Wrong arity or param type | **Compile error** — the signatures must match exactly |
-| `fn(i64) -> i64` ≠ `fn(i64, i64) -> i64` | **Compile error** |
+| Wrong arity or param type | **Compile error** -- the signatures must match exactly |
+| `fn(i64) -> i64` != `fn(i64, i64) -> i64` | **Compile error** |
 
 ```vani
-// This is a compile error — wrong arity:
+// This is a compile error -- wrong arity:
 fn add(a: i64, b: i64) -> i64 { return a + b; }
 fn apply(f: fn(i64) -> i64, x: i64) -> i64 { return f(x); }
 fn bad() -> i64 {
-  return apply(add, 1);   // ERROR: fn(i64,i64)->i64 ≠ fn(i64)->i64
+  return apply(add, 1);   // ERROR: fn(i64,i64)->i64 != fn(i64)->i64
 }
 ```
 
@@ -154,13 +154,13 @@ fn bad() -> i64 {
 
 | | Function pointer `fn(A)->R` | Closure (via `fn` literal capturing locals) |
 |---|---|---|
-| Captures outer variables? | No — stateless | Yes — captures by value |
-| Can store in `Vec`? | Yes — `Vec<fn(A)->R>` | Yes — same syntax |
+| Captures outer variables? | No -- stateless | Yes -- captures by value |
+| Can store in `Vec`? | Yes -- `Vec<fn(A)->R>` | Yes -- same syntax |
 | Usable with `map`/`filter`/`fold`? | Yes | Yes |
-| Passed to `parallel for` body? | No — indirect calls rejected | No — same restriction |
+| Passed to `parallel for` body? | No -- indirect calls rejected | No -- same restriction |
 
 When you need to capture a local variable, write a closure
-(see [§6 — Closures](06_closures.md)). When you want a pure
+(see [Sec.6 -- Closures](06_closures.md)). When you want a pure
 stateless transform (no captured state), a named function passed
 as a value is cleaner.
 
@@ -176,4 +176,4 @@ that returns a new function equal to `f(g(x))`. Use it to compose
 
 ---
 
-**Next**: [§7 — Tuples and tuple destructure →](07_tuples.md)
+**Next**: [Sec.7 -- Tuples and tuple destructure ->](07_tuples.md)

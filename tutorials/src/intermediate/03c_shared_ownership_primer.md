@@ -1,4 +1,4 @@
-# Intermediate 3c — Shared ownership without `Rc`/`Arc`
+# Intermediate 3c -- Shared ownership without `Rc`/`Arc`
 
 > **Learning goal**: understand vāṇी's intentional omission of
 > reference-counted pointers (`Rc<T>` / `Arc<T>` / `Weak<T>`)
@@ -33,7 +33,7 @@ Three reasons, in increasing order of importance:
 `Rc<T>` doesn't free a cycle. If two Rc-managed nodes point
 at each other, neither's count ever reaches zero; both leak.
 The Rust workaround is to use `Weak<T>` for the back-edges of
-graphs — a chore the user has to remember to do correctly.
+graphs -- a chore the user has to remember to do correctly.
 
 A language without Rc avoids this entire class of bugs.
 
@@ -41,7 +41,7 @@ A language without Rc avoids this entire class of bugs.
 
 Every clone of an `Rc<T>` bumps a refcount; every drop
 decrements. `Arc<T>` does it with atomic operations
-(memory-bus-locking instructions) — much slower than non-atomic.
+(memory-bus-locking instructions) -- much slower than non-atomic.
 
 For a language whose pitch is "as fast as C, safer than C",
 adding silent reference-counting overhead on values that LOOK
@@ -51,18 +51,18 @@ like normal pointers undercuts the story.
 
 Rc/Arc say "many owners; whichever drops last cleans up."
 That's flexible, but it also means the cleanup time is
-*emergent* — you can't tell from the source when something
+*emergent* -- you can't tell from the source when something
 will run. Debugging a "this resource is freed too early" or
 "this resource is held too long" bug under Rc is harder than
 under single-owner because the *ownership graph* is dynamic.
 
 vāṇी's single-owner-plus-borrows model makes cleanup time
 predictable: when the owning binding's scope ends. The trade
-is more thinking up front about who owns what — but it's the
+is more thinking up front about who owns what -- but it's the
 SAME thinking the Rc programmer should be doing anyway, just
 forced to be explicit.
 
-## How to share without Rc — five patterns
+## How to share without Rc -- five patterns
 
 vāṇी's borrow system (`ref T` / `mut ref T`) handles MOST
 cases that would use Rc in Rust. When that's not enough, five
@@ -84,7 +84,7 @@ fn use_data(...) -> i64 {
 }
 ```
 
-Three "shared owners" in spirit — all reading `xs`. The
+Three "shared owners" in spirit -- all reading `xs`. The
 compiler accepts unlimited shared borrows of the same value
 because they can't conflict (read-only). No refcount needed:
 the borrows end naturally when each call returns, and `xs`
@@ -117,12 +117,12 @@ fn move_entity(world: mut ref World, e: Entity, dt: f64) -> i64 {
 
 The "shared ownership" semantics are simulated: many parts of
 the program hold `Entity` handles; the `World` owns the actual
-data. Lookups are O(1) array indexing — faster than chasing
+data. Lookups are O(1) array indexing -- faster than chasing
 pointers AND cache-friendly because adjacent entities' data
 is contiguous.
 
 For graphs, this manifests as `Vec<Node>` with each Node
-holding `Vec<u32>` of neighbor indices — no `Box`, no `Rc`, no
+holding `Vec<u32>` of neighbor indices -- no `Box`, no `Rc`, no
 cycles-as-pointers (cycles become valid index-graphs, freed
 together when the World drops).
 
@@ -130,7 +130,7 @@ together when the World drops).
 
 Allocate many values from a shared arena; free the whole arena
 at once. The values "share ownership" of the arena's lifetime
-— they all live as long as the arena does, then die together.
+-- they all live as long as the arena does, then die together.
 
 ```vani
 region scratch[64 * 1024] {
@@ -141,7 +141,7 @@ region scratch[64 * 1024] {
 }  // scratch drops; a + b's data is freed together
 ```
 
-Inside the region, you can pass `ref Foo` handles freely —
+Inside the region, you can pass `ref Foo` handles freely --
 they're all valid until the region ends. No per-value
 refcounting; one wholesale cleanup at scope exit. This is
 how compilers, parsers, and game-frame allocators often
@@ -175,7 +175,7 @@ task consumer {
 ```
 
 At any moment, exactly one task owns the Vec. There's no
-shared mutable state — no race possible. The channel is the
+shared mutable state -- no race possible. The channel is the
 synchronization primitive AND the ownership-transfer
 primitive.
 
@@ -192,18 +192,18 @@ let counter: Mutex<SharedCounter> = mutex_new(SharedCounter { value: 0 });
 task incrementer {
   let g: Guard<SharedCounter> = mutex_lock(ref counter);
   g.value = g.value + 1;
-  // g drops at end of scope → mutex unlocks
+  // g drops at end of scope -> mutex unlocks
 }
 ```
 
 The Mutex is the "shared ownership" mechanism. The `Guard<T>`
-RAII handle ensures the lock releases when the scope ends —
+RAII handle ensures the lock releases when the scope ends --
 no manual unlock. Mutex<T> takes care of cross-thread
 synchronization without per-value reference counting.
 
 If you need to hold the mutex across an `await` (chapter
 [01a async](../advanced/01a_async_primer.md)), a different
-shape applies — the mutex is part of the Task state.
+shape applies -- the mutex is part of the Task state.
 
 ## What if I really, REALLY need Rc semantics?
 
@@ -225,23 +225,23 @@ For these, vāṇी's current answer is:
    "graphs with cycles" become cleaner as `Vec<Node>` with
    index-based edges.
 2. **Use `unsafe(reason = "...")`** for the unavoidable cases
-   — explicitly mark the section where the type system isn't
+   -- explicitly mark the section where the type system isn't
    tracking ownership, and explain in the reason string what
    discipline you're maintaining manually.
-3. **A v2 `Rc<T>` is conceivable** — but the design choice
+3. **A v2 `Rc<T>` is conceivable** -- but the design choice
    today is to not have it. If real-world experience shows
    it's needed for a class of programs that no other pattern
    addresses cleanly, the language could add it. So far,
    nothing has surfaced that genuinely needs it.
 
-## Weak pointers — gone with Rc
+## Weak pointers -- gone with Rc
 
-`Weak<T>` exists in Rust ONLY because `Rc<T>` exists — it's
+`Weak<T>` exists in Rust ONLY because `Rc<T>` exists -- it's
 the way to break Rc cycles. With no Rc, there's no need for
 Weak.
 
 If you need "look at this value without keeping it alive,"
-that's just `ref T` — a shared borrow. The compiler tracks
+that's just `ref T` -- a shared borrow. The compiler tracks
 borrow scope to ensure the source outlives the borrower.
 
 ## A summary you can carry
@@ -250,20 +250,20 @@ borrow scope to ensure the source outlives the borrower.
 - Reasons: cycle leaks under Rc, real overhead per
   clone/drop, hidden ownership graph dynamics.
 - Five idiomatic alternatives:
-  1. **Just borrow** — many `ref T` co-exist; handles 80%
+  1. **Just borrow** -- many `ref T` co-exist; handles 80%
      of would-be Rc cases.
-  2. **Handles, not pointers** — store data in a Vec/Pool,
+  2. **Handles, not pointers** -- store data in a Vec/Pool,
      pass indices (ECS / graph-as-index pattern).
-  3. **Arena / region** — shared lifetime by construction,
+  3. **Arena / region** -- shared lifetime by construction,
      wholesale cleanup.
-  4. **Channels** — move ownership between threads
+  4. **Channels** -- move ownership between threads
      explicitly.
-  5. **`Mutex<T>`** — synchronized shared mutable state for
+  5. **`Mutex<T>`** -- synchronized shared mutable state for
      cases that actually need it.
 - For the rare genuine Rc-required cases: refactor toward
   handles, or use `unsafe` with a documented discipline.
 
-vāṇी optimizes for *predictable* memory behavior — you can
+vāṇी optimizes for *predictable* memory behavior -- you can
 always tell when something will be freed. Rc trades that
 predictability for flexibility; vāṇी declines that trade as a
 default. The patterns above let you achieve almost all of
@@ -271,18 +271,18 @@ Rc's expressiveness without the cost.
 
 ## Cross-reference
 
-- [Beginner 6c — Ownership primer](../beginner/06c_ownership_primer.md)
-  — the foundation
-- [Intermediate 3a — Box and RAII primer](03a_box_raii_primer.md)
-  — single-owner heap allocation
-- [Intermediate 3b — Affine deeper primer](03b_affine_deeper_primer.md)
-  — borrow scopes; many-shared-XOR-one-mutable rule
-- [Intermediate 3d — Cyclic references primer](03d_cyclic_references_primer.md)
-  — worked side-by-side examples (parent↔child tree,
+- [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
+  -- the foundation
+- [Intermediate 3a -- Box and RAII primer](03a_box_raii_primer.md)
+  -- single-owner heap allocation
+- [Intermediate 3b -- Affine deeper primer](03b_affine_deeper_primer.md)
+  -- borrow scopes; many-shared-XOR-one-mutable rule
+- [Intermediate 3d -- Cyclic references primer](03d_cyclic_references_primer.md)
+  -- worked side-by-side examples (parent<->child tree,
   doubly-linked list, observer pattern) of the three
   canonical Rc+Weak shapes translated to vāṇी's
   index-into-Vec pattern
-- [Advanced 2a — Parallelism + race-freedom primer](../advanced/02a_parallelism_primer.md)
-  — channels + mutex as the cross-thread sharing primitives
-- [Advanced 4a — Embedded primer](../advanced/04a_embedded_primer.md)
-  — region typing details
+- [Advanced 2a -- Parallelism + race-freedom primer](../advanced/02a_parallelism_primer.md)
+  -- channels + mutex as the cross-thread sharing primitives
+- [Advanced 4a -- Embedded primer](../advanced/04a_embedded_primer.md)
+  -- region typing details

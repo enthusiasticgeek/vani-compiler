@@ -1,11 +1,11 @@
-# Advanced 4b — Cross-compilation and bare-metal targets (primer)
+# Advanced 4b -- Cross-compilation and bare-metal targets (primer)
 
 > **Learning goal**: understand what cross-compilation means,
 > why bare-metal needs special linker attributes and no-stdlib,
 > and how vāṇī's `--target`, `--no-std`, `#[no_mangle]`,
 > `#[link_section]`, and narrow MMIO builtins fit together.
-> Reading order: [Advanced 4a — Embedded primer](04a_embedded_primer.md)
-> → here → [Advanced 4 — Embedded](04_embedded.md).
+> Reading order: [Advanced 4a -- Embedded primer](04a_embedded_primer.md)
+> -> here -> [Advanced 4 -- Embedded](04_embedded.md).
 
 This chapter has **no compiler code**. Pure concepts, then the
 full attribute / flag reference.
@@ -16,22 +16,22 @@ full attribute / flag reference.
 
 On a typical development laptop (x86-64 Linux or Windows), you
 run `vanic build` and get a binary that runs on **the same
-machine** — the host. The compiler, the object code, and the
+machine** -- the host. The compiler, the object code, and the
 runtime all share the same CPU instruction set and OS ABI.
 
 **Cross-compilation** produces a binary for a **different**
-target — an ARM Cortex-M microcontroller, a RISC-V board, an
-AArch64 server — that the build machine cannot run directly.
+target -- an ARM Cortex-M microcontroller, a RISC-V board, an
+AArch64 server -- that the build machine cannot run directly.
 
 ```
 Build machine: x86-64 Linux
-  → run vanic build --target=arm-none-eabi
-  → produces:  firmware.elf  (ARM Thumb-2 instructions)
-  → flash to:  STM32 Nucleo board  (ARM Cortex-M4)
+  -> run vanic build --target=arm-none-eabi
+  -> produces:  firmware.elf  (ARM Thumb-2 instructions)
+  -> flash to:  STM32 Nucleo board  (ARM Cortex-M4)
 ```
 
 The LLVM backend already knows how to emit ARM / RISC-V /
-AArch64 instructions — it was designed to be target-independent.
+AArch64 instructions -- it was designed to be target-independent.
 `--target=<triple>` just tells `llc` which instruction set to
 use instead of the host default.
 
@@ -55,7 +55,7 @@ A **target triple** is a string in the form:
 | `x86_64-unknown-linux-musl` | x86-64 | Linux with musl libc |
 
 Triples containing `none`, `eabi`, or ending in `-elf` are
-**bare-metal** — vāṇी automatically treats them differently from
+**bare-metal** -- vāṇी automatically treats them differently from
 Linux cross-targets.
 
 ---
@@ -64,14 +64,14 @@ Linux cross-targets.
 
 A bare-metal target has:
 
-1. **No operating system** — no syscalls, no `printf`, no file
+1. **No operating system** -- no syscalls, no `printf`, no file
    descriptors, no dynamic linker.
-2. **No C standard library** — `malloc`, `free`, `fopen` don't
+2. **No C standard library** -- `malloc`, `free`, `fopen` don't
    exist unless you provide them yourself.
-3. **A linker script** — instead of the OS loader, a
+3. **A linker script** -- instead of the OS loader, a
    hand-written `.ld` file maps code and data to physical
    addresses on the chip.
-4. **An explicit entry point** — instead of the OS finding
+4. **An explicit entry point** -- instead of the OS finding
    `main`, the linker script sets the reset vector to a function
    you name (`Reset_Handler`, `_start`, etc.).
 
@@ -79,7 +79,7 @@ vāṇī has three features that address these directly:
 
 ---
 
-## `--no-std` — strip the C prelude
+## `--no-std` -- strip the C prelude
 
 The C backend normally starts every generated file with:
 
@@ -87,7 +87,7 @@ The C backend normally starts every generated file with:
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-…
+...
 ```
 
 A bare-metal cross-compiler (`arm-none-eabi-gcc`) has no libc.
@@ -112,23 +112,23 @@ vanic build firmware.vani --target=arm-none-eabi -o firmware.elf
 
 ---
 
-## `#[no_mangle]` — use the exact function name
+## `#[no_mangle]` -- use the exact function name
 
 vāṇī mangles every generated function name to avoid collisions:
 
 ```
-fn main()          → intent_main
-fn Reset_Handler() → intent_Reset_Handler
+fn main()          -> intent_main
+fn Reset_Handler() -> intent_Reset_Handler
 ```
 
 A bare-metal linker script expects the **exact** name at the
-reset vector — `Reset_Handler`, `_start`, `HardFault_Handler`.
+reset vector -- `Reset_Handler`, `_start`, `HardFault_Handler`.
 If the symbol is renamed, the linker can't find it.
 
 ```vani
 #[no_mangle]
 fn Reset_Handler() -> i64 {
-  // …
+  // ...
 }
 ```
 
@@ -138,7 +138,7 @@ and the LLVM IR. The linker script can now reference it directly.
 
 ---
 
-## `#[link_section = "..."]` — place code / data at a specific address
+## `#[link_section = "..."]` -- place code / data at a specific address
 
 A typical Cortex-M linker script maps:
 
@@ -155,18 +155,18 @@ function in a specific section:
 ```vani
 #[no_mangle]
 #[link_section = ".text.Reset_Handler"]
-fn Reset_Handler() -> i64 { … }
+fn Reset_Handler() -> i64 { ... }
 
 #[no_mangle]
 #[link_section = ".text.isr"]
-fn SysTick_Handler() -> i64 { … }
+fn SysTick_Handler() -> i64 { ... }
 ```
 
 In C output this emits:
 
 ```c
 __attribute__((section(".text.Reset_Handler")))
-int64_t Reset_Handler(void) { … }
+int64_t Reset_Handler(void) { ... }
 ```
 
 In LLVM IR the `define` line gets `section ".text.Reset_Handler"`.
@@ -185,7 +185,7 @@ SECTIONS {
 ## Narrow MMIO builtins (u8 / u16)
 
 Peripheral registers on a microcontroller are often 8-bit or
-16-bit — GPIO status bytes, UART data registers, ADC result
+16-bit -- GPIO status bytes, UART data registers, ADC result
 halves. Since v0.1.6 all four width variants ship:
 
 | Builtin | Width | Direction |
@@ -210,7 +210,7 @@ not to optimize away the access or reorder it.
 understands the target ABI. Selection priority:
 
 1. `$CROSS_CC` environment variable (always wins).
-2. `<triple>-gcc` with `unknown-` stripped — e.g.
+2. `<triple>-gcc` with `unknown-` stripped -- e.g.
    `arm-none-eabi-gcc`, `riscv32-none-elf-gcc`,
    `aarch64-linux-gnu-gcc`.
 3. If neither is found, the build fails with a clear error.
@@ -240,7 +240,7 @@ QEMU binary lookup priority:
 4. If none found: ELF is written to a temp file, a hint is
    printed, exit 1.
 
-Bare-metal triples cannot run this way — `vanic run` rejects
+Bare-metal triples cannot run this way -- `vanic run` rejects
 them with a clear error and suggests `vanic build` + physical
 flashing.
 
@@ -256,12 +256,12 @@ flashing.
 | Place function in specific ELF section | `#[link_section = ".text.foo"]` |
 | 8-bit MMIO register | `mmio_read_u8(addr)` / `mmio_write_u8(addr, val)` |
 | 16-bit MMIO register | `mmio_read_u16(addr)` / `mmio_write_u16(addr, val)` |
-| Override cross-linker | `CROSS_CC=arm-none-eabi-gcc vanic build …` |
+| Override cross-linker | `CROSS_CC=arm-none-eabi-gcc vanic build ...` |
 | Run cross-Linux ELF on host | `vanic run --target=aarch64-unknown-linux-gnu` (needs QEMU) |
 
 ## Cross-reference
 
-- [Advanced 4a — Embedded primer](04a_embedded_primer.md) — the broader embedded picture (`no_heap`, `bounded_stack`, regions)
-- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md) — worked examples using these features together
-- [Intermediate 9 — FFI](../intermediate/09_ffi.md) — device I/O (UART/SPI/I2C) still needs FFI + C shims
-- [`examples/language/english/bare_metal.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/bare_metal.vani) — runnable bare-metal example
+- [Advanced 4a -- Embedded primer](04a_embedded_primer.md) -- the broader embedded picture (`no_heap`, `bounded_stack`, regions)
+- [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md) -- worked examples using these features together
+- [Intermediate 9 -- FFI](../intermediate/09_ffi.md) -- device I/O (UART/SPI/I2C) still needs FFI + C shims
+- [`examples/language/english/bare_metal.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/bare_metal.vani) -- runnable bare-metal example

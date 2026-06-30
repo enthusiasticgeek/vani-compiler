@@ -1,4 +1,4 @@
-# CLI Reference — `vanic` command reference
+# CLI Reference -- `vanic` command reference
 
 > A one-page reference for every `vanic` subcommand, flag, and
 > environment variable. Bookmark this; you'll come back often.
@@ -46,7 +46,7 @@ vanic run hello.vani --big-o          # print per-fn Big-O before running
 
 ### `vanic build <file.vani>`
 
-AOT-compile to a native binary. Pipeline: emit `.ll` → `llc -filetype=obj` → `.o` → `cc -o <out>`.
+AOT-compile to a native binary. Pipeline: emit `.ll` -> `llc -filetype=obj` -> `.o` -> `cc -o <out>`.
 
 ```bash
 vanic build hello.vani                       # outputs ./hello
@@ -70,7 +70,7 @@ vanic build hello.vani --link-with helper.c -lm
 
 ### `vanic check <file.vani>`
 
-Type-check + SMT-verify a program without producing any output. Fast — only runs the checker pipeline.
+Type-check + SMT-verify a program without producing any output. Fast -- only runs the checker pipeline.
 
 ```bash
 vanic check hello.vani
@@ -113,7 +113,7 @@ vanic fmt --check src/          # CI-style check for entire tree
 
 ### `vanic test <file.vani | directory>`
 
-Run `vanic test` files — each file's `main` is expected to return 0 for pass, non-zero for fail.
+Run `vanic test` files -- each file's `main` is expected to return 0 for pass, non-zero for fail.
 
 ```bash
 vanic test tests/
@@ -138,7 +138,7 @@ Dump the parsed AST (skips the type checker). Useful when you want to see what t
 
 ### `vanic ir <file.vani>`
 
-Dump the typed IR — the representation the backends see after full type-checking. Useful for checking what the backends will lower.
+Dump the typed IR -- the representation the backends see after full type-checking. Useful for checking what the backends will lower.
 
 ---
 
@@ -168,7 +168,7 @@ vanic acyclicity fw.vani --format=csv
 
 ### `vanic deviations <file.vani>`
 
-Extract every `unsafe(reason = "…")` block as a structured deviation record — the audit artifact for ASIL-D / DO-178C / MISRA sign-off.
+Extract every `unsafe(reason = "...")` block as a structured deviation record -- the audit artifact for ASIL-D / DO-178C / MISRA sign-off.
 
 ```bash
 vanic deviations fw.vani
@@ -204,7 +204,7 @@ Report which functions carry which safety attributes (`#[no_heap]`, `#[bounded_s
 
 | Command | Description |
 |---------|-------------|
-| `vanic add <name>[@constraint]` | Fetch package from registry → `vendor/`, update `vani.toml` + `vani.lock` |
+| `vanic add <name>[@constraint]` | Fetch package from registry -> `vendor/`, update `vani.toml` + `vani.lock` |
 | `vanic remove <name>` | Remove package from `vani.toml` |
 | `vanic update` | Re-resolve all deps to latest compatible versions |
 | `vanic vendor` | Download all deps into `vendor/` |

@@ -1,4 +1,4 @@
-# Advanced 7 — Devanagari purity arc
+# Advanced 7 -- Devanagari purity arc
 
 > **Learning goal**: understand the `// vani-lang:` pragma's
 > purity gate, how the lexer enforces per-file dialect choice,
@@ -8,9 +8,9 @@
 maintain vāṇी programs in a Devanagari-script dialect (Sanskrit
 / Hindi / Marathi and their close relatives). You'll learn what
 the pragma does, what the "purity gate" enforces (no mixing of
-dialects within one file), and how Subject–Object–Verb word
+dialects within one file), and how Subject-Object-Verb word
 order affects statement shape. Skip this chapter if you're only
-writing English-keyword vāṇी — nothing in the main tracks
+writing English-keyword vāṇी -- nothing in the main tracks
 depends on it.
 
 ## The pragma + the gate
@@ -52,11 +52,11 @@ write verb-at-end (SOV) forms. The shapes that ship today:
 | `<expr> सिद्धम्;` | `assert <expr>;` |
 | `<expr> प्रमाण;` | `prove <expr>;` |
 | `<name>: <type> = <init> माना;` | `let <name>: <type> = <init>;` |
-| `<cond> यदि { … } अन्यथा { … }` | `if <cond> { … } else { … }` |
-| `<cond> यावत् { … }` | `while <cond> { … }` |
+| `<cond> यदि { ... } अन्यथा { ... }` | `if <cond> { ... } else { ... }` |
+| `<cond> यावत् { ... }` | `while <cond> { ... }` |
 
 `fn` / `struct` / `enum` / top-level decls are keyword-first
-only in v1 — no SOV path for those yet.
+only in v1 -- no SOV path for those yet.
 
 ## What's automatic in a Devanagari-pragma file
 
@@ -67,7 +67,7 @@ These work without you doing anything special:
   `@intent_print_int_dev` in LLVM IR). Phase 1.1.
 - **Error labels** render in the matching script (`त्रुटिः` for
   Sanskrit, `त्रुटि` for Hindi, `चूक` for Marathi, etc.).
-- **Identifiers** can be Devanagari letters — the LLVM
+- **Identifiers** can be Devanagari letters -- the LLVM
   backend mangles non-ASCII codepoints via `_uHHHH` because LLVM
   IR identifier grammar forbids non-ASCII; the C backend uses
   the bytes directly.
@@ -90,7 +90,7 @@ These work without you doing anything special:
 | Perso-Arabic (RTL) | Urdu, Sindhi, Punjabi-Shahmukhi, Persian, Pashto (Phase 12.x) |
 
 **21 dialects across 11 scripts** as of Phase 12.5 (2026-06-07).
-Within Perso-Arabic, two distinct numeral blocks are wired —
+Within Perso-Arabic, two distinct numeral blocks are wired --
 Eastern Arabic-Indic ٠..٩ (Urdu/Sindhi/Shahmukhi) and Persian
 ۰..۹ (Persian/Pashto).
 
@@ -98,7 +98,7 @@ Eastern Arabic-Indic ٠..٩ (Urdu/Sindhi/Shahmukhi) and Persian
 
 A 2026-06-07 audit across all 10 Indic dialects layered
 **natural everyday** spellings alongside the Sanskrit-rooted
-tatsama forms. Both registers compile — pick whichever reads
+tatsama forms. Both registers compile -- pick whichever reads
 more naturally for your file:
 
 | Dialect | True (formal / everyday) | False (formal / everyday) |
@@ -116,7 +116,7 @@ noun) alongside the colloquial `मेल`.
 **Marathi-specific note**: `सही` means "signature" (noun) in
 Marathi and `अशुद्ध` strictly means "impure"; both are
 Hindi-only as bool literals. Marathi's `बदल` is the noun
-"change" — the proper mutable adjective is `बदलणारा`. And
+"change" -- the proper mutable adjective is `बदलणारा`. And
 Marathi conjugates `print` from `लिह्-` (`लिहा` / `लिही` /
 `लिहिया`), not the Hindi `लिख्-` root.
 
@@ -158,9 +158,9 @@ version, but the source reads like Sanskrit.
 per dialect. The Bengali table, for example:
 
 ```
-"expected " → "প্রত্যাশিত "
-"unknown variable" → "অজানা চলক (unknown variable)"
-"type mismatch" → "প্রকার অমিল (type mismatch)"
+"expected " -> "প্রত্যাশিত "
+"unknown variable" -> "অজানা চলক (unknown variable)"
+"type mismatch" -> "প্রকার অমিল (type mismatch)"
 ```
 
 Add to these as users report rough patches. Sanskrit / Hindi /
@@ -178,4 +178,4 @@ on both backends.
 
 ---
 
-**Next**: [§8 — Cross-language translator extension →](08_translator.md)
+**Next**: [Sec.8 -- Cross-language translator extension ->](08_translator.md)

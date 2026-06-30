@@ -1,4 +1,4 @@
-# Intermediate 15 — Math, random numbers, and `clone`
+# Intermediate 15 -- Math, random numbers, and `clone`
 
 > **Learning goal**: use the math, random-number, and `clone`
 > builtins that are available in every vāṇी program without an
@@ -35,7 +35,7 @@ commonly used ones:
 
 | Builtin | Value |
 |---|---|
-| `f64_pi()` | π |
+| `f64_pi()` | pi |
 | `f64_e()` | e (Euler's number) |
 | `f64_inf()` | positive infinity |
 | `f64_nan()` | NaN |
@@ -52,7 +52,7 @@ commonly used ones:
 ### Quick example
 
 ```vani
-intent "Intermediate 15 — math builtins.";
+intent "Intermediate 15 -- math builtins.";
 
 fn main() -> i64 {
   print "sqrt(2):", sqrt(2.0);
@@ -81,7 +81,7 @@ Seed the RNG once with `seed_rng(seed: i64)`, then draw values:
 | `rand_normal(mean: f64, std: f64) -> f64` | Gaussian sample |
 
 ```vani
-intent "Intermediate 15 — RNG.";
+intent "Intermediate 15 -- RNG.";
 
 fn main() -> i64 {
   seed_rng(42);
@@ -100,7 +100,7 @@ fn main() -> i64 {
 ```
 
 Without `seed_rng`, the RNG is seeded to 0 and produces
-deterministic values — useful for tests. Call `seed_rng` with a
+deterministic values -- useful for tests. Call `seed_rng` with a
 time-based or hardware seed for unpredictable output.
 
 ## `clone`
@@ -119,19 +119,19 @@ print "copy len:", len(copy);           // 4
 
 - `clone(x)` copies the heap data; the caller owns the copy.
 - `clone_at(v, i)` clones only the element at index `i` in a
-  `Vec<T>` — useful for extracting an `OwnedStr` field without
+  `Vec<T>` -- useful for extracting an `OwnedStr` field without
   consuming the whole vector.
 - Only heap-allocated types need `clone`; `i64`, `f64`, `bool`
   copy automatically (they're `Copy`).
 
 ## Challenge
 
-Write a Monte Carlo π estimator: draw N pairs of random floats
+Write a Monte Carlo pi estimator: draw N pairs of random floats
 in `[0, 1)`, count how many fall inside the unit circle
 (`x*x + y*y < 1.0`), and print `4 * count / N` as an
-approximation of π. Use `rand_f64()` and verify the estimate
+approximation of pi. Use `rand_f64()` and verify the estimate
 converges as N grows.
 
 ---
 
-**Next**: [Advanced track →](../advanced/01_async.md)
+**Next**: [Advanced track ->](../advanced/01_async.md)

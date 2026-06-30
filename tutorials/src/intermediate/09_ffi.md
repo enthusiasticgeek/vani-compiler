@@ -1,14 +1,14 @@
-# Intermediate 9 — FFI: `extern "C"` + `--link-with`
+# Intermediate 9 -- FFI: `extern "C"` + `--link-with`
 
 > **Learning goal**: call a C-ABI function from vāṇी, declare
 > a foreign function as `pure` so pure callers can use it, and
 > link external code at build time via `--link-with` / `-l<name>`.
 
-> **New to this?** Read [Intermediate 9a — FFI primer](09a_ffi_primer.md) first.
+> **New to this?** Read [Intermediate 9a -- FFI primer](09a_ffi_primer.md) first.
 
 Think of a hardware store that sells pre-made door hinges. Your
 house is written in vāṇी; the hinges were made in a C factory.
-You don't need to understand how the factory works — you just
+You don't need to understand how the factory works -- you just
 need to know the hinge's interface (its type signature) and where
 to get it (the library). `extern "C"` is the vāṇी way of
 describing that interface; `--link-with` tells the compiler where
@@ -17,7 +17,7 @@ the factory's finished goods are stored.
 ## The program
 
 ```vani
-intent "Intermediate 9 worked example — FFI to libc.";
+intent "Intermediate 9 worked example -- FFI to libc.";
 
 // `extern "C" fn` declares a foreign function. The linker
 // resolves it at build time; the compiler treats it as
@@ -27,7 +27,7 @@ extern "C" fn atoi(x: Str) -> i32;
 // `pure extern "C" fn` opts the foreign symbol in as side-
 // effect-free + deterministic, so `pure fn` bodies can call
 // it. The compiler can't verify purity across the FFI
-// boundary — you're asserting it.
+// boundary -- you're asserting it.
 pure extern "C" fn atoll(x: Str) -> i64;
 
 // A pure fn can compose pure externs.
@@ -67,7 +67,7 @@ parse_sum("3", "4") = 7
   compiler treats every `extern "C" fn` as impure (the SMT
   engine can't reason across the FFI boundary). Adding `pure`
   in front asserts that the foreign function is side-effect-
-  free and deterministic — your responsibility to verify.
+  free and deterministic -- your responsibility to verify.
 - **ABI scope in v1**: scalars (`i8..i64`, `u8..u64`, `f32` /
   `f64`, `bool`), `Str` (NUL-terminated `i8*`), and any
   `ref T` / `mut ref T`. **Aggregate-by-value** (struct /
@@ -107,7 +107,7 @@ vanic build foo.vani -o foo -lm -lcurl
 
 > **v0.1.5 update**: native `FileHandle`, `file_open`, `file_read_line`,
 > `file_write`, `file_close`, `file_flush`, `stdin_read_line`,
-> `flush_stdout`, and the `eprint` statement all ship natively — no FFI
+> `flush_stdout`, and the `eprint` statement all ship natively -- no FFI
 > needed for flat files or stdin.
 > See [`examples/language/english/file_io.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/file_io.vani).
 >
@@ -242,4 +242,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§10 — Error handling: `Result<T, E>` + `try` →](10_result_try.md)
+**Next**: [Sec.10 -- Error handling: `Result<T, E>` + `try` ->](10_result_try.md)

@@ -1,4 +1,4 @@
-# Intermediate 13 — `Option<T>` and the option builtins
+# Intermediate 13 -- `Option<T>` and the option builtins
 
 > **Learning goal**: represent "a value that might not exist" with
 > `Option<T>`, use the `option_*` builtin combinators to chain
@@ -6,8 +6,8 @@
 > understand when to prefer the match form vs the combinator form.
 
 Think of `Option<T>` like a gift-wrapped box. When the gift is
-inside you have `Option.Some(value)` — you unwrap the box and use
-it. When the box is empty you have `Option.None` — there is
+inside you have `Option.Some(value)` -- you unwrap the box and use
+it. When the box is empty you have `Option.None` -- there is
 nothing to unwrap, but the box itself is still valid and you have
 to decide what to do (use a default, skip the step, propagate the
 emptiness). The `option_*` builtins are just helpers that save you
@@ -57,7 +57,7 @@ For `f64` payloads, use the `_f64` suffixed variants:
 ## The program
 
 ```vani
-intent "Intermediate 13 — Option<i64> builtins.";
+intent "Intermediate 13 -- Option<i64> builtins.";
 
 fn safe_div(a: i64, b: i64) -> Option<i64> {
   if b == 0 {
@@ -130,7 +130,7 @@ None or Some(99): 99
 100/0 then /5 = -1
 ```
 
-## match vs combinators — when to use which
+## match vs combinators -- when to use which
 
 - **`match`**: when you need to branch on both `Some` and `None`
   and the two branches do structurally different things.
@@ -138,13 +138,13 @@ None or Some(99): 99
   or chain *inside* the option without explicitly writing both
   arms every time. Chains read left-to-right:
   `option_and_then(option_and_then(x, step1), step2)`.
-- **`option_unwrap_or`**: the natural end of a chain — collapse to
+- **`option_unwrap_or`**: the natural end of a chain -- collapse to
   a concrete value.
 
 ## How `Option<T>` relates to `hashmap_get`
 
 `hashmap_get` and `hashmap_insert` both return `Option<T>` (see
-§14). The `option_*` builtins let you inline those result-checks
+Sec.14). The `option_*` builtins let you inline those result-checks
 without a dedicated `unwrap_or` helper function in every file:
 
 ```vani
@@ -156,8 +156,8 @@ let v: i64 = option_unwrap_or(hashmap_get(ref m, k), -1);
 
 Write a `lookup_chain` that looks up a key in one map, uses the
 result as a key to look up a second map, and returns `Option<i64>`
-from the second map — using only `option_and_then`.
+from the second map -- using only `option_and_then`.
 
 ---
 
-**Next**: [§14 — `HashMap<K,V>` and `HashSet<T>` →](14_collections.md)
+**Next**: [Sec.14 -- `HashMap<K,V>` and `HashSet<T>` ->](14_collections.md)

@@ -113,7 +113,7 @@ file normally.
 
 ---
 
-## `vani.lock` — the lockfile
+## `vani.lock` -- the lockfile
 
 After `vanic add` (or any manifest-driven `vanic run`/`build`), a
 `vani.lock` appears next to `vani.toml`:
@@ -160,7 +160,7 @@ itself, and `target/`.
 Publishing is **gated**: you must sign the publisher agreement and be
 approved by the registry operator before `vanic publish` will work.
 
-### Step 1 — Read the Publisher Agreement
+### Step 1 -- Read the Publisher Agreement
 
 ```
 vanic apply-publisher
@@ -175,7 +175,7 @@ Read every section. Key requirements:
 - No illegal content (CSAM, export-controlled code).
 - Every package must include a license declaration.
 
-### Step 2 — Submit your application
+### Step 2 -- Submit your application
 
 ```
 vanic apply-publisher --accept-agreement
@@ -184,7 +184,7 @@ vanic apply-publisher --accept-agreement
 This opens a public GitHub issue in `kosh-index` recording your acceptance.
 You will see a confirmation with the issue URL.
 
-### Step 3 — Wait for operator review
+### Step 3 -- Wait for operator review
 
 The operator (`enthusiasticgeek`) reviews your application and either approves
 or denies it via the GitHub issue. Approval typically takes a few days.
@@ -220,7 +220,7 @@ Output:
   release: https://github.com/enthusiasticgeek/kosh-index/releases/tag/my-library-v1.0.0
   updating registry index...
   index updated.
-publish: my-library v1.0.0 → https://github.com/.../releases/tag/my-library-v1.0.0
+publish: my-library v1.0.0 -> https://github.com/.../releases/tag/my-library-v1.0.0
 ```
 
 `vanic publish`:
@@ -235,7 +235,7 @@ publish: my-library v1.0.0 → https://github.com/.../releases/tag/my-library-v1
 
 The publisher list lives in the registry's
 [`governance.json`](https://enthusiasticgeek.github.io/kosh-index/governance.json)
-— governance can be handed to a committee without any compiler change.
+-- governance can be handed to a committee without any compiler change.
 
 ### What goes into the tarball?
 
@@ -331,20 +331,20 @@ GitHub Contents API.
 
 ```
 my-library/
-  vani.toml           ← manifest (name, version, entry, deps)
-  vani.lock           ← auto-generated; commit to version control
+  vani.toml           <- manifest (name, version, entry, deps)
+  vani.lock           <- auto-generated; commit to version control
   src/
-    lib.vani          ← library entry point (exported fns)
+    lib.vani          <- library entry point (exported fns)
   vendor/
-    hello-kosh/       ← added by vanic add (commit or .gitignore)
+    hello-kosh/       <- added by vanic add (commit or .gitignore)
       vani.toml
       src/
         lib.vani
 ```
 
 Whether to commit `vendor/` is up to you:
-- **Commit it** → fully reproducible builds with no network access.
-- **`.gitignore` it** → smaller repo; teammates run `vanic vendor` after clone.
+- **Commit it** -> fully reproducible builds with no network access.
+- **`.gitignore` it** -> smaller repo; teammates run `vanic vendor` after clone.
 
 ---
 
@@ -363,7 +363,7 @@ Whether to commit `vendor/` is up to you:
 | `vanic apply-publisher --accept-agreement` | Submit a publisher application (GitHub issue) |
 | `vanic publish` | Build + upload tarball + update index (approved publishers only) |
 | `vanic registry-approve <user>` | (Operator) Approve a publisher application |
-| `vanic registry-blacklist <user> --reason=…` | (Operator) Blacklist a publisher |
+| `vanic registry-blacklist <user> --reason=...` | (Operator) Blacklist a publisher |
 
 ---
 
@@ -372,10 +372,10 @@ Whether to commit `vendor/` is up to you:
 - `vani.toml` is the single source of truth for your package's identity and
   dependencies.
 - `vanic add` is the one-command way to pull in a library from the registry.
-- `vani.lock` records exact resolved versions — commit it.
+- `vani.lock` records exact resolved versions -- commit it.
 - `vanic publish` ships your work to the world; the registry gates who can
-  publish via `governance.json` — allowlist, pending list, and blacklist.
-- To become a publisher: `vanic apply-publisher` → read agreement →
-  `vanic apply-publisher --accept-agreement` → wait for operator approval.
+  publish via `governance.json` -- allowlist, pending list, and blacklist.
+- To become a publisher: `vanic apply-publisher` -> read agreement ->
+  `vanic apply-publisher --accept-agreement` -> wait for operator approval.
 
 In the next chapter we look at interfaces and trait-style polymorphism.

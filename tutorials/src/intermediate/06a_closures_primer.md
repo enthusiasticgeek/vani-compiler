@@ -1,6 +1,6 @@
-# Intermediate 6a — Closures and lambda lifting (intuition primer)
+# Intermediate 6a -- Closures and lambda lifting (intuition primer)
 
-> **Learning goal**: build a mental model of "closure" — a
+> **Learning goal**: build a mental model of "closure" -- a
 > function that REMEMBERS values from where it was created.
 > Why this is different from a regular function, and what the
 > compiler does to make it work. Reading order: this is
@@ -28,7 +28,7 @@ say_hi_to_bob();     // prints "hello, bob"
 These two functions came from the same factory (`make_greeter`)
 but **remember different names**. `say_hi_to_alice` knows about
 the string "alice"; `say_hi_to_bob` knows about "bob". Neither
-takes a name as a parameter — the name is *baked into the
+takes a name as a parameter -- the name is *baked into the
 function*.
 
 That's a **closure**: a function that has *closed over* some
@@ -56,7 +56,7 @@ The robot returned by `make_greeter("alice")` has a post-it
 that says `name = "alice"` stuck on it. When called, it reads
 the note to know who to greet.
 
-These post-its are called **captured variables** — values
+These post-its are called **captured variables** -- values
 captured from the surrounding scope at the moment the closure
 was created.
 
@@ -99,16 +99,16 @@ code, pointer to environment).
 
 ```
 The closure (say_hi_to_alice):
-┌────────────────────────────────┐
-│ pointer to the greeter code    │ ← stack/static
-├────────────────────────────────┤
-│ pointer to the environment     │ ← heap
-└──────────────┬─────────────────┘
-               ↓
++--------------------------------+
+| pointer to the greeter code    | <- stack/static
++--------------------------------+
+| pointer to the environment     | <- heap
++--------------+-----------------+
+               v
 The environment (on the heap):
-┌────────────────────────────────┐
-│ name = "alice"                 │
-└────────────────────────────────┘
++--------------------------------+
+| name = "alice"                 |
++--------------------------------+
 ```
 
 Sound familiar? It's the same two-pointer shape as
@@ -124,7 +124,7 @@ to follow the closure's *first* pointer to find the right code.
 This is exactly the same dispatch shape as a function pointer,
 plus the environment pointer that gets passed in implicitly.
 
-## "Lambda lifting" — what the compiler ACTUALLY does
+## "Lambda lifting" -- what the compiler ACTUALLY does
 
 The phrase "lambda lifting" describes the compile-time
 transformation that handles closures. The compiler does this
@@ -162,7 +162,7 @@ fn make_greeter(name: OwnedStr) -> Closure {
 The closure expression becomes a top-level function (the
 "lifted" lambda) plus a small env-struct. The runtime closure
 is a two-pointer bundle. None of this is visible in your
-source — the compiler handles it.
+source -- the compiler handles it.
 
 ## Where closures show up in practice
 
@@ -173,7 +173,7 @@ let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
 let doubled: Vec<i64> = vec_map(xs, |x| x * 2);
 ```
 
-`vec_map` is a higher-order function — it takes a function (or
+`vec_map` is a higher-order function -- it takes a function (or
 closure) and applies it to each element. The closure `|x| x * 2`
 is a tiny anonymous function with no captures.
 
@@ -215,14 +215,14 @@ do its job.
 When a closure references a variable from the surrounding
 scope, the compiler decides HOW to capture it:
 
-- **By value (move)** — for owning types (Vec, OwnedStr, Box).
+- **By value (move)** -- for owning types (Vec, OwnedStr, Box).
   The closure takes ownership; the surrounding scope can no
   longer use the variable.
-- **By copy** — for Copy types (i64, bool, etc.). The closure
+- **By copy** -- for Copy types (i64, bool, etc.). The closure
   gets a copy; the surrounding scope's binding is unchanged.
 
 vāṇी's v1 closures don't currently capture by reference (only
-by value or copy). This is a deliberate restriction — by-ref
+by value or copy). This is a deliberate restriction -- by-ref
 capture would interact in tricky ways with the affine
 ownership rules. It can be added later if real use cases
 surface.
@@ -233,7 +233,7 @@ A common over-use: turning a 3-line function body into a
 closure when a regular function would do.
 
 ```vani
-// Overkill — name it.
+// Overkill -- name it.
 let add: Closure = |a, b| a + b;
 let r = add(3, 5);
 
@@ -272,13 +272,13 @@ syntax + `vec_map` / `vec_fold` worked examples.
 
 ## Cross-reference
 
-- [Intermediate 6 — Closures + iterator combinators](06_closures.md)
-  — syntax + iterator pattern
-- [Beginner 6c — Ownership and move primer](../beginner/06c_ownership_primer.md)
-  — why "capture by value" is the default for owning types
-- [Intermediate 4a — dyn Iface primer](04a_dyn_iface_primer.md)
-  — closures and dyn share the same two-pointer shape; the
+- [Intermediate 6 -- Closures + iterator combinators](06_closures.md)
+  -- syntax + iterator pattern
+- [Beginner 6c -- Ownership and move primer](../beginner/06c_ownership_primer.md)
+  -- why "capture by value" is the default for owning types
+- [Intermediate 4a -- dyn Iface primer](04a_dyn_iface_primer.md)
+  -- closures and dyn share the same two-pointer shape; the
   bookkeeping differs but the dispatch idea is the same
-- [Intermediate 4c — Generics + monomorphization](04c_generics_primer.md)
-  — closures interact with generics: `vec_map<T, R>` takes a
+- [Intermediate 4c -- Generics + monomorphization](04c_generics_primer.md)
+  -- closures interact with generics: `vec_map<T, R>` takes a
   closure `T -> R` and monomorphizes per (T, R) pair

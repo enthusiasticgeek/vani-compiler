@@ -1,4 +1,4 @@
-# Beginner 5b — Print Blocks `print { ... }`
+# Beginner 5b -- Print Blocks `print { ... }`
 
 > **Learning goal**: group multiple print lines under a single `print`
 > keyword so you don't have to repeat `print` on every line.
@@ -36,7 +36,7 @@ print {
 }
 ```
 
-This is *exactly* equivalent to the four separate `print` statements above —
+This is *exactly* equivalent to the four separate `print` statements above --
 same output, same order, same newline after each group. The `print { }` form
 is just tidier when you're printing a block of related data.
 
@@ -72,7 +72,7 @@ test:
 
 ## Works inside loops
 
-Print blocks work anywhere a regular `print` does — including inside `for`
+Print blocks work anywhere a regular `print` does -- including inside `for`
 and `while` loops:
 
 ```vani
@@ -81,7 +81,7 @@ fn main() -> i64 {
     let sq: i64 = i * i;
     print {
       "i  = ", i;
-      "i² = ", sq;
+      "i^2 = ", sq;
       "---";
     }
   }
@@ -93,13 +93,13 @@ Output:
 
 ```
 i  = 0
-i² = 0
+i^2 = 0
 ---
 i  = 1
-i² = 1
+i^2 = 1
 ---
 i  = 2
-i² = 4
+i^2 = 4
 ---
 ```
 
@@ -163,5 +163,5 @@ Expected output:
 
 ---
 
-**Next**: [§5c — Named loop labels →](05c_loop_labels_primer.md)  
-**Or**: [§5 — `while` and `for` loops →](05_loops.md)
+**Next**: [Sec.5c -- Named loop labels ->](05c_loop_labels_primer.md)  
+**Or**: [Sec.5 -- `while` and `for` loops ->](05_loops.md)

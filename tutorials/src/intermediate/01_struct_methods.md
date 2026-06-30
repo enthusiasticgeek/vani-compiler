@@ -1,9 +1,9 @@
-# Intermediate 1 — Structs and methods
+# Intermediate 1 -- Structs and methods
 
 > **Learning goal**: define a `struct`, attach `methods` to it,
 > and pass it around by value with field access.
 
-A `struct` is a named collection of fields — think of a business
+A `struct` is a named collection of fields -- think of a business
 card: it groups `name`, `email`, and `phone` together under one
 label so you can hand the whole card to someone instead of
 passing three separate pieces of paper. `methods` are the
@@ -15,7 +15,7 @@ just structs + methods.
 ## The program
 
 ```vani
-intent "Intermediate 1 worked example — structs and methods.";
+intent "Intermediate 1 worked example -- structs and methods.";
 
 struct Point { x: i64, y: i64 }
 
@@ -65,7 +65,7 @@ translated.y = -1
   no trailing comma in v1.
 - **`methods on Name { ... }`** is the method block syntax.
   Inside, each `fn`'s **first parameter must be explicitly typed
-  as the struct**: `fn foo(self: Point, …)`. There's no `&self`
+  as the struct**: `fn foo(self: Point, ...)`. There's no `&self`
   / `&mut self` shorthand in v1.
 - **Field access uses `.`**: `p.x`, `p.y`. Reading a field by
   value copies the primitive; reading a `Vec<T>` field through
@@ -80,7 +80,7 @@ translated.y = -1
 ## Challenge
 
 Add a `distance_squared(other: Point) -> i64` method that
-returns `(self.x - other.x)² + (self.y - other.y)²`. Call it
+returns `(self.x - other.x)^2 + (self.y - other.y)^2`. Call it
 twice from `main` and verify both results print.
 
 <details>
@@ -98,7 +98,7 @@ methods on Point {
 fn main() -> i64 {
   let a: Point = Point { x: 0, y: 0 };
   let b: Point = Point { x: 3, y: 4 };
-  print "d² =", a.distance_squared(b);
+  print "d^2 =", a.distance_squared(b);
   return 0;
 }
 ```
@@ -107,4 +107,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§2 — Enums with payloads + match arms →](02_enums_payloads.md)
+**Next**: [Sec.2 -- Enums with payloads + match arms ->](02_enums_payloads.md)

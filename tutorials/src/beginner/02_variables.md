@@ -1,13 +1,13 @@
-# Beginner 2 — Variables, types, operators
+# Beginner 2 -- Variables, types, operators
 
 > **Learning goal**: declare typed variables, do arithmetic with
 > integers and floats, and combine booleans.
 
 A variable is a named box. You give the box a label (`a`), say
-what kind of thing it holds (`i64` — a whole number), and put
+what kind of thing it holds (`i64` -- a whole number), and put
 something in it (`7`). Later, whenever you write `a`, the
 program looks up that box and uses what's inside. The *type*
-(`i64`, `f64`, `bool`) is the shape of the box — it determines
+(`i64`, `f64`, `bool`) is the shape of the box -- it determines
 what values fit and what you're allowed to do with them (you
 can't add a whole number to a `true`/`false`, just like you
 can't fit a litre of milk in a coin slot).
@@ -17,7 +17,7 @@ can't fit a litre of milk in a coin slot).
 Save this in `~/lesson2.vani`:
 
 ```vani
-intent "Lesson 2 worked example — variables + types + operators.";
+intent "Lesson 2 worked example -- variables + types + operators.";
 
 fn main() -> i64 {
   let a: i64 = 7;
@@ -70,7 +70,7 @@ either = true
 ## Why it works that way
 
 - **Types are explicit by default**. `let a: i64 = 7` names the
-  type. You'll see inferred `let answer = …` later, but until you
+  type. You'll see inferred `let answer = ...` later, but until you
   trust your guess about what the inferred type is, spelling it
   out is the safe choice.
 - **Integer widths matter**. vāṇी has `i8`, `i16`, `i32`, `i64`
@@ -84,10 +84,10 @@ either = true
   `!` work as you'd expect.
 - **`/` on integers truncates toward zero**; `%` is the
   matching remainder. `7 / 3 == 2` and `7 % 3 == 1`. For float
-  division, both operands must be floats: `7.0 / 3.0 == 2.333…`.
+  division, both operands must be floats: `7.0 / 3.0 == 2.333...`.
 - **`print` accepts multiple comma-separated arguments**. The
   runtime emits them with single spaces in between. There's no
-  format-string syntax — just compose with `,`.
+  format-string syntax -- just compose with `,`.
 
 ## Challenge
 
@@ -106,7 +106,7 @@ print "widened * a =", widened * a;
 ```
 
 vāṇी uses `as` for explicit numeric casts. There's no implicit
-widening — the compiler tells you exactly where the conversion
+widening -- the compiler tells you exactly where the conversion
 must happen, which is harder to write but easier to read.
 
 </details>
@@ -117,15 +117,15 @@ All integer types support the standard bitwise operators:
 
 | Operator | Meaning | Example |
 |---|---|---|
-| `&` | bitwise AND | `12 & 10` → `8` |
-| `\|` | bitwise OR | `12 \| 10` → `14` |
-| `^` | bitwise XOR | `12 ^ 10` → `6` |
-| `~` | bitwise NOT (complement) | `~0` → `-1` |
-| `<<` | left shift | `1 << 3` → `8` |
-| `>>` | right shift | `16 >> 2` → `4` |
+| `&` | bitwise AND | `12 & 10` -> `8` |
+| `\|` | bitwise OR | `12 \| 10` -> `14` |
+| `^` | bitwise XOR | `12 ^ 10` -> `6` |
+| `~` | bitwise NOT (complement) | `~0` -> `-1` |
+| `<<` | left shift | `1 << 3` -> `8` |
+| `>>` | right shift | `16 >> 2` -> `4` |
 
 ```vani
-intent "Lesson 2 — bitwise ops.";
+intent "Lesson 2 -- bitwise ops.";
 
 fn main() -> i64 {
   let a: i64 = 0b1100;    // 12
@@ -148,4 +148,4 @@ advanced cases: `i64_set_bit(n, pos)`, `i64_clear_bit(n, pos)`,
 
 ---
 
-**Next**: [§3 — Functions and the four return aliases →](03_functions.md)
+**Next**: [Sec.3 -- Functions and the four return aliases ->](03_functions.md)

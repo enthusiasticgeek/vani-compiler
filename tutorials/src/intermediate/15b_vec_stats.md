@@ -1,12 +1,12 @@
-# Intermediate 15b — Vec statistics and combinators
+# Intermediate 15b -- Vec statistics and combinators
 
 > **Learning goal**: use the built-in vector statistics and
-> combinators — sorting variants, argmin/argmax, quantiles,
-> running sums, set operations, and statistical aggregates —
+> combinators -- sorting variants, argmin/argmax, quantiles,
+> running sums, set operations, and statistical aggregates --
 > without writing loops by hand.
 
-> **Prerequisites**: [Intermediate 7 — Arrays and Vec<T>](07_vec_arrays.md)
-> and [Intermediate 15 — Math, random numbers, and clone](15_math_rng.md).
+> **Prerequisites**: [Intermediate 7 -- Arrays and Vec<T>](07_vec_arrays.md)
+> and [Intermediate 15 -- Math, random numbers, and clone](15_math_rng.md).
 
 ---
 
@@ -57,7 +57,7 @@ fn main() -> i64 {
   print "argmin index:", mn;           // 1 (value 1)
   print "argmax index:", mx;           // 5 (value 9)
 
-  // k-th smallest (0-indexed, not sorted — uses quickselect)
+  // k-th smallest (0-indexed, not sorted -- uses quickselect)
   let med: i64 = vec_kth_smallest(mut ref xs, 2);
   print "3rd smallest:", med;          // 3
 
@@ -104,8 +104,8 @@ fn main() -> i64 {
 | `vec_max(ref xs)` | `-> i64` | Maximum element |
 | `vec_mean(ref xs)` | `-> i64` | Integer mean (floor division) |
 | `vec_mode(ref xs)` | `-> i64` | Most frequent element |
-| `f64_harmonic_mean(ref xs)` | `Vec<f64> -> f64` | 1 / mean(1/xᵢ) |
-| `f64_geometric_mean(ref xs)` | `Vec<f64> -> f64` | (∏ xᵢ)^(1/n) |
+| `f64_harmonic_mean(ref xs)` | `Vec<f64> -> f64` | 1 / mean(1/xi) |
+| `f64_geometric_mean(ref xs)` | `Vec<f64> -> f64` | (∏ xi)^(1/n) |
 
 ---
 
@@ -132,7 +132,7 @@ fn main() -> i64 {
 
 | Builtin | Output |
 |---------|--------|
-| `vec_running_sum(ref xs)` | Prefix sums: `rs[i] = xs[0] + … + xs[i]` |
+| `vec_running_sum(ref xs)` | Prefix sums: `rs[i] = xs[0] + ... + xs[i]` |
 | `vec_cumulative_max(ref xs)` | `cm[i] = max(xs[0..=i])` |
 | `vec_cumulative_min(ref xs)` | `cn[i] = min(xs[0..=i])` |
 
@@ -164,7 +164,7 @@ fn main() -> i64 {
 | `vec_disjoint(ref a, ref b)` | No element appears in both |
 | `vec_equal_set(ref a, ref b)` | Same elements (order-independent) |
 
-These do linear scans — for large vecs, load into a `HashSet<i64>` first.
+These do linear scans -- for large vecs, load into a `HashSet<i64>` first.
 
 ---
 
@@ -264,4 +264,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§16 — Packages with Kosh →](16_packages.md)
+**Next**: [Sec.16 -- Packages with Kosh ->](16_packages.md)

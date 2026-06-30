@@ -1,16 +1,16 @@
-# Beginner 10 — Modules and `pub`
+# Beginner 10 -- Modules and `pub`
 
 > **Learning goal**: organize code into `module` blocks, mark
 > exposed items with `pub`, reference them with `::`, and bring
 > them into scope with `use`.
 
-> **New to this?** Read [Beginner 9a — Modules and namespaces primer](09a_modules_primer.md) first.
+> **New to this?** Read [Beginner 9a -- Modules and namespaces primer](09a_modules_primer.md) first.
 
 A module is like a filing cabinet drawer labelled by topic
 ("Accounts", "HR", "Legal"). Functions and types live inside
 the relevant drawer. `pub` is the label you stick on a folder
 to say "anyone from outside this drawer is allowed to read
-this." Without `pub` the folder is internal — only code inside
+this." Without `pub` the folder is internal -- only code inside
 the same drawer can access it. `use` is shorthand: instead of
 spelling out the full drawer-path every time
 (`Accounts::invoices::create()`), you pull the folder to your
@@ -22,7 +22,7 @@ desk (`use Accounts::invoices::create;`) so you can just write
 Save this in `~/lesson10.vani`:
 
 ```vani
-intent "Lesson 10 worked example — modules + pub + use.";
+intent "Lesson 10 worked example -- modules + pub + use.";
 
 module math {
   pub fn square(n: i64) -> i64 {
@@ -88,7 +88,7 @@ math::next_square(4) = 25
 - **`use math::square;` imports a single item** into the
   current scope under its bare name. Multi-item form:
   `use math::{square, cube};`. Glob form: `use math::*;` (every
-  direct public child of `math`, non-transitive — sub-modules
+  direct public child of `math`, non-transitive -- sub-modules
   aren't pulled in).
 - **`as` renames**. `use math::square as sq;` brings `square`
   into scope as `sq` only. Useful when two modules expose the
@@ -96,7 +96,7 @@ math::next_square(4) = 25
 - **One file per module isn't required in v1**. Modules can
   live in the same file as `main`. Multi-file projects use
   `vani.toml` + `use "path";` declarations to splice files
-  together — that's Intermediate §8.
+  together -- that's Intermediate Sec.8.
 
 ## Challenge
 
@@ -136,4 +136,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§11 — Challenges →](11_challenges.md)
+**Next**: [Sec.11 -- Challenges ->](11_challenges.md)

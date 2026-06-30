@@ -1,11 +1,11 @@
-# Intermediate 12b — Compile time vs runtime (intuition primer)
+# Intermediate 12b -- Compile time vs runtime (intuition primer)
 
 > **Learning goal**: build a clear mental model of WHICH
 > checks happen WHEN. vāṇी moves a lot of work to compile
 > time that other languages defer to runtime; understanding
 > the split is half the story of writing fast, correct
-> programs. Reading order: read after [Intermediate 12a — SMT
-> primer](12a_smt_primer.md) and [Intermediate 10b — Runtime
+> programs. Reading order: read after [Intermediate 12a -- SMT
+> primer](12a_smt_primer.md) and [Intermediate 10b -- Runtime
 > errors](10b_runtime_errors_primer.md).
 
 This chapter has **no compiler code**. Pure intuition.
@@ -17,7 +17,7 @@ questions:
 
 1. **"Is this even allowed?"** Asked at compile time. The
    compiler reads the source and rejects if the answer is
-   no — there's no compiled artifact at all.
+   no -- there's no compiled artifact at all.
 2. **"Is this true right now, on this input?"** Asked at
    runtime. The check is emitted into the artifact and
    runs every time the program executes that line.
@@ -31,31 +31,31 @@ vāṇी layers its checks. Bottom of the pyramid: pervasive,
 applies to every line. Top of the pyramid: explicit + opt-in.
 
 ```
-              ┌──────────────────────────┐
-              │  Runtime: assert /       │  ← fires abort() on bad input
-              │  prove / requires not    │     at the failing line
-              │  discharged by SMT       │
-              └──────────────────────────┘
-            ┌──────────────────────────────┐
-            │  Runtime: bounds check /     │  ← fires abort() on first
-            │  overflow guard /            │     out-of-bounds access
-            │  div-by-zero guard           │
-            │  (only when SMT can't prove) │
-            └──────────────────────────────┘
-        ┌──────────────────────────────────────┐
-        │  Compile-time: SMT solver discharges │  ← proves
-        │  requires/ensures/invariant clauses  │     contracts statically
-        │  via Z3                              │
-        └──────────────────────────────────────┘
-    ┌──────────────────────────────────────────────┐
-    │  Compile-time: scope-escape analyzer rejects │  ← rejects
-    │  refs that would outlive their source        │     dangle shapes
-    └──────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────┐
-│  Compile-time: type checker + affine ownership      │  ← rejects
-│  + race-free `parallel for` body verifier           │     mistypes,
-│                                                     │     moves, races
-└─────────────────────────────────────────────────────┘
+              +--------------------------+
+              |  Runtime: assert /       |  <- fires abort() on bad input
+              |  prove / requires not    |     at the failing line
+              |  discharged by SMT       |
+              +--------------------------+
+            +------------------------------+
+            |  Runtime: bounds check /     |  <- fires abort() on first
+            |  overflow guard /            |     out-of-bounds access
+            |  div-by-zero guard           |
+            |  (only when SMT can't prove) |
+            +------------------------------+
+        +--------------------------------------+
+        |  Compile-time: SMT solver discharges |  <- proves
+        |  requires/ensures/invariant clauses  |     contracts statically
+        |  via Z3                              |
+        +--------------------------------------+
+    +----------------------------------------------+
+    |  Compile-time: scope-escape analyzer rejects |  <- rejects
+    |  refs that would outlive their source        |     dangle shapes
+    +----------------------------------------------+
++-----------------------------------------------------+
+|  Compile-time: type checker + affine ownership      |  <- rejects
+|  + race-free `parallel for` body verifier           |     mistypes,
+|                                                     |     moves, races
++-----------------------------------------------------+
 ```
 
 Each layer rejects a class of mistakes that the layer above
@@ -68,14 +68,14 @@ fire only when something would otherwise crash at runtime.
 
 Every `let x: i64 = "hello";` rejects. Every `print 5 + true;`
 rejects. The compiler reads each expression's types and
-verifies they line up. Zero runtime cost — the check
+verifies they line up. Zero runtime cost -- the check
 disappears after the build.
 
 ### Affine ownership
 
 `let y = x; x.foo();` rejects: `x` was moved into `y`.
 The compiler tracks each binding's move state through the
-function body. No runtime cost — the rejected program never
+function body. No runtime cost -- the rejected program never
 compiles, so the rejection never runs.
 
 ### Scope-escape analysis
@@ -95,7 +95,7 @@ checker walks every parallel-for body.
 
 `let xs: Vec<&T>` where `&T` doesn't satisfy the element
 type constraint, struct fields with disallowed types,
-function signatures with banned shapes — all caught at
+function signatures with banned shapes -- all caught at
 parse + check time.
 
 ## What's checked at runtime (only when needed)
@@ -145,7 +145,7 @@ the artifact as a guard; the proven case is elided.
 
 **Compile-time wins**:
 - Zero runtime cost (the check isn't there).
-- Failures are caught BEFORE shipping — every user gets
+- Failures are caught BEFORE shipping -- every user gets
   the same correct binary.
 - The compiler proves correctness once; you never have to
   test that particular failure mode.
@@ -163,7 +163,7 @@ the artifact as a guard; the proven case is elided.
   doesn't have to fit one at compile time).
 
 **Runtime costs**:
-- Every check fires per-execution — bounds checks alone
+- Every check fires per-execution -- bounds checks alone
   can be 5-15% overhead on numerical code.
 - Failures crash users, not developers.
 - Hard to enumerate every code path that could fire.
@@ -249,18 +249,18 @@ happen.
 The takeaway: **the same operation may be checked at compile
 time OR runtime, depending on how much the compiler can
 prove.** Writing better contracts moves checks earlier and
-makes the artifact faster — that's the optimization story
+makes the artifact faster -- that's the optimization story
 in vāṇी.
 
 ## Cross-reference
 
-- [Intermediate 12a — SMT primer](12a_smt_primer.md) — the
+- [Intermediate 12a -- SMT primer](12a_smt_primer.md) -- the
   proof machinery that lifts runtime checks to compile time
-- [Intermediate 10b — Runtime errors primer](10b_runtime_errors_primer.md)
-  — what happens when a runtime check DOES fire
-- [Beginner 9 — First contract](../beginner/09_smt_intro.md)
-  — your first `requires` / `prove` / `assert`
-- [Beginner 13a — Big-O primer](../beginner/13a_big_o_primer.md)
-  — the `--big-o` flag is also a compile-time analysis;
+- [Intermediate 10b -- Runtime errors primer](10b_runtime_errors_primer.md)
+  -- what happens when a runtime check DOES fire
+- [Beginner 9 -- First contract](../beginner/09_smt_intro.md)
+  -- your first `requires` / `prove` / `assert`
+- [Beginner 13a -- Big-O primer](../beginner/13a_big_o_primer.md)
+  -- the `--big-o` flag is also a compile-time analysis;
   the annotation is part of the same "prove it statically"
   story

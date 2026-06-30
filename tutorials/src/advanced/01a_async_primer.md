@@ -1,12 +1,12 @@
-# Advanced 1a — Async, await, and Task (intuition primer)
+# Advanced 1a -- Async, await, and Task (intuition primer)
 
 > **Learning goal**: build a mental model of "asynchronous"
-> programming — what `async fn` actually IS, how `await`
+> programming -- what `async fn` actually IS, how `await`
 > works, what a state machine has to do with any of this. The
 > formal chapter ([Advanced 1](01_async.md)) is dense; this
 > chapter sets up the intuition first. Reading order:
-> [02a parallelism primer](02a_parallelism_primer.md) → here
-> → [Advanced 1 async/await](01_async.md).
+> [02a parallelism primer](02a_parallelism_primer.md) -> here
+> -> [Advanced 1 async/await](01_async.md).
 
 This chapter has **no compiler code**. Pure intuition.
 
@@ -14,7 +14,7 @@ This chapter has **no compiler code**. Pure intuition.
 
 Imagine a program that talks to a website. The program sends a
 request, then waits for the response. The wait might be 100ms
-— time during which the CPU has NOTHING TO DO with this
+-- time during which the CPU has NOTHING TO DO with this
 request. It's like ordering coffee and just standing there
 staring at the barista for two minutes.
 
@@ -24,7 +24,7 @@ calls their name; they put down the phone and pick up the
 coffee. They've USED the wait-time for something else.
 
 That's what `async` is about. Instead of having your program
-sit idle during the 100ms wait, it can be doing OTHER work —
+sit idle during the 100ms wait, it can be doing OTHER work --
 serving another request, computing something else, anything
 useful. When the network response arrives, the program
 "comes back" to where it was waiting and resumes.
@@ -32,7 +32,7 @@ useful. When the network response arrives, the program
 The result: ONE OS thread can handle hundreds or thousands of
 "in-flight" requests at once. Memory and CPU usage stay tiny.
 The alternative (one thread per request) needs a megabyte or
-two of stack per request — at 10,000 requests, that's 10-20 GB
+two of stack per request -- at 10,000 requests, that's 10-20 GB
 of RAM just for stacks. Async lets you do the same work in a
 few MB.
 
@@ -49,7 +49,7 @@ progress*.
 
 You can combine them: an async runtime with N threads, each
 juggling many tasks. But the basic concept is
-single-threaded — one juggler, many balls.
+single-threaded -- one juggler, many balls.
 
 ## The juggler analogy
 
@@ -63,14 +63,14 @@ it and throw it back up. ("It's about to come down" =
 "continue the task from where it was waiting".)
 
 When a task hits an `await`, it's like the juggler tossing
-that ball up high — the task is now "in the air", waiting for
+that ball up high -- the task is now "in the air", waiting for
 some external thing. The juggler immediately turns attention
 to the next ball.
 
 ## What `async fn` actually IS
 
 This is the part that surprises CS-experienced readers coming
-from JavaScript / Python — and is the entire point of vāṇी's
+from JavaScript / Python -- and is the entire point of vāṇी's
 async story.
 
 ```vani
@@ -98,7 +98,7 @@ fn __poll_fetch(t: mut ref Task__fetch) -> i64 {
     0 => {
       // Step 0: call io_recv_async
       let r = io_recv_async(t.fd, 64);
-      if r == -2 { return -2; }    // not ready yet — yield
+      if r == -2 { return -2; }    // not ready yet -- yield
       t.n = r;
       t.state_tag = 1;
       // fall through to state 1
@@ -114,7 +114,7 @@ fn __poll_fetch(t: mut ref Task__fetch) -> i64 {
 The struct REMEMBERS where in the function we are AND what
 local variables have been computed. The `poll` function
 advances by one step each time it's called. When a step has
-to wait (the `-2` Pending signal), it returns immediately —
+to wait (the `-2` Pending signal), it returns immediately --
 the juggler can switch to another task.
 
 When the waiting thing becomes ready, the juggler calls
@@ -122,7 +122,7 @@ When the waiting thing becomes ready, the juggler calls
 resume; the saved locals are still there in the struct. It's
 as if the function "continued where it left off".
 
-This is **the compiler-generated state machine** — vāṇी's
+This is **the compiler-generated state machine** -- vāṇी's
 Arc 8 v3.1 work, which other docs reference. The user
 writes the natural `async fn` syntax; the compiler emits all
 this boilerplate.
@@ -166,14 +166,14 @@ between rounds when no task has progress to make.
 fn drive(ep: i64, t: mut ref Task__fetch) -> i64 {
   while true {
     let r: i64 = __poll_fetch(t);
-    if r != -2 { return r; }          // Ready or Error → done
-    let _ = epoll_wait_one(ep, 1000); // Pending → wait for I/O
+    if r != -2 { return r; }          // Ready or Error -> done
+    let _ = epoll_wait_one(ep, 1000); // Pending -> wait for I/O
   }
   return 0;
 }
 ```
 
-This is the "juggler" — the event loop that drives the state
+This is the "juggler" -- the event loop that drives the state
 machine forward. vāṇी doesn't ship a built-in runtime; users
 write small drivers like this. (A runtime built into the
 language is queued; the underlying capability already ships.)
@@ -189,13 +189,13 @@ Examples: web servers, network proxies, streaming pipelines,
 GUI event loops.
 
 DON'T use async when:
-- Your tasks are CPU-bound (no waiting — you'd just be
+- Your tasks are CPU-bound (no waiting -- you'd just be
   juggling without any I/O to wait for). Use `parallel for`
   or `task` instead.
 - You have only a few concurrent operations. The async
   overhead isn't worth the complexity.
 
-## The cost — what async DOES NOT give you for free
+## The cost -- what async DOES NOT give you for free
 
 1. **Latency between events.** A task progresses one step per
    poll. If the driver is slow to call `poll` after the I/O
@@ -214,7 +214,7 @@ DON'T use async when:
    call stack. The "control flow" jumps between states.
 
 4. **Cancellation.** Stopping a task partway through requires
-   careful design — vāṇी's `CancelToken` + A4.4 auto-plumbing
+   careful design -- vāṇी's `CancelToken` + A4.4 auto-plumbing
    handles the common case automatically.
 
 ## A summary you can carry
@@ -222,7 +222,7 @@ DON'T use async when:
 - **Async** = ONE thread juggling many waiting tasks. Switches
   between them whenever one is waiting for I/O.
 - **`async fn`** is rewritten by the compiler into a
-  **state machine** — a struct (remembering progress + locals)
+  **state machine** -- a struct (remembering progress + locals)
   plus a `poll` function (advances one step at a time).
 - **`await`** marks suspend points where the state machine
   yields if the awaited thing isn't ready yet.
@@ -232,20 +232,20 @@ DON'T use async when:
   use `parallel for` or `task` for CPU-bound work.
 
 That's async. The next chapter ([Advanced 1](01_async.md))
-shows the actual code — `async fn` + `await` + the driver
+shows the actual code -- `async fn` + `await` + the driver
 loop, with full state-machine examples.
 
 ## Cross-reference
 
-- [Advanced 2a — Parallelism primer](02a_parallelism_primer.md)
-  — parallelism (many cores) vs asynchrony (one thread,
+- [Advanced 2a -- Parallelism primer](02a_parallelism_primer.md)
+  -- parallelism (many cores) vs asynchrony (one thread,
   many tasks); the comparison
-- [Beginner 6c — Ownership primer](../beginner/06c_ownership_primer.md)
-  — why affine types crossing await points live in the Task
+- [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
+  -- why affine types crossing await points live in the Task
   struct (the state machine takes ownership)
-- [Intermediate 12a — SMT primer](../intermediate/12a_smt_primer.md)
-  — compile-time guarantees apply to async fns too;
+- [Intermediate 12a -- SMT primer](../intermediate/12a_smt_primer.md)
+  -- compile-time guarantees apply to async fns too;
   contracts on `async fn` compose normally
-- [Advanced 1 — Async / await / Task transform](01_async.md)
-  — the formal chapter with full syntax and state-machine
+- [Advanced 1 -- Async / await / Task transform](01_async.md)
+  -- the formal chapter with full syntax and state-machine
   decomposition

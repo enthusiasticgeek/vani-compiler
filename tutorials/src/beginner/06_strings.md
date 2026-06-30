@@ -1,17 +1,17 @@
-# Beginner 6 — Strings (`Str` vs `OwnedStr`)
+# Beginner 6 -- Strings (`Str` vs `OwnedStr`)
 
 > **Learning goal**: declare and compare `Str` literals, get
 > their length, and understand the difference between `Str`
 > (borrowed) and `OwnedStr` (heap-allocated).
 
-> **New to this?** Read [Beginner 6a — Pointers and references primer](06a_pointers_refs_primer.md)
+> **New to this?** Read [Beginner 6a -- Pointers and references primer](06a_pointers_refs_primer.md)
 > for the address/value analogy first.
 
 Think of a `Str` like a sticky note with directions to a book
 on a library shelf: it POINTS at some text that lives elsewhere
 in the program (usually hardcoded in the compiled binary), but
 it doesn't OWN that text. An `OwnedStr` is like buying your
-own copy of the book — the heap memory is yours, you can
+own copy of the book -- the heap memory is yours, you can
 modify it, and when you're done it gets freed. Most programs
 only need to READ string literals (`Str` is enough); you need
 `OwnedStr` when you CONSTRUCT strings at runtime by combining
@@ -22,7 +22,7 @@ or modifying parts.
 Save this in `~/lesson6.vani`:
 
 ```vani
-intent "Lesson 6 worked example — Str borrowed literals.";
+intent "Lesson 6 worked example -- Str borrowed literals.";
 
 fn role(who: Str) -> Str {
   if who == "admin" {
@@ -83,20 +83,20 @@ diff = true
 ## Why it works that way
 
 - **`Str` is borrowed**. It's the type of compile-time string
-  literals (`"hello"`, `"alice"`, …). Under the hood it's a
+  literals (`"hello"`, `"alice"`, ...). Under the hood it's a
   pointer to a NUL-terminated byte buffer in the program's
   `.rodata` section. You can pass `Str` values around freely;
   they copy a pointer, not the bytes.
 - **`OwnedStr` is heap-allocated**. You get it from concatenation
   (`"foo" + bar` returns `OwnedStr`) and from a few stdlib
   helpers. v1 frees it automatically at scope exit (affine
-  ownership). For this lesson we stick to `Str` — owned strings
+  ownership). For this lesson we stick to `Str` -- owned strings
   are a Intermediate-track topic.
 - **`==` / `!=` use byte equality**. `"abc" == "abc"` is true.
-  vāṇी uses `strcmp` under the hood — no surprises.
+  vāṇी uses `strcmp` under the hood -- no surprises.
 - **`len(s)` returns a `u64`**. Note the unsigned width:
   lengths are non-negative by definition, and the SMT verifier
-  uses that to prove invariants in §9.
+  uses that to prove invariants in Sec.9.
 - **No string interpolation in v1**. Compose with `print "x =", x`
   which the runtime spaces out, or build an `OwnedStr` via `+`.
 - **`<`, `<=`, `>`, `>=` on strings are NOT supported in v1**.
@@ -134,7 +134,7 @@ arguments and return the type shown.
 Quick example:
 
 ```vani
-intent "Lesson 6 — string builtins sampler.";
+intent "Lesson 6 -- string builtins sampler.";
 
 fn main() -> i64 {
   let s: Str = "  Hello, World!  ";
@@ -194,10 +194,10 @@ fn is_yes(s: Str) -> bool {
 }
 ```
 
-A cleaner version using `match` will appear in §8.
+A cleaner version using `match` will appear in Sec.8.
 
 </details>
 
 ---
 
-**Next**: [§7 — Arrays and `Vec<T>` basics →](07_vec_arrays.md)
+**Next**: [Sec.7 -- Arrays and `Vec<T>` basics ->](07_vec_arrays.md)

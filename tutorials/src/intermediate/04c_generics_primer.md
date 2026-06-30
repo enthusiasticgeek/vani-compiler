@@ -1,10 +1,10 @@
-# Intermediate 4c — Generics and monomorphization (intuition primer)
+# Intermediate 4c -- Generics and monomorphization (intuition primer)
 
-> **Learning goal**: build a mental model of "generic" — the
+> **Learning goal**: build a mental model of "generic" -- the
 > `<T>` notation you've seen in `Vec<T>` or `fn id<T>(x: T)`.
 > Why this exists, what the compiler does with it, and when
 > to reach for it. Reading order: [04b interfaces primer](04b_interfaces_primer.md)
-> → here → [Intermediate 4 generics+interfaces](04_generics_iface.md)
+> -> here -> [Intermediate 4 generics+interfaces](04_generics_iface.md)
 > for the formal syntax.
 
 This chapter has **no compiler code**. Pure intuition.
@@ -24,7 +24,7 @@ Now you need the same thing for f64. And for u32. And for any
 type that has a `>` operator.
 
 Without generics, you'd write `max_f64`, `max_u32`, `max_i32`,
-... — N copies of the same algorithm, differing only in the
+... -- N copies of the same algorithm, differing only in the
 type name. Tedious, error-prone (a bug fix has to be applied
 N times), and bloats your source.
 
@@ -34,8 +34,8 @@ versions for you.
 
 ## The cookie cutter analogy
 
-A generic function is a **cookie cutter**. The shape is fixed —
-"take two values, return whichever is larger" — but the
+A generic function is a **cookie cutter**. The shape is fixed --
+"take two values, return whichever is larger" -- but the
 material isn't specified. When you press the cutter into
 chocolate-chip dough, you get a chocolate-chip cookie. When you
 press it into oatmeal dough, you get an oatmeal cookie.
@@ -48,10 +48,10 @@ fn max<T>(a: T, b: T) -> T where T is Comparable {
 ```
 
 `<T>` is the cookie cutter's "material slot". `T` is a
-placeholder — when someone calls `max(3, 7)`, the compiler
+placeholder -- when someone calls `max(3, 7)`, the compiler
 sees T = i64. When they call `max(3.14, 2.71)`, T = f64.
 
-The `where T is Comparable` is the bound — only types
+The `where T is Comparable` is the bound -- only types
 supporting `>` (the Comparable interface) can use this cookie
 cutter. Without the bound, the compiler couldn't be sure the
 `if a > b` step would work for arbitrary T.
@@ -79,15 +79,15 @@ uses i64 comparison instructions; the f64 version uses f64
 comparison instructions. No runtime type-dispatch, no
 indirection.
 
-This process is called **monomorphization** — "making
+This process is called **monomorphization** -- "making
 mono-typed versions". The Greek root: *mono* = one, *morph* =
-form. Generic source → multiple mono-typed compiled forms.
+form. Generic source -> multiple mono-typed compiled forms.
 
 ## Why "monomorphization, not type erasure"?
 
 Java (and some other languages) take a different approach
 called **type erasure**: at runtime, generic types are
-"erased" — your `List<Integer>` and `List<String>` are both
+"erased" -- your `List<Integer>` and `List<String>` are both
 just `List` at runtime. They share ONE compiled implementation.
 
 Pros of erasure:
@@ -97,7 +97,7 @@ Pros of erasure:
 
 Cons:
 - Boxing: small types like `int` have to be wrapped in
-  `Integer` objects to fit through the generic — slow.
+  `Integer` objects to fit through the generic -- slow.
 - No type-specific optimization: the one compiled version has
   to work for everything.
 - Lost type info at runtime: you can't ask "is this a
@@ -109,13 +109,13 @@ a bigger compiled binary, but that's usually acceptable.
 
 ## Common generic shapes
 
-### `Vec<T>` — generic container
+### `Vec<T>` -- generic container
 
-You've seen this. `Vec<i64>`, `Vec<OwnedStr>`, `Vec<Bag>` —
+You've seen this. `Vec<i64>`, `Vec<OwnedStr>`, `Vec<Bag>` --
 each is its own type at runtime, with its own specialized
 compiled helpers (push, pop, len, etc.).
 
-### `Option<T>` / `Result<T, E>` — generic enum
+### `Option<T>` / `Result<T, E>` -- generic enum
 
 ```vani
 enum Option<T> {
@@ -127,13 +127,13 @@ enum Option<T> {
 Same shape (Some or None) regardless of T. The compiler
 generates `Option__i64`, `Option__OwnedStr`, etc. per use.
 
-### `id<T>` — generic identity function
+### `id<T>` -- generic identity function
 
 ```vani
 fn id<T>(x: T) -> T { return x; }
 ```
 
-Almost trivial — just returns its argument. But the type can
+Almost trivial -- just returns its argument. But the type can
 be anything. Useful as a building block in functional patterns.
 
 ### Generic with bounds
@@ -147,7 +147,7 @@ fn min<T>(a: T, b: T) -> T where T is Comparable {
 
 The `where T is Comparable` bound tells the compiler what
 operations you'll use inside the body (`<`). Without it, the
-compiler can't verify the body — it'd reject the use of `<` on
+compiler can't verify the body -- it'd reject the use of `<` on
 an unknown type.
 
 ## Multi-parameter generics
@@ -160,7 +160,7 @@ enum Result<T, E> {
 ```
 
 Two placeholders. `Result<i64, OwnedStr>` is different from
-`Result<f64, OwnedStr>` — both monomorphized separately.
+`Result<f64, OwnedStr>` -- both monomorphized separately.
 
 ## When NOT to use generics
 
@@ -176,14 +176,14 @@ Generics shine when:
 Generics misfire when:
 - You're parameterizing over types that have nothing in common
   (use multiple specific functions instead).
-- The bound (`where T is …`) effectively names a single type
+- The bound (`where T is ...`) effectively names a single type
   (just use that type).
 
 ## A summary you can carry
 
 - A **generic** is a cookie cutter with a type-shaped slot.
 - `<T>` declares the type placeholder.
-- `where T is Iface` is a bound — restricts T to types
+- `where T is Iface` is a bound -- restricts T to types
   implementing the interface, and lets the body call the
   interface's methods on T.
 - The compiler does **monomorphization**: generates one
@@ -202,12 +202,12 @@ shows the syntax + a worked example with both pieces together.
 
 ## Cross-reference
 
-- [Intermediate 4 — Generics and interfaces](04_generics_iface.md)
-  — actual syntax + worked example
-- [Intermediate 4a — `dyn Iface` primer](04a_dyn_iface_primer.md)
-  — the dynamic-dispatch alternative to monomorphization
-- [Intermediate 4b — Interfaces and static dispatch](04b_interfaces_primer.md)
-  — the contract side of the generic+interface pairing
-- [Beginner 6a — Pointers and references](../beginner/06a_pointers_refs_primer.md)
-  — generics over reference types (`<T>` and `<ref T>`) compose
+- [Intermediate 4 -- Generics and interfaces](04_generics_iface.md)
+  -- actual syntax + worked example
+- [Intermediate 4a -- `dyn Iface` primer](04a_dyn_iface_primer.md)
+  -- the dynamic-dispatch alternative to monomorphization
+- [Intermediate 4b -- Interfaces and static dispatch](04b_interfaces_primer.md)
+  -- the contract side of the generic+interface pairing
+- [Beginner 6a -- Pointers and references](../beginner/06a_pointers_refs_primer.md)
+  -- generics over reference types (`<T>` and `<ref T>`) compose
   cleanly

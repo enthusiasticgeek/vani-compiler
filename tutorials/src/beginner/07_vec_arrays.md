@@ -1,11 +1,11 @@
-# Beginner 7 — Arrays and `Vec<T>` basics
+# Beginner 7 -- Arrays and `Vec<T>` basics
 
 > **Learning goal**: declare fixed-size arrays and heap-allocated
 > `Vec<T>`s, iterate them with `while` + indexing, and pass them
 > to functions by reference.
 
-> **New to this?** Read [Beginner 7a — Tuples and destructuring primer](07a_tuples_primer.md)
-> and [Beginner 6b — Heap and stack primer](06b_heap_vs_stack_primer.md) first.
+> **New to this?** Read [Beginner 7a -- Tuples and destructuring primer](07a_tuples_primer.md)
+> and [Beginner 6b -- Heap and stack primer](06b_heap_vs_stack_primer.md) first.
 
 An array is like a fixed-size egg carton: you declare it holds
 exactly 4 eggs, and it always holds exactly 4 slots. A `Vec<T>`
@@ -20,7 +20,7 @@ stores the actual items on the heap, which is how it grows.
 Save this in `~/lesson7.vani`:
 
 ```vani
-intent "Lesson 7 worked example — arrays + Vec basics.";
+intent "Lesson 7 worked example -- arrays + Vec basics.";
 
 fn sum_array(xs: ref [i64; 4]) -> i64 {
   let total: i64 = 0;
@@ -91,10 +91,10 @@ count_positive = 2
   `vec(...)` (varargs literal) or `Vec::new()` (empty). Both
   emit the same `intent_vec_int64_t` runtime bundle in C.
 - **Pass by reference with `ref`**. `xs: ref Vec<i64>` is a
-  read-only borrow — the function reads but doesn't free the
+  read-only borrow -- the function reads but doesn't free the
   Vec. If you passed by value, ownership would transfer and
   the caller couldn't use `xs` after the call (affine
-  ownership — Intermediate §3). `ref` is what you want most of
+  ownership -- Intermediate Sec.3). `ref` is what you want most of
   the time.
 - **Index with `[i]`**. Both arrays and `Vec<T>` support `[i]`.
   The compiler proves at compile time that the index is in
@@ -103,17 +103,17 @@ count_positive = 2
   behavior.
 - **`len(arr)` is a compile-time constant**, `len(vec)` is a
   runtime value. Both have type `u64`. Mixing `u64` and `i64`
-  needs an explicit cast — that's the most common beginner
+  needs an explicit cast -- that's the most common beginner
   speed-bump.
 - **Iterating with `while`** is the most explicit form. The
-  Intermediate track shows `for x in xs { … }` once you're
+  Intermediate track shows `for x in xs { ... }` once you're
   comfortable.
 
 ## Challenge
 
 Write a `max_in_vec(xs: ref Vec<i64>) -> i64` that returns the
 maximum element. Assume the Vec is non-empty (you'll add a
-`requires` clause for this in §9).
+`requires` clause for this in Sec.9).
 
 <details>
 <summary>Solution</summary>
@@ -136,4 +136,4 @@ fn max_in_vec(xs: ref Vec<i64>) -> i64 {
 
 ---
 
-**Next**: [§8 — Pattern match on integers + booleans →](08_match.md)
+**Next**: [Sec.8 -- Pattern match on integers + booleans ->](08_match.md)

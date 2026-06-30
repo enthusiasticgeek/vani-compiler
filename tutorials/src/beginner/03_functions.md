@@ -1,4 +1,4 @@
-# Beginner 3 — Functions and the four return aliases
+# Beginner 3 -- Functions and the four return aliases
 
 > **Learning goal**: declare functions, pass parameters by value,
 > return a value, and learn that `return` has three Devanagari
@@ -9,7 +9,7 @@ and call it whenever you need the same task done. `fn add(a, b)`
 is like a recipe card labelled "Add two numbers": the card takes
 two ingredients (`a` and `b`) and produces one result (the sum).
 Calling `add(3, 4)` is like saying "follow the Add recipe with
-ingredients 3 and 4" — it produces 7 and hands it back to whoever
+ingredients 3 and 4" -- it produces 7 and hands it back to whoever
 asked. Functions let you avoid copying the same instructions
 everywhere; change the recipe once and every place that uses it
 automatically gets the update.
@@ -19,7 +19,7 @@ automatically gets the update.
 Save this in `~/lesson3.vani`:
 
 ```vani
-intent "Lesson 3 worked example — functions, parameters, return.";
+intent "Lesson 3 worked example -- functions, parameters, return.";
 
 fn add(a: i64, b: i64) -> i64 {
   return a + b;
@@ -70,14 +70,14 @@ hello from a helper
 
 ## Why it works that way
 
-- **Function syntax**: `fn name(p1: T1, p2: T2) -> R { … }`.
+- **Function syntax**: `fn name(p1: T1, p2: T2) -> R { ... }`.
   Every parameter is typed. The return type comes after `->`.
   Functions returning *nothing* return `i64` and use `0` by
   convention (vāṇी v1 has no `()` unit type at the language
   surface; the `shout` helper above uses this convention).
-- **Pass by value**. Primitives (`i64`, `f64`, `bool`, …) and
+- **Pass by value**. Primitives (`i64`, `f64`, `bool`, ...) and
   `Str` (a borrowed string) copy on call. To pass a `Vec<T>`
-  or struct by reference, use `ref` / `mut ref` — that's a
+  or struct by reference, use `ref` / `mut ref` -- that's a
   later lesson.
 - **`return` has dialect aliases**. The same statement is
   spelled four ways depending on the file's `// vani-lang:`
@@ -95,7 +95,7 @@ hello from a helper
   English-keyword form because that's the canonical surface.
 - **Recursion just works**. There's no special `fn rec` syntax.
   See `bounded_score` in `examples/language/english/basics.vani`
-  for a contract-style example, and §9 for the SMT-friendly form
+  for a contract-style example, and Sec.9 for the SMT-friendly form
   with a `requires` clause.
 
 ## Challenge
@@ -123,4 +123,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§4 — `if` / `else` →](04_if_else.md)
+**Next**: [Sec.4 -- `if` / `else` ->](04_if_else.md)

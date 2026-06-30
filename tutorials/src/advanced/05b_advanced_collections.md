@@ -1,25 +1,25 @@
-# Advanced 5b — Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque
+# Advanced 5b -- Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque
 
 > **Learning goal**: reach for the right built-in data structure
 > for graph problems, prefix matching, ordered sets, disjoint
-> sets, probabilistic membership, and double-ended queues —
+> sets, probabilistic membership, and double-ended queues --
 > all with affine ownership and no manual memory management.
 
-> **Prerequisites**: [Intermediate 14 — HashMap & HashSet](../intermediate/14_collections.md)
-> and [Intermediate 3b — Affine ownership](../intermediate/03b_affine_deeper_primer.md).
+> **Prerequisites**: [Intermediate 14 -- HashMap & HashSet](../intermediate/14_collections.md)
+> and [Intermediate 3b -- Affine ownership](../intermediate/03b_affine_deeper_primer.md).
 
 ---
 
-## Graph — weighted directed graph
+## Graph -- weighted directed graph
 
 ```vani
 intent "Graph example";
 
 fn main() -> i64 {
-  // graph_new(num_nodes) — nodes are i64 indices in [0, n)
+  // graph_new(num_nodes) -- nodes are i64 indices in [0, n)
   let g: Graph = graph_new(5);
 
-  // add_edge(src, dst, weight) — directed, weighted
+  // add_edge(src, dst, weight) -- directed, weighted
   let _ = g.add_edge(0, 1, 4);
   let _ = g.add_edge(0, 2, 1);
   let _ = g.add_edge(2, 1, 2);
@@ -31,10 +31,10 @@ fn main() -> i64 {
   print "bfs reach from 0:", g.bfs_reach(0);    // 5 (all nodes)
   print "dfs reach from 0:", g.dfs_reach(0);    // 5
 
-  // dijkstra returns Option<i64> — None if unreachable
+  // dijkstra returns Option<i64> -- None if unreachable
   let dist: Option<i64> = g.dijkstra(0, 4);
   return match dist {
-    Option.Some(d) then { print "shortest 0→4:", d; 0 },
+    Option.Some(d) then { print "shortest 0->4:", d; 0 },
     Option.None     then { print "unreachable"; 1 },
   };
 }
@@ -52,12 +52,12 @@ fn main() -> i64 {
 | `dfs_reach` | `(ref g, start: i64) -> i64` | DFS reachable node count |
 | `dijkstra` | `(ref g, src, dst: i64) -> Option<i64>` | shortest weighted path; `None` if unreachable |
 
-Method-sugar: `g.add_edge(…)`, `g.bfs_reach(…)`, etc.
+Method-sugar: `g.add_edge(...)`, `g.bfs_reach(...)`, etc.
 Scope-exit Drop frees the three edge arrays.
 
 ---
 
-## BST — binary search tree (AVL self-balancing)
+## BST -- binary search tree (AVL self-balancing)
 
 ```vani
 intent "BST example";
@@ -98,7 +98,7 @@ AVL rotations keep height O(log n) even on sorted insertion. Scope-exit Drop fre
 
 ---
 
-## Trie — prefix tree
+## Trie -- prefix tree
 
 ```vani
 intent "Trie example";
@@ -130,11 +130,11 @@ fn main() -> i64 {
 | `len` | `(ref t) -> i64` | number of words |
 | `node_count` | `(ref t) -> i64` | internal arena node count |
 
-Backing: flat 256 × N child-index arena. Any nonzero byte is a valid input character. Scope-exit Drop frees the two arrays.
+Backing: flat 256 x N child-index arena. Any nonzero byte is a valid input character. Scope-exit Drop frees the two arrays.
 
 ---
 
-## SkipList — probabilistic ordered set
+## SkipList -- probabilistic ordered set
 
 ```vani
 intent "SkipList example";
@@ -145,7 +145,7 @@ fn main() -> i64 {
   let _ = sl.insert(10);
   let _ = sl.insert(5);
   let _ = sl.insert(20);
-  let _ = sl.insert(5);   // duplicate — returns false
+  let _ = sl.insert(5);   // duplicate -- returns false
 
   print "len:", sl.len();           // 3
   print "contains 5:", sl.contains(5);    // true
@@ -171,10 +171,10 @@ MAX_LEVEL = 8; LCG-based random level selection. Scope-exit Drop frees the three
 
 ---
 
-## UnionFind — disjoint-set with path compression
+## UnionFind -- disjoint-set with path compression
 
 ```vani
-intent "UnionFind example — connected components";
+intent "UnionFind example -- connected components";
 
 fn main() -> i64 {
   // 6 nodes; each starts in its own set
@@ -206,7 +206,7 @@ fn main() -> i64 {
 
 ---
 
-## BloomFilter — probabilistic membership
+## BloomFilter -- probabilistic membership
 
 ```vani
 intent "BloomFilter example";
@@ -239,14 +239,14 @@ fn main() -> i64 {
 | `len` | `(ref bf) -> i64` | number of bits in the array |
 | `count` | `(ref bf) -> i64` | number of insertions |
 
-False positives are possible (the filter may say "yes" for something never inserted). False negatives are impossible (a `false` answer is definitive). Choose `bits` ≈ 10× your expected element count for a ~1% false-positive rate with 4 hashes.
+False positives are possible (the filter may say "yes" for something never inserted). False negatives are impossible (a `false` answer is definitive). Choose `bits` ~= 10x your expected element count for a ~1% false-positive rate with 4 hashes.
 
 ---
 
-## Deque — double-ended queue
+## Deque -- double-ended queue
 
 ```vani
-intent "Deque example — sliding window";
+intent "Deque example -- sliding window";
 
 fn main() -> i64 {
   let d: Deque<i64> = deque_new();
@@ -287,9 +287,9 @@ O(1) amortized at both ends. Ring buffer grows by doubling. Scope-exit Drop free
 
 | Need | Collection |
 |------|-----------|
-| Membership with fast lookup — ordered | `Bst<i64>` / `SkipList` |
-| Membership — unordered, fast | `HashSet<T>` |
-| Membership — probabilistic, memory-constrained | `BloomFilter` |
+| Membership with fast lookup -- ordered | `Bst<i64>` / `SkipList` |
+| Membership -- unordered, fast | `HashSet<T>` |
+| Membership -- probabilistic, memory-constrained | `BloomFilter` |
 | Prefix / autocomplete queries | `Trie` |
 | Graph traversal + shortest paths | `Graph` |
 | Connected components / cycle detection | `UnionFind` |
@@ -298,4 +298,4 @@ O(1) amortized at both ends. Ring buffer grows by doubling. Scope-exit Drop free
 
 ---
 
-**Next**: [Advanced 6 — SMT trace debugging](06_smt_debug.md)
+**Next**: [Advanced 6 -- SMT trace debugging](06_smt_debug.md)

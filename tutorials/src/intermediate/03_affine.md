@@ -1,16 +1,16 @@
-﻿# Intermediate 3 â€” Affine ownership: `ref` / `mut ref`
+# Intermediate 3 -- Affine ownership: `ref` / `mut ref`
 
 > **Learning goal**: borrow a struct by `ref` (read-only) or
-> `mut ref` (exclusive read-write), and understand how vÄá¹‡à¥€'s
+> `mut ref` (exclusive read-write), and understand how vāṇी's
 > affine ownership keeps borrows safe at compile time.
 
-> **New to this?** Read [Beginner 6c â€” Ownership and move](../beginner/06c_ownership_primer.md)
-> first for the analogy, then [Intermediate 3b â€” Affine deeper pass](03b_affine_deeper_primer.md)
+> **New to this?** Read [Beginner 6c -- Ownership and move](../beginner/06c_ownership_primer.md)
+> first for the analogy, then [Intermediate 3b -- Affine deeper pass](03b_affine_deeper_primer.md)
 > for the precise mechanics. This chapter is the code surface.
 
 Imagine a hotel room. You have the key (ownership). You can lend
-a friend a read-only pass (`ref` â€” they can look, not move
-furniture). Or you give a cleaner a full key (`mut ref` â€” they can
+a friend a read-only pass (`ref` -- they can look, not move
+furniture). Or you give a cleaner a full key (`mut ref` -- they can
 rearrange), but only one cleaner can hold the key at a time so
 they don't conflict. When done, the key returns to you. That's
 the borrow model.
@@ -18,7 +18,7 @@ the borrow model.
 ## The program
 
 ```vani
-intent "Intermediate 3 worked example â€” affine ownership and borrows.";
+intent "Intermediate 3 worked example -- affine ownership and borrows.";
 
 struct Pair { a: i64, b: i64 }
 
@@ -123,4 +123,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [Â§4 â€” Generics and interfaces â†’](04_generics_iface.md)
+**Next**: [Sec.4 -- Generics and interfaces ->](04_generics_iface.md)

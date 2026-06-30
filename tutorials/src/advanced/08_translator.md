@@ -1,4 +1,4 @@
-# Advanced 8 — Writing a cross-language translator extension
+# Advanced 8 -- Writing a cross-language translator extension
 
 > **Learning goal**: extend `tools/vani_translate.py` to
 > support a new keyword spelling or a new dialect, and
@@ -8,18 +8,18 @@
 vocabulary for a dialect that's close to one already shipped
 (e.g. a regional spelling variant), or developers who want to
 understand how the keyword-substitution pipeline works. The
-translator is a Python script — not part of the Rust compiler —
+translator is a Python script -- not part of the Rust compiler --
 so you don't need to understand compiler internals to use it.
 
 ## What the translator does
 
 `tools/vani_translate.py` does token-level keyword substitution
-between vāṇी's supported dialects: English ↔ Sanskrit ↔ Hindi
-↔ Marathi (the other dialects accept the union of these as a
+between vāṇी's supported dialects: English <-> Sanskrit <-> Hindi
+<-> Marathi (the other dialects accept the union of these as a
 starting point).
 
 ```bash
-# English → Sanskrit (with auspicious header)
+# English -> Sanskrit (with auspicious header)
 python3 tools/vani_translate.py --to sanskrit \
     examples/language/english/basics.vani \
     -o /tmp/basics_sa.vani --add-sri-header
@@ -32,13 +32,13 @@ python3 tools/vani_translate.py --to marathi /tmp/basics_sa.vani \
     -o /tmp/basics_mr.vani
 ```
 
-The `--from` flag is advisory — the translator recognizes
+The `--from` flag is advisory -- the translator recognizes
 keywords regardless of source dialect because the alias table
 is bidirectional.
 
 ## Round-trip parity
 
-The contract: `english → sanskrit → english` produces a file
+The contract: `english -> sanskrit -> english` produces a file
 that compiles to the same AST as the original (modulo
 whitespace and which alias was picked when multiple existed).
 This is the property the test ledger pins.
@@ -46,7 +46,7 @@ This is the property the test ledger pins.
 ## The alias table
 
 The full mapping lives in
-`tools/vani_translate.py::ALIASES` — one Python dict, one
+`tools/vani_translate.py::ALIASES` -- one Python dict, one
 entry per `TokenKind`:
 
 ```python
@@ -99,7 +99,7 @@ Nepali):
    ```
 3. Add the `--add-sri-header` behavior if appropriate (Nepali
    uses Devanagari, so `// श्री।` still fits).
-4. Update `tools/llm_context/bundle.py::emit_aliases` — it
+4. Update `tools/llm_context/bundle.py::emit_aliases` -- it
    reads `ALIASES` directly, so the LLM context bundle picks
    up the new dialect automatically.
 5. Add a test in `tools/test_translate.py` (TBD module) that
@@ -111,7 +111,7 @@ Nepali):
   Translating English `print x;` to Sanskrit yields
   `लिख x;`, not the SOV form `x लिख;`. Use `vanic fmt` for
   canonicalization.
-- **Comments are preserved verbatim** — the user controls their
+- **Comments are preserved verbatim** -- the user controls their
   language.
 - **The four English-only keywords** (`extern`, `type`,
   `intent`, `invariant`) are now translated too (SOV-S7 expanded
@@ -136,4 +136,4 @@ language). Run the round-trip and read the diff out loud.
 
 ---
 
-**Next**: [§9 — Adding a new dialect →](09_new_dialect.md)
+**Next**: [Sec.9 -- Adding a new dialect ->](09_new_dialect.md)

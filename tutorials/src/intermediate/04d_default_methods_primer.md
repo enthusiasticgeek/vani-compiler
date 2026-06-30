@@ -1,9 +1,9 @@
-# Intermediate 4d — Default methods and blanket implementations (primer)
+# Intermediate 4d -- Default methods and blanket implementations (primer)
 
 > **Learning goal**: understand what *default methods* and *blanket
 > implementations* are, why they exist, and when to reach for each.
 > Reading order: [04b interfaces primer](04b_interfaces_primer.md)
-> → [04c generics primer](04c_generics_primer.md) → here →
+> -> [04c generics primer](04c_generics_primer.md) -> here ->
 > [Intermediate 4 generics and interfaces](04_generics_iface.md)
 > (the code surface).
 
@@ -13,12 +13,12 @@ one-page API.
 ## Default methods: the "built-in recipe"
 
 Imagine a `Describable` interface that every type in your program
-needs. For most types, the description is the same boilerplate —
+needs. For most types, the description is the same boilerplate --
 "I am something." Only a few unusual types need a custom
 description.
 
 Without default methods, you'd have to copy-paste the same body
-into every `implement Describable for Type` block — tedious and
+into every `implement Describable for Type` block -- tedious and
 error-prone.
 
 **Default methods** let the interface itself supply the body.
@@ -31,7 +31,7 @@ write their own value. The form is valid either way.
 
 ```vani
 interface Describable {
-  fn name(self: Self) -> Str;            // required — no default
+  fn name(self: Self) -> Str;            // required -- no default
 
   fn describe(self: Self) -> Str {       // default body
     return "I am something.";
@@ -48,7 +48,7 @@ struct Cat {}
 
 implement Describable for Dog {
   fn name(self: Dog) -> Str { return self.breed; }
-  // describe() NOT provided → inherits default: "I am something."
+  // describe() NOT provided -> inherits default: "I am something."
 }
 
 implement Describable for Cat {
@@ -62,7 +62,7 @@ implement Describable for Cat {
 You'll notice `self: Self` in the interface signature above.
 `Self` is a placeholder for "whatever concrete type is implementing
 this interface." When `Dog` implements `Describable`, the compiler
-substitutes `Self` → `Dog` in the method signature.
+substitutes `Self` -> `Dog` in the method signature.
 
 This lets you write interface signatures that are generic without
 declaring a type parameter. `fn name(self: Self) -> Str` becomes
@@ -77,7 +77,7 @@ simultaneously.
 
 The canonical example: a `Wrapper<T>` that forwards all method
 calls to the inner `T`. If `T` can already print itself, then
-`Wrapper<T>` should be able to print itself too — by delegating:
+`Wrapper<T>` should be able to print itself too -- by delegating:
 
 ```vani
 interface Printable {
@@ -100,7 +100,7 @@ With this single blanket impl:
 
 Without the blanket impl you'd need a separate
 `implement Printable for Wrapper<Dog>`,
-`implement Printable for Wrapper<Cat>`, … one per concrete type.
+`implement Printable for Wrapper<Cat>`, ... one per concrete type.
 
 ## Blanket impl vs concrete impl
 
@@ -117,13 +117,13 @@ reports ambiguity and rejects. Choose one path per concrete type.
 
 ## When to use each
 
-**Default methods** — reach for these when:
+**Default methods** -- reach for these when:
 - Most implementors share the same body (saves boilerplate).
 - You want to add a new method to an existing interface without
   breaking every existing `implement` block.
 - The interface provides a sensible generic "fallback" behavior.
 
-**Blanket implementations** — reach for these when:
+**Blanket implementations** -- reach for these when:
 - You have a generic container/adapter type that should
   automatically inherit capabilities from its inner type.
 - You want to derive interface X from interface Y automatically
@@ -135,9 +135,9 @@ reports ambiguity and rejects. Choose one path per concrete type.
 
 ```vani
 interface MyIface {
-  fn required_method(self: Self) -> i64;        // no body → must implement
+  fn required_method(self: Self) -> i64;        // no body -> must implement
 
-  fn optional_method(self: Self) -> Str {        // has body → inheritable
+  fn optional_method(self: Self) -> Str {        // has body -> inheritable
     return "default";
   }
 }
@@ -155,9 +155,9 @@ implement<T> TargetIface for Container<T> where T is SourceBound {
 
 ## Cross-reference
 
-- [Intermediate 4b — Interfaces primer](04b_interfaces_primer.md)
-  — what interfaces are and how `implement` blocks work
-- [Intermediate 4c — Generics primer](04c_generics_primer.md)
-  — type parameters, `where` bounds, and monomorphization
-- [Intermediate 4 — Generics and interfaces](04_generics_iface.md)
-  — worked code examples including default methods and blanket impls
+- [Intermediate 4b -- Interfaces primer](04b_interfaces_primer.md)
+  -- what interfaces are and how `implement` blocks work
+- [Intermediate 4c -- Generics primer](04c_generics_primer.md)
+  -- type parameters, `where` bounds, and monomorphization
+- [Intermediate 4 -- Generics and interfaces](04_generics_iface.md)
+  -- worked code examples including default methods and blanket impls

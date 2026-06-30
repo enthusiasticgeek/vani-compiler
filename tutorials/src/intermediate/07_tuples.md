@@ -1,12 +1,12 @@
-# Intermediate 7 — Tuples and tuple destructure
+# Intermediate 7 -- Tuples and tuple destructure
 
 > **Learning goal**: return multiple values from a function via
 > a tuple, read fields with `.0` / `.1` / `.N`, and unpack with
 > `let (a, b, c) = expr;`.
 
-> **New to this?** Read [Beginner 7a — Tuples and destructuring primer](../beginner/07a_tuples_primer.md) first.
+> **New to this?** Read [Beginner 7a -- Tuples and destructuring primer](../beginner/07a_tuples_primer.md) first.
 
-A tuple is an anonymous bundle — like a shoebox where you throw
+A tuple is an anonymous bundle -- like a shoebox where you throw
 in a name, an age, and a score without bothering to name the
 box itself. When a function needs to hand back two or three
 pieces of information at once, a tuple is the quick alternative
@@ -18,7 +18,7 @@ you can unpack the whole bundle in one line:
 ## The program
 
 ```vani
-intent "Intermediate 7 worked example — tuples and tuple destructure.";
+intent "Intermediate 7 worked example -- tuples and tuple destructure.";
 
 fn divmod(a: i64, b: i64) -> (i64, i64) {
   return (a / b, a % b);
@@ -58,12 +58,12 @@ a = 10 b = 20 c = 30
 
 ## Why it works that way
 
-- **Tuple type**: `(T1, T2, T3, …)`. Heterogeneous elements;
-  fixed arity is part of the type. There's no `Tuple<…>`
-  generic wrapper — the parens-list is the type.
-- **Tuple value**: `(e1, e2, e3, …)`. The element types are
+- **Tuple type**: `(T1, T2, T3, ...)`. Heterogeneous elements;
+  fixed arity is part of the type. There's no `Tuple<...>`
+  generic wrapper -- the parens-list is the type.
+- **Tuple value**: `(e1, e2, e3, ...)`. The element types are
   the types of each expression.
-- **Field access**: `.0`, `.1`, `.2`, … — zero-indexed,
+- **Field access**: `.0`, `.1`, `.2`, ... -- zero-indexed,
   positional. Out-of-range access (`.3` on a 2-tuple) is a
   type error.
 - **Destructure** with `let (a, b, c) = expr;` binds each
@@ -120,4 +120,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§8 — Multi-file projects + `vani.toml` →](08_manifest.md)
+**Next**: [Sec.8 -- Multi-file projects + `vani.toml` ->](08_manifest.md)

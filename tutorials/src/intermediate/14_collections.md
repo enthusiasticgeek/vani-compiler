@@ -1,6 +1,6 @@
-# Intermediate 14 — `HashMap<K,V>` and `HashSet<T>`
+# Intermediate 14 -- `HashMap<K,V>` and `HashSet<T>`
 
-> **Learning goal**: store and retrieve key→value pairs with
+> **Learning goal**: store and retrieve key->value pairs with
 > `HashMap<K,V>`, use `HashSet<T>` for membership tests, and
 > understand the `mut ref` discipline that both collections
 > require.
@@ -10,11 +10,11 @@ and holds a value (your gym bag). `HashMap<K,V>` is that locker
 room: `hashmap_get` is "open locker N and hand me what's inside",
 `hashmap_insert` is "put this bag in locker N", and
 `hashmap_contains_key` is "is locker N occupied?" All of these
-return immediately — no need to walk the whole room.
+return immediately -- no need to walk the whole room.
 `HashSet<T>` is the same idea but the locker holds nothing; all
 you care about is WHETHER a locker number exists in the set.
 
-## `HashMap<K,V>` — key/value map
+## `HashMap<K,V>` -- key/value map
 
 ### Create + insert
 
@@ -43,7 +43,7 @@ resized). Forgetting `mut` is a compile error.
 ### Worked example
 
 ```vani
-intent "Intermediate 14 — HashMap<i64, i64> basics.";
+intent "Intermediate 14 -- HashMap<i64, i64> basics.";
 
 fn main() -> i64 {
   let scores: HashMap<i64, i64> = hashmap_new();
@@ -100,9 +100,9 @@ map len: 2
 | `(i64, i64)` | tuple keys; see `hashmap_tup.vani` |
 | `Vec<i64>` | vector keys; deep-equal + hash |
 
-## `HashSet<T>` — membership set
+## `HashSet<T>` -- membership set
 
-A `HashSet<T>` is a map with no value — you only care whether an
+A `HashSet<T>` is a map with no value -- you only care whether an
 element is in the set.
 
 ### API
@@ -119,7 +119,7 @@ element is in the set.
 ### Worked example
 
 ```vani
-intent "Intermediate 14 — HashSet<i64> deduplication.";
+intent "Intermediate 14 -- HashSet<i64> deduplication.";
 
 fn main() -> i64 {
   let seen: HashSet<i64> = hashset_new();
@@ -214,4 +214,4 @@ an O(n) solution.
 
 ---
 
-**Next**: [§15 — Compiler internals (advanced track preview) →](../advanced/10_internals.md)
+**Next**: [Sec.15 -- Compiler internals (advanced track preview) ->](../advanced/10_internals.md)

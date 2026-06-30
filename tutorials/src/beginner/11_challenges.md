@@ -1,7 +1,7 @@
-# Beginner 11 — Challenges
+# Beginner 11 -- Challenges
 
 > **Learning goal**: stretch yourself with three small projects
-> that combine everything from §1–§10. Each has a worked
+> that combine everything from Sec.1-Sec.10. Each has a worked
 > solution at the bottom of its section.
 
 These are meant to be done from a blank file. Read the prompt,
@@ -10,7 +10,7 @@ to do at least one without peeking.
 
 ---
 
-## A — FizzBuzz
+## A -- FizzBuzz
 
 Write a program that prints the numbers 1 through 15, but:
 
@@ -56,7 +56,7 @@ Expected output:
 4 number
 5 Buzz
 6 Fizz
-…
+...
 15 FizzBuzz
 ```
 
@@ -64,18 +64,18 @@ Expected output:
 
 ---
 
-## B — Vector statistics
+## B -- Vector statistics
 
 Given `let xs: Vec<i64> = vec(4, 9, 1, 7, 3, 8, 2);` write three
 free-standing helper functions:
 
-- `total_of(xs: ref Vec<i64>) -> i64` — the sum.
-- `find_max(xs: ref Vec<i64>) -> i64` — the largest element.
-- `find_min(xs: ref Vec<i64>) -> i64` — the smallest element.
+- `total_of(xs: ref Vec<i64>) -> i64` -- the sum.
+- `find_max(xs: ref Vec<i64>) -> i64` -- the largest element.
+- `find_min(xs: ref Vec<i64>) -> i64` -- the smallest element.
 
-…and print each result. Why these names? `vec_sum` is a
+...and print each result. Why these names? `vec_sum` is a
 built-in name in vāṇी's standard prelude, and `min` / `max`
-are stdlib generic free functions — naming yours `vec_min` /
+are stdlib generic free functions -- naming yours `vec_min` /
 `vec_max` would shadow useful primitives in larger programs.
 Picking distinct verb-style names sidesteps the collision and
 reads better when you import them with `use`.
@@ -84,7 +84,7 @@ reads better when you import them with `use`.
 <summary>Solution</summary>
 
 ```vani
-intent "Vector statistics — sum, max, min.";
+intent "Vector statistics -- sum, max, min.";
 
 fn total_of(xs: ref Vec<i64>) -> i64 {
   let total: i64 = 0;
@@ -129,9 +129,9 @@ fn main() -> i64 {
 
 ---
 
-## C — Modular grading rubric
+## C -- Modular grading rubric
 
-Reorganize the `grade(score: i64) -> Str` function from §4
+Reorganize the `grade(score: i64) -> Str` function from Sec.4
 into a `grading` module with two public functions:
 
 - `pass_threshold() -> i64` returning `70`.
@@ -173,4 +173,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§12 — Devanagari surface — optional intro →](12_devanagari.md)
+**Next**: [Sec.12 -- Devanagari surface -- optional intro ->](12_devanagari.md)

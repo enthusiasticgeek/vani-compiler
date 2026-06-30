@@ -1,4 +1,4 @@
-# Advanced 4c — Function attributes reference
+# Advanced 4c -- Function attributes reference
 
 > A one-page reference for every `#[attribute]` vāṇी supports
 > on `fn` declarations. Attributes are the primary way to
@@ -92,7 +92,7 @@ fn pid_controller(err: f64, integral: f64) -> f64 {
 Mark a function as an interrupt service routine (ISR). The
 compiler emits the interrupt-specific calling convention
 (callee-saves all registers; no return value coercion on
-ARM/RISC-V). Implies `#[no_heap]` — ISRs must not allocate.
+ARM/RISC-V). Implies `#[no_heap]` -- ISRs must not allocate.
 
 ```vani
 #[interrupt]
@@ -189,7 +189,7 @@ Attributes can be stacked. A typical bare-metal ISR:
 #[no_heap]
 #[bounded_stack(256)]
 fn HardFault_Handler() -> i64 {
-  // Hardware fault handler — no heap, bounded stack, no mangling,
+  // Hardware fault handler -- no heap, bounded stack, no mangling,
   // placed in the .text.isr section.
   return 0;
 }
@@ -206,7 +206,7 @@ named in the diagnostic.
 | Attribute | What it enforces | Runtime cost |
 |-----------|-----------------|--------------|
 | `#[no_heap]` | Transitive malloc-free | None (compile-time) |
-| `#[bounded_stack(N)]` | Stack budget ≤ N bytes | None (compile-time estimate) |
+| `#[bounded_stack(N)]` | Stack budget <= N bytes | None (compile-time estimate) |
 | `#[recursion_bound(N)]` | Max recursion depth | 1 counter increment per call |
 | `#[deterministic_timing]` | No dynamic-dispatch / unbounded loops | None (compile-time) |
 | `#[interrupt]` | ISR calling convention | Register save/restore at entry/exit |
@@ -218,7 +218,7 @@ named in the diagnostic.
 
 ## Cross-reference
 
-- [Advanced 4a — Embedded primer](04a_embedded_primer.md) — the big picture of embedded constraints
-- [Advanced 4b — Cross-compilation primer](04b_cross_compile_primer.md) — `--target`, `--no-std`, bare-metal workflow
-- [Advanced 4 — Embedded targets + `unsafe`](04_embedded.md) — worked examples with `#[no_heap]` + `#[bounded_stack]`
-- [CLI Reference](../beginner/00_cli_reference.md) — `vanic stack-depth`, `vanic acyclicity`, `vanic safety-attrs`
+- [Advanced 4a -- Embedded primer](04a_embedded_primer.md) -- the big picture of embedded constraints
+- [Advanced 4b -- Cross-compilation primer](04b_cross_compile_primer.md) -- `--target`, `--no-std`, bare-metal workflow
+- [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md) -- worked examples with `#[no_heap]` + `#[bounded_stack]`
+- [CLI Reference](../beginner/00_cli_reference.md) -- `vanic stack-depth`, `vanic acyclicity`, `vanic safety-attrs`

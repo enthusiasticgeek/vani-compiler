@@ -1,8 +1,8 @@
-# Beginner 7a — Tuples and destructuring (intuition primer)
+# Beginner 7a -- Tuples and destructuring (intuition primer)
 
-> **Learning goal**: build a mental model of "tuple" — the
+> **Learning goal**: build a mental model of "tuple" -- the
 > simplest way to group a few values without inventing a
-> struct — and "destructuring" — pulling the pieces back out
+> struct -- and "destructuring" -- pulling the pieces back out
 > at use sites. Reading order: this is short + foundational;
 > read it any time after [Beginner 7 Vec + arrays](07_vec_arrays.md).
 
@@ -50,13 +50,13 @@ fn divmod(a: i64, b: i64) -> (i64, i64) {
 }
 
 fn main() -> i64 {
-  let (q, r) = divmod(17, 5);   // ← destructure the tuple
+  let (q, r) = divmod(17, 5);   // <- destructure the tuple
   print "q =", q, "r =", r;
   return 0;
 }
 ```
 
-The return type is `(i64, i64)` — an anonymous pair. No name
+The return type is `(i64, i64)` -- an anonymous pair. No name
 needed; the type is its shape. The call site uses
 **destructuring** to pull the two pieces into individual
 variables in one step.
@@ -90,18 +90,18 @@ The deciding question: **will more than one piece of code use
 this shape, and is the meaning of each component
 self-evident?**
 
-If yes → struct. Naming the type AND the fields adds
+If yes -> struct. Naming the type AND the fields adds
 documentation. `struct Point { x: i64, y: i64 }` reads better
 than `(i64, i64)` because future-you knows which slot is x.
 
 If no (one-off return, the meaning is obvious from context)
-→ tuple. `(quotient, remainder)` is clear enough.
+-> tuple. `(quotient, remainder)` is clear enough.
 
 A practical rule of thumb: if the tuple has more than 3
 components OR if any component has a non-obvious meaning,
 upgrade to a struct.
 
-## Destructuring — pulling the pieces out
+## Destructuring -- pulling the pieces out
 
 You've seen `let (q, r) = divmod(17, 5);`. This is
 **destructuring binding**: declare multiple variables in one
@@ -138,7 +138,7 @@ The match arms each destructure differently. Wildcards `_` say
 "don't bind this slot." The last arm `(x, y)` catches
 everything else and binds the components.
 
-### Indexed access — `.0` / `.1` / `.2`
+### Indexed access -- `.0` / `.1` / `.2`
 
 You can also access individual slots without destructuring:
 
@@ -163,8 +163,8 @@ Tuples follow the same ownership rules as any other type:
 
 ```vani
 let pair: (i64, OwnedStr) = (42, "hi" + "!");
-let answer: i64 = pair.0;      // copy — pair.0 is i64
-let msg: OwnedStr = pair.1;    // move — pair.1 is OwnedStr,
+let answer: i64 = pair.0;      // copy -- pair.0 is i64
+let msg: OwnedStr = pair.1;    // move -- pair.1 is OwnedStr,
                                 // now pair.1 is moved
 ```
 
@@ -183,7 +183,7 @@ After the move, `pair.0` is still readable; `pair.1` is not.
   uses a tuple for the state. `fold((0, 0), |(sum, count),
   x| (sum + x, count + 1))`.
 
-## Variations — tuples aren't just `(i64, i64)`
+## Variations -- tuples aren't just `(i64, i64)`
 
 The shape `(T1, T2, T3, ...)` works for ANY types, not just
 primitives. A few non-trivial examples to fix the mental
@@ -239,7 +239,7 @@ fn make_pair() -> (i64, Box<BigData>) {
 
 The i64 lives in the tuple directly (8 bytes). The
 `Box<BigData>` is also in the tuple but is just an 8-byte
-pointer — the 4 KB lives separately on the heap. The whole
+pointer -- the 4 KB lives separately on the heap. The whole
 tuple's stack footprint is 16 bytes; the actual data is
 out-of-band.
 
@@ -269,7 +269,7 @@ struct Rectangle {
 You can use tuples inside structs when you want a quick
 multi-field group without inventing a sub-struct. Compare to
 naming each: `top_left_x`, `top_left_y`, `bottom_right_x`,
-`bottom_right_y` — verbose.
+`bottom_right_y` -- verbose.
 
 ### Tuple inside a Vec
 
@@ -281,9 +281,9 @@ for pt in ref coords {
 }
 ```
 
-A Vec of pairs — common pattern for storing many (key, value)
+A Vec of pairs -- common pattern for storing many (key, value)
 or (timestamp, sample) pairs. Each tuple is its own heap-free
-two-i64 unit; the Vec's heap buffer holds N×16 bytes
+two-i64 unit; the Vec's heap buffer holds Nx16 bytes
 contiguously.
 
 ### Mixed types in the same tuple
@@ -331,10 +331,10 @@ covers the actual syntax + a few worked examples.
 
 ## Cross-reference
 
-- [Intermediate 7 — Tuples and tuple destructure](../intermediate/07_tuples.md)
-  — syntax + worked examples
-- [Beginner 8a — Pattern matching primer](08a_pattern_match_primer.md)
-  — destructuring extends naturally to match patterns
-- [Beginner 6c — Ownership primer](06c_ownership_primer.md)
-  — tuples follow the same move-vs-copy rules as other
+- [Intermediate 7 -- Tuples and tuple destructure](../intermediate/07_tuples.md)
+  -- syntax + worked examples
+- [Beginner 8a -- Pattern matching primer](08a_pattern_match_primer.md)
+  -- destructuring extends naturally to match patterns
+- [Beginner 6c -- Ownership primer](06c_ownership_primer.md)
+  -- tuples follow the same move-vs-copy rules as other
   types; partial moves apply field-by-field

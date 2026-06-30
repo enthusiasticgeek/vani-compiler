@@ -1,15 +1,15 @@
-# Intermediate 6 — Closures and iterator combinators
+# Intermediate 6 -- Closures and iterator combinators
 
 > **Learning goal**: bind anonymous functions to `fn`-pointer
 > values, pass them to higher-order helpers, and build your
 > own `fold` over a `Vec<i64>`.
 
-> **New to this?** Read [Intermediate 6a — Closures primer](06a_closures_primer.md)
-> and [Intermediate 6b — Iterators primer](06b_iterators_primer.md) first.
+> **New to this?** Read [Intermediate 6a -- Closures primer](06a_closures_primer.md)
+> and [Intermediate 6b -- Iterators primer](06b_iterators_primer.md) first.
 
 Imagine handing a recipe card to a chef: the card IS the
 instruction (a function), not a named dish on the menu.
-Higher-order functions work the same way — instead of calling
+Higher-order functions work the same way -- instead of calling
 a specific named function, you pass one in as a parameter,
 and the caller decides at runtime what "the thing to do" is.
 This lets you write `map`, `filter`, and `fold` once and reuse
@@ -18,7 +18,7 @@ them for any operation the caller supplies.
 ## The program
 
 ```vani
-intent "Intermediate 6 worked example — anonymous fns + higher-order helpers.";
+intent "Intermediate 6 worked example -- anonymous fns + higher-order helpers.";
 
 fn apply(f: fn(i64) -> i64, x: i64) -> i64 {
   return f(x);
@@ -67,10 +67,10 @@ max = 5
 
 ## Why it works that way
 
-- **`fn(p: T, …) -> R { body }`** in *value position* is an
+- **`fn(p: T, ...) -> R { body }`** in *value position* is an
   anonymous function literal. The compiler's lambda-lift pass
   hoists each one into a generated top-level
-  `__anon_fn_<N>(p: T, …) -> R` and replaces the expression
+  `__anon_fn_<N>(p: T, ...) -> R` and replaces the expression
   with a function pointer.
 - **Function-pointer types**: `fn(i64) -> i64`,
   `fn(i64, i64) -> i64`, etc. These are first-class values you
@@ -89,10 +89,10 @@ max = 5
 | Rust | vāṇी v1 |
 |---|---|
 | `|x| x + x` | `fn(x: i64) -> i64 { return x + x; }` |
-| Closure with capture (`move \|x\|`) | Not yet — workaround: pass captures as explicit params |
+| Closure with capture (`move \|x\|`) | Not yet -- workaround: pass captures as explicit params |
 | `iter().map(f).collect()` chains | Hand-rolled `fold` / loops (this lesson) |
 
-The combinator-style chain isn't in the v1 stdlib yet — but the
+The combinator-style chain isn't in the v1 stdlib yet -- but the
 underlying mechanism (anon fns + higher-order helpers) is, and
 you can build your own `map_into` / `filter_into` / `fold` on
 top of it.
@@ -117,7 +117,7 @@ a function literal, and they return a new `Vec<i64>` (or a scalar).
 | `vec_product(v)` | `ref Vec<i64> -> i64` | product of all elements |
 
 ```vani
-intent "Intermediate 6 — built-in vec combinators.";
+intent "Intermediate 6 -- built-in vec combinators.";
 
 fn main() -> i64 {
   let nums: Vec<i64> = vec(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
@@ -155,4 +155,4 @@ then `fold` it to get the sum-of-squares.
 
 ---
 
-**Next**: [§7 — Tuples and tuple destructure →](07_tuples.md)
+**Next**: [Sec.7 -- Tuples and tuple destructure ->](07_tuples.md)

@@ -1,16 +1,16 @@
-﻿# Beginner 9 â€” First contract: `assert` / `prove` / `requires`
+# Beginner 9 -- First contract: `assert` / `prove` / `requires`
 
 > **Learning goal**: state preconditions with `requires`, write
 > runtime invariants with `assert`, and ask the SMT verifier to
 > *prove* arithmetic facts at compile time with `prove`.
 
-Imagine a vending machine with a small sign: "Insert Â£1 or more."
-That sign is a *precondition* â€” it tells you what's required
+Imagine a vending machine with a small sign: "Insert GBP1 or more."
+That sign is a *precondition* -- it tells you what's required
 BEFORE you press the button. `requires n >= 0` works the same
 way: you're documenting "this function only makes sense when
 `n` is non-negative," and the compiler enforces it. `assert` is
 a self-check mid-function: "at this point in my recipe, the
-dough MUST have risen â€” crash loudly if it hasn't." `prove`
+dough MUST have risen -- crash loudly if it hasn't." `prove`
 goes further: instead of checking at runtime, it asks a
 mathematical solver to verify the claim is ALWAYS true, before
 the code ever runs.
@@ -20,7 +20,7 @@ the code ever runs.
 Save this in `~/lesson9.vani`:
 
 ```vani
-intent "Lesson 9 worked example â€” assert / prove / requires.";
+intent "Lesson 9 worked example -- assert / prove / requires.";
 
 fn double(n: i64) -> i64
 requires n >= 0;
@@ -63,23 +63,23 @@ working in the background.
 
 ## Why it works that way
 
-vÄá¹‡à¥€ has **three contract keywords**, each with a different
+vāṇी has **three contract keywords**, each with a different
 job:
 
-- **`requires <bool>;`** â€” a *precondition* clause that goes
+- **`requires <bool>;`** -- a *precondition* clause that goes
   between the `fn` signature and the body. The caller is
   obligated to ensure the predicate holds before calling.
   Inside the body, the verifier *assumes* the predicate is
   true. `requires n >= 0; requires n <= 1000;` above guarantees
   `n * 2` can't overflow `i64`.
-- **`assert <bool>;`** â€” a statement inside a function body.
+- **`assert <bool>;`** -- a statement inside a function body.
   Asks the verifier to prove the predicate using everything it
   knows so far (parameters, prior `assert`s, prior `let`s). If
   the proof fails at compile time, you get a "proof failed" error
   with an SMT counterexample. If the proof succeeds, no runtime
-  code is emitted â€” `assert` is *free at runtime* when the SMT
+  code is emitted -- `assert` is *free at runtime* when the SMT
   pass discharges it.
-- **`prove <bool>;`** â€” same shape as `assert` but for pure
+- **`prove <bool>;`** -- same shape as `assert` but for pure
   arithmetic facts you want to express explicitly. `prove 2 + 2
   == 4;` is documentation that compiles. The main practical
   difference: a failing `assert` is a runtime panic when SMT
@@ -93,7 +93,7 @@ In this lesson, all four checks discharge:
 | Check | Discharges because |
 |---|---|
 | `assert r >= n;` inside `double` | knows `n >= 0` from `requires` and `r = n * 2` |
-| `assert x == 14;` in `main` | not discharged statically (see below) â€” runs as a runtime check |
+| `assert x == 14;` in `main` | not discharged statically (see below) -- runs as a runtime check |
 | `prove 2 + 2 == 4;` | pure integer arithmetic |
 | `assert y == 200;` in `main` | runtime check (see L12) |
 
@@ -110,11 +110,11 @@ fn double(n: i64) -> i64
 requires n >= 0;
 requires n <= 1000;
 ensures result == n * 2;
-{ â€¦ }
+{ ... }
 ```
 
-â€¦and now the callers' `assert`s become compile-time `prove`s.
-`ensures` is covered in depth in **Intermediate Â§12 â€” SMT
+...and now the callers' `assert`s become compile-time `prove`s.
+`ensures` is covered in depth in **Intermediate Sec.12 -- SMT
 verification deep-dive**.
 
 ## Challenge
@@ -145,7 +145,7 @@ fn main() -> i64 {
 
 To prove the `assert n + 1 > n;` is discharged, run
 `vanic emit ~/lesson9.vani --backend=c` and grep the C output
-for the inner assert â€” you'll find no `if (...) abort()` for
+for the inner assert -- you'll find no `if (...) abort()` for
 the `n + 1 > n` predicate. That's the SMT-elision pass in
 action.
 
@@ -153,4 +153,4 @@ action.
 
 ---
 
-**Next**: [Â§10 â€” Modules and `pub` â†’](10_modules.md)
+**Next**: [Sec.10 -- Modules and `pub` ->](10_modules.md)

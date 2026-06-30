@@ -1,11 +1,11 @@
-# Beginner 8a — Pattern matching (intuition primer)
+# Beginner 8a -- Pattern matching (intuition primer)
 
 > **Learning goal**: build a mental model of "pattern matching"
-> — a control-flow form more flexible than `if`/`else` chains
+> -- a control-flow form more flexible than `if`/`else` chains
 > AND more readable than nested switches. Reading order: this
 > is foundational for chapter 8 + intermediate's enums-with-
 > payloads. Read it before
-> [Beginner 8 — Pattern match on integers + booleans](08_match.md).
+> [Beginner 8 -- Pattern match on integers + booleans](08_match.md).
 
 This chapter has **no compiler code**. Pure intuition.
 
@@ -70,10 +70,10 @@ match parse_result {
 
 The `(n)` in `Ok(n)` introduces a NEW LOCAL BINDING. When
 this branch runs, `n` is the i64 inside the Ok. You didn't
-have to call `.unwrap()` or do a `if let` dance — the pattern
+have to call `.unwrap()` or do a `if let` dance -- the pattern
 extracted the value.
 
-Same for `(e)` in `Err(e)` — `e` is the ParseError inside the
+Same for `(e)` in `Err(e)` -- `e` is the ParseError inside the
 Err.
 
 ### Pattern 2: tuples
@@ -105,10 +105,10 @@ A pattern can bind a name AND have a guard (`if condition`).
 The branch runs only if both the pattern matches AND the
 guard is true.
 
-## Exhaustiveness — the compiler-checked guarantee
+## Exhaustiveness -- the compiler-checked guarantee
 
 A loose `if`/`else` chain might handle 4 cases and forget the
-5th — a runtime "fell through everything" silently-wrong-
+5th -- a runtime "fell through everything" silently-wrong-
 behavior. With `match`, the compiler **checks that every
 possible value is covered**.
 
@@ -124,7 +124,7 @@ fn name(c: Color) -> Str {
 }
 ```
 
-Compile error: "match is not exhaustive — variant Blue not
+Compile error: "match is not exhaustive -- variant Blue not
 covered". You can't accidentally drop a case. Either you
 handle each variant, or you add `_ then default-value`
 explicitly to acknowledge you're catching the rest.
@@ -132,10 +132,10 @@ explicitly to acknowledge you're catching the rest.
 This is one of the most useful properties of `match`. As your
 enum grows (you add a new variant `Blue` to `Color`), every
 `match` in your codebase that doesn't have a wildcard becomes
-a compile error — forcing you to update each match site to
+a compile error -- forcing you to update each match site to
 handle the new variant. You CAN'T forget.
 
-## When the value is "or" — match is the natural fit
+## When the value is "or" -- match is the natural fit
 
 Sums (one of these N variants) and products (this AND that
 combined) are the two basic ways of building data types.
@@ -173,7 +173,7 @@ Each arm's body produces the same-typed value; the match's
 value is whichever arm matched. No `if`/`else` ternary needed;
 no separate variable initialized in each branch.
 
-This means you can use match wherever a value is expected —
+This means you can use match wherever a value is expected --
 return position, function arguments, struct fields:
 
 ```vani
@@ -213,7 +213,7 @@ match parse_command(buf) {
 }
 ```
 
-Nested patterns — `Ok(Command.Echo(s))` peels two layers:
+Nested patterns -- `Ok(Command.Echo(s))` peels two layers:
 "the Result is Ok, AND the inner Command is Echo, AND extract
 the inner Str into `s`."
 
@@ -238,13 +238,13 @@ exact spelling vāṇी uses.)
   `if`/`else` chains.
 - **Patterns** destructure values into pieces, binding names
   to inner parts (especially enum variants).
-- The compiler **enforces exhaustiveness** — you can't forget
-  to handle a variant. Add a variant later → every non-
+- The compiler **enforces exhaustiveness** -- you can't forget
+  to handle a variant. Add a variant later -> every non-
   wildcard match becomes a compile error until updated.
-- `match` is an **expression** — produces a value. Use it
+- `match` is an **expression** -- produces a value. Use it
   inline in return positions, struct fields, etc.
 - Default to `match` for sum types (enum, Result, Option) and
-  for "many-way dispatch on a value" — even when `if`/`else`
+  for "many-way dispatch on a value" -- even when `if`/`else`
   would work, `match` reads more clearly.
 
 That's pattern matching. The next chapter ([Beginner 8](08_match.md))
@@ -254,10 +254,10 @@ covers enum-with-payload destructuring in depth.
 
 ## Cross-reference
 
-- [Beginner 8 — Pattern match on integers + booleans](08_match.md)
-  — basic syntax
-- [Intermediate 2 — Enums with payloads + match arms](../intermediate/02_enums_payloads.md)
-  — payloaded-enum destructuring; the most common match use case
-- [Intermediate 10a — Result and try primer](../intermediate/10a_result_try_primer.md)
-  — Result/Option destructuring is half "match", half
+- [Beginner 8 -- Pattern match on integers + booleans](08_match.md)
+  -- basic syntax
+- [Intermediate 2 -- Enums with payloads + match arms](../intermediate/02_enums_payloads.md)
+  -- payloaded-enum destructuring; the most common match use case
+- [Intermediate 10a -- Result and try primer](../intermediate/10a_result_try_primer.md)
+  -- Result/Option destructuring is half "match", half
   `try`/`?` sugar

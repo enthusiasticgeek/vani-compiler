@@ -1,13 +1,13 @@
-# Advanced 1 — Async / await and the `Task` transform
+# Advanced 1 -- Async / await and the `Task` transform
 
 > **Learning goal**: declare `async fn`, call it with `await`,
 > thread a `CancelToken` through long operations, and
 > understand the v1 desugar from `async fn` to `Future<R>`.
 
-> **New to this?** Read [Advanced 1a — Async primer](01a_async_primer.md) first.
+> **New to this?** Read [Advanced 1a -- Async primer](01a_async_primer.md) first.
 
 Imagine a restaurant kitchen with one chef. When an order comes
-in for a pizza (a slow operation — it takes 15 min to bake),
+in for a pizza (a slow operation -- it takes 15 min to bake),
 a synchronous chef would stand at the oven doing nothing until
 it's done. An async chef puts the pizza in the oven, notes
 "pizza for table 3 in the oven", and goes to make a salad
@@ -21,7 +21,7 @@ juggle many in-progress tasks without blocking.
 ## The program
 
 ```vani
-intent "Advanced 1 — async fn + await + CancelToken.";
+intent "Advanced 1 -- async fn + await + CancelToken.";
 
 async fn fetch(n: i64) -> i64 {
   return n * 7;
@@ -39,12 +39,12 @@ fn main() -> i64 {
   let r1: i64 = await(fetch(6));
   print "await fetch(6) =", r1;
 
-  // CancelToken not cancelled — produces value.
+  // CancelToken not cancelled -- produces value.
   let tok: CancelToken = CancelToken { cancelled: false };
   let r2: i64 = await(cancellable(7, ref tok));
   print "await cancellable(7, !tok) =", r2;
 
-  // CancelToken cancelled — produces sentinel.
+  // CancelToken cancelled -- produces sentinel.
   let tok2: CancelToken = CancelToken { cancelled: true };
   let r3: i64 = await(cancellable(7, ref tok2));
   print "await cancellable(7, tok)  =", r3;
@@ -85,7 +85,7 @@ await cancellable(7, tok)  = -1
   Thread it through async functions and check `.cancelled` at
   natural breakpoints. Real suspend-point cancellation lands
   when the state-machine codegen ships.
-- **The `try` keyword sugar** ([Intermediate §10](../intermediate/10_result_try.md))
+- **The `try` keyword sugar** ([Intermediate Sec.10](../intermediate/10_result_try.md))
   is enabled *inside async fn bodies* in v1 (Arc 8 v3.1 Phase
   2.4). For Result-returning async fns, you can write `let v:
   i64 = try maybe_fetch();` and the compiler inserts the
@@ -95,12 +95,12 @@ await cancellable(7, tok)  = -1
 
 | Today | Queued |
 |---|---|
-| `async fn` + `await` synchronous desugar (v1) AND real suspend-point state machine (v3.1, FEATURE-COMPLETE 2026-06-08) | — |
-| `CancelToken` cooperative cancellation AND **A4.4** auto-injected cancel guards at every suspend point | — |
-| `try EXPR` keyword AND postfix `EXPR?` operator in both sync + async bodies | — |
-| `Future<R>` for scalar R AND v3.1 Task<T> for all v3.1-allowed T | — |
-| **A4.3** dynamic-N multi-task scheduling via `mut ref pool[i]` over `Vec<Task__<fn>>` | — |
-| Per-dialect spellings: `अतुल्यकालिक` / `异步` / `非同期` for `async`; `प्रतीक्षा` / `等候` / `待機` for `await` | — |
+| `async fn` + `await` synchronous desugar (v1) AND real suspend-point state machine (v3.1, FEATURE-COMPLETE 2026-06-08) | -- |
+| `CancelToken` cooperative cancellation AND **A4.4** auto-injected cancel guards at every suspend point | -- |
+| `try EXPR` keyword AND postfix `EXPR?` operator in both sync + async bodies | -- |
+| `Future<R>` for scalar R AND v3.1 Task<T> for all v3.1-allowed T | -- |
+| **A4.3** dynamic-N multi-task scheduling via `mut ref pool[i]` over `Vec<Task__<fn>>` | -- |
+| Per-dialect spellings: `अतुल्यकालिक` / `异步` / `非同期` for `async`; `प्रतीक्षा` / `等候` / `待機` for `await` | -- |
 
 ## Common patterns
 
@@ -136,4 +136,4 @@ if `cancelled`.
 
 ---
 
-**Next**: [§2 — `parallel for` + race-freedom →](02_parallel.md)
+**Next**: [Sec.2 -- `parallel for` + race-freedom ->](02_parallel.md)

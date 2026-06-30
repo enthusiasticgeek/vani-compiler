@@ -1,18 +1,18 @@
-# Beginner 8 — Pattern match on integers + booleans
+# Beginner 8 -- Pattern match on integers + booleans
 
 > **Learning goal**: replace long `if`/`else if` chains with
 > `match`, and learn that `match` in vāṇी is an **expression**
 > using `then` (not `=>`) between the pattern and the arm body.
 
-> **New to this?** Read [Beginner 8a — Pattern matching primer](08a_pattern_match_primer.md) first.
+> **New to this?** Read [Beginner 8a -- Pattern matching primer](08a_pattern_match_primer.md) first.
 
 Pattern matching is like a post-sorting machine at an airport:
 each parcel arrives, gets inspected against a set of routing
-rules in order ("is it fragile? → gate 1", "is it oversized?
-→ gate 2", "otherwise → gate 3"), and the FIRST matching rule
+rules in order ("is it fragile? -> gate 1", "is it oversized?
+-> gate 2", "otherwise -> gate 3"), and the FIRST matching rule
 wins. `match` works the same way: the compiler checks each arm
 in order and runs the body of the first arm whose pattern fits
-the value. No fall-through, no hidden priority — it's exhaustive
+the value. No fall-through, no hidden priority -- it's exhaustive
 (every possible value must be handled) and unambiguous.
 
 ## The program
@@ -20,7 +20,7 @@ the value. No fall-through, no hidden priority — it's exhaustive
 Save this in `~/lesson8.vani`:
 
 ```vani
-intent "Lesson 8 worked example — match on integers and booleans.";
+intent "Lesson 8 worked example -- match on integers and booleans.";
 
 fn weekday_name(n: i64) -> Str {
   let name: Str = match n {
@@ -92,7 +92,7 @@ many
 
 - **`match` is an expression**, not a statement. You bind its
   result with `let`: `let s = match x { ... };`. There is **no
-  statement-form `match`** in v1 — the arms can't contain
+  statement-form `match`** in v1 -- the arms can't contain
   `return` directly.
 - **The arm separator is `then`**, not `=>` or `->`. The full
   syntax is `<pattern> then <expr>,`. Trailing comma on the last
@@ -106,17 +106,17 @@ many
   `Str` and `i64` arms is a type error.
 - **`true` and `false` patterns** make `match` on a `bool`
   exhaustive without needing `_`.
-- **Why `then` instead of `=>`?** It reads aloud naturally —
-  *"match `n`: case 1 then `Monday`, case 2 then `Tuesday`, …"* —
+- **Why `then` instead of `=>`?** It reads aloud naturally --
+  *"match `n`: case 1 then `Monday`, case 2 then `Tuesday`, ..."* --
   which fits vāṇी's "code as speech" philosophy. Sanskrit /
   Hindi / Marathi files use the same `तदा` / `तो` / `तर` keyword
   in the same slot.
 
 ## Challenge
 
-Rewrite the `is_yes(s: Str) -> bool` function from §6 using a
+Rewrite the `is_yes(s: Str) -> bool` function from Sec.6 using a
 single `match` on the string argument. Note that `match` on a
-`Str` works the same way as `match` on an integer — you just
+`Str` works the same way as `match` on an integer -- you just
 match against string literals.
 
 <details>
@@ -139,4 +139,4 @@ fn is_yes(s: Str) -> bool {
 
 ---
 
-**Next**: [§9 — First contract: `assert` / `prove` / `requires` →](09_smt_intro.md)
+**Next**: [Sec.9 -- First contract: `assert` / `prove` / `requires` ->](09_smt_intro.md)

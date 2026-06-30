@@ -1,11 +1,11 @@
-# Intermediate 4b — Interfaces and static dispatch (intuition primer)
+# Intermediate 4b -- Interfaces and static dispatch (intuition primer)
 
 > **Learning goal**: build a mental model of "interface" (what
 > vāṇी calls Rust's "trait" or Java's "interface") and "static
-> dispatch" — the non-`dyn` counterpart that pairs with
+> dispatch" -- the non-`dyn` counterpart that pairs with
 > [04a dyn Iface primer](04a_dyn_iface_primer.md). Reading
-> order: 04a → here → [Intermediate 4 generics+interfaces](04_generics_iface.md)
-> → [Intermediate 5 dyn dispatch](05_dyn.md).
+> order: 04a -> here -> [Intermediate 4 generics+interfaces](04_generics_iface.md)
+> -> [Intermediate 5 dyn dispatch](05_dyn.md).
 
 This chapter has **no compiler code**. Pure intuition.
 
@@ -29,7 +29,7 @@ or solid) is its own business.
 You wrote a function:
 
 ```vani
-fn print_area(s: Shape) -> i64 {  // ← what does Shape mean here?
+fn print_area(s: Shape) -> i64 {  // <- what does Shape mean here?
   print s.area();
   return 0;
 }
@@ -50,19 +50,19 @@ The compiler asks the call site:
 If the answer is "Circle", the compiler MAKES A COPY of
 `print_area` with `Shape` replaced by `Circle` everywhere
 inside. The body's `s.area()` calls the Circle-specific `area`
-function directly — no indirection, no vtable. If you call
+function directly -- no indirection, no vtable. If you call
 `print_area(square)` later, it generates ANOTHER copy
 specialized to Square.
 
-This is called **monomorphization** — "making mono-typed
+This is called **monomorphization** -- "making mono-typed
 versions". The compiler generates one version per concrete
 type you call the generic function with.
 
 Pros:
-- The call to `area` is *inlinable* — the compiler can paste
+- The call to `area` is *inlinable* -- the compiler can paste
   the area code right where you called it, eliminating the
   function-call overhead entirely.
-- Fastest possible runtime — no indirection, no vtable.
+- Fastest possible runtime -- no indirection, no vtable.
 
 Cons:
 - More compiled binary code (one copy per type).
@@ -83,19 +83,19 @@ Pros:
   `print_area`.
 
 Cons:
-- One indirect call per `area` invocation — small but real.
+- One indirect call per `area` invocation -- small but real.
 - No inlining.
 
 ## How vāṇी spells each
 
 ```vani
-// Static dispatch — compiler monomorphizes per call type
+// Static dispatch -- compiler monomorphizes per call type
 fn print_area<T>(s: T) -> i64 where T is Shape {
   print s.area();
   return 0;
 }
 
-// Dynamic dispatch — one function for all types
+// Dynamic dispatch -- one function for all types
 fn print_area(s: dyn Shape) -> i64 {
   print s.area();
   return 0;
@@ -116,7 +116,7 @@ A practical rule of thumb:
 |---|---|
 | Tight inner loop calling the method millions of times | Static (inlines) |
 | Heterogeneous collection (`Vec<dyn Shape>`) | Dynamic |
-| Library plugin point — users provide their own impls | Dynamic |
+| Library plugin point -- users provide their own impls | Dynamic |
 | Function with a single Shape parameter that's a known type | Static |
 | Function with a single Shape parameter that's "any Shape, decided later" | Either works |
 | Need to call the same function on Circle and Square in one call site | Either; static makes two copies, dynamic makes one |
@@ -135,7 +135,7 @@ T is Hashable + Comparable`, you immediately know:
 - `x` can be any type, BUT
 - It must support hashing AND comparison.
 
-The compiler enforces this — you can't pass a type that
+The compiler enforces this -- you can't pass a type that
 doesn't implement those interfaces. The function body can
 freely call `x.hash()` and `x.cmp(...)` knowing they're
 provided.
@@ -160,7 +160,7 @@ in the interface, it's just a regular method (not part of the
 contract).
 
 This is opt-in. You don't get an interface "automatically"
-because your type happens to have an `area` method — you have
+because your type happens to have an `area` method -- you have
 to declare the implementation explicitly. The opt-in stops
 accidental conformance (e.g., two types both with `clone`
 methods accidentally treated as "Cloneable").
@@ -203,12 +203,12 @@ shows the dynamic-dispatch variant.
 
 ## Cross-reference
 
-- [Beginner 6a — pointers/references](../beginner/06a_pointers_refs_primer.md)
-- [Beginner 6c — ownership/move](../beginner/06c_ownership_primer.md)
-- [Intermediate 3a — Box/RAII](03a_box_raii_primer.md)
-- [Intermediate 4 — Generics and interfaces](04_generics_iface.md)
-  — the actual syntax + worked example
-- [Intermediate 4a — `dyn Iface` primer](04a_dyn_iface_primer.md)
-  — the dynamic-dispatch counterpart
-- [Intermediate 5 — Dynamic dispatch](05_dyn.md) — `Vec<dyn Shape>`
+- [Beginner 6a -- pointers/references](../beginner/06a_pointers_refs_primer.md)
+- [Beginner 6c -- ownership/move](../beginner/06c_ownership_primer.md)
+- [Intermediate 3a -- Box/RAII](03a_box_raii_primer.md)
+- [Intermediate 4 -- Generics and interfaces](04_generics_iface.md)
+  -- the actual syntax + worked example
+- [Intermediate 4a -- `dyn Iface` primer](04a_dyn_iface_primer.md)
+  -- the dynamic-dispatch counterpart
+- [Intermediate 5 -- Dynamic dispatch](05_dyn.md) -- `Vec<dyn Shape>`
   worked example

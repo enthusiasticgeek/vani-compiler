@@ -1,10 +1,10 @@
-# Intermediate 9a — FFI: calling C code from vāṇी (intuition primer)
+# Intermediate 9a -- FFI: calling C code from vāṇी (intuition primer)
 
-> **Learning goal**: build a mental model of "FFI" — Foreign
+> **Learning goal**: build a mental model of "FFI" -- Foreign
 > Function Interface. The way one language calls into another.
 > Why this exists, what could go wrong, and what vāṇी does to
 > make it tractable. Reading order:
-> [Intermediate 9 — FFI: extern "C" + --link-with](09_ffi.md)
+> [Intermediate 9 -- FFI: extern "C" + --link-with](09_ffi.md)
 > follows this; read this primer first if you've never used
 > a foreign-function call before.
 
@@ -22,8 +22,8 @@ Each of these is *already* solved by some C library (openssl,
 sqlite3, libjpeg, BlueZ). Writing your own is months of work
 PLUS risks bugs the libraries have already squashed.
 
-The vAṇी solution: don't rewrite — call the C library
-directly. The mechanism is **FFI** — Foreign Function
+The vAṇी solution: don't rewrite -- call the C library
+directly. The mechanism is **FFI** -- Foreign Function
 Interface. Your vāṇी program calls into pre-compiled C code as
 if it were a vāṇी function.
 
@@ -43,17 +43,17 @@ But:
   bytes. C's `char*` could be that, or could be a pointer into a
   string-literal table, or anywhere else.
 - vāṇी's `Vec<i64>` is a 3-word struct (data pointer + length +
-  capacity). C has no built-in equivalent — you'd have to pass
+  capacity). C has no built-in equivalent -- you'd have to pass
   the three pieces separately.
 - vāṇी's enums are tagged unions; C enums are just integers.
 
-Some types map cleanly (`i64` ↔ `int64_t`, `Str` ↔ `const
+Some types map cleanly (`i64` <-> `int64_t`, `Str` <-> `const
 char*`); others need adapters.
 
 ### 2. Calling convention
 
 When function `foo` calls `bar`, the arguments and return value
-have to pass between them via a specific protocol — which CPU
+have to pass between them via a specific protocol -- which CPU
 registers hold which values, who saves what, who cleans up the
 stack. This protocol is called a **calling convention**.
 
@@ -63,22 +63,22 @@ and most compilers use it. vāṇी and most C compilers agree on
 the platform's dominant convention. FFI between them "just
 works" for simple cases.
 
-The bad news: structs-by-value have *intricate* rules — small
+The bad news: structs-by-value have *intricate* rules -- small
 structs go in registers; larger ones get spilled to the stack
 with hidden alignment padding. Vāṇी handles a subset of these
 patterns and rejects the rest with a clear migration hint.
 
 ### 3. Ownership
 
-Vāṇी has affine ownership — every value has exactly one
+Vāṇी has affine ownership -- every value has exactly one
 owner; the compiler tracks who owns what. C has no concept of
 ownership; pointers are pointers.
 
 When you call into C:
-- Passing a Vec → who owns the data? If C frees it, vāṇी's
+- Passing a Vec -> who owns the data? If C frees it, vāṇी's
   affine bookkeeping is now wrong (vāṇी thinks the data still
-  exists). If vāṇी frees it AND C also frees it → double-free.
-- Receiving a `char*` from C → who frees this? vāṇी doesn't
+  exists). If vāṇी frees it AND C also frees it -> double-free.
+- Receiving a `char*` from C -> who frees this? vāṇी doesn't
   know. The user must know whether it's a literal (never free)
   vs a malloc'd string (caller frees) vs a static buffer
   (don't free).
@@ -120,18 +120,18 @@ build --link-with=m`, vāṇी links against libm and the call
 resolves to the actual libm `sqrt`.
 
 For scalars + bool + Str + references, the FFI is **safe by
-default** — vāṇी handles all the calling-convention details.
+default** -- vāṇी handles all the calling-convention details.
 
 For structs-by-value, the compiler checks if the struct fits
-the platform's small-struct convention. Yes → safe. No → the
+the platform's small-struct convention. Yes -> safe. No -> the
 compiler rejects with a hint: "pass by reference instead."
 
 For raw pointer types (`*const T`, `*mut T`), you'd be working
 with C-style memory. These types only appear inside an
-`unsafe(reason = "...")` block — vāṇी forces you to mark the
+`unsafe(reason = "...")` block -- vāṇी forces you to mark the
 section where the type system isn't tracking ownership.
 
-## Function pointers — calling vāṇी from C
+## Function pointers -- calling vāṇी from C
 
 The reverse direction also works. vAṇी functions can be passed
 as callbacks to C functions:
@@ -157,9 +157,9 @@ The vāṇी function `compare` becomes a callback C can invoke.
 This is how you wire vāṇी logic into existing C frameworks
 (libuv, GTK, etc.).
 
-## "ABI" — the deeper word
+## "ABI" -- the deeper word
 
-When you read FFI docs you'll see **ABI** — Application
+When you read FFI docs you'll see **ABI** -- Application
 Binary Interface. It's the broader term covering: calling
 convention + type layout + ownership conventions + error
 signaling. Two languages have "compatible ABIs" when their
@@ -185,7 +185,7 @@ Use FFI when:
   (Linux syscalls, Windows API, POSIX).
 
 DON'T use FFI when:
-- A pure-vāṇी alternative exists (use it — better safety
+- A pure-vāṇी alternative exists (use it -- better safety
   properties).
 - The C library is small/simple (might be easier to port than
   wrap).
@@ -205,7 +205,7 @@ DON'T use FFI when:
   Calling it works like a normal call.
 - **`--link-with=libname`** is the linker hint to find the
   actual symbol at build time.
-- vāṇी commits to ABI compatibility with C on each platform —
+- vāṇी commits to ABI compatibility with C on each platform --
   not across vāṇी versions.
 
 This is enough to read the formal chapter without getting
@@ -215,12 +215,12 @@ callbacks.
 
 ## Cross-reference
 
-- [Intermediate 9 — FFI: `extern "C"` + `--link-with`](09_ffi.md)
-  — the actual syntax + worked examples
-- [Beginner 6a — Pointers and references primer](../beginner/06a_pointers_refs_primer.md)
-  — references map naturally to C pointers
-- [Advanced 4 — Embedded targets + `unsafe`](../advanced/04_embedded.md)
-  — the `unsafe(reason = "...")` block is shared between FFI
+- [Intermediate 9 -- FFI: `extern "C"` + `--link-with`](09_ffi.md)
+  -- the actual syntax + worked examples
+- [Beginner 6a -- Pointers and references primer](../beginner/06a_pointers_refs_primer.md)
+  -- references map naturally to C pointers
+- [Advanced 4 -- Embedded targets + `unsafe`](../advanced/04_embedded.md)
+  -- the `unsafe(reason = "...")` block is shared between FFI
   and embedded use cases
-- [Beginner 6c — Ownership primer](../beginner/06c_ownership_primer.md)
-  — why ownership is the gnarliest cross-boundary issue
+- [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
+  -- why ownership is the gnarliest cross-boundary issue

@@ -1,10 +1,10 @@
-# Intermediate 6b — Iterators and combinators (intuition primer)
+# Intermediate 6b -- Iterators and combinators (intuition primer)
 
 > **Learning goal**: build a mental model of "iterators" and
-> the "combinator" pattern — the functional-programming style
+> the "combinator" pattern -- the functional-programming style
 > of expressing computations over collections via chains of
 > small operations. Reading order:
-> [06a closures primer](06a_closures_primer.md) → here →
+> [06a closures primer](06a_closures_primer.md) -> here ->
 > [Intermediate 6 closures + iterator combinators](06_closures.md).
 
 This chapter has **no compiler code**. Pure intuition.
@@ -16,7 +16,7 @@ You have a list of numbers. You want to:
 2. Double each.
 3. Sum them up.
 
-The "imperative" way — write a loop:
+The "imperative" way -- write a loop:
 
 ```vani
 let total: i64 = 0;
@@ -53,7 +53,7 @@ and the method-call sugar (`xs.filter(...)`, `xs.map(...)`,
 
 Picture each step as a kitchen-sink tap.
 
-- **`xs`** is the water source — the full list of numbers.
+- **`xs`** is the water source -- the full list of numbers.
 - **`.filter(f)`** is a tap that lets some water through and
   blocks the rest. (`f` is a closure deciding pass/block per
   drop.)
@@ -69,35 +69,35 @@ the chain matches the shape of the computation.
 
 You'll see these names across many languages. vāṇी's spellings:
 
-### Producers — start a chain
+### Producers -- start a chain
 
-- **The Vec itself** — `xs` produces all its elements in order.
-- **`vec_range(0, 10)`** — produces `0, 1, 2, ..., 9`.
+- **The Vec itself** -- `xs` produces all its elements in order.
+- **`vec_range(0, 10)`** -- produces `0, 1, 2, ..., 9`.
 
-### Adapters — middle of a chain
+### Adapters -- middle of a chain
 
 Each takes a closure and returns a new iterator with the
 closure applied per element.
 
-- **`.map(g)`** — replace each element with `g(element)`.
-- **`.filter(f)`** — keep only elements where `f(element)` is
+- **`.map(g)`** -- replace each element with `g(element)`.
+- **`.filter(f)`** -- keep only elements where `f(element)` is
   true.
-- **`.take(n)`** — yield only the first n.
-- **`.drop(n)`** — skip the first n, yield the rest.
+- **`.take(n)`** -- yield only the first n.
+- **`.drop(n)`** -- skip the first n, yield the rest.
 
-### Consumers — end a chain
+### Consumers -- end a chain
 
-- **`.fold(init, h)`** — combine all elements using `h`.
+- **`.fold(init, h)`** -- combine all elements using `h`.
   Returns ONE value.
-- **`.sum()`** — shorthand for `.fold(0, |a, x| a + x)`.
-- **`.count()`** — how many elements made it through?
-- **`.collect()`** — gather the elements into a fresh Vec.
+- **`.sum()`** -- shorthand for `.fold(0, |a, x| a + x)`.
+- **`.count()`** -- how many elements made it through?
+- **`.collect()`** -- gather the elements into a fresh Vec.
 
 A chain has zero or more adapters between a producer + a
 consumer. Adapters don't actually do anything until the
-consumer pulls — that's called *lazy evaluation*.
+consumer pulls -- that's called *lazy evaluation*.
 
-## Lazy evaluation — what it means and why it matters
+## Lazy evaluation -- what it means and why it matters
 
 In the imperative code, the `for` loop runs once, top to
 bottom. Every operation happens for every element, in order.
@@ -128,7 +128,7 @@ operations would be expensive on the full input.
 
 Every adapter takes a closure (chapter 06a). The closure
 captures whatever local context the adapter needs. This is
-why iterators + closures live in the same conceptual area —
+why iterators + closures live in the same conceptual area --
 they compose to express most "operations over a collection"
 patterns.
 
@@ -144,12 +144,12 @@ inside `.filter` reaches out and captures it. Without closures,
 you'd need a separate top-level function plus a way to pass
 threshold to it.
 
-## Fusion — what the compiler does for performance
+## Fusion -- what the compiler does for performance
 
 A common worry: "doesn't all this chaining make a lot of
 intermediate Vecs and Closures and slow things down?"
 
-In a naive implementation, yes. In vāṇी, no — the compiler
+In a naive implementation, yes. In vāṇी, no -- the compiler
 **fuses** adjacent combinators into a single loop.
 
 ```vani
@@ -174,7 +174,7 @@ for x in xs:
 
 ONE pass, ZERO intermediate allocations. The combinator
 syntax compiles to the same machine code as the hand-written
-loop — but you wrote it more readably.
+loop -- but you wrote it more readably.
 
 This is the "best of both worlds": functional clarity at the
 source level, imperative efficiency at the machine level.
@@ -208,8 +208,8 @@ state, write the loop.
 - **Combinator** = a transformation that consumes an iterator
   and produces a new one (adapter) or a single value
   (consumer).
-- **Adapters**: `map`, `filter`, `take`, `drop` — chain them.
-- **Consumers**: `fold`, `sum`, `count`, `collect` — end the
+- **Adapters**: `map`, `filter`, `take`, `drop` -- chain them.
+- **Consumers**: `fold`, `sum`, `count`, `collect` -- end the
   chain.
 - **Lazy evaluation**: chains only do work when the consumer
   asks. `.take(3)` after a million-element source touches
@@ -223,14 +223,14 @@ examples.
 
 ## Cross-reference
 
-- [Intermediate 6a — Closures primer](06a_closures_primer.md)
-  — combinators take closures as arguments; the pair is the
+- [Intermediate 6a -- Closures primer](06a_closures_primer.md)
+  -- combinators take closures as arguments; the pair is the
   full functional vocabulary
-- [Intermediate 6 — Closures + iterator combinators](06_closures.md)
-  — the formal chapter with all syntax
-- [Intermediate 4c — Generics primer](04c_generics_primer.md)
-  — `vec_map<T, R>` is generic over the input and output
+- [Intermediate 6 -- Closures + iterator combinators](06_closures.md)
+  -- the formal chapter with all syntax
+- [Intermediate 4c -- Generics primer](04c_generics_primer.md)
+  -- `vec_map<T, R>` is generic over the input and output
   element types; monomorphization specializes per pair
-- [Advanced 2a — Parallelism primer](../advanced/02a_parallelism_primer.md)
-  — `parallel for` shares the per-element-independent-iteration
+- [Advanced 2a -- Parallelism primer](../advanced/02a_parallelism_primer.md)
+  -- `parallel for` shares the per-element-independent-iteration
   insight that makes both iterators and parallelism work

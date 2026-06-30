@@ -1,11 +1,11 @@
-﻿# Intermediate 10 â€” Error handling: `Result<T, E>` + `try`
+# Intermediate 10 -- Error handling: `Result<T, E>` + `try`
 
 > **Learning goal**: model fallible computations with a
 > Result-style enum, chain operations that short-circuit on
 > error, and understand where the `try` keyword fits today.
 
-> **New to this?** Read [Intermediate 10a â€” Result and `try` primer](10a_result_try_primer.md)
-> and [Intermediate 10b â€” Runtime errors primer](10b_runtime_errors_primer.md) first.
+> **New to this?** Read [Intermediate 10a -- Result and `try` primer](10a_result_try_primer.md)
+> and [Intermediate 10b -- Runtime errors primer](10b_runtime_errors_primer.md) first.
 
 Imagine every step in a recipe either succeeds ("the dough rose")
 or fails ("the oven broke"). A `Result` is a small envelope that
@@ -20,7 +20,7 @@ handle it.
 ## The program
 
 ```vani
-intent "Intermediate 10 worked example â€” Result + manual propagation.";
+intent "Intermediate 10 worked example -- Result + manual propagation.";
 
 enum Result { Ok(i64), Err(i64) }
 
@@ -74,27 +74,27 @@ pipeline(-3)  = -999
 
 ## Why it works that way
 
-- **There's no built-in `Result<T, E>`** in v1 â€” you declare
-  your own per-function-family enum (per Intermediate Â§2).
+- **There's no built-in `Result<T, E>`** in v1 -- you declare
+  your own per-function-family enum (per Intermediate Sec.2).
   The convention `enum Result { Ok(i64), Err(i64) }` mirrors
   Rust's `Result<T, E>` shape.
 - **Manual propagation** uses `match` to either extract the
   `Ok` value or rebuild and return `Err` unchanged. The pattern
   is repetitive but predictable.
 - **`unwrap_or`** is the idiomatic "extract or default"
-  helper â€” return the inner value on `Ok`, the default on
+  helper -- return the inner value on `Ok`, the default on
   `Err`.
 
 ## The `try` keyword (queued sugar)
 
-vÄá¹‡à¥€ reserves the `try` keyword for the standard Rust-style
+vāṇी reserves the `try` keyword for the standard Rust-style
 short-circuit:
 
 ```vani
 let v: i64 = try parse_pos(n);   // queued sugar
 ```
 
-â€¦desugars to roughly:
+...desugars to roughly:
 
 ```vani
 let __t = parse_pos(n);
@@ -115,15 +115,15 @@ the long-form manual style on `Opt`-shaped enums.
   parameters yet, so each fallible API declares its own
   Result-shaped enum with concrete payload types.
 - **No enum-destructure in `let`** ([L1 in v1_limitations.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md))
-  â€” every extraction goes through `match`.
+  -- every extraction goes through `match`.
 
 ## Challenge
 
 Add a `safe_sqrt(n: i64) -> Result` helper that returns
 `Err` for negative inputs and `Ok(approximate_sqrt)` otherwise.
 Chain it into `pipeline` so the full sequence
-`parse_pos â†’ double â†’ safe_sqrt` propagates errors at any step.
+`parse_pos -> double -> safe_sqrt` propagates errors at any step.
 
 ---
 
-**Next**: [Â§11 â€” The 22 GoF design patterns â†’](11_design_patterns.md)
+**Next**: [Sec.11 -- The 22 GoF design patterns ->](11_design_patterns.md)

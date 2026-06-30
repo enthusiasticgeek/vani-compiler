@@ -1,26 +1,26 @@
-# Beginner 6c — Ownership and move (intuition primer)
+# Beginner 6c -- Ownership and move (intuition primer)
 
 > **Learning goal**: build the "one-owner-at-a-time" mental
 > model that explains why vāṇी doesn't have a garbage collector
 > AND doesn't make you free heap memory yourself. Reading order:
-> [06a pointers/refs](06a_pointers_refs_primer.md) →
-> [06b heap/stack](06b_heap_vs_stack_primer.md) → here.
+> [06a pointers/refs](06a_pointers_refs_primer.md) ->
+> [06b heap/stack](06b_heap_vs_stack_primer.md) -> here.
 
 This chapter has **no compiler code**. Pure intuition. The
-formal version is [Intermediate 3 — Affine ownership](../intermediate/03_affine.md).
+formal version is [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md).
 
 ## Recap: where we are
 
 You know from the heap/stack chapter that:
-- Small / bounded values live on the **stack** — auto-cleaned
+- Small / bounded values live on the **stack** -- auto-cleaned
   when their function returns.
 - Big / dynamic values (a `Vec<i64>` with a million items, an
   `OwnedStr` from a string concat) have their data on the
-  **heap** — someone must explicitly tell the system to release
+  **heap** -- someone must explicitly tell the system to release
   it later.
 
 You also know vāṇी's choice for who that "someone" is: not the
-programmer (manual `free`), not a garbage collector — the
+programmer (manual `free`), not a garbage collector -- the
 **compiler**, automatically, at compile time.
 
 The rule the compiler uses to figure out when to free things is
@@ -45,11 +45,11 @@ You have a bicycle. Three things are true:
 
 These map directly to vāṇी:
 
-1. `let bike: Bike = Bike { ... };` — `bike` is the owner.
-2. `let friend_bike: Bike = bike;` — ownership **moves** from
+1. `let bike: Bike = Bike { ... };` -- `bike` is the owner.
+2. `let friend_bike: Bike = bike;` -- ownership **moves** from
    `bike` to `friend_bike`. Now `bike` is invalid; reading it
    is a compile error.
-3. `let n: i64 = inspect(ref bike);` — `inspect` **borrows**
+3. `let n: i64 = inspect(ref bike);` -- `inspect` **borrows**
    the bike for the duration of the call. `bike` still owns
    it; using `bike` after the call is fine.
 
@@ -70,7 +70,7 @@ let b: Vec<i64> = a;        // hypothetical: BOTH own?
 ```
 
 When `a` goes out of scope, it calls `free()` on the data. When
-`b` goes out of scope, it ALSO calls `free()` on the data —
+`b` goes out of scope, it ALSO calls `free()` on the data --
 double-free. Memory corruption. Crash.
 
 vāṇी's rule prevents this. The `let b = a;` MOVES ownership.
@@ -87,18 +87,18 @@ let r: ref Vec<i64>;
 {
   let xs: Vec<i64> = vec(1, 2, 3);
   r = ref xs;
-}  // xs goes out of scope → its data is freed
-print r[0];  // r points at freed memory → undefined behavior
+}  // xs goes out of scope -> its data is freed
+print r[0];  // r points at freed memory -> undefined behavior
 ```
 
 vāṇी's compiler tracks references and rejects this at compile
-time — you don't even get to run the program. The reference
+time -- you don't even get to run the program. The reference
 isn't allowed to outlive the value it points to.
 
 ### Problem 3: forgetting to free
 
 In languages where YOU write the `free()`, you sometimes forget
-— and your program leaks memory. Worse, you sometimes free the
+-- and your program leaks memory. Worse, you sometimes free the
 SAME thing twice (problem 1) or free something that's still
 being used (problem 2).
 
@@ -112,9 +112,9 @@ Coming from Python or Java, you might think:
 
 ```python
 a = [1, 2, 3]
-b = a               # ← "they share the same list, right?"
+b = a               # <- "they share the same list, right?"
 a.append(4)
-print(b)            # → [1, 2, 3, 4]
+print(b)            # -> [1, 2, 3, 4]
 ```
 
 In Python, `a = [...]` creates a list. `b = a` makes `b` point
@@ -125,7 +125,7 @@ semantics.
 vāṇी (and Rust) take a different stance: `let b: Vec<i64> = a;`
 *moves the list from a to b*. `a` is now an invalid name.
 You'd write your program differently if you want both names
-to mutate the same data — either pass a `mut ref` around, or
+to mutate the same data -- either pass a `mut ref` around, or
 restructure.
 
 Why this design? Because *shared mutation* is the source of
@@ -139,7 +139,7 @@ references.
 
 **Types that move on assignment** (the value transfers; the
 source is invalidated):
-- `Vec<T>`, `OwnedStr`, `Box<T>`, `HashMap`, `HashSet`, etc. —
+- `Vec<T>`, `OwnedStr`, `Box<T>`, `HashMap`, `HashSet`, etc. --
   heap-owning types
 - User-defined structs containing any of the above
 - Affine types: `Task`, `Atomic`, `Mutex`, `Guard`, `Channel`
@@ -148,7 +148,7 @@ source is invalidated):
 both bindings independently own a copy):
 - All scalars: `i64`, `bool`, `f64`, etc.
 - `Str` (the borrowed-pointer kind; a `Str` value is just an
-  address — copying the address is cheap and creates no
+  address -- copying the address is cheap and creates no
   aliasing issue because Str data is read-only)
 - Fixed-size arrays `[T; N]` of Copy elements
 - Tuples / structs of Copy fields
@@ -169,7 +169,7 @@ fn consume(xs: Vec<i64>) -> i64 {
 fn main() -> i64 {
   let xs: Vec<i64> = vec(1, 2, 3);
   let r: i64 = consume(xs);   // xs MOVES into consume
-  // print xs[1];              // ← would fail to compile;
+  // print xs[1];              // <- would fail to compile;
                                 //   xs is moved
   return r;
 }
@@ -190,8 +190,8 @@ fn main() -> i64 {
 }
 ```
 
-This pattern — borrow when you can, move when ownership
-genuinely transfers — is how vāṇी (and Rust) code feels in
+This pattern -- borrow when you can, move when ownership
+genuinely transfers -- is how vāṇी (and Rust) code feels in
 practice.
 
 ## A summary you can carry
@@ -216,14 +216,14 @@ read like sensible feedback instead of cryptic noise.
 ## "Affine"? "Linear"? Where do those words come from?
 
 You'll see "affine ownership" in vāṇी's docs. The word "affine"
-comes from logic — *affine logic* treats each resource as
+comes from logic -- *affine logic* treats each resource as
 something that can be used at most once (you can drop it
 unused, but you can't use it twice). vāṇी's bindings are
 "affine" because each value can be moved at most once.
 
-A related word is "linear" — same idea but stricter: each
+A related word is "linear" -- same idea but stricter: each
 resource MUST be used exactly once (no dropping). vāṇी is
-affine, not linear — you can declare a value and never
+affine, not linear -- you can declare a value and never
 explicitly consume it (the scope-exit cleanup uses it
 implicitly).
 
@@ -232,8 +232,8 @@ the formal vocabulary the docs use.
 
 ## Cross-reference
 
-- [Beginner 6a — pointers and references primer](06a_pointers_refs_primer.md)
-- [Beginner 6b — heap and stack primer](06b_heap_vs_stack_primer.md)
-- [Intermediate 3 — Affine ownership](../intermediate/03_affine.md)
-  — formal syntax + compiler errors + worked examples
-- [Intermediate 4a — `dyn Iface` primer](../intermediate/04a_dyn_iface_primer.md)
+- [Beginner 6a -- pointers and references primer](06a_pointers_refs_primer.md)
+- [Beginner 6b -- heap and stack primer](06b_heap_vs_stack_primer.md)
+- [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md)
+  -- formal syntax + compiler errors + worked examples
+- [Intermediate 4a -- `dyn Iface` primer](../intermediate/04a_dyn_iface_primer.md)

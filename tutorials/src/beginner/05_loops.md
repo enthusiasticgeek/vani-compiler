@@ -1,11 +1,11 @@
-﻿# Beginner 5 â€” `while` and `for` loops
+# Beginner 5 -- `while` and `for` loops
 
 > **Learning goal**: write a `while` loop with an explicit
 > condition, a `for ... from ... to ...` range loop, and use
 > `break` / `return` to exit early.
 
-> **New to this?** Read [Beginner 5a â€” Recursion primer](05a_recursion_primer.md) first
-> for why we repeat things â€” then come back here for the loop syntax.
+> **New to this?** Read [Beginner 5a -- Recursion primer](05a_recursion_primer.md) first
+> for why we repeat things -- then come back here for the loop syntax.
 
 A loop is just an instruction you give a very obedient assistant:
 "keep doing X until I tell you to stop." A `while` loop says
@@ -19,7 +19,7 @@ out the door mid-task.
 Save this in `~/lesson5.vani`:
 
 ```vani
-intent "Lesson 5 worked example â€” while and for loops.";
+intent "Lesson 5 worked example -- while and for loops.";
 
 fn sum_to_n(n: i64) -> i64 {
   let total: i64 = 0;
@@ -74,26 +74,26 @@ first_multiple_of_seven(20) = 21
 
 ## Why it works that way
 
-- **`while <bool> { â€¦ }`** runs the body until the condition is
+- **`while <bool> { ... }`** runs the body until the condition is
   false. Don't forget to advance the loop variable (`i = i + 1`)
-  or the loop is infinite. There's no postfix `i++` â€” the
+  or the loop is infinite. There's no postfix `i++` -- the
   language prefers spelled-out arithmetic.
-- **`for k from lo to hi { â€¦ }`** is a half-open range:
-  `k` takes values `lo, lo+1, â€¦, hi-1`. The upper bound is
+- **`for k from lo to hi { ... }`** is a half-open range:
+  `k` takes values `lo, lo+1, ..., hi-1`. The upper bound is
   *exclusive*, which is why `product_of_range(1, 5)` computes
   `1 * 2 * 3 * 4 = 24`, not `1 * 2 * 3 * 4 * 5 = 120`.
-- **`while true { â€¦ }`** loops indefinitely. Combine with
+- **`while true { ... }`** loops indefinitely. Combine with
   `return` (or `break`) to exit. The compiler proves
   reachability: the final `return 0 - 1;` after a
   `while true` is reachable for the type-checker but unreachable
   at runtime, and that's fine.
 - **`break;`** exits the nearest enclosing loop;
   **`continue;`** skips to the next iteration.
-- **There's no `let mut`** â€” `let i: i64 = 0;` declares a
+- **There's no `let mut`** -- `let i: i64 = 0;` declares a
   variable that's already mutable via `i = i + 1`. v1 treats
   every `let` binding as mutable for primitives; the `mut`
-  keyword is reserved for `mut ref` parameters in Â§3 of the
-  Intermediate track. This is a documented v1 deviation â€”
+  keyword is reserved for `mut ref` parameters in Sec.3 of the
+  Intermediate track. This is a documented v1 deviation --
   see [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md).
 
 ## Challenge
@@ -127,4 +127,4 @@ For negatives, you'd flip the sign first; the language has no
 
 ---
 
-**Next**: [Â§6 â€” Strings (`Str` vs `OwnedStr`) â†’](06_strings.md)
+**Next**: [Sec.6 -- Strings (`Str` vs `OwnedStr`) ->](06_strings.md)

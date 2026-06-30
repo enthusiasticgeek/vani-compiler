@@ -1,18 +1,18 @@
-# Intermediate 9c — File I/O: `FileHandle` + `eprint`
+# Intermediate 9c -- File I/O: `FileHandle` + `eprint`
 
 > **Learning goal**: open, read, write, and close files using
 > vāṇī's native `FileHandle` type; write to stderr with
 > `eprint`; read stdin line-by-line with `stdin_read_line`.
 
-> **New to this?** Read [Intermediate 9b — File I/O primer](09b_file_io_primer.md) first.
+> **New to this?** Read [Intermediate 9b -- File I/O primer](09b_file_io_primer.md) first.
 
 ## The program
 
 ```vani
-intent "Intermediate 9c — native file I/O.";
+intent "Intermediate 9c -- native file I/O.";
 
 fn main() -> i64 {
-  // ── write ────────────────────────────────────────────────
+  // -- write ------------------------------------------------
   let fw: FileHandle = file_open("/tmp/vani_hello.txt", "w");
   if !file_is_ok(ref fw) {
     eprint "error: could not open file for writing";
@@ -23,7 +23,7 @@ fn main() -> i64 {
   let _ = file_flush(mut ref fw);
   let _ = file_close(fw);           // explicit close; could omit (scope-exit does it)
 
-  // ── read back ────────────────────────────────────────────
+  // -- read back --------------------------------------------
   let fr: FileHandle = file_open("/tmp/vani_hello.txt", "r");
   if !file_is_ok(ref fr) {
     eprint "error: could not open file for reading";
@@ -56,11 +56,11 @@ line 2: second line
 
 - **`file_open(path, mode)`** calls `fopen` internally and
   stores the `FILE*` inside a `FileHandle`. The handle is
-  affine — the compiler tracks it like an `OwnedStr`.
+  affine -- the compiler tracks it like an `OwnedStr`.
 - **`file_is_ok(ref fh)`** checks that `fopen` succeeded
   (returned a non-null pointer). Always test before reading
   or writing; if the check fails, any use of the handle is
-  undefined behaviour in C — vāṇī's builtin makes this
+  undefined behaviour in C -- vāṇī's builtin makes this
   explicit by requiring you to check before the mutable
   operations are useful.
 - **`file_read_line(mut ref fh)`** reads up to and including
@@ -72,7 +72,7 @@ line 2: second line
   Returns the number of bytes written, or -1 on error.
 - **`file_flush(mut ref fh)`** flushes the OS write buffer.
   Important before `file_close` when the OS might batch writes.
-- **`file_close(fh)`** consumes the handle — no `ref`. The
+- **`file_close(fh)`** consumes the handle -- no `ref`. The
   compiler marks `fw` / `fr` as moved; any use after this
   is a compile error. Scope-exit also closes automatically
   if you don't call `file_close` explicitly.
@@ -98,7 +98,7 @@ one was present.
 
 ## Writing to stderr
 
-The `eprint` statement sends output to stderr — the diagnostic
+The `eprint` statement sends output to stderr -- the diagnostic
 channel that isn't captured when the user redirects stdout:
 
 ```vani
@@ -178,4 +178,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [§10a — Result / try primer →](10a_result_try_primer.md)
+**Next**: [Sec.10a -- Result / try primer ->](10a_result_try_primer.md)

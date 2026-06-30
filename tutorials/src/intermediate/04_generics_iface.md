@@ -1,17 +1,17 @@
-# Intermediate 4 — Generics and interfaces
+# Intermediate 4 -- Generics and interfaces
 
 > **Learning goal**: declare an `interface` (vāṇी's name for
 > traits), `implement` it for concrete types, and write a
 > generic function bounded by `where T is Iface`.
 
-> **New to this?** Read [Intermediate 4b — Interfaces and static dispatch primer](04b_interfaces_primer.md)
-> and [Intermediate 4c — Generics primer](04c_generics_primer.md) first. This chapter
+> **New to this?** Read [Intermediate 4b -- Interfaces and static dispatch primer](04b_interfaces_primer.md)
+> and [Intermediate 4c -- Generics primer](04c_generics_primer.md) first. This chapter
 > is the code surface.
 
 Think of an `interface` as a job description: "any employee who
 fills this role must know how to do X, Y, Z." A `Circle` and a
 `Square` both apply for the `Drawable` role by implementing it
-— you write their specific skills in an `implement` block. A
+-- you write their specific skills in an `implement` block. A
 generic function that accepts `where T is Drawable` can then
 work with any shape, just like a manager can assign tasks to
 anyone who holds the right job title, without caring about the
@@ -20,7 +20,7 @@ specific person.
 ## The program
 
 ```vani
-intent "Intermediate 4 worked example — interfaces + static dispatch.";
+intent "Intermediate 4 worked example -- interfaces + static dispatch.";
 
 struct Circle { r: i64 }
 struct Square { side: i64 }
@@ -76,7 +76,7 @@ area = 16
 
 - **`interface Name { fn ...; }`** declares an interface (Rust
   calls these *traits*). Methods may have full signatures only,
-  or a **default body** — see *Default methods* below.
+  or a **default body** -- see *Default methods* below.
 - **`implement Iface for Type { fn ...; }`** provides the
   concrete method bodies. Methods with defaults can be omitted;
   methods without defaults must be implemented. Partial
@@ -90,8 +90,8 @@ area = 16
   Static dispatch: the compiler emits one specialization per
   concrete T, so the call `s.area()` has zero runtime
   overhead.
-- **Dynamic dispatch** (`dyn Iface`) is a separate path —
-  covered in [§5 — Dynamic dispatch](05_dyn.md).
+- **Dynamic dispatch** (`dyn Iface`) is a separate path --
+  covered in [Sec.5 -- Dynamic dispatch](05_dyn.md).
 
 ## Default methods (v0.1.1+)
 
@@ -101,7 +101,7 @@ default.
 
 ```vani
 interface Describable {
-  fn name(self: Self) -> Str;          // required — no default
+  fn name(self: Self) -> Str;          // required -- no default
 
   fn describe(self: Self) -> Str {     // default body
     return "I am something.";
@@ -113,7 +113,7 @@ struct Cat {}
 
 implement Describable for Dog {
   fn name(self: Dog) -> Str { return self.breed; }
-  // describe() is NOT overridden — Dog inherits the default
+  // describe() is NOT overridden -- Dog inherits the default
 }
 
 implement Describable for Cat {
@@ -133,7 +133,7 @@ fn main() -> i64 {
 ## Blanket implementations (v0.1.1+)
 
 A blanket impl lets you implement an interface for **any type
-`T` that satisfies another bound** — the `Wrapper<T>` example
+`T` that satisfies another bound** -- the `Wrapper<T>` example
 below automatically gets `Printable` for every `T` that is
 already `Printable`:
 
@@ -160,7 +160,7 @@ blanket impl.
 | Need | Use |
 |---|---|
 | Know the concrete type at compile time | Generic `<T> where T is Iface` (this lesson) |
-| Heterogeneous collection (`Vec<…>` of mixed types) | `dyn Iface` (§5) |
+| Heterogeneous collection (`Vec<...>` of mixed types) | `dyn Iface` (Sec.5) |
 | Tiny code size | `dyn Iface` (one fn body, runtime vtable) |
 | Hot loop, minimal overhead | Generic (this lesson) |
 
@@ -172,9 +172,9 @@ generic `fn smaller<T>(a: T, b: T) -> T where T is Cmp` that
 returns whichever argument is smaller.
 
 Hint: this is exactly the shape of
-`examples/language/english/bounded_generics.vani` — peek there
+`examples/language/english/bounded_generics.vani` -- peek there
 if you get stuck.
 
 ---
 
-**Next**: [§5 — Dynamic dispatch →](05_dyn.md)
+**Next**: [Sec.5 -- Dynamic dispatch ->](05_dyn.md)

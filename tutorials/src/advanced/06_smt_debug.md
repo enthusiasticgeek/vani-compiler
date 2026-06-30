@@ -1,4 +1,4 @@
-# Advanced 6 — SMT trace debugging
+# Advanced 6 -- SMT trace debugging
 
 > **Learning goal**: when a `prove` / `assert` / loop
 > `invariant` fails, get the SMT solver to show its work and
@@ -22,13 +22,13 @@ Set the env var, then re-run any compile command:
 VANIC_SMT_DEBUG=1 vanic check ~/myprog.vani 2> smt.log
 ```
 
-Every SMT query the verifier emits — for every `prove`,
+Every SMT query the verifier emits -- for every `prove`,
 `assert`, `requires` at call sites, `ensures` at returns, and
-loop invariants — is written to stderr in two parts:
+loop invariants -- is written to stderr in two parts:
 
 1. **The query** in SMT-LIB v2 format, ready to paste into a
    standalone `z3` invocation.
-2. **The response** — either `unsat` (proof discharged) or a
+2. **The response** -- either `unsat` (proof discharged) or a
    `sat` model showing the counterexample assignment.
 
 The compiler buffers nothing; you can `tail -f smt.log` while
@@ -50,7 +50,7 @@ false. Read it as "if `x = i64::MAX` and `b = i64::MIN`, then
 `x - b` overflows and the inequality doesn't hold."
 
 The fix is usually a tightened `requires` clause. From
-Intermediate §12:
+Intermediate Sec.12:
 
 ```vani
 fn checked_sub(a: i64, b: i64) -> i64
@@ -69,7 +69,7 @@ operands inside the safe window.
 **Forgot to assume `requires` of a callee.** v1's encoder
 inlines `ensures` clauses across calls, but **not**
 `requires`. The caller must pass values that satisfy the
-callee's `requires` — failure mode is a "callee precondition
+callee's `requires` -- failure mode is a "callee precondition
 not met" error.
 
 **Loop invariant too weak.** The verifier needs the invariant
@@ -80,7 +80,7 @@ to be:
 - Strong enough at exit to prove the post-loop goal.
 
 A counterexample at "loop invariant is not preserved by the
-loop body" tells you the inductive step fails — usually you
+loop body" tells you the inductive step fails -- usually you
 need an *additional* invariant that constrains some other
 variable's relationship.
 
@@ -117,7 +117,7 @@ The query block looks like:
 (check-sat)
 ```
 
-`unsat` means the goal is provable — there's no model that
+`unsat` means the goal is provable -- there's no model that
 satisfies the negated goal under the assumptions. `sat` plus a
 `(get-model)` block is the counterexample.
 
@@ -147,7 +147,7 @@ It doesn't handle yet:
 - Recursion across calls without `ensures`.
 
 When you hit a boundary, the answer is usually "rewrite the
-predicate in the supported subset" — e.g. replace a string
+predicate in the supported subset" -- e.g. replace a string
 length check with the `u64` return of `len(s)`.
 
 ## Worked debugging session
@@ -166,4 +166,4 @@ counterexample narrows.
 
 ---
 
-**Next**: [§7 — Devanagari purity arc →](07_devanagari_purity.md)
+**Next**: [Sec.7 -- Devanagari purity arc ->](07_devanagari_purity.md)

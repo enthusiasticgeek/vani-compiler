@@ -1,10 +1,10 @@
-# Advanced 2b — Barrier: rendezvous synchronization (primer)
+# Advanced 2b -- Barrier: rendezvous synchronization (primer)
 
 > **Learning goal**: understand *why* you sometimes need all threads
 > to reach the same point before any of them can proceed, and how
 > `Barrier` in vāṇī gives you that guarantee with no data races.
 > Reading order: [02a parallelism primer](02a_parallelism_primer.md)
-> → here → [Advanced 3 concurrency](03_concurrency.md).
+> -> here -> [Advanced 3 concurrency](03_concurrency.md).
 
 This chapter has **no compiler code**. Pure intuition, then the
 one-page API.
@@ -14,13 +14,13 @@ one-page API.
 Imagine you are directing a team of 4 chefs preparing a feast.
 The feast has two distinct phases:
 
-1. **Phase 1** — each chef prepares their own dish independently
+1. **Phase 1** -- each chef prepares their own dish independently
    (no coordination needed; fully parallel).
-2. **Phase 2** — all four dishes are plated together; the sous-chef
+2. **Phase 2** -- all four dishes are plated together; the sous-chef
    can't start plating until every dish is ready.
 
 If Chef A finishes in 2 minutes and runs straight to phase 2,
-they'll try to plate three empty places — wrong. Chef A must
+they'll try to plate three empty places -- wrong. Chef A must
 *wait at the counter* until all four chefs finish phase 1, then
 everyone can move to phase 2 together.
 
@@ -28,10 +28,10 @@ That waiting-at-the-counter checkpoint is exactly what a **Barrier**
 implements.
 
 ```
-Thread A ───────────────────── Phase 1 work ─────── WAIT ──┐
-Thread B ─────────── Phase 1 work ──────────────── WAIT ───┤ ALL HERE
-Thread C ──────────────────────────── Phase 1 work ─ WAIT ─┤  ↓
-Thread D ─ Phase 1 work ────────────────────────── WAIT ───┘  ↓
+Thread A --------------------- Phase 1 work ------- WAIT --+
+Thread B ----------- Phase 1 work ---------------- WAIT ---+ ALL HERE
+Thread C ---------------------------- Phase 1 work - WAIT -+  v
+Thread D - Phase 1 work -------------------------- WAIT ---+  v
                                                         ALL PROCEED to Phase 2
 ```
 
@@ -43,23 +43,23 @@ simultaneously unblock and continue.
 
 `join` collects a task's *return value* back into the main thread.
 For phase-by-phase work, you want ALL threads to continue past
-the barrier — including the threads that were already fast. `join`
+the barrier -- including the threads that were already fast. `join`
 would force everything back to the main thread and destroy the
 parallelism of phase 2.
 
 A Barrier lets threads do:
 
 ```
-Thread A:  phase_one() → barrier_wait() → phase_two()   ← stays alive
-Thread B:  phase_one() → barrier_wait() → phase_two()   ← stays alive
-Thread C:  phase_one() → barrier_wait() → phase_two()   ← stays alive
+Thread A:  phase_one() -> barrier_wait() -> phase_two()   <- stays alive
+Thread B:  phase_one() -> barrier_wait() -> phase_two()   <- stays alive
+Thread C:  phase_one() -> barrier_wait() -> phase_two()   <- stays alive
 ```
 
 With just `join`, the flow would be:
 
 ```
-Thread A:  phase_one() → EXIT → (main joins, starts new thread) → phase_two()
-Thread B:  phase_one() → EXIT → ...
+Thread A:  phase_one() -> EXIT -> (main joins, starts new thread) -> phase_two()
+Thread B:  phase_one() -> EXIT -> ...
 ```
 
 Extra thread spawn/join overhead per phase, plus the parallelism
@@ -67,14 +67,14 @@ gap between teardown and re-spawn.
 
 ## The "last to arrive" signal
 
-`barrier_wait` returns a `bool` — `true` for the **last** thread
+`barrier_wait` returns a `bool` -- `true` for the **last** thread
 to arrive, `false` for all others. This lets you do a final
 single-thread cleanup step before everyone proceeds:
 
 ```vani
 let is_last: bool = barrier_wait(mut ref b);
 if is_last {
-  // Only one thread runs this — perfect for writing a summary,
+  // Only one thread runs this -- perfect for writing a summary,
   // flipping a flag, or triggering the next pipeline stage.
   print "All threads finished phase 1";
 }
@@ -114,14 +114,14 @@ so every thread can call `barrier_wait` on the same object.
 ## Worked example
 
 ```vani
-intent "Barrier primer — two-phase parallel work.";
+intent "Barrier primer -- two-phase parallel work.";
 
 fn phase_one(id: i64, b: mut ref Barrier) -> i64 {
-  // Simulate work — in a real program this would be computation.
+  // Simulate work -- in a real program this would be computation.
   print "thread", id, "finished phase 1";
   let is_last: bool = barrier_wait(mut ref b);
   if is_last {
-    print "All threads at barrier — starting phase 2";
+    print "All threads at barrier -- starting phase 2";
   }
   // All threads proceed here.
   print "thread", id, "starting phase 2";
@@ -145,7 +145,7 @@ Sample output (ordering within phase 1 varies by schedule):
 thread 2 finished phase 1
 thread 1 finished phase 1
 thread 3 finished phase 1
-All threads at barrier — starting phase 2
+All threads at barrier -- starting phase 2
 thread 3 starting phase 2
 thread 1 starting phase 2
 thread 2 starting phase 2
@@ -167,9 +167,9 @@ for `Channel` or `Condvar` instead.
 
 ## Cross-reference
 
-- [Advanced 2a — Parallelism primer](02a_parallelism_primer.md)
-  — race-freedom background; why ownership prevents data races
-- [Advanced 3 — concurrency primitives](03_concurrency.md)
-  — full API reference for all six primitives including Barrier
-- [Advanced 2 — `parallel for` + reductions](02_parallel.md)
-  — data-parallel alternative (no explicit synchronization needed)
+- [Advanced 2a -- Parallelism primer](02a_parallelism_primer.md)
+  -- race-freedom background; why ownership prevents data races
+- [Advanced 3 -- concurrency primitives](03_concurrency.md)
+  -- full API reference for all six primitives including Barrier
+- [Advanced 2 -- `parallel for` + reductions](02_parallel.md)
+  -- data-parallel alternative (no explicit synchronization needed)

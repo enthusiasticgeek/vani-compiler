@@ -1,4 +1,4 @@
-# Advanced 3 — `task` / `join` + atomics / mutexes / channels / barriers / rwlocks
+# Advanced 3 -- `task` / `join` + atomics / mutexes / channels / barriers / rwlocks
 
 > **Learning goal**: spawn an explicit OS thread with `task`,
 > join it back, and pick the right concurrency primitive
@@ -6,22 +6,22 @@
 > `Barrier` / `RwLock<T>`) for your synchronization need.
 
 Imagine two chefs sharing one kitchen at the same time (true
-parallelism — two threads). If they both reach for the salt
+parallelism -- two threads). If they both reach for the salt
 shaker simultaneously, one has to wait. Concurrency primitives
 are the rules that prevent chaos:
-- **Atomic** — a single number with a padlock so small and fast
+- **Atomic** -- a single number with a padlock so small and fast
   that the two chefs can each update it without ever noticing
   the other. Good for simple counters.
-- **Mutex** — a door key: only the chef holding the key can
+- **Mutex** -- a door key: only the chef holding the key can
   enter the walk-in fridge. One at a time; everyone else waits.
-- **Channel** — a pass-through hatch: chef A prepares dishes
+- **Channel** -- a pass-through hatch: chef A prepares dishes
   and slides them through; chef B picks them up on the other
   side. No shared space, no collision.
-- **Condvar** — a buzzer: one chef waits in the break room and
+- **Condvar** -- a buzzer: one chef waits in the break room and
   the other buzzes them when the oven is free.
-- **Barrier** — a starting gate: all N chefs must arrive before
+- **Barrier** -- a starting gate: all N chefs must arrive before
   any of them can enter the kitchen together.
-- **RwLock** — a whiteboard with a usage log: many chefs can
+- **RwLock** -- a whiteboard with a usage log: many chefs can
   read it at once, but only one can write and only when no one
   is reading.
 
@@ -37,7 +37,7 @@ fn worker(n: i64) -> i64 {
 
 fn main() -> i64 {
   let t: Task<i64> = task worker(6);   // spawns an OS thread
-  // …do other work concurrently…
+  // ...do other work concurrently...
   let r: i64 = join t;                 // blocks until worker exits
   print "result =", r;
   return 0;
@@ -45,7 +45,7 @@ fn main() -> i64 {
 ```
 
 - **`task EXPR`** spawns an OS thread (via `pthread_create` on
-  Linux/macOS, `CreateThread` on Windows — the backend picks)
+  Linux/macOS, `CreateThread` on Windows -- the backend picks)
   and runs the expression in it. Returns a `Task<R>` handle.
 - **`join t`** blocks the caller until the task finishes, then
   returns the task's value.
@@ -54,10 +54,10 @@ fn main() -> i64 {
 
 ## The six concurrency primitives
 
-vāṇी ships six primitives in the prelude — pick by the
+vāṇी ships six primitives in the prelude -- pick by the
 synchronization shape you need:
 
-### `Atomic<T>` — lock-free counters and flags
+### `Atomic<T>` -- lock-free counters and flags
 
 ```vani
 let counter: Atomic<i64> = atomic_new(0);
@@ -68,12 +68,12 @@ let _ = atomic_compare_exchange(ref counter, 0, 1);
 ```
 
 - `T` ranges over `i8..i64`, `u8..u64`, and `bool`.
-- All operations are sequentially consistent (`seq_cst`) — no
+- All operations are sequentially consistent (`seq_cst`) -- no
   weaker memory orderings in v1.
 - Best for hot counters, flags, and single-cell lock-free
   publication.
 
-### `Mutex<T>` — guarded mutation of a payload
+### `Mutex<T>` -- guarded mutation of a payload
 
 ```vani
 // Simple scalar payload
@@ -95,12 +95,12 @@ let cfg: Mutex<Config> = mutex_new(Config { limit: 100, debug: false });
 ```
 
 - `T` can be any type: scalars, `bool`, structs, enums (parametric since v0.1.1).
-- The `Guard<T>` returned by `mutex_lock` is affine — exactly one
+- The `Guard<T>` returned by `mutex_lock` is affine -- exactly one
   thread can hold a guard for a given mutex at a time, enforced
   at compile time + runtime.
 - The unlock happens at the guard's scope exit (Rust-style RAII).
 
-### `Channel<T, N>` — bounded MPMC queue
+### `Channel<T, N>` -- bounded MPMC queue
 
 ```vani
 // Scalar element
@@ -120,7 +120,7 @@ print "got msg id =", m.id;
 - Backed by a ring buffer with a futex/WaitOnAddress wait
   protocol so blocked threads don't spin.
 
-### `Condvar` — signaling for non-trivial wait conditions
+### `Condvar` -- signaling for non-trivial wait conditions
 
 ```vani
 let cv: Condvar = condvar_new();
@@ -137,15 +137,15 @@ let _ = condvar_signal_all(ref cv);
 - v1's predicate is just `Guard<i64>` payload comparison; full
   user-predicate support is a follow-up.
 
-### `Barrier` — N-thread rendezvous
+### `Barrier` -- N-thread rendezvous
 
 A Barrier makes all N threads wait at a checkpoint until every
-one of them has arrived. Only then does every thread proceed —
+one of them has arrived. Only then does every thread proceed --
 like a starting gun at a race.
 
 ```vani
 fn stage_one(n: i64, b: mut ref Barrier) -> i64 {
-  // …do first-stage work…
+  // ...do first-stage work...
   let is_last: bool = barrier_wait(mut ref b);
   // All N threads have now finished stage one.
   // is_last is true for exactly the last thread to arrive.
@@ -166,10 +166,10 @@ fn main() -> i64 {
 - `barrier_new(n)` creates an affine Barrier for `n` threads.
 - `barrier_wait(mut ref b)` blocks until all n threads have
   called it; returns `true` for the last thread to arrive.
-- Uses a generation counter to prevent ABA races — safe to
+- Uses a generation counter to prevent ABA races -- safe to
   reuse in a loop.
 
-### `RwLock<T>` — shared reads, exclusive writes
+### `RwLock<T>` -- shared reads, exclusive writes
 
 A RwLock lets many threads read simultaneously but requires
 exclusive access to write. Use it when reads vastly outnumber
@@ -179,16 +179,16 @@ writes and you want to avoid Mutex contention.
 fn main() -> i64 {
   let rw: RwLock<i64> = rwlock_new(0);
 
-  // Shared read — many threads can hold a ReadGuard at once
+  // Shared read -- many threads can hold a ReadGuard at once
   let r: ReadGuard<i64> = rwlock_read(ref rw);
   let v: i64 = read_guard_get(ref r);
   print "current value =", v;
-  // ReadGuard drops here → read lock released
+  // ReadGuard drops here -> read lock released
 
-  // Exclusive write — blocks until all readers have released
+  // Exclusive write -- blocks until all readers have released
   let w: WriteGuard<i64> = rwlock_write(mut ref rw);
   let _ = write_guard_set(mut ref w, v + 1);
-  // WriteGuard drops here → write lock released
+  // WriteGuard drops here -> write lock released
 
   return 0;
 }
@@ -204,11 +204,11 @@ fn main() -> i64 {
 
 For runnable end-to-end programs, see:
 
-- `examples/language/english/atomics.vani` — atomic counter
+- `examples/language/english/atomics.vani` -- atomic counter
   and the five builtin operations.
-- `examples/language/english/concurrency.vani` — `task` + `join`
+- `examples/language/english/concurrency.vani` -- `task` + `join`
   with multiple workers.
-- `examples/language/english/condvar.vani` — `Condvar` waiting
+- `examples/language/english/condvar.vani` -- `Condvar` waiting
   on a `Mutex<i64>` payload.
 
 ## Picking the right primitive
@@ -225,7 +225,7 @@ For runnable end-to-end programs, see:
 | Spawn-and-collect-result | `task` + `join` |
 
 If your design needs a primitive that's not in the list, look
-in `examples/language/english/parallel.vani` — `parallel for`
+in `examples/language/english/parallel.vani` -- `parallel for`
 + `reduce` covers a lot of the embarrassingly-parallel space
 without needing explicit synchronization.
 
@@ -237,4 +237,4 @@ final total. Use `Atomic<i64>` for the running total.
 
 ---
 
-**Next**: [§4 — Embedded targets + `unsafe` + region typing →](04_embedded.md)
+**Next**: [Sec.4 -- Embedded targets + `unsafe` + region typing ->](04_embedded.md)

@@ -1,13 +1,13 @@
-# Intermediate 10b — Runtime errors, panic-free design, and the segfault-free guarantee
+# Intermediate 10b -- Runtime errors, panic-free design, and the segfault-free guarantee
 
 > **Learning goal**: build the mental model for what *can*
 > fail at runtime in a vāṇी program, what *cannot* by
 > construction (segfaults, UAF, double-free, dangling-ref
 > deref), and the everyday discipline for writing programs
 > that never reach an abort. Reading order: at minimum
-> [Intermediate 10a — Result/try primer](10a_result_try_primer.md)
-> + [Beginner 09 — first contract](../beginner/09_smt_intro.md).
-> Optional follow-up: [Intermediate 12a — SMT primer](12a_smt_primer.md).
+> [Intermediate 10a -- Result/try primer](10a_result_try_primer.md)
+> + [Beginner 09 -- first contract](../beginner/09_smt_intro.md).
+> Optional follow-up: [Intermediate 12a -- SMT primer](12a_smt_primer.md).
 
 This chapter has **no compiler code**. Pure intuition with
 side-by-side comparisons.
@@ -19,7 +19,7 @@ different failure modes:
 
 - **Bug-class crashes**: null-pointer dereference, use-after-
   free, double-free, buffer overrun, wild stack-smash. The
-  program is in *undefined behavior* — anything could happen
+  program is in *undefined behavior* -- anything could happen
   next. C programs segfault here; C++ too; Rust forbids
   these in safe code; Python's interpreter shields you but
   C extensions can still crash.
@@ -28,7 +28,7 @@ different failure modes:
   have *known* about these statically with enough effort. C
   invokes UB; Java throws; Python raises; Rust panics.
 - **Recoverable failures**: file not found, network timeout,
-  parse error, user typed nonsense. These are not bugs —
+  parse error, user typed nonsense. These are not bugs --
   they're inputs the program needs to handle. C returns -1
   / sets errno; Java throws checked exceptions; Python
   raises; Rust returns `Result<T, E>`.
@@ -37,9 +37,9 @@ vāṇी's design splits these cleanly:
 
 | Class | vāṇी's stance |
 |---|---|
-| Bug-class crashes | **Structurally impossible on hosted targets** — affine ownership + bounds checks + no raw pointers + scope-escape analysis eliminate the surface. |
+| Bug-class crashes | **Structurally impossible on hosted targets** -- affine ownership + bounds checks + no raw pointers + scope-escape analysis eliminate the surface. |
 | Logic-class crashes | **Compile-time when SMT can prove**; otherwise a clean `abort()` at the operation with a diagnostic. No corrupted state. |
-| Recoverable failures | **Always values** — `Result<T, E>` or `Option<T>` returned, propagated via `try` / `?`, matched by the caller. No exceptions, no unwinding. |
+| Recoverable failures | **Always values** -- `Result<T, E>` or `Option<T>` returned, propagated via `try` / `?`, matched by the caller. No exceptions, no unwinding. |
 
 The rest of this chapter unpacks each row.
 
@@ -58,7 +58,7 @@ heap allocation with auto-drop), `dyn Iface` fat pointers,
 `Box<dyn Iface>`, and indices into `Vec<T>`. None of these
 can be null. `Option<Box<T>>` makes "maybe-allocated" an
 explicit type that the caller MUST match on before
-dereferencing — no silent nullptr crash.
+dereferencing -- no silent nullptr crash.
 
 ### 2. Affine ownership eliminates UAF and double-free
 
@@ -67,7 +67,7 @@ Every heap-owning value (`Vec<T>`, `OwnedStr`, `Box<T>`,
 heap fields) has exactly one owner. After `let y = x;`,
 `x` is a compile-time error to reference. Drop fires
 exactly once on the new owner. No double-free path exists
-to be exercised. No UAF path either — after drop, the
+to be exercised. No UAF path either -- after drop, the
 binding is unreachable.
 
 ### 3. Scope-escape analysis prevents dangling references
@@ -75,8 +75,8 @@ binding is unreachable.
 A `ref T` / `mut ref T` can appear in parameters, `let`
 bindings, and user struct fields. The scope-escape analyzer
 walks every shape that COULD let the reference outlive its
-source — returning the ref-holding struct, storing it in a
-`Vec`, holding `mut ref T` across a suspend point — and
+source -- returning the ref-holding struct, storing it in a
+`Vec`, holding `mut ref T` across a suspend point -- and
 rejects them at compile time with the exact source line.
 
 ### 4. Bounds-checked indexing by default
@@ -90,21 +90,21 @@ diagnostic, NOT a buffer overrun into adjacent memory.
 
 `unsafe(reason = "...")` is rejected by the hosted-build
 path. It only opens on `--target embedded`, and even there,
-Layer 1–3 of the safety net ([unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
+Layer 1-3 of the safety net ([unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
 catches the majority of pointer-class mistakes.
 
 ### What this rules out
 
 The classic segfault sources from C/C++ don't exist:
 
-- `NULL` dereference → no nullable pointers
-- Use-after-free → affine + scope-escape
-- Double-free → affine drop fires exactly once
-- Buffer overrun (read or write) → bounds checks
-- Dangling stack-frame return → scope-escape rejects at parse
-- Wild pointer arithmetic → no raw pointers in safe code
-- Stack smash via unbounded `strcpy` → no unbounded copy primitives
-- Type confusion via `transmute` → not in safe code
+- `NULL` dereference -> no nullable pointers
+- Use-after-free -> affine + scope-escape
+- Double-free -> affine drop fires exactly once
+- Buffer overrun (read or write) -> bounds checks
+- Dangling stack-frame return -> scope-escape rejects at parse
+- Wild pointer arithmetic -> no raw pointers in safe code
+- Stack smash via unbounded `strcpy` -> no unbounded copy primitives
+- Type confusion via `transmute` -> not in safe code
 
 A hosted-target vāṇी program **cannot segfault from source
 code alone**. If one segfaults, the cause is in linked C
@@ -115,7 +115,7 @@ code alone**. If one segfaults, the cause is in linked C
 The structural guarantees above leave a small, well-named
 set of *logic-class* checks the compiler emits at runtime
 when SMT can't discharge them statically. When one fails,
-the program calls `abort()` — a clean, deterministic, named
+the program calls `abort()` -- a clean, deterministic, named
 termination, NOT undefined behavior.
 
 ### What can abort
@@ -151,9 +151,9 @@ When one of the conditions above fires:
    non-zero; on POSIX, a signal-terminated process exits
    with `128 + SIGABRT = 134`).
 
-This is **graceful in the diagnostic sense** — a named,
-deterministic event with a printable cause — but **terminal
-in the cleanup sense** — no chance to recover, no chance to
+This is **graceful in the diagnostic sense** -- a named,
+deterministic event with a printable cause -- but **terminal
+in the cleanup sense** -- no chance to recover, no chance to
 flush buffers manually, no chance to write a crash dump from
 inside vāṇी code.
 
@@ -174,12 +174,12 @@ The deciding question: **is this a contract the caller is
 obligated to uphold, or is this input that the caller might
 legitimately produce?**
 
-- Contract → `requires` (compile-time check if possible,
+- Contract -> `requires` (compile-time check if possible,
   abort if SMT can't discharge). Example: `fn sqrt_int(n:
-  i64) requires n >= 0 -> i64` — the caller MUST pass
+  i64) requires n >= 0 -> i64` -- the caller MUST pass
   non-negative. Passing negative is a bug.
-- Input → `Result<T, E>`. Example: `fn parse_int(s: Str)
-  -> Result<i64, ParseError>` — the caller might
+- Input -> `Result<T, E>`. Example: `fn parse_int(s: Str)
+  -> Result<i64, ParseError>` -- the caller might
   legitimately pass non-numeric text. Returning the
   failure as a value lets the caller decide.
 
@@ -188,7 +188,7 @@ that intentionally pass the bad value to verify error
 handling, it's a `Result`. If passing the bad value would
 be a test of the type system itself, it's a contract.**
 
-### Worked split — a small parser
+### Worked split -- a small parser
 
 ```vani
 fn parse_int(s: Str) -> Result<i64, OwnedStr> { ... }
@@ -221,7 +221,7 @@ The split is a design choice, not a compiler decision.
 
 When a function's body calls many `Result`-returning
 functions, the postfix `?` operator (or the `try EXPR`
-keyword — same AST node, two surface spellings) propagates
+keyword -- same AST node, two surface spellings) propagates
 failures up:
 
 ```vani
@@ -240,7 +240,7 @@ Three things to notice:
    if Ok, unwrap to the value." Propagation is automatic.
 2. The function's own return type is `Result<...>`, so the
    propagated error gets wrapped naturally.
-3. `parts[0]` is a CONTRACT slot — the caller is expected
+3. `parts[0]` is a CONTRACT slot -- the caller is expected
    to know that the split produced at least one piece. If
    it didn't, the bounds check aborts. The author has to
    *think* about whether that's right.
@@ -256,7 +256,7 @@ can prove that a runtime check ALWAYS succeeds, in which
 case the compiler elides the check entirely. The check
 that's never there can never fire.
 
-### Index access — bounds elision
+### Index access -- bounds elision
 
 ```vani
 fn sum_first_three(xs: ref Vec<i64>) -> i64
@@ -274,9 +274,9 @@ program is faster AND can't possibly fire that abort
 because the path doesn't exist in the emitted code.
 
 If you remove the `requires`, the compiler emits the
-runtime checks — they MIGHT fire on a 0-length input.
+runtime checks -- they MIGHT fire on a 0-length input.
 
-### Integer overflow — range elision
+### Integer overflow -- range elision
 
 ```vani
 fn safe_add(a: i64, b: i64) -> i64
@@ -288,7 +288,7 @@ fn safe_add(a: i64, b: i64) -> i64
 ```
 
 SMT proves `a + b` cannot overflow given the pre-conditions
-(both inputs ≤ 1M, sum ≤ 2M, well within i64). The overflow
+(both inputs <= 1M, sum <= 2M, well within i64). The overflow
 guard is elided.
 
 ### Divide-by-zero elision
@@ -316,7 +316,7 @@ that never runs is the fastest check.
 
 The guard stays. The program is no slower than it would be
 in a language that ALWAYS does the check (most languages).
-The guard's behavior on failure is `abort` — not silent UB,
+The guard's behavior on failure is `abort` -- not silent UB,
 not corrupted state.
 
 You can ALWAYS keep the guards on with `INTENTC_NO_VERIFY=1`
@@ -341,7 +341,7 @@ $ echo $?
 Three properties:
 
 1. **Named.** The specific assertion / pre-condition is
-   printed. Not just "segmentation fault" — the exact
+   printed. Not just "segmentation fault" -- the exact
    contract that was violated.
 2. **Located.** The source file and line. No address-only
    trace; no need for symbol resolution.
@@ -365,7 +365,7 @@ C-level `signal(SIGABRT, handler)` *before* main returns,
 in a tiny FFI shim. Keep the handler async-signal-safe (no
 mallocs, no locks).
 
-## Side-by-side — same input, four languages
+## Side-by-side -- same input, four languages
 
 A program that reads `argv[1]`, parses it as an integer,
 divides 100 by it, and prints the result.
@@ -374,9 +374,9 @@ divides 100 by it, and prints the result.
 
 ```c
 int main(int argc, char** argv) {
-    int n = atoi(argv[1]);   // ← argv[1] could be NULL → segfault
-    int r = 100 / n;         // ← n could be 0 → SIGFPE / abort
-    printf("%d\n", r);       // ← n could be negative; atoi could
+    int n = atoi(argv[1]);   // <- argv[1] could be NULL -> segfault
+    int r = 100 / n;         // <- n could be 0 -> SIGFPE / abort
+    printf("%d\n", r);       // <- n could be negative; atoi could
                              //   silently truncate; UB on overflow
     return 0;
 }
@@ -399,7 +399,7 @@ fn main() {
 
 Two `unwrap()` calls panic on missing or non-numeric input.
 The divide panics on zero. Integer overflow is checked in
-debug, silently wraps in release — a footgun. The panics
+debug, silently wraps in release -- a footgun. The panics
 unwind by default (drops run); aborts on `panic=abort`
 builds.
 
@@ -443,7 +443,7 @@ fn safe_div(num: i64, den: i64) -> Result<i64, OwnedStr> {
 
 Each failure mode is a named return code with a printed
 message. Bounds check on `argv[1]` is elided after the
-`len(argv) < 2` guard. `parse_int` is `Result` — bad text
+`len(argv) < 2` guard. `parse_int` is `Result` -- bad text
 goes to the `Err` arm. `safe_div` rejects zero up front.
 The program cannot segfault, cannot panic, cannot abort.
 
@@ -456,7 +456,7 @@ type signatures.
 ## What if I genuinely WANT abort behavior?
 
 Sometimes the right move is "if this is wrong, kill the
-program — I can't recover." Two paths:
+program -- I can't recover." Two paths:
 
 ### 1. `assert` for invariants you've verified
 
@@ -489,7 +489,7 @@ time, OR the build fails. Use when you have an invariant
 that the rest of the program's correctness depends on and
 you don't want to ship without proof.
 
-These tools are *for* aborting — they're not bugs to be
+These tools are *for* aborting -- they're not bugs to be
 avoided. They mark "if this fails, the bug is here, in this
 named contract."
 
@@ -505,15 +505,15 @@ named contract."
   and named: assert / prove / requires / ensures /
   invariant / index OOB / overflow / div-by-zero / shift
   past width.
-- **Recoverable failures** are always values — `Result<T, E>`
+- **Recoverable failures** are always values -- `Result<T, E>`
   / `Option<T>` propagated via `?` / `try`. No exceptions,
   no unwinding, no "uncaught exception" surprise.
 - The split between `Result<T, E>` and `assert` is a design
-  choice: contracts (caller obligated to uphold) → `assert`
+  choice: contracts (caller obligated to uphold) -> `assert`
   / `requires`; inputs (caller might legitimately produce
-  bad value) → `Result<T, E>`.
+  bad value) -> `Result<T, E>`.
 - **Lift checks to compile time** with `requires` / `ensures`
-  — SMT elides the runtime guards, programs run faster, and
+  -- SMT elides the runtime guards, programs run faster, and
   the abort that's not emitted can't fire.
 - Abort is **terminal, diagnostic, deterministic**. No
   destructors run, no cleanup, no recovery from inside
@@ -527,19 +527,19 @@ impossible or named at a contract.
 
 ## Cross-reference
 
-- [Intermediate 10a — Result / try / `?` primer](10a_result_try_primer.md)
-  — graceful error propagation
-- [Intermediate 10 — Result, `try`, and the `?` operator](10_result_try.md)
-  — syntax + worked examples
-- [Beginner 09 — first contract `assert` / `prove` / `requires`](../beginner/09_smt_intro.md)
-  — the assert side
-- [Intermediate 12a — SMT primer](12a_smt_primer.md) — the
+- [Intermediate 10a -- Result / try / `?` primer](10a_result_try_primer.md)
+  -- graceful error propagation
+- [Intermediate 10 -- Result, `try`, and the `?` operator](10_result_try.md)
+  -- syntax + worked examples
+- [Beginner 09 -- first contract `assert` / `prove` / `requires`](../beginner/09_smt_intro.md)
+  -- the assert side
+- [Intermediate 12a -- SMT primer](12a_smt_primer.md) -- the
   intuition for compile-time discharge
-- [Intermediate 12 — SMT deep-dive](12_smt_deepdive.md) —
+- [Intermediate 12 -- SMT deep-dive](12_smt_deepdive.md) --
   the full SMT surface
-- [Advanced 6 — SMT trace debugging](../advanced/06_smt_debug.md)
-  — when SMT *can't* discharge: how to read the trace,
+- [Advanced 6 -- SMT trace debugging](../advanced/06_smt_debug.md)
+  -- when SMT *can't* discharge: how to read the trace,
   what to strengthen
-- [Advanced 4 — Embedded + `unsafe` + regions](../advanced/04_embedded.md)
-  — the only place the safe-by-construction surface opens,
-  and how Layer 1–3 keep it bounded
+- [Advanced 4 -- Embedded + `unsafe` + regions](../advanced/04_embedded.md)
+  -- the only place the safe-by-construction surface opens,
+  and how Layer 1-3 keep it bounded

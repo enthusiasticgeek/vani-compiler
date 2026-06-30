@@ -1,10 +1,10 @@
-﻿# Contributing to the tutorials
+# Contributing to the tutorials
 
 The tutorials site is an mdBook. Each lesson is a single
 Markdown file under `tutorials/src/`. To contribute:
 
 1. **Pick a lesson** from [SUMMARY.md](SUMMARY.md). Stub
-   lessons (everything except *Beginner 1 â€” Hello, World*) are
+   lessons (everything except *Beginner 1 â€" Hello, World*) are
    open for writing.
 2. **Use the template** from
    [`beginner/01_hello_world.md`](beginner/01_hello_world.md):
@@ -52,5 +52,5 @@ mdbook serve --open
 mdbook clean
 ```
 
-GitHub Pages deployment is queued as **TUT-5** â€” see
+GitHub Pages deployment is queued as **TUT-5** â€" see
 [TODO.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md).
