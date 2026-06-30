@@ -496,110 +496,16 @@ history and [TODO.md](TODO.md) for what's queued. The full Roadmap
 (small + multi-session items) is in the README's *Roadmap* section
 below.
 
-**Since the Levels-1-to-4 sweep — Arcs 1–9 multi-session ledger
-(2026-06-03 → 2026-06-04):**
-- **Arc 4 — full HashMap K-V matrix** cross-backend: `HashMap<OwnedStr, V>` (4.1), `HashMap<i64, OwnedStr>` (4.2), `HashMap<OwnedStr, OwnedStr>` (4.3), `HashMap<Tuple, V>` (4.4), `HashMap<f64, V>` (4.5), `HashMap<Vec<i64>, V>` (4.6). Per-bundle FNV-1a + memcpy / strcmp / element-walk equality; per-slot drop walks; clone-on-insert to side-step the affine double-free shape.
-- **Arc 5c — closure-as-value across fn boundaries** (commit `7cccc1b`). New `Type::Closure(Args, Ret)`; lift-pass synthesizes env-struct + trampoline + magic `__intent_make_closure_<N>` constructor. Captured anonymous fns now pass as fn args / return values / struct fields. Example: [examples/closure_as_value.vani](examples/closure_as_value.vani).
-- **Arc 7 SysV — full float-class + mixed int/float ≤ 16-byte struct FFI** (commit `69b5ec0`). Closure #285 covered the integer-only subset; this completes the SysV classifier. Win64 / AArch64 gated on cross-platform CI.
-- **Arc 8 FULLY COMPLETE — async + networking + concurrency + state machines end-to-end**:
-  - **v1 source surface** (commits `2e649ff`, `e50dc20`, `25b5a84`): `async fn`, `await(expr)`, `Future<T>`, `Poll<T>`, `CancelToken` at parser+prelude layer. Examples: [async_fn.vani](examples/async_fn.vani), [async_await.vani](examples/async_await.vani).
-  - **v1.5 timers** (commits `d344828`, `d209e06`): `sleep_ms` POSIX nanosleep wrapper; [async_io.vani](examples/async_io.vani).
-  - **v1.6 blocking TCP** (commits `9aaec41`, `83010ab`): 8-builtin TCP family + [tcp_echo.vani](examples/tcp_echo.vani) (1 client) + [tcp_multi_echo.vani](examples/tcp_multi_echo.vani) (3 task clients).
-  - **v2 epoll + non-blocking I/O** (commit `92864de`): 7-builtin epoll + nb family. [tcp_echo_epoll.vani](examples/tcp_echo_epoll.vani) — 3 concurrent clients multiplexed on ONE OS thread.
-  - **v3 async aliases + state-machine pattern** (commit `f7743a1`): 3 async-flavored builtin aliases (`io_recv_async` / `io_send_async` / `io_accept_async`) + [tcp_echo_state_machine.vani](examples/tcp_echo_state_machine.vani) showing the hand-rolled state-machine pattern (struct + poll fn + driver loop).
-  - **Arc 8 v3.1 sugar — FEATURE-COMPLETE 2026-06-08** for typical user code (postfix `?`, multi-task scheduling, ref CancelToken + A4.4 auto-plumbing all shipped same day; full ledger above): the parser-level compiler transform auto-rewrites `async fn` bodies into state-machine struct/poll/constructor triples that users previously wrote by hand. **All phases shipped**: Phase 0 + 1 + 2 narrow + 2.1a-c + 2.2 + 2.3-narrow + 2.3a/b/c/d + 2.4 + 2.5 + 2.5b + 3a/b/c/d/e/f + 3-returns + 3-params + 4a-narrow + 4a-broad + 4b + 4c-narrow + **4c-broad (full generic async fns)**. Covers linear bodies + non-suspending control flow + suspend-in-branch state-splitting + fall-through merge + nested ifs + ANF lifting + loops + break/continue + **match-with-suspends for every literal + enum pattern shape** (Int / Bool / Str / Float / Variant / VariantWithBinding / Wildcard) + **`try EXPR` keyword for Result propagation** + **non-i64 types across the entire async-fn boundary** (params + locals + returns: bool / f64 / Str / OwnedStr / Enum / Vec<T> / Struct / Array `[T; N]`) + **nested async** (`let sub: Task__inner = inner(args); let r = __poll_inner(mut ref sub);` as `await sub`) + **multi-task scheduling** (multiple concurrent sub-tasks in one async fn) + **generic async fns** (`async fn identity<T>(...) -> T`). 28 acceptance examples + generic-async smoke all cross-backend parity-green. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for the phased plan-of-record.
-  - **Platform support — Linux + macOS + Windows (2026-06-06)**. Phase 5 (macOS kqueue + EVFILT_TIMER + `__error()` errno) and Phase 6 (Windows IOCP + winsock2 + WSAStartup + `Sleep`) ship on the C backend via `#ifdef __APPLE__` / `_WIN32` branches, and on the LLVM backend via host-conditional inline IR (matching the C-backend's constants + struct layouts). **Linux verification is green**; macOS verification deferred (no host). **Windows fully verified (2026-06-11)**: all 2089 lib tests + all e2e tests pass on Windows 11 GNU toolchain after applying `putchar`→`printf("%c",…)` CRT shim, `ws2_32` MinGW linker flag, `Sleep` IR dedup, 64 MB stack, and CRLF normalisation. IOCP async-TCP tests (`tcp_echo_epoll`, `echo_loop`, `async_showcase`) remain skipped pending overlapped-I/O wiring. Threading was already cross-platform (CreateThread via [host_uses_win32_threading()](src/backend_llvm.rs)).
-- **Arc 9 c+d — `pub(kosh)` visibility tier + chained `pub use` re-exports** already on `main` via closures #257 + #258.
-- **Arc 9 a/b/e — Kosh package manager MVP — SHIPPED 2026-06-17**: `vani.toml` manifest with `[package].version` and `[deps]` version constraints; `vani.lock` writer; `vanic vendor`; live sparse registry at **[enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/)**; `vanic add <name>[@constraint]` (fetches from registry → `vendor/` → updates manifest + lockfile); `vanic publish` (builds tarball, creates GitHub Release, appends NDJSON index entry); publish gate via `governance.allowed_publishers` in `config.json` (governance transfers without a compiler change). See [docs/kosh_design.md](docs/kosh_design.md).
+**Major feature arcs (shipped):**
 
-**v0.1.1 — concurrency + generics sweep (2026-06-18):**
-- **Traits phase 2** — default methods in interface declarations; blanket impls (`implement<T> Iface for Wrapper<T> where T is Iface`); satisfiability checking with bounded generics.
-- **Parametric `Mutex<T>` / `Guard<T>`** — previously i64-only; now any element type (integers, bool, struct, enum). Per-T C struct bundles synthesized by `collect_mutex_specs`.
-- **Parametric `Channel<T, N>`** — struct and enum element types now accepted in addition to integer widths and bool. C backend uses `memset` zero-init for aggregate slots.
-- **`Barrier`** — N-thread rendezvous primitive (`barrier_new(n)` / `barrier_wait(mut ref b) -> bool`). Stack-by-value, affine. Generation counter prevents ABA races under futex/WaitOnAddress. Both backends.
-- **`RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>`** — readers-writer lock parametric over any value type T. RAII drop releases the lock. State encoding: 0=unlocked, N>0=N concurrent readers, -1=write-locked. Per-T C struct bundles. Both backends.
-- **Kosh**: runtime download URL + custom CA cert file configurable via `config.json`.
+- **Arc 4 -- full HashMap K-V matrix** -- all six K/V combinations (`OwnedStr`, `i64`, `f64`, `Tuple`, `Vec<i64>`) cross-backend. FNV-1a hashing, per-slot drop, clone-on-insert.
+- **Arc 5c -- closure-as-value across fn boundaries** -- `Type::Closure(Args, Ret)`; closures pass as fn args / return values / struct fields. See [examples/closure_as_value.vani](examples/closure_as_value.vani).
+- **Arc 7 SysV -- full float-class + mixed int/float <= 16-byte struct FFI** -- completes the SysV ABI classifier; Win64 / AArch64 gated on cross-platform CI.
+- **Arc 8 -- async + networking + concurrency + state machines end-to-end** -- `async fn` / `await` / `Future<T>` / `Poll<T>` / `CancelToken`; blocking TCP, epoll non-blocking I/O, compiler-driven state-machine transform (postfix `?`, multi-task scheduling, generic async fns); Linux / macOS / Windows. See [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) and the examples under `examples/`.
+- **Arc 9 -- Kosh package manager** -- `vani.toml` manifest + `vani.lock`; `vanic add / vendor / publish`; live sparse registry at [enthusiasticgeek.github.io/kosh-index](https://enthusiasticgeek.github.io/kosh-index/). See [docs/kosh_design.md](docs/kosh_design.md).
 
-**v0.1.5 — native file I/O (2026-06-21):**
-- **`FileHandle`** — affine RAII file handle; auto-`fclose`d at scope exit on both C and LLVM backends.
-- **`file_open` / `file_is_ok` / `file_read_line` / `file_write` / `file_close` / `file_flush`** — full typed file I/O API.
-- **`stdin_read_line() -> OwnedStr`** / **`flush_stdout() -> i64`** — stdin and stdout helpers.
-- **`eprint` statement** — writes to stderr, same multi-item syntax as `print`.
-- **L18 resolved** (`docs/v1_limitations.md`). Example: `examples/language/english/file_io.vani`.
-
-**v0.1.6 — bare-metal / cross-compilation (2026-06-21):**
-- **`--target=<triple>`** on `vanic build` / `vanic run` — passes `--mtriple` to `llc`, selects cross-linker, suppresses libc/OpenMP/pthread for bare-metal triples.
-- **`--no-std`** on `vanic emit --backend=c` / `vanic emit-c` — suppresses all `#include <std*.h>`, emits minimal typedef block; auto-activates for bare-metal triples.
-- **`#[link_section = "..."]`** attribute on `fn` — `__attribute__((section(...)))` in C, `section "..."` in LLVM IR.
-- **`#[no_mangle]`** attribute on `fn` — suppresses `intent_` prefix and Unicode mangling in both backends.
-- **`mmio_read_u8` / `mmio_write_u8` / `mmio_read_u16` / `mmio_write_u16`** — volatile 8/16-bit MMIO (joins existing u32 builtins).
-- **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently invokes `qemu-<arch>-static`.
-- **L19 fully resolved** (all 5 bare-metal gaps). Example: `examples/language/english/bare_metal.vani`.
-
-**v0.1.8 — block comments, print blocks, positional break (2026-06-23):**
-- **Block comments `/* ... */`** — multi-line, nestable to any depth; unterminated → clean diagnostic.
-- **Print block `print { line1; line2; }`** — group multiple output lines under one keyword; each `;`-group is a separate line.
-- **Positional break** — `break inner` (innermost), `break middle` (second-from-innermost), `break outer` (outermost); C + LLVM backends.
-
-**v0.1.7 — tutorial coverage expansion (2026-06-21):**
-- **10 new tutorial pages** across beginner, intermediate, and advanced tracks — no compiler changes.
-- **`beginner/00_cli_reference.md`** — complete `vanic` CLI reference: all subcommands, flags, and environment variables.
-- **`intermediate/06c_fnptr_primer.md`** — function pointers (`fn(A)->R`) as first-class values, higher-order functions, `Vec<fn(A)->R>` dispatch tables.
-- **`intermediate/09b_file_io_primer.md` + `09c_file_io.md`** — `FileHandle` concept primer and worked examples (write/read/stdin/append).
-- **`intermediate/15a_math_deep.md`** — full math library coverage: logs, special functions (erf, gamma, hypot, cbrt), ML activations (relu, sigmoid, swish, softplus, logit), extended number theory, and complete bit-manipulation API (set/clear/toggle/test_bit, rotate, bswap, clz/ctz, popcount, parity).
-- **`intermediate/15b_vec_stats.md`** — vec sorting, argmin/argmax/kth, statistical aggregates, cumulative ops, set operations, combinators.
-- **`advanced/03b_condvar_primer.md`** — condition variable mental model, spurious wakeups, wait-loop idiom, `condvar_wait_timeout`.
-- **`advanced/04b_cross_compile_primer.md`** — target triple system, `--no-std`, all 6 MMIO widths, QEMU user-mode.
-- **`advanced/04c_attributes_reference.md`** — all 8 function attributes with code examples and runtime-cost table.
-- **`advanced/05b_advanced_collections.md`** — Graph, BST/AVL, Trie, SkipList, UnionFind, BloomFilter, Deque with API tables and decision guide.
-
-**Test ledger at 2026-06-21: ~2434+ lib green** —
-**62 dialects across 26 scripts** with Mandarin Chinese (中文)
-joining the CJK family as the 62nd dialect on 2026-06-08.
-Latest ship 2026-06-23 — **v0.1.8: block comments `/* */`, print blocks, `break inner/middle/outer` — C + LLVM backends**.
-Previous ship 2026-06-21 — **v0.1.7: tutorial coverage expansion — 10 new pages; full CLI ref, FnPtr, file I/O, math deep-dive, vec stats, condvar, cross-compile, attributes, advanced collections**.
-Previous ship 2026-06-21 — **v0.1.6: bare-metal cross-compilation + `--target` + `--no-std` + `#[no_mangle]` + `#[link_section]` + MMIO u8/u16**.
-Previous notable ship 2026-06-11 — **Windows full e2e parity** (all lib +
-e2e tests pass on Windows 11 GNU toolchain; IOCP async-TCP tests
-deferred). Previous notable ship 2026-06-09 — **L4 (C) closure:
-lifetime elision**.
-Functions can now return `ref T` / `mut ref T` under the
-single-ref-parameter elision rule (Swift/OCaml-style; no `'a`
-syntax). Zero or multi-ref-param returns reject with clear
-"refactor to one ref param" diagnostics. Call sites propagate
-the source's lifetime through binding chains so a `let r =
-foo(ref X); push(mut ref outer_vec, r);` correctly bounds the
-push to X's scope. Combined with **L4 (B) Phase 4 (2026-06-09)
-— `Vec<ref T>` / `Vec<mut ref T>` end-to-end on both backends**:
-L4 (B+C) is now **fully closed**; only path-D (multi-input
-distinct lifetimes, struct lifetime parameters, ref-capturing
-closures) remains deferred indefinitely. Big-O annotation flag
-+ step-by-step diagnostic elaboration also shipped 2026-06-09.
-Other ships on 2026-06-08:
-
-- **L2 fully closed**: Box\<T\> Phases 1+2+3+3b on both backends
-  (Copy + sized inner types AND `Box<dyn Iface>` heap-owning fat
-  pointer), plus recursive-drop follow-up (`Box<Vec<T>>` /
-  `Box<OwnedStr>` chain Drop into the inner destructor), plus
-  expected-type threading sugar (`let b: Box<dyn Iface> =
-  box(value);` works without the `as dyn Iface` cast).
-- **Arc 8 v3.1 caveats #5, #6, #12 closed**:
-  - Postfix `?` operator (Result/Option propagation sugar; same
-    AST as `try` keyword).
-  - L4 partial lift — `ref CancelToken` / `mut ref Struct`
-    parameters now flow through v3.1; synthesized Task struct
-    stores raw pointer field.
-  - A4.4 CancelToken auto-plumbing — `if token.cancelled {
-    return 0 - 1; }` injected before every suspend point
-    automatically.
-  - A4.3 multi-task scheduling — `mut ref vec[i]` as a first-
-    class expression unblocks `__poll_<fn>(mut ref pool[i])`
-    over a `Vec<Task__<fn>>`. echo_pool.vani shows N concurrent
-    clients on one OS thread via Vec-of-Tasks + round-robin
-    + epoll multiplex.
-- **Arc 8 v3.1 caveats remaining (of 15)**: only #2 (liveness
-  polish) and #15 (test surface polish). The compiler-driven
-  async transform is now genuinely feature-complete for v1.
+> Per-release changelogs live in [`RELEASE_NOTES/`](RELEASE_NOTES/).
+> The closure-by-closure history and current version are in [`STATUS.md`](STATUS.md).
 
 
 
