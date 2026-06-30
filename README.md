@@ -69,8 +69,9 @@ compiler guarantees and what falls inside `unsafe`.
     structures, embedded position, examples-the-compiler-
     rejects, known gaps
 
-**Part IV — Language Reference.** Depth for every primitive and
+**Part IV -- Language Reference.** Depth for every primitive and
 construct. Use as a lookup, in order.
+  - Comments
   - Integer rules
   - Float rules
   - Casts
@@ -80,13 +81,20 @@ construct. Use as a lookup, in order.
   - Vectors
   - Strings
   - References
-  - Control flow + scoping
+  - Control flow + scoping (includes named loop labels)
+  - Print and output (`print`, `print { }`, `eprint`)
   - Mutable references and indexed writes
-  - SMT verification — `requires` / `ensures` / `assert` /
+  - Heap allocation (`Box<T>`)
+  - SMT verification -- `requires` / `ensures` / `assert` /
     `prove` / loop invariants / overflow reasoning / assert
     messages / discard pattern / multi-file projects
   - Modules and namespaces
-  - Effects, ownership, and parallelism
+  - Effects, ownership, and parallelism (includes `Atomic<T>`,
+    `Mutex<T>`, `RwLock<T>`, `Barrier`, `Channel<T>`,
+    `parallel for`, `task`, function pointers)
+  - Async concurrency (`async fn`, `await`, `Future<T>`,
+    `Poll<T>`, `CancelToken`, TCP/epoll networking)
+  - File I/O (`FileHandle`, `eprint`, `stdin_read_line`)
 
 **Part V — Tooling.** Commands + editor integration + build
 pipeline.
@@ -1844,6 +1852,32 @@ constructs (modules, effects + concurrency).
 Each `##` heading is its own chapter; jump to the one you
 need.
 
+## Comments
+
+vani supports two comment forms:
+
+- **Line comments** -- `// text to end of line`. Most common for short annotations.
+- **Block comments** -- `/* text */`. Span any number of lines; nest to any depth.
+  The closing `*/` pairs with the *innermost* open `/*`, so you can comment out
+  a block that already contains block comments.
+
+```vani
+// single-line comment
+
+/* single-line block comment */
+
+/* outer
+   /* inner -- still inside outer */
+   back in outer
+*/
+
+let x: i64 = /* inline annotation */ 42;
+
+/**/  /* empty block comment -- valid */
+```
+
+Forgetting the closing `*/` is a compile-time error (`unterminated block comment`).
+
 ## Integer Rules
 
 Arithmetic operators `+`, `-`, `*`, `/`, and `%` work on integer operands. The
@@ -2240,13 +2274,47 @@ fn find_first_negative(xs: &Vec<i64>) -> i64 {
 - The move-state-balance rule extends to jump points: at any `break`,
   `continue`, or natural fall-through, every outer non-`Copy` binding must be
   in the same move state it had at loop start. So if you `take(xs)` inside
-  the body, you must `let xs = …;` (or `xs = …;`) before any reachable jump
+  the body, you must `let xs = ...;` (or `xs = ...;`) before any reachable jump
   out of the loop.
 - After an `if`/`while`, the checker conservatively clears compile-time
   constant tracking for all bindings in scope. This avoids unsound `prove`
   discharge when branches mutate values; it's slightly over-conservative
   (constants that survived unchanged are also cleared), and is a known
   follow-up.
+
+### Named loop labels
+
+Put a plain identifier followed by `:` directly before a `for` or `while`
+keyword to name that loop. `break name;` exits the named loop and everything
+nested inside it. `continue name;` skips to the named loop's next iteration,
+bypassing all remaining code in that loop's body (including inner loops).
+
+```vani
+outer: for i from 0 to 5 {
+  middle: for j from 0 to 5 {
+    inner: for k from 0 to 10 {
+      if k == 3 { break inner; }     /* exits k-loop only */
+      if j == 2 { continue outer; }  /* skips to next i; middle + inner exit */
+      if i == 4 { break middle; }    /* exits middle + inner; i continues */
+    }
+  }
+}
+```
+
+| Statement | Effect |
+|-----------|--------|
+| `break inner` | exits k-loop only |
+| `break middle` | exits middle-loop + k-loop |
+| `break outer` | exits all three loops |
+| `continue inner` | next k iteration |
+| `continue middle` | next j iteration (skips remaining k iterations) |
+| `continue outer` | next i iteration (skips remaining j and k iterations) |
+
+Rules:
+- Labels are plain identifiers -- any valid identifier works (`outer`, `search`, `retry`, ...).
+- Using a label that does not name any enclosing loop is a **compile-time error**.
+- Plain `break;` / `continue;` still target the innermost loop.
+- Works on `while` loops identically to `for` loops.
 
 ### Lexical scoping
 
@@ -3461,6 +3529,35 @@ require dataflow on the SSA layer.
 
 See `examples/concurrency.vani` for a runnable demonstration.
 
+**RwLock and ReadGuard / WriteGuard.** `RwLock<T>` is an affine readers-writer
+lock. Multiple concurrent readers are allowed; a writer gets exclusive access.
+`rwlock_read` returns an affine `ReadGuard<T>`; `rwlock_write` returns an
+affine `WriteGuard<T>`. Both guards release the lock at scope exit.
+
+| Builtin | Returns |
+|---------|---------|
+| `rwlock_new(initial: T) -> RwLock<T>` | affine handle |
+| `rwlock_read(rw: ref RwLock<T>) -> ReadGuard<T>` | shared (read) guard |
+| `rwlock_write(rw: ref RwLock<T>) -> WriteGuard<T>` | exclusive (write) guard |
+| `rguard_get(g: ref ReadGuard<T>) -> T` | read the protected value |
+| `wguard_get(g: ref WriteGuard<T>) -> T` | read under write lock |
+| `wguard_set(g: ref WriteGuard<T>, v: T) -> T` | update under write lock |
+
+State encoding: 0 = unlocked, N > 0 = N concurrent readers, -1 = write-locked.
+T ranges over all Copy element types.
+
+**Barrier.** `Barrier` is an N-thread rendezvous primitive. All participants
+call `barrier_wait`; each blocks until all N threads have arrived, then all
+are released simultaneously. A generation counter prevents ABA races.
+
+| Builtin | Returns |
+|---------|---------|
+| `barrier_new(n: i64) -> Barrier` | affine barrier for N threads |
+| `barrier_wait(b: mut ref Barrier) -> bool` | blocks until all N arrive; last-to-arrive returns `true` |
+
+`Barrier` is stack-by-value and affine. See `examples/concurrency.vani` for
+a demonstration with real threads.
+
 **Function pointers.** `fn(T1, T2, ...) -> R` is a first-class
 type. A top-level function name in expression position yields
 its function-pointer value, so functions can be passed as
@@ -3485,6 +3582,193 @@ pipeline does not yet lower fn-ptr shapes — the tree-based
 backends handle them directly.
 
 See `examples/fn_pointers.vani` for a runnable demonstration.
+
+## Print and output
+
+**`print`** writes a newline-terminated line to stdout. It accepts a
+comma-separated list of values:
+
+```vani
+print "hello, world";
+print x;
+print "value = ", x, " and y = ", y;
+```
+
+**Print block** -- group multiple output lines under one `print` keyword.
+Each `;`-terminated group inside the braces becomes one output line:
+
+```vani
+print {
+  "name:  ", name;
+  "score: ", score;
+  "rank:  ", rank;
+}
+```
+
+This is exactly equivalent to three separate `print` statements.
+
+**`eprint`** -- same syntax as `print` / `print { }`, but writes to **stderr**:
+
+```vani
+eprint "error: file not found";
+eprint { "path = ", path; "code = ", code; }
+```
+
+**`flush_stdout() -> i64`** -- flushes the stdout buffer. Returns 0.
+
+**`stdin_read_line() -> OwnedStr`** -- reads one line from stdin (including
+the trailing `
+`). The returned `OwnedStr` is affine and freed at scope exit.
+
+## Heap allocation (`Box<T>`)
+
+`Box<T>` is a single-owner heap pointer. `box(value)` allocates `value` on the
+heap and returns an affine `Box<T>`. The heap memory is freed automatically
+when the `Box<T>` goes out of scope (or when `implement Drop for T` runs
+first if T has a custom destructor).
+
+```vani
+let b: Box<i64> = box(42);
+```
+
+`Box<dyn Iface>` stores a fat pointer (data + vtable) and is the standard
+way to hold a heap-allocated trait object:
+
+```vani
+let b: Box<dyn Drawable> = box(Circle { r: 5 }) as dyn Drawable;
+```
+
+`Box<Vec<T>>` / `Box<OwnedStr>` chain-drop: when the outer Box drops, it
+calls the inner type's destructor before freeing the Box allocation itself.
+
+`Box<T>` is affine -- each value has exactly one owner; move semantics apply.
+
+## Async concurrency
+
+vani's async system is based on **compiler-rewritten state machines**.
+The `async fn` keyword marks a function whose body the compiler transforms
+into a `struct + poll fn + constructor` triple at parse time. No heap
+allocation or runtime scheduler is required.
+
+### `async fn` and `await`
+
+```vani
+async fn fetch(url: Str) -> OwnedStr {
+  let conn: i64 = await(io_connect(addr, port));
+  let data: OwnedStr = await(io_recv_async(conn, buf_size));
+  return data;
+}
+```
+
+The compiler rewrites `fetch` into:
+- A state-machine struct `Task__fetch` that holds all locals live across
+  `await` points.
+- A `poll` function `__poll_fetch(mut ref state: Task__fetch) -> Poll<OwnedStr>`
+  that advances the machine one step and returns `Poll::Pending` or
+  `Poll::Ready(value)`.
+- A constructor `__make_fetch(url: Str) -> Task__fetch`.
+
+Callers drive the task with a `while` loop:
+
+```vani
+let task: Task__fetch = __make_fetch("example.com");
+let result: Poll<OwnedStr> = Poll::Pending;
+while true {
+  result = __poll_fetch(mut ref task);
+  if result is Poll::Ready { break; }
+}
+```
+
+### Key async types (injected by the prelude)
+
+| Type | Description |
+|------|-------------|
+| `Future<T>` | A computation that will eventually produce `T` |
+| `Poll<T>` | `Poll::Ready(T)` -- done; `Poll::Pending` -- not yet |
+| `CancelToken` | Checked before each suspend point; `token.cancelled` signals abort |
+| `Task__<fn>` | The synthesized state-machine struct for `async fn <fn>` |
+
+### `await(expr)`
+
+`await(expr)` is a suspend point. The compiler splits the function body at
+each `await` call and preserves all live locals in the state struct.
+
+### Postfix `?` and `try`
+
+`try EXPR` (or postfix `EXPR?`) propagates `Err` / `None` -- same as Rust's
+`?` operator. Works inside both sync and async functions:
+
+```vani
+async fn read_line(fd: i64) -> OwnedStr {
+  let n: i64 = io_recv_async(fd, buf)?;
+  ...
+}
+```
+
+### Networking builtins
+
+**Blocking TCP** (all return `i64` -- the fd, or -1 on error):
+
+| Builtin | Description |
+|---------|-------------|
+| `tcp_connect(host: Str, port: i64) -> i64` | blocking connect |
+| `tcp_listen(port: i64) -> i64` | bind + listen |
+| `tcp_accept(fd: i64) -> i64` | blocking accept |
+| `tcp_read(fd: i64, buf: mut ref [u8; N]) -> i64` | blocking read |
+| `tcp_write(fd: i64, data: Str) -> i64` | blocking write |
+| `tcp_close(fd: i64) -> i64` | close |
+
+**Epoll / non-blocking I/O** (Linux; macOS kqueue / Windows IOCP via `#ifdef`):
+
+| Builtin | Description |
+|---------|-------------|
+| `io_epoll_create() -> i64` | create epoll fd |
+| `io_epoll_add(epfd: i64, fd: i64) -> i64` | register fd |
+| `io_epoll_wait(epfd: i64, timeout: i64) -> i64` | wait; returns ready fd |
+| `io_accept_async(fd: i64) -> i64` | non-blocking accept |
+| `io_recv_async(fd: i64, n: i64) -> OwnedStr` | non-blocking recv |
+| `io_send_async(fd: i64, data: Str) -> i64` | non-blocking send |
+| `io_set_nonblocking(fd: i64) -> i64` | set O_NONBLOCK |
+
+**Timers:**
+
+| Builtin | Description |
+|---------|-------------|
+| `sleep_ms(ms: i64) -> i64` | blocking sleep (POSIX `nanosleep` / Windows `Sleep`) |
+
+See `examples/async_fn.vani`, `examples/tcp_echo_epoll.vani`, and
+[ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for end-to-end examples.
+
+## File I/O
+
+`FileHandle` is an affine RAII handle. The file is closed automatically
+when the handle goes out of scope (scope-exit calls `fclose`).
+
+```vani
+let fh: FileHandle = file_open("data.txt", "w");
+if file_is_ok(ref fh) {
+  let _ = file_write(ref fh, "hello
+");
+}
+/* fh closes here */
+```
+
+### File API
+
+| Builtin | Description |
+|---------|-------------|
+| `file_open(path: Str, mode: Str) -> FileHandle` | open file (`"r"`, `"w"`, `"a"`, `"rb"`, ...) |
+| `file_is_ok(ref fh: FileHandle) -> bool` | false if open failed |
+| `file_read_line(ref fh: FileHandle) -> OwnedStr` | read one line including `
+`; empty string at EOF |
+| `file_write(ref fh: FileHandle, data: Str) -> i64` | write string; returns bytes written |
+| `file_flush(ref fh: FileHandle) -> i64` | flush write buffer |
+| `file_close(ref fh: FileHandle) -> i64` | explicit close (optional -- scope-exit also closes) |
+
+`stdin_read_line() -> OwnedStr` and `flush_stdout() -> i64` are covered in the
+*Print and output* section above.
+
+See `examples/language/english/file_io.vani` for a runnable demonstration.
 
 ---
 
