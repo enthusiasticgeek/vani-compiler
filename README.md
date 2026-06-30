@@ -85,6 +85,7 @@ construct. Use as a lookup, in order.
   - Print and output (`print`, `print { }`, `eprint`)
   - Mutable references and indexed writes
   - Heap allocation (`Box<T>`)
+  - Error handling -- `Option<T>`, `Result<T, E>`, `try`/`?`, `match`, `assert`
   - SMT verification -- `requires` / `ensures` / `assert` /
     `prove` / loop invariants / overflow reasoning / assert
     messages / discard pattern / multi-file projects
@@ -2484,6 +2485,105 @@ discard the collection". The source must be an owned `Vec<T>` or `[T; N]`
 binding — consuming a `&T` or `&mut T` parameter is rejected (use the
 borrow form). After the loop, `xs` is moved; any subsequent use is a
 compile error with a related note pointing at the `for` line.
+
+## Error handling
+
+vani has **no exceptions, no `catch`, and no stack unwinding**. All errors
+are ordinary values carried in payloaded enums. Every failure path is
+statically visible -- no call can silently unwind past your frame.
+
+### `Option<T>` and `Result<T, E>`
+
+The compiler injects two generic error-carrier types into every program via
+the prelude:
+
+```vani
+enum Option<T> { Some(T), None }
+enum Result<T, E> { Ok(T), Err(E) }
+```
+
+Use `Option<T>` when a value may simply be absent; `Result<T, E>` when the
+error carries diagnostic information.
+
+```vani
+fn safe_div(a: i64, b: i64) -> Option<i64> {
+  if b == 0 { return Option.None; }
+  return Option.Some(a / b);
+}
+
+fn parse_port(s: Str) -> Result<i64, Str> {
+  let n: Option<i64> = parse_int(s);
+  match n {
+    Option.Some(v) then {
+      if v < 1 || v > 65535 { return Result.Err("out of range"); }
+      return Result.Ok(v);
+    },
+    Option.None then return Result.Err("not a number"),
+  }
+}
+```
+
+### `match` -- recovering from errors
+
+`match` is the primary way to handle (i.e. "catch") a failure arm:
+
+```vani
+match safe_div(10, x) {
+  Option.Some(v) then print "quotient = ", v,
+  Option.None    then print "division by zero",
+}
+
+match parse_port("8080") {
+  Result.Ok(port)  then start_server(port),
+  Result.Err(msg)  then { eprint "bad port: ", msg; return 1; },
+}
+```
+
+### `try` / `?` -- propagating errors upward
+
+`try EXPR` (equivalently, postfix `EXPR?`) propagates the failure arm by
+returning early from the current function. The function's own return type
+must be Option- or Result-compatible.
+
+```vani
+fn run() -> Option<i64> {
+  let a: i64 = try safe_div(100, x);  /* None? return Option.None immediately */
+  let b: i64 = try safe_div(a, y);
+  return Option.Some(a + b);
+}
+```
+
+`try` and `?` are the same AST node -- identical semantics, two spellings.
+Works for both `Option` (propagates `None`) and `Result` (propagates `Err(e)`
+as `Result.Err(e)`).
+
+### `assert` -- non-recoverable invariant violations
+
+`assert cond` / `assert cond, "msg"` calls `abort()` when `cond` is false.
+There is no recovery -- the process terminates. Use `assert` for invariants
+that must never be violated; use `Result`/`Option` for expected failure modes.
+
+```vani
+assert n >= 0, "n must be non-negative";
+assert len(xs) > 0;
+```
+
+SMT-verified assertions (`prove`) are discharged at compile time and emit
+no runtime code when verified. See *SMT verification* below.
+
+### Summary
+
+| Need | Tool |
+|------|------|
+| Value may be absent | `Option<T>` |
+| Operation can fail with diagnostic | `Result<T, E>` |
+| Recover from absence or error | `match` on the enum |
+| Propagate failure upward | `try EXPR` or `EXPR?` |
+| Abort on invariant violation | `assert cond[, "msg"]` |
+| Compile-time proof of correctness | `prove` (see *SMT verification*) |
+
+> For the design rationale -- why values over exceptions -- see Part VI,
+> *`try` is a value-flow shortcut, not an exception system*.
 
 ## SMT verification
 
