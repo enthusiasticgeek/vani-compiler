@@ -1,4 +1,4 @@
-# CLI Reference -- `vanic` command reference
+# Beginner 0 -- CLI Reference: `vanic` commands and flags
 
 > A one-page reference for every `vanic` subcommand, flag, and
 > environment variable. Bookmark this; you'll come back often.

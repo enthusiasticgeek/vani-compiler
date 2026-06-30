@@ -126,4 +126,4 @@ Chain it into `pipeline` so the full sequence
 
 ---
 
-**Next**: [Sec.11 -- The 22 GoF design patterns ->](11_design_patterns.md)
+**Next**: [Sec.13 -- `Option<T>` and the option builtins ->](13_option.md)

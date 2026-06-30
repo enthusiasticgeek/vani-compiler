@@ -1,4 +1,4 @@
-# 16. Packages with Kosh
+# Intermediate 16 -- Packages with Kosh
 
 **Analogy**: Imagine a public library (the registry). You can borrow books
 (`vanic add`) or donate your own (`vanic publish`). Each book has a catalogue

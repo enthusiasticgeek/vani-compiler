@@ -139,4 +139,5 @@ fn is_yes(s: Str) -> bool {
 
 ---
 
-**Next**: [Sec.9 -- First contract: `assert` / `prove` / `requires` ->](09_smt_intro.md)
+**Next**: [Sec.8b -- Errors as values ->](08b_errors_primer.md)
+**Or skip to**: [Sec.9 -- First contract: `assert` / `prove` ->](09_smt_intro.md)

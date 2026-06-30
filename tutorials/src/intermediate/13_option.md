@@ -160,4 +160,4 @@ from the second map -- using only `option_and_then`.
 
 ---
 
-**Next**: [Sec.14 -- `HashMap<K,V>` and `HashSet<T>` ->](14_collections.md)
+**Next**: [Sec.11 -- The 22 GoF design patterns ->](11_design_patterns.md)
