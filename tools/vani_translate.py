@@ -3,43 +3,52 @@
 vani_translate — translate a .vani source file's keywords between
                 English, Sanskrit, Hindi, and Marathi.
 
-B.1 v2 — token-level keyword substitution with round-trip
-verification, auto-detection, and batch mode.
+B.1 v3 — adds SOV <-> SVO word-order reordering for verb-final
+statements and Hindi for-range loops; adds optional LLM-based
+translation of comments, string literals, and identifiers.
 
 Usage:
     # Translate to Sanskrit (auto-detects source from pragma):
-    python3 tools/vani_translate.py examples/language/english/basics.vani \
+    python3 tools/vani_translate.py examples/language/english/basics.vani \\
         --to sanskrit -o out.vani
 
-    # Verify round-trip: english → hindi → english matches original:
+    # SOV word-order is reordered automatically:
+    #   hindi:    n पुनरागम;            -> english: return n;
+    #   english:  return n;             -> hindi:   n लौटाओ;
+    #   hindi:    i के लिए 0 से 5 तक { -> english: for i from 0 to 5 {
+    #   english:  for i from 0 to 5 {  -> hindi:   i के लिए 0 से 5 तक {
+
+    # LLM translation of comments + strings (Anthropic):
+    python3 tools/vani_translate.py basics.vani --to hindi \\
+        --llm anthropic --llm-model claude-haiku-4-5-20251001
+
+    # LLM translation via local Ollama:
+    python3 tools/vani_translate.py basics.vani --to hindi \\
+        --llm ollama --llm-model llama3.2
+
+    # LLM translation via OpenAI:
+    python3 tools/vani_translate.py basics.vani --to hindi \\
+        --llm openai --llm-model gpt-4o-mini
+
+    # Also translate identifiers (camelCase/snake_case split and translated):
+    python3 tools/vani_translate.py basics.vani --to hindi \\
+        --llm anthropic --translate-identifiers
+
+    # Verify round-trip:
     python3 tools/vani_translate.py basics.vani --to hindi --verify
-
-    # Translate all .vani files in a directory tree:
-    python3 tools/vani_translate.py examples/language/english/ \
-        --to marathi --batch -o translated/
-
-    # Edit in-place (saves backup as .vani.bak):
-    python3 tools/vani_translate.py basics.vani --to sanskrit --inplace
 
     # Print all keyword aliases as a markdown table:
     python3 tools/vani_translate.py --list-keywords
 
-    # Verify AST equivalence via vanic (requires vanic in PATH):
-    diff <(vanic ast examples/language/english/basics.vani) \
-         <(vanic ast out.vani)
-
-What this v2 does NOT do (deferred to later phases):
-  - SOV word-order reshape. The output keeps the source's word
-    order; only keywords are substituted. A Sanskrit source with
-    verb-final shapes won't be reshaped to keyword-first when
-    translated to English.
-  - Identifier translation. User-named functions, vars, and types
-    stay in whatever language the author wrote them in.
-  - Comment translation. Comments are preserved verbatim.
+What this does NOT do:
+  - Translate block comments /* ... */ (only line comments // ... are translated).
+  - Translate multi-line string literals spanning more than one line.
+  - Handle nested for-range SOV patterns (only the outermost level is reordered).
 """
 
 import argparse
 import io
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -51,11 +60,10 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
 
-# Single-word keyword alias table. Each TokenKind maps to one
-# canonical spelling per language. Source: src/lexer.rs
-#
-# When multiple aliases exist for a (TokenKind, language) pair, the
-# table picks the most natural / most-common spelling.
+# ---------------------------------------------------------------------------
+# Keyword alias table.  Source of truth: src/lexer.rs
+# ---------------------------------------------------------------------------
+
 ALIASES: Dict[str, Dict[str, str]] = {
     # Declarations
     "Fn":         {"english": "fn",        "sanskrit": "कार्य",        "hindi": "फलन",        "marathi": "कार्य",       "mandarin": "函数"},
@@ -135,6 +143,9 @@ SUPPORTED_LANGS = ("english", "sanskrit", "hindi", "marathi", "mandarin")
 # Devanagari Indo-Aryan targets that get the श्री। header.
 _IA_DEVANAGARI = frozenset(("sanskrit", "hindi", "marathi", "nepali", "maithili", "konkani"))
 
+# Languages with SOV (Subject-Object-Verb) word order for certain constructs.
+SOV_LANGS = frozenset({"sanskrit", "hindi", "marathi"})
+
 # Multi-word forms that the lexer fuses post-tokenization.
 MULTI_WORD_ALIASES: Dict[Tuple[str, ...], str] = {
     ("नहीं", "तो"):      "Else",
@@ -144,6 +155,28 @@ MULTI_WORD_ALIASES: Dict[Tuple[str, ...], str] = {
     ("समान्तर", "प्रति"): "Parallel",
 }
 
+# ---------------------------------------------------------------------------
+# SOV word-order helpers
+# ---------------------------------------------------------------------------
+
+# Verb-final token kinds: these appear at the END of the statement in SOV langs.
+_SOV_VERB_FINAL_KINDS = frozenset({"Return", "Print", "Assert", "Prove"})
+
+# Build: spelling -> kind, for every non-English SOV verb-final keyword.
+# Single-word forms only here (multi-word forms handled separately below).
+_VERB_FINAL_SPELLINGS: Dict[str, str] = {}
+for _kind in _SOV_VERB_FINAL_KINDS:
+    for _lang, _spelling in ALIASES[_kind].items():
+        if _lang != "english" and " " not in _spelling:
+            _VERB_FINAL_SPELLINGS[_spelling] = _kind
+
+# Multi-word verb-final spellings: "WORD1 WORD2" -> kind
+_MULTI_WORD_VERB_FINALS: Dict[str, str] = {
+    " ".join(pair): kind
+    for pair, kind in MULTI_WORD_ALIASES.items()
+    if kind in _SOV_VERB_FINAL_KINDS
+}
+
 
 def _is_word_char(c: str) -> bool:
     if c.isalnum() or c == "_":
@@ -151,6 +184,181 @@ def _is_word_char(c: str) -> bool:
     cp = ord(c)
     return (0x0900 <= cp <= 0x097F) or (0x0A8E0 <= cp <= 0x0A8FF)
 
+
+def _last_word(s: str) -> Tuple[str, int]:
+    """Return (word, start_index) for the last contiguous word in s."""
+    end = len(s)
+    while end > 0 and not _is_word_char(s[end - 1]):
+        end -= 1
+    start = end
+    while start > 0 and _is_word_char(s[start - 1]):
+        start -= 1
+    return s[start:end], start
+
+
+def _try_normalize_verbfinal_line(line: str) -> str:
+    """
+    If `line` (in a SOV language) ends with a verb-final keyword followed by ;,
+    reorder it to English SVO: put the English verb first.
+
+    'n पुनरागम;'      -> 'return n;'
+    '  x लिखो;'       -> '  print x;'
+    '  x सिद्ध करो;'  -> '  prove x;'   (multi-word Prove)
+    """
+    stripped = line.rstrip()  # strip all trailing whitespace/newlines
+    trailing = line[len(stripped):]  # re-append after reorder (e.g. "\n")
+
+    if not stripped.endswith(";"):
+        return line
+
+    # Capture indent; work on body (indent-free "expr VERB" string)
+    leading = stripped[: len(stripped) - len(stripped.lstrip())]
+    before_semi = stripped[:-1].rstrip()          # "  expr VERB"
+    body = before_semi[len(leading):].rstrip()    # "expr VERB" (no indent)
+
+    if not body:
+        return line
+
+    # --- single-word verb-final ---
+    verb, verb_start = _last_word(body)
+    if verb and verb in _VERB_FINAL_SPELLINGS:
+        kind = _VERB_FINAL_SPELLINGS[verb]
+        expr = body[:verb_start].rstrip()
+        english_verb = ALIASES[kind]["english"]
+        if expr:
+            return f"{leading}{english_verb} {expr};{trailing}"
+        return f"{leading}{english_verb};{trailing}"
+
+    # --- two-word verb-final (e.g. "सिद्ध करो", "सिद्ध करा") ---
+    before_last = body[:verb_start].rstrip()
+    if before_last:
+        word2 = verb
+        word1, word1_start = _last_word(before_last)
+        two_word = f"{word1} {word2}"
+        if two_word in _MULTI_WORD_VERB_FINALS:
+            kind = _MULTI_WORD_VERB_FINALS[two_word]
+            expr = before_last[:word1_start].rstrip()
+            english_verb = ALIASES[kind]["english"]
+            if expr:
+                return f"{leading}{english_verb} {expr};{trailing}"
+            return f"{leading}{english_verb};{trailing}"
+
+    return line
+
+
+def _normalize_sov_to_svo(source: str, src_lang: str) -> str:
+    """
+    Pre-processing: if source is in a SOV language, reorder verb-final
+    statements to SVO (English word order) so that keyword substitution
+    produces the correct target output.
+
+    Handles:
+      - Verb-final return/print/assert/prove statements (line-level).
+      - Hindi for-range:  VAR के लिए START से END तक {  →  for VAR from START to END {
+    """
+    if src_lang not in SOV_LANGS:
+        return source
+
+    # 1. Line-level verb-final reorder.
+    trailing_nl = source.endswith("\n")
+    source = "\n".join(
+        _try_normalize_verbfinal_line(ln)
+        for ln in source.splitlines(keepends=False)
+    )
+    if trailing_nl:
+        source += "\n"
+
+    # 2. Hindi for-range: VAR के लिए START से END तक {
+    if src_lang == "hindi":
+        # Multi-word के लिए = For.  Regex: IDENT (whitespace) के लिए EXPR से EXPR तक (ws) {
+        pat = re.compile(
+            r'([ \t]*)(\w+)([ \t]+)के\s+लिए([ \t]+)(\S+)([ \t]+)से([ \t]+)(\S+)([ \t]+)तक([ \t]*)\{'
+        )
+        def _fix_for(m: re.Match) -> str:
+            indent, var, _, _, start, _, _, end, _, _, = m.groups()
+            return f"{indent}for {var} from {start} to {end} {{"
+        source = pat.sub(_fix_for, source)
+
+    return source
+
+
+def _convert_svo_to_sov(source: str, target_lang: str) -> str:
+    """
+    Post-processing: if target is a SOV language, reorder SVO verb-initial
+    statements to verb-final SOV.
+
+    Handles:
+      - Verb-initial return/print/assert/prove statements (line-level).
+      - Hindi for-range:  for VAR from START to END {  →  VAR के लिए START से END तक {
+    """
+    if target_lang not in SOV_LANGS:
+        return source
+
+    # Build lookup: english_verb -> target spelling
+    target_verb: Dict[str, str] = {
+        ALIASES[k]["english"]: ALIASES[k][target_lang]
+        for k in _SOV_VERB_FINAL_KINDS
+        if target_lang in ALIASES[k]
+    }
+
+    result_lines = []
+    for line in source.splitlines(keepends=False):
+        stripped = line.rstrip()
+        if not stripped.endswith(";"):
+            result_lines.append(line)
+            continue
+        leading = stripped[: len(stripped) - len(stripped.lstrip())]
+        body = stripped.lstrip()
+
+        # Check if the line starts with one of the target verbs (as already
+        # substituted by translate()) or their English originals.
+        matched = False
+        for en_verb, sov_verb in target_verb.items():
+            # The translate() step will have already replaced 'return' with
+            # e.g. 'लौटाओ'.  So we look for either form.
+            for look_for in (sov_verb, en_verb):
+                if body.startswith(look_for + " ") or body.startswith(look_for + "\t"):
+                    expr = body[len(look_for):].strip().rstrip(";")
+                    # Skip if there's no expression (e.g. bare `return;`)
+                    if expr:
+                        result_lines.append(f"{leading}{expr} {sov_verb};")
+                    else:
+                        result_lines.append(line)
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            result_lines.append(line)
+
+    trailing_nl = source.endswith("\n")
+    source = "\n".join(result_lines)
+    if trailing_nl:
+        source += "\n"
+
+    # Hindi for-range:  for VAR from START to END {  →  VAR के लिए START से END तक {
+    if target_lang == "hindi":
+        for_kw  = ALIASES["For"]["hindi"]   # "के लिए"
+        from_kw = ALIASES["From"]["hindi"]  # "से"
+        to_kw   = ALIASES["To"]["hindi"]    # "तक"
+        # At this point translate() has already substituted: for→के लिए, from→से, to→तक
+        # So the (wrong) text looks like: "के लिए VAR से START तक END {"
+        pat = re.compile(
+            re.escape(for_kw) + r'([ \t]+)(\w+)([ \t]+)' +
+            re.escape(from_kw) + r'([ \t]+)(\S+)([ \t]+)' +
+            re.escape(to_kw) + r'([ \t]+)(\S+)([ \t]*)\{'
+        )
+        def _fix_for_sov(m: re.Match) -> str:
+            _, var, _, _, start, _, _, end, _ = m.groups()
+            return f"{var} {for_kw} {start} {from_kw} {end} {to_kw} {{"
+        source = pat.sub(_fix_for_sov, source)
+
+    return source
+
+
+# ---------------------------------------------------------------------------
+# Core keyword translator
+# ---------------------------------------------------------------------------
 
 def build_reverse_lookup() -> Dict[str, Tuple[str, str]]:
     rev: Dict[str, Tuple[str, str]] = {}
@@ -199,7 +407,6 @@ def extract_keyword_tokens(source: str) -> List[str]:
             while j < n and _is_word_char(source[j]):
                 j += 1
             word = source[i:j]
-            # Check multi-word.
             k = j
             while k < n and source[k] in (" ", "\t"):
                 k += 1
@@ -223,10 +430,10 @@ def extract_keyword_tokens(source: str) -> List[str]:
     return tokens
 
 
-def translate(source: str, target_lang: str) -> str:
+def _translate_keywords(source: str, target_lang: str) -> str:
     """
-    Walk `source` substituting every keyword with the target_lang
-    spelling. Rewrites `// vani-lang:` pragma to match target_lang.
+    Pure keyword substitution (no word-order changes).
+    Rewrites the `// vani-lang:` pragma to target_lang.
     """
     assert target_lang in SUPPORTED_LANGS, f"unknown target {target_lang!r}"
     rev = build_reverse_lookup()
@@ -304,6 +511,24 @@ def translate(source: str, target_lang: str) -> str:
     return "".join(out)
 
 
+def translate(source: str, target_lang: str, src_lang: Optional[str] = None) -> str:
+    """
+    Translate source to target_lang.
+
+    Steps:
+      1. Detect source language (from pragma or argument).
+      2. If source is SOV, normalize verb-final statements to SVO.
+      3. Substitute keywords to target_lang spellings.
+      4. If target is SOV, convert SVO verb-initial statements to SOV.
+      5. Rewrite pragma.
+    """
+    effective_src = src_lang or detect_pragma_lang(source) or "english"
+    text = _normalize_sov_to_svo(source, effective_src)
+    text = _translate_keywords(text, target_lang)
+    text = _convert_svo_to_sov(text, target_lang)
+    return text
+
+
 def verify_roundtrip(source: str, target_lang: str, src_lang: Optional[str]) -> Tuple[bool, str]:
     """
     Translate source → target_lang → src_lang, then compare the
@@ -311,17 +536,17 @@ def verify_roundtrip(source: str, target_lang: str, src_lang: Optional[str]) -> 
     result. Returns (passed, message).
     """
     effective_src = src_lang or detect_pragma_lang(source) or "english"
-    intermediate = translate(source, target_lang)
-    back = translate(intermediate, effective_src)
+    intermediate = translate(source, target_lang, effective_src)
+    back = translate(intermediate, effective_src, target_lang)
     orig_tokens = extract_keyword_tokens(source)
     back_tokens = extract_keyword_tokens(back)
     if orig_tokens == back_tokens:
         return True, (
-            f"round-trip ok: {effective_src} → {target_lang} → {effective_src} "
+            f"round-trip ok: {effective_src} -> {target_lang} -> {effective_src} "
             f"({len(orig_tokens)} keyword tokens preserved)"
         )
     diffs = [
-        f"  pos {i}: {a!r} → {b!r}"
+        f"  pos {i}: {a!r} -> {b!r}"
         for i, (a, b) in enumerate(zip(orig_tokens, back_tokens))
         if a != b
     ]
@@ -339,10 +564,237 @@ def list_keywords() -> str:
     sep    = "|-----------|" + "|".join("-" * (len(l) + 2) for l in langs) + "|"
     rows = [header, sep]
     for kind, mapping in sorted(ALIASES.items()):
-        cells = " | ".join(mapping.get(l, "—") for l in langs)
+        cells = " | ".join(mapping.get(l, "--") for l in langs)
         rows.append(f"| {kind:<12} | {cells} |")
     return "\n".join(rows)
 
+
+# ---------------------------------------------------------------------------
+# LLM translation for comments, strings, and identifiers
+# ---------------------------------------------------------------------------
+
+_LANG_NAMES = {
+    "english":  "English",
+    "sanskrit": "Sanskrit",
+    "hindi":    "Hindi",
+    "marathi":  "Marathi",
+    "mandarin": "Mandarin Chinese",
+}
+
+
+def _llm_prompt(text: str, src_lang: str, target_lang: str, content_type: str) -> str:
+    src_name = _LANG_NAMES.get(src_lang, src_lang)
+    tgt_name = _LANG_NAMES.get(target_lang, target_lang)
+    return (
+        f"Translate the following {content_type} from {src_name} to {tgt_name}.\n"
+        f"Rules:\n"
+        f"- Translate only the natural language content.\n"
+        f"- Preserve all technical terms, variable names, code references, "
+        f"and special characters exactly as-is.\n"
+        f"- Output ONLY the translated text, nothing else.\n\n"
+        f"Text:\n{text}"
+    )
+
+
+def _call_anthropic(text: str, src_lang: str, target_lang: str,
+                    content_type: str, model: str) -> str:
+    try:
+        import anthropic as _anthropic
+    except ImportError:
+        raise RuntimeError(
+            "anthropic package not installed. Run: pip install anthropic"
+        )
+    client = _anthropic.Anthropic()
+    msg = client.messages.create(
+        model=model,
+        max_tokens=4096,
+        messages=[{"role": "user", "content": _llm_prompt(text, src_lang, target_lang, content_type)}],
+    )
+    return msg.content[0].text.strip()
+
+
+def _call_openai(text: str, src_lang: str, target_lang: str,
+                 content_type: str, model: str) -> str:
+    try:
+        import openai as _openai
+    except ImportError:
+        raise RuntimeError(
+            "openai package not installed. Run: pip install openai"
+        )
+    client = _openai.OpenAI()
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": _llm_prompt(text, src_lang, target_lang, content_type)}],
+    )
+    return resp.choices[0].message.content.strip()
+
+
+def _call_ollama(text: str, src_lang: str, target_lang: str,
+                 content_type: str, model: str,
+                 host: str = "http://localhost:11434") -> str:
+    try:
+        import requests as _requests
+    except ImportError:
+        raise RuntimeError(
+            "requests package not installed. Run: pip install requests"
+        )
+    payload = {
+        "model": model,
+        "prompt": _llm_prompt(text, src_lang, target_lang, content_type),
+        "stream": False,
+    }
+    resp = _requests.post(f"{host}/api/generate", json=payload, timeout=120)
+    resp.raise_for_status()
+    return resp.json()["response"].strip()
+
+
+def _llm_translate_chunk(text: str, src_lang: str, target_lang: str,
+                          content_type: str,
+                          llm: str, model: str,
+                          ollama_host: str = "http://localhost:11434") -> str:
+    """Call the chosen LLM backend to translate a natural language chunk."""
+    if not text.strip():
+        return text
+    if llm == "anthropic":
+        return _call_anthropic(text, src_lang, target_lang, content_type, model)
+    if llm == "openai":
+        return _call_openai(text, src_lang, target_lang, content_type, model)
+    if llm == "ollama":
+        return _call_ollama(text, src_lang, target_lang, content_type, model, ollama_host)
+    raise ValueError(f"unknown LLM backend: {llm!r}")
+
+
+def _split_identifier(ident: str) -> List[str]:
+    """
+    Split a camelCase or snake_case identifier into constituent words.
+    E.g. 'safeDiv' -> ['safe', 'Div'], 'safe_div' -> ['safe', 'div'].
+    """
+    # Split on underscores first
+    parts = ident.split("_")
+    words: List[str] = []
+    for part in parts:
+        if not part:
+            continue
+        # Split camelCase
+        sub = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", part)
+        sub = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", sub)
+        words.extend(sub.split("_"))
+    return words
+
+
+def translate_with_llm(
+    source: str,
+    target_lang: str,
+    src_lang: Optional[str],
+    llm: str,
+    model: str,
+    translate_identifiers: bool = False,
+    ollama_host: str = "http://localhost:11434",
+) -> str:
+    """
+    Translate a vani source file using both keyword substitution and LLM
+    translation for natural language content.
+
+    Translates:
+    - Keywords: via the keyword substitution table (always).
+    - Line comments (// ...): via LLM.
+    - String literals ("..."): via LLM.
+    - Identifiers (user-defined names): via LLM when translate_identifiers=True.
+    """
+    effective_src = src_lang or detect_pragma_lang(source) or "english"
+
+    # Step 1: keyword translation (with SOV reordering).
+    result = translate(source, target_lang, effective_src)
+
+    # Step 2: translate line comments.
+    def _translate_comment(m: re.Match) -> str:
+        prefix = m.group(1)   # // or //
+        content = m.group(2)  # the text after //
+
+        # Skip pragma lines.
+        stripped = content.strip()
+        if stripped.startswith("vani-lang:") or stripped.startswith("श्री।"):
+            return m.group(0)
+
+        try:
+            translated = _llm_translate_chunk(
+                content, effective_src, target_lang, "comment text",
+                llm, model, ollama_host
+            )
+            return prefix + translated
+        except Exception as e:
+            print(f"  [llm] comment translation failed: {e}", file=sys.stderr)
+            return m.group(0)
+
+    result = re.sub(r"(//)(.*)", _translate_comment, result)
+
+    # Step 3: translate string literals.
+    def _translate_string(m: re.Match) -> str:
+        content = m.group(1)  # content inside quotes
+        try:
+            translated = _llm_translate_chunk(
+                content, effective_src, target_lang, "string literal",
+                llm, model, ollama_host
+            )
+            # Ensure no unescaped quotes sneak in.
+            translated = translated.replace('"', '\\"')
+            return f'"{translated}"'
+        except Exception as e:
+            print(f"  [llm] string translation failed: {e}", file=sys.stderr)
+            return m.group(0)
+
+    # Match string literals but not escaped quotes inside them.
+    result = re.sub(r'"((?:[^"\\]|\\.)*)"', _translate_string, result)
+
+    # Step 4: translate identifiers (optional).
+    if translate_identifiers:
+        rev = build_reverse_lookup()
+        # Collect all unique user-defined identifiers (not keywords, not all-caps consts).
+        idents = set(re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', result))
+        # Filter out keywords and trivial names.
+        idents = {
+            w for w in idents
+            if w not in rev
+            and w not in ALIASES
+            and len(w) >= 3
+            and not w.isupper()
+        }
+
+        ident_map: Dict[str, str] = {}
+        if idents:
+            # Batch all identifiers into one LLM call to save API round-trips.
+            batch = "\n".join(sorted(idents))
+            try:
+                translated_batch = _llm_translate_chunk(
+                    batch, effective_src, target_lang,
+                    "list of programming identifiers (one per line -- translate each separately, preserve the same line count)",
+                    llm, model, ollama_host
+                )
+                translated_lines = translated_batch.splitlines()
+                sorted_idents = sorted(idents)
+                for orig, xlat in zip(sorted_idents, translated_lines):
+                    # Sanitize: identifiers must be word-chars only.
+                    clean = re.sub(r"[^\w]", "_", xlat.strip())
+                    if clean and clean != orig:
+                        ident_map[orig] = clean
+            except Exception as e:
+                print(f"  [llm] identifier translation failed: {e}", file=sys.stderr)
+
+        if ident_map:
+            def _replace_ident(m: re.Match) -> str:
+                return ident_map.get(m.group(0), m.group(0))
+            # Sort by length desc so longer identifiers match before shorter subsets.
+            pattern = r'\b(' + "|".join(
+                re.escape(k) for k in sorted(ident_map, key=len, reverse=True)
+            ) + r')\b'
+            result = re.sub(pattern, _replace_ident, result)
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# File-level translation
+# ---------------------------------------------------------------------------
 
 def _translate_file(
     src_path: Path,
@@ -353,6 +805,10 @@ def _translate_file(
     verify: bool,
     src_lang: Optional[str],
     verbose: bool,
+    llm: Optional[str] = None,
+    llm_model: str = "claude-haiku-4-5-20251001",
+    translate_identifiers: bool = False,
+    ollama_host: str = "http://localhost:11434",
 ) -> bool:
     source = src_path.read_text(encoding="utf-8")
     if verify:
@@ -362,7 +818,13 @@ def _translate_file(
         if not ok:
             return False
 
-    translated = translate(source, target_lang)
+    if llm:
+        translated = translate_with_llm(
+            source, target_lang, src_lang, llm, llm_model,
+            translate_identifiers, ollama_host
+        )
+    else:
+        translated = translate(source, target_lang, src_lang)
 
     if add_sri_header and target_lang in _IA_DEVANAGARI:
         if not translated.lstrip().startswith("// श्री।"):
@@ -378,7 +840,7 @@ def _translate_file(
         backup.write_text(source, encoding="utf-8")
         src_path.write_text(translated, encoding="utf-8")
         if verbose:
-            print(f"  {src_path}  (backup → {backup.name})")
+            print(f"  {src_path}  (backup -> {backup.name})")
     elif out_path is not None:
         if out_path.is_dir():
             dest = out_path / src_path.name
@@ -387,17 +849,23 @@ def _translate_file(
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(translated, encoding="utf-8")
         if verbose:
-            print(f"  {src_path} → {dest}")
+            print(f"  {src_path} -> {dest}")
     else:
         sys.stdout.write(translated)
     return True
 
 
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Translate a .vani source file's keywords between "
-            "English, Sanskrit, Hindi, Marathi, and Mandarin."
+            "English, Sanskrit, Hindi, Marathi, and Mandarin. "
+            "SOV word-order (verb-final statements and Hindi for-range) "
+            "is reordered automatically."
         )
     )
     parser.add_argument(
@@ -412,7 +880,7 @@ def main() -> int:
         choices=SUPPORTED_LANGS,
         default=None,
         help=(
-            "source language — optional; auto-detected from the "
+            "source language -- optional; auto-detected from the "
             "`// vani-lang:` pragma if not provided"
         ),
     )
@@ -460,6 +928,45 @@ def main() -> int:
             "translating to an Indo-Aryan Devanagari language"
         ),
     )
+
+    # LLM options
+    llm_group = parser.add_argument_group("LLM translation (comments, strings, identifiers)")
+    llm_group.add_argument(
+        "--llm",
+        choices=("anthropic", "openai", "ollama"),
+        default=None,
+        metavar="BACKEND",
+        help=(
+            "Enable LLM translation for comments and string literals. "
+            "Choices: anthropic, openai, ollama. "
+            "Requires the corresponding Python package and API credentials."
+        ),
+    )
+    llm_group.add_argument(
+        "--llm-model",
+        default=None,
+        metavar="MODEL",
+        help=(
+            "Model name to use with --llm. "
+            "Defaults: anthropic=claude-haiku-4-5-20251001, "
+            "openai=gpt-4o-mini, ollama=llama3.2"
+        ),
+    )
+    llm_group.add_argument(
+        "--translate-identifiers",
+        action="store_true",
+        help=(
+            "Also translate user-defined identifiers via LLM (requires --llm). "
+            "All unique identifiers are batched into one API call."
+        ),
+    )
+    llm_group.add_argument(
+        "--ollama-host",
+        default="http://localhost:11434",
+        metavar="URL",
+        help="Ollama server URL (default: http://localhost:11434)",
+    )
+
     parser.add_argument(
         "--verbose", "-v",
         action="store_true",
@@ -477,6 +984,31 @@ def main() -> int:
         parser.error("--to is required")
     if args.inplace and args.output is not None:
         parser.error("--inplace and --output are mutually exclusive")
+    if args.translate_identifiers and not args.llm:
+        parser.error("--translate-identifiers requires --llm")
+
+    # Default model per backend
+    llm_model = args.llm_model
+    if args.llm and not llm_model:
+        llm_model = {
+            "anthropic": "claude-haiku-4-5-20251001",
+            "openai":    "gpt-4o-mini",
+            "ollama":    "llama3.2",
+        }[args.llm]
+
+    common = dict(
+        target_lang=args.target_lang,
+        out_path=args.output,
+        inplace=args.inplace,
+        add_sri_header=args.add_sri_header,
+        verify=args.verify,
+        src_lang=args.src_lang,
+        verbose=args.verbose,
+        llm=args.llm,
+        llm_model=llm_model,
+        translate_identifiers=args.translate_identifiers,
+        ollama_host=args.ollama_host,
+    )
 
     if args.batch:
         if not args.input.is_dir():
@@ -487,10 +1019,7 @@ def main() -> int:
             return 1
         ok_count = 0
         for f in sorted(files):
-            ok = _translate_file(
-                f, args.target_lang, args.output, args.inplace,
-                args.add_sri_header, args.verify, args.src_lang, verbose=True,
-            )
+            ok = _translate_file(f, **common)
             if ok:
                 ok_count += 1
         print(f"{ok_count}/{len(files)} files translated successfully.", file=sys.stderr)
@@ -499,10 +1028,7 @@ def main() -> int:
         if not args.input.exists():
             print(f"input file not found: {args.input}", file=sys.stderr)
             return 1
-        ok = _translate_file(
-            args.input, args.target_lang, args.output, args.inplace,
-            args.add_sri_header, args.verify, args.src_lang, verbose=args.verbose,
-        )
+        ok = _translate_file(args.input, **common)
         return 0 if ok else 1
 
 
