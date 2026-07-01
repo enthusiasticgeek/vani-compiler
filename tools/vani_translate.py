@@ -585,6 +585,16 @@ _LANG_NAMES = {
 def _llm_prompt(text: str, src_lang: str, target_lang: str, content_type: str) -> str:
     src_name = _LANG_NAMES.get(src_lang, src_lang)
     tgt_name = _LANG_NAMES.get(target_lang, target_lang)
+    if content_type == "comment text":
+        # Explicit framing prevents models from generating code instead of translating.
+        return (
+            f"Translate this source code comment from {src_name} to {tgt_name}.\n"
+            f"The input is natural language text written as a comment inside a computer program.\n"
+            f"Output ONLY the translated natural language sentence -- no code, no quotes, "
+            f"no surrounding punctuation.\n"
+            f"Keep any technical terms, variable names, numbers, and identifiers unchanged.\n\n"
+            f"Comment: {text.strip()}"
+        )
     return (
         f"Translate the following {content_type} from {src_name} to {tgt_name}.\n"
         f"Rules:\n"
@@ -602,15 +612,43 @@ def _call_anthropic(text: str, src_lang: str, target_lang: str,
         import anthropic as _anthropic
     except ImportError:
         raise RuntimeError(
-            "anthropic package not installed. Run: pip install anthropic"
+            "anthropic package not installed. Run: pip install 'anthropic>=0.20'"
         )
-    client = _anthropic.Anthropic()
-    msg = client.messages.create(
-        model=model,
-        max_tokens=4096,
-        messages=[{"role": "user", "content": _llm_prompt(text, src_lang, target_lang, content_type)}],
+    prompt = _llm_prompt(text, src_lang, target_lang, content_type)
+
+    # Modern SDK (v0.20+): has Anthropic class with messages API.
+    if hasattr(_anthropic, "Anthropic"):
+        client = _anthropic.Anthropic()
+        msg = client.messages.create(
+            model=model,
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+
+    # Legacy SDK (v0.2.x): uses Client + completion() + HUMAN_PROMPT sentinel.
+    if hasattr(_anthropic, "Client") and hasattr(_anthropic, "HUMAN_PROMPT"):
+        import os
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY environment variable not set. "
+                "Set it or upgrade: pip install 'anthropic>=0.20'"
+            )
+        client = _anthropic.Client(api_key=api_key)
+        full_prompt = (
+            f"{_anthropic.HUMAN_PROMPT} {prompt}{_anthropic.AI_PROMPT}"
+        )
+        resp = client.completion(
+            prompt=full_prompt,
+            model=model if model.startswith("claude-v") else "claude-v1",
+            max_tokens_to_sample=4096,
+        )
+        return resp["completion"].strip()
+
+    raise RuntimeError(
+        "Unrecognized anthropic package. Run: pip install 'anthropic>=0.20'"
     )
-    return msg.content[0].text.strip()
 
 
 def _call_openai(text: str, src_lang: str, target_lang: str,
@@ -631,7 +669,8 @@ def _call_openai(text: str, src_lang: str, target_lang: str,
 
 def _call_ollama(text: str, src_lang: str, target_lang: str,
                  content_type: str, model: str,
-                 host: str = "http://localhost:11434") -> str:
+                 host: str = "http://localhost:11434",
+                 timeout: int = 60) -> str:
     try:
         import requests as _requests
     except ImportError:
@@ -643,7 +682,7 @@ def _call_ollama(text: str, src_lang: str, target_lang: str,
         "prompt": _llm_prompt(text, src_lang, target_lang, content_type),
         "stream": False,
     }
-    resp = _requests.post(f"{host}/api/generate", json=payload, timeout=120)
+    resp = _requests.post(f"{host}/api/generate", json=payload, timeout=timeout)
     resp.raise_for_status()
     return resp.json()["response"].strip()
 
@@ -651,7 +690,8 @@ def _call_ollama(text: str, src_lang: str, target_lang: str,
 def _llm_translate_chunk(text: str, src_lang: str, target_lang: str,
                           content_type: str,
                           llm: str, model: str,
-                          ollama_host: str = "http://localhost:11434") -> str:
+                          ollama_host: str = "http://localhost:11434",
+                          llm_timeout: int = 60) -> str:
     """Call the chosen LLM backend to translate a natural language chunk."""
     if not text.strip():
         return text
@@ -660,7 +700,8 @@ def _llm_translate_chunk(text: str, src_lang: str, target_lang: str,
     if llm == "openai":
         return _call_openai(text, src_lang, target_lang, content_type, model)
     if llm == "ollama":
-        return _call_ollama(text, src_lang, target_lang, content_type, model, ollama_host)
+        return _call_ollama(text, src_lang, target_lang, content_type, model,
+                            ollama_host, llm_timeout)
     raise ValueError(f"unknown LLM backend: {llm!r}")
 
 
@@ -690,6 +731,7 @@ def translate_with_llm(
     model: str,
     translate_identifiers: bool = False,
     ollama_host: str = "http://localhost:11434",
+    llm_timeout: int = 60,
 ) -> str:
     """
     Translate a vani source file using both keyword substitution and LLM
@@ -719,9 +761,9 @@ def translate_with_llm(
         try:
             translated = _llm_translate_chunk(
                 content, effective_src, target_lang, "comment text",
-                llm, model, ollama_host
+                llm, model, ollama_host, llm_timeout
             )
-            return prefix + translated
+            return prefix + " " + translated.lstrip()
         except Exception as e:
             print(f"  [llm] comment translation failed: {e}", file=sys.stderr)
             return m.group(0)
@@ -734,7 +776,7 @@ def translate_with_llm(
         try:
             translated = _llm_translate_chunk(
                 content, effective_src, target_lang, "string literal",
-                llm, model, ollama_host
+                llm, model, ollama_host, llm_timeout
             )
             # Ensure no unescaped quotes sneak in.
             translated = translated.replace('"', '\\"')
@@ -768,7 +810,7 @@ def translate_with_llm(
                 translated_batch = _llm_translate_chunk(
                     batch, effective_src, target_lang,
                     "list of programming identifiers (one per line -- translate each separately, preserve the same line count)",
-                    llm, model, ollama_host
+                    llm, model, ollama_host, llm_timeout
                 )
                 translated_lines = translated_batch.splitlines()
                 sorted_idents = sorted(idents)
@@ -809,6 +851,7 @@ def _translate_file(
     llm_model: str = "claude-haiku-4-5-20251001",
     translate_identifiers: bool = False,
     ollama_host: str = "http://localhost:11434",
+    llm_timeout: int = 60,
 ) -> bool:
     source = src_path.read_text(encoding="utf-8")
     if verify:
@@ -821,7 +864,7 @@ def _translate_file(
     if llm:
         translated = translate_with_llm(
             source, target_lang, src_lang, llm, llm_model,
-            translate_identifiers, ollama_host
+            translate_identifiers, ollama_host, llm_timeout
         )
     else:
         translated = translate(source, target_lang, src_lang)
@@ -966,6 +1009,16 @@ def main() -> int:
         metavar="URL",
         help="Ollama server URL (default: http://localhost:11434)",
     )
+    llm_group.add_argument(
+        "--llm-timeout",
+        type=int,
+        default=60,
+        metavar="SECONDS",
+        help=(
+            "HTTP timeout for LLM requests in seconds (default: 60). "
+            "Increase for slow CPU-only Ollama models."
+        ),
+    )
 
     parser.add_argument(
         "--verbose", "-v",
@@ -1008,6 +1061,7 @@ def main() -> int:
         llm_model=llm_model,
         translate_identifiers=args.translate_identifiers,
         ollama_host=args.ollama_host,
+        llm_timeout=args.llm_timeout,
     )
 
     if args.batch:
