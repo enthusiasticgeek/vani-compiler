@@ -12,6 +12,18 @@ hours; a brand-new script family takes 15-30 hours. Read this
 chapter before opening a PR -- it covers the exact files to
 touch, the test checklist, and the native-speaker review gate.
 
+## Two levels of "adding a dialect"
+
+There are two distinct levels of work:
+
+| Level | What it unlocks | Effort |
+|-------|----------------|--------|
+| **Translator only** | `vani_translate.py` can output the language; you can read source in that language if you already have it | Edit `ALIASES` in `tools/vani_translate.py` — no Rust changes |
+| **Compiler-level** | `vanic` can parse, type-check, and compile `.vani` files *written* in that language | Lexer + backend + diagnostic changes in Rust |
+
+The translator already covers 57 languages (see [Section 8](08_translator.md)).
+For compiler-level support, continue with the rest of this chapter.
+
 ## Quick decision tree
 
 Before you start, decide which case you're in:
@@ -179,10 +191,14 @@ Thanks to Phase 6's parameterized print helpers:
 
 ## Challenge
 
-Pick a Brahmi-derived script not yet in vāṇी (Tibetan,
-Lao, Khmer). Sketch the keyword table for ~10 of the most
-important `TokenKind`s. Don't ship -- but write the change as a
-draft PR to feel the workflow.
+Tibetan, Lao, and Khmer are already in the *translator* (see
+[Section 8](08_translator.md)). For compiler-level support, pick
+one of them and sketch the full set of changes described above:
+lexer keyword function, `DialectLang` variant, `Script` range,
+`PrintLangMode` variant, diagnostic labels. Write it as a draft PR
+description — you don't need to compile, but writing out the change
+forces you to read the relevant source files and understand the
+abstraction boundaries.
 
 ---
 

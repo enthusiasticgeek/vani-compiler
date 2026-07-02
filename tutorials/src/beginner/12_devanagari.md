@@ -9,12 +9,19 @@
 Most programming languages use English keywords because they
 were invented by English speakers. vāṇी treats that as a
 historical accident, not a rule. The same compiler that reads
-`fn main()` also reads `मखय फलन`, because the Devanagari
+`fn main()` also reads `फलन main()`, because the Devanagari
 keyword `फलन` maps to `fn` in the same way `funcion` maps to
 "function" in Spanish. You add one line to your file --
 `// vani-lang: sanskrit` -- and the entire keyword vocabulary
 switches. The program still runs identically; only the words
-you type change. This lesson shows you what that looks like in
+you type change.
+
+The compiler natively supports Sanskrit, Hindi, Marathi, and several
+other script families. The translator tool (`tools/vani_translate.py`)
+extends this to **57 languages** — from Russian and Arabic to Japanese
+and Swahili — so you can convert existing files into any of those
+languages even if the compiler does not yet parse them natively.
+This lesson shows you what the Devanagari surface looks like in
 practice.
 
 ## The program
@@ -98,14 +105,24 @@ but they're a stylistic choice, not a requirement.
   available for `print`, `return`, `assert`, `prove`, `let`,
   `if`, and `while`. They're documented in
   Advanced Sec.7 -- *Devanagari purity arc*.
-- **The translator works both ways**. If you want to convert
-  an English file to Sanskrit (or vice versa) without writing
-  by hand, use the tool documented in
-  [`tools/README.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/README.md):
+- **The translator works both ways and across 57 languages**.
+  Convert any `.vani` file between human languages without
+  rewriting by hand:
   ```bash
+  # English → Sanskrit
   python3 tools/vani_translate.py --to sanskrit \
       ~/lesson1.vani -o ~/lesson1_sa.vani --add-sri-header
+
+  # Sanskrit → Japanese (or any other of the 57 supported languages)
+  python3 tools/vani_translate.py --to japanese \
+      ~/lesson1_sa.vani -o ~/lesson1_ja.vani
+
+  # Add --llm anthropic to also translate comments and strings
+  python3 tools/vani_translate.py --to hindi ~/lesson1.vani \
+      --llm anthropic --llm-model claude-haiku-4-5-20251001
   ```
+  See [`tools/README.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/README.md)
+  for the full reference and the LLM backend options.
 
 ## Should I write vāṇी in Devanagari?
 
@@ -125,11 +142,15 @@ language is fully expressive there.
 
 ## Challenge
 
-Pick any one of your solutions from Lessons 2-11 and translate
-it to a Sanskrit-pragma file *by hand* (no tooling). Run it
-and confirm the output is byte-identical (except for the
-Devanagari numerals). This is a great way to internalize the
-keyword table.
+1. Pick any solution from Lessons 2–11 and translate it to a
+   Sanskrit-pragma file *by hand* (no tooling). Run it and confirm
+   the output is identical (except for the Devanagari numerals).
+   This internalises the keyword table better than reading it.
+
+2. *(Bonus)* Run the same file through the translator to Japanese or
+   Arabic and compare the result with your hand-translated Sanskrit
+   version. Notice what the keyword substitution does and doesn't
+   change.
 
 ---
 
