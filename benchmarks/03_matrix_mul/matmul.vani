@@ -1,12 +1,19 @@
 // vani-lang: english
 // Benchmark 03 — 256×256 matrix multiply (i64)
 //
-// C = A × B using naïve triple-loop.
+// C = A × B using i-k-j loop order (cache-optimal, SIMD-vectorisable).
 // Flat Vec<i64> represents 2D matrices: element (r,c) at index r*N+c.
-// The affine functional-update `c = set(c, idx as u64, sum)` is
-// optimised to an in-place write because the old `c` is immediately consumed.
+//
+// Loop order rationale:
+//   i-j-k (naïve): inner k loop accesses B column-major (stride N) — not vectorisable.
+//   i-k-j (here):  inner col loop accesses B and C row-major (sequential) — vectorisable.
+//                  The compiler emits _Pragma("GCC ivdep") before each while loop, and
+//                  the Vec __restrict__ data pointer lets gcc use AVX2 SIMD for the
+//                  inner SAXPY: c[row*n+col] += a_val * b[k*n+col].
+//
+// set(mut ref c, idx as u64, val) writes the element in-place (no struct copy).
 
-intent "Benchmark: 256×256 i64 matrix multiply — arithmetic-dense nested loops";
+intent "Benchmark: 256×256 i64 matrix multiply — i-k-j SIMD-friendly loop order";
 
 fn main() -> i64 {
     let n: i64 = 256;
@@ -16,7 +23,7 @@ fn main() -> i64 {
     let a: Vec<i64> = vec();
     let ia: i64 = 0;
     while ia < sz {
-        a = push(a, ia % 97 + 1);
+        let _ = push(mut ref a, ia % 97 + 1);
         ia = ia + 1;
     }
 
@@ -24,7 +31,7 @@ fn main() -> i64 {
     let b: Vec<i64> = vec();
     let ib: i64 = 0;
     while ib < sz {
-        b = push(b, ib % 53 + 1);
+        let _ = push(mut ref b, ib % 53 + 1);
         ib = ib + 1;
     }
 
@@ -32,23 +39,27 @@ fn main() -> i64 {
     let c: Vec<i64> = vec();
     let ic: i64 = 0;
     while ic < sz {
-        c = push(c, 0);
+        let _ = push(mut ref c, 0);
         ic = ic + 1;
     }
 
-    // Multiply: C[row][col] = sum_k A[row][k] * B[k][col]
+    // Multiply: C[row][col] += A[row][k] * B[k][col]  (i-k-j order)
+    // For each (row, k): broadcast a_val = A[row][k], then add
+    // a_val * B[k][col] into each C[row][col] sequentially.
+    // The inner col loop is a SAXPY — sequential reads of B and C,
+    // scalar a_val — ideal for AVX2 vectorisation.
     let row: i64 = 0;
     while row < n {
-        let col: i64 = 0;
-        while col < n {
-            let sum: i64 = 0;
-            let m: i64 = 0;
-            while m < n {
-                sum = sum + a[row * n + m] * b[m * n + col];
-                m = m + 1;
+        let k: i64 = 0;
+        while k < n {
+            let a_val: i64 = a[row * n + k];
+            let col: i64 = 0;
+            while col < n {
+                let c_idx: i64 = row * n + col;
+                let _ = set(mut ref c, c_idx as u64, c[c_idx] + a_val * b[k * n + col]);
+                col = col + 1;
             }
-            c = set(c, (row * n + col) as u64, sum);
-            col = col + 1;
+            k = k + 1;
         }
         row = row + 1;
     }

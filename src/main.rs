@@ -2656,7 +2656,14 @@ fn run_program(
         // gcc only inlines functions explicitly marked `inline`; this flag
         // lets it inline small callees based on cost heuristics, closing
         // the ~9% gap vs hand-written C on recursive benchmarks.
-        .arg("-finline-functions");
+        .arg("-finline-functions")
+        // Enable the auto-vectoriser (also part of -O3 but absent from -O2).
+        // Works with the __restrict__ data pointers in every Vec struct and
+        // the _Pragma("GCC ivdep") emitted before every loop: gcc can use
+        // SSE2/AVX2 SIMD for Vec-element loops (matmul inner col-loop,
+        // sieve mark-composites, stats accumulation) without the aliasing
+        // ambiguity that blocks vectorisation in the absence of restrict.
+        .arg("-ftree-vectorize");
     // Layer 4.1 of `unsafe.md` — stack canaries. Opt-in via the
     // same embedded gate as Layer 1.1 / 1.2. `-fstack-protector-
     // strong` catches stack-smashing in any function with

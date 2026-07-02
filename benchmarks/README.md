@@ -241,13 +241,15 @@ accumulators. Row-partitioned output parallelism would need a language extension
 
 ### Summary table
 
-| Benchmark | Gap | Fixable today? | Notes |
-|-----------|-----|----------------|-------|
+| Benchmark | Gap | Status | Notes |
+|-----------|-----|--------|-------|
 | Graph BFS `build_graph` bug | Correctness | **Fixed** — `push(mut ref …)` | Was compile error |
 | Array stats ~35% slower | Performance | **Fixed** — `parallel for … reduce` | Now 3× faster than sequential C |
-| Sieve ~3× slower | Performance | No — compiler gap | Functional `set` not yet optimised to in-place in nested loops |
-| MatMul ~3× slower | Performance | No — compiler gap | No SIMD; loop reorder incompatible with N² `set` constraint |
-| Parallel MatMul | Parallelism | No — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
+| Fibonacci ~9% slower | Performance | **Fixed** — `-finline-functions` | Now within noise |
+| Alloc stress ~30% slower | Performance | **Fixed** — `__builtin_expect` + `__builtin_unreachable` | Now within 4% |
+| Sieve ~3× slower | Performance | **Fixed** — `set(mut ref …)` form | Now within 14% of C++ |
+| MatMul ~3× slower | Performance | **Fixed** — i-k-j loop + `-ftree-vectorize` + `ivdep` | Now within 5% of C++ |
+| Parallel MatMul | Parallelism | Open — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
 | Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
 
 ---

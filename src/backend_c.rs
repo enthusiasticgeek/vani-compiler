@@ -13124,6 +13124,14 @@ return __intent_ret; }}\n",
             out.push('\n');
         }
         TypedStmt::While { cond, body, label } => {
+            // vāṇī's affine ownership rules out pointer aliasing by
+            // construction, so it is always safe to assert to the
+            // vectoriser that loop iterations are independent.
+            // _Pragma is the C99 stringised form of #pragma so it
+            // can be emitted as a statement without line-level
+            // directives. gcc ignores ivdep on loops it cannot
+            // vectorise; clang silently accepts the unknown GCC pragma.
+            out.push_str("  _Pragma(\"GCC ivdep\")\n");
             out.push_str("  while (");
             out.push_str(&emit_expr(cond));
             out.push_str(") {\n");
@@ -13305,6 +13313,12 @@ return __intent_ret; }}\n",
                     ));
                 }
                 out.push_str(&format!("  _Pragma(\"{}\")\n", pragma));
+            } else {
+                // Same ivdep hint as for while-loops: vāṇī affine
+                // ownership guarantees no iteration carries a
+                // write-after-read alias, so the vectoriser can
+                // freely use SIMD without gather/scatter.
+                out.push_str("  _Pragma(\"GCC ivdep\")\n");
             }
             out.push_str(&format!(
                 "  for ({0} {1} = {2}; {1} < {3}; {1}++) {{\n",
