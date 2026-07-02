@@ -2740,13 +2740,10 @@ fn emit_intent_hashset_helpers_c_body(out: &mut String) {
          /* FNV-1a over the 8 bytes of an i64 — inline so we\n\
          \x20  don't require intent_hash_i64 to be emitted. */\n\
          static INTENT_UNUSED uint64_t intent_hashset_i64__hash_key(int64_t k) {\n\
-         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
-         \x20 uint64_t u = (uint64_t)k;\n\
-         \x20 for (int i = 0; i < 8; i++) {\n\
-         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
-         \x20   h *= 0x100000001b3ULL;\n\
-         \x20 }\n\
-         \x20 return h;\n\
+         \x20 uint64_t x = (uint64_t)k;\n\
+         \x20 x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;\n\
+         \x20 x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;\n\
+         \x20 return x ^ (x >> 31);\n\
          }\n\
          /* Rehash-only insert (used during grow): assumes the key\n\
           * isn't already in the table and skips the dup check. */\n\
@@ -2776,7 +2773,7 @@ fn emit_intent_hashset_helpers_c_body(out: &mut String) {
          \x20 if (old_occ) free(old_occ);\n\
          }\n\
          static INTENT_UNUSED bool intent_hashset_i64_insert(intent_hashset_i64* s, int64_t k) {\n\
-         \x20 if (s->capacity == 0 || ((s->len + s->tombstones) * 2) >= s->capacity) intent_hashset_i64__grow(s);\n\
+         \x20 if (s->capacity == 0 || ((s->len + s->tombstones) * 4) >= (s->capacity * 3)) intent_hashset_i64__grow(s);\n\
          \x20 uint64_t mask = s->capacity - 1;\n\
          \x20 uint64_t i = intent_hashset_i64__hash_key(k) & mask;\n\
          \x20 /* First-tombstone-or-empty placement strategy: walk past\n\
@@ -2947,13 +2944,10 @@ fn emit_intent_hashmap_pair_c_body(
          \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
          }}\n\
          static INTENT_UNUSED uint64_t {prefix}__hash_key(int64_t k) {{\n\
-         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
-         \x20 uint64_t u = (uint64_t)k;\n\
-         \x20 for (int i = 0; i < 8; i++) {{\n\
-         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
-         \x20   h *= 0x100000001b3ULL;\n\
-         \x20 }}\n\
-         \x20 return h;\n\
+         \x20 uint64_t x = (uint64_t)k;\n\
+         \x20 x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;\n\
+         \x20 x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;\n\
+         \x20 return x ^ (x >> 31);\n\
          }}\n\
          static INTENT_UNUSED void {prefix}__insert_raw({prefix}* m, int64_t k, {v_ctype} v) {{\n\
          \x20 uint64_t mask = m->capacity - 1;\n\
@@ -3026,7 +3020,7 @@ fn emit_intent_hashmap_pair_c_body(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, int64_t k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -3205,7 +3199,7 @@ fn emit_intent_hashmap_struct_pair_c_body(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, {k_ctype} k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -3360,7 +3354,7 @@ fn emit_intent_hashmap_pair_c_body_f64k(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, double k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -3529,7 +3523,7 @@ fn emit_intent_hashmap_pair_c_body_strk(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, const char* k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -3725,7 +3719,7 @@ fn emit_intent_hashmap_pair_c_body_tuple_i64k(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, {tuple_struct} k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -3806,13 +3800,10 @@ fn emit_intent_hashmap_pair_c_body_i64k_strv(
          \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
          }}\n\
          static INTENT_UNUSED uint64_t {prefix}__hash_key(int64_t k) {{\n\
-         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
-         \x20 uint64_t u = (uint64_t)k;\n\
-         \x20 for (int i = 0; i < 8; i++) {{\n\
-         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
-         \x20   h *= 0x100000001b3ULL;\n\
-         \x20 }}\n\
-         \x20 return h;\n\
+         \x20 uint64_t x = (uint64_t)k;\n\
+         \x20 x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;\n\
+         \x20 x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;\n\
+         \x20 return x ^ (x >> 31);\n\
          }}\n\
          /* _insert_owned_raw takes an already-owned V pointer\n\
           * (used by __grow, which moves V's across the rehash\n\
@@ -3901,7 +3892,7 @@ fn emit_intent_hashmap_pair_c_body_i64k_strv(
              \x20 r.tag = 1; r.payload = (char*)0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, int64_t k, const char* v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -4090,7 +4081,7 @@ fn emit_intent_hashmap_pair_c_body_strk_strv(
              \x20 r.tag = 1; r.payload = (char*)0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, const char* k, const char* v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -4290,7 +4281,7 @@ fn emit_intent_hashmap_pair_c_body_vec_i64k(
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }}\n\
              static INTENT_UNUSED {opt_v} {prefix}_insert({prefix}* m, intent_vec_int64_t k, {v_ctype} v) {{\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) {prefix}__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) {prefix}__grow(m);\n\
              \x20 {opt_v} r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = {prefix}__hash_key(k) & mask;\n\
@@ -4375,13 +4366,10 @@ fn emit_intent_hashmap_helpers_c_body(out: &mut String, has_option_i64: bool) {
          \x20 m->len = 0; m->capacity = 0; m->tombstones = 0;\n\
          }\n\
          static INTENT_UNUSED uint64_t intent_hashmap_i64_i64__hash_key(int64_t k) {\n\
-         \x20 uint64_t h = 0xcbf29ce484222325ULL;\n\
-         \x20 uint64_t u = (uint64_t)k;\n\
-         \x20 for (int i = 0; i < 8; i++) {\n\
-         \x20   h ^= (u >> (i * 8)) & 0xffULL;\n\
-         \x20   h *= 0x100000001b3ULL;\n\
-         \x20 }\n\
-         \x20 return h;\n\
+         \x20 uint64_t x = (uint64_t)k;\n\
+         \x20 x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;\n\
+         \x20 x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;\n\
+         \x20 return x ^ (x >> 31);\n\
          }\n\
          /* Rehash-only insert (used during grow): assumes no\n\
           * tombstones exist (just-allocated occ array). */\n\
@@ -4456,7 +4444,7 @@ fn emit_intent_hashmap_helpers_c_body(out: &mut String, has_option_i64: bool) {
              \x20 r.tag = 1; r.payload = 0; return r;\n\
              }\n\
              static INTENT_UNUSED Enum_Option__i64 intent_hashmap_i64_i64_insert(intent_hashmap_i64_i64* m, int64_t k, int64_t v) {\n\
-             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 2) >= m->capacity) intent_hashmap_i64_i64__grow(m);\n\
+             \x20 if (m->capacity == 0 || ((m->len + m->tombstones) * 4) >= (m->capacity * 3)) intent_hashmap_i64_i64__grow(m);\n\
              \x20 Enum_Option__i64 r;\n\
              \x20 uint64_t mask = m->capacity - 1;\n\
              \x20 uint64_t i = intent_hashmap_i64_i64__hash_key(k) & mask;\n\
@@ -7087,6 +7075,48 @@ fn emit_intent_array_helpers_i64_unconditional(out: &mut String, has_option_i64:
          static INTENT_UNUSED int64_t intent_array_int64_t__cmp_ascending(int64_t a, int64_t b) {\n\
          \x20 return (a > b) - (a < b);\n\
          }\n\
+         /* sort_asc_impl: Hoare-partition quicksort specialised for ascending\n\
+          * order. Direct a[i]<pivot / a[j]>pivot comparisons (no function\n\
+          * pointer) let gcc inline and vectorise the scan loops. Median-of-3\n\
+          * pivot eliminates worst-case on sorted / reverse-sorted input. */\n\
+         static INTENT_UNUSED void intent_array_int64_t__sort_asc_impl(int64_t* a, int64_t lo, int64_t hi) {\n\
+         \x20 while (lo < hi) {\n\
+         \x20   if (hi - lo < 16) {\n\
+         \x20     for (int64_t i = lo + 1; i <= hi; i++) {\n\
+         \x20       int64_t key = a[i];\n\
+         \x20       int64_t j = i - 1;\n\
+         \x20       while (j >= lo && a[j] > key) {\n\
+         \x20         a[j + 1] = a[j];\n\
+         \x20         j--;\n\
+         \x20       }\n\
+         \x20       a[j + 1] = key;\n\
+         \x20     }\n\
+         \x20     return;\n\
+         \x20   }\n\
+         \x20   /* Median-of-3: place median of a[lo]/a[mid]/a[hi] at a[mid]. */\n\
+         \x20   int64_t mid = lo + (hi - lo) / 2;\n\
+         \x20   if (a[lo] > a[mid]) { int64_t t = a[lo]; a[lo] = a[mid]; a[mid] = t; }\n\
+         \x20   if (a[lo] > a[hi])  { int64_t t = a[lo]; a[lo] = a[hi];  a[hi]  = t; }\n\
+         \x20   if (a[mid] > a[hi]) { int64_t t = a[mid]; a[mid] = a[hi]; a[hi]  = t; }\n\
+         \x20   int64_t pivot = a[mid];\n\
+         \x20   int64_t i = lo - 1;\n\
+         \x20   int64_t j = hi + 1;\n\
+         \x20   for (;;) {\n\
+         \x20     do { i++; } while (a[i] < pivot);\n\
+         \x20     do { j--; } while (a[j] > pivot);\n\
+         \x20     if (i >= j) break;\n\
+         \x20     int64_t tmp = a[i]; a[i] = a[j]; a[j] = tmp;\n\
+         \x20   }\n\
+         \x20   if (j - lo < hi - (j + 1)) {\n\
+         \x20     intent_array_int64_t__sort_asc_impl(a, lo, j);\n\
+         \x20     lo = j + 1;\n\
+         \x20   } else {\n\
+         \x20     intent_array_int64_t__sort_asc_impl(a, j + 1, hi);\n\
+         \x20     hi = j;\n\
+         \x20   }\n\
+         \x20 }\n\
+         }\n\
+         /* qsort_impl: function-pointer version kept for sort_by() user comparators. */\n\
          static INTENT_UNUSED void intent_array_int64_t__qsort_impl(int64_t* a, int64_t lo, int64_t hi, intent_array_int64_t__cmp_fn cmp) {\n\
          \x20 while (lo < hi) {\n\
          \x20   if (hi - lo < 16) {\n\
@@ -7121,7 +7151,7 @@ fn emit_intent_array_helpers_i64_unconditional(out: &mut String, has_option_i64:
          \x20 }\n\
          }\n\
          static INTENT_UNUSED int64_t intent_array_int64_t__sort(int64_t* a, uint64_t n) {\n\
-         \x20 if (n > 1) intent_array_int64_t__qsort_impl(a, 0, (int64_t)n - 1, intent_array_int64_t__cmp_ascending);\n\
+         \x20 if (n > 1) intent_array_int64_t__sort_asc_impl(a, 0, (int64_t)n - 1);\n\
          \x20 return 0;\n\
          }\n\
          static INTENT_UNUSED int64_t intent_array_int64_t__sort_by(int64_t* a, uint64_t n, intent_array_int64_t__cmp_fn cmp) {\n\

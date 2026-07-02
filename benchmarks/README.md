@@ -251,6 +251,8 @@ accumulators. Row-partitioned output parallelism would need a language extension
 | Sieve ~3× slower | Performance | **Fixed** — `set(mut ref …)` form | Now within 14% of C++ |
 | MatMul ~3× slower | Performance | **Fixed** — i-k-j loop + `-ftree-vectorize` + `ivdep` | Now within 5% of C++ |
 | All benchmarks — AVX-512 / FMA | Performance | **Fixed** — `-march=native -fomit-frame-pointer` | Ice Lake i5-1035G1: 8-wide AVX-512, FMA, free rbp register |
+| Sort ~16-29% behind C++/Rust | Performance | **Fixed** — `sort_asc_impl` + median-of-3 | No function-pointer in hot path; gcc can inline + vectorise scan loops |
+| HashMap ~15-24% behind C++/Rust | Performance | **Fixed** — splitmix64 hash + 75% load factor | Hash: 8 ops → 2 ops; load factor: 50% → 75% (fewer grows, denser table) |
 | Parallel MatMul | Parallelism | Open — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
 | Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
 
@@ -301,20 +303,28 @@ and whatever residual BFS gap remains after the v0.3 fix.
 **Fix planned**: SSA-level bounds-elision pass (v0.4) will analyse loop
 induction variables and delete checks that are provably redundant.
 
-#### 3. Standard library quality, not language overhead
+#### 3. Standard library improvements — fixed in v0.3
 
-- **Sort (29% behind Rust)**: vāṇī uses introsort; Rust `sort_unstable` is
-  pdqsort (pattern-defeating quicksort), which has measurably better cache
-  behaviour on partially-sorted or structured data. C++ `std::sort` also
-  benefits from decades of compiler-specific tuning.
+- **Sort (was 29% behind Rust, 16% behind C++)**: The old `sort()` called a
+  Hoare quicksort through a `cmp_fn` function pointer. Every comparison in the
+  inner loop went through an indirect call, blocking gcc from inlining or
+  vectorising the scan. Fixed in v0.3: `sort()` now calls `sort_asc_impl`, a
+  specialised version that uses direct `a[i] < pivot` comparisons (inlineable)
+  and a **median-of-3 pivot** (median of `a[lo]`, `a[mid]`, `a[hi]`) to
+  eliminate worst-case behaviour on sorted / reverse-sorted input.
+  `sort_by()` still uses the function-pointer path for user comparators.
 
-- **HashMap (24% behind Rust)**: vāṇī uses FNV-1a open addressing. Rust
-  `HashMap` is backed by hashbrown / SwissTable, which uses SIMD on the
-  8-byte control-byte array to probe up to 8 slots per instruction. This is
-  a fundamentally faster probe sequence regardless of the hash function.
+- **HashMap (was 24% behind Rust, 15% behind C++)**: Two changes in v0.3:
+  1. **Hash function**: Replaced 8-iteration FNV-1a (8 × multiply+xor) with
+     **splitmix64** (2 multiplies + 3 shifts). Same avalanche quality, ~4×
+     fewer operations per hash.
+  2. **Load factor 50% → 75%**: The grow threshold changed from
+     `(len + tombstones) × 2 ≥ capacity` to
+     `(len + tombstones) × 4 ≥ capacity × 3`. Fewer grow/rehash cycles,
+     denser table = better cache hit rate on lookup chains.
 
-These are library gaps, not language gaps — the same algorithms implemented in
-vāṇī user code would produce the same C output and close the difference.
+These were library gaps, not language gaps. The fixes live entirely in the C
+code emitted by `backend_c.rs` — no language changes required.
 
 #### 4. No escape analysis
 
