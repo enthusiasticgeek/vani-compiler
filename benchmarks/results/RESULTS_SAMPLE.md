@@ -35,7 +35,7 @@ rustc    : /usr/bin/rustc
 | Array stats 10M       |      9.1 ms† |     26.8 ms  |     27.1 ms  | —            | —            |     28.3 ms  |
 
 † vāṇī uses `parallel for … reduce` (multi-core); C/C++/Rust columns are single-threaded baseline.
-‡ vāṇī uses `set(mut ref sieve, j as u64, 0)` (in-place element write, v0.3+); previously 38.4 ms with consuming `set`.
+‡ v0.3: switched to `set(mut ref …)` in-place form (previously 38.4 ms). v0.4: signed bounds check + VRP hints close remaining ~14% gap.
 
 ---
 
@@ -75,15 +75,26 @@ rustc    : /usr/bin/rustc
 
 *Old result with consuming `set()` form: 38.4 ms (3× slower).*
 
-> **Analysis**: Rewriting `sieve = set(sieve, j as u64, 0)` to
-> `let _ = set(mut ref sieve, j as u64, 0)` (available from v0.3)
-> eliminates the 24-byte Vec-struct pass-by-value and return on every
-> inner-loop iteration. The in-place form (`__set_mut`) writes directly
-> through the Vec pointer with no struct copies, allowing gcc to keep the
-> data pointer in a register across iterations.
+> **Analysis**: Two generations of fixes closed the original 3× gap.
 >
-> With `set(mut ref ...)`, vāṇī closes from 3× slower to within 14% of C++ —
-> within normal measurement noise for this workload.
+> **v0.3** — `set(mut ref sieve, j as u64, 0)` eliminates 24-byte Vec-struct
+> copies on every inner-loop iteration. The `__set_mut` helper writes directly
+> through the Vec pointer, letting gcc keep the data pointer in a register.
+> Closed 3× → within 14%.
+>
+> **v0.4** — Bounds-check elision via signed VRP hints:
+> 1. `intent_check_bounds` and `set_mut` now take `int64_t index` and check
+>    `index < 0 || index >= (int64_t)length` (signed form). gcc's VRP can
+>    eliminate each sub-condition separately.
+> 2. Before `while j <= limit`, the backend emits a hoisted assertion
+>    `if (limit >= sieve.len) abort()` — fires on the same iteration that
+>    would have been out-of-bounds, and tells gcc `sieve.len > limit` for
+>    the whole loop.
+> 3. `__builtin_assume(j <= limit)` is emitted at the top of every while body.
+>
+> Together: VRP knows `j <= limit < sieve.len` and `j >= 0` (from outer-loop
+> init `j = i*i` where `i ≥ 2`). The check `j < 0 || j >= sieve.len` = dead
+> code. gcc removes it. Same mechanism applies to the count loop and BFS reads.
 
 ---
 

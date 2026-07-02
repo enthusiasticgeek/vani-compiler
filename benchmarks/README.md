@@ -253,6 +253,7 @@ accumulators. Row-partitioned output parallelism would need a language extension
 | All benchmarks — AVX-512 / FMA | Performance | **Fixed** — `-march=native -fomit-frame-pointer` | Ice Lake i5-1035G1: 8-wide AVX-512, FMA, free rbp register |
 | Sort ~16-29% behind C++/Rust | Performance | **Fixed** — `sort_asc_impl` + median-of-3 | No function-pointer in hot path; gcc can inline + vectorise scan loops |
 | HashMap ~15-24% behind C++/Rust | Performance | **Fixed** — splitmix64 hash + 75% load factor | Hash: 8 ops → 2 ops; load factor: 50% → 75% (fewer grows, denser table) |
+| Bounds checks not elided — 5–14% residual gaps | Performance | **Fixed** — signed check + VRP hints (v0.4) | `__builtin_assume(cond)` + hoisted range assertion; gcc VRP elides signed check |
 | Parallel MatMul | Parallelism | Open — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
 | Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
 
@@ -290,18 +291,30 @@ separate double-ref bug in `build_graph`: passing `mut ref adj_start` where
 `adj_start` is already `mut ref Vec<i64>` creates `mut ref mut ref Vec<i64>`
 (rejected). Fixed by passing the parameter directly.
 
-#### 2. Bounds checks not fully elided — remaining ~5–14% gaps
+#### 2. Bounds checks — closed in v0.4
 
-Every `xs[i]` compiles to `intent_check_bounds(i, xs.len)`.
-Even with `__builtin_expect(i >= len, 0)` + `__builtin_unreachable()`, gcc can
-only remove the check when it can *prove* `i < len` from surrounding control
-flow — which it cannot always do across function call boundaries.
-C and Rust's safe iterators use raw pointer arithmetic in tight loops, paying
-zero per-element check cost. This is the remaining cost in the Sieve (~14% vs C++)
-and whatever residual BFS gap remains after the v0.3 fix.
+Every `xs[i]` compiles to a bounds check. The old unsigned form
+`index >= length` could not be proved dead from a signed loop guard
+`i < n`. Three-part fix landed in v0.4:
 
-**Fix planned**: SSA-level bounds-elision pass (v0.4) will analyse loop
-induction variables and delete checks that are provably redundant.
+1. **Signed check signature**: `intent_check_bounds` and `set_mut` now
+   take `int64_t index` and check `index < 0 || index >= (int64_t)length`.
+   The two-condition form lets gcc's VRP eliminate each branch separately.
+
+2. **Hoisted range assertion**: For `while var <= upper` loops accessing
+   `vec[var]`, the backend emits a *single* pre-loop `if (upper >= vec.len)
+   abort()` — safe, fires exactly when the last iteration would have been
+   out-of-bounds anyway, and tells gcc `vec.len > upper` for the whole loop.
+
+3. **`__builtin_assume(cond)`** at the top of every while body: re-states
+   the loop condition so VRP can use it to bound the loop variable.
+
+With all three: inside `while j <= limit`, VRP knows `j <= limit < vec.len`
+(from hoisted assertion) and `j >= 0` (from outer-loop VRP or initialization).
+The signed check `j < 0 || j >= (int64_t)vec.len` is `false || false` — dead
+code — gcc removes it entirely. Same mechanism fires for BFS
+(`while head < len(queue)` — the assume directly proves the check false since
+`head < queue.len` is the condition *and* the check).
 
 #### 3. Standard library improvements — fixed in v0.3
 

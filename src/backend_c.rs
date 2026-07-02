@@ -11573,9 +11573,9 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
             "    xs->data[i] = v;".to_string()
         };
         out.push_str(&format!(
-            "static INTENT_UNUSED int64_t {sn}__set_mut({sn}* xs, uint64_t i, {ct} v) {{\
-\n    if (__builtin_expect(i >= xs->len, 0)) {{ fprintf(stderr, \"set_mut: index out of bounds\\n\"); abort(); }}\
-\n    if (i >= xs->len) __builtin_unreachable();\
+            "static INTENT_UNUSED int64_t {sn}__set_mut({sn}* xs, int64_t i, {ct} v) {{\
+\n    if (__builtin_expect(i < 0 || i >= (int64_t)xs->len, 0)) {{ fprintf(stderr, \"set_mut: index out of bounds\\n\"); abort(); }}\
+\n    if (i < 0 || i >= (int64_t)xs->len) __builtin_unreachable();\
 {cleanup}\
 \n{store}\
 \n    return 0;\
@@ -12164,6 +12164,128 @@ fn emit_params(function: &TypedFunction, out: &mut String) {
             out.push_str(", ");
         }
         out.push_str(&format_declarator(&param.ty, &local_name(&param.name)));
+    }
+}
+
+/// Returns pre-loop C assertion strings for a `while var (<=|<) upper` loop
+/// that accesses a Vec indexed by `var`.  One assertion per Vec establishes
+/// `upper (< | <=) vec.len`, enabling gcc's VRP to prove per-element bounds
+/// checks redundant after the signed `intent_check_bounds` / `set_mut` change.
+fn while_bounds_hints(cond: &TypedExpr, body: &[TypedStmt]) -> Vec<String> {
+    use crate::ir::TypedExprKind as E;
+    use crate::ast::BinaryOp;
+    let (loop_var, upper, is_le) = match &cond.kind {
+        E::Binary { op, left, right, .. } => match op {
+            BinaryOp::Le => match &left.kind {
+                E::Var(v) => (v.clone(), right.as_ref(), true),
+                _ => return vec![],
+            },
+            BinaryOp::Lt => match &left.kind {
+                E::Var(v) => (v.clone(), right.as_ref(), false),
+                _ => return vec![],
+            },
+            _ => return vec![],
+        },
+        _ => return vec![],
+    };
+    let mut vec_names: std::collections::BTreeSet<String> = Default::default();
+    collect_vec_idx_names(body, &loop_var, &mut vec_names);
+    if vec_names.is_empty() {
+        return vec![];
+    }
+    let upper_str = emit_expr(upper);
+    vec_names
+        .into_iter()
+        .map(|vn| {
+            let local = local_name(&vn);
+            if is_le {
+                // j <= upper: max index is upper; abort if upper >= vec.len
+                format!(
+                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi >= (int64_t)({}.len), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi >= (int64_t)({}.len)) __builtin_unreachable(); }}\n",
+                    upper_str, local, local
+                )
+            } else {
+                // j < upper: max index is upper-1; abort if upper > vec.len
+                format!(
+                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi > (int64_t)({}.len), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi > (int64_t)({}.len)) __builtin_unreachable(); }}\n",
+                    upper_str, local, local
+                )
+            }
+        })
+        .collect()
+}
+
+fn collect_vec_idx_names(
+    body: &[TypedStmt],
+    loop_var: &str,
+    out: &mut std::collections::BTreeSet<String>,
+) {
+    use crate::ir::TypedStmt as S;
+    for stmt in body {
+        match stmt {
+            S::Let { expr, .. } | S::Reassign { expr, .. } | S::Discard { expr } => {
+                collect_vec_idx_in_expr(expr, loop_var, out);
+            }
+            S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => {
+                collect_vec_idx_in_expr(expr, loop_var, out);
+            }
+            S::If { cond, then_body, else_body } => {
+                collect_vec_idx_in_expr(cond, loop_var, out);
+                collect_vec_idx_names(then_body, loop_var, out);
+                collect_vec_idx_names(else_body, loop_var, out);
+            }
+            // Don't recurse into nested loops — different loop variable
+            _ => {}
+        }
+    }
+}
+
+fn collect_vec_idx_in_expr(
+    expr: &TypedExpr,
+    loop_var: &str,
+    out: &mut std::collections::BTreeSet<String>,
+) {
+    use crate::ir::TypedExprKind as E;
+    match &expr.kind {
+        E::Index { array, index, .. } => {
+            if let E::Var(vec_name) = &array.kind {
+                if expr_is_loop_var(index, loop_var) {
+                    out.insert(vec_name.clone());
+                }
+            }
+            collect_vec_idx_in_expr(array, loop_var, out);
+            collect_vec_idx_in_expr(index, loop_var, out);
+        }
+        E::Call { name, args, .. } => {
+            // set_mut(mut ref vec, loop_var [as u64], value) — in-place write
+            if (name == "set_mut" || name == "set") && args.len() >= 2 {
+                if let E::RefMut { name: vn } | E::Ref { name: vn } = &args[0].kind {
+                    if expr_is_loop_var(&args[1], loop_var) {
+                        out.insert(vn.clone());
+                    }
+                }
+            }
+            for a in args {
+                collect_vec_idx_in_expr(a, loop_var, out);
+            }
+        }
+        E::Binary { left, right, .. } => {
+            collect_vec_idx_in_expr(left, loop_var, out);
+            collect_vec_idx_in_expr(right, loop_var, out);
+        }
+        E::Unary { expr, .. } | E::Cast { expr, .. } => {
+            collect_vec_idx_in_expr(expr, loop_var, out);
+        }
+        _ => {}
+    }
+}
+
+fn expr_is_loop_var(expr: &TypedExpr, loop_var: &str) -> bool {
+    use crate::ir::TypedExprKind as E;
+    match &expr.kind {
+        E::Var(v) => v == loop_var,
+        E::Cast { expr, .. } => expr_is_loop_var(expr, loop_var),
+        _ => false,
     }
 }
 
@@ -13154,6 +13276,14 @@ return __intent_ret; }}\n",
             out.push('\n');
         }
         TypedStmt::While { cond, body, label } => {
+            // Hoist a single bounds assertion per accessed Vec before the
+            // loop. When the pattern is `while var <= upper` and the body
+            // accesses `vec[var]`, asserting `upper < vec.len` once lets
+            // gcc's VRP prove the per-element signed check redundant and
+            // eliminate it from the hot path.
+            for hint in while_bounds_hints(cond, body) {
+                out.push_str(&hint);
+            }
             // vāṇī's affine ownership rules out pointer aliasing by
             // construction, so it is always safe to assert to the
             // vectoriser that loop iterations are independent.
@@ -13165,6 +13295,13 @@ return __intent_ret; }}\n",
             out.push_str("  while (");
             out.push_str(&emit_expr(cond));
             out.push_str(") {\n");
+            // Restate the loop condition as a compiler hint so gcc's range
+            // analysis can prove per-element bounds checks redundant even
+            // when the pre-loop hoisted assertion did not fire (e.g. when
+            // the upper bound IS the vec length, as in BFS).
+            out.push_str("    __builtin_assume(");
+            out.push_str(&emit_expr(cond));
+            out.push_str(");\n");
             for s in body {
                 emit_stmt(s, out);
             }
@@ -13790,7 +13927,7 @@ fn emit_index_assign(
     let (slot_lvalue, store_line): (Option<String>, String) = match underlying {
         Type::Array { length, .. } => {
             let idx_expr = if checked {
-                format!("intent_check_bounds((uint64_t)({}), {})", index_str, length)
+                format!("intent_check_bounds((int64_t)({}), (int64_t){})", index_str, length)
             } else {
                 index_str.clone()
             };
@@ -13806,7 +13943,7 @@ fn emit_index_assign(
             };
             let idx_expr = if checked {
                 format!(
-                    "intent_check_bounds((uint64_t)({}), {}.len)",
+                    "intent_check_bounds((int64_t)({}), (int64_t){}.len)",
                     index_str, prefix
                 )
             } else {
@@ -18581,7 +18718,7 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 _ => unreachable!("set_mut() arg 0 must be (mut ref) Vec<_>"),
             };
             format!(
-                "{}({}, (uint64_t)({}), {})",
+                "{}({}, (int64_t)({}), {})",
                 vec_helper(&element, "set_mut"),
                 emit_expr(&args[0]),
                 emit_expr(&args[1]),
@@ -18684,7 +18821,7 @@ fn emit_index(array: &TypedExpr, index: &TypedExpr, checked: bool) -> String {
         Type::Array { length, .. } => {
             if checked {
                 format!(
-                    "({}[intent_check_bounds((uint64_t)({}), {})])",
+                    "({}[intent_check_bounds((int64_t)({}), (int64_t){})])",
                     array_str, index_str, length
                 )
             } else {
@@ -18704,7 +18841,7 @@ fn emit_index(array: &TypedExpr, index: &TypedExpr, checked: bool) -> String {
                 let elem_storage = c_element_storage(element);
                 if checked {
                     return format!(
-                        "(({{ {sn} _intent_idx_tmp = ({arr}); {es} _intent_idx_r = _intent_idx_tmp.data[intent_check_bounds((uint64_t)({idx}), _intent_idx_tmp.len)]; {fh}(_intent_idx_tmp); _intent_idx_r; }}))",
+                        "(({{ {sn} _intent_idx_tmp = ({arr}); {es} _intent_idx_r = _intent_idx_tmp.data[intent_check_bounds((int64_t)({idx}), (int64_t)_intent_idx_tmp.len)]; {fh}(_intent_idx_tmp); _intent_idx_r; }}))",
                         sn = struct_name,
                         arr = array_str,
                         es = elem_storage,
@@ -18729,7 +18866,7 @@ fn emit_index(array: &TypedExpr, index: &TypedExpr, checked: bool) -> String {
             };
             if checked {
                 format!(
-                    "({}.data[intent_check_bounds((uint64_t)({}), {}.len)])",
+                    "({}.data[intent_check_bounds((int64_t)({}), (int64_t){}.len)])",
                     prefix, index_str, prefix
                 )
             } else {
@@ -19493,14 +19630,14 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         // The trailing __builtin_unreachable() is an optimizer assumption:
         // if gcc can prove index < length it removes the whole branch;
         // otherwise the abort() fires before reaching it (safe).
-        out.push_str("static INTENT_UNUSED inline uint64_t intent_check_bounds(uint64_t index, uint64_t length) {\n\
-    if (__builtin_expect(index >= length, 0)) {\n\
-        fprintf(stderr, \"index out of bounds: %llu >= %llu\\n\",\n\
-                (unsigned long long)index, (unsigned long long)length);\n\
+        out.push_str("static INTENT_UNUSED inline uint64_t intent_check_bounds(int64_t index, int64_t length) {\n\
+    if (__builtin_expect(index < 0 || index >= length, 0)) {\n\
+        fprintf(stderr, \"index out of bounds: %lld, len %lld\\n\",\n\
+                (long long)index, (long long)length);\n\
         abort();\n\
     }\n\
-    if (index >= length) __builtin_unreachable();\n\
-    return index;\n\
+    if (index < 0 || index >= length) __builtin_unreachable();\n\
+    return (uint64_t)index;\n\
 }\n");
     }
 
