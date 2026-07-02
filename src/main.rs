@@ -2660,10 +2660,21 @@ fn run_program(
         // Enable the auto-vectoriser (also part of -O3 but absent from -O2).
         // Works with the __restrict__ data pointers in every Vec struct and
         // the _Pragma("GCC ivdep") emitted before every loop: gcc can use
-        // SSE2/AVX2 SIMD for Vec-element loops (matmul inner col-loop,
+        // SSE2/AVX2/AVX-512 SIMD for Vec-element loops (matmul inner col-loop,
         // sieve mark-composites, stats accumulation) without the aliasing
         // ambiguity that blocks vectorisation in the absence of restrict.
-        .arg("-ftree-vectorize");
+        .arg("-ftree-vectorize")
+        // Unlock CPU-native instruction set (AVX-512F/BW/DQ/VL + FMA3 on
+        // Ice Lake i5-1035G1). Key wins:
+        //   matmul SAXPY:  c += a*b → single vfmadd231epi64 (FMA, 1 insn vs 2)
+        //   sieve inner:   8-wide AVX-512 i64 stores vs 4-wide AVX2
+        //   general:       better uarch scheduling for the specific CPU model
+        // Safe because benchmarks compile and run on the same machine.
+        .arg("-march=native")
+        // Free the frame-pointer register (rbp) for use as a general-purpose
+        // register in tight loops. Saves 1 instruction per function entry/exit
+        // and reduces register spills in register-pressure inner loops.
+        .arg("-fomit-frame-pointer");
     // Layer 4.1 of `unsafe.md` — stack canaries. Opt-in via the
     // same embedded gate as Layer 1.1 / 1.2. `-fstack-protector-
     // strong` catches stack-smashing in any function with

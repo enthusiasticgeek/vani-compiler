@@ -24,17 +24,19 @@ intent "Benchmark: graph BFS with index handles — no weak_ptr, no ref-counting
 fn build_graph(n: i64, adj_start: mut ref Vec<i64>, adj_edges: mut ref Vec<i64>) -> i64 {
     // Wire each node v to neighbours: (v+1)%n, (v+3)%n, (v+7)%n,
     //                                  (v+13)%n, (v+29)%n, (v+61)%n
+    // Note: adj_start and adj_edges are already mut ref Vec<i64> parameters;
+    // pass them directly to insert/push (no extra mut ref — that would double-ref).
     let v: i64 = 0;
     while v < n {
-        let start: i64 = (len(ref adj_edges)) as i64;
-        let _ = insert(mut ref adj_start, v as u64, start);
+        let start: i64 = (len(adj_edges)) as i64;
+        let _ = insert(adj_start, v as u64, start);
 
-        let _ = push(mut ref adj_edges, (v + 1) % n);
-        let _ = push(mut ref adj_edges, (v + 3) % n);
-        let _ = push(mut ref adj_edges, (v + 7) % n);
-        let _ = push(mut ref adj_edges, (v + 13) % n);
-        let _ = push(mut ref adj_edges, (v + 29) % n);
-        let _ = push(mut ref adj_edges, (v + 61) % n);
+        let _ = push(adj_edges, (v + 1) % n);
+        let _ = push(adj_edges, (v + 3) % n);
+        let _ = push(adj_edges, (v + 7) % n);
+        let _ = push(adj_edges, (v + 13) % n);
+        let _ = push(adj_edges, (v + 29) % n);
+        let _ = push(adj_edges, (v + 61) % n);
         v = v + 1;
     }
     return 0;
@@ -42,19 +44,22 @@ fn build_graph(n: i64, adj_start: mut ref Vec<i64>, adj_edges: mut ref Vec<i64>)
 
 fn bfs(adj_start: ref Vec<i64>, adj_edges: ref Vec<i64>,
        n: i64, start: i64) -> i64 {
+    // visited and queue are local Vec<i64> — use set(mut ref ...) and push(mut ref ...)
+    // to avoid 24-byte Vec-struct copies on every call. This is the hot path:
+    // ~1 000 000 push+set calls per benchmark run (1000 BFS × ~1000 visits each).
     let visited: Vec<i64> = vec();
     let queue: Vec<i64> = vec();
     let k: i64 = 0;
     while k < n {
-        visited = push(visited, 0);
+        let _ = push(mut ref visited, 0);
         k = k + 1;
     }
-    visited = set(visited, start as u64, 1);
-    queue = push(queue, start);
+    let _ = set(mut ref visited, start as u64, 1);
+    let _ = push(mut ref queue, start);
 
     let head: i64 = 0;
     let count: i64 = 0;
-    while head < (len(queue) as i64) {
+    while head < (len(ref queue) as i64) {
         let curr: i64 = queue[head];
         head = head + 1;
         count = count + 1;
@@ -66,8 +71,8 @@ fn bfs(adj_start: ref Vec<i64>, adj_edges: ref Vec<i64>,
         while e < 6 {
             let nb: i64 = adj_edges[edge_base + e];
             if visited[nb] == 0 {
-                visited = set(visited, nb as u64, 1);
-                queue = push(queue, nb);
+                let _ = set(mut ref visited, nb as u64, 1);
+                let _ = push(mut ref queue, nb);
             }
             e = e + 1;
         }

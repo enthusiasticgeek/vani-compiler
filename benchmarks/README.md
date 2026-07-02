@@ -243,12 +243,14 @@ accumulators. Row-partitioned output parallelism would need a language extension
 
 | Benchmark | Gap | Status | Notes |
 |-----------|-----|--------|-------|
-| Graph BFS `build_graph` bug | Correctness | **Fixed** — `push(mut ref …)` | Was compile error |
+| Graph BFS `build_graph` double-ref bug | Correctness | **Fixed** — pass `mut ref` params directly | Was compile error (double `mut ref` rejected) |
+| Graph BFS `bfs()` hot-path copies | Performance | **Fixed** — `push(mut ref …)` + `set(mut ref …)` on local Vecs | Eliminates ~1 M Vec-struct copies per run |
 | Array stats ~35% slower | Performance | **Fixed** — `parallel for … reduce` | Now 3× faster than sequential C |
 | Fibonacci ~9% slower | Performance | **Fixed** — `-finline-functions` | Now within noise |
 | Alloc stress ~30% slower | Performance | **Fixed** — `__builtin_expect` + `__builtin_unreachable` | Now within 4% |
 | Sieve ~3× slower | Performance | **Fixed** — `set(mut ref …)` form | Now within 14% of C++ |
 | MatMul ~3× slower | Performance | **Fixed** — i-k-j loop + `-ftree-vectorize` + `ivdep` | Now within 5% of C++ |
+| All benchmarks — AVX-512 / FMA | Performance | **Fixed** — `-march=native -fomit-frame-pointer` | Ice Lake i5-1035G1: 8-wide AVX-512, FMA, free rbp register |
 | Parallel MatMul | Parallelism | Open — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
 | Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
 
@@ -272,20 +274,34 @@ the language model itself.
 
 ### Where vāṇī lags and why
 
-#### 1. Bounds checks not fully elided — dominant cost in 13–17% gaps
+#### 1. Graph BFS hot-path Vec copies — fixed in v0.3
+
+The `bfs()` function used consuming `push(visited, val)` and `set(visited, idx, val)`
+on its local `visited` and `queue` Vecs. Each consuming call copies the 24-byte Vec
+struct (data pointer + len + capacity) and potentially triggers a realloc. With
+~1 000 000 such calls per benchmark run (1 000 BFS × ~1 000 visits), this was
+the dominant source of the ~17% gap vs C.
+
+Fixed by switching to `push(mut ref visited, …)` and `set(mut ref visited, …)`,
+which write through a pointer with no struct copies. Also uncovered and fixed a
+separate double-ref bug in `build_graph`: passing `mut ref adj_start` where
+`adj_start` is already `mut ref Vec<i64>` creates `mut ref mut ref Vec<i64>`
+(rejected). Fixed by passing the parameter directly.
+
+#### 2. Bounds checks not fully elided — remaining ~5–14% gaps
 
 Every `xs[i]` compiles to `intent_check_bounds(i, xs.len)`.
 Even with `__builtin_expect(i >= len, 0)` + `__builtin_unreachable()`, gcc can
 only remove the check when it can *prove* `i < len` from surrounding control
 flow — which it cannot always do across function call boundaries.
 C and Rust's safe iterators use raw pointer arithmetic in tight loops, paying
-zero per-element check cost. This is the primary source of the ~17% Graph BFS
-gap and the ~14% Sieve gap vs C++.
+zero per-element check cost. This is the remaining cost in the Sieve (~14% vs C++)
+and whatever residual BFS gap remains after the v0.3 fix.
 
 **Fix planned**: SSA-level bounds-elision pass (v0.4) will analyse loop
 induction variables and delete checks that are provably redundant.
 
-#### 2. Standard library quality, not language overhead
+#### 3. Standard library quality, not language overhead
 
 - **Sort (29% behind Rust)**: vāṇī uses introsort; Rust `sort_unstable` is
   pdqsort (pattern-defeating quicksort), which has measurably better cache
@@ -300,7 +316,7 @@ induction variables and delete checks that are provably redundant.
 These are library gaps, not language gaps — the same algorithms implemented in
 vāṇī user code would produce the same C output and close the difference.
 
-#### 3. No escape analysis
+#### 4. No escape analysis
 
 The compiler does not yet detect when a `Vec` created inside a function never
 outlives that call and could be stack-allocated or entirely eliminated. Hand-

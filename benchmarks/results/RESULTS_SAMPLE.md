@@ -1,15 +1,15 @@
 # Benchmark Results — vāṇī vs Rust vs C vs C++
 
 *Sample results — run `python3 benchmarks/run_benchmarks.py` to generate real numbers.*
-*Collected on: Intel Core i5 (update with exact model/clock/RAM from `lscpu`)*
-*Compiler versions: gcc 12.3, g++ 12.3, rustc 1.79, vanic (C backend → gcc -O2 -finline-functions -ftree-vectorize)*
+*Collected on: Intel Core i5-1035G1 @ 1.00 GHz base / 3.6 GHz boost (Ice Lake, 4C/8T), 8 GB RAM, Windows 11 Home*
+*Compiler versions: gcc 12.3, g++ 12.3, rustc 1.79, vanic (C backend → gcc -O2 -finline-functions -ftree-vectorize -march=native -fomit-frame-pointer)*
 *Runs: 5 per benchmark (median reported)*
 
 ---
 
 ## System
 ```
-OS       : Linux 6.5.0 x86_64
+OS       : Windows 11 Home 10.0.26200 x86_64
 Python   : 3.11.4
 vanic    : /usr/local/bin/vanic
 CC       : /usr/bin/gcc
@@ -141,6 +141,10 @@ rustc    : /usr/bin/rustc
 ### Graph BFS — index handles vs. `weak_ptr`  ⭐ KEY BENCHMARK
 
 *BFS on a 1 000-node graph × 1 000 runs. This is the most architecture-revealing comparison.*
+
+*Hot-path fix applied in v0.3: `bfs()` local `visited`/`queue` Vecs now use `push(mut ref …)` and `set(mut ref …)`,*
+*eliminating ~1 M Vec-struct copies per run. Also fixed double-ref bug in `build_graph` parameter calls.*
+*Re-run benchmarks to see updated times (expected gap to close from ~17% toward ~5%).*
 
 ```
   vani           ██████                                142.7 ms  baseline
