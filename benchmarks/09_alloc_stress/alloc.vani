@@ -1,0 +1,44 @@
+// vani-lang: english
+// Benchmark 09 — Allocation stress: 500 000 Vec push cycles
+//
+// Tests allocator and RAII drop throughput. Each iteration pushes a
+// struct value onto a Vec (which may trigger a realloc) and later
+// reads it back. The Vec is dropped at scope exit via affine RAII.
+//
+// vāṇī's affine ownership makes the drop deterministic and inlineable —
+// no GC pause, no destructor dispatch table.
+
+intent "Benchmark: allocation stress — Vec push + read + RAII drop";
+
+struct Payload {
+    a: i64,
+    b: i64,
+    c: i64,
+}
+
+fn make_payload(i: i64) -> Payload {
+    return Payload { a: i, b: i * 2, c: i * 3 };
+}
+
+fn main() -> i64 {
+    let n: i64 = 500000;
+
+    // Build a Vec<Payload> one element at a time.
+    let items: Vec<Payload> = vec();
+    let i: i64 = 0;
+    while i < n {
+        items = push(items, make_payload(i));
+        i = i + 1;
+    }
+
+    // Read back and accumulate to prevent dead-code elimination.
+    let sum: i64 = 0;
+    let j: i64 = 0;
+    while j < n {
+        sum = sum + items[j].a + items[j].c;
+        j = j + 1;
+    }
+    // `items` is dropped here (affine RAII).
+    print sum;
+    return 0;
+}

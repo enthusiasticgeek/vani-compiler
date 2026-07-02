@@ -1,0 +1,40 @@
+// vani-lang: english
+// Benchmark 08 — Index-based linked list, 1 000 000 nodes
+//
+// vāṇī has no raw pointers, so linked lists are naturally expressed
+// as two parallel Vec<i64>:
+//   values[i] = payload of node i
+//   next[i]   = index of next node; (0 - 1) means end-of-list
+//
+// All nodes share the two Vec allocations — no per-node malloc.
+// Traversal is sequential array reads: excellent cache behaviour.
+//
+// Compare with list.cpp which uses traditional heap-allocated nodes
+// (pointer-linked) to show the cache-miss penalty.
+
+intent "Benchmark: index-based linked list — build + traverse 1M nodes";
+
+fn main() -> i64 {
+    let n: i64 = 1000000;
+    let values: Vec<i64> = vec();
+    let next: Vec<i64>   = vec();
+
+    // Build list: node i points to node i+1; last node ends with (0-1).
+    let i: i64 = 0;
+    while i < n {
+        values = push(values, i % 1000);
+        next   = push(next, i + 1);
+        i = i + 1;
+    }
+    next = set(next, (n - 1) as u64, 0 - 1);
+
+    // Traverse and accumulate.
+    let sum: i64 = 0;
+    let curr: i64 = 0;
+    while curr != (0 - 1) {
+        sum  = sum + values[curr];
+        curr = next[curr];
+    }
+    print sum;
+    return 0;
+}

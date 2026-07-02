@@ -1,0 +1,42 @@
+// vani-lang: english
+// Benchmark 06 — Parallel sum of 50 000 000 elements
+//
+// vāṇī expresses data-parallel reductions with three extra keywords:
+//   parallel for i from 0 to n
+//   reduce total with +;
+//   { total = total + data[i]; }
+//
+// The compiler emits `#pragma omp parallel for reduction(+:total)`
+// (C backend) or `atomicrmw add` with a thread-outlined loop body
+// (LLVM backend).  The verifier proves race-freedom statically —
+// no data-race annotation or unsafe block required.
+//
+// Compare with:
+//   parsum.c   — OpenMP (same pragma, requires -fopenmp)
+//   parsum.cpp — OpenMP
+//   parsum.rs  — manual std::thread split-and-join
+
+intent "Benchmark: parallel reduction sum — tests vāṇī parallel-for with reduce";
+
+fn main() -> i64 {
+    let n: i64 = 50000000;
+
+    // Build data array: values are i % 1000 so total is computable.
+    let data: Vec<i64> = vec();
+    let i: i64 = 0;
+    while i < n {
+        data = push(data, i % 1000);
+        i = i + 1;
+    }
+
+    // Parallel reduction — compiler handles thread spawning + combining.
+    let total: i64 = 0;
+    parallel for i from 0 to n
+    reduce total with +;
+    {
+        total = total + data[i];
+    }
+
+    print total;
+    return 0;
+}

@@ -1,0 +1,93 @@
+// vani-lang: english
+// Benchmark 05 — Graph BFS using integer index handles
+//
+// vāṇī has no weak_ptr. Cyclic graphs are stored as integer
+// indices into a flat Vec<i64>.  This eliminates:
+//   • per-node heap allocation (all nodes share one Vec buffer)
+//   • atomic reference-count increment/decrement on every access
+//   • weak_ptr::lock() overhead (~2 atomic ops per back-edge read)
+//
+// The graph: N=1000 nodes, ~6 outgoing edges per node (deterministic).
+// We run BFS 1000 times (from node i % N) and print the total
+// node-visit count as a correctness check.
+//
+// Compare with:
+//   graph_index.{c,cpp,rs}  — same index approach in C / C++ / Rust
+//   graph_weakptr.cpp        — C++ shared_ptr + weak_ptr (back-edges)
+
+intent "Benchmark: graph BFS with index handles — no weak_ptr, no ref-counting";
+
+// Adjacency list stored as two parallel Vec<i64>:
+//   adj_start[v]     = start index in adj_edges for node v
+//   adj_edges[...]   = neighbour node indices
+
+fn build_graph(n: i64, adj_start: mut ref Vec<i64>, adj_edges: mut ref Vec<i64>) -> i64 {
+    // Wire each node v to neighbours: (v+1)%n, (v+3)%n, (v+7)%n,
+    //                                  (v+13)%n, (v+29)%n, (v+61)%n
+    let v: i64 = 0;
+    while v < n {
+        let start: i64 = (len(ref adj_edges)) as i64;
+        let _ = insert(mut ref adj_start, v as u64, start);
+
+        adj_edges = push(ref adj_edges, (v + 1) % n);
+        adj_edges = push(ref adj_edges, (v + 3) % n);
+        adj_edges = push(ref adj_edges, (v + 7) % n);
+        adj_edges = push(ref adj_edges, (v + 13) % n);
+        adj_edges = push(ref adj_edges, (v + 29) % n);
+        adj_edges = push(ref adj_edges, (v + 61) % n);
+        v = v + 1;
+    }
+    return 0;
+}
+
+fn bfs(adj_start: ref Vec<i64>, adj_edges: ref Vec<i64>,
+       n: i64, start: i64) -> i64 {
+    let visited: Vec<i64> = vec();
+    let queue: Vec<i64> = vec();
+    let k: i64 = 0;
+    while k < n {
+        visited = push(visited, 0);
+        k = k + 1;
+    }
+    visited = set(visited, start as u64, 1);
+    queue = push(queue, start);
+
+    let head: i64 = 0;
+    let count: i64 = 0;
+    while head < (len(queue) as i64) {
+        let curr: i64 = queue[head];
+        head = head + 1;
+        count = count + 1;
+
+        // Edges for `curr` are at adj_edges[adj_start[curr] .. adj_start[curr]+6].
+        // (Fixed degree 6 per node in this graph.)
+        let edge_base: i64 = adj_start[curr];
+        let e: i64 = 0;
+        while e < 6 {
+            let nb: i64 = adj_edges[edge_base + e];
+            if visited[nb] == 0 {
+                visited = set(visited, nb as u64, 1);
+                queue = push(queue, nb);
+            }
+            e = e + 1;
+        }
+    }
+    return count;
+}
+
+fn main() -> i64 {
+    let n: i64 = 1000;
+
+    let adj_start: Vec<i64> = vec();
+    let adj_edges: Vec<i64> = vec();
+    let _ = build_graph(n, mut ref adj_start, mut ref adj_edges);
+
+    let total: i64 = 0;
+    let run: i64 = 0;
+    while run < 1000 {
+        total = total + bfs(ref adj_start, ref adj_edges, n, run % n);
+        run = run + 1;
+    }
+    print total;
+    return 0;
+}

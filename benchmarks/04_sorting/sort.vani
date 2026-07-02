@@ -1,0 +1,35 @@
+// vani-lang: english
+// Benchmark 04 — Sort 1 000 000 pseudo-random integers
+//
+// Uses the built-in `sort(mut ref xs)` which is an in-place
+// introsort (quicksort + heapsort fallback). The integer sequence
+// is generated with a simple LCG to match the other variants.
+
+intent "Benchmark: sort 1 000 000 integers using the built-in sort";
+
+fn main() -> i64 {
+    let n: i64 = 1000000;
+
+    // Generate pseudo-random data with an LCG.
+    let xs: Vec<i64> = vec();
+    let seed: i64 = 12345678;
+    let a: i64 = 1664525;
+    let c_val: i64 = 1013904223;
+    let mask: i64 = 2147483647;  // 2^31 - 1
+    let i: i64 = 0;
+    while i < n {
+        seed = (a * seed + c_val) % mask;
+        xs = push(xs, seed);
+        i = i + 1;
+    }
+
+    // Sort in place using the built-in introsort.
+    let _ = sort(mut ref xs);
+
+    // Verify and print: first + last element as checksum.
+    let first: i64 = xs[0];
+    let last: i64 = xs[n - 1];
+    assert first <= last;
+    print first + last;
+    return 0;
+}

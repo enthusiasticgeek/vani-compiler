@@ -1,0 +1,19 @@
+// vani-lang: english
+// Benchmark 01 — Fibonacci(42) recursive
+// Expected output: 267914296
+//
+// Build & run (via benchmark runner):
+//   vanic build benchmarks/01_fibonacci/fib.vani -o /tmp/fib_vani && /tmp/fib_vani
+
+intent "Benchmark: recursive Fibonacci — tests raw function-call throughput";
+
+fn fib(n: i64) -> i64 {
+    if n <= 1 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> i64 {
+    let result: i64 = fib(42);
+    print result;
+    return 0;
+}

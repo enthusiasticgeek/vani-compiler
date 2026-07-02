@@ -1,0 +1,60 @@
+// vani-lang: english
+// Benchmark 03 — 256×256 matrix multiply (i64)
+//
+// C = A × B using naïve triple-loop.
+// Flat Vec<i64> represents 2D matrices: element (r,c) at index r*N+c.
+// The affine functional-update `c = set(c, idx as u64, sum)` is
+// optimised to an in-place write because the old `c` is immediately consumed.
+
+intent "Benchmark: 256×256 i64 matrix multiply — arithmetic-dense nested loops";
+
+fn main() -> i64 {
+    let n: i64 = 256;
+    let sz: i64 = n * n;
+
+    // Fill A: a[r][c] = (r * n + c) % 97 + 1
+    let a: Vec<i64> = vec();
+    let ia: i64 = 0;
+    while ia < sz {
+        a = push(a, ia % 97 + 1);
+        ia = ia + 1;
+    }
+
+    // Fill B: b[r][c] = (r + c) % 53 + 1
+    let b: Vec<i64> = vec();
+    let ib: i64 = 0;
+    while ib < sz {
+        b = push(b, ib % 53 + 1);
+        ib = ib + 1;
+    }
+
+    // Initialise C to zeros.
+    let c: Vec<i64> = vec();
+    let ic: i64 = 0;
+    while ic < sz {
+        c = push(c, 0);
+        ic = ic + 1;
+    }
+
+    // Multiply: C[row][col] = sum_k A[row][k] * B[k][col]
+    let row: i64 = 0;
+    while row < n {
+        let col: i64 = 0;
+        while col < n {
+            let sum: i64 = 0;
+            let m: i64 = 0;
+            while m < n {
+                sum = sum + a[row * n + m] * b[m * n + col];
+                m = m + 1;
+            }
+            c = set(c, (row * n + col) as u64, sum);
+            col = col + 1;
+        }
+        row = row + 1;
+    }
+
+    // Print checksum so the compiler can't eliminate the computation.
+    let checksum: i64 = c[0] + c[sz - 1];
+    print checksum;
+    return 0;
+}

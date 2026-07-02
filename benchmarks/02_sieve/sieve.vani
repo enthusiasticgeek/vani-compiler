@@ -1,0 +1,48 @@
+// vani-lang: english
+// Benchmark 02 — Sieve of Eratosthenes, primes ≤ 2 000 000
+// Expected output: 148933
+//
+// Demonstrates Vec<i64> with affine functional-update pattern:
+//   sieve = set(sieve, j as u64, 0)
+// The compiler optimises the move-and-rebind to an in-place write.
+
+intent "Benchmark: Sieve of Eratosthenes — dense random-access Vec writes";
+
+fn main() -> i64 {
+    let limit: i64 = 2000000;
+
+    // Initialise sieve: 1 = possibly prime, 0 = composite.
+    let sieve: Vec<i64> = vec();
+    let k: i64 = 0;
+    while k <= limit {
+        sieve = push(sieve, 1);
+        k = k + 1;
+    }
+    sieve = set(sieve, 0 as u64, 0);
+    sieve = set(sieve, 1 as u64, 0);
+
+    // Mark composites.
+    let i: i64 = 2;
+    while i * i <= limit {
+        if sieve[i] == 1 {
+            let j: i64 = i * i;
+            while j <= limit {
+                sieve = set(sieve, j as u64, 0);
+                j = j + i;
+            }
+        }
+        i = i + 1;
+    }
+
+    // Count primes.
+    let count: i64 = 0;
+    let m: i64 = 2;
+    while m <= limit {
+        if sieve[m] == 1 {
+            count = count + 1;
+        }
+        m = m + 1;
+    }
+    print count;
+    return 0;
+}
