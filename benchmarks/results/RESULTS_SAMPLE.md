@@ -2,7 +2,7 @@
 
 *Sample results — run `python3 benchmarks/run_benchmarks.py` to generate real numbers.*
 *Collected on: Intel Core i7-12700K @ 3.6 GHz, 32 GB DDR5, Ubuntu 22.04 LTS*
-*Compiler versions: gcc 12.3, g++ 12.3, rustc 1.79, vanic (C backend → gcc -O2)*
+*Compiler versions: gcc 12.3, g++ 12.3, rustc 1.79, vanic (C backend → gcc -O2 -finline-functions -ftree-vectorize)*
 *Runs: 5 per benchmark (median reported)*
 
 ---
@@ -48,10 +48,10 @@ rustc    : /usr/bin/rustc
 *Classic recursive fib(42). Tests raw function-call throughput.*
 
 ```
-  vani           █████████████████████████████████     2 198.1 ms  baseline
-  c              █████████████████████████████████     2 193.4 ms   0.2% faster
-  cpp            █████████████████████████████████     2 198.7 ms   0.0% (noise)
-  rs             █████████████████████████████████     2 241.8 ms   2.0% slower
+  vani           ███████████████████████████████████   2 198.1 ms  baseline
+  c              ███████████████████████████████████   2 193.4 ms   0.2% faster
+  cpp            ███████████████████████████████████   2 198.7 ms   0.0% (noise)
+  rs             ████████████████████████████████████  2 241.8 ms   2.0% slower
 ```
 
 > **Analysis**: Adding `-finline-functions` to the gcc invocation (v0.3) enables
@@ -67,10 +67,10 @@ rustc    : /usr/bin/rustc
 *Dense random-access Vec writes; tests the in-place element-write form.*
 
 ```
-  vani (set_mut) █████████████                         13.8 ms   baseline
-  c              ████████████                          12.6 ms    8.7% faster
-  cpp            ████████████                          11.9 ms   13.8% faster
-  rs             █████████████                         13.1 ms    5.1% faster
+  vani (set_mut) ████████████████████████████████████  13.8 ms   baseline
+  c              █████████████████████████████████     12.6 ms    8.7% faster
+  cpp            ███████████████████████████████       11.9 ms   13.8% faster
+  rs             ██████████████████████████████████    13.1 ms    5.1% faster
 ```
 
 *Old result with consuming `set()` form: 38.4 ms (3× slower).*
@@ -92,10 +92,10 @@ rustc    : /usr/bin/rustc
 *i-k-j loop order + AVX2 SIMD inner SAXPY; tests arithmetic-dense vectorised code.*
 
 ```
-  vani           ██████████████████████████████████    331.6 ms  baseline
-  c              █████████████████████████████████     318.2 ms   4.0% faster
-  cpp            █████████████████████████████████     314.7 ms   5.1% faster
-  rs             ██████████████████████████████████    322.9 ms   2.6% faster
+  vani           ████████████████████████████████████  331.6 ms  baseline
+  c              ███████████████████████████████████   318.2 ms   4.0% faster
+  cpp            ██████████████████████████████████    314.7 ms   5.1% faster
+  rs             ███████████████████████████████████   322.9 ms   2.6% faster
 ```
 
 *Old result (i-j-k, no SIMD): 924.1 ms (3× slower). Fixed in v0.3.*
@@ -126,10 +126,10 @@ rustc    : /usr/bin/rustc
 *vāṇī built-in introsort vs stdlib qsort / std::sort / sort_unstable.*
 
 ```
-  vani           ████████████████████████████████████  107.3 ms  baseline
-  c              ██████████████████████████████████████ 128.4 ms  19.7% slower
-  cpp            █████████████████████████████████     89.6 ms   16.5% faster
-  rs             ████████████████████████████          76.2 ms   29.0% faster
+  vani           ██████████████████████████████        107.3 ms  baseline
+  c              ████████████████████████████████████  128.4 ms  19.7% slower
+  cpp            █████████████████████████             89.6 ms   16.5% faster
+  rs             █████████████████████                 76.2 ms   29.0% faster
 ```
 
 > **Analysis**: vāṇī's built-in introsort outperforms C's `qsort` (which has
@@ -145,7 +145,7 @@ rustc    : /usr/bin/rustc
 ```
   vani           ██████                                142.7 ms  baseline
   c              █████                                 118.3 ms  17.1% faster
-  cpp (index)    ██████                                124.1 ms  13.0% faster
+  cpp (index)    █████                                 124.1 ms  13.0% faster
   rs             █████                                 119.6 ms  16.2% faster
   cpp (weak_ptr) ████████████████████████████████████  891.3 ms  524.7% SLOWER
 ```
@@ -175,10 +175,10 @@ rustc    : /usr/bin/rustc
 *Tests parallelism: vāṇī `parallel for … reduce` vs OpenMP vs std::thread.*
 
 ```
-  vani (OMP)     ██████                                18.2 ms   baseline
-  c   (OMP)      █████                                 16.9 ms    7.1% faster
-  cpp (OMP)      ██████                                17.4 ms    4.4% faster
-  rs  (threads)  ████████                              21.3 ms   17.0% slower
+  vani (OMP)     ███████████████████████████████       18.2 ms   baseline
+  c   (OMP)      █████████████████████████████         16.9 ms    7.1% faster
+  cpp (OMP)      █████████████████████████████         17.4 ms    4.4% faster
+  rs  (threads)  ████████████████████████████████████  21.3 ms   17.0% slower
 ```
 
 > **Analysis**: All three parallel versions (vāṇī, C, C++) emit the same
@@ -193,10 +193,10 @@ rustc    : /usr/bin/rustc
 ### HashMap — 500 000 insert + 500 000 lookup
 
 ```
-  vani           ████████████████████████████████████  143.6 ms  baseline
-  c (FNV-1a OA)  ██████████████████████████████████████ 189.2 ms  31.8% slower
-  cpp (unordered)████████████████████████████████      121.8 ms  15.2% faster
-  rs (HashMap)   ███████████████████████████           108.4 ms  24.5% faster
+  vani           ███████████████████████████           143.6 ms  baseline
+  c (FNV-1a OA)  ████████████████████████████████████  189.2 ms  31.8% slower
+  cpp (unordered)███████████████████████               121.8 ms  15.2% faster
+  rs (HashMap)   █████████████████████                 108.4 ms  24.5% faster
 ```
 
 > **Analysis**: vāṇī's built-in open-addressing hashmap is competitive with
@@ -212,10 +212,10 @@ rustc    : /usr/bin/rustc
 *All four variants use the same flat-array index approach; pointer chase avoided.*
 
 ```
-  vani           ████████████████████████████████████   3.8 ms   baseline
-  c              ████████████████████████████████        3.6 ms    5.3% faster
-  cpp            █████████████████████████████████████  3.9 ms    2.6% slower
-  rs             █████████████████████████████████████  3.7 ms    2.6% faster
+  vani           ███████████████████████████████████    3.8 ms   baseline
+  c              █████████████████████████████████      3.6 ms    5.3% faster
+  cpp            ████████████████████████████████████   3.9 ms    2.6% slower
+  rs             ██████████████████████████████████     3.7 ms    2.6% faster
 ```
 
 > **Analysis**: All four variants store data in contiguous arrays and traverse
@@ -228,10 +228,10 @@ rustc    : /usr/bin/rustc
 ### Allocation stress — 500 000 struct alloc/free cycles
 
 ```
-  vani           ████████████████████████████████       15.3 ms  baseline
-  c              ████████████████████████████           14.7 ms   3.9% faster
-  cpp            ████████████████████████████████       15.2 ms   0.7% faster
-  rs             ██████████████████████████████         16.1 ms   5.2% slower
+  vani           ██████████████████████████████████     15.3 ms  baseline
+  c              █████████████████████████████████      14.7 ms   3.9% faster
+  cpp            ██████████████████████████████████     15.2 ms   0.7% faster
+  rs             ████████████████████████████████████   16.1 ms   5.2% slower
 ```
 
 *Old result: 21.4 ms (31% slower). Fixed in v0.3.*
@@ -253,9 +253,9 @@ rustc    : /usr/bin/rustc
 
 ```
   vani (par)     ████████████                            9.1 ms  baseline (4-core)
-  c (seq)        ████████████████████████████           26.8 ms  66.0% slower
-  cpp (seq)      █████████████████████████████          27.1 ms  65.7% slower
-  rs (seq)       ██████████████████████████████         28.3 ms  67.8% slower
+  c (seq)        ██████████████████████████████████     26.8 ms  194.5% slower
+  cpp (seq)      ██████████████████████████████████     27.1 ms  197.8% slower
+  rs (seq)       ████████████████████████████████████   28.3 ms  211.0% slower
 ```
 
 > **Analysis**: Replacing the two sequential `while` passes with
