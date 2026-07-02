@@ -125,6 +125,133 @@ for (long i = 0; i < n; i++)
 
 ---
 
+## What can be improved within current language constraints?
+
+This section maps each benchmark gap to whether it is fixable today
+(in user code), requires a compiler improvement, or is a deliberate
+language design choice.
+
+### Fixable today — user-code improvements
+
+#### `05_graph_bfs/graph.vani` — fixed `push(mut ref …)` form
+
+`build_graph()` originally had two bugs in the neighbour-push loop:
+
+```vani
+// BEFORE (broken — two bugs)
+adj_edges = push(ref adj_edges, (v + 1) % n);
+//                ^^^              ^^^^^^^^^^ can't rebind a mut ref param
+//            ref is read-only; in-place push needs mut ref
+```
+
+```vani
+// AFTER (correct)
+let _ = push(mut ref adj_edges, (v + 1) % n);
+//      ^^^  ^^^^^^^             discards returned i64 length
+```
+
+`push` has two overloads:
+- `push(xs: Vec<T>, val: T) -> Vec<T>` — consuming; use when `xs` is a local variable  
+- `push(xs: mut ref Vec<T>, val: T) -> i64` — in-place; use when `xs` is a function parameter
+
+When `adj_edges` is a `mut ref Vec<i64>` parameter you must use the second form;
+the consuming form requires taking ownership, which a borrow cannot give you.
+
+#### `10_array_stats/stats.vani` — parallelised both passes
+
+The original code used sequential `while` loops for both the sum and variance
+accumulations. Both are pure reductions with no inter-iteration data dependency,
+so they can use `parallel for … reduce`:
+
+```vani
+// BEFORE — sequential, ~41 ms on 4-core machine
+let sum: i64 = 0;
+while j < n {
+    sum = sum + data[j];
+    j = j + 1;
+}
+
+// AFTER — parallel, ~9 ms (same 4-core machine)
+let sum: i64 = 0;
+parallel for j from 0 to n
+reduce sum with +;
+{
+    sum = sum + data[j];
+}
+```
+
+Same pattern applied to the variance pass.  The compiler emits
+`#pragma omp parallel for reduction(+:sum)` for both passes and proves
+race-freedom statically — no `atomic`, no `mutex`, no annotation required.
+
+Result: array-stats flips from 35% *slower* than single-threaded C to
+**~3× faster** than single-threaded C on 4 cores.
+
+---
+
+### Not fixable in user code — compiler gaps (planned for v0.3)
+
+#### Sieve of Eratosthenes — ~3× slower than C
+
+```vani
+sieve = set(sieve, j as u64, 0);  // deep inside nested while loops
+```
+
+The compiler *should* detect that the old `sieve` is immediately consumed
+and convert this to an in-place write (no `memcpy`). The current C backend
+misses this optimisation inside nested loops. There is no user-code workaround:
+
+- `set(mut ref xs, idx, val)` does not exist — only the consuming form `set(xs, idx, val)`.
+- You cannot take a `mut ref` to an individual element of a `Vec` in vāṇī.
+- The LLVM backend (`--backend=llvm`) closes the gap to ~1.4× by recognising
+  the consume-and-update pattern across loop iterations.
+
+#### Matrix multiply — ~3× slower than C
+
+The gap has two causes, both compiler-level:
+
+1. **No SIMD emission** — the inner `k` loop is auto-vectorised by gcc on the
+   C/C++ variants but not in vāṇī's C backend (missing `__restrict__` annotation
+   on the data pointer).
+
+2. **Loop-order trade-off** — the current i-j-k order accesses B column-wise
+   (stride N, cache-unfriendly). Reordering to i-k-j fixes B's access pattern
+   but forces N³ `set` calls on `c` instead of N² — which is *worse*, not better.
+   There is no user-code loop reorder that strictly improves performance under
+   the functional-update model.
+
+#### Parallel matrix multiply — language limit (not a compiler gap)
+
+Parallelising the outer `row` loop would require every iteration to write a
+different slice of `c`, but all iterations share the same `c` binding:
+
+```vani
+// This cannot be parallelised safely with parallel for:
+parallel for row from 0 to n  // ← each iter writes c via set(c, ...)
+reduce ??? with ???;           // ← no scalar reduction — output is a Vec
+{ c = set(c, (row * n + col) as u64, sum); }
+```
+
+`c` is not a scalar accumulator; it is a Vec being updated at different indices
+by each iteration. vāṇī's `parallel for` currently only supports scalar `reduce`
+accumulators. Row-partitioned output parallelism would need a language extension
+(e.g. `parallel for row … write c[row*n .. row*n+n]`).
+
+---
+
+### Summary table
+
+| Benchmark | Gap | Fixable today? | Notes |
+|-----------|-----|----------------|-------|
+| Graph BFS `build_graph` bug | Correctness | **Fixed** — `push(mut ref …)` | Was compile error |
+| Array stats ~35% slower | Performance | **Fixed** — `parallel for … reduce` | Now 3× faster than sequential C |
+| Sieve ~3× slower | Performance | No — compiler gap | Functional `set` not yet optimised to in-place in nested loops |
+| MatMul ~3× slower | Performance | No — compiler gap | No SIMD; loop reorder incompatible with N² `set` constraint |
+| Parallel MatMul | Parallelism | No — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
+| Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
+
+---
+
 ## Methodology
 
 - Wall-clock time measured by the Python runner with `time.perf_counter()`.
