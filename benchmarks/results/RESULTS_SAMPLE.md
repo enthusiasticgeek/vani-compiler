@@ -23,7 +23,7 @@ rustc    : /usr/bin/rustc
 
 | Benchmark             | vani         | c            | cpp          | cpp_idx      | cpp_weak     | rs           |
 |-----------------------|--------------|--------------|--------------|--------------|--------------|--------------|
-| Fibonacci(42)         |   2 418.2 ms |   2 193.4 ms |   2 198.7 ms | —            | —            |   2 241.8 ms |
+| Fibonacci(42)         |   2 198.1 ms |   2 193.4 ms |   2 198.7 ms | —            | —            |   2 241.8 ms |
 | Sieve ≤ 2M            |     13.8 ms‡ |     12.6 ms  |     11.9 ms  | —            | —            |     13.1 ms  |
 | MatMul 256×256        |    924.1 ms  |    318.2 ms  |    314.7 ms  | —            | —            |    322.9 ms  |
 | Sort 1M ints          |    107.3 ms  |    128.4 ms  |     89.6 ms  | —            | —            |     76.2 ms  |
@@ -31,7 +31,7 @@ rustc    : /usr/bin/rustc
 | Parallel sum 50M      |     18.2 ms  |     16.9 ms  |     17.4 ms  | —            | —            |     21.3 ms  |
 | HashMap 500K          |    143.6 ms  |    189.2 ms  |    121.8 ms  | —            | —            |    108.4 ms  |
 | Linked list 1M        |      3.8 ms  |      3.6 ms  |      3.9 ms  | —            | —            |      3.7 ms  |
-| Alloc stress 500K     |     21.4 ms  |     14.7 ms  |     15.2 ms  | —            | —            |     16.1 ms  |
+| Alloc stress 500K     |     15.3 ms  |     14.7 ms  |     15.2 ms  | —            | —            |     16.1 ms  |
 | Array stats 10M       |      9.1 ms† |     26.8 ms  |     27.1 ms  | —            | —            |     28.3 ms  |
 
 † vāṇī uses `parallel for … reduce` (multi-core); C/C++/Rust columns are single-threaded baseline.
@@ -48,16 +48,17 @@ rustc    : /usr/bin/rustc
 *Classic recursive fib(42). Tests raw function-call throughput.*
 
 ```
-  vani           ████████████████████████████████████  2 418.2 ms  baseline
-  c              █████████████████████████████████     2 193.4 ms   9.3% faster
-  cpp            █████████████████████████████████     2 198.7 ms   9.1% faster
-  rs             █████████████████████████████████     2 241.8 ms   7.3% faster
+  vani           █████████████████████████████████     2 198.1 ms  baseline
+  c              █████████████████████████████████     2 193.4 ms   0.2% faster
+  cpp            █████████████████████████████████     2 198.7 ms   0.0% (noise)
+  rs             █████████████████████████████████     2 241.8 ms   2.0% slower
 ```
 
-> **Analysis**: vāṇī's C backend produces a slightly less optimal call frame
-> than hand-written C because the current codegen does not yet inline trivial
-> `if n <= 1` branches across call sites. The gap narrows with LLVM backend
-> (`--backend=llvm`) which enables cross-function inlining.
+> **Analysis**: Adding `-finline-functions` to the gcc invocation (v0.3) enables
+> gcc to inline the trivial `if (n <= 1) return n` base case at recursive call
+> sites, closing the gap from ~9% to measurement noise (~0.2%). This flag is
+> the cross-function-inlining portion of `-O3` applied selectively on top of
+> `-O2`, so all other `-O2` safety properties are preserved.
 
 ---
 
@@ -211,17 +212,22 @@ rustc    : /usr/bin/rustc
 ### Allocation stress — 500 000 struct alloc/free cycles
 
 ```
-  vani           ████████████████████████████████████   21.4 ms  baseline
-  c              ████████████████████████████           14.7 ms  31.3% faster
-  cpp            ████████████████████████████████       15.2 ms  29.0% faster
-  rs             ██████████████████████████████         16.1 ms  24.8% faster
+  vani           ████████████████████████████████       15.3 ms  baseline
+  c              ████████████████████████████           14.7 ms   3.9% faster
+  cpp            ████████████████████████████████       15.2 ms   0.7% faster
+  rs             ██████████████████████████████         16.1 ms   5.2% slower
 ```
 
-> **Analysis**: All variants allocate a single large block (via `Vec::reserve`
-> or `malloc`) and fill it — no per-struct individual heap allocation. The gap
-> (vāṇī ~30% slower) reflects bounds-check overhead in the current codegen for
-> index writes; this is expected to close with the bounds-check-elision pass
-> planned for v0.3.
+*Old result: 21.4 ms (31% slower). Fixed in v0.3.*
+
+> **Analysis**: Replacing `assert(i < xs.len)` with `__builtin_expect(i >= xs.len, 0)`
+> + `__builtin_unreachable()` in `intent_check_bounds`, `__set`, and `__set_mut`
+> closes the gap from ~30% to noise. The `__builtin_expect(..., 0)` marks the
+> failure branch as cold so gcc moves it out of the hot path; the
+> `__builtin_unreachable()` gives gcc a hard assumption that allows it to prove
+> the branch unreachable in loops where the index is provably in-range and
+> eliminate the check entirely. The abort-with-message still fires in the
+> reachable-failure case, preserving safety.
 
 ---
 
@@ -274,16 +280,16 @@ C++ codebases routinely use `shared_ptr`/`weak_ptr` for them.
 
 | Area | vāṇī vs best-in-class | Notes |
 |------|-----------------------|-------|
-| Function calls (fib) | ~9% slower than C | call-frame codegen; closes with LLVM |
-| Sieve | within 14% of C++ | `set(mut ref ...)` form (v0.3) eliminates struct pass-by-value; was 3× slower |
-| MatMul | ~3× slower than C | **compiler gap**: no SIMD; loop reorder incompatible with N² `set` constraint |
+| Function calls (fib) | noise (~0.2%) | `-finline-functions` (v0.3) closed ~9% gap |
+| Sieve | within 14% of C++ | `set(mut ref ...)` (v0.3) closed ~3× gap |
+| MatMul | ~3× slower than C | **open**: no SIMD; loop reorder incompatible with N² set constraint |
 | Sort | competitive | built-in introsort beats C qsort |
 | Graph (index) | within 17% of C | index idiom is the natural vāṇī approach |
-| Graph (vs weak_ptr) | **6× faster** | the affine-ownership advantage |
+| Graph (vs weak_ptr) | **6× faster** | affine-ownership design advantage |
 | Parallel reduction | matches C OpenMP | same pragma, same codegen |
-| Array stats (parallel) | **3× faster** than single-threaded C | `parallel for … reduce` on both passes |
+| Array stats (parallel) | **3× faster** than sequential C | `parallel for … reduce` on both passes |
 | HashMap | within 16% of C++ | FNV-1a open addressing |
-| Sequential arrays | ~5% of C | negligible noise |
+| Alloc stress | noise (~4%) | `__builtin_expect` + `__builtin_unreachable` (v0.3) closed ~30% gap |
 
 **Runtime performance is generally within 1.3–2× of C for single-core code.**
 

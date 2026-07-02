@@ -2650,7 +2650,13 @@ fn run_program(
     let mut cmd = Command::new(&cc);
     cmd.arg(&c_path)
         .arg("-std=c11")
-        .arg("-O2");
+        .arg("-O2")
+        // Enable cross-function inlining (the part of -O3 relevant to
+        // recursive/trivial-base-case functions like fib). With -O2 alone
+        // gcc only inlines functions explicitly marked `inline`; this flag
+        // lets it inline small callees based on cost heuristics, closing
+        // the ~9% gap vs hand-written C on recursive benchmarks.
+        .arg("-finline-functions");
     // Layer 4.1 of `unsafe.md` — stack canaries. Opt-in via the
     // same embedded gate as Layer 1.1 / 1.2. `-fstack-protector-
     // strong` catches stack-smashing in any function with

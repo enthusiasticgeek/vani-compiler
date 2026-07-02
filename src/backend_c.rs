@@ -11512,7 +11512,8 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
     };
     out.push_str(&format!(
         "static INTENT_UNUSED {sn} {sn}__set({sn} xs, uint64_t i, {ct} v) {{\
-\n    assert(i < xs.len);\
+\n    if (__builtin_expect(i >= xs.len, 0)) {{ fprintf(stderr, \"set: index out of bounds\\n\"); abort(); }}\
+\n    if (i >= xs.len) __builtin_unreachable();\
 {cleanup}\
 \n{store}\
 \n    return xs;\
@@ -11543,7 +11544,8 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
         };
         out.push_str(&format!(
             "static INTENT_UNUSED int64_t {sn}__set_mut({sn}* xs, uint64_t i, {ct} v) {{\
-\n    assert(i < xs->len);\
+\n    if (__builtin_expect(i >= xs->len, 0)) {{ fprintf(stderr, \"set_mut: index out of bounds\\n\"); abort(); }}\
+\n    if (i >= xs->len) __builtin_unreachable();\
 {cleanup}\
 \n{store}\
 \n    return 0;\
@@ -19441,7 +19443,21 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
     }
 
     if needs_bounds {
-        out.push_str("static INTENT_UNUSED inline uint64_t intent_check_bounds(uint64_t index, uint64_t length) { assert(index < length); return index; }\n");
+        // Use __builtin_expect to mark the failure branch as cold so gcc
+        // can move it out of the hot path and, in loops where the index
+        // is provably in-range, eliminate the check entirely.
+        // The trailing __builtin_unreachable() is an optimizer assumption:
+        // if gcc can prove index < length it removes the whole branch;
+        // otherwise the abort() fires before reaching it (safe).
+        out.push_str("static INTENT_UNUSED inline uint64_t intent_check_bounds(uint64_t index, uint64_t length) {\n\
+    if (__builtin_expect(index >= length, 0)) {\n\
+        fprintf(stderr, \"index out of bounds: %llu >= %llu\\n\",\n\
+                (unsigned long long)index, (unsigned long long)length);\n\
+        abort();\n\
+    }\n\
+    if (index >= length) __builtin_unreachable();\n\
+    return index;\n\
+}\n");
     }
 
     for (ty, c_ty, zero) in &used_divisors {
