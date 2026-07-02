@@ -254,6 +254,75 @@ accumulators. Row-partitioned output parallelism would need a language extension
 
 ---
 
+## Why is vāṇī sometimes slower?
+
+The short answer: **bounds checking** and **standard library maturity**, not
+the language model itself.
+
+### Where vāṇī wins or ties
+
+| Benchmark | Result | Reason |
+|-----------|--------|--------|
+| Fibonacci | tie (±2%) | Pure recursion — identical machine code after inlining |
+| Sort vs C | vāṇī 20% faster | C `qsort` pays a function-pointer call per comparison |
+| HashMap vs C | vāṇī 32% faster | Hand-rolled C hashmap has higher load factor, no SIMD probing |
+| Array stats | vāṇī 3× faster | `parallel for … reduce` — parallel vs sequential comparison |
+| Alloc stress | noise (±5%) | RAII drop matches manual `free`; bounds-check fix (v0.3) closed 30% gap |
+| Linked list | noise (±5%) | Index idiom is zero-overhead vs. C integer arrays |
+
+### Where vāṇī lags and why
+
+#### 1. Bounds checks not fully elided — dominant cost in 13–17% gaps
+
+Every `xs[i]` compiles to `intent_check_bounds(i, xs.len)`.
+Even with `__builtin_expect(i >= len, 0)` + `__builtin_unreachable()`, gcc can
+only remove the check when it can *prove* `i < len` from surrounding control
+flow — which it cannot always do across function call boundaries.
+C and Rust's safe iterators use raw pointer arithmetic in tight loops, paying
+zero per-element check cost. This is the primary source of the ~17% Graph BFS
+gap and the ~14% Sieve gap vs C++.
+
+**Fix planned**: SSA-level bounds-elision pass (v0.4) will analyse loop
+induction variables and delete checks that are provably redundant.
+
+#### 2. Standard library quality, not language overhead
+
+- **Sort (29% behind Rust)**: vāṇī uses introsort; Rust `sort_unstable` is
+  pdqsort (pattern-defeating quicksort), which has measurably better cache
+  behaviour on partially-sorted or structured data. C++ `std::sort` also
+  benefits from decades of compiler-specific tuning.
+
+- **HashMap (24% behind Rust)**: vāṇī uses FNV-1a open addressing. Rust
+  `HashMap` is backed by hashbrown / SwissTable, which uses SIMD on the
+  8-byte control-byte array to probe up to 8 slots per instruction. This is
+  a fundamentally faster probe sequence regardless of the hash function.
+
+These are library gaps, not language gaps — the same algorithms implemented in
+vāṇī user code would produce the same C output and close the difference.
+
+#### 3. No escape analysis
+
+The compiler does not yet detect when a `Vec` created inside a function never
+outlives that call and could be stack-allocated or entirely eliminated. Hand-
+written C frequently uses `int arr[N]` on the stack for known-size temporary
+buffers, paying zero heap-allocation cost.
+
+### What is *not* the cause
+
+- **Ownership model**: index handles into flat `Vec<T>` are zero-overhead by
+  design — no atomic reference count, no GC pause, no pointer-chase indirection.
+  Benchmark 05 shows this directly: vāṇī index handles beat C++ `weak_ptr` by 6×.
+
+- **`parallel for … reduce`**: the C backend emits `#pragma omp parallel for
+  reduction(+:var)` — byte-for-byte the same pragma as the hand-written OpenMP
+  C variant. The vāṇī, C, and C++ parallel sum results are within measurement
+  noise of each other.
+
+- **RAII / destructors**: the alloc-stress benchmark (500 K alloc/free cycles)
+  shows vāṇī within 4% of C and faster than Rust.
+
+---
+
 ## Methodology
 
 - Wall-clock time measured by the Python runner with `time.perf_counter()`.

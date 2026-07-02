@@ -1,7 +1,7 @@
 # Benchmark Results — vāṇī vs Rust vs C vs C++
 
 *Sample results — run `python3 benchmarks/run_benchmarks.py` to generate real numbers.*
-*Collected on: Intel Core i7-12700K @ 3.6 GHz, 32 GB DDR5, Ubuntu 22.04 LTS*
+*Collected on: Intel Core i5 (update with exact model/clock/RAM from `lscpu`)*
 *Compiler versions: gcc 12.3, g++ 12.3, rustc 1.79, vanic (C backend → gcc -O2 -finline-functions -ftree-vectorize)*
 *Runs: 5 per benchmark (median reported)*
 
