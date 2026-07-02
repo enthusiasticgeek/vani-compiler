@@ -1,0 +1,71 @@
+// build & run:
+//   vanic run examples/language/english/set_mut.vani                          # LLVM backend
+//   vanic run examples/language/english/set_mut.vani --backend=c              # C backend
+
+intent "In-place Vec element write — `set(mut ref xs, i, v)`";
+
+// Two forms of `set`:
+//
+//   set(xs: Vec<T>, i: u64, v: T) -> Vec<T>         consuming (functional update)
+//   set(xs: mut ref Vec<T>, i: u64, v: T) -> i64    in-place (returns 0)
+//
+// The consuming form is the affine/functional style: it moves `xs` into
+// the call, writes the slot, and returns the updated Vec. The compiler
+// can sometimes optimize this to an in-place write when the old binding
+// is immediately consumed, but this depends on the optimization level.
+//
+// The in-place form (mut ref) always writes through the pointer with
+// zero struct copies. It is preferred in tight loops (e.g. the sieve
+// inner loop) and when the Vec is owned by another binding (struct field).
+
+struct Grid { width: i64, cells: Vec<i64> }
+
+fn main() -> i64 {
+    // Local Vec — in-place form avoids consuming + rebinding.
+    let xs: Vec<i64> = vec(10, 20, 30, 40, 50);
+
+    let r1: i64 = set(mut ref xs, 0 as u64, 100);
+    let r2: i64 = set(mut ref xs, 2 as u64, 300);
+    let r3: i64 = set(mut ref xs, 4 as u64, 500);
+
+    // r1/r2/r3 are all 0 (the return value is always 0)
+    assert r1 == 0;
+    assert r2 == 0;
+    assert r3 == 0;
+
+    // xs was modified in place
+    assert xs[0] == 100;
+    assert xs[1] == 20;
+    assert xs[2] == 300;
+    assert xs[3] == 40;
+    assert xs[4] == 500;
+    print "xs:", xs[0], xs[1], xs[2], xs[3], xs[4];
+
+    // Struct field Vec — same in-place form works through field borrow.
+    let g: Grid = Grid { width: 4, cells: vec(1, 2, 3, 4) };
+    let _ = set(mut ref g.cells, 1 as u64, 20);
+    let _ = set(mut ref g.cells, 3 as u64, 40);
+    assert g.cells[0] == 1;
+    assert g.cells[1] == 20;
+    assert g.cells[2] == 3;
+    assert g.cells[3] == 40;
+    print "grid:", g.cells[0], g.cells[1], g.cells[2], g.cells[3];
+
+    // In-place writes in a loop — the sieve pattern.
+    let flags: Vec<i64> = vec(1, 1, 1, 1, 1, 1, 1, 1, 1, 1);
+    let j: i64 = 0;
+    while j < 10 {
+        if j % 2 == 0 {
+            let _ = set(mut ref flags, j as u64, 0);
+        }
+        j = j + 1;
+    }
+    // Even indices set to 0, odd remain 1
+    assert flags[0] == 0;
+    assert flags[1] == 1;
+    assert flags[2] == 0;
+    assert flags[9] == 1;
+    print "flags (even=0):", flags[0], flags[1], flags[2], flags[3];
+
+    return 0;
+}

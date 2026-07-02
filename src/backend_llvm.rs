@@ -14414,6 +14414,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 name.as_str(),
                 "push"
                     | "set"
+                    | "set_mut"
                     | "clone"
                     | "push_mut"
                     | "pop"
@@ -40293,6 +40294,58 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
     out.push_str(&format!("  store {} %v, {}* %p\n", elt_ty, elt_ty));
     out.push_str(&format!("  ret {} %xs\n", s_ty));
     out.push_str("}\n");
+
+    // ---- set_mut(xs_p, i, v): in-place element write through a
+    // pointer to the Vec struct. Used by `set(mut ref xs, i, v)`.
+    // Avoids the 24-byte struct pass-by-value + return of `set`,
+    // allowing gcc/LLVM to keep the data pointer in a register
+    // across iterations of tight loops (e.g. sieve inner loop).
+    {
+        let set_mut_name = format!("@intent_vec_{}__set_mut", tag);
+        out.push_str(&format!(
+            "define i64 {}({}* %xs_p, i64 %i, {} %v) {{\n",
+            set_mut_name, s_ty, elt_ty
+        ));
+        out.push_str(&format!(
+            "  %data_p = getelementptr {}, {}* %xs_p, i32 0, i32 0\n",
+            s_ty, s_ty
+        ));
+        out.push_str(&format!(
+            "  %data = load {}*, {}** %data_p\n",
+            elt_ty, elt_ty
+        ));
+        out.push_str(&format!(
+            "  %p = getelementptr {}, {}* %data, i64 %i\n",
+            elt_ty, elt_ty
+        ));
+        if !element_is_copy {
+            // Free old slot's resources before overwrite to avoid leak.
+            match element {
+                Type::Vec(inner) => {
+                    let inner_free = format!(
+                        "@intent_vec_{}__free",
+                        vec_struct_tag(inner)
+                    );
+                    out.push_str(&format!(
+                        "  %sm_old = load {}, {}* %p\n",
+                        elt_ty, elt_ty
+                    ));
+                    out.push_str(&format!(
+                        "  call void {}({} %sm_old)\n",
+                        inner_free, elt_ty
+                    ));
+                }
+                Type::OwnedStr => {
+                    out.push_str("  %sm_old = load i8*, i8** %p\n");
+                    out.push_str("  call void @free(i8* %sm_old)\n");
+                }
+                _ => {}
+            }
+        }
+        out.push_str(&format!("  store {} %v, {}* %p\n", elt_ty, elt_ty));
+        out.push_str("  ret i64 0\n");
+        out.push_str("}\n");
+    }
 
     // ---- clone(xs): malloc new buffer + copy each element.
     // For Copy elements a memcpy of the whole buffer is

@@ -28701,12 +28701,25 @@ fn check_set_builtin(
     }
 
     let xs = check_expr(&args[0], env, signatures, diagnostics);
-    let element_type = match xs.ty() {
-        Type::Vec(element) => (**element).clone(),
+    // Two forms, dispatched on first argument type:
+    //   set(xs: Vec<T>, i: u64, v: T) -> Vec<T>        (consuming)
+    //   set(xs: mut ref Vec<T>, i: u64, v: T) -> i64   (in-place, returns 0)
+    let (element_type, in_place) = match xs.ty() {
+        Type::Vec(element) => ((**element).clone(), false),
+        Type::RefMut(inner) => match inner.as_ref() {
+            Type::Vec(element) => ((**element).clone(), true),
+            other => {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!("set() requires a Vec or mut ref Vec argument, got mut ref {}", other),
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+                return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
+            }
+        },
         other => {
             diagnostics.push(Diagnostic::new(
                 args[0].span,
-                format!("set() requires a Vec argument, got {}", other),
+                format!("set() requires a Vec or mut ref Vec argument, got {}", other),
             ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
         }
@@ -28729,23 +28742,29 @@ fn check_set_builtin(
         diagnostics,
     );
 
-    diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
-
-    consume_if_moved_var(&args[0], &xs, env);
-    // Mark the new-value Var moved when it owns non-Copy
-    // heap — set() stores it into the slot, so the source
-    // binding's scope-exit drop would double-free.
-    // Mirrors push (closure #171).
+    // Consuming form moves xs; in-place form leaves it borrowed
+    // (the RefMut borrow already validated by the checker).
+    if !in_place {
+        diagnose_partial_then_whole_move(&args[0], &xs, env, diagnostics);
+        consume_if_moved_var(&args[0], &xs, env);
+    }
+    // The stored value is taken by value — for non-Copy element
+    // types the source binding must be marked moved to avoid a
+    // double-free at scope exit. Mirrors push (closure #171).
     consume_if_moved_var(&args[2], &value, env);
     let mut xs_expr = xs.expr;
     inject_branch_drops(&mut xs_expr);  // closure #182
     let mut value_expr = value.expr;
     inject_branch_drops(&mut value_expr);
 
-    let result_type = Type::Vec(Box::new(element_type));
+    let (call_name, result_type) = if in_place {
+        ("set_mut".to_string(), Type::I64)
+    } else {
+        ("set".to_string(), Type::Vec(Box::new(element_type)))
+    };
     CheckedExpr::new(
         TypedExprKind::Call {
-            name: "set".to_string(),
+            name: call_name,
             name_span: span,
             args: vec![xs_expr, index.expr, value_expr],
         },

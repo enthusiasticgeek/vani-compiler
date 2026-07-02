@@ -10716,8 +10716,13 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
     // writes (C forbids `arr1 = arr2` via `=`). Phase 2c.
     let element_is_array = matches!(element, Type::Array { .. });
 
+    // __restrict__ tells gcc that this data pointer is the sole
+    // access path for the buffer, enabling auto-vectorisation of
+    // loops over Vec<i64> and Vec<f64> (matmul inner loop, stats
+    // accumulation). gcc honours restrict on struct members under
+    // -O2 with -fstrict-aliasing (the default).
     out.push_str(&format!(
-        "typedef struct {{ {ct}* data; uint64_t len; uint64_t capacity; }} {sn};\n",
+        "typedef struct {{ {ct}* __restrict__ data; uint64_t len; uint64_t capacity; }} {sn};\n",
         ct = c_element,
         sn = struct_name
     ));
@@ -11517,6 +11522,38 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
         cleanup = set_cleanup,
         store = set_store,
     ));
+
+    // `__set_mut(xs_p, i, v)`: in-place element write through a
+    // pointer to the Vec struct. Used by `set(mut ref xs, i, v)`
+    // — avoids 24-byte struct pass-by-value + return and lets gcc
+    // keep the data pointer in a register across iterations.
+    {
+        let set_mut_cleanup = if element_is_copy {
+            String::new()
+        } else {
+            c_element_drop_old("xs->data[i]", element)
+        };
+        let set_mut_store = if element_is_array {
+            format!(
+                "    memcpy(xs->data[i], v, sizeof({}));",
+                c_element,
+            )
+        } else {
+            "    xs->data[i] = v;".to_string()
+        };
+        out.push_str(&format!(
+            "static INTENT_UNUSED int64_t {sn}__set_mut({sn}* xs, uint64_t i, {ct} v) {{\
+\n    assert(i < xs->len);\
+{cleanup}\
+\n{store}\
+\n    return 0;\
+\n}}\n",
+            sn = struct_name,
+            ct = c_element,
+            cleanup = set_mut_cleanup,
+            store = set_mut_store,
+        ));
+    }
 
     // `__clone(xs)`: malloc a new buffer + copy each element.
     // For Copy elements a single memcpy suffices. For non-Copy
@@ -18484,6 +18521,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             format!(
                 "{}({}, (uint64_t)({}), {})",
                 vec_helper(element, "set"),
+                emit_expr(&args[0]),
+                emit_expr(&args[1]),
+                emit_expr(&args[2])
+            )
+        }
+        "set_mut" => {
+            // In-place element write: first arg is `mut ref Vec<T>`,
+            // lowered to a pointer to the Vec struct. Element type
+            // is obtained by peering through the RefMut wrapper.
+            let element = match args[0].ty.deref() {
+                Type::Vec(element) => element.clone(),
+                _ => unreachable!("set_mut() arg 0 must be (mut ref) Vec<_>"),
+            };
+            format!(
+                "{}({}, (uint64_t)({}), {})",
+                vec_helper(&element, "set_mut"),
                 emit_expr(&args[0]),
                 emit_expr(&args[1]),
                 emit_expr(&args[2])

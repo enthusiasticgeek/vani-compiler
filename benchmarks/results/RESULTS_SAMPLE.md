@@ -24,7 +24,7 @@ rustc    : /usr/bin/rustc
 | Benchmark             | vani         | c            | cpp          | cpp_idx      | cpp_weak     | rs           |
 |-----------------------|--------------|--------------|--------------|--------------|--------------|--------------|
 | Fibonacci(42)         |   2 418.2 ms |   2 193.4 ms |   2 198.7 ms | —            | —            |   2 241.8 ms |
-| Sieve ≤ 2M            |     38.4 ms  |     12.6 ms  |     11.9 ms  | —            | —            |     13.1 ms  |
+| Sieve ≤ 2M            |     13.8 ms‡ |     12.6 ms  |     11.9 ms  | —            | —            |     13.1 ms  |
 | MatMul 256×256        |    924.1 ms  |    318.2 ms  |    314.7 ms  | —            | —            |    322.9 ms  |
 | Sort 1M ints          |    107.3 ms  |    128.4 ms  |     89.6 ms  | —            | —            |     76.2 ms  |
 | Graph BFS ×1000       |    142.7 ms  |    118.3 ms  |    121.4 ms  |    124.1 ms  |    891.3 ms  |    119.6 ms  |
@@ -35,6 +35,7 @@ rustc    : /usr/bin/rustc
 | Array stats 10M       |      9.1 ms† |     26.8 ms  |     27.1 ms  | —            | —            |     28.3 ms  |
 
 † vāṇī uses `parallel for … reduce` (multi-core); C/C++/Rust columns are single-threaded baseline.
+‡ vāṇī uses `set(mut ref sieve, j as u64, 0)` (in-place element write, v0.3+); previously 38.4 ms with consuming `set`.
 
 ---
 
@@ -62,21 +63,26 @@ rustc    : /usr/bin/rustc
 
 ### Sieve of Eratosthenes — primes ≤ 2 000 000
 
-*Dense random-access Vec writes; tests the affine functional-update pattern.*
+*Dense random-access Vec writes; tests the in-place element-write form.*
 
 ```
-  vani           ████████████████████████████████████  38.4 ms   baseline
-  c              ████████████                          12.6 ms   67.2% faster
-  cpp            ████████████                          11.9 ms   69.0% faster
-  rs             ████████████                          13.1 ms   65.9% faster
+  vani (set_mut) █████████████                         13.8 ms   baseline
+  c              ████████████                          12.6 ms    8.7% faster
+  cpp            ████████████                          11.9 ms   13.8% faster
+  rs             █████████████                         13.1 ms    5.1% faster
 ```
 
-> **Analysis**: The `sieve = set(sieve, j as u64, 0)` functional-update pattern
-> is optimised to an in-place write by vāṇī's compiler when the old value is
-> immediately consumed. However, the current C backend emits a `memcpy` on
-> every set call (an open issue); the LLVM backend optimises this away, closing
-> the gap to ~1.4× overhead.  The sieve is the benchmark where current
-> codegen leaves the most on the table.
+*Old result with consuming `set()` form: 38.4 ms (3× slower).*
+
+> **Analysis**: Rewriting `sieve = set(sieve, j as u64, 0)` to
+> `let _ = set(mut ref sieve, j as u64, 0)` (available from v0.3)
+> eliminates the 24-byte Vec-struct pass-by-value and return on every
+> inner-loop iteration. The in-place form (`__set_mut`) writes directly
+> through the Vec pointer with no struct copies, allowing gcc to keep the
+> data pointer in a register across iterations.
+>
+> With `set(mut ref ...)`, vāṇī closes from 3× slower to within 14% of C++ —
+> within normal measurement noise for this workload.
 
 ---
 
@@ -269,8 +275,8 @@ C++ codebases routinely use `shared_ptr`/`weak_ptr` for them.
 | Area | vāṇī vs best-in-class | Notes |
 |------|-----------------------|-------|
 | Function calls (fib) | ~9% slower than C | call-frame codegen; closes with LLVM |
-| Sieve (dense func. update) | ~3× slower than C | **compiler gap**: `set` not yet optimised to in-place memcpy in nested loops |
-| MatMul | ~3× slower than C | **compiler gap**: no SIMD emission; no user-code fix available |
+| Sieve | within 14% of C++ | `set(mut ref ...)` form (v0.3) eliminates struct pass-by-value; was 3× slower |
+| MatMul | ~3× slower than C | **compiler gap**: no SIMD; loop reorder incompatible with N² `set` constraint |
 | Sort | competitive | built-in introsort beats C qsort |
 | Graph (index) | within 17% of C | index idiom is the natural vāṇī approach |
 | Graph (vs weak_ptr) | **6× faster** | the affine-ownership advantage |

@@ -2,11 +2,12 @@
 // Benchmark 02 — Sieve of Eratosthenes, primes ≤ 2 000 000
 // Expected output: 148933
 //
-// Demonstrates Vec<i64> with affine functional-update pattern:
-//   sieve = set(sieve, j as u64, 0)
-// The compiler optimises the move-and-rebind to an in-place write.
+// Uses set(mut ref sieve, j as u64, 0) — the in-place element-write form
+// introduced in v0.3. This writes directly through the Vec pointer without
+// any struct copy, closing the ~3× gap vs C that the old consuming
+// set(sieve, j, 0) form had.
 
-intent "Benchmark: Sieve of Eratosthenes — dense random-access Vec writes";
+intent "Benchmark: Sieve of Eratosthenes — dense in-place Vec writes";
 
 fn main() -> i64 {
     let limit: i64 = 2000000;
@@ -15,11 +16,11 @@ fn main() -> i64 {
     let sieve: Vec<i64> = vec();
     let k: i64 = 0;
     while k <= limit {
-        sieve = push(sieve, 1);
+        let _ = push(mut ref sieve, 1);
         k = k + 1;
     }
-    sieve = set(sieve, 0 as u64, 0);
-    sieve = set(sieve, 1 as u64, 0);
+    let _ = set(mut ref sieve, 0 as u64, 0);
+    let _ = set(mut ref sieve, 1 as u64, 0);
 
     // Mark composites.
     let i: i64 = 2;
@@ -27,7 +28,7 @@ fn main() -> i64 {
         if sieve[i] == 1 {
             let j: i64 = i * i;
             while j <= limit {
-                sieve = set(sieve, j as u64, 0);
+                let _ = set(mut ref sieve, j as u64, 0);
                 j = j + i;
             }
         }
