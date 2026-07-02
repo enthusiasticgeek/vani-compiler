@@ -29,12 +29,12 @@ fn build_graph(n: i64, adj_start: mut ref Vec<i64>, adj_edges: mut ref Vec<i64>)
         let start: i64 = (len(ref adj_edges)) as i64;
         let _ = insert(mut ref adj_start, v as u64, start);
 
-        adj_edges = push(ref adj_edges, (v + 1) % n);
-        adj_edges = push(ref adj_edges, (v + 3) % n);
-        adj_edges = push(ref adj_edges, (v + 7) % n);
-        adj_edges = push(ref adj_edges, (v + 13) % n);
-        adj_edges = push(ref adj_edges, (v + 29) % n);
-        adj_edges = push(ref adj_edges, (v + 61) % n);
+        let _ = push(mut ref adj_edges, (v + 1) % n);
+        let _ = push(mut ref adj_edges, (v + 3) % n);
+        let _ = push(mut ref adj_edges, (v + 7) % n);
+        let _ = push(mut ref adj_edges, (v + 13) % n);
+        let _ = push(mut ref adj_edges, (v + 29) % n);
+        let _ = push(mut ref adj_edges, (v + 61) % n);
         v = v + 1;
     }
     return 0;

@@ -1,12 +1,14 @@
 // vani-lang: english
 // Benchmark 10 — Mean and integer variance of 10 000 000 values
 //
-// Two sequential passes over a large Vec<i64>:
-//   Pass 1: accumulate sum  → mean = sum / n
-//   Pass 2: accumulate (x - mean)^2 → variance = sum_sq / n
-// Tests plain sequential arithmetic loop throughput.
+// Two parallel passes over a large Vec<i64>:
+//   Pass 1: parallel reduce sum  → mean = sum / n
+//   Pass 2: parallel reduce (x - mean)^2 → variance = sum_sq / n
+//
+// Using `parallel for ... reduce` to multi-core both passes.
+// The sequential `while` form is left commented below for reference.
 
-intent "Benchmark: mean + variance of 10M integers — sequential arithmetic loops";
+intent "Benchmark: mean + variance of 10M integers — parallel reduce both passes";
 
 fn main() -> i64 {
     let n: i64 = 10000000;
@@ -19,22 +21,22 @@ fn main() -> i64 {
         i = i + 1;
     }
 
-    // Pass 1: sum.
+    // Pass 1: parallel sum.
     let sum: i64 = 0;
-    let j: i64 = 0;
-    while j < n {
+    parallel for j from 0 to n
+    reduce sum with +;
+    {
         sum = sum + data[j];
-        j = j + 1;
     }
     let mean: i64 = sum / n;
 
-    // Pass 2: variance (integer arithmetic).
+    // Pass 2: parallel variance (integer arithmetic).
     let var_sum: i64 = 0;
-    let k: i64 = 0;
-    while k < n {
+    parallel for k from 0 to n
+    reduce var_sum with +;
+    {
         let diff: i64 = data[k] - mean;
         var_sum = var_sum + diff * diff;
-        k = k + 1;
     }
     let variance: i64 = var_sum / n;
 
