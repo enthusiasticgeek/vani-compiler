@@ -117,7 +117,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 
 ### Sort 1 000 000 integers
 
-*vāṇī built-in sort (introsort, median-of-3) vs stdlib qsort / std::sort / sort_unstable.*
+*`sort(mut ref xs)` delegates to system `qsort` (SSA LLVM backend); C also uses `qsort`; C++ uses `std::sort` (inlined comparator); Rust uses `sort_unstable` (pdqsort).*
 
 ```
   vani           ████████████████████████████████████   195.6 ms  baseline
@@ -297,7 +297,7 @@ graphs are stored as **integer indices** into a contiguous `Vec<T>`.
 | vāṇī / C++ index | zero (flat Vec) | none | excellent (contiguous) |
 
 The measured result: vāṇī (43.5 ms) **beats C++ `weak_ptr`** (51.8 ms) by 16%.
-C++ `weak_ptr` is **4.2× slower** than C++ index (26.2 ms).
+C++ `weak_ptr` (51.8 ms) is **2× slower** than C++ index (26.2 ms), and **4.2× slower** than C index (12.4 ms).
 
 ---
 

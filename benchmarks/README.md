@@ -158,7 +158,7 @@ overhead** — not the ownership model.
 |-----------|--------|-----|
 | Alloc stress | **vāṇī wins** | RAII drop matches manual `free`; zero per-dealloc overhead |
 | HashMap | within 10% of C | splitmix64 hash + 75% load factor matches hand-rolled C |
-| Linked list | within 50% of C | index idiom same as C `int[]`; gap is while-loop overhead |
+| Linked list | 1.5× slower than C | index idiom same as C `int[]`; gap is while-loop + bounds-check overhead |
 | Sort vs C | within 25% | both use `qsort` with function-pointer comparator |
 | Fibonacci vs Rust | tie | pure recursion, same code after inlining |
 

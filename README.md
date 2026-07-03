@@ -1765,9 +1765,10 @@ fn main() -> i64 {
   parallel for i from 0 to 100
   reduce total with +;
   {
-    total = total + i;   // OK: declared reduction, lowered to OpenMP
-                         //     `reduction(+: total)` on the C
-                         //     backend and atomicrmw on LLVM.
+    total = total + i;   // OK: declared reduction. SSA LLVM (default):
+                         //     per-thread local accumulator + one
+                         //     atomicrmw per thread at loop exit.
+                         //     C backend: OpenMP `reduction(+:total)`.
   }
   return total;
 }
@@ -3377,17 +3378,17 @@ count.
 **Reduction patterns.** A `parallel for` may carry one or more
 `reduce <var> with <op>;` clauses. Supported ops:
 
-| Op   | Variable type | C lowering              | LLVM lowering                  |
+| Op   | Variable type | C lowering              | SSA LLVM lowering (default)    |
 |------|---------------|-------------------------|--------------------------------|
-| `+`  | integer       | `reduction(+:var)`      | `atomicrmw add`                |
-| `*`  | integer       | `reduction(*:var)`      | `cmpxchg`-retry loop (mul)     |
-| `&&` | bool          | `reduction(&&:var)`     | `atomicrmw and i8*` against an i8 shadow allocated in the parent (LLVM rejects atomicrmw on `i1`) |
-| `\|\|` | bool        | `reduction(\|\|:var)`   | `atomicrmw or i8*` against an i8 shadow (same reason) |
-| `&`  | integer       | `reduction(&:var)`      | native-width `atomicrmw and` |
-| `\|` | integer       | `reduction(\|:var)`     | native-width `atomicrmw or` |
-| `^`  | integer       | `reduction(^:var)`      | native-width `atomicrmw xor` |
-| `min` | integer      | `reduction(min:var)`    | `atomicrmw min` (signed) / `umin` (unsigned) |
-| `max` | integer      | `reduction(max:var)`    | `atomicrmw max` (signed) / `umax` (unsigned) |
+| `+`  | integer       | `reduction(+:var)`      | per-thread `alloca` init'd 0; body accumulates non-atomically; one `atomicrmw add` per thread at exit |
+| `*`  | integer       | `reduction(*:var)`      | per-thread `alloca` init'd 1; body accumulates non-atomically; one `cmpxchg`-retry loop per thread at exit |
+| `&&` | bool          | `reduction(&&:var)`     | per-thread `alloca` init'd 1 (all-true); body accumulates non-atomically; `atomicrmw and i8*` against an i8 shadow per thread at exit |
+| `\|\|` | bool        | `reduction(\|\|:var)`   | per-thread `alloca` init'd 0 (all-false); body accumulates non-atomically; `atomicrmw or i8*` against an i8 shadow per thread at exit |
+| `&`  | integer       | `reduction(&:var)`      | per-thread `alloca` init'd -1; one `atomicrmw and` per thread at exit |
+| `\|` | integer       | `reduction(\|:var)`     | per-thread `alloca` init'd 0; one `atomicrmw or` per thread at exit |
+| `^`  | integer       | `reduction(^:var)`      | per-thread `alloca` init'd 0; one `atomicrmw xor` per thread at exit |
+| `min` | integer      | `reduction(min:var)`    | per-thread `alloca` init'd INT64_MAX; one `atomicrmw min` per thread at exit |
+| `max` | integer      | `reduction(max:var)`    | per-thread `alloca` init'd INT64_MIN; one `atomicrmw max` per thread at exit |
 
 For `+`, `*`, `&&`, and `||` the checker requires the body to
 update `<var>` only as `<var> <op> <expr>` (or `<expr> <op>

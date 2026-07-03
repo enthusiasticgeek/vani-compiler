@@ -1,9 +1,9 @@
 // vani-lang: english
 // Benchmark 04 — Sort 1 000 000 pseudo-random integers
 //
-// Uses the built-in `sort(mut ref xs)` which is an in-place
-// introsort (quicksort + heapsort fallback). The integer sequence
-// is generated with a simple LCG to match the other variants.
+// Uses the built-in `sort(mut ref xs)` which delegates to the
+// system `qsort` via a typed comparator (SSA LLVM backend).
+// The integer sequence is generated with a simple LCG to match the other variants.
 
 intent "Benchmark: sort 1 000 000 integers using the built-in sort";
 
