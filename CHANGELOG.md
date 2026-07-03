@@ -6,6 +6,119 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.0] — 2026-07-01
+
+### Added — Tooling
+
+- **`vani_translate.py` v3 — 57-language translator** — expanded from 5 to 57
+  supported languages; SOV word-order rewriting for 20 languages; `--llm` flag
+  for AI-assisted translation of comments, strings, and identifiers via
+  Anthropic / OpenAI / Ollama backends.
+- No compiler or language changes.
+
+---
+
+## [0.1.9] — 2026-06-23
+
+### Added — Language
+
+- **Named loop labels** — `label: for/while` + `break label` + `continue label`;
+  any nesting depth; undefined label produces a clear compile error. Both the
+  SSA-C and LLVM backends emit correct labeled exits.
+- Supersedes the positional break keywords (`break inner/middle/outer`)
+  introduced in v0.1.8; plain `break` / `continue` still target the innermost
+  loop.
+- 3 new adversarial tests.
+
+---
+
+## [0.1.8] — 2026-06-23
+
+### Added — Language
+
+- **Block comments `/* ... */`** — multi-line, arbitrarily nested; unterminated
+  comment produces a clean diagnostic (no panic).
+- **Print block `print { ... }`** — groups multiple print lines under one
+  `print` keyword; each `;`-terminated item becomes a separate output line.
+- **Positional break** — `break inner` / `break middle` / `break outer` exit a
+  loop by nesting position. (Superseded by named labels in v0.1.9.)
+- Both C and LLVM backends; 8 new adversarial tests.
+
+---
+
+## [0.1.7] — 2026-06-21
+
+### Added — Docs / Tutorials
+
+- **10 new tutorial pages (~1 650 lines)** covering: function pointers as
+  first-class values, native file I/O primer + worked examples, advanced math
+  library deep-dive, Vec statistics and combinators, condition variables,
+  cross-compilation primer, function attributes reference, advanced collections
+  (Graph/BST/Trie/SkipList/UnionFind/BloomFilter/Deque), and full `vanic` CLI
+  reference.
+- No compiler changes; test count unchanged.
+
+---
+
+## [0.1.6] — 2026-06-21
+
+### Added — Language / Tooling
+
+- **`--target=<triple>`** — cross-compilation to arbitrary LLVM targets; passes
+  `--mtriple` to `llc`; selects cross-linker via `$CROSS_CC` or `<triple>-gcc`;
+  bare-metal triples (containing `none` or `eabi`) suppress libc/OpenMP/pthread
+  linker flags.
+- **`--no-std` (C backend)** — suppresses all `#include` lines; emits a minimal
+  typedef preamble (`uint8_t`, `int64_t`, `size_t`, `uintptr_t`, `NULL`);
+  auto-activates for bare-metal triples.
+- **`#[link_section = "..."]`** — places function in the named linker section
+  (C: `__attribute__((section(...)))`; LLVM IR: `section "..."`).
+- **`#[no_mangle]`** — suppresses `intent_` prefix and Unicode mangling in both
+  backends; linker scripts can reference the bare vāṇी function name.
+- **`mmio_read_u8` / `mmio_write_u8`** — 8-bit volatile MMIO builtins.
+- **`mmio_read_u16` / `mmio_write_u16`** — 16-bit volatile MMIO builtins.
+- **QEMU user-mode run** — `vanic run --target=<linux-triple>` transparently
+  invokes `qemu-<arch>-static`.
+- Resolves L19 in `docs/v1_limitations.md` (all 5 bare-metal sub-gaps: target
+  flag, no-std, no_mangle, link_section, narrow MMIO widths).
+
+---
+
+## [0.1.5] — 2026-06-21
+
+### Added — Language
+
+- **Native file I/O** — `FileHandle` affine RAII type; automatically `fclose`d
+  at scope exit. New builtins: `file_open`, `file_is_ok`, `file_read_line`,
+  `file_write`, `file_close`, `file_flush`, `stdin_read_line`, `flush_stdout`.
+  Both C and LLVM backends.
+- **`eprint` statement** — writes to stderr; syntax identical to `print`; both
+  backends route through `fprintf(stderr, ...)`.
+- Resolves L18 in `docs/v1_limitations.md` ("native file I/O").
+
+---
+
+## [0.1.4] — 2026-06-20
+
+### Fixed — Compiler
+
+- **Non-Copy elements in tuples** — `(OwnedStr, i64)` and similar tuples
+  containing non-Copy types were previously rejected with "v1 tuples are
+  Copy-only"; now fully supported across both backends. `ast.rs`,
+  `checker.rs`, `backend_c.rs`, and `backend_llvm.rs` all updated.
+- **`Box<T>` as enum variant payload** — `Option<Box<T>>` and any enum with a
+  `Box<T>` payload were rejected by the checker; now accepted. Scope-exit and
+  per-slot drop handlers added in both backends.
+
+### Fixed — Docs
+
+- Tutorial site broken-link sweep (19 files): wrong GitHub repo URLs, wrong
+  relative paths, ellipsis placeholder URLs — all repaired.
+- `SUMMARY.md` duplicate `installation.md` entry removed (caused mdBook to
+  render the page starting from an anchor, dropping all content above it).
+
+---
+
 ## [0.1.3] — 2026-06-19
 
 ### Added — Installation docs
@@ -214,7 +327,7 @@ generics, async/await, and a package manager.
 
 ---
 
-## [Unreleased] — 0.1.4-dev
+## [Unreleased] — v0.2.1-dev
 
 Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
 [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.
