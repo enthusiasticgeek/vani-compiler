@@ -13295,13 +13295,6 @@ return __intent_ret; }}\n",
             out.push_str("  while (");
             out.push_str(&emit_expr(cond));
             out.push_str(") {\n");
-            // Restate the loop condition as a compiler hint so gcc's range
-            // analysis can prove per-element bounds checks redundant even
-            // when the pre-loop hoisted assertion did not fire (e.g. when
-            // the upper bound IS the vec length, as in BFS).
-            out.push_str("    __builtin_assume(");
-            out.push_str(&emit_expr(cond));
-            out.push_str(");\n");
             for s in body {
                 emit_stmt(s, out);
             }

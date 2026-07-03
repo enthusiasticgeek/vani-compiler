@@ -290,6 +290,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str("declare i8* @malloc(i64)\n");
     out.push_str("declare i8* @realloc(i8*, i64)\n");
     out.push_str("declare void @free(i8*)\n");
+    out.push_str("declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)\n");
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i32 @strcmp(i8*, i8*)\n");
@@ -2545,6 +2546,37 @@ fn emit_outlined_parallel_for(
         ));
     }
 
+    // Thread-local accumulator allocas for non-Bool integer
+    // reductions. Each thread accumulates privately into
+    // %loc_red_<i> (no atomic ops in the hot loop), then
+    // combines once into the global via atomicrmw at done:.
+    let mut local_acc_names: Vec<Option<String>> = Vec::new();
+    for (i, (_, op, red_ty)) in region.reductions.iter().enumerate() {
+        if matches!(red_ty, Type::Bool) {
+            local_acc_names.push(None);
+            continue;
+        }
+        let storage_ty = red_storage_llvm(red_ty)?;
+        let identity = match op {
+            crate::ast::ReductionOp::Add
+            | crate::ast::ReductionOp::Or
+            | crate::ast::ReductionOp::BitOr
+            | crate::ast::ReductionOp::BitXor => "0",
+            crate::ast::ReductionOp::Mul => "1",
+            crate::ast::ReductionOp::And
+            | crate::ast::ReductionOp::BitAnd => "-1",
+            crate::ast::ReductionOp::Min => "9223372036854775807",
+            crate::ast::ReductionOp::Max => "-9223372036854775808",
+        };
+        let name = format!("%loc_red_{}", i);
+        out.push_str(&format!("  {} = alloca {}\n", name, storage_ty));
+        out.push_str(&format!(
+            "  store {} {}, {}* {}\n",
+            storage_ty, identity, storage_ty, name
+        ));
+        local_acc_names.push(Some(name));
+    }
+
     // Work distribution: OMP on Linux/macOS, Win32-arg loads
     // on Windows.
     if use_win32 {
@@ -2744,6 +2776,70 @@ fn emit_outlined_parallel_for(
                 continue;
             }
             if let Some(red_idx) = red_update_to_idx.get(&instr.result) {
+                let (_, op, red_ty) = &region.reductions[*red_idx];
+                if let Some(local_name) = &local_acc_names[*red_idx] {
+                    // Thread-local path: load local acc, update,
+                    // store back — zero atomic ops per element.
+                    let storage_ty = red_storage_llvm(red_ty)?;
+                    let n = instr.result.0;
+                    let inc = operand_str(&reduction_increments[*red_idx]);
+                    let cur = format!("%v_{}.loc_cur", n);
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        cur, storage_ty, storage_ty, local_name
+                    ));
+                    match op {
+                        crate::ast::ReductionOp::Min => {
+                            let cmp_op =
+                                if is_signed_int(red_ty) { "slt" } else { "ult" };
+                            let cmp = format!("%v_{}.loc_cmp", n);
+                            out.push_str(&format!(
+                                "  {} = icmp {} {} {}, {}\n",
+                                cmp, cmp_op, storage_ty, cur, inc
+                            ));
+                            out.push_str(&format!(
+                                "  %v_{} = select i1 {}, {} {}, {} {}\n",
+                                n, cmp, storage_ty, cur, storage_ty, inc
+                            ));
+                        }
+                        crate::ast::ReductionOp::Max => {
+                            let cmp_op =
+                                if is_signed_int(red_ty) { "sgt" } else { "ugt" };
+                            let cmp = format!("%v_{}.loc_cmp", n);
+                            out.push_str(&format!(
+                                "  {} = icmp {} {} {}, {}\n",
+                                cmp, cmp_op, storage_ty, cur, inc
+                            ));
+                            out.push_str(&format!(
+                                "  %v_{} = select i1 {}, {} {}, {} {}\n",
+                                n, cmp, storage_ty, cur, storage_ty, inc
+                            ));
+                        }
+                        other => {
+                            let binop = match other {
+                                crate::ast::ReductionOp::Add => "add",
+                                crate::ast::ReductionOp::Mul => "mul",
+                                crate::ast::ReductionOp::And
+                                | crate::ast::ReductionOp::BitAnd => "and",
+                                crate::ast::ReductionOp::Or
+                                | crate::ast::ReductionOp::BitOr => "or",
+                                crate::ast::ReductionOp::BitXor => "xor",
+                                _ => unreachable!(),
+                            };
+                            out.push_str(&format!(
+                                "  %v_{} = {} {} {}, {}\n",
+                                n, binop, storage_ty, cur, inc
+                            ));
+                        }
+                    }
+                    out.push_str(&format!(
+                        "  store {} %v_{}, {}* {}\n",
+                        storage_ty, n, storage_ty, local_name
+                    ));
+                    continue;
+                }
+                // Bool (or future non-i64) reduction: per-element
+                // atomicrmw as before.
                 emit_reduction_update(
                     &region.reductions[*red_idx],
                     &reduction_ptr_names[*red_idx],
@@ -2798,10 +2894,113 @@ fn emit_outlined_parallel_for(
     out.push_str("  %i_next = add i64 %i, 1\n");
     out.push_str("  br label %check\n");
     out.push_str("done:\n");
-    if use_win32 {
-        out.push_str("  ret i8* null\n");
+    // Combine each thread's local accumulator into the shared
+    // global via one atomic op (non-Mul) or CAS loop (Mul).
+    // Non-Mul atomicrmw ops are plain instructions and stay in
+    // the done: block. Mul uses cmpxchg so it needs its own
+    // basic blocks; those are emitted last.
+    for (i, (local_opt, (_, op, red_ty))) in
+        local_acc_names.iter().zip(region.reductions.iter()).enumerate()
+    {
+        let Some(local_name) = local_opt else { continue };
+        if matches!(op, crate::ast::ReductionOp::Mul) {
+            continue; // emitted below
+        }
+        let storage_ty = red_storage_llvm(red_ty)?;
+        let global_ptr = &reduction_ptr_names[i];
+        let final_val = format!("%loc_final_{}", i);
+        out.push_str(&format!(
+            "  {} = load {}, {}* {}\n",
+            final_val, storage_ty, storage_ty, local_name
+        ));
+        let opcode = match op {
+            crate::ast::ReductionOp::Add => "add",
+            crate::ast::ReductionOp::BitAnd => "and",
+            crate::ast::ReductionOp::BitOr => "or",
+            crate::ast::ReductionOp::BitXor => "xor",
+            crate::ast::ReductionOp::Min => {
+                if is_signed_int(red_ty) { "min" } else { "umin" }
+            }
+            crate::ast::ReductionOp::Max => {
+                if is_signed_int(red_ty) { "max" } else { "umax" }
+            }
+            _ => unreachable!(),
+        };
+        out.push_str(&format!(
+            "  atomicrmw {} {}* {}, {} {} seq_cst\n",
+            opcode, storage_ty, global_ptr, storage_ty, final_val
+        ));
+    }
+    // Collect Mul-reduction indices (need CAS loops → new blocks).
+    let mul_reds: Vec<usize> = local_acc_names
+        .iter()
+        .zip(region.reductions.iter())
+        .enumerate()
+        .filter_map(|(i, (local_opt, (_, op, _)))| {
+            if local_opt.is_some() && matches!(op, crate::ast::ReductionOp::Mul) {
+                Some(i)
+            } else {
+                None
+            }
+        })
+        .collect();
+    if mul_reds.is_empty() {
+        if use_win32 {
+            out.push_str("  ret i8* null\n");
+        } else {
+            out.push_str("  ret void\n");
+        }
     } else {
-        out.push_str("  ret void\n");
+        // Bridge done: → first Mul CAS block.
+        out.push_str(&format!(
+            "  br label %mul_combine_{}\n",
+            mul_reds[0]
+        ));
+        for (k, &i) in mul_reds.iter().enumerate() {
+            let (_, _, red_ty) = &region.reductions[i];
+            let storage_ty = red_storage_llvm(red_ty)?;
+            let global_ptr = &reduction_ptr_names[i];
+            let local_name = local_acc_names[i].as_ref().unwrap();
+            let final_val = format!("%loc_final_{}", i);
+            out.push_str(&format!("mul_combine_{}:\n", i));
+            out.push_str(&format!(
+                "  {} = load {}, {}* {}\n",
+                final_val, storage_ty, storage_ty, local_name
+            ));
+            out.push_str(&format!("  br label %mul_cas_{}_try\n", i));
+            out.push_str(&format!("mul_cas_{}_try:\n", i));
+            out.push_str(&format!(
+                "  %mul_cur_{} = load {}, {}* {}\n",
+                i, storage_ty, storage_ty, global_ptr
+            ));
+            out.push_str(&format!(
+                "  %mul_new_{} = mul {} %mul_cur_{}, {}\n",
+                i, storage_ty, i, final_val
+            ));
+            out.push_str(&format!(
+                "  %mul_xchg_{} = cmpxchg {}* {}, {} %mul_cur_{}, {} %mul_new_{} seq_cst seq_cst\n",
+                i, storage_ty, global_ptr, storage_ty, i, storage_ty, i
+            ));
+            out.push_str(&format!(
+                "  %mul_ok_{} = extractvalue {{ {}, i1 }} %mul_xchg_{}, 1\n",
+                i, storage_ty, i
+            ));
+            let next_lbl = if k + 1 < mul_reds.len() {
+                format!("mul_combine_{}", mul_reds[k + 1])
+            } else {
+                "mul_done_ret".to_string()
+            };
+            out.push_str(&format!(
+                "  br i1 %mul_ok_{}, label %{}, label %mul_cas_{}_try\n",
+                i, next_lbl, i
+            ));
+        }
+        out.push_str("mul_done_ret:\n");
+        if use_win32 {
+            out.push_str("  ret i8* null\n");
+        } else {
+            out.push_str("  ret void\n");
+        }
     }
     out.push_str("}\n\n");
 
