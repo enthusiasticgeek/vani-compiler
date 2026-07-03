@@ -37714,8 +37714,12 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
     // return new length as i64. Used by `push(mut ref xs, v)`
     // — caller passes a pointer to the Vec (alloca address or
     // field GEP). T1.2 phase 2b follow-up.
+    // alwaysinline: push_mut is called in tight loops (BFS queue growth,
+    // Vec construction loops); inlining lets LLVM keep the Vec struct
+    // fields in registers across iterations and hoist the grow-path
+    // branch as a loop-exit rather than re-evaluating it every element.
     out.push_str(&format!(
-        "define i64 {}({}* %xs_p, {} %v) {{\n",
+        "define i64 {}({}* %xs_p, {} %v) alwaysinline {{\n",
         push_mut_name, s_ty, elt_ty
     ));
     out.push_str(&format!(
@@ -40333,8 +40337,13 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
     // across iterations of tight loops (e.g. sieve inner loop).
     {
         let set_mut_name = format!("@intent_vec_{}__set_mut", tag);
+        // alwaysinline: set_mut is the hot path for in-place Vec writes
+        // (sieve inner loop, BFS visited array). Inlining lets LLVM apply
+        // LICM to hoist the data-pointer load out of the enclosing loop —
+        // turning each call into a single GEP + store with the base address
+        // kept in a register, matching C's direct array indexing throughput.
         out.push_str(&format!(
-            "define i64 {}({}* %xs_p, i64 %i, {} %v) {{\n",
+            "define i64 {}({}* %xs_p, i64 %i, {} %v) alwaysinline {{\n",
             set_mut_name, s_ty, elt_ty
         ));
         out.push_str(&format!(

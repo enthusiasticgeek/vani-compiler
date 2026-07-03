@@ -295,17 +295,29 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i32 @strcmp(i8*, i8*)\n");
     out.push_str("declare i64 @strlen(i8*)\n");
+    // @llvm.assume: tells LLVM a condition is true at a point,
+    // enabling downstream redundant-check elimination via the
+    // ConstraintElimination pass. No runtime cost; ignored if
+    // the condition is already known.
+    out.push_str("declare void @llvm.assume(i1)\n");
     // Bounds-check helper used by Index / IndexAssign emit when
-    // the SSA elision pass couldn't prove in-bounds. Centralizing
-    // the branch in a helper avoids splitting the caller's basic
-    // block at every check site.
+    // the SSA elision pass couldn't prove in-bounds. alwaysinline
+    // makes LLVM expand the branch inline at every call site so
+    // that GVN/ConstraintElimination can see the condition and
+    // eliminate duplicate checks (e.g. the outer-loop bound check
+    // in BFS's `while head < queue.len { curr = queue[head] }`).
+    // The @llvm.assume in cont: registers the proven condition with
+    // LLVM's value-range tracking so downstream uses of the same
+    // (idx, len) pair in dominated blocks are also eliminated.
     out.push_str(
-        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) {\n\
+        "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
            br i1 %ok, label %cont, label %oob\n\
-         cont:\n  ret void\n\
-         oob:\n  call void @abort()\n  unreachable\n}\n",
+         oob:\n  call void @abort()\n  unreachable\n\
+         cont:\n  \
+           call void @llvm.assume(i1 %ok)\n  \
+           ret void\n}\n",
     );
     // Empty string global used by the per-element Vec
     // clone helper (closure #152) and the payloaded-enum
