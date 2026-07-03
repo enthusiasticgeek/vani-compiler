@@ -15661,6 +15661,28 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 )
             }
         }
+        "vec_with_capacity" => {
+            // Pre-allocate a Vec<T> with exactly `n` slots, len=0.
+            // Eliminates all realloc doublings for sequential push loops
+            // where the final size is known upfront.
+            let element = match result_ty {
+                Type::Vec(element) => element,
+                _ => unreachable!("vec_with_capacity() must return Vec<_>"),
+            };
+            let c_element = c_element_storage(element);
+            let vec_ty = format!("intent_vec_{}", crate::backend_llvm::vec_struct_tag(element));
+            let n_expr = emit_expr(&args[0]);
+            format!(
+                "({{ int64_t _vwc_n = (int64_t)({n}); \
+                   uint64_t _vwc_cap = (uint64_t)(_vwc_n > 0 ? _vwc_n : 1); \
+                   {ce}* _vwc_p = ({ce}*)malloc(_vwc_cap * sizeof({ce})); \
+                   {vs} _vwc_v; _vwc_v.data = _vwc_p; _vwc_v.len = 0; \
+                   _vwc_v.capacity = _vwc_cap; _vwc_v; }})",
+                n = n_expr,
+                ce = c_element,
+                vs = vec_ty,
+            )
+        }
         "push" => {
             let element = match result_ty {
                 Type::Vec(element) => element,

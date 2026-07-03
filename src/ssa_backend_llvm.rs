@@ -4617,7 +4617,7 @@ fn emit_instr(
             }
             // Vec builtins call through the shared runtime
             // helpers emitted in the module preamble.
-            if matches!(name.as_str(), "vec" | "push" | "set" | "clone") {
+            if matches!(name.as_str(), "vec" | "push" | "set" | "clone" | "vec_with_capacity") {
                 let element = match &instr.ty {
                     Type::Vec(elt) => (**elt).clone(),
                     other => {
@@ -5496,6 +5496,53 @@ fn emit_vec_call(
     let elt_ty = crate::backend_llvm::vec_element_value_str(element);
     let elt_tag = crate::backend_llvm::vec_struct_tag(element);
     match name {
+        "vec_with_capacity" => {
+            // Pre-allocate a Vec<T> with capacity = args[0], len = 0.
+            // No elements stored; subsequent push_mut calls will never
+            // realloc until the capacity is exhausted.
+            let elt_bits =
+                crate::backend_llvm::vec_element_byte_size(element) as i64;
+            let n_op = operand_str(&args[0]);
+            let raw = format!("%v_{}.raw", result.0);
+            let bytes = format!("%v_{}.bytes", result.0);
+            let cap = format!("%v_{}.cap", result.0);
+            let cond = format!("%v_{}.cond", result.0);
+            out.push_str(&format!(
+                "  {} = icmp sgt i64 {}, 0\n",
+                cond, n_op
+            ));
+            out.push_str(&format!(
+                "  {} = select i1 {}, i64 {}, i64 1\n",
+                cap, cond, n_op
+            ));
+            out.push_str(&format!(
+                "  {} = mul i64 {}, {}\n",
+                bytes, cap, elt_bits
+            ));
+            out.push_str(&format!(
+                "  {} = call i8* @malloc(i64 {})\n",
+                raw, bytes
+            ));
+            let buf = format!("%v_{}.buf", result.0);
+            out.push_str(&format!(
+                "  {} = bitcast i8* {} to {}*\n",
+                buf, raw, elt_ty
+            ));
+            let iv0 = format!("%v_{}.iv0", result.0);
+            out.push_str(&format!(
+                "  {} = insertvalue {} undef, {}* {}, 0\n",
+                iv0, struct_ty, elt_ty, buf
+            ));
+            let iv1 = format!("%v_{}.iv1", result.0);
+            out.push_str(&format!(
+                "  {} = insertvalue {} {}, i64 0, 1\n",
+                iv1, struct_ty, iv0
+            ));
+            out.push_str(&format!(
+                "  %v_{} = insertvalue {} {}, i64 {}, 2\n",
+                result.0, struct_ty, iv1, cap
+            ));
+        }
         "vec" => {
             // Inline malloc + per-element store + struct
             // build. Mirrors the tree-LLVM

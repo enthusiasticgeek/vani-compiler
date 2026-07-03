@@ -11,7 +11,7 @@ fn main() -> i64 {
     let n: i64 = 1000000;
 
     // Generate pseudo-random data with an LCG.
-    let xs: Vec<i64> = vec();
+    let xs: Vec<i64> = vec_with_capacity(n);
     let seed: i64 = 12345678;
     let a: i64 = 1664525;
     let c_val: i64 = 1013904223;

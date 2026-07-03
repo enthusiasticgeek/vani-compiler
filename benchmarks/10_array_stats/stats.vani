@@ -14,7 +14,7 @@ fn main() -> i64 {
     let n: i64 = 10000000;
 
     // Generate data: deterministic pattern to match other variants.
-    let data: Vec<i64> = vec();
+    let data: Vec<i64> = vec_with_capacity(n);
     let i: i64 = 0;
     while i < n {
         data = push(data, (i * 7 + 13) % 1000);

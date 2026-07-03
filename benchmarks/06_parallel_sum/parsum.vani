@@ -22,7 +22,7 @@ fn main() -> i64 {
     let n: i64 = 50000000;
 
     // Build data array: values are i % 1000 so total is computable.
-    let data: Vec<i64> = vec();
+    let data: Vec<i64> = vec_with_capacity(n);
     let i: i64 = 0;
     while i < n {
         data = push(data, i % 1000);

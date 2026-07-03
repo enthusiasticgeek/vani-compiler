@@ -34,7 +34,10 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // timers: caller calls sleep_ms_async, registers the
     // returned fd with epoll, waits via epoll_wait_one,
     // then calls sleep_ms_finish to clear + close the timer.
-    "sleep_ms_async", "sleep_ms_finish"];
+    "sleep_ms_async", "sleep_ms_finish",
+    // Performance builtin: pre-allocate Vec with known capacity to avoid
+    // O(log N) realloc doublings during sequential push loops.
+    "vec_with_capacity"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -9629,6 +9632,10 @@ fn check_one_stmt(
                     try_elaborate_empty_vec(expr, annotation, diagnostics)
                 {
                     elaborated
+                } else if let Some(elaborated) = try_elaborate_vec_with_capacity(
+                    expr, annotation, env, signatures, diagnostics,
+                ) {
+                    elaborated
                 } else if let Some(elaborated) =
                     try_elaborate_empty_hashmap(expr, annotation, diagnostics)
                 {
@@ -9938,6 +9945,13 @@ fn check_one_stmt(
                 env.lookup(name).cloned().and_then(|info| {
                     try_elaborate_empty_vec(expr, &info.ty, diagnostics)
                 })
+            } else if matches!(
+                &expr.kind,
+                ExprKind::Call { name: n, .. } if n == "vec_with_capacity"
+            ) {
+                env.lookup(name).cloned().and_then(|info| {
+                    try_elaborate_vec_with_capacity(expr, &info.ty, env, signatures, diagnostics)
+                })
             } else {
                 None
             };
@@ -10076,6 +10090,14 @@ fn check_one_stmt(
             let checked = if let Some(elaborated) = try_elaborate_empty_vec(
                 expr,
                 &function.return_type,
+                diagnostics,
+            ) {
+                elaborated
+            } else if let Some(elaborated) = try_elaborate_vec_with_capacity(
+                expr,
+                &function.return_type,
+                env,
+                signatures,
                 diagnostics,
             ) {
                 elaborated
@@ -17947,6 +17969,33 @@ fn check_call(
         // is sound.
         "unbox" => return check_unbox_builtin(args, env, signatures, span, diagnostics),
         "vec" => return check_vec_builtin(args, env, signatures, span, diagnostics),
+        "vec_with_capacity" => {
+            // Fallback when called without a usable type annotation.
+            // try_elaborate_vec_with_capacity handles the annotated path;
+            // this arm fires for unresolved call sites and defaults to Vec<i64>.
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "vec_with_capacity(n) takes 1 argument (the capacity, i64), got {}",
+                        args.len()
+                    ),
+                ));
+                return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
+            }
+            let n_raw = check_expr(&args[0], env, signatures, diagnostics);
+            let n = coerce_checked(n_raw, &Type::I64, args[0].span, "vec_with_capacity capacity", diagnostics);
+            return CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "vec_with_capacity".to_string(),
+                    name_span: span,
+                    args: vec![n.expr],
+                },
+                Type::Vec(Box::new(Type::I64)),
+                None,
+                span,
+            );
+        }
         // Closure #284: try_vec(n: u64) -> Result<Vec<i64>,
         // AllocError>. Builtin that allocates a Vec<i64> of
         // capacity n; returns Result.Ok(vec) on success or
@@ -20507,6 +20556,50 @@ fn try_elaborate_empty_vec(
             name: "vec".to_string(),
             name_span: expr.span,
             args: vec![],
+        },
+        Type::Vec(Box::new(element_ty)),
+        None,
+        expr.span,
+    ))
+}
+
+// vec_with_capacity(n) elaboration: borrow T from the Vec<T>
+// annotation so the builtin returns a properly-typed empty Vec
+// pre-allocated to capacity n.  Mirror of try_elaborate_empty_vec.
+fn try_elaborate_vec_with_capacity(
+    expr: &Expr,
+    expected: &Type,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<CheckedExpr> {
+    let ExprKind::Call { name, args, .. } = &expr.kind else {
+        return None;
+    };
+    if name != "vec_with_capacity" {
+        return None;
+    }
+    let Type::Vec(element_box) = expected else {
+        return None;
+    };
+    if args.len() != 1 {
+        diagnostics.push(Diagnostic::new(
+            expr.span,
+            format!(
+                "vec_with_capacity(n) takes 1 argument (the capacity, i64), got {}",
+                args.len()
+            ),
+        ));
+        return None;
+    }
+    let element_ty = (**element_box).clone();
+    let n_checked = check_expr(&args[0], env, signatures, diagnostics);
+    let n_coerced = coerce_checked(n_checked, &Type::I64, args[0].span, "vec_with_capacity capacity", diagnostics);
+    Some(CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "vec_with_capacity".to_string(),
+            name_span: expr.span,
+            args: vec![n_coerced.expr],
         },
         Type::Vec(Box::new(element_ty)),
         None,

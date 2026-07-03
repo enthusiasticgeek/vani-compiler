@@ -8551,6 +8551,59 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return s2;
             }
+            // `vec_with_capacity(n)` — pre-allocate a Vec<T> with
+            // capacity n and len 0.  No elements are stored;
+            // subsequent push/push_mut calls won't realloc until
+            // the capacity is exhausted.
+            if name == "vec_with_capacity" {
+                let element = match &expr.ty {
+                    Type::Vec(element) => element,
+                    _ => unreachable!("vec_with_capacity() must return Vec<_>"),
+                };
+                let elt_ty = vec_element_value_str(element);
+                let s_ty = vec_struct_name(element);
+                let elt_bytes = vec_element_byte_size(element) as i64;
+                let n_val = emit_expr(&args[0], ctx, out);
+                // cap = max(n, 1) to avoid zero-byte malloc
+                let cond = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp sgt i64 {}, 0\n", cond, n_val));
+                let cap = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 1\n",
+                    cap, cond, n_val
+                ));
+                let bytes = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = mul i64 {}, {}\n",
+                    bytes, cap, elt_bytes
+                ));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @malloc(i64 {})\n",
+                    raw, bytes
+                ));
+                let buf = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast i8* {} to {}*\n",
+                    buf, raw, elt_ty
+                ));
+                let s0 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue {} undef, {}* {}, 0\n",
+                    s0, s_ty, elt_ty, buf
+                ));
+                let s1 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue {} {}, i64 0, 1\n",
+                    s1, s_ty, s0
+                ));
+                let s2 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertvalue {} {}, i64 {}, 2\n",
+                    s2, s_ty, s1, cap
+                ));
+                return s2;
+            }
             // `clone_at(xs, i)` returns a fresh owned value of
             // the element type. Mirrors the SSA-LLVM lowering
             // (ssa_backend_llvm.rs:3431) — without this arm the
@@ -38201,7 +38254,159 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("sort_done:\n");
         out.push_str("  ret i64 0\n");
         out.push_str("}\n");
-        // sort: delegate to system qsort (O(n log n)) instead of insertion sort.
+        // Recursive quicksort helper: median-of-3 pivot, Lomuto partition,
+        // insertion sort for n<=16.  Recursive so each call frame owns its
+        // alloca slots — avoids O(N) stack growth of an iterative approach
+        // with allocas in non-entry blocks.  O(log N) recursion depth with
+        // median-of-3 pivot (~20 frames for 1M elements = well within limits).
+        let qs_impl_name = format!("@intent_vec_{}__qs_impl", tag);
+        out.push_str(&format!(
+            "define internal void {fn}(i64* %a, i64 %lo, i64 %hi) {{\n",
+            fn = qs_impl_name,
+        ));
+        out.push_str("entry:\n");
+        // All mutable-counter allocas in the entry block (SSA requirement).
+        out.push_str("  %is_i_p = alloca i64\n");
+        out.push_str("  %is_j_p = alloca i64\n");
+        out.push_str("  %pt_i_p = alloca i64\n");
+        out.push_str("  %pt_j_p = alloca i64\n");
+        out.push_str("  %rng    = sub i64 %hi, %lo\n");
+        out.push_str("  %ok     = icmp sgt i64 %rng, 0\n");
+        out.push_str("  br i1 %ok, label %dispatch, label %qs_ret\n");
+        out.push_str("dispatch:\n");
+        out.push_str("  %small  = icmp sle i64 %rng, 15\n");
+        out.push_str("  br i1 %small, label %is_init, label %med3\n");
+        // --- Insertion sort (n <= 16) ---
+        out.push_str("is_init:\n");
+        out.push_str("  %is_lo1 = add i64 %lo, 1\n");
+        out.push_str("  store i64 %is_lo1, i64* %is_i_p\n");
+        out.push_str("  br label %is_outer\n");
+        out.push_str("is_outer:\n");
+        out.push_str("  %is_i   = load i64, i64* %is_i_p\n");
+        out.push_str("  %is_ok  = icmp sle i64 %is_i, %hi\n");
+        out.push_str("  br i1 %is_ok, label %is_body, label %qs_ret\n");
+        out.push_str("is_body:\n");
+        out.push_str("  %is_kp  = getelementptr i64, i64* %a, i64 %is_i\n");
+        out.push_str("  %is_key = load i64, i64* %is_kp\n");
+        out.push_str("  %is_j0  = sub i64 %is_i, 1\n");
+        out.push_str("  store i64 %is_j0, i64* %is_j_p\n");
+        out.push_str("  br label %is_inner\n");
+        out.push_str("is_inner:\n");
+        out.push_str("  %is_j   = load i64, i64* %is_j_p\n");
+        out.push_str("  %is_jge = icmp sge i64 %is_j, %lo\n");
+        out.push_str("  br i1 %is_jge, label %is_cmp, label %is_place\n");
+        out.push_str("is_cmp:\n");
+        out.push_str("  %is_jp  = getelementptr i64, i64* %a, i64 %is_j\n");
+        out.push_str("  %is_jv  = load i64, i64* %is_jp\n");
+        out.push_str("  %is_gt  = icmp sgt i64 %is_jv, %is_key\n");
+        out.push_str("  br i1 %is_gt, label %is_shift, label %is_place\n");
+        out.push_str("is_shift:\n");
+        out.push_str("  %is_j1  = add i64 %is_j, 1\n");
+        out.push_str("  %is_j1p = getelementptr i64, i64* %a, i64 %is_j1\n");
+        out.push_str("  store i64 %is_jv, i64* %is_j1p\n");
+        out.push_str("  %is_jd  = sub i64 %is_j, 1\n");
+        out.push_str("  store i64 %is_jd, i64* %is_j_p\n");
+        out.push_str("  br label %is_inner\n");
+        out.push_str("is_place:\n");
+        out.push_str("  %is_jf  = load i64, i64* %is_j_p\n");
+        out.push_str("  %is_dst = add i64 %is_jf, 1\n");
+        out.push_str("  %is_dp  = getelementptr i64, i64* %a, i64 %is_dst\n");
+        out.push_str("  store i64 %is_key, i64* %is_dp\n");
+        out.push_str("  %is_in  = add i64 %is_i, 1\n");
+        out.push_str("  store i64 %is_in, i64* %is_i_p\n");
+        out.push_str("  br label %is_outer\n");
+        // --- Median-of-3 pivot selection ---
+        out.push_str("med3:\n");
+        out.push_str("  %half   = sdiv i64 %rng, 2\n");
+        out.push_str("  %mid    = add i64 %lo, %half\n");
+        out.push_str("  %p_lo   = getelementptr i64, i64* %a, i64 %lo\n");
+        out.push_str("  %p_mid  = getelementptr i64, i64* %a, i64 %mid\n");
+        out.push_str("  %p_hi   = getelementptr i64, i64* %a, i64 %hi\n");
+        out.push_str("  %v_lo   = load i64, i64* %p_lo\n");
+        out.push_str("  %v_mid  = load i64, i64* %p_mid\n");
+        out.push_str("  %v_hi   = load i64, i64* %p_hi\n");
+        out.push_str("  %lm_gt  = icmp sgt i64 %v_lo, %v_mid\n");
+        out.push_str("  br i1 %lm_gt, label %sw_lm, label %af_lm\n");
+        out.push_str("sw_lm:\n");
+        out.push_str("  store i64 %v_mid, i64* %p_lo\n");
+        out.push_str("  store i64 %v_lo,  i64* %p_mid\n");
+        out.push_str("  br label %af_lm\n");
+        out.push_str("af_lm:\n");
+        out.push_str("  %v_lo2  = load i64, i64* %p_lo\n");
+        out.push_str("  %v_hi2  = load i64, i64* %p_hi\n");
+        out.push_str("  %lh_gt  = icmp sgt i64 %v_lo2, %v_hi2\n");
+        out.push_str("  br i1 %lh_gt, label %sw_lh, label %af_lh\n");
+        out.push_str("sw_lh:\n");
+        out.push_str("  store i64 %v_hi2, i64* %p_lo\n");
+        out.push_str("  store i64 %v_lo2, i64* %p_hi\n");
+        out.push_str("  br label %af_lh\n");
+        out.push_str("af_lh:\n");
+        out.push_str("  %v_mid3 = load i64, i64* %p_mid\n");
+        out.push_str("  %v_hi3  = load i64, i64* %p_hi\n");
+        out.push_str("  %mh_gt  = icmp sgt i64 %v_mid3, %v_hi3\n");
+        out.push_str("  br i1 %mh_gt, label %sw_mh, label %af_mh\n");
+        out.push_str("sw_mh:\n");
+        out.push_str("  store i64 %v_hi3,  i64* %p_mid\n");
+        out.push_str("  store i64 %v_mid3, i64* %p_hi\n");
+        out.push_str("  br label %af_mh\n");
+        out.push_str("af_mh:\n");
+        // After median-of-3: a[lo] <= a[mid] <= a[hi].
+        // Move pivot (a[mid]) to a[hi] so Lomuto can use a[lo] as the min sentinel.
+        out.push_str("  %piv    = load i64, i64* %p_mid\n");
+        out.push_str("  %hi_v   = load i64, i64* %p_hi\n");
+        out.push_str("  store i64 %hi_v, i64* %p_mid\n");
+        out.push_str("  store i64 %piv,  i64* %p_hi\n");
+        // Lomuto partition on [lo, hi-1] with pivot sitting at a[hi].
+        out.push_str("  store i64 %lo, i64* %pt_i_p\n");
+        out.push_str("  store i64 %lo, i64* %pt_j_p\n");
+        out.push_str("  %hi_m1  = sub i64 %hi, 1\n");
+        out.push_str("  br label %pt_loop\n");
+        out.push_str("pt_loop:\n");
+        out.push_str("  %pj     = load i64, i64* %pt_j_p\n");
+        out.push_str("  %pt_ok  = icmp sle i64 %pj, %hi_m1\n");
+        out.push_str("  br i1 %pt_ok, label %pt_body, label %pt_fin\n");
+        out.push_str("pt_body:\n");
+        out.push_str("  %pi     = load i64, i64* %pt_i_p\n");
+        out.push_str("  %pa_jp  = getelementptr i64, i64* %a, i64 %pj\n");
+        out.push_str("  %pa_jv  = load i64, i64* %pa_jp\n");
+        out.push_str("  %lt_pv  = icmp slt i64 %pa_jv, %piv\n");
+        out.push_str("  br i1 %lt_pv, label %pt_swap, label %pt_next\n");
+        out.push_str("pt_swap:\n");
+        out.push_str("  %pa_ip  = getelementptr i64, i64* %a, i64 %pi\n");
+        out.push_str("  %pa_iv  = load i64, i64* %pa_ip\n");
+        out.push_str("  store i64 %pa_jv, i64* %pa_ip\n");
+        out.push_str("  store i64 %pa_iv, i64* %pa_jp\n");
+        out.push_str("  %pi1    = add i64 %pi, 1\n");
+        out.push_str("  store i64 %pi1, i64* %pt_i_p\n");
+        out.push_str("  br label %pt_next\n");
+        out.push_str("pt_next:\n");
+        out.push_str("  %pj1    = add i64 %pj, 1\n");
+        out.push_str("  store i64 %pj1, i64* %pt_j_p\n");
+        out.push_str("  br label %pt_loop\n");
+        out.push_str("pt_fin:\n");
+        // Place pivot in its final position: swap a[i] with a[hi] (= pivot).
+        out.push_str("  %pif    = load i64, i64* %pt_i_p\n");
+        out.push_str("  %pa_fp  = getelementptr i64, i64* %a, i64 %pif\n");
+        out.push_str("  %pa_fv  = load i64, i64* %pa_fp\n");
+        out.push_str("  %pa_hv  = load i64, i64* %p_hi\n");
+        out.push_str("  store i64 %pa_hv, i64* %pa_fp\n");
+        out.push_str("  store i64 %pa_fv, i64* %p_hi\n");
+        // Recurse on [lo, pif-1] and [pif+1, hi].
+        out.push_str("  %left_hi  = sub i64 %pif, 1\n");
+        out.push_str("  %right_lo = add i64 %pif, 1\n");
+        out.push_str(&format!(
+            "  call void {fn}(i64* %a, i64 %lo, i64 %left_hi)\n",
+            fn = qs_impl_name,
+        ));
+        out.push_str(&format!(
+            "  call void {fn}(i64* %a, i64 %right_lo, i64 %hi)\n",
+            fn = qs_impl_name,
+        ));
+        out.push_str("  br label %qs_ret\n");
+        out.push_str("qs_ret:\n");
+        out.push_str("  ret void\n");
+        out.push_str("}\n");
+        // sort: call the inline quicksort helper.
         out.push_str(&format!(
             "define i64 {sn}({sty}* %xs_p) {{\n",
             sn = sort_name,
@@ -38217,11 +38422,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         ));
         out.push_str("  %qs_d = load i64*, i64** %qs_dp\n");
         out.push_str("  %qs_l = load i64, i64* %qs_lp\n");
-        out.push_str("  %qs_raw = bitcast i64* %qs_d to i8*\n");
+        out.push_str("  %qs_ne = icmp sgt i64 %qs_l, 1\n");
+        out.push_str("  br i1 %qs_ne, label %do_sort, label %skip_sort\n");
+        out.push_str("do_sort:\n");
+        out.push_str("  %qs_hi = sub i64 %qs_l, 1\n");
         out.push_str(&format!(
-            "  call void @qsort(i8* %qs_raw, i64 %qs_l, i64 8, i32 (i8*, i8*)* {qcmp})\n",
-            qcmp = qsort_cmp_name,
+            "  call void {fn}(i64* %qs_d, i64 0, i64 %qs_hi)\n",
+            fn = qs_impl_name,
         ));
+        out.push_str("  br label %skip_sort\n");
+        out.push_str("skip_sort:\n");
         out.push_str("  ret i64 0\n");
         out.push_str("}\n");
         out.push_str(&format!(
