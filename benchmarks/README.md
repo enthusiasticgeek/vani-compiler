@@ -111,7 +111,7 @@ reduce total with +;
 The SSA LLVM backend (default) allocates one stack-local accumulator per
 thread, accumulates in the parallel body with no atomic ops, and combines
 per-thread results with a single `atomicrmw` at the parallel region's exit
-(v0.5, 2026-07-01). The C backend emits `#pragma omp parallel for
+(v0.2.1-dev, 2026-07-01). The C backend emits `#pragma omp parallel for
 reduction(+:total)`. Either way, you write three lines; the verifier proves
 race-freedom statically.
 
@@ -128,7 +128,7 @@ for (long i = 0; i < n; i++)
 
 ---
 
-## Current performance status — SSA LLVM backend (v0.6)
+## Current performance status — SSA LLVM backend (v0.2.1-dev)
 
 Numbers from a representative run (Intel i5-1035G1, Windows 11, gcc/rustc -O2):
 
@@ -168,7 +168,7 @@ overhead** — not the ownership model.
 
 vāṇī's `sieve` is `Vec<i64>` (8 bytes/element). C uses `char` (1 byte).
 The inner marking loop (`while j <= limit { set(mut ref sieve, j, 0) }`)
-moves **8× more data** through cache. With `set_mut` inlined (v0.6), the
+moves **8× more data** through cache. With `set_mut` inlined (v0.2.1-dev), the
 inner loop itself is now a single GEP + store — the remaining gap is almost
 entirely cache bandwidth, not code quality.
 
@@ -184,7 +184,7 @@ bounds checks per edge visit. LLVM's ConstraintElimination eliminates the
 but the adjacency-list and visited-array checks remain.
 
 Additionally, the BFS queue starts empty and grows dynamically; `push_mut`
-(now inlined, v0.6) still has a capacity-check branch every push.
+(now inlined, v0.2.1-dev) still has a capacity-check branch every push.
 
 #### 3. Parallel sum / Array stats — Vec construction
 
@@ -218,12 +218,12 @@ yet emitted. Planned.
   Benchmark 05 shows this directly: vāṇī index handles match or beat C++ index
   arrays and are 3-8× faster than C++ `weak_ptr`.
 
-- **`parallel for … reduce`**: thread-local accumulation (v0.5) eliminates all
+- **`parallel for … reduce`**: thread-local accumulation (v0.2.1-dev) eliminates all
   per-element atomic ops. The parallel sum gap vs C is not the parallel part —
   it is the Vec construction before the loop starts.
 
 - **RAII / destructors**: the alloc-stress benchmark (500 K alloc/free cycles)
-  shows vāṇī *faster* than both C and C++ (v0.6 run).
+  shows vāṇī *faster* than both C and C++.
 
 ---
 

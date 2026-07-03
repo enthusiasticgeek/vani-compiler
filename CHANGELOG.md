@@ -332,7 +332,7 @@ generics, async/await, and a package manager.
 Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
 [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.
 
-### Performance — SSA LLVM backend optimisations (v0.6, 2026-07-03)
+### Performance — SSA LLVM backend alwaysinline optimisations (2026-07-03)
 
 Three `alwaysinline` changes that let LLVM's LICM and ConstraintElimination
 passes work across function-call boundaries:
@@ -352,10 +352,10 @@ passes work across function-call boundaries:
   sees the grow-path branch as unlikely and keeps Vec fields in registers
   across BFS queue iterations.
 
-Results vs v0.5:
+Results vs thread-local baseline (2026-07-01):
 
-| Benchmark | v0.5 | v0.6 | Δ |
-|-----------|------|------|---|
+| Benchmark | before | after | Δ |
+|-----------|--------|-------|---|
 | Sieve | 66.8 ms | 51.4 ms | −23 % |
 | BFS | 56.1 ms | 43.5 ms | −22 % |
 | HashMap | 65.2 ms | 50.8 ms | −22 % |
@@ -365,16 +365,16 @@ Results vs v0.5:
 
 ---
 
-### Performance — thread-local reduction accumulation (v0.5, 2026-07-01)
+### Performance — thread-local reduction accumulation (2026-07-01)
 
 Replaced per-element `atomicrmw seq_cst` ops in `parallel for … reduce`
 regions with **per-thread stack-local accumulators**. The parallel body now
 accumulates into a non-atomic local; a single `atomicrmw` (or CAS loop for
 `*`) per thread combines the result at the parallel region's exit.
 
-Results vs v0.4:
+Results vs prior baseline:
 
-| Benchmark | v0.4 | v0.5 | Δ |
-|-----------|------|------|---|
+| Benchmark | before | after | Δ |
+|-----------|--------|-------|---|
 | Parallel sum (50 M elems) | 1300 ms | 556 ms | −57 % |
 | Array statistics (10 M elems) | 499.7 ms | 106.2 ms | −79 % |
