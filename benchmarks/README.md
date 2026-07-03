@@ -6,7 +6,7 @@ Every benchmark has four variants compiled with equivalent optimisation flags:
 
 | Language | Compiler flag | Note |
 |----------|--------------|-------|
-| vāṇī     | `vanic build` | uses C or LLVM backend internally |
+| vāṇī     | `vanic build` | SSA LLVM backend (default); `--backend=c` for C backend |
 | C        | `gcc -O2`     | |
 | C++      | `g++ -O2 -std=c++17` | |
 | Rust     | `rustc -C opt-level=2` | |
@@ -108,9 +108,12 @@ reduce total with +;
 }
 ```
 
-The compiler (C backend) emits `#pragma omp parallel for reduction(+:total)`;
-the LLVM backend emits `atomicrmw add`. Either way, you write three lines;
-the verifier proves race-freedom statically.
+The SSA LLVM backend (default) allocates one stack-local accumulator per
+thread, accumulates in the parallel body with no atomic ops, and combines
+per-thread results with a single `atomicrmw` at the parallel region's exit
+(v0.5, 2026-07-01). The C backend emits `#pragma omp parallel for
+reduction(+:total)`. Either way, you write three lines; the verifier proves
+race-freedom statically.
 
 Equivalent C requires:
 
@@ -125,240 +128,116 @@ for (long i = 0; i < n; i++)
 
 ---
 
-## What can be improved within current language constraints?
+## Current performance status — SSA LLVM backend (v0.6)
 
-This section maps each benchmark gap to whether it is fixable today
-(in user code), requires a compiler improvement, or is a deliberate
-language design choice.
+Numbers from a representative run (Intel i5-1035G1, Windows 11, gcc/rustc -O2):
 
-### Fixable today — user-code improvements
-
-#### `05_graph_bfs/graph.vani` — fixed `push(mut ref …)` form
-
-`build_graph()` originally had two bugs in the neighbour-push loop:
-
-```vani
-// BEFORE (broken — two bugs)
-adj_edges = push(ref adj_edges, (v + 1) % n);
-//                ^^^              ^^^^^^^^^^ can't rebind a mut ref param
-//            ref is read-only; in-place push needs mut ref
-```
-
-```vani
-// AFTER (correct)
-let _ = push(mut ref adj_edges, (v + 1) % n);
-//      ^^^  ^^^^^^^             discards returned i64 length
-```
-
-`push` has two overloads:
-- `push(xs: Vec<T>, val: T) -> Vec<T>` — consuming; use when `xs` is a local variable  
-- `push(xs: mut ref Vec<T>, val: T) -> i64` — in-place; use when `xs` is a function parameter
-
-When `adj_edges` is a `mut ref Vec<i64>` parameter you must use the second form;
-the consuming form requires taking ownership, which a borrow cannot give you.
-
-#### `10_array_stats/stats.vani` — parallelised both passes
-
-The original code used sequential `while` loops for both the sum and variance
-accumulations. Both are pure reductions with no inter-iteration data dependency,
-so they can use `parallel for … reduce`:
-
-```vani
-// BEFORE — sequential, ~41 ms on 4-core machine
-let sum: i64 = 0;
-while j < n {
-    sum = sum + data[j];
-    j = j + 1;
-}
-
-// AFTER — parallel, ~9 ms (same 4-core machine)
-let sum: i64 = 0;
-parallel for j from 0 to n
-reduce sum with +;
-{
-    sum = sum + data[j];
-}
-```
-
-Same pattern applied to the variance pass.  The compiler emits
-`#pragma omp parallel for reduction(+:sum)` for both passes and proves
-race-freedom statically — no `atomic`, no `mutex`, no annotation required.
-
-Result: array-stats flips from 35% *slower* than single-threaded C to
-**~3× faster** than single-threaded C on 4 cores.
-
----
-
-### Not fixable in user code — compiler gaps (planned for v0.3)
-
-#### Sieve of Eratosthenes — ~3× slower than C
-
-```vani
-sieve = set(sieve, j as u64, 0);  // deep inside nested while loops
-```
-
-The compiler *should* detect that the old `sieve` is immediately consumed
-and convert this to an in-place write (no `memcpy`). The current C backend
-misses this optimisation inside nested loops. There is no user-code workaround:
-
-- `set(mut ref xs, idx, val)` does not exist — only the consuming form `set(xs, idx, val)`.
-- You cannot take a `mut ref` to an individual element of a `Vec` in vāṇī.
-- The LLVM backend (`--backend=llvm`) closes the gap to ~1.4× by recognising
-  the consume-and-update pattern across loop iterations.
-
-#### Matrix multiply — ~3× slower than C
-
-The gap has two causes, both compiler-level:
-
-1. **No SIMD emission** — the inner `k` loop is auto-vectorised by gcc on the
-   C/C++ variants but not in vāṇī's C backend (missing `__restrict__` annotation
-   on the data pointer).
-
-2. **Loop-order trade-off** — the current i-j-k order accesses B column-wise
-   (stride N, cache-unfriendly). Reordering to i-k-j fixes B's access pattern
-   but forces N³ `set` calls on `c` instead of N² — which is *worse*, not better.
-   There is no user-code loop reorder that strictly improves performance under
-   the functional-update model.
-
-#### Parallel matrix multiply — language limit (not a compiler gap)
-
-Parallelising the outer `row` loop would require every iteration to write a
-different slice of `c`, but all iterations share the same `c` binding:
-
-```vani
-// This cannot be parallelised safely with parallel for:
-parallel for row from 0 to n  // ← each iter writes c via set(c, ...)
-reduce ??? with ???;           // ← no scalar reduction — output is a Vec
-{ c = set(c, (row * n + col) as u64, sum); }
-```
-
-`c` is not a scalar accumulator; it is a Vec being updated at different indices
-by each iteration. vāṇī's `parallel for` currently only supports scalar `reduce`
-accumulators. Row-partitioned output parallelism would need a language extension
-(e.g. `parallel for row … write c[row*n .. row*n+n]`).
-
----
-
-### Summary table
-
-| Benchmark | Gap | Status | Notes |
-|-----------|-----|--------|-------|
-| Graph BFS `build_graph` double-ref bug | Correctness | **Fixed** — pass `mut ref` params directly | Was compile error (double `mut ref` rejected) |
-| Graph BFS `bfs()` hot-path copies | Performance | **Fixed** — `push(mut ref …)` + `set(mut ref …)` on local Vecs | Eliminates ~1 M Vec-struct copies per run |
-| Array stats ~35% slower | Performance | **Fixed** — `parallel for … reduce` | Now 3× faster than sequential C |
-| Fibonacci ~9% slower | Performance | **Fixed** — `-finline-functions` | Now within noise |
-| Alloc stress ~30% slower | Performance | **Fixed** — `__builtin_expect` + `__builtin_unreachable` | Now within 4% |
-| Sieve ~3× slower | Performance | **Fixed** — `set(mut ref …)` form | Now within 14% of C++ |
-| MatMul ~3× slower | Performance | **Fixed** — i-k-j loop + `-ftree-vectorize` + `ivdep` | Now within 5% of C++ |
-| All benchmarks — AVX-512 / FMA | Performance | **Fixed** — `-march=native -fomit-frame-pointer` | Ice Lake i5-1035G1: 8-wide AVX-512, FMA, free rbp register |
-| Sort ~16-29% behind C++/Rust | Performance | **Fixed** — `sort_asc_impl` + median-of-3 | No function-pointer in hot path; gcc can inline + vectorise scan loops |
-| HashMap ~15-24% behind C++/Rust | Performance | **Fixed** — splitmix64 hash + 75% load factor | Hash: 8 ops → 2 ops; load factor: 50% → 75% (fewer grows, denser table) |
-| Bounds checks not elided — 5–14% residual gaps | Performance | **Fixed** — signed check + VRP hints (v0.4) | `__builtin_assume(cond)` + hoisted range assertion; gcc VRP elides signed check |
-| Parallel MatMul | Parallelism | Open — language limit | `parallel for` needs scalar reduce; row-slice output not yet supported |
-| Graph 6× faster than `weak_ptr` | Design win | N/A | Index handles are the *only* path — vāṇī makes the fast choice mandatory |
+| Benchmark | vāṇī | C | C++ | Rust | vs C |
+|-----------|------|---|-----|------|------|
+| Fibonacci (42) | 876 ms | 519 ms | 524 ms | 833 ms | 1.7× |
+| Sieve (2 M) | 51 ms | 13 ms | 28 ms | 14 ms | 3.9× |
+| Matrix (256×256) | 24 ms | 12 ms | 18 ms | 30 ms | 2.0× |
+| Sort (1 M) | 196 ms | 162 ms | 97 ms | 39 ms | 1.2× |
+| BFS (1 K nodes × 1 K) | 44 ms | 12 ms | 26 ms | 16 ms | 3.5× |
+| Parallel sum (50 M) | 474 ms | 107 ms | 131 ms | 195 ms | 4.4× |
+| HashMap (500 K) | 51 ms | 45 ms | 56 ms | 78 ms | 1.1× |
+| Linked list (1 M) | 19 ms | 13 ms | 17 ms | 18 ms | 1.5× |
+| Alloc stress (500 K) | 16 ms | 20 ms | 19 ms | 15 ms | **0.8× (wins)** |
+| Array stats (10 M) | 82 ms | 27 ms | 31 ms | 50 ms | 3.1× |
 
 ---
 
 ## Why is vāṇī sometimes slower?
 
-The short answer: **bounds checking** and **standard library maturity**, not
-the language model itself.
+The short answer: **element size**, **bounds checking**, and **Vec construction
+overhead** — not the ownership model.
 
 ### Where vāṇī wins or ties
 
-| Benchmark | Result | Reason |
-|-----------|--------|--------|
-| Fibonacci | tie (±2%) | Pure recursion — identical machine code after inlining |
-| Sort vs C | vāṇī 20% faster | C `qsort` pays a function-pointer call per comparison |
-| HashMap vs C | vāṇī 32% faster | Hand-rolled C hashmap has higher load factor, no SIMD probing |
-| Array stats | vāṇī 3× faster | `parallel for … reduce` — parallel vs sequential comparison |
-| Alloc stress | noise (±5%) | RAII drop matches manual `free`; bounds-check fix (v0.3) closed 30% gap |
-| Linked list | noise (±5%) | Index idiom is zero-overhead vs. C integer arrays |
+| Benchmark | Result | Why |
+|-----------|--------|-----|
+| Alloc stress | **vāṇī wins** | RAII drop matches manual `free`; zero per-dealloc overhead |
+| HashMap | within 10% of C | splitmix64 hash + 75% load factor matches hand-rolled C |
+| Linked list | within 50% of C | index idiom same as C `int[]`; gap is while-loop overhead |
+| Sort vs C | within 25% | both use `qsort` with function-pointer comparator |
+| Fibonacci vs Rust | tie | pure recursion, same code after inlining |
 
 ### Where vāṇī lags and why
 
-#### 1. Graph BFS hot-path Vec copies — fixed in v0.3
+#### 1. Sieve — 3.9× vs C: element-size mismatch
 
-The `bfs()` function used consuming `push(visited, val)` and `set(visited, idx, val)`
-on its local `visited` and `queue` Vecs. Each consuming call copies the 24-byte Vec
-struct (data pointer + len + capacity) and potentially triggers a realloc. With
-~1 000 000 such calls per benchmark run (1 000 BFS × ~1 000 visits), this was
-the dominant source of the ~17% gap vs C.
+vāṇī's `sieve` is `Vec<i64>` (8 bytes/element). C uses `char` (1 byte).
+The inner marking loop (`while j <= limit { set(mut ref sieve, j, 0) }`)
+moves **8× more data** through cache. With `set_mut` inlined (v0.6), the
+inner loop itself is now a single GEP + store — the remaining gap is almost
+entirely cache bandwidth, not code quality.
 
-Fixed by switching to `push(mut ref visited, …)` and `set(mut ref visited, …)`,
-which write through a pointer with no struct copies. Also uncovered and fixed a
-separate double-ref bug in `build_graph`: passing `mut ref adj_start` where
-`adj_start` is already `mut ref Vec<i64>` creates `mut ref mut ref Vec<i64>`
-(rejected). Fixed by passing the parameter directly.
+A `Vec<Bool>` type (1-bit packed) would close this gap to ~1.5×; it is on
+the roadmap but not yet implemented.
 
-#### 2. Bounds checks — closed in v0.4
+#### 2. BFS — 3.5× vs C: bounds checks + while-loop overhead
 
-Every `xs[i]` compiles to a bounds check. The old unsigned form
-`index >= length` could not be proved dead from a signed loop guard
-`i < n`. Three-part fix landed in v0.4:
+Every `xs[i]` read emits an inline bounds check (`icmp ult idx, len` +
+conditional branch). For BFS's inner loop over adjacency lists, that is 3
+bounds checks per edge visit. LLVM's ConstraintElimination eliminates the
+`queue[head]` check (same condition as the outer `while head < queue.len`),
+but the adjacency-list and visited-array checks remain.
 
-1. **Signed check signature**: `intent_check_bounds` and `set_mut` now
-   take `int64_t index` and check `index < 0 || index >= (int64_t)length`.
-   The two-condition form lets gcc's VRP eliminate each branch separately.
+Additionally, the BFS queue starts empty and grows dynamically; `push_mut`
+(now inlined, v0.6) still has a capacity-check branch every push.
 
-2. **Hoisted range assertion**: For `while var <= upper` loops accessing
-   `vec[var]`, the backend emits a *single* pre-loop `if (upper >= vec.len)
-   abort()` — safe, fires exactly when the last iteration would have been
-   out-of-bounds anyway, and tells gcc `vec.len > upper` for the whole loop.
+#### 3. Parallel sum / Array stats — Vec construction
 
-3. **`__builtin_assume(cond)`** at the top of every while body: re-states
-   the loop condition so VRP can use it to bound the loop variable.
+Both benchmarks build a `Vec<i64>` with 50 M / 10 M sequential `push` calls
+before the parallel computation. Vec construction — initial alloc + repeated
+`realloc` doubling + 50 M/10 M pointer writes — accounts for most of the
+wall-clock gap. The actual parallel sum is fast; the construction is not.
 
-With all three: inside `while j <= limit`, VRP knows `j <= limit < vec.len`
-(from hoisted assertion) and `j >= 0` (from outer-loop VRP or initialization).
-The signed check `j < 0 || j >= (int64_t)vec.len` is `false || false` — dead
-code — gcc removes it entirely. Same mechanism fires for BFS
-(`while head < len(queue)` — the assume directly proves the check false since
-`head < queue.len` is the condition *and* the check).
+A `vec_with_capacity(n)` builtin (pre-allocate at known size) would eliminate
+the realloc doubling and reduce construction time by ~3×. Planned for a future
+release.
 
-#### 3. Standard library improvements — fixed in v0.3
+#### 4. Fibonacci — 1.7× vs C: recursive call overhead
 
-- **Sort (was 29% behind Rust, 16% behind C++)**: The old `sort()` called a
-  Hoare quicksort through a `cmp_fn` function pointer. Every comparison in the
-  inner loop went through an indirect call, blocking gcc from inlining or
-  vectorising the scan. Fixed in v0.3: `sort()` now calls `sort_asc_impl`, a
-  specialised version that uses direct `a[i] < pivot` comparisons (inlineable)
-  and a **median-of-3 pivot** (median of `a[lo]`, `a[mid]`, `a[hi]`) to
-  eliminate worst-case behaviour on sorted / reverse-sorted input.
-  `sort_by()` still uses the function-pointer path for user comparators.
+vāṇī emits calls with the platform ABI (arguments on stack, full calling
+convention). At 331 million recursive `fib` calls for `fib(42)`, the overhead
+per call adds up. C's gcc applies `-finline-functions` + `-foptimize-sibling-calls`
+more aggressively. No language fix available; recursive fib is inherently
+call-heavy.
 
-- **HashMap (was 24% behind Rust, 15% behind C++)**: Two changes in v0.3:
-  1. **Hash function**: Replaced 8-iteration FNV-1a (8 × multiply+xor) with
-     **splitmix64** (2 multiplies + 3 shifts). Same avalanche quality, ~4×
-     fewer operations per hash.
-  2. **Load factor 50% → 75%**: The grow threshold changed from
-     `(len + tombstones) × 2 ≥ capacity` to
-     `(len + tombstones) × 4 ≥ capacity × 3`. Fewer grow/rehash cycles,
-     denser table = better cache hit rate on lookup chains.
+#### 5. Matrix — 2× vs C: no SIMD
 
-These were library gaps, not language gaps. The fixes live entirely in the C
-code emitted by `backend_c.rs` — no language changes required.
-
-#### 4. No escape analysis
-
-The compiler does not yet detect when a `Vec` created inside a function never
-outlives that call and could be stack-allocated or entirely eliminated. Hand-
-written C frequently uses `int arr[N]` on the stack for known-size temporary
-buffers, paying zero heap-allocation cost.
+The inner `k` loop is auto-vectorised by gcc on the C/C++ variants but not yet
+on the SSA LLVM path. `__restrict__` hints and `!alias.scope` metadata are not
+yet emitted. Planned.
 
 ### What is *not* the cause
 
 - **Ownership model**: index handles into flat `Vec<T>` are zero-overhead by
   design — no atomic reference count, no GC pause, no pointer-chase indirection.
-  Benchmark 05 shows this directly: vāṇī index handles beat C++ `weak_ptr` by 6×.
+  Benchmark 05 shows this directly: vāṇī index handles match or beat C++ index
+  arrays and are 3-8× faster than C++ `weak_ptr`.
 
-- **`parallel for … reduce`**: the C backend emits `#pragma omp parallel for
-  reduction(+:var)` — byte-for-byte the same pragma as the hand-written OpenMP
-  C variant. The vāṇī, C, and C++ parallel sum results are within measurement
-  noise of each other.
+- **`parallel for … reduce`**: thread-local accumulation (v0.5) eliminates all
+  per-element atomic ops. The parallel sum gap vs C is not the parallel part —
+  it is the Vec construction before the loop starts.
 
 - **RAII / destructors**: the alloc-stress benchmark (500 K alloc/free cycles)
-  shows vāṇī within 4% of C and faster than Rust.
+  shows vāṇī *faster* than both C and C++ (v0.6 run).
+
+---
+
+## Open gaps (compiler, not user code)
+
+| Benchmark | Gap | Root cause | Planned fix |
+|-----------|-----|------------|-------------|
+| Sieve | 3.9× | `Vec<i64>` vs `char` — 8× memory bandwidth | `Vec<Bool>` packed type |
+| BFS | 3.5× | bounds checks on adjacency/visited arrays | Loop-range assertion (`@llvm.assume(upper < len)` before loop) |
+| Parallel sum | 4.4× | Vec construction: 50 M sequential `push` | `vec_with_capacity(n)` builtin |
+| Array stats | 3.1× | Vec construction + while-loop overhead | Same as parallel sum |
+| Fibonacci | 1.7× | Recursive call overhead, no sibling-call opt | TCO / tail-call elimination |
+| Matrix | 2× | No SIMD / `__restrict__` hints | LLVM alias metadata |
+| Sort | 1.2× | qsort function-pointer comparator (same as C) | Inline introsort for SSA path |
 
 ---
 

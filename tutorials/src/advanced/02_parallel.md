@@ -32,9 +32,10 @@ fn main() -> i64 {
 
   // The same loop with parallel for + reduce. The compiler
   // proves the body has no inter-iteration data dependence
-  // (affine ownership + reduce clause) and emits OpenMP
-  // `reduction(+: total)` on the C backend, atomicrmw add on
-  // LLVM.
+  // (affine ownership + reduce clause). The SSA LLVM backend
+  // (default) uses per-thread local accumulators combined with
+  // a single atomic at the end; the C backend emits OpenMP
+  // `reduction(+: total)`.
   let par: i64 = 0;
   parallel for i from 1 to 101
   reduce par with +;
@@ -76,10 +77,13 @@ the semantics.
   array slots, mutable captures without a `reduce` clause, etc.
   This is the safety boundary.
 - **`reduce <var> with <op>;`** declares an accumulator variable
-  that survives across iterations. The compiler emits OpenMP's
-  `reduction(<op>: <var>)` clause on the C backend, or an
-  `atomicrmw <op>` on LLVM. Per-thread partial sums combine to
-  the final value at the loop's barrier.
+  that survives across iterations. The SSA LLVM backend (default)
+  allocates one stack-local accumulator per thread, applies the
+  reduction body with no atomic ops, then combines per-thread
+  results with a single `atomicrmw` at the parallel region's exit.
+  The C backend emits an OpenMP `reduction(<op>: <var>)` clause.
+  Per-thread partial sums combine to the final value at the
+  loop's barrier.
 - **Race-freedom is proved**, not asserted. The combination of
   affine ownership (each binding has one owner), the explicit
   `reduce` declaration, and the no-iteration-dependence check
