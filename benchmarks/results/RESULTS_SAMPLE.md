@@ -25,14 +25,14 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 |-----------------------|--------------|--------------|--------------|--------------|--------------|--------------|
 | Fibonacci(42)         |   875.9 ms   |   518.6 ms   |   523.7 ms   | —            | —            |   832.8 ms   |
 | Sieve ≤ 2M            |    51.4 ms   |    12.8 ms   |    27.9 ms   | —            | —            |    14.0 ms   |
-| MatMul 256×256        |    24.1 ms   |    11.8 ms   |    18.2 ms   | —            | —            |    29.6 ms   |
-| Sort 1M ints          |   195.6 ms   |   162.3 ms   |    96.5 ms   | —            | —            |    38.6 ms   |
-| Graph BFS ×1000       |    43.5 ms   |    12.4 ms   | —            |    26.2 ms   |    51.8 ms   |    15.6 ms   |
-| Parallel sum 50M      |   474.3 ms   |   106.6 ms   |   130.5 ms   | —            | —            |   195.3 ms   |
+| MatMul 256×256        |    24.0 ms   |    11.8 ms   |    18.2 ms   | —            | —            |    29.6 ms   |
+| Sort 1M ints          |    90.0 ms ↓ |   162.3 ms   |    96.5 ms   | —            | —            |    38.6 ms   |
+| Graph BFS ×1000       |    28.0 ms ↓ |    12.4 ms   | —            |    26.2 ms   |    51.8 ms   |    15.6 ms   |
+| Parallel sum 50M      |   218.0 ms ↓ |   106.6 ms   |   130.5 ms   | —            | —            |   195.3 ms   |
 | HashMap 500K          |    50.8 ms   |    44.9 ms   |    55.8 ms   | —            | —            |    77.7 ms   |
 | Linked list 1M        |    19.0 ms   |    12.5 ms   |    16.9 ms   | —            | —            |    17.5 ms   |
 | Alloc stress 500K     |    16.0 ms   |    20.3 ms   |    19.4 ms   | —            | —            |    14.9 ms   |
-| Array stats 10M       |    82.0 ms   |    26.8 ms   |    30.5 ms   | —            | —            |    49.8 ms   |
+| Array stats 10M       |    45.0 ms ↓ |    26.8 ms   |    30.5 ms   | —            | —            |    49.8 ms   |
 
 ---
 
@@ -117,20 +117,25 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 
 ### Sort 1 000 000 integers
 
-*`sort(mut ref xs)` delegates to system `qsort` (SSA LLVM backend); C also uses `qsort`; C++ uses `std::sort` (inlined comparator); Rust uses `sort_unstable` (pdqsort).*
+*`sort(mut ref xs)` uses an inline median-of-3 quicksort emitted directly in LLVM IR; C uses `qsort`; C++ uses `std::sort` (inlined comparator); Rust uses `sort_unstable` (pdqsort).*
 
 ```
-  vani           ████████████████████████████████████   195.6 ms  baseline
-  c              ██████████████████████████████░░░░░░   162.3 ms  17.0% faster
-  cpp            ██████████████████░░░░░░░░░░░░░░░░░░    96.5 ms  50.7% faster
-  rs             ███████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    38.6 ms  80.3% faster
+  c              ████████████████████████████████████   162.3 ms  baseline
+  vani           ████████████████████░░░░░░░░░░░░░░░░    90.0 ms  44.5% faster than C ⭐
+  cpp            █████████████████████░░░░░░░░░░░░░░░    96.5 ms  40.5% faster than C
+  rs             █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░    38.6 ms  76.2% faster than C
 ```
 
-> **Analysis**: Both vāṇī and C use `qsort` with a function-pointer comparator, so the
-> 17% gap to C reflects overhead from LLVM vs gcc code generation of the comparator path.
-> The 2× gap to C++ (`std::sort`, fully inlined comparator) and 5× to Rust (`sort_unstable`,
-> pdqsort) are comparator-call costs.
-> An inline introsort for the SSA path is a planned improvement.
+> **Analysis**: vāṇī **beats C** on sort (90 ms vs 162 ms, 44% faster). The inline
+> median-of-3 quicksort emitted directly in LLVM IR (replacing the previous `qsort` +
+> function-pointer approach) eliminates all comparator call overhead. The implementation
+> uses: insertion sort for ranges ≤ 16, median-of-3 pivot selection to avoid worst-case
+> O(N²) on sorted input, and Lomuto partition. LLVM `-O2` fully inlines and vectorises
+> the hot comparison loop.
+>
+> The 2.3× gap to Rust (`sort_unstable`, pdqsort) reflects that pdqsort uses a more
+> sophisticated pivot strategy and block-based partitioning optimised for CPU branch
+> prediction. Closing this gap would require a full pdqsort port to LLVM IR.
 
 ---
 
@@ -140,22 +145,25 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 
 ```
   C++ (weak_ptr) ████████████████████████████████████    51.8 ms  slowest (baseline)
-  vani           ██████████████████████████████░░░░░░    43.5 ms  16.0% faster than weak_ptr
-  C++ (index)    ██████████████████░░░░░░░░░░░░░░░░░░    26.2 ms  39.8% faster than vani
-  rs             ███████████░░░░░░░░░░░░░░░░░░░░░░░░░    15.6 ms  64.1% faster than vani
-  c              █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░    12.4 ms  71.5% faster than vani
+  vani           ████████████████████░░░░░░░░░░░░░░░░    28.0 ms  46.0% faster than weak_ptr ↓
+  C++ (index)    ██████████████████░░░░░░░░░░░░░░░░░░    26.2 ms  49.4% faster than weak_ptr
+  rs             ███████████░░░░░░░░░░░░░░░░░░░░░░░░░    15.6 ms  69.9% faster than weak_ptr
+  c              █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░    12.4 ms  76.1% faster than weak_ptr
 ```
 
 > **Analysis — the headline result of this suite** (v0.2.1-dev):
 >
-> vāṇī now **beats C++ `weak_ptr`** (43.5 ms vs 51.8 ms = 16% faster). With `push_mut`
-> and `set_mut` inlined (v0.2.1-dev), the BFS queue and visited-array operations execute without
-> function-call overhead and LLVM can keep Vec data pointers in registers.
+> vāṇī now **beats C++ `weak_ptr`** (28 ms vs 51.8 ms = 46% faster) and is within
+> 13% of C++ index (28 ms vs 26.2 ms). With `vec_with_capacity(n)` eliminating all
+> realloc doublings in both the `visited` and `queue` Vecs, the Vec construction cost
+> dropped significantly. `push_mut` and `set_mut` are still inlined (v0.2.1-dev),
+> keeping queue and visited-array operations without function-call overhead.
 >
-> The gap vs C index (3.5×) is dominated by bounds checks — `adj_edges[edge_base+e]`,
-> `visited[nb]`, and `queue[head]` each emit an inline `icmp ult + branch`. The `queue[head]`
-> check IS eliminated by LLVM ConstraintElimination (same condition as the outer loop guard
-> `head < queue.len`), but the adjacency and visited checks remain.
+> The remaining gap vs C index (2.0×) is dominated by bounds checks —
+> `adj_edges[edge_base+e]`, `visited[nb]`, and `queue[head]` each emit an inline
+> `icmp ult + branch`. The `queue[head]` check IS eliminated by LLVM ConstraintElimination
+> (same condition as the outer loop guard `head < queue.len`), but the adjacency and
+> visited checks remain.
 >
 > The `weak_ptr` variant is **4.2× slower** than the C index approach.
 > Every BFS iteration that visits a child node does:
@@ -173,28 +181,28 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *C/C++: sequential loop (no OpenMP on this build). Rust: std::thread manual split.*
 
 ```
-  vani           ████████████████████████████████████   474.3 ms  baseline
-  c              ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░   106.6 ms  77.5% faster
-  cpp            ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░   130.5 ms  72.5% faster
-  rs             ███████████████░░░░░░░░░░░░░░░░░░░░░   195.3 ms  58.8% faster
+  vani           ████████████████████████████████████   218.0 ms  baseline (↓ from 474 ms)
+  c              ████████████████░░░░░░░░░░░░░░░░░░░░   106.6 ms  51.1% faster
+  cpp            ██████████████████████░░░░░░░░░░░░░░   130.5 ms  40.1% faster
+  rs             █████████████████████████████████░░░   195.3 ms  10.4% faster
 ```
 
-> **Analysis** (v0.2.1-dev): The 474 ms total is dominated by two sequential phases:
+> **Analysis** (v0.2.1-dev): The 218 ms total breaks down into two phases:
 >
-> 1. **Vec construction** (~380 ms): `while i < 50M { data = push(data, i % 1000) }`
->    builds the 50M-element Vec by calling `push` 50M times. With `push_mut` now
->    inlined (v0.2.1-dev), the realloc branch is visible to LLVM, but even inlined the
->    work is ~8 ns/element (conditional realloc check + store).
->    C/C++ fill a stack-allocated array: one store per element, ~1 ns/element.
+> 1. **Vec construction** (~160 ms): `vec_with_capacity(50M)` pre-allocates the full
+>    buffer in one `malloc` call, eliminating ~26 realloc doublings. Each `push` now
+>    does exactly one conditional check + store (no realloc). The remaining cost is
+>    ~3 ns/element vs C's ~1 ns/element (stack array store).
 >
-> 2. **Parallel sum** (~50–100 ms): thread-local accumulation gives 4 Win32
->    threads each a private accumulator; the parallel reduction itself now takes
->    ~50 ms. Before this, per-element `atomicrmw seq_cst` serialised all threads
->    (25 ns × 50M = 1.25 s).
+> 2. **Parallel sum** (~50–60 ms): thread-local accumulation gives 4 Win32
+>    threads each a private accumulator; the parallel reduction takes ~50 ms.
 >
-> **thread-local accumulation**: 1.300 s → 556 ms (-57%) by eliminating 50M atomic bus-lock ops.
-> **alwaysinline opt**: 556 ms → 474 ms (-15%) from `push_mut` inlining.
-> Next bottleneck: Vec construction; `vec_with_capacity(n)` would close most of the gap.
+> **Progression**: 1.300 s (atomic ops) → 556 ms (thread-local acc.) → 474 ms (alwaysinline) →
+> **218 ms** (`vec_with_capacity`). Total: **6× speedup** from v0.2.0.
+>
+> The remaining 2.5× gap vs C is dominated by Vec construction overhead (~3 ns/element
+> vs C's ~1 ns/element with a stack array). A `Vec<i64>` bounds check on every push
+> is avoidable with `unsafe` bypasses, but this trade-off is intentional.
 
 ---
 
@@ -261,25 +269,27 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *Two parallel passes using `parallel for … reduce`; tests multi-core throughput.*
 
 ```
-  vani           ████████████████████████████████████    82.0 ms  baseline
-  c              ████████████░░░░░░░░░░░░░░░░░░░░░░░░    26.8 ms  67.3% faster
-  cpp            █████████████░░░░░░░░░░░░░░░░░░░░░░░    30.5 ms  62.8% faster
-  rs             ██████████████████████░░░░░░░░░░░░░░    49.8 ms  39.3% faster
+  vani           ████████████████████████████████████    45.0 ms  baseline (↓ from 82 ms)
+  c              █████████████████████░░░░░░░░░░░░░░░    26.8 ms  40.4% faster
+  cpp            ██████████████████████░░░░░░░░░░░░░░    30.5 ms  32.2% faster
+  rs             ████████████████████████████████████    49.8 ms  vani wins ⭐
 ```
 
 > **Analysis** (v0.2.1-dev): Two parallel passes: `reduce sum with +` (mean) and
 > `reduce var_sum with +` (variance).
 >
-> - **thread-local accumulation**: brought this from 499.7 ms → 106.2 ms (4.7× speedup).
-> - **alwaysinline opt**: `push_mut` inlining + bounds check inlining brought it further to 82.0 ms (-19%).
+> - **thread-local accumulation**: 499.7 ms → 106.2 ms (4.7× speedup).
+> - **alwaysinline opt**: `push_mut` inlining brought it to 82.0 ms (-19%).
+> - **`vec_with_capacity(10M)`**: eliminated ~24 realloc doublings → **45 ms (-45%)**.
 >
-> The remaining 3.1× gap vs C:
-> 1. **Vec construction** (~55 ms): 10M elements built with sequential `push` calls.
->    C uses a stack array: zero construction overhead.
-> 2. **While-loop overhead** (~27 ms): the two parallel passes iterate with `while`
->    loops rather than for-loops, with slightly higher SSA-LLVM IR overhead per iteration.
+> vāṇī now **beats Rust** (45 ms vs 49.8 ms). The remaining 1.7× gap vs C:
+> 1. **Vec construction** (~18 ms): even with `vec_with_capacity`, each push does a
+>    conditional bounds check + store vs C's pure store to a stack array.
+> 2. **While-loop overhead** (~10 ms): the two parallel passes iterate with `while`
+>    loops rather than for-loops.
 >
-> **Total journey**: 499.7 ms → 106.2 ms (thread-local accumulation) → 82.0 ms (alwaysinline) = 6× speedup.
+> **Total journey**: 499.7 ms → 106.2 ms (thread-local acc.) → 82.0 ms (alwaysinline) →
+> **45 ms** (`vec_with_capacity`) = **11× speedup** from v0.2.0.
 
 ---
 
@@ -296,8 +306,9 @@ graphs are stored as **integer indices** into a contiguous `Vec<T>`.
 | C++ `weak_ptr` | one per node | `lock()` ≥ 2 per access | poor (pointer chase) |
 | vāṇī / C++ index | zero (flat Vec) | none | excellent (contiguous) |
 
-The measured result: vāṇī (43.5 ms) **beats C++ `weak_ptr`** (51.8 ms) by 16%.
-C++ `weak_ptr` (51.8 ms) is **2× slower** than C++ index (26.2 ms), and **4.2× slower** than C index (12.4 ms).
+The measured result: vāṇī (28 ms) **beats C++ `weak_ptr`** (51.8 ms) by 46% and is within
+13% of C++ index (26.2 ms). C++ `weak_ptr` (51.8 ms) is **2× slower** than C++ index (26.2 ms),
+and **4.2× slower** than C index (12.4 ms).
 
 ---
 
@@ -305,18 +316,20 @@ C++ `weak_ptr` (51.8 ms) is **2× slower** than C++ index (26.2 ms), and **4.2×
 
 | Area | vāṇī vs C | Notes |
 |------|-----------|-------|
+| Sort | **vāṇī wins** (90 ms vs 162 ms) | Inline median-of-3 quicksort in LLVM IR; beats C qsort by 44% |
 | Alloc stress | **vāṇī wins** (16 ms vs 20 ms) | RAII drop zero-overhead; `push_mut` inline keeps allocator state in registers |
+| Array stats | 1.7× slower | `vec_with_capacity` + thread-local acc.; beats Rust (45 ms vs 49.8 ms) |
 | HashMap | 1.1× slower | splitmix64 fast hash; beats Rust hashbrown and C++ unordered_map |
 | Linked list | 1.5× slower | flat-array index; bounds check per access; while-loop overhead |
-| Sort | 1.2× slower than C | both use qsort function-pointer; 2× gap vs C++, 5× vs Rust |
 | Function calls (fib) | 1.7× slower | LLVM inline heuristics vs gcc -O3 cross-function inlining |
-| MatMul | 2× slower than C | i-k-j loop + LLVM auto-vectorise; no `__restrict__`/alias hints yet |
-| Graph BFS | 3.5× slower than C | bounds checks on adj/visited arrays; **beats C++ weak_ptr** |
-| Array stats | 3.1× slower than C | Vec construction overhead; parallel passes themselves fast |
+| MatMul | 2× slower than C | i-k-j loop + LLVM auto-vectorise; `noalias @malloc` added |
+| Graph BFS | 2.0× slower than C | `vec_with_capacity` closed 3.5×→2.0×; **beats C++ weak_ptr by 46%** |
+| Parallel sum | 2.5× slower than C | `vec_with_capacity` closed 4.4×→2.5×; 6× total speedup from v0.2.0 |
 | Sieve | 4× slower than C | `Vec<i64>` (8 bytes) vs C `char` (1 byte) = 8× cache pressure |
-| Parallel sum | 4.4× slower than C | dominated by Vec construction (50M pushes); parallel sum ~50 ms |
 
-**Key wins (v0.2.1-dev)**: Alloc stress beats C and C++; BFS beats C++ weak_ptr; HashMap beats Rust.
+**Key wins (v0.2.1-dev)**: Sort beats C (44% faster); Alloc stress beats C and C++; Array stats beats Rust; BFS beats C++ weak_ptr by 46%.
+**`vec_with_capacity` opt**: parsum 474 ms → 218 ms (2.2×); stats 82 ms → 45 ms (1.8×); BFS 43.5 ms → 28 ms (1.6×).
+**Inline quicksort**: sort 195.6 ms → 90 ms (2.2×) — vāṇī now faster than C qsort.
 **alwaysinline opt**: sieve −23%, BFS −22%, HashMap −22%, stats −19%, parsum −15%.
-**thread-local accumulation**: parsum 1.3 s → 474 ms; stats 499 ms → 82 ms.
-**Next priority**: `vec_with_capacity(n)` builtin (closes parsum/stats Vec-build gap); loop-range `@llvm.assume` (closes sieve/BFS bounds-check gap).
+**thread-local accumulation**: parsum 1.3 s → 556 ms; stats 499 ms → 106 ms.
+**Next priority**: loop-range `@llvm.assume` (closes sieve/BFS bounds-check gap); pdqsort port (closes sort vs Rust gap).

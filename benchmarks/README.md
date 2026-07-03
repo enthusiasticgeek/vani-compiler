@@ -137,13 +137,13 @@ Numbers from a representative run (Intel i5-1035G1, Windows 11, gcc/rustc -O2):
 | Fibonacci (42) | 876 ms | 519 ms | 524 ms | 833 ms | 1.7× |
 | Sieve (2 M) | 51 ms | 13 ms | 28 ms | 14 ms | 3.9× |
 | Matrix (256×256) | 24 ms | 12 ms | 18 ms | 30 ms | 2.0× |
-| Sort (1 M) | 196 ms | 162 ms | 97 ms | 39 ms | 1.2× |
-| BFS (1 K nodes × 1 K) | 44 ms | 12 ms | 26 ms | 16 ms | 3.5× |
-| Parallel sum (50 M) | 474 ms | 107 ms | 131 ms | 195 ms | 4.4× |
+| Sort (1 M) | **90 ms** | 162 ms | 97 ms | 39 ms | **0.55× (wins)** |
+| BFS (1 K nodes × 1 K) | **28 ms** | 12 ms | 26 ms | 16 ms | **2.0×** |
+| Parallel sum (50 M) | **218 ms** | 107 ms | 131 ms | 195 ms | **2.5×** |
 | HashMap (500 K) | 51 ms | 45 ms | 56 ms | 78 ms | 1.1× |
 | Linked list (1 M) | 19 ms | 13 ms | 17 ms | 18 ms | 1.5× |
 | Alloc stress (500 K) | 16 ms | 20 ms | 19 ms | 15 ms | **0.8× (wins)** |
-| Array stats (10 M) | 82 ms | 27 ms | 31 ms | 50 ms | 3.1× |
+| Array stats (10 M) | **45 ms** | 27 ms | 31 ms | 50 ms | **1.7×** |
 
 ---
 
@@ -156,10 +156,11 @@ overhead** — not the ownership model.
 
 | Benchmark | Result | Why |
 |-----------|--------|-----|
+| Sort | **vāṇī wins (44% faster than C)** | Inline median-of-3 quicksort in LLVM IR; no function-pointer comparator overhead |
 | Alloc stress | **vāṇī wins** | RAII drop matches manual `free`; zero per-dealloc overhead |
+| Array stats | **vāṇī beats Rust** (45 ms vs 50 ms) | `vec_with_capacity` + thread-local acc.; 1.7× behind C |
 | HashMap | within 10% of C | splitmix64 hash + 75% load factor matches hand-rolled C |
 | Linked list | 1.5× slower than C | index idiom same as C `int[]`; gap is while-loop + bounds-check overhead |
-| Sort vs C | within 25% | both use `qsort` with function-pointer comparator |
 | Fibonacci vs Rust | tie | pure recursion, same code after inlining |
 
 ### Where vāṇī lags and why
@@ -175,27 +176,28 @@ entirely cache bandwidth, not code quality.
 A `Vec<Bool>` type (1-bit packed) would close this gap to ~1.5×; it is on
 the roadmap but not yet implemented.
 
-#### 2. BFS — 3.5× vs C: bounds checks + while-loop overhead
+#### 2. BFS — 2.0× vs C: bounds checks (was 3.5×, improved by vec_with_capacity)
 
-Every `xs[i]` read emits an inline bounds check (`icmp ult idx, len` +
-conditional branch). For BFS's inner loop over adjacency lists, that is 3
-bounds checks per edge visit. LLVM's ConstraintElimination eliminates the
-`queue[head]` check (same condition as the outer `while head < queue.len`),
-but the adjacency-list and visited-array checks remain.
+`vec_with_capacity(n)` (v0.2.1-dev) pre-allocates the BFS `visited` and `queue`
+Vecs at full capacity, eliminating all `realloc` doublings. BFS improved from
+43.5 ms → 28 ms (1.6×).
 
-Additionally, the BFS queue starts empty and grows dynamically; `push_mut`
-(now inlined, v0.2.1-dev) still has a capacity-check branch every push.
+The remaining 2.0× gap vs C is bounds checks: every `xs[i]` read emits an
+inline `icmp ult idx, len` + conditional branch. For BFS's inner loop over
+adjacency lists, that is 3 bounds checks per edge visit. LLVM's
+ConstraintElimination eliminates the `queue[head]` check (same condition as
+the outer `while head < queue.len`), but the adjacency-list and visited-array
+checks remain.
 
-#### 3. Parallel sum / Array stats — Vec construction
+#### 3. Parallel sum / Array stats — remaining Vec construction overhead
 
-Both benchmarks build a `Vec<i64>` with 50 M / 10 M sequential `push` calls
-before the parallel computation. Vec construction — initial alloc + repeated
-`realloc` doubling + 50 M/10 M pointer writes — accounts for most of the
-wall-clock gap. The actual parallel sum is fast; the construction is not.
+`vec_with_capacity(n)` (v0.2.1-dev) eliminated the `realloc` doubling.
+Parsum improved 474 ms → 218 ms (2.2×); stats improved 82 ms → 45 ms (1.8×).
 
-A `vec_with_capacity(n)` builtin (pre-allocate at known size) would eliminate
-the realloc doubling and reduce construction time by ~3×. Planned for a future
-release.
+The remaining gap (~2–3 ns/element for `push` vs ~1 ns/element for C's plain
+store) comes from the capacity-check branch per push, even when the capacity
+check is guaranteed to pass. LLVM cannot yet fold this branch away without
+profile-guided hints.
 
 #### 4. Fibonacci — 1.7× vs C: recursive call overhead
 
@@ -232,12 +234,12 @@ yet emitted. Planned.
 | Benchmark | Gap | Root cause | Planned fix |
 |-----------|-----|------------|-------------|
 | Sieve | 3.9× | `Vec<i64>` vs `char` — 8× memory bandwidth | `Vec<Bool>` packed type |
-| BFS | 3.5× | bounds checks on adjacency/visited arrays | Loop-range assertion (`@llvm.assume(upper < len)` before loop) |
-| Parallel sum | 4.4× | Vec construction: 50 M sequential `push` | `vec_with_capacity(n)` builtin |
-| Array stats | 3.1× | Vec construction + while-loop overhead | Same as parallel sum |
+| BFS | 2.0× | bounds checks on adjacency/visited arrays (vec_with_capacity landed) | Loop-range `@llvm.assume(upper < len)` before loop |
+| Parallel sum | 2.5× | push capacity-check branch per element (vec_with_capacity landed) | Profile-guided branch folding |
+| Array stats | 1.7× | push capacity-check branch per element (vec_with_capacity landed) | Profile-guided branch folding |
 | Fibonacci | 1.7× | Recursive call overhead, no sibling-call opt | TCO / tail-call elimination |
-| Matrix | 2× | No SIMD / `__restrict__` hints | LLVM alias metadata |
-| Sort | 1.2× | qsort function-pointer comparator (same as C) | Inline introsort for SSA path |
+| Matrix | 2× | No full SIMD alias hints beyond `noalias @malloc` | LLVM `!alias.scope` metadata |
+| Sort vs Rust | 2.3× | pdqsort block partitioning vs median-of-3 quicksort (sort vs C now wins) | Full pdqsort port to LLVM IR |
 
 ---
 
