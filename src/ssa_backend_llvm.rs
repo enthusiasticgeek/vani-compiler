@@ -287,7 +287,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
-    out.push_str("declare i8* @malloc(i64)\n");
+    out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare i8* @realloc(i8*, i64)\n");
     out.push_str("declare void @free(i8*)\n");
     out.push_str("declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)\n");

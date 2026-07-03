@@ -772,7 +772,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
-    out.push_str("declare i8* @malloc(i64)\n");
+    out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
     out.push_str("declare i8* @realloc(i8*, i64)\n");
@@ -25075,7 +25075,7 @@ fn emit_intent_epoll_helpers_llvm_darwin(out: &mut String) {
          declare i32 @pipe(i32*)\n\
          declare i32 @pthread_create(i8*, i8*, i8* (i8*)*, i8*)\n\
          declare i32 @pthread_detach(i8*)\n\
-         declare i8* @malloc(i64)\n\
+         declare noalias i8* @malloc(i64)\n\
          declare void @free(i8*)\n\
          declare i64 @write(i32, i8*, i64)\n\
          declare i64 @read(i32, i8*, i64)\n\

@@ -50,13 +50,14 @@ fn main() -> i64 {
     // scalar a_val — ideal for AVX2 vectorisation.
     let row: i64 = 0;
     while row < n {
+        let row_n: i64 = row * n;
         let k: i64 = 0;
         while k < n {
-            let a_val: i64 = a[row * n + k];
+            let a_val: i64 = a[row_n + k];
+            let k_n: i64 = k * n;
             let col: i64 = 0;
             while col < n {
-                let c_idx: i64 = row * n + col;
-                let _ = set(mut ref c, c_idx as u64, c[c_idx] + a_val * b[k * n + col]);
+                let _ = set(mut ref c, (row_n + col) as u64, c[row_n + col] + a_val * b[k_n + col]);
                 col = col + 1;
             }
             k = k + 1;
