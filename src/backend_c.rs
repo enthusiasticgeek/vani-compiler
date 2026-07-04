@@ -10825,6 +10825,27 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
         store = push_mut_store,
     ));
 
+    // push_unchecked: no capacity check, no realloc. Data pointer
+    // stays as the original malloc result — no aliasing through
+    // realloc. Caller guarantees vec_with_capacity(n) and < n pushes.
+    let push_unc_store = if element_is_array {
+        format!(
+            "    memcpy(xs->data[xs->len], v, sizeof({}));\n    xs->len++;",
+            c_element,
+        )
+    } else {
+        "    xs->data[xs->len++] = v;".to_string()
+    };
+    out.push_str(&format!(
+        "static INTENT_UNUSED int64_t {sn}__push_unchecked({sn}* xs, {ct} v) {{\
+\n{store}\
+\n    return (int64_t)xs->len;\
+\n}}\n",
+        sn = struct_name,
+        ct = c_element,
+        store = push_unc_store,
+    ));
+
     // Closure #219: in-place `pop(mut ref xs) -> T` — abort on
     // empty, otherwise decrement len and return the last
     // element by-move. For non-Copy element types (OwnedStr,
@@ -15706,6 +15727,18 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             format!(
                 "{}({}, {})",
                 vec_helper(&element, "push_mut"),
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            )
+        }
+        "push_unchecked" => {
+            let element = match args[0].ty.deref() {
+                Type::Vec(element) => element.clone(),
+                _ => unreachable!("push_unchecked() arg 0 must be (mut ref) Vec<_>"),
+            };
+            format!(
+                "{}({}, {})",
+                vec_helper(&element, "push_unchecked"),
                 emit_expr(&args[0]),
                 emit_expr(&args[1])
             )

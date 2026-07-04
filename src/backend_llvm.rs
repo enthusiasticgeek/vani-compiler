@@ -89,6 +89,13 @@ use crate::ast::{BinaryOp, Type, UnaryOp};
 use crate::backend::Backend;
 use crate::ir::{TypedExpr, TypedExprKind, TypedFunction, TypedProgram, TypedStmt};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+// Module-level counter for LLVM named-metadata node IDs (!N).
+// Each while-loop back-edge gets a unique pair of IDs for
+// !llvm.loop.vectorize.enable. Atomic so the counter is safe even
+// if the compiler is ever driven from multiple threads.
+static NEXT_LOOP_META_ID: AtomicU32 = AtomicU32::new(0);
 
 pub struct LlvmBackend;
 
@@ -773,9 +780,9 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare noalias i8* @malloc(i64)\n");
-    out.push_str("declare i8* @calloc(i64, i64)\n");
+    out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
-    out.push_str("declare i8* @realloc(i8*, i64)\n");
+    out.push_str("declare noalias i8* @realloc(i8*, i64)\n");
     out.push_str("declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)\n");
     // File I/O primitives — FileHandle builtin support.
     out.push_str("declare i8* @fopen(i8*, i8*)\n");
@@ -2047,6 +2054,13 @@ fn emit_function(
         out.push('\n');
         out.push_str(&ctx.deferred_functions);
     }
+    // Flush !llvm.loop.vectorize.enable metadata nodes. These are
+    // module-level named-metadata definitions referenced by the
+    // back-edge branches of while loops in this function.
+    if !ctx.loop_meta_buf.is_empty() {
+        out.push('\n');
+        out.push_str(&ctx.loop_meta_buf);
+    }
 }
 
 struct FnCtx<'a> {
@@ -2095,6 +2109,9 @@ struct FnCtx<'a> {
     /// emits can reference `@__intent_depth_<name>`).
     /// `None` when the fn is unbounded.
     bounded_fn_name: Option<String>,
+    /// Named-metadata nodes for !llvm.loop.vectorize.enable accumulated
+    /// during this function. Flushed to `out` after the closing `}`.
+    loop_meta_buf: String,
 }
 
 #[derive(Clone)]
@@ -2126,6 +2143,7 @@ impl<'a> FnCtx<'a> {
             // emit will overwrite it.
             current_block: String::new(),
             bounded_fn_name: None,
+            loop_meta_buf: String::new(),
         }
     }
     fn fresh_tmp(&mut self) -> String {
@@ -3540,8 +3558,29 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // to the header for the next iteration. If it ended in
             // a return / break / continue, the terminator is already
             // emitted.
+            // Attach !llvm.loop.vectorize.enable i1 true to the
+            // back-edge: overrides the cost model when aliasing is
+            // safe, forcing LLVM to vectorize even for nested loops.
             if !ctx.terminated {
-                out.push_str(&format!("  br label %{}\n", header));
+                // Three metadata IDs per loop:
+                //   !mid   = distinct self-referencing loop-ID node
+                //   !mid+1 = llvm.loop.vectorize.enable i1 true
+                //   !mid+2 = llvm.loop.vectorize.width  i32 4
+                // The width hint is required for LLVM 22+ which may
+                // emit `samesign ult` exit conditions after loop-rotate;
+                // the vectorizer can't determine trip counts from that
+                // form using only the enable flag alone.
+                let mid = NEXT_LOOP_META_ID.fetch_add(3, Ordering::Relaxed);
+                out.push_str(&format!(
+                    "  br label %{}, !llvm.loop !{}\n",
+                    header, mid
+                ));
+                ctx.loop_meta_buf.push_str(&format!(
+                    "!{} = distinct !{{!{}, !{}, !{}}}\n\
+                     !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
+                     !{} = !{{!\"llvm.loop.vectorize.width\", i32 4}}\n",
+                    mid, mid, mid + 1, mid + 2, mid + 1, mid + 2
+                ));
             }
             ctx.loops.pop();
             ctx.terminated = outer_terminated;
@@ -14471,6 +14510,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     | "set_mut"
                     | "clone"
                     | "push_mut"
+                    | "push_unchecked"
                     | "pop"
                     | "sort"
                     | "sort_by"
@@ -37833,6 +37873,42 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
     out.push_str(&format!("  store {} %v, {}* %slot_m\n", elt_ty, elt_ty));
     out.push_str("  store i64 %new_len_m, i64* %len_p_m\n");
     out.push_str("  ret i64 %new_len_m\n");
+    out.push_str("}\n");
+
+    // ---- push_unchecked(xs_p, v): in-place push with no
+    // capacity check and no realloc branch. Caller must ensure
+    // vec_with_capacity(n) was called and fewer than n elements
+    // are pushed. No grow path → data pointer stays as a single
+    // noalias @malloc result (no phi node), which lets LLVM prove
+    // non-aliasing between two Vec data pointers and vectorise the
+    // inner SAXPY loop in matmul. alwaysinline: same reasoning as
+    // push_mut — LICM hoists the data-pointer load out of the loop.
+    let push_unc_name = format!("@intent_vec_{}__push_unchecked", tag);
+    out.push_str(&format!(
+        "define i64 {}({}* %xs_p, {} %v) alwaysinline {{\n",
+        push_unc_name, s_ty, elt_ty
+    ));
+    out.push_str(&format!(
+        "  %data_p_u = getelementptr {}, {}* %xs_p, i32 0, i32 0\n",
+        s_ty, s_ty
+    ));
+    out.push_str(&format!(
+        "  %len_p_u = getelementptr {}, {}* %xs_p, i32 0, i32 1\n",
+        s_ty, s_ty
+    ));
+    out.push_str(&format!(
+        "  %data_u = load {}*, {}** %data_p_u\n",
+        elt_ty, elt_ty
+    ));
+    out.push_str("  %len_u = load i64, i64* %len_p_u\n");
+    out.push_str(&format!(
+        "  %slot_u = getelementptr {}, {}* %data_u, i64 %len_u\n",
+        elt_ty, elt_ty
+    ));
+    out.push_str(&format!("  store {} %v, {}* %slot_u\n", elt_ty, elt_ty));
+    out.push_str("  %new_len_u = add i64 %len_u, 1\n");
+    out.push_str("  store i64 %new_len_u, i64* %len_p_u\n");
+    out.push_str("  ret i64 %new_len_u\n");
     out.push_str("}\n");
 
     // ---- pop_mut(xs_p) -> T: in-place pop through a Vec

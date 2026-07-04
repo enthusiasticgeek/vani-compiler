@@ -314,7 +314,7 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
             // operate through a Vec pointer and have no
             // SSA-backend lowering yet — route through the
             // tree backend.
-            if name == "push_mut" || name == "pop"
+            if name == "push_mut" || name == "push_unchecked" || name == "pop"
                 || name == "sort" || name == "sort_by" || name == "sort_desc"
                 || name == "vec_swap" || name == "vec_remove_at"
                 || name == "vec_replace_all"
@@ -2989,13 +2989,23 @@ fn build_program_llvm(
     // is not installed — the build still completes with llc's own
     // optimizer (the -O=2 below).
     let opt = env::var("OPT").unwrap_or_else(|_| "opt".to_string());
-    let llc_input = match Command::new(&opt)
-        .arg("-O2")
-        .arg("-S")
-        .arg(&ll_path)
-        .arg("-o")
-        .arg(&opt_path)
-        .output()
+    // For host builds (no cross-compile target), unlock the native CPU's
+    // full ISA so the loop vectorizer can emit AVX2/AVX-512 intrinsics
+    // rather than being limited to SSE2. The flag is safe because `vanic
+    // build` compiles and runs on the same machine.
+    let opt_mcpu = if target.is_none() { Some("native") } else { None };
+    let llc_input = match {
+        let mut cmd = Command::new(&opt);
+        cmd.arg("-O2");
+        if let Some(cpu) = opt_mcpu {
+            cmd.arg(format!("--mcpu={}", cpu));
+        }
+        cmd.arg("-S")
+            .arg(&ll_path)
+            .arg("-o")
+            .arg(&opt_path)
+            .output()
+    }
     {
         Ok(o) if o.status.success() => opt_path.clone(),
         // `opt` exists but choked: emit the stderr and keep going
@@ -3028,6 +3038,10 @@ fn build_program_llvm(
             llc_cmd.arg("-relocation-model=pic");
         }
     } else {
+        // Host build: use the native CPU to lower vector IR to the widest
+        // available ISA (AVX2, AVX-512). Matches the -mcpu=native passed
+        // to opt above so the IR and the lowering agree on feature set.
+        llc_cmd.arg("-mcpu=native");
         llc_cmd.arg("-relocation-model=pic");
     }
     // Default to -O=2. The verifier proves safety upstream so

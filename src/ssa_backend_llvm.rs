@@ -288,7 +288,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
     out.push_str("declare noalias i8* @malloc(i64)\n");
-    out.push_str("declare i8* @realloc(i8*, i64)\n");
+    out.push_str("declare noalias i8* @realloc(i8*, i64)\n");
     out.push_str("declare void @free(i8*)\n");
     out.push_str("declare void @qsort(i8*, i64, i64, i32 (i8*, i8*)*)\n");
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
@@ -313,7 +313,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         "define internal void @__intent_bounds_check(i64 %idx, i64 %len) alwaysinline {\n\
          entry:\n  \
            %ok = icmp ult i64 %idx, %len\n  \
-           br i1 %ok, label %cont, label %oob\n\
+           br i1 %ok, label %cont, label %oob, !prof !{!\"branch_weights\", i32 1048576, i32 1}\n\
          oob:\n  call void @abort()\n  unreachable\n\
          cont:\n  \
            call void @llvm.assume(i1 %ok)\n  \

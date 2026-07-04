@@ -20,26 +20,28 @@ fn main() -> i64 {
     let sz: i64 = n * n;
 
     // Fill A: a[r][c] = (r * n + c) % 97 + 1
-    let a: Vec<i64> = vec();
+    // push_unchecked: no capacity-check branch — data pointer stays as the
+    // original noalias @malloc result, enabling SIMD aliasing proofs.
+    let a: Vec<i64> = vec_with_capacity(sz);
     let ia: i64 = 0;
     while ia < sz {
-        let _ = push(mut ref a, ia % 97 + 1);
+        let _ = push_unchecked(mut ref a, ia % 97 + 1);
         ia = ia + 1;
     }
 
     // Fill B: b[r][c] = (r + c) % 53 + 1
-    let b: Vec<i64> = vec();
+    let b: Vec<i64> = vec_with_capacity(sz);
     let ib: i64 = 0;
     while ib < sz {
-        let _ = push(mut ref b, ib % 53 + 1);
+        let _ = push_unchecked(mut ref b, ib % 53 + 1);
         ib = ib + 1;
     }
 
     // Initialise C to zeros.
-    let c: Vec<i64> = vec();
+    let c: Vec<i64> = vec_with_capacity(sz);
     let ic: i64 = 0;
     while ic < sz {
-        let _ = push(mut ref c, 0);
+        let _ = push_unchecked(mut ref c, 0);
         ic = ic + 1;
     }
 

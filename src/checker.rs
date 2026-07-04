@@ -37,7 +37,12 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     "sleep_ms_async", "sleep_ms_finish",
     // Performance builtin: pre-allocate Vec with known capacity to avoid
     // O(log N) realloc doublings during sequential push loops.
-    "vec_with_capacity"];
+    "vec_with_capacity",
+    // Unsafe-style push: no capacity check, no realloc. Caller must
+    // guarantee capacity was pre-allocated (e.g. vec_with_capacity(n)).
+    // Eliminates the phi-node aliasing that blocks SIMD vectorisation
+    // when push_mut is used in tight initialization loops.
+    "push_unchecked"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -18007,6 +18012,7 @@ fn check_call(
         // when expected-type threading lands.
         "try_vec" => return check_try_vec_builtin(args, env, signatures, span, diagnostics),
         "push" => return check_push_builtin(args, env, signatures, span, diagnostics),
+        "push_unchecked" => return check_push_unchecked_builtin(args, env, signatures, span, diagnostics),
         "pop" => return check_pop_builtin(args, env, signatures, span, diagnostics),
         "set" => return check_set_builtin(args, env, signatures, span, diagnostics),
         "sort" | "sort_by" | "sort_desc" => {
@@ -21358,6 +21364,77 @@ fn check_push_builtin(
             args: vec![xs_expr, value_expr],
         },
         result_type,
+        None,
+        span,
+    )
+}
+
+/// `push_unchecked(mut ref xs, v)` — same as `push(mut ref xs, v)`
+/// but emits no capacity check and no realloc branch. The caller
+/// *must* ensure `xs` was pre-allocated with `vec_with_capacity(n)`
+/// and that no more than `n` elements are pushed. Violating this
+/// causes UB (write past allocation). Returns the new len as i64.
+///
+/// The key perf win: because there is no realloc branch, the data
+/// pointer is a single `noalias @malloc` result (not a phi node
+/// collecting malloc + realloc). LLVM can then prove that two
+/// different Vec data pointers don't alias, enabling SIMD
+/// vectorisation of inner loops (e.g. matmul SAXPY).
+fn check_push_unchecked_builtin(
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    if args.len() != 2 {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!("push_unchecked(mut ref xs, v) expects 2 arguments, got {}", args.len()),
+            )
+        );
+        return CheckedExpr::fallback(Type::I64, span);
+    }
+    let xs = check_expr(&args[0], env, signatures, diagnostics);
+    let element_type = match xs.ty() {
+        Type::RefMut(inner) => match &**inner {
+            Type::Vec(element) => (**element).clone(),
+            _ => {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "push_unchecked() requires a `mut ref Vec<T>` argument, got {}",
+                        xs.ty()
+                    ),
+                ));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+        },
+        other => {
+            diagnostics.push(Diagnostic::new(
+                args[0].span,
+                format!(
+                    "push_unchecked() requires a `mut ref Vec<T>` argument, got {}",
+                    other
+                ),
+            ));
+            return CheckedExpr::fallback(Type::I64, span);
+        }
+    };
+    let value = check_expr(&args[1], env, signatures, diagnostics);
+    let value = coerce_checked(value, &element_type, args[1].span, "push_unchecked value", diagnostics);
+    let mut xs_expr = xs.expr;
+    inject_branch_drops(&mut xs_expr);
+    let mut value_expr = value.expr;
+    inject_branch_drops(&mut value_expr);
+    CheckedExpr::new(
+        TypedExprKind::Call {
+            name: "push_unchecked".to_string(),
+            name_span: span,
+            args: vec![xs_expr, value_expr],
+        },
+        Type::I64,
         None,
         span,
     )
