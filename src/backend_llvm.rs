@@ -2022,6 +2022,20 @@ fn emit_function(
     // the condition; on false, call `@abort()`. The verifier has
     // already discharged what it can, but call sites that the
     // verifier couldn't prove safe still need the runtime guard.
+    // Two-pass body emit: pre-pass collects loop-body let allocas into
+    // ctx.alloca_preamble so we can hoist them before the first potential
+    // terminator (requires clauses). mem2reg only promotes entry-block
+    // allocas; hoisting ensures they are seen before any br instruction.
+    let mut body_out = String::new();
+    for stmt in &function.body {
+        emit_stmt(stmt, &mut ctx, &mut body_out);
+    }
+    // Flush hoisted allocas immediately after param stores (still in
+    // the function entry block, before requires terminators).
+    if !ctx.alloca_preamble.is_empty() {
+        out.push_str(&ctx.alloca_preamble);
+    }
+
     for req in &function.requires {
         let c = emit_expr(req, &mut ctx, out);
         let ok = ctx.fresh_label("req_ok");
@@ -2036,9 +2050,7 @@ fn emit_function(
         out.push_str(&format!("{}:\n", ok));
     }
 
-    for stmt in &function.body {
-        emit_stmt(stmt, &mut ctx, out);
-    }
+    out.push_str(&body_out);
 
     // If the body fell through without a return, emit a poison/zero
     // return so the IR validates. The checker forbids missing
@@ -2112,6 +2124,11 @@ struct FnCtx<'a> {
     /// Named-metadata nodes for !llvm.loop.vectorize.enable accumulated
     /// during this function. Flushed to `out` after the closing `}`.
     loop_meta_buf: String,
+    /// `alloca` instructions for `let` bindings inside while/for bodies.
+    /// Hoisted here during the body pre-pass so mem2reg sees them in the
+    /// function entry block. Flushed to `out` after param stores but
+    /// before the first potential terminator (requires clauses).
+    alloca_preamble: String,
 }
 
 #[derive(Clone)]
@@ -2144,6 +2161,7 @@ impl<'a> FnCtx<'a> {
             current_block: String::new(),
             bounded_fn_name: None,
             loop_meta_buf: String::new(),
+            alloca_preamble: String::new(),
         }
     }
     fn fresh_tmp(&mut self) -> String {
@@ -2216,7 +2234,11 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 let value = emit_expr(expr, ctx, out);
                 let s_ty = vec_struct_name(element);
                 let addr = format!("%{}.addr", name);
-                out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
+                if !ctx.loops.is_empty() {
+                    ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
+                } else {
+                    out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
+                }
                 out.push_str(&format!(
                     "  store {} {}, {}* {}\n",
                     s_ty, value, s_ty, addr
@@ -2227,7 +2249,11 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             if let Type::Array { element, length } = ty {
                 let agg = llvm_type_string(ty);
                 let addr = format!("%{}.addr", name);
-                out.push_str(&format!("  {} = alloca {}\n", addr, agg));
+                if !ctx.loops.is_empty() {
+                    ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, agg));
+                } else {
+                    out.push_str(&format!("  {} = alloca {}\n", addr, agg));
+                }
                 // Use the string form so struct / tuple
                 // elements render their `%Struct_<Name>` /
                 // `%intent_tuple_<…>` spellings instead of
@@ -2315,7 +2341,12 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // for-loop bodies in the same function) doesn't
             // collide on `%r.addr`.
             let addr = format!("{}.{}.addr", ctx.fresh_tmp(), name);
-            out.push_str(&format!("  {} = alloca {}\n", addr, lty));
+            // Always hoist scalar allocas to the function entry block via
+            // alloca_preamble. This lets mem2reg promote ALL scalar lets to SSA
+            // registers, regardless of whether they appear inside loops or after
+            // the first branch. Non-entry-block allocas (e.g. after the init
+            // while in bfs) are not promoted by mem2reg even if promotable.
+            ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, lty));
             out.push_str(&format!("  store {} {}, {}* {}\n", lty, value, lty, addr));
             ctx.locals.insert(name.clone(), (ty.clone(), addr));
         }

@@ -2982,6 +2982,9 @@ fn build_program_llvm(
     let obj_path = env::temp_dir().join(format!("vanic-{}-{}-{}.o", stem, pid, nanos));
     fs::write(&ll_path, ll)
         .map_err(|error| format!("failed to write '{}': {}", ll_path.display(), error))?;
+    if let Ok(keep) = env::var("VANIC_KEEP_IR") {
+        let _ = fs::copy(&ll_path, &keep);
+    }
 
     // Optional opt(1) pass: promotes our alloca-heavy locals into
     // SSA values (mem2reg), inlines small functions, and folds
@@ -3007,7 +3010,12 @@ fn build_program_llvm(
             .output()
     }
     {
-        Ok(o) if o.status.success() => opt_path.clone(),
+        Ok(o) if o.status.success() => {
+            if let Ok(keep) = env::var("VANIC_KEEP_OPT_IR") {
+                let _ = fs::copy(&opt_path, &keep);
+            }
+            opt_path.clone()
+        }
         // `opt` exists but choked: emit the stderr and keep going
         // with the unoptimized IR so the user still gets a binary.
         Ok(o) => {
