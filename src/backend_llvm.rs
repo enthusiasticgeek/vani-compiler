@@ -2129,6 +2129,10 @@ struct FnCtx<'a> {
     /// function entry block. Flushed to `out` after param stores but
     /// before the first potential terminator (requires clauses).
     alloca_preamble: String,
+    /// When true, `TypedStmt::Let` alloca emission goes directly to `out`
+    /// instead of `alloca_preamble`. Set for outlined parallel-for functions
+    /// where `emit_function`'s two-pass flush is not used.
+    skip_alloca_hoisting: bool,
 }
 
 #[derive(Clone)]
@@ -2162,6 +2166,7 @@ impl<'a> FnCtx<'a> {
             bounded_fn_name: None,
             loop_meta_buf: String::new(),
             alloca_preamble: String::new(),
+            skip_alloca_hoisting: false,
         }
     }
     fn fresh_tmp(&mut self) -> String {
@@ -2234,7 +2239,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 let value = emit_expr(expr, ctx, out);
                 let s_ty = vec_struct_name(element);
                 let addr = format!("%{}.addr", name);
-                if !ctx.loops.is_empty() {
+                if !ctx.loops.is_empty() && !ctx.skip_alloca_hoisting {
                     ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
                 } else {
                     out.push_str(&format!("  {} = alloca {}\n", addr, s_ty));
@@ -2249,7 +2254,7 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             if let Type::Array { element, length } = ty {
                 let agg = llvm_type_string(ty);
                 let addr = format!("%{}.addr", name);
-                if !ctx.loops.is_empty() {
+                if !ctx.loops.is_empty() && !ctx.skip_alloca_hoisting {
                     ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, agg));
                 } else {
                     out.push_str(&format!("  {} = alloca {}\n", addr, agg));
@@ -2341,12 +2346,15 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // for-loop bodies in the same function) doesn't
             // collide on `%r.addr`.
             let addr = format!("{}.{}.addr", ctx.fresh_tmp(), name);
-            // Always hoist scalar allocas to the function entry block via
-            // alloca_preamble. This lets mem2reg promote ALL scalar lets to SSA
-            // registers, regardless of whether they appear inside loops or after
-            // the first branch. Non-entry-block allocas (e.g. after the init
-            // while in bfs) are not promoted by mem2reg even if promotable.
-            ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, lty));
+            // Hoist scalar allocas to the function entry block via alloca_preamble
+            // so mem2reg can promote all scalar lets to SSA registers regardless of
+            // where they appear in the function body. Skipped for outlined functions
+            // (skip_alloca_hoisting=true) where the two-pass flush isn't available.
+            if ctx.skip_alloca_hoisting {
+                out.push_str(&format!("  {} = alloca {}\n", addr, lty));
+            } else {
+                ctx.alloca_preamble.push_str(&format!("  {} = alloca {}\n", addr, lty));
+            }
             out.push_str(&format!("  store {} {}, {}* {}\n", lty, value, lty, addr));
             ctx.locals.insert(name.clone(), (ty.clone(), addr));
         }
@@ -42864,7 +42872,8 @@ fn emit_parallel_for_via_gomp(
     deferred.push_str("  %cap = icmp slt i64 %my_hi_uncapped, %end_v\n");
     deferred.push_str("  %my_hi = select i1 %cap, i64 %my_hi_uncapped, i64 %end_v\n");
 
-    // Body's outer-loop counter alloca + header.
+    // Body's outer-loop counter alloca (in entry block, before the first
+    // terminator, so mem2reg can promote it to a phi node).
     deferred.push_str(&format!("  %i_addr = alloca {}\n", lty));
     // Note: start_v / end_v are i64; if the loop is narrower, we'd
     // need a trunc. For now `ty` is assumed i64 / u64.
@@ -42875,30 +42884,17 @@ fn emit_parallel_for_via_gomp(
         "%my_lo_n".to_string()
     };
     deferred.push_str(&format!("  store {} {}, {}* %i_addr\n", lty, stored_lo, lty));
-    deferred.push_str("  br label %hdr\n");
-    deferred.push_str("hdr:\n");
-    let cur_name = "%i_cur".to_string();
-    deferred.push_str(&format!("  {} = load {}, {}* %i_addr\n", cur_name, lty, lty));
-    let cmp_lo = if matches!(ty, Type::I64 | Type::U64) {
-        cur_name.clone()
-    } else {
-        deferred.push_str(&format!("  %i_cur64 = sext {} {} to i64\n", lty, cur_name));
-        "%i_cur64".to_string()
-    };
-    let lt = if ty.is_signed_integer() { "slt" } else { "ult" };
-    deferred.push_str(&format!(
-        "  %cmp = icmp {} i64 {}, %my_hi\n",
-        lt, cmp_lo
-    ));
-    deferred.push_str("  br i1 %cmp, label %body, label %exit\n");
-    deferred.push_str("body:\n");
 
-    // Emit the body's statements with a fresh FnCtx whose only
-    // pre-populated locals are the loop variable and the captures
-    // we just unpacked above. The body's emit code will read
-    // through the captured pointers via the normal `Var` lookup
-    // path (load <ty>, <ty>* <addr>).
+    // Create outlined_ctx HERE (before the entry-block terminator) so
+    // local-accumulator allocas can be emitted in the entry block.
+    // mem2reg requires allocas to be in the entry block to promote them
+    // to SSA phi nodes; allocas after `br label %hdr` are in loop blocks
+    // and fail LLVM's dominance check.
     let mut outlined_ctx = FnCtx::new(ctx.assert_msg_indices, ctx.print_str_indices);
+    // Outlined functions are built directly into `deferred` without the
+    // two-pass flush that `emit_function` uses for alloca_preamble. Skip
+    // hoisting so let-allocas go directly to the output buffer.
+    outlined_ctx.skip_alloca_hoisting = true;
     outlined_ctx
         .locals
         .insert(var.to_string(), (ty.clone(), "%i_addr".to_string()));
@@ -42910,12 +42906,8 @@ fn emit_parallel_for_via_gomp(
     // Thread-local accumulation: each thread accumulates into its OWN
     // alloca (zero contention), then does ONE atomicrmw at exit to
     // combine its partial result into the shared reduction variable.
-    // This replaces the old per-element atomicrmw which forces all
-    // threads to bus-lock the same cache line on every iteration —
-    // catastrophic for large arrays (50M-element sum went from 1.3s
-    // to ~30ms with this change). Bool reductions still use the
-    // i8-shadow + per-element atomicrmw path (rare; not performance-
-    // sensitive). Closure #RL-1.
+    // Closure #RL-1. The allocas are emitted HERE in the entry block so
+    // they dominate both the body (store) and the exit (load) blocks.
     use crate::ast::ReductionOp;
     struct LocalAcc {
         var_name: String,
@@ -42940,6 +42932,7 @@ fn emit_parallel_for_via_gomp(
             ReductionOp::Min => "9223372036854775807",
             ReductionOp::Max => "-9223372036854775808",
         };
+        // Emit in entry block (before br label %hdr) so mem2reg can promote.
         deferred.push_str(&format!("  {} = alloca i64\n", local_addr));
         deferred.push_str(&format!("  store i64 {}, i64* {}\n", identity, local_addr));
         // Override the captured global pointer with the local alloca so
@@ -42955,6 +42948,25 @@ fn emit_parallel_for_via_gomp(
             op: r.op,
         });
     }
+
+    // Entry-block terminator + loop header.
+    deferred.push_str("  br label %hdr\n");
+    deferred.push_str("hdr:\n");
+    let cur_name = "%i_cur".to_string();
+    deferred.push_str(&format!("  {} = load {}, {}* %i_addr\n", cur_name, lty, lty));
+    let cmp_lo = if matches!(ty, Type::I64 | Type::U64) {
+        cur_name.clone()
+    } else {
+        deferred.push_str(&format!("  %i_cur64 = sext {} {} to i64\n", lty, cur_name));
+        "%i_cur64".to_string()
+    };
+    let lt = if ty.is_signed_integer() { "slt" } else { "ult" };
+    deferred.push_str(&format!(
+        "  %cmp = icmp {} i64 {}, %my_hi\n",
+        lt, cmp_lo
+    ));
+    deferred.push_str("  br i1 %cmp, label %body, label %exit\n");
+    deferred.push_str("body:\n");
     // Only bool reductions (excluded above) still go through the per-
     // element atomicrmw rewrite; integer reductions use local_accs.
     let local_acc_vars: std::collections::HashSet<&str> =
@@ -42997,7 +43009,17 @@ fn emit_parallel_for_via_gomp(
         "  store {} %i_next, {}* %i_addr\n",
         lty, lty
     ));
-    deferred.push_str("  br label %hdr\n");
+    // Attach !llvm.loop.vectorize metadata to the outlined loop's back-edge.
+    // Without this the vectorizer has no hint and leaves the inner accumulation
+    // loop scalar — critical for parallel-sum throughput on large arrays.
+    let pmid = NEXT_LOOP_META_ID.fetch_add(3, Ordering::Relaxed);
+    deferred.push_str(&format!("  br label %hdr, !llvm.loop !{}\n", pmid));
+    ctx.loop_meta_buf.push_str(&format!(
+        "!{} = distinct !{{!{}, !{}, !{}}}\n\
+         !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
+         !{} = !{{!\"llvm.loop.vectorize.width\", i32 4}}\n",
+        pmid, pmid, pmid + 1, pmid + 2, pmid + 1, pmid + 2
+    ));
     deferred.push_str("exit:\n");
     // Combine each thread's partial result into the shared reduction.
     // One atomicrmw per reduction variable per thread — O(threads)
