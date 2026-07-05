@@ -1,6 +1,7 @@
 /* Benchmark 05 — Graph BFS with integer index adjacency list  (C)
    Equivalent to graph.vani: no pointers, no ref-counting.
-   gcc -O2 -o graph_c graph_index.c && ./graph_c               */
+   gcc -O3 -march=native -o graph_c graph_index.c && ./graph_c */
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,9 +43,9 @@ static int bfs(int start) {
 
 int main(void) {
     build_graph();
-    long total = 0;
+    int64_t total = 0;
     for (int run = 0; run < RUNS; run++)
         total += bfs(run % N);
-    printf("%ld\n", total);
+    printf("%" PRId64 "\n", total);
     return 0;
 }

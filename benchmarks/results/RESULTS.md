@@ -1,6 +1,6 @@
 # Benchmark Results — vāṇī vs Rust vs C vs C++
 
-*Generated: 2026-07-04 21:00 — 7 timing run(s) per benchmark, median reported.*
+*Generated: 2026-07-05 11:57 — 7 timing run(s) per benchmark, median reported.*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O2 --mcpu=native` + `llc -O2 -mcpu=native`.*
 
@@ -18,16 +18,16 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 
 | Benchmark | vani         | c            | cpp          | rs           | cpp_idx      | cpp_weak     |
 |--------------------|--------------|--------------|--------------|--------------|--------------|--------------|
-| Fibonacci(42) — re |   1.310  s   |   776.4 ms   |   747.4 ms   |   1.199  s   | —            | —            |
-| Sieve of Eratosthe |    15.3 ms   |    14.8 ms   |    20.3 ms   |    16.0 ms   | —            | —            |
-| Matrix multiplicat |    17.0 ms   |    14.5 ms   |    16.0 ms   |    31.9 ms   | —            | —            |
-| Sort 1 000 000 int |   123.0 ms   |   191.3 ms   |   114.4 ms   |    48.1 ms   | —            | —            |
-| Graph BFS — index  |    13.9 ms   |    17.9 ms   | —            |    20.4 ms   |    22.3 ms   |    65.0 ms   |
-| Parallel sum — 50  |   218.8 ms   |    81.1 ms   |    94.0 ms   |   151.6 ms   | —            | —            |
-| HashMap — 500 000  |    50.6 ms   |    41.1 ms   |    67.1 ms   |    99.5 ms   | —            | —            |
-| Linked list — 1 00 |    15.5 ms   |    14.8 ms   |    32.8 ms   |    33.8 ms   | —            | —            |
-| Allocation stress  |    32.9 ms   |    27.9 ms   |    16.0 ms   |    25.9 ms   | —            | —            |
-| Array statistics — |    59.1 ms   |    40.1 ms   |    43.2 ms   |    89.8 ms   | —            | —            |
+| Fibonacci(42) — re |   866.9 ms   |   505.8 ms   |   479.1 ms   |   902.9 ms   | —            | —            |
+| Sieve of Eratosthe |    14.6 ms   |    12.0 ms   |    17.4 ms   |    14.5 ms   | —            | —            |
+| Matrix multiplicat |    13.2 ms   |    13.6 ms   |    19.6 ms   |    30.4 ms   | —            | —            |
+| Sort 1 000 000 int |    98.8 ms   |   177.0 ms   |   100.8 ms   |    39.1 ms   | —            | —            |
+| Graph BFS — index  |    11.7 ms   |    12.7 ms   | —            |    17.1 ms   |    19.1 ms   |    43.9 ms   |
+| Parallel sum — 50  |   168.5 ms   |   203.1 ms   |   197.6 ms   |   121.2 ms   | —            | —            |
+| HashMap — 500 000  |    38.2 ms   |    34.2 ms   |    55.8 ms   |    69.7 ms   | —            | —            |
+| Linked list — 1 00 |    13.5 ms   |    15.7 ms   |    17.9 ms   |    18.9 ms   | —            | —            |
+| Allocation stress  |    15.4 ms   |    14.9 ms   |    17.1 ms   |    16.2 ms   | —            | —            |
+| Array statistics — |    51.5 ms   |    53.9 ms   |    57.7 ms   |    51.2 ms   | —            | —            |
 
 ## Per-benchmark charts
 
@@ -38,10 +38,10 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *Classic recursive fib(42). Tests raw function-call throughput.*
 
 ```
-  vani           ████████████████████████████████████    1.310  s    baseline
-  c              █████████████████████░░░░░░░░░░░░░░░    776.4 ms   40.7% faster
-  cpp            █████████████████████░░░░░░░░░░░░░░░    747.4 ms   42.9% faster
-  rs             █████████████████████████████████░░░    1.199  s    8.4% faster
+  vani           ███████████████████████████████████░    866.9 ms    baseline
+  c              ████████████████████░░░░░░░░░░░░░░░░    505.8 ms   41.7% faster
+  cpp            ███████████████████░░░░░░░░░░░░░░░░░    479.1 ms   44.7% faster
+  rs             ████████████████████████████████████    902.9 ms    4.2% slower
 ```
 
 ### Sieve of Eratosthenes — primes ≤ 2 000 000
@@ -49,10 +49,10 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *Boolean sieve with Vec-set inner loop. Tests dense random-access array writes.*
 
 ```
-  vani           ███████████████████████████░░░░░░░░░     15.3 ms    baseline
-  c              ██████████████████████████░░░░░░░░░░     14.8 ms    3.3% faster
-  cpp            ████████████████████████████████████     20.3 ms   32.6% slower
-  rs             ████████████████████████████░░░░░░░░     16.0 ms    4.4% slower
+  vani           ██████████████████████████████░░░░░░     14.6 ms    baseline
+  c              █████████████████████████░░░░░░░░░░░     12.0 ms   17.6% faster
+  cpp            ████████████████████████████████████     17.4 ms   19.1% slower
+  rs             ██████████████████████████████░░░░░░     14.5 ms    0.7% faster
 ```
 
 ### Matrix multiplication 256×256 (i64)
@@ -60,10 +60,10 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *Naïve triple-loop matmul. Tests arithmetic-dense nested loops.*
 
 ```
-  vani           ███████████████████░░░░░░░░░░░░░░░░░     17.0 ms    baseline
-  c              ████████████████░░░░░░░░░░░░░░░░░░░░     14.5 ms   14.9% faster
-  cpp            ██████████████████░░░░░░░░░░░░░░░░░░     16.0 ms    5.8% faster
-  rs             ████████████████████████████████████     31.9 ms   87.7% slower
+  vani           ████████████████░░░░░░░░░░░░░░░░░░░░     13.2 ms    baseline
+  c              ████████████████░░░░░░░░░░░░░░░░░░░░     13.6 ms    2.7% slower
+  cpp            ███████████████████████░░░░░░░░░░░░░     19.6 ms   48.3% slower
+  rs             ████████████████████████████████████     30.4 ms   129.6% slower
 ```
 
 ### Sort 1 000 000 integers
@@ -71,10 +71,10 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 *vāṇī uses the built-in sort(mut ref xs); others use stdlib. Tests sort quality.*
 
 ```
-  vani           ███████████████████████░░░░░░░░░░░░░    123.0 ms    baseline
-  c              ████████████████████████████████████    191.3 ms   55.5% slower
-  cpp            ██████████████████████░░░░░░░░░░░░░░    114.4 ms    7.0% faster
-  rs             █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░     48.1 ms   60.9% faster
+  vani           ████████████████████░░░░░░░░░░░░░░░░     98.8 ms    baseline
+  c              ████████████████████████████████████    177.0 ms   79.1% slower
+  cpp            ████████████████████░░░░░░░░░░░░░░░░    100.8 ms    2.0% slower
+  rs             ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░     39.1 ms   60.4% faster
 ```
 
 ### Graph BFS — index handles vs. weak_ptr
@@ -84,11 +84,11 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
   graph_weakptr.cpp                   — shared_ptr children + weak_ptr back-edges.*
 
 ```
-  vani           ████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░     13.9 ms    baseline
-  c              ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░     17.9 ms   29.2% slower
-  C++ (index)    ████████████░░░░░░░░░░░░░░░░░░░░░░░░     22.3 ms   60.4% slower
-  C++ (weak_ptr) ████████████████████████████████████     65.0 ms   368.6% slower
-  rs             ███████████░░░░░░░░░░░░░░░░░░░░░░░░░     20.4 ms   47.1% slower
+  vani           ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░     11.7 ms    baseline
+  c              ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░     12.7 ms    9.0% slower
+  C++ (index)    ████████████████░░░░░░░░░░░░░░░░░░░░     19.1 ms   64.1% slower
+  C++ (weak_ptr) ████████████████████████████████████     43.9 ms   276.3% slower
+  rs             ██████████████░░░░░░░░░░░░░░░░░░░░░░     17.1 ms   46.3% slower
 ```
 
 ### Parallel sum — 50 000 000 elements
@@ -98,10 +98,10 @@ C/C++: OpenMP (if available), else serial.
 Rust: std::thread manual split.*
 
 ```
-  vani           ████████████████████████████████████    218.8 ms    baseline
-  c              █████████████░░░░░░░░░░░░░░░░░░░░░░░     81.1 ms   62.9% faster
-  cpp            ███████████████░░░░░░░░░░░░░░░░░░░░░     94.0 ms   57.0% faster
-  rs             █████████████████████████░░░░░░░░░░░    151.6 ms   30.7% faster
+  vani           ██████████████████████████████░░░░░░    168.5 ms    baseline
+  c              ████████████████████████████████████    203.1 ms   20.5% slower
+  cpp            ███████████████████████████████████░    197.6 ms   17.3% slower
+  rs             █████████████████████░░░░░░░░░░░░░░░    121.2 ms   28.1% faster
 ```
 
 ### HashMap — 500 000 insert + 500 000 lookup
@@ -109,10 +109,10 @@ Rust: std::thread manual split.*
 *Tests open-addressing HashMap throughput.*
 
 ```
-  vani           ██████████████████░░░░░░░░░░░░░░░░░░     50.6 ms    baseline
-  c              ███████████████░░░░░░░░░░░░░░░░░░░░░     41.1 ms   18.7% faster
-  cpp            ████████████████████████░░░░░░░░░░░░     67.1 ms   32.7% slower
-  rs             ████████████████████████████████████     99.5 ms   96.8% slower
+  vani           ████████████████████░░░░░░░░░░░░░░░░     38.2 ms    baseline
+  c              ██████████████████░░░░░░░░░░░░░░░░░░     34.2 ms   10.4% faster
+  cpp            █████████████████████████████░░░░░░░     55.8 ms   45.9% slower
+  rs             ████████████████████████████████████     69.7 ms   82.4% slower
 ```
 
 ### Linked list — 1 000 000 nodes, index-based
@@ -121,10 +121,10 @@ Rust: std::thread manual split.*
 C++/Rust use traditional pointer-linked nodes for comparison.*
 
 ```
-  vani           █████████████████░░░░░░░░░░░░░░░░░░░     15.5 ms    baseline
-  c              ████████████████░░░░░░░░░░░░░░░░░░░░     14.8 ms    4.9% faster
-  cpp            ███████████████████████████████████░     32.8 ms   111.1% slower
-  rs             ████████████████████████████████████     33.8 ms   117.7% slower
+  vani           ██████████████████████████░░░░░░░░░░     13.5 ms    baseline
+  c              ██████████████████████████████░░░░░░     15.7 ms   16.9% slower
+  cpp            ██████████████████████████████████░░     17.9 ms   33.1% slower
+  rs             ████████████████████████████████████     18.9 ms   40.2% slower
 ```
 
 ### Allocation stress — 500 000 struct alloc/free cycles
@@ -132,10 +132,10 @@ C++/Rust use traditional pointer-linked nodes for comparison.*
 *Tests allocator throughput; vāṇī uses RAII affine drop.*
 
 ```
-  vani           ████████████████████████████████████     32.9 ms    baseline
-  c              ███████████████████████████████░░░░░     27.9 ms   15.2% faster
-  cpp            ██████████████████░░░░░░░░░░░░░░░░░░     16.0 ms   51.2% faster
-  rs             ████████████████████████████░░░░░░░░     25.9 ms   21.1% faster
+  vani           █████████████████████████████████░░░     15.4 ms    baseline
+  c              ████████████████████████████████░░░░     14.9 ms    3.1% faster
+  cpp            ████████████████████████████████████     17.1 ms   10.6% slower
+  rs             ██████████████████████████████████░░     16.2 ms    5.2% slower
 ```
 
 ### Array statistics — mean + variance of 10 000 000 values
@@ -143,10 +143,10 @@ C++/Rust use traditional pointer-linked nodes for comparison.*
 *Two sequential passes; tests plain arithmetic loop throughput.*
 
 ```
-  vani           ████████████████████████░░░░░░░░░░░░     59.1 ms    baseline
-  c              ████████████████░░░░░░░░░░░░░░░░░░░░     40.1 ms   32.1% faster
-  cpp            █████████████████░░░░░░░░░░░░░░░░░░░     43.2 ms   26.8% faster
-  rs             ████████████████████████████████████     89.8 ms   52.0% slower
+  vani           ████████████████████████████████░░░░     51.5 ms    baseline
+  c              ██████████████████████████████████░░     53.9 ms    4.7% slower
+  cpp            ████████████████████████████████████     57.7 ms   12.0% slower
+  rs             ████████████████████████████████░░░░     51.2 ms    0.5% faster
 ```
 
 ## Key insight: index handles vs. `weak_ptr`

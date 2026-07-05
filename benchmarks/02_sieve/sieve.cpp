@@ -1,5 +1,5 @@
 // Benchmark 02 — Sieve of Eratosthenes ≤ 2 000 000  (C++)
-// g++ -O2 -std=c++17 -o sieve_cpp sieve.cpp && ./sieve_cpp
+// g++ -O3 -march=native -std=c++17 -o sieve_cpp sieve.cpp && ./sieve_cpp
 // Expected: 148933
 #include <cstdio>
 #include <vector>

@@ -1,5 +1,5 @@
 /* Benchmark 02 — Sieve of Eratosthenes ≤ 2 000 000  (C)
-   gcc -O2 -o sieve_c sieve.c && ./sieve_c
+   gcc -O3 -march=native -o sieve_c sieve.c && ./sieve_c
    Expected: 148933                                         */
 #include <stdio.h>
 #include <stdlib.h>

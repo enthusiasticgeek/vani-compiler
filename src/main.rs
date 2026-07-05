@@ -2999,7 +2999,7 @@ fn build_program_llvm(
     let opt_mcpu = if target.is_none() { Some("native") } else { None };
     let llc_input = match {
         let mut cmd = Command::new(&opt);
-        cmd.arg("-O2");
+        cmd.arg("-O3");
         if let Some(cpu) = opt_mcpu {
             cmd.arg(format!("--mcpu={}", cpu));
         }
@@ -3052,11 +3052,11 @@ fn build_program_llvm(
         llc_cmd.arg("-mcpu=native");
         llc_cmd.arg("-relocation-model=pic");
     }
-    // Default to -O=2. The verifier proves safety upstream so
+    // Default to -O=3. The verifier proves safety upstream so
     // the optimizer is free to assume no UB on the proved paths.
     // Users can override the optimization level by setting LLC
     // to a wrapper script if they need a different level.
-    llc_cmd.arg("-O=2");
+    llc_cmd.arg("-O=3");
     llc_cmd.arg("-o").arg(&obj_path).arg(&llc_input);
     let llc_out = llc_cmd
         .output()

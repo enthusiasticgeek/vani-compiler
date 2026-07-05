@@ -2,7 +2,9 @@
 // This is the equivalent of graph.vani: std::vector<int> indices,
 // NO shared_ptr / weak_ptr.  Nodes sit in one contiguous buffer.
 //
-// g++ -O2 -std=c++17 -o graph_idx_cpp graph_index.cpp && ./graph_idx_cpp
+// g++ -O3 -march=native -std=c++17 -o graph_idx_cpp graph_index.cpp && ./graph_idx_cpp
+#include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <vector>
 
@@ -48,9 +50,9 @@ int main() {
             nodes[v].neighbors.push_back((v + OFFSETS[e]) % N);
     }
 
-    long total = 0;
+    int64_t total = 0;
     for (int run = 0; run < RUNS; run++)
         total += bfs(nodes, run % N);
 
-    std::printf("%ld\n", total);
+    std::printf("%" PRId64 "\n", total);
 }

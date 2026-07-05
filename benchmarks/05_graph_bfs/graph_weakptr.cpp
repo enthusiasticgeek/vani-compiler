@@ -11,11 +11,13 @@
 // Compare with graph_index.cpp (and graph.vani) to see the speedup from
 // the index-handle approach.
 //
-// g++ -O2 -std=c++17 -o graph_weak_cpp graph_weakptr.cpp && ./graph_weak_cpp
+// g++ -O3 -march=native -std=c++17 -o graph_weak_cpp graph_weakptr.cpp && ./graph_weak_cpp
+#include <cinttypes>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
-#include <vector>
 #include <queue>
+#include <vector>
 
 static const int N      = 1000;
 static const int DEGREE = 6;
@@ -67,10 +69,10 @@ int main() {
             nodes[v]->parent = nodes[v - 1]; // weak_ptr assignment
     }
 
-    long total = 0;
+    int64_t total = 0;
     for (int run = 0; run < RUNS; run++)
         total += bfs(nodes[run % N]);
 
-    std::printf("%ld\n", total);
+    std::printf("%" PRId64 "\n", total);
     // Nodes are freed here; shared_ptr ref-counts drop to zero in cascade.
 }
