@@ -26420,28 +26420,12 @@ fn emit_intent_hashmap_pair_llvm(
          \x20 ret void\n\
          }}\n\
          define internal i64 @{s}__hash_key(i64 %k) {{\n\
-         \x20 %h_p = alloca i64\n\
-         \x20 store i64 -3750763034362895579, i64* %h_p\n\
-         \x20 %i_p = alloca i64\n\
-         \x20 store i64 0, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_loop:\n\
-         \x20 %i = load i64, i64* %i_p\n\
-         \x20 %cont = icmp slt i64 %i, 8\n\
-         \x20 br i1 %cont, label %hk_body, label %hk_done\n\
-         hk_body:\n\
-         \x20 %sh = mul i64 %i, 8\n\
-         \x20 %shifted = lshr i64 %k, %sh\n\
-         \x20 %b = and i64 %shifted, 255\n\
-         \x20 %h = load i64, i64* %h_p\n\
-         \x20 %hx = xor i64 %h, %b\n\
-         \x20 %hp = mul i64 %hx, 1099511628211\n\
-         \x20 store i64 %hp, i64* %h_p\n\
-         \x20 %i_n = add i64 %i, 1\n\
-         \x20 store i64 %i_n, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_done:\n\
-         \x20 %final = load i64, i64* %h_p\n\
+         \x20 ; Multiply-shift hash: 3 instructions vs FNV-1a 8-step loop (~48 ops).\n\
+         \x20 ; PCG multiplier (6364136223846793005) + upper XOR fold. Uniform for\n\
+         \x20 ; sequential integer keys in power-of-2 open-addressing tables.\n\
+         \x20 %x1 = mul i64 %k, 6364136223846793005\n\
+         \x20 %sh1 = lshr i64 %x1, 33\n\
+         \x20 %final = xor i64 %x1, %sh1\n\
          \x20 ret i64 %final\n\
          }}\n\
          define internal void @{s}__insert_raw(%{s}* %m, i64 %k, {v} %v) {{\n\
@@ -26932,29 +26916,11 @@ fn emit_intent_hashmap_pair_llvm_f64k(
          \x20 ret void\n\
          }}\n\
          define internal i64 @{s}__hash_key(double %k) {{\n\
+         \x20 ; Bitcast to i64 then apply multiply-shift hash (same as i64 path).\n\
          \x20 %bits = bitcast double %k to i64\n\
-         \x20 %h_p = alloca i64\n\
-         \x20 store i64 -3750763034362895579, i64* %h_p\n\
-         \x20 %i_p = alloca i64\n\
-         \x20 store i64 0, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_loop:\n\
-         \x20 %i = load i64, i64* %i_p\n\
-         \x20 %cont = icmp slt i64 %i, 8\n\
-         \x20 br i1 %cont, label %hk_body, label %hk_done\n\
-         hk_body:\n\
-         \x20 %sh = mul i64 %i, 8\n\
-         \x20 %shifted = lshr i64 %bits, %sh\n\
-         \x20 %b = and i64 %shifted, 255\n\
-         \x20 %h = load i64, i64* %h_p\n\
-         \x20 %hx = xor i64 %h, %b\n\
-         \x20 %hp = mul i64 %hx, 1099511628211\n\
-         \x20 store i64 %hp, i64* %h_p\n\
-         \x20 %i_n = add i64 %i, 1\n\
-         \x20 store i64 %i_n, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_done:\n\
-         \x20 %final = load i64, i64* %h_p\n\
+         \x20 %x1 = mul i64 %bits, 6364136223846793005\n\
+         \x20 %sh1 = lshr i64 %x1, 33\n\
+         \x20 %final = xor i64 %x1, %sh1\n\
          \x20 ret i64 %final\n\
          }}\n\
          define internal void @{s}__insert_raw(%{s}* %m, double %k, {v} %v) {{\n\
@@ -29291,28 +29257,12 @@ fn emit_intent_hashmap_pair_llvm_i64k_strv(
          \x20 ret void\n\
          }}\n\
          define internal i64 @{s}__hash_key(i64 %k) {{\n\
-         \x20 %h_p = alloca i64\n\
-         \x20 store i64 -3750763034362895579, i64* %h_p\n\
-         \x20 %i_p = alloca i64\n\
-         \x20 store i64 0, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_loop:\n\
-         \x20 %i = load i64, i64* %i_p\n\
-         \x20 %cont = icmp slt i64 %i, 8\n\
-         \x20 br i1 %cont, label %hk_body, label %hk_done\n\
-         hk_body:\n\
-         \x20 %sh = mul i64 %i, 8\n\
-         \x20 %shifted = lshr i64 %k, %sh\n\
-         \x20 %b = and i64 %shifted, 255\n\
-         \x20 %h = load i64, i64* %h_p\n\
-         \x20 %hx = xor i64 %h, %b\n\
-         \x20 %hp = mul i64 %hx, 1099511628211\n\
-         \x20 store i64 %hp, i64* %h_p\n\
-         \x20 %i_n = add i64 %i, 1\n\
-         \x20 store i64 %i_n, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_done:\n\
-         \x20 %final = load i64, i64* %h_p\n\
+         \x20 ; Multiply-shift hash: 3 instructions vs FNV-1a 8-step loop (~48 ops).\n\
+         \x20 ; PCG multiplier (6364136223846793005) + upper XOR fold. Uniform for\n\
+         \x20 ; sequential integer keys in power-of-2 open-addressing tables.\n\
+         \x20 %x1 = mul i64 %k, 6364136223846793005\n\
+         \x20 %sh1 = lshr i64 %x1, 33\n\
+         \x20 %final = xor i64 %x1, %sh1\n\
          \x20 ret i64 %final\n\
          }}\n\
          define internal void @{s}__insert_owned_raw(%{s}* %m, i64 %k, i8* %v_owned) {{\n\
