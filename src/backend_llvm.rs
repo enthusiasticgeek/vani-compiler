@@ -8682,6 +8682,123 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return s2;
             }
+            // `vec_fill(n, val)` — allocate and bulk-initialize Vec<T>.
+            // i8 path: malloc + memset (single libc call, optimal for sieve).
+            // Wider types: malloc + phi-based scalar fill loop.
+            if name == "vec_fill" {
+                let element = match &expr.ty {
+                    Type::Vec(element) => element,
+                    _ => unreachable!("vec_fill() must return Vec<_>"),
+                };
+                let elt_ty = vec_element_value_str(element);
+                let s_ty = vec_struct_name(element);
+                let elt_bytes = vec_element_byte_size(element) as i64;
+                let n_val = emit_expr(&args[0], ctx, out);
+                let fill_val = emit_expr(&args[1], ctx, out);
+                // cap = max(n, 1) to avoid zero-byte malloc
+                let cond = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp sgt i64 {}, 0\n", cond, n_val));
+                let cap = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = select i1 {}, i64 {}, i64 1\n",
+                    cap, cond, n_val
+                ));
+                let bytes = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", bytes, cap, elt_bytes));
+                let raw = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @malloc(i64 {})\n",
+                    raw, bytes
+                ));
+                if elt_bytes == 1 {
+                    // fill_val is already i8; sext to i32 for memset's byte arg.
+                    let sext = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = sext i8 {} to i32\n", sext, fill_val));
+                    out.push_str(&format!(
+                        "  call i8* @memset(i8* {}, i32 {}, i64 {})\n",
+                        raw, sext, cap
+                    ));
+                    let buf = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i8* {} to {}*\n",
+                        buf, raw, elt_ty
+                    ));
+                    let s0 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} undef, {}* {}, 0\n",
+                        s0, s_ty, elt_ty, buf
+                    ));
+                    let s1 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} {}, i64 {}, 1\n",
+                        s1, s_ty, s0, n_val
+                    ));
+                    let s2 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} {}, i64 {}, 2\n",
+                        s2, s_ty, s1, cap
+                    ));
+                    return s2;
+                } else {
+                    // General fill loop using phi-based SSA loop.
+                    // Pre-allocate idx and idx_next names before emitting loop so
+                    // the phi forward-reference to idx_next is valid LLVM SSA.
+                    let buf = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = bitcast i8* {} to {}*\n",
+                        buf, raw, elt_ty
+                    ));
+                    let entry_blk = ctx.current_block.clone();
+                    let chk_lbl = ctx.fresh_label("vfill_chk");
+                    let body_lbl = ctx.fresh_label("vfill_body");
+                    let exit_lbl = ctx.fresh_label("vfill_exit");
+                    // Pre-allocate idx and idx_next so phi can forward-ref idx_next.
+                    let idx = ctx.fresh_tmp();
+                    let idx_next = ctx.fresh_tmp();
+                    out.push_str(&format!("  br label %{}\n", chk_lbl));
+                    out.push_str(&format!("{}:\n", chk_lbl));
+                    ctx.current_block = chk_lbl.clone();
+                    out.push_str(&format!(
+                        "  {} = phi i64 [0, %{}], [{}, %{}]\n",
+                        idx, entry_blk, idx_next, body_lbl
+                    ));
+                    let done = ctx.fresh_tmp();
+                    out.push_str(&format!("  {} = icmp sge i64 {}, {}\n", done, idx, n_val));
+                    out.push_str(&format!(
+                        "  br i1 {}, label %{}, label %{}\n",
+                        done, exit_lbl, body_lbl
+                    ));
+                    out.push_str(&format!("{}:\n", body_lbl));
+                    ctx.current_block = body_lbl.clone();
+                    let gep = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr inbounds {}, {}* {}, i64 {}\n",
+                        gep, elt_ty, elt_ty, buf, idx
+                    ));
+                    out.push_str(&format!("  store {} {}, {}* {}\n", elt_ty, fill_val, elt_ty, gep));
+                    // Define idx_next (the pre-allocated name — must be defined exactly once).
+                    out.push_str(&format!("  {} = add i64 {}, 1\n", idx_next, idx));
+                    out.push_str(&format!("  br label %{}\n", chk_lbl));
+                    out.push_str(&format!("{}:\n", exit_lbl));
+                    ctx.current_block = exit_lbl.clone();
+                    let s0 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} undef, {}* {}, 0\n",
+                        s0, s_ty, elt_ty, buf
+                    ));
+                    let s1 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} {}, i64 {}, 1\n",
+                        s1, s_ty, s0, n_val
+                    ));
+                    let s2 = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = insertvalue {} {}, i64 {}, 2\n",
+                        s2, s_ty, s1, cap
+                    ));
+                    return s2;
+                }
+            }
             // `clone_at(xs, i)` returns a fresh owned value of
             // the element type. Mirrors the SSA-LLVM lowering
             // (ssa_backend_llvm.rs:3431) — without this arm the

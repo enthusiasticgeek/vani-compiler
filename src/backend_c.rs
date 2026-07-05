@@ -15704,6 +15704,47 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 vs = vec_ty,
             )
         }
+        "vec_fill" => {
+            // Allocate Vec<T> of length n with every element equal to val.
+            // Uses memset for i8 (single libc call); otherwise a C for-loop.
+            let element = match result_ty {
+                Type::Vec(element) => element,
+                _ => unreachable!("vec_fill() must return Vec<_>"),
+            };
+            let elt_bytes = crate::backend_llvm::vec_element_byte_size(element);
+            let c_element = c_element_storage(element);
+            let vec_ty = format!("intent_vec_{}", crate::backend_llvm::vec_struct_tag(element));
+            let n_expr = emit_expr(&args[0]);
+            let val_expr = emit_expr(&args[1]);
+            if elt_bytes == 1 {
+                format!(
+                    "({{ int64_t _vf_n = (int64_t)({n}); \
+                       uint64_t _vf_cap = (uint64_t)(_vf_n > 0 ? _vf_n : 1); \
+                       {ce}* _vf_p = ({ce}*)malloc(_vf_cap); \
+                       memset(_vf_p, (int)({val}), (size_t)_vf_cap); \
+                       {vs} _vf_v; _vf_v.data = _vf_p; _vf_v.len = (uint64_t)_vf_n; \
+                       _vf_v.capacity = _vf_cap; _vf_v; }})",
+                    n = n_expr,
+                    val = val_expr,
+                    ce = c_element,
+                    vs = vec_ty,
+                )
+            } else {
+                format!(
+                    "({{ int64_t _vf_n = (int64_t)({n}); \
+                       uint64_t _vf_cap = (uint64_t)(_vf_n > 0 ? _vf_n : 1); \
+                       {ce}* _vf_p = ({ce}*)malloc(_vf_cap * sizeof({ce})); \
+                       {ce} _vf_val = ({val}); \
+                       for (int64_t _vf_i = 0; _vf_i < _vf_n; _vf_i++) _vf_p[_vf_i] = _vf_val; \
+                       {vs} _vf_v; _vf_v.data = _vf_p; _vf_v.len = (uint64_t)_vf_n; \
+                       _vf_v.capacity = _vf_cap; _vf_v; }})",
+                    n = n_expr,
+                    val = val_expr,
+                    ce = c_element,
+                    vs = vec_ty,
+                )
+            }
+        }
         "push" => {
             let element = match result_ty {
                 Type::Vec(element) => element,

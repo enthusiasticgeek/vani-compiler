@@ -323,6 +323,10 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
                 || name == "binary_search"
                 || name == "swap_remove" || name == "insert"
                 || name == "clear"
+                // set(mut ref v, i, val) in-place write: no SSA backend lowering yet.
+                || name == "set_mut"
+                // vec_fill: only wired in tree-LLVM backend.
+                || name == "vec_fill"
                 || name == "str_contains" || name == "str_starts_with"
                 || name == "str_ends_with" || name == "str_trim"
                 || name == "str_replace" || name == "str_split"

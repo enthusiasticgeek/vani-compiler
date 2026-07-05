@@ -15,12 +15,8 @@ fn main() -> i64 {
     // Initialise sieve: 1 = possibly prime, 0 = composite.
     // Vec<i8>: 1 byte/element vs Vec<i64>'s 8 bytes — 8× smaller working set,
     // fits in L1/L2 instead of spilling to L3.
-    let sieve: Vec<i8> = vec();
-    let k: i64 = 0;
-    while k <= limit {
-        let _ = push(mut ref sieve, 1 as i8);
-        k = k + 1;
-    }
+    // vec_fill uses malloc+memset matching C's memset(sieve,1,LIMIT+1) exactly.
+    let sieve: Vec<i8> = vec_fill(limit + 1, 1 as i8);
     let _ = set(mut ref sieve, 0 as u64, 0 as i8);
     let _ = set(mut ref sieve, 1 as u64, 0 as i8);
 

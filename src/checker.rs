@@ -38,6 +38,10 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // Performance builtin: pre-allocate Vec with known capacity to avoid
     // O(log N) realloc doublings during sequential push loops.
     "vec_with_capacity",
+    // Bulk-initialize a Vec<T> with n copies of val using malloc+memset
+    // (i8) or malloc+loop (wider types). Eliminates O(n) push() calls for
+    // sieve-style boolean initialization patterns.
+    "vec_fill",
     // Unsafe-style push: no capacity check, no realloc. Caller must
     // guarantee capacity was pre-allocated (e.g. vec_with_capacity(n)).
     // Eliminates the phi-node aliasing that blocks SIMD vectorisation
@@ -17997,6 +18001,36 @@ fn check_call(
                     args: vec![n.expr],
                 },
                 Type::Vec(Box::new(Type::I64)),
+                None,
+                span,
+            );
+        }
+        "vec_fill" => {
+            // vec_fill(n: i64, val: T) -> Vec<T>
+            // Bulk-initializes a Vec of length n with every element equal to val.
+            // The element type T is inferred from val's concrete type.
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "vec_fill(n, val) takes 2 arguments (count: i64, value: T), got {}",
+                        args.len()
+                    ),
+                ));
+                return CheckedExpr::fallback(Type::Vec(Box::new(Type::I64)), span);
+            }
+            let n_raw = check_expr(&args[0], env, signatures, diagnostics);
+            let n = coerce_checked(n_raw, &Type::I64, args[0].span, "vec_fill count", diagnostics);
+            let val = check_expr(&args[1], env, signatures, diagnostics);
+            let elem_ty = val.ty().clone();
+            let ret_ty = Type::Vec(Box::new(elem_ty));
+            return CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: "vec_fill".to_string(),
+                    name_span: span,
+                    args: vec![n.expr, val.expr],
+                },
+                ret_ty,
                 None,
                 span,
             );
