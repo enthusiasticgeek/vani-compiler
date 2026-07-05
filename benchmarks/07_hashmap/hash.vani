@@ -9,7 +9,7 @@ intent "Benchmark: HashMap<i64,i64> throughput — 500K insert + 500K lookup";
 
 fn main() -> i64 {
     let n: i64 = 500000;
-    let m: HashMap<i64, i64> = hashmap_new();
+    let m: HashMap<i64, i64> = hashmap_with_capacity(n);
 
     // Insert n key/value pairs.
     let i: i64 = 0;

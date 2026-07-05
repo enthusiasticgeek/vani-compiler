@@ -17082,6 +17082,11 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // `intent_hashmap_i64_i64` prefix; non-(i64, i64) uses
         // the per-pair `intent_hashmap_<K_tag>_<V_tag>` form.
         "hashmap_new" => format!("{}_new()", hashmap_prefix_from_ty(result_ty)),
+        "hashmap_with_capacity" => format!(
+            "{}_with_capacity({})",
+            hashmap_prefix_from_ty(result_ty),
+            emit_expr(&args[0])
+        ),
         "hashmap_insert" => format!(
             "{}_insert({}, ({}), ({}))",
             hashmap_prefix_from_recv(&args[0].ty),

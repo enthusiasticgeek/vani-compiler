@@ -16,17 +16,17 @@ intent "Benchmark: index-based linked list — build + traverse 1M nodes";
 
 fn main() -> i64 {
     let n: i64 = 1000000;
-    let values: Vec<i64> = vec();
-    let next: Vec<i64>   = vec();
+    let values: Vec<i64> = vec_with_capacity(n);
+    let next: Vec<i64>   = vec_with_capacity(n);
 
     // Build list: node i points to node i+1; last node ends with (0-1).
     let i: i64 = 0;
     while i < n {
-        values = push(values, i % 1000);
-        next   = push(next, i + 1);
+        let _ = push_unchecked(mut ref values, i % 1000);
+        let _ = push_unchecked(mut ref next, i + 1);
         i = i + 1;
     }
-    next = set(next, (n - 1) as u64, 0 - 1);
+    let _ = set(mut ref next, (n - 1) as u64, 0 - 1);
 
     // Traverse and accumulate.
     let sum: i64 = 0;

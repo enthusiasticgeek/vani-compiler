@@ -9102,6 +9102,16 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
+            if name == "hashmap_with_capacity" {
+                let (prefix, _v_llvm, _opt) = hashmap_llvm_dispatch_from_ty(&expr.ty);
+                let n = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call %{p} @{p}_with_capacity(i64 {})\n",
+                    dest, n, p = prefix
+                ));
+                return dest;
+            }
             if name == "hashmap_insert" {
                 let recv_ty = &args[0].ty;
                 let (prefix, k_llvm, v_llvm, opt) =
@@ -30737,6 +30747,35 @@ fn emit_intent_hashmap_i64_i64_helpers_llvm(out: &mut String, has_option_i64: bo
          \x20 %r5 = insertvalue %intent_hashmap_i64_i64 %r4, i64 0, 5\n\
          \x20 ret %intent_hashmap_i64_i64 %r5\n\
          }\n\
+         define %intent_hashmap_i64_i64 @intent_hashmap_i64_i64_with_capacity(i64 %n) {\n\
+         \x20 %cap_p = alloca i64\n\
+         \x20 store i64 8, i64* %cap_p\n\
+         \x20 %n2 = mul i64 %n, 2\n\
+         \x20 br label %wc_loop\n\
+         wc_loop:\n\
+         \x20 %cur = load i64, i64* %cap_p\n\
+         \x20 %need = icmp slt i64 %cur, %n2\n\
+         \x20 br i1 %need, label %wc_double, label %wc_alloc\n\
+         wc_double:\n\
+         \x20 %dbl = mul i64 %cur, 2\n\
+         \x20 store i64 %dbl, i64* %cap_p\n\
+         \x20 br label %wc_loop\n\
+         wc_alloc:\n\
+         \x20 %cap = load i64, i64* %cap_p\n\
+         \x20 %kb = mul i64 %cap, 8\n\
+         \x20 %ki8 = call i8* @malloc(i64 %kb)\n\
+         \x20 %keys = bitcast i8* %ki8 to i64*\n\
+         \x20 %vi8 = call i8* @malloc(i64 %kb)\n\
+         \x20 %vals = bitcast i8* %vi8 to i64*\n\
+         \x20 %occ = call i8* @calloc(i64 %cap, i64 1)\n\
+         \x20 %r0 = insertvalue %intent_hashmap_i64_i64 undef, i64* %keys, 0\n\
+         \x20 %r1 = insertvalue %intent_hashmap_i64_i64 %r0, i64* %vals, 1\n\
+         \x20 %r2 = insertvalue %intent_hashmap_i64_i64 %r1, i8* %occ, 2\n\
+         \x20 %r3 = insertvalue %intent_hashmap_i64_i64 %r2, i64 0, 3\n\
+         \x20 %r4 = insertvalue %intent_hashmap_i64_i64 %r3, i64 %cap, 4\n\
+         \x20 %r5 = insertvalue %intent_hashmap_i64_i64 %r4, i64 0, 5\n\
+         \x20 ret %intent_hashmap_i64_i64 %r5\n\
+         }\n\
          define void @intent_hashmap_i64_i64_drop(%intent_hashmap_i64_i64* %m) {\n\
          \x20 %kpp = getelementptr %intent_hashmap_i64_i64, %intent_hashmap_i64_i64* %m, i32 0, i32 0\n\
          \x20 %vpp = getelementptr %intent_hashmap_i64_i64, %intent_hashmap_i64_i64* %m, i32 0, i32 1\n\
@@ -43158,12 +43197,17 @@ fn emit_parallel_for_via_gomp(
         // N is resolved at codegen time from OMP_NUM_THREADS;
         // this avoids @getenv linkage in the generated IR while
         // still letting callers control parallelism by setting
-        // the env-var before invoking intentc. Default: 4.
+        // the env-var before invoking vanic. Falls back to the
+        // machine's logical CPU count so host builds scale
+        // automatically without needing the env-var.
+        let cpu_count = std::thread::available_parallelism()
+            .map(|n| n.get() as u64)
+            .unwrap_or(4);
         let n: u64 = std::env::var("OMP_NUM_THREADS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&v| v >= 1 && v <= 256)
-            .unwrap_or(4);
+            .unwrap_or(cpu_count);
         let warr = ctx.fresh_tmp();
         out.push_str(&format!(
             "  {} = alloca [{} x {{ i8*, i64, i64 }}]\n",
@@ -44698,11 +44742,14 @@ mod tests {
         let ll = LlvmBackend.emit(&checked.ir);
         // Mirror the backend's N resolution so assertions stay
         // consistent with whatever OMP_NUM_THREADS is set to.
+        let cpu_count_t = std::thread::available_parallelism()
+            .map(|n| n.get() as u64)
+            .unwrap_or(4);
         let expected_n: u64 = std::env::var("OMP_NUM_THREADS")
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&v| v >= 1 && v <= 256)
-            .unwrap_or(4);
+            .unwrap_or(cpu_count_t);
         assert!(
             !ll.contains("@GOMP_parallel") && !ll.contains("@omp_get_thread_num"),
             "expected GOMP/omp_get_* to be absent on Windows:\n{ll}"

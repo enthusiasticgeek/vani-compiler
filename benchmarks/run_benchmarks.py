@@ -25,6 +25,7 @@ Requirements
 """
 
 import argparse
+import io
 import os
 import platform
 import shutil
@@ -32,6 +33,10 @@ import statistics
 import subprocess
 import sys
 import tempfile
+
+# Windows console may use cp1252 which can't encode Unicode benchmark names.
+if hasattr(sys.stdout, "buffer"):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -194,8 +199,14 @@ EXE_EXT = ".exe" if IS_WIN else ""
 
 
 def detect_compilers() -> Dict[str, Optional[str]]:
+    # Look for vanic relative to this script's repo root as well as PATH
+    script_root = Path(__file__).parent.parent
+    extra_vanic = [
+        str(script_root / "target" / "release" / "vanic.exe"),
+        str(script_root / "target" / "release" / "vanic"),
+    ]
     return {
-        "vanic": _which(["vanic", "vanic.exe"]),
+        "vanic": _which(["vanic", "vanic.exe"] + extra_vanic),
         "cc":    _which(["gcc", "clang", "cc"]),
         "cxx":   _which(["g++", "clang++", "c++"]),
         "rustc": _which(["rustc"]),
@@ -226,11 +237,11 @@ def compile_vani(src: Path, out: Path, compilers: Dict) -> Tuple[bool, str]:
 def compile_c(src: Path, out: Path, compilers: Dict, extra: List[str] = ()) -> Tuple[bool, str]:
     if not compilers["cc"]:
         return False, f"gcc/clang not found"
-    cmd = [compilers["cc"], "-O2", "-o", str(out), str(src)] + list(extra)
+    cmd = [compilers["cc"], "-O3", "-march=native", "-o", str(out), str(src)] + list(extra)
     ok, msg = _run(cmd)
     if not ok and "-fopenmp" in extra:
         # retry without OpenMP
-        cmd2 = [compilers["cc"], "-O2", "-o", str(out), str(src)]
+        cmd2 = [compilers["cc"], "-O3", "-march=native", "-o", str(out), str(src)]
         ok, msg = _run(cmd2)
         if ok:
             msg = "(OpenMP unavailable; compiled serial)"
@@ -240,10 +251,10 @@ def compile_c(src: Path, out: Path, compilers: Dict, extra: List[str] = ()) -> T
 def compile_cpp(src: Path, out: Path, compilers: Dict, extra: List[str] = ()) -> Tuple[bool, str]:
     if not compilers["cxx"]:
         return False, f"g++/clang++ not found"
-    cmd = [compilers["cxx"], "-O2", "-std=c++17", "-o", str(out), str(src)] + list(extra)
+    cmd = [compilers["cxx"], "-O3", "-march=native", "-std=c++17", "-o", str(out), str(src)] + list(extra)
     ok, msg = _run(cmd)
     if not ok and "-fopenmp" in extra:
-        cmd2 = [compilers["cxx"], "-O2", "-std=c++17", "-o", str(out), str(src)]
+        cmd2 = [compilers["cxx"], "-O3", "-march=native", "-std=c++17", "-o", str(out), str(src)]
         ok, msg = _run(cmd2)
         if ok:
             msg = "(OpenMP unavailable; compiled serial)"
@@ -253,7 +264,8 @@ def compile_cpp(src: Path, out: Path, compilers: Dict, extra: List[str] = ()) ->
 def compile_rust(src: Path, out: Path, compilers: Dict) -> Tuple[bool, str]:
     if not compilers["rustc"]:
         return False, "rustc not found in PATH"
-    ok, msg = _run([compilers["rustc"], "-C", "opt-level=2", "-o", str(out), str(src)])
+    ok, msg = _run([compilers["rustc"], "-C", "opt-level=3", "-C", "target-cpu=native",
+                    "-o", str(out), str(src)])
     return ok, msg
 
 
@@ -401,6 +413,8 @@ def generate_report(all_results: Dict[str, List[Result]], benchmarks: List[Dict]
     lines.append("# Benchmark Results — vāṇī vs Rust vs C vs C++")
     lines.append("")
     lines.append(f"*Generated: {time.strftime('%Y-%m-%d %H:%M')} — {runs} timing run(s) per benchmark, median reported.*")
+    lines.append(f"*C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*")
+    lines.append(f"*vāṇī uses LLVM backend with `opt -O2 --mcpu=native` + `llc -O2 -mcpu=native`.*")
     lines.append("")
 
     # System info
@@ -553,7 +567,7 @@ def main() -> None:
 
         for bench in benches:
             bench_path = BENCH_DIR / bench["id"]
-            print(f"── {bench['name']}")
+            print(f"-- {bench['name']}")
             results = run_benchmark(
                 bench, bench_path, compilers, args.runs, tmp_dir, lang_filter
             )

@@ -13,22 +13,24 @@ fn main() -> i64 {
     let limit: i64 = 2000000;
 
     // Initialise sieve: 1 = possibly prime, 0 = composite.
-    let sieve: Vec<i64> = vec();
+    // Vec<i8>: 1 byte/element vs Vec<i64>'s 8 bytes — 8× smaller working set,
+    // fits in L1/L2 instead of spilling to L3.
+    let sieve: Vec<i8> = vec();
     let k: i64 = 0;
     while k <= limit {
-        let _ = push(mut ref sieve, 1);
+        let _ = push(mut ref sieve, 1 as i8);
         k = k + 1;
     }
-    let _ = set(mut ref sieve, 0 as u64, 0);
-    let _ = set(mut ref sieve, 1 as u64, 0);
+    let _ = set(mut ref sieve, 0 as u64, 0 as i8);
+    let _ = set(mut ref sieve, 1 as u64, 0 as i8);
 
     // Mark composites.
     let i: i64 = 2;
     while i * i <= limit {
-        if sieve[i] == 1 {
+        if sieve[i] == (1 as i8) {
             let j: i64 = i * i;
             while j <= limit {
-                let _ = set(mut ref sieve, j as u64, 0);
+                let _ = set(mut ref sieve, j as u64, 0 as i8);
                 j = j + i;
             }
         }
@@ -39,7 +41,7 @@ fn main() -> i64 {
     let count: i64 = 0;
     let m: i64 = 2;
     while m <= limit {
-        if sieve[m] == 1 {
+        if sieve[m] == (1 as i8) {
             count = count + 1;
         }
         m = m + 1;

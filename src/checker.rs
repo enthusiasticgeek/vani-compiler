@@ -18487,6 +18487,7 @@ fn check_call(
             );
         }
         "hashmap_new"
+        | "hashmap_with_capacity"
         | "hashmap_insert"
         | "hashmap_get"
         | "hashmap_contains_key"
@@ -27451,7 +27452,7 @@ fn check_hashmap_builtin(
 ) -> CheckedExpr {
     let want_args = match name {
         "hashmap_new" => 0,
-        "hashmap_len" | "hashmap_clear" => 1,
+        "hashmap_with_capacity" | "hashmap_len" | "hashmap_clear" => 1,
         "hashmap_get" | "hashmap_contains_key" | "hashmap_remove" => 2,
         "hashmap_insert" => 3,
         _ => unreachable!(),
@@ -27468,7 +27469,7 @@ fn check_hashmap_builtin(
             ),
         ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
         let ret_ty = match name {
-            "hashmap_new" => {
+            "hashmap_new" | "hashmap_with_capacity" => {
                 Type::HashMap(Box::new(Type::I64), Box::new(Type::I64))
             }
             "hashmap_insert" | "hashmap_get" | "hashmap_remove" => {
@@ -27485,6 +27486,28 @@ fn check_hashmap_builtin(
                 name: "hashmap_new".to_string(),
                 name_span: span,
                 args: Vec::new(),
+            },
+            Type::HashMap(Box::new(Type::I64), Box::new(Type::I64)),
+            None,
+            span,
+        );
+    }
+    if name == "hashmap_with_capacity" {
+        let cap_arg = check_expr(&args[0], env, signatures, diagnostics);
+        if *cap_arg.ty() != Type::I64 {
+            diagnostics.push(Diagnostic::new(
+                args[0].span,
+                format!(
+                    "hashmap_with_capacity() expects an i64 capacity, got {}",
+                    cap_arg.ty()
+                ),
+            ));
+        }
+        return CheckedExpr::new(
+            TypedExprKind::Call {
+                name: "hashmap_with_capacity".to_string(),
+                name_span: span,
+                args: vec![cap_arg.expr],
             },
             Type::HashMap(Box::new(Type::I64), Box::new(Type::I64)),
             None,
