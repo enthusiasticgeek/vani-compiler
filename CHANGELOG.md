@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.3] — 2026-07-05
+
+### Performance — Builtins & Hash
+
+- **`vec_fill(n, val)` builtin**: new `Vec<T>` bulk-initializer — allocates with
+  `malloc` then fills with `memset` (for `i8` elements) or a phi-based fill loop
+  (for wider types). Eliminates the 2M sequential `push()` calls in the sieve
+  benchmark. Sieve gap vs C: 1.25× → **vāṇī 4% faster** (13.1ms vs 13.5ms).
+  Available in both tree-LLVM and C backends. SSA-LLVM backend correctly routes
+  programs using `vec_fill` or `set(mut ref ...)` to tree-LLVM.
+- **Multiply-shift hash**: replaced the FNV-1a 8-step byte loop in all hashmap/
+  hashset `__hash_key` functions (i64 and f64 key variants) with a 3-instruction
+  PCG multiply + XOR-fold (`k * 6364136223846793005 ^ (result >> 33)`). Reduces
+  per-hash cost from ~48 operations to 3; hashmap benchmark: 42ms → 41ms.
+- **SSA-LLVM routing fix**: `set_mut` (in-place `set(mut ref ...)`) was not in
+  the SSA-LLVM reject list, causing programs without `push_mut` to fall through
+  to the SSA backend which emits undefined `@fn_set_mut`. Added `set_mut` and
+  `vec_fill` to the reject list; affected programs now correctly use tree-LLVM.
+
+---
+
 ## [0.2.2] — 2026-07-05
 
 ### Performance — Compiler & Benchmarks
