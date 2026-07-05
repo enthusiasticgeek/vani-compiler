@@ -6,6 +6,32 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.2] — 2026-07-05
+
+### Performance — Compiler & Benchmarks
+
+- **`opt -O3` / `llc -O3`**: upgraded the LLVM pipeline from `-O2` to `-O3`,
+  enabling more aggressive inlining, loop unrolling, and auto-vectorization.
+  Fibonacci gap closed from 1.90× → 1.57×; matrix now at parity with C;
+  parallel sum and array statistics now beat C (vāṇī faster).
+- **Benchmark correctness fix**: all C/C++ benchmark files used bare `long`
+  which is 32-bit on Windows/MinGW, giving wrong outputs and an unfair 2×
+  SIMD advantage (32-bit fits 2× more elements per AVX2 register than 64-bit).
+  Changed all 20 C/C++ files to `int64_t` / `PRId64` (`fib`, `sieve`,
+  `matmul`, `sort`, `graph_index`, `graph_weakptr`, `parsum`, `hash`, `list`,
+  `alloc`, `stats`). With a fair comparison, vāṇī beats C in 6/10 benchmarks.
+- **Fibonacci gap analysis**: the remaining 1.57× gap vs GCC is due to GCC's
+  O3 recursive tree-inlining pass (3–4 levels inline, ~25 labels / 337 ASM
+  lines for 2 real call sites). LLVM has no equivalent pass; the gap is ~φ
+  (≈ 1.618) as predicted. vāṇī already beats GCC with `noinline` (866ms vs
+  1116ms), confirming LLVM's tail-call elimination gives a 1.29× advantage
+  over naive recursion.
+- **Benchmark runner**: fix stale `opt -O2` header; fix array statistics
+  description to note vāṇī uses parallel reduces while C/C++/Rust are
+  sequential.
+
+---
+
 ## [0.2.1] — 2026-07-04
 
 ### Performance — Compiler & Benchmarks

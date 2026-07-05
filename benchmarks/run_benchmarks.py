@@ -172,7 +172,7 @@ BENCHMARKS: List[Dict] = [
     {
         "id": "10_array_stats",
         "name": "Array statistics — mean + variance of 10 000 000 values",
-        "description": "Two sequential passes; tests plain arithmetic loop throughput.",
+        "description": "vāṇī: two `parallel for … reduce` passes. C/C++/Rust: sequential passes. Tests loop throughput and parallelism.",
         "expected": None,
         "variants": [
             {"tag": "vani", "file": "stats.vani"},
@@ -414,7 +414,7 @@ def generate_report(all_results: Dict[str, List[Result]], benchmarks: List[Dict]
     lines.append("")
     lines.append(f"*Generated: {time.strftime('%Y-%m-%d %H:%M')} — {runs} timing run(s) per benchmark, median reported.*")
     lines.append(f"*C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*")
-    lines.append(f"*vāṇī uses LLVM backend with `opt -O2 --mcpu=native` + `llc -O2 -mcpu=native`.*")
+    lines.append(f"*vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*")
     lines.append("")
 
     # System info
