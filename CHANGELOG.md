@@ -6,6 +6,33 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [0.2.1] — 2026-07-04
+
+### Performance — Compiler & Benchmarks
+
+- **Sieve Vec<i8>**: switched sieve benchmark from `Vec<i64>` to `Vec<i8>`
+  (8× smaller working set fits L1/L2 instead of spilling to L3); sieve gap vs C
+  closes from 3.35× to 1.03× (near parity).
+- **`hashmap_with_capacity(n)`**: new builtin pre-allocates a power-of-two slot
+  table ≥ 2n, eliminating incremental grow rehashing; hashmap gap closes from
+  1.94× to ~1.0× parity with C. Wired in checker, LLVM backend, and C backend.
+- **FNV-1a hash restored**: reverted a Fibonacci-hash experiment (`k * Φ`) that
+  caused a 4× hashmap regression; FNV-1a iterative hash reinstated across all 6
+  codegen sites (4 template + 2 concrete).
+- **Runtime thread count**: parallel-for thread default now reads
+  `std::thread::available_parallelism()` at compile time instead of a hardcoded
+  4; `OMP_NUM_THREADS` env-var still overrides. Host builds scale automatically.
+- **Alloca hoisting**: scalar `let` allocas moved to function entry block; local
+  accumulators in outlined parallel-for functions hoisted similarly, enabling
+  LICM and better register allocation.
+- **Benchmark runner**: fix Unicode crash on Windows cp1252 console; auto-detect
+  vanic from repo `target/release/`; upgrade C/C++ to `-O3 -march=native` and
+  Rust to `-C opt-level=3 -C target-cpu=native` for a fair native comparison;
+  deleted stale `RESULTS_SAMPLE.md`; regenerated `RESULTS.md` with 4-language
+  (C / C++ / Rust / vāṇī) comparison table.
+
+---
+
 ## [0.2.0] — 2026-07-01
 
 ### Added — Tooling
