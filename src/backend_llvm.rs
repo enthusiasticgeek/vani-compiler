@@ -30882,28 +30882,9 @@ fn emit_intent_hashmap_i64_i64_helpers_llvm(out: &mut String, has_option_i64: bo
          \x20 ret void\n\
          }\n\
          define internal i64 @intent_hashmap_i64_i64__hash_key(i64 %k) {\n\
-         \x20 %h_p = alloca i64\n\
-         \x20 store i64 -3750763034362895579, i64* %h_p\n\
-         \x20 %i_p = alloca i64\n\
-         \x20 store i64 0, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_loop:\n\
-         \x20 %i = load i64, i64* %i_p\n\
-         \x20 %cont = icmp slt i64 %i, 8\n\
-         \x20 br i1 %cont, label %hk_body, label %hk_done\n\
-         hk_body:\n\
-         \x20 %sh = mul i64 %i, 8\n\
-         \x20 %shifted = lshr i64 %k, %sh\n\
-         \x20 %b = and i64 %shifted, 255\n\
-         \x20 %h = load i64, i64* %h_p\n\
-         \x20 %hx = xor i64 %h, %b\n\
-         \x20 %hp = mul i64 %hx, 1099511628211\n\
-         \x20 store i64 %hp, i64* %h_p\n\
-         \x20 %i_n = add i64 %i, 1\n\
-         \x20 store i64 %i_n, i64* %i_p\n\
-         \x20 br label %hk_loop\n\
-         hk_done:\n\
-         \x20 %final = load i64, i64* %h_p\n\
+         \x20 %x1 = mul i64 %k, 6364136223846793005\n\
+         \x20 %sh1 = lshr i64 %x1, 33\n\
+         \x20 %final = xor i64 %x1, %sh1\n\
          \x20 ret i64 %final\n\
          }\n\
          define internal void @intent_hashmap_i64_i64__insert_raw(%intent_hashmap_i64_i64* %m, i64 %k, i64 %v) {\n\
