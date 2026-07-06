@@ -22,10 +22,13 @@ fn main() -> i64 {
     let n: i64 = 50000000;
 
     // Build data array: values are i % 1000 so total is computable.
-    let data: Vec<i64> = vec_with_capacity(n);
+    // vec_fill(n, 0) pre-allocates with len=n (no len update per iteration),
+    // then set() overwrites each element — no loop-carried len dependency,
+    // so LLVM can vectorize both the fill and the subsequent parallel sum.
+    let data: Vec<i64> = vec_fill(n, 0 as i64);
     let i: i64 = 0;
     while i < n {
-        let _ = push_unchecked(mut ref data, i % 1000);
+        let _ = set(mut ref data, i as u64, i % 1000);
         i = i + 1;
     }
 

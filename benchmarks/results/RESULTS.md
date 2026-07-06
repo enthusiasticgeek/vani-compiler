@@ -23,7 +23,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 | Matrix multiplicat |    12.9 ms   |    13.1 ms   |    16.1 ms   |    30.9 ms   | —            | —            |
 | Sort 1 000 000 int |    97.4 ms   |   175.4 ms   |    97.8 ms   |    36.7 ms   | —            | —            |
 | Graph BFS — index  |    12.7 ms   |    13.6 ms   | —            |    18.5 ms   |    20.3 ms   |    44.9 ms   |
-| Parallel sum — 50  |   176.7 ms   |   183.8 ms   |   223.5 ms   |   134.1 ms   | —            | —            |
+| Parallel sum — 50  |   177.5 ms   |   182.9 ms   |   218.5 ms   |   170.6 ms   | —            | —            |
 | HashMap — 500 000  |    40.4 ms   |    45.1 ms   |    54.4 ms   |    74.2 ms   | —            | —            |
 | Linked list — 1 00 |    12.4 ms   |    12.5 ms   |    15.4 ms   |    18.3 ms   | —            | —            |
 | Allocation stress  |    12.2 ms   |     9.6 ms   |    12.7 ms   |    13.9 ms   | —            | —            |
@@ -103,10 +103,10 @@ C/C++: OpenMP (if available), else serial.
 Rust: std::thread manual split.*
 
 ```
-  vani           ████████████████████████████░░░░░░░░    176.7 ms    baseline
-  c              ██████████████████████████████░░░░░░    183.8 ms    4.0% slower
-  cpp            ████████████████████████████████████    223.5 ms   26.5% slower
-  rs             ██████████████████████░░░░░░░░░░░░░░    134.1 ms   24.1% faster
+  vani           █████████████████████████████░░░░░░░    177.5 ms    baseline
+  c              ██████████████████████████████░░░░░░    182.9 ms    3.0% slower
+  cpp            ████████████████████████████████████    218.5 ms   23.1% slower
+  rs             ████████████████████████████░░░░░░░░    170.6 ms    3.9% faster
 ```
 
 ### HashMap — 500 000 insert + 500 000 lookup

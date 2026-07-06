@@ -1954,8 +1954,10 @@ fn emit_function(
         ));
     }
     out.push_str(&format!("){} {{\n", section_suffix));
+    out.push_str("entry:\n");
 
     let mut ctx = FnCtx::new(assert_msg_indices, print_str_indices);
+    ctx.current_block = "entry".to_string();
     // Closure #289 tree-LLVM: record the fn's bounded-name
     // (if any) so Return emits can reference the
     // thread-local counter. Then emit the entry sequence.
