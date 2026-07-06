@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-06-23
+Last updated: 2026-07-06
 
 ---
 
@@ -156,6 +156,65 @@ workarounds, and the exact design goal for each.
 
 ---
 
+---
+
+## ARM / AArch64 / NEON work queue
+
+Added 2026-07-06. Full status document: [`docs/arm_neon_status.md`](arm_neon_status.md).
+
+### ARM-1 — Target-aware `vectorize.width` hint (short, ~2 h)
+
+- [ ] **ARM-1. Emit target-aware loop vectorize width**
+  Currently every reduction loop emits `vectorize.width = 4` regardless
+  of target. On AArch64 NEON a 128-bit register holds **2×i64**, so width 4
+  forces two registers and may confuse the vectorizer. Fix: read the target
+  triple in the parallel-for emitter; emit `width = 2` for i64 on AArch64,
+  `width = 4` for i32 on AArch64 / i64 on x86-64 AVX2, `width = 8` for i32
+  on AVX-512.  Also applies to the `vec_fill` fill loop and the `set` loop.
+  Ref: `src/backend_llvm.rs` — `!llvm.loop.vectorize.width` emission sites.
+
+### ARM-2 — `--cpu=` flag for llc tuning (short, ~1 h)
+
+- [ ] **ARM-2. Add `--cpu=<name>` flag to `vanic build`**
+  Today `llc` is invoked with `-mcpu=native` (host builds) or no `-mcpu`
+  (cross builds). Cross targets like `aarch64-unknown-linux-gnu` would
+  benefit from `-mcpu=cortex-a72` (Pi 4) or `-mcpu=neoverse-n2` (Graviton 3).
+  Add `--cpu=<cpu-name>` flag; forward as `-mcpu=<name>` to `llc`.
+  Ref: `src/main.rs:3003` (`opt_mcpu` logic in `build_program_llvm`).
+
+### ARM-3 — AArch64 benchmark run (medium, ~2 h + hardware)
+
+- [ ] **ARM-3. Run all 10 benchmarks on AArch64; add to RESULTS.md**
+  All current numbers are x86-64 (Windows 11 AMD64). Run on a Graviton 3 /
+  Raspberry Pi 4 / Apple Silicon (via cross-build + SSH or native vanic).
+  Add an `AArch64` column to `benchmarks/results/RESULTS.md`.
+  This validates NEON auto-vectorization quality on a real ARM64 target.
+
+### ARM-4 — SVE / SVE2 opt-in (medium, ~4 h)
+
+- [ ] **ARM-4. Pass `+sve` / `+sve2` feature to llc for capable targets**
+  Neoverse N2, Graviton 3, and Apple M4 support SVE (scalable vectors).
+  Add `--sve` / `--sve2` flags (or auto-detect from `--cpu=neoverse-n2`).
+  Forward as `-mattr=+sve` / `-mattr=+sve2` to `llc`.
+  Ref: `src/main.rs` MTE path at line 3157 as a model for ISA-extension flags.
+
+### ARM-5 — Bare-metal parallel-for workaround documentation (short, ~1 h)
+
+- [ ] **ARM-5. Document bare-metal parallel-for limitation + FreeRTOS FFI pattern**
+  `parallel for … reduce` emits `pthread_create` which doesn't exist on
+  `arm-none-eabi`. Add a note to `tutorials/src/advanced/02_parallel.md`
+  and `04_embedded.md` with the recommended alternative: manual loop split
+  + FreeRTOS `xTaskCreate` via FFI, or single-threaded DMA-offload pattern.
+
+### ARM-6 — AArch64 CI runner (blocked)
+
+- [ ] **ARM-6. Add AArch64 GitHub Actions runner**
+  `.github/workflows/release.yml` only tests `ubuntu-latest` (x86-64).
+  Add a `ubuntu-24.04-arm` or self-hosted Graviton job that runs the full
+  `cargo test` suite. **BLOCKED**: needs CI runner budget / self-hosted Pi.
+
+---
+
 ## Blocked (not in our control)
 
 | Item | Blocker |
@@ -165,3 +224,4 @@ workarounds, and the exact design goal for each.
 | Windows IOCP async-TCP (`tcp_echo_epoll` etc.) | Readiness-vs-completion model mismatch (R8 in decisions.md) |
 | Arc 7 Win64 / AArch64 CI wiring | CI runner setup |
 | crates.io publish (item 1) — v0.1.2 tagged and ready | crates.io API token needed (`cargo login`) |
+| ARM-6 AArch64 CI | CI runner budget / self-hosted hardware |
