@@ -503,7 +503,7 @@ C and LLVM.
 | `Stream<T>` async iterator | absent | hand-rolled poll loop |
 | `select!` | absent | explicit poll round-robin |
 | Pin<&mut Self> | NOT planned | restructure to avoid self-refs |
-| Mutex<Vec<T>> | i64 only in v1 | channel transfer / task ownership |
+| Mutex<Vec<T>> | ✅ SHIPPED v0.1.1 — `Mutex<T>` is parametric over any T | — |
 | Proc macros | absent | external build-time codegen script |
 | `macro_rules!` | absent | generic fns + per-call codegen |
 | Reflection | absent | `dyn Iface` / explicit enum dispatch |
