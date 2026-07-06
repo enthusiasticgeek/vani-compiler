@@ -22,7 +22,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 | Sieve of Eratosthe |    13.4 ms   |    16.3 ms   |    17.6 ms   |    16.8 ms   | —            | —            |
 | Matrix multiplicat |    12.9 ms   |    13.1 ms   |    16.1 ms   |    30.9 ms   | —            | —            |
 | Sort 1 000 000 int |    97.4 ms   |   175.4 ms   |    97.8 ms   |    36.7 ms   | —            | —            |
-| Graph BFS — index  |    14.7 ms   |    13.0 ms   | —            |    22.0 ms   |    17.7 ms   |    49.1 ms   |
+| Graph BFS — index  |    12.7 ms   |    13.6 ms   | —            |    18.5 ms   |    20.3 ms   |    44.9 ms   |
 | Parallel sum — 50  |   176.7 ms   |   183.8 ms   |   223.5 ms   |   134.1 ms   | —            | —            |
 | HashMap — 500 000  |    40.4 ms   |    45.1 ms   |    54.4 ms   |    74.2 ms   | —            | —            |
 | Linked list — 1 00 |    12.4 ms   |    12.5 ms   |    15.4 ms   |    18.3 ms   | —            | —            |
@@ -89,11 +89,11 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
   graph_weakptr.cpp                   — shared_ptr children + weak_ptr back-edges.*
 
 ```
-  vani           ███████████░░░░░░░░░░░░░░░░░░░░░░░░░     14.7 ms    baseline
-  c              ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░     13.0 ms   11.4% faster
-  C++ (index)    █████████████░░░░░░░░░░░░░░░░░░░░░░░     17.7 ms   20.7% slower
-  C++ (weak_ptr) ████████████████████████████████████     49.1 ms   234.3% slower
-  rs             ████████████████░░░░░░░░░░░░░░░░░░░░     22.0 ms   50.0% slower
+  vani           ██████████░░░░░░░░░░░░░░░░░░░░░░░░░░     12.7 ms    baseline
+  c              ███████████░░░░░░░░░░░░░░░░░░░░░░░░░     13.6 ms    7.1% slower
+  C++ (index)    ████████████████░░░░░░░░░░░░░░░░░░░░     20.3 ms   59.8% slower
+  C++ (weak_ptr) ████████████████████████████████████     44.9 ms   253.5% slower
+  rs             ███████████████░░░░░░░░░░░░░░░░░░░░░     18.5 ms   45.7% slower
 ```
 
 ### Parallel sum — 50 000 000 elements

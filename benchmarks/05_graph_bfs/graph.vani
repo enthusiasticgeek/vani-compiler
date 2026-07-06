@@ -7,7 +7,8 @@
 //   • atomic reference-count increment/decrement on every access
 //   • weak_ptr::lock() overhead (~2 atomic ops per back-edge read)
 //
-// The graph: N=1000 nodes, ~6 outgoing edges per node (deterministic).
+// The graph: N=1000 nodes, fixed degree 6 (same neighbours as C benchmark).
+// Flat adjacency layout: adj[curr * 6 + e] — matches C's adj[curr*DEGREE+e].
 // We run BFS 1000 times (from node i % N) and print the total
 // node-visit count as a correctness check.
 //
@@ -17,62 +18,50 @@
 
 intent "Benchmark: graph BFS with index handles — no weak_ptr, no ref-counting";
 
-// Adjacency list stored as two parallel Vec<i64>:
-//   adj_start[v]     = start index in adj_edges for node v
-//   adj_edges[...]   = neighbour node indices
-
-fn build_graph(n: i64, adj_start: mut ref Vec<i64>, adj_edges: mut ref Vec<i64>) -> i64 {
-    // Wire each node v to neighbours: (v+1)%n, (v+3)%n, (v+7)%n,
-    //                                  (v+13)%n, (v+29)%n, (v+61)%n
-    // Note: adj_start and adj_edges are already mut ref Vec<i64> parameters;
-    // pass them directly to insert/push (no extra mut ref — that would double-ref).
+fn build_graph(n: i64, adj: mut ref Vec<i64>) -> i64 {
+    // Flat CSR: adj[v * 6 + e] = neighbour index.
+    // Offsets match C: {1, 3, 7, 13, 29, 61}.
     let v: i64 = 0;
     while v < n {
-        let start: i64 = (len(adj_edges)) as i64;
-        let _ = insert(adj_start, v as u64, start);
-
-        let _ = push(adj_edges, (v + 1) % n);
-        let _ = push(adj_edges, (v + 3) % n);
-        let _ = push(adj_edges, (v + 7) % n);
-        let _ = push(adj_edges, (v + 13) % n);
-        let _ = push(adj_edges, (v + 29) % n);
-        let _ = push(adj_edges, (v + 61) % n);
+        let _ = push(adj, (v + 1) % n);
+        let _ = push(adj, (v + 3) % n);
+        let _ = push(adj, (v + 7) % n);
+        let _ = push(adj, (v + 13) % n);
+        let _ = push(adj, (v + 29) % n);
+        let _ = push(adj, (v + 61) % n);
         v = v + 1;
     }
     return 0;
 }
 
-fn bfs(adj_start: ref Vec<i64>, adj_edges: ref Vec<i64>,
+fn bfs(adj: ref Vec<i64>,
+       visited: mut ref Vec<i8>, queue: mut ref Vec<i64>,
        n: i64, start: i64) -> i64 {
-    // visited and queue are local Vec<i64> — use set(mut ref ...) and push(mut ref ...)
-    // to avoid 24-byte Vec-struct copies on every call. This is the hot path:
-    // ~1 000 000 push+set calls per benchmark run (1000 BFS × ~1000 visits each).
-    let visited: Vec<i64> = vec_with_capacity(n);
-    let queue: Vec<i64> = vec_with_capacity(n);
+    // Reset visited to all-zero; clear() resets queue length to 0 without freeing.
     let k: i64 = 0;
     while k < n {
-        let _ = push(mut ref visited, 0);
+        let _ = set(visited, k as u64, 0 as i8);
         k = k + 1;
     }
-    let _ = set(mut ref visited, start as u64, 1);
-    let _ = push(mut ref queue, start);
+    let _ = clear(queue);
+
+    let _ = set(visited, start as u64, 1 as i8);
+    let _ = push_unchecked(queue, start);
 
     let head: i64 = 0;
     let count: i64 = 0;
-    while head < (len(ref queue) as i64) {
+    while head < (len(queue) as i64) {
         let curr: i64 = queue[head];
         head = head + 1;
         count = count + 1;
 
-        // Edges for `curr` are at adj_edges[adj_start[curr] .. adj_start[curr]+6].
-        // (Fixed degree 6 per node in this graph.)
-        let edge_base: i64 = adj_start[curr];
+        let base: i64 = curr * 6;
         let e: i64 = 0;
         while e < 6 {
-            let nb: i64 = adj_edges[edge_base + e];
-            if visited[nb] == 0 {
-                let _ = set(mut ref visited, nb as u64, 1);
-                let _ = push_unchecked(mut ref queue, nb);
+            let nb: i64 = adj[base + e];
+            if visited[nb] == (0 as i8) {
+                let _ = set(visited, nb as u64, 1 as i8);
+                let _ = push_unchecked(queue, nb);
             }
             e = e + 1;
         }
@@ -83,14 +72,24 @@ fn bfs(adj_start: ref Vec<i64>, adj_edges: ref Vec<i64>,
 fn main() -> i64 {
     let n: i64 = 1000;
 
-    let adj_start: Vec<i64> = vec_with_capacity(n + 1);
-    let adj_edges: Vec<i64> = vec_with_capacity(n * 6);
-    let _ = build_graph(n, mut ref adj_start, mut ref adj_edges);
+    // Flat adjacency: adj[v * 6 + e] = neighbour of v at position e.
+    let adj: Vec<i64> = vec_with_capacity(n * 6);
+    let _ = build_graph(n, mut ref adj);
+
+    // Pre-allocate visited and queue outside the BFS loop.
+    let visited: Vec<i8> = vec_with_capacity(n);
+    let queue: Vec<i64> = vec_with_capacity(n);
+    // Prime visited length to n so set() writes are in-bounds.
+    let vi: i64 = 0;
+    while vi < n {
+        let _ = push_unchecked(mut ref visited, 0 as i8);
+        vi = vi + 1;
+    }
 
     let total: i64 = 0;
     let run: i64 = 0;
     while run < 1000 {
-        total = total + bfs(ref adj_start, ref adj_edges, n, run % n);
+        total = total + bfs(ref adj, mut ref visited, mut ref queue, n, run % n);
         run = run + 1;
     }
     print total;
