@@ -11,7 +11,7 @@
 > fixed (see below). Run with `vanic run <file>
 > --backend=c` (or `--backend=llvm`) to verify.
 
-Last verified 2026-06-09 against `vanic` HEAD; mixed-feature gap table updated 2026-06-20 for v0.1.1/v0.1.2/v0.1.3 changes.
+Last verified 2026-07-06 against `vanic` HEAD (v0.2.4); mixed-feature gap table updated 2026-06-20 for v0.1.1/v0.1.2/v0.1.3 changes; bug log updated 2026-07-06 for v0.2.x fixes.
 
 > **Why mixed-feature tests matter.** A feature working in
 > isolation is necessary but not sufficient. `Box<T>` works.
@@ -166,6 +166,36 @@ already runs for these — letting it pick them up resolves
 the ordering. Regression:
 `async_fn_returning_ref_to_user_struct_compiles_on_c_backend`.
 
+### Bug 7 — `vec_with_capacity` / `vec_fill` under-allocated for struct element types (FIXED v0.2.2)
+
+`vec_with_capacity(n)` and `vec_fill(n, val)` computed the
+allocation size as `n * 8` for any struct element type,
+because `vec_element_byte_size` returned 8 (the `bits().unwrap_or(64)/8`
+fallback) for `Type::Struct`. For a 24-byte struct (three `i64`
+fields) this allocated `n * 8` bytes but `push` wrote `n * 24`
+bytes, silently corrupting the heap and crashing with an access
+violation on the first out-of-bounds write. Fix: the two call
+sites in `vec_with_capacity` and `vec_fill` now use
+`vec_element_size_expr` which emits the LLVM compile-time
+constant `ptrtoint(%Struct_T* getelementptr(%Struct_T, null, 1) to i64)`.
+Regression: `benchmarks/09_alloc_stress/alloc.vani` (exercises
+`Vec<Payload>` where `Payload` has three `i64` fields).
+
+### Bug 8 — `vec_fill` with non-i8 element type failed to compile at function entry (FIXED v0.2.4)
+
+`vec_fill(n, val)` for element types wider than `i8` emits a
+phi-based fill loop. The phi node references its predecessor
+basic block by name, captured from `ctx.current_block`. When
+`vec_fill` was called at the start of a function (before any
+branch), `ctx.current_block` was `""` (the implicit unnamed
+entry block), producing the invalid LLVM IR
+`phi i64 [0, %], [%idx_next, %vfill_body_N]`.
+Fix: `emit_function` now emits an explicit `entry:` label
+immediately after the function's opening brace and sets
+`ctx.current_block = "entry"`, so every phi always has a
+valid named predecessor. The `i8` path (which uses `memset`
+instead of a phi loop) was unaffected.
+
 ### Bug 4 — `Vec<Box<T>>` panicked both backends (C backend FIXED; LLVM backend still leaks)
 
 `Vec<Box<T>>` previously panicked both backends with placeholder-
@@ -194,17 +224,14 @@ the compile-succeeds case; runtime cleanup is a follow-up).
   / (v3.1 only) Ref/RefMut(Var) at the T-position. Complex
   argument expressions reject with a documented diagnostic;
   no turbofish (`f::<i64>(...)`) syntax.
-- **Tuples are Copy-only.** `(Box<T>, U)` / `(OwnedStr, U)`
-  reject; workaround is a named struct.
+- ~~**Tuples are Copy-only.** `(Box<T>, U)` / `(OwnedStr, U)` reject; workaround is a named struct.~~ **FIXED v0.1.4** — non-Copy elements allowed in tuples; regression test: `mix_tuple_non_copy.vani`.
 - **OwnedStr enum payloads** are exposed in match arm
   bindings as `Str` (read-only borrow) not `OwnedStr` (owning).
   Match arm returning the bound `s` then types as `Str`,
   which mismatches if other arms return `OwnedStr`.
   Workaround: `s + ""` to copy into OwnedStr at the binding
   site.
-- **`Option<Box<T>>` enum payload** rejects — v1 enum
-  variant payloads admit Copy / OwnedStr / Vec / array /
-  Task / Atomic / Mutex / Channel only.
+- ~~**`Option<Box<T>>` enum payload** rejects — v1 enum variant payloads admit Copy / OwnedStr / Vec / array / Task / Atomic / Mutex / Channel only.~~ **FIXED v0.1.4** — `Box<T>` admitted in enum variant payloads; regression test: `mix_box_enum_payload.vani`.
 - **Anonymous fn called inline from Vec slot** (`fs[0](10)`)
   rejects — only named functions can be called.
 
