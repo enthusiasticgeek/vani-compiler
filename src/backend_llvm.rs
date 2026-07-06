@@ -8640,7 +8640,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 };
                 let elt_ty = vec_element_value_str(element);
                 let s_ty = vec_struct_name(element);
-                let elt_bytes = vec_element_byte_size(element) as i64;
+                let sizeof_expr = vec_element_size_expr(element);
                 let n_val = emit_expr(&args[0], ctx, out);
                 // cap = max(n, 1) to avoid zero-byte malloc
                 let cond = ctx.fresh_tmp();
@@ -8653,7 +8653,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let bytes = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = mul i64 {}, {}\n",
-                    bytes, cap, elt_bytes
+                    bytes, cap, sizeof_expr
                 ));
                 let raw = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -8693,6 +8693,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let elt_ty = vec_element_value_str(element);
                 let s_ty = vec_struct_name(element);
                 let elt_bytes = vec_element_byte_size(element) as i64;
+                let sizeof_expr = vec_element_size_expr(element);
                 let n_val = emit_expr(&args[0], ctx, out);
                 let fill_val = emit_expr(&args[1], ctx, out);
                 // cap = max(n, 1) to avoid zero-byte malloc
@@ -8704,7 +8705,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     cap, cond, n_val
                 ));
                 let bytes = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = mul i64 {}, {}\n", bytes, cap, elt_bytes));
+                out.push_str(&format!("  {} = mul i64 {}, {}\n", bytes, cap, sizeof_expr));
                 let raw = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = call i8* @malloc(i64 {})\n",
