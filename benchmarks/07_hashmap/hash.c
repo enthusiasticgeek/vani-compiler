@@ -5,16 +5,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <inttypes.h>
 
 #define CAP_INIT  (1 << 20)   /* must be power-of-2 */
 
-typedef struct { long key; long val; int used; } Slot;
+typedef struct { int64_t key; int64_t val; int used; } Slot;
 
 static Slot  *table;
 static size_t cap;
 static size_t count;
 
-static uint64_t fnv1a(long key) {
+static uint64_t fnv1a(int64_t key) {
     uint64_t h = 14695981039346656037ULL;
     unsigned char *p = (unsigned char *)&key;
     for (int i = 0; i < 8; i++) {
@@ -30,7 +31,7 @@ static void ht_init(size_t initial_cap) {
     table = (Slot *)calloc(cap, sizeof(Slot));
 }
 
-static void ht_insert(long key, long val) {
+static void ht_insert(int64_t key, int64_t val) {
     size_t idx = (size_t)fnv1a(key) & (cap - 1);
     while (table[idx].used && table[idx].key != key)
         idx = (idx + 1) & (cap - 1);
@@ -40,7 +41,7 @@ static void ht_insert(long key, long val) {
     table[idx].used = 1;
 }
 
-static long ht_get(long key, long def) {
+static int64_t ht_get(int64_t key, int64_t def) {
     size_t idx = (size_t)fnv1a(key) & (cap - 1);
     while (table[idx].used) {
         if (table[idx].key == key) return table[idx].val;
@@ -50,17 +51,17 @@ static long ht_get(long key, long def) {
 }
 
 int main(void) {
-    const long N = 500000;
+    const int64_t N = 500000;
     ht_init(CAP_INIT);
 
-    for (long i = 0; i < N; i++)
+    for (int64_t i = 0; i < N; i++)
         ht_insert(i, i * i);
 
-    long sum = 0;
-    for (long j = 0; j < N; j++)
+    int64_t sum = 0;
+    for (int64_t j = 0; j < N; j++)
         sum += ht_get(j, 0);
 
-    printf("%zu\n%ld\n", count, sum);
+    printf("%zu\n%" PRId64 "\n", count, sum);
     free(table);
     return 0;
 }
