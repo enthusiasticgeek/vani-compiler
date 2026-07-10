@@ -2,7 +2,7 @@
 
 **Project**: vāṇी compiler (`vani-compiler`)
 **Maintainer**: Pratik M. Tambe &lt;enthusiasticgeek@gmail.com&gt;
-**Agreement version**: 1.1 — 2026-07-10
+**Agreement version**: 1.2 — 2026-07-10
 
 > **Note**: This agreement was drafted in good faith but has not been reviewed
 > by a licensed attorney. Both parties should seek independent legal counsel
@@ -56,9 +56,37 @@ Include the following in the issue body:
 [Describe what you intend to contribute: bug fixes, new language features,
  backends, documentation, benchmarks, test cases, etc.]
 
+### Employment and contractual independence declaration
+**Current employer (or "Self-employed" / "Student" / "Unemployed")**:
+[Name of employer, or status]
+
+**Does your employer operate in a field related to compilers, programming
+languages, developer tooling, or systems software?** (yes / no / N/A):
+[answer]
+
+**Have you reviewed your employment contract, IP assignment agreement,
+non-compete, moonlighting clause, or any other contractual obligation that
+could apply to this Contribution?** (yes / no / N/A):
+[answer]
+
+**Do any of those agreements restrict or prohibit this Contribution?**
+(yes / no — if yes, explain or do not apply):
+[answer]
+
+**If your employer could claim any rights to this Contribution** (e.g.,
+made on company time, company equipment, or in a field related to your
+employment), have you obtained written employer permission? (yes / N/A):
+[answer or "N/A — contribution is entirely independent of my employment"]
+
 ### CLA Declaration
-I have read the vāṇी Compiler Contributor License Agreement (CLA.md v1.1)
-and agree to its terms.
+I have read the vāṇī Compiler Contributor License Agreement (CLA.md v1.2)
+and agree to its terms, including the Employment Independence and
+Indemnification provisions (§6).
+
+I declare that the employment information above is accurate and complete.
+I understand that any legal issues arising from my violation of employment
+or contractual obligations are solely my responsibility, and I agree to
+defend and indemnify the Maintainer and Project against any resulting claims.
 
 Signed: [Your Full Legal Name]
 Date:   [YYYY-MM-DD]
@@ -72,7 +100,7 @@ The Maintainer will review your GitHub profile, credentials, and stated contribu
 - **Request more information**: The Maintainer may ask follow-up questions before making a decision.
 - **Decline**: The Maintainer may decline any application at sole discretion, with or without explanation.
 
-Approval is not permanent — it may be revoked at any time (see §8).
+Approval is not permanent — it may be revoked at any time (see §9).
 
 ### Step 3 — Open Pull Requests
 
@@ -82,7 +110,7 @@ Once approved, you may open pull requests. Reference your approval issue number 
 
 ## 3. Copyright License Grant
 
-Subject to the terms of this Agreement, You hereby grant to the Maintainer, and to all recipients of software distributed by the Maintainer, a **perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable** copyright license to:
+Subject to the terms of this Agreement (and in particular subject to the representations and indemnification in §§5–6), You hereby grant to the Maintainer, and to all recipients of software distributed by the Maintainer, a **perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable** copyright license to:
 
 - reproduce, prepare derivative works of, publicly display, publicly perform, sublicense, and distribute Your Contributions and any derivative works thereof.
 
@@ -100,15 +128,58 @@ If any entity institutes patent litigation against You or any other party allegi
 
 By submitting a Contribution application and any subsequent Contributions, You represent that:
 
-1. **Entitlement** — You are legally entitled to grant the licenses in §§3–4. If Your employer has rights to intellectual property You create, You represent that Your employer has authorized You to make this Contribution on its behalf, or that Your employer has waived such rights for Your Contributions to this Project.
-2. **Original authorship** — Each Contribution is Your original creation, unless disclosed as required by §6.
-3. **Third-party notices** — You have disclosed all third-party licenses, patents, or restrictions of which You are aware that are associated with any part of Your Contribution.
-4. **No litigation** — You are not aware of any pending or threatened patent or copyright claims that would prevent the Project from distributing Your Contribution under its existing license.
-5. **Accurate identity** — The GitHub account used to apply is under Your sole control and accurately identifies You or Your organisation. Applications made under false identity are void.
+1. **Entitlement** — You are legally entitled to grant the licenses in §§3–4.
+
+2. **Employment and contractual clearance** — You have reviewed every employment agreement, contractor agreement, IP assignment clause, moonlighting or outside-activity restriction, non-compete agreement, non-disclosure agreement, and any other contractual or fiduciary obligation binding on You, and You confirm that:
+   - making this Contribution does **not** violate any such obligation;
+   - Your employer (if any) does **not** hold, claim, or could not reasonably claim ownership of this Contribution by virtue of your employment relationship (e.g., work-for-hire, invention-assignment, or scope-of-employment doctrines); and
+   - if Your employer operates in a field related to compilers, programming languages, developer tooling, or systems software, You have either (a) obtained written permission from Your employer to make this Contribution, or (b) confirmed in writing (in your application) that the Contribution is entirely independent of your employment duties, created on your own time, using your own equipment, and not in a field covered by your IP assignment clause.
+
+3. **Original authorship** — Each Contribution is Your original creation, unless disclosed as required by §7.
+
+4. **Third-party notices** — You have disclosed all third-party licenses, patents, or restrictions of which You are aware that are associated with any part of Your Contribution.
+
+5. **No litigation** — You are not aware of any pending or threatened patent, copyright, or employment-related claim that would prevent the Project from distributing Your Contribution under its existing license.
+
+6. **Accurate identity and disclosure** — The GitHub account used to apply is under Your sole control and accurately identifies You or Your organisation. The employment information provided in Your application is accurate and complete. Applications made under false identity or with materially false employment disclosures are void and constitute grounds for immediate revocation and legal action.
 
 ---
 
-## 6. Third-Party Materials
+## 6. Employment Independence and Indemnification
+
+### 6.1 Sole responsibility for employment compliance
+
+**Your compliance with your own employment agreements is entirely your responsibility.** The Maintainer and the Project:
+
+- have no means to verify the terms of Your employment, contractor, or non-compete agreements;
+- do not undertake to review or advise on those agreements;
+- are **not liable** for any consequences arising from Your decision to contribute in violation of those agreements; and
+- will not modify or remove accepted Contributions solely on the basis of a third-party employment-related claim, except where legally compelled to do so.
+
+If a dispute arises between You and Your employer over ownership of a Contribution, that dispute is between You and Your employer. The Project will cooperate with lawfully issued court orders but will not voluntarily withdraw accepted Contributions on the basis of unverified employment claims.
+
+### 6.2 Indemnification
+
+**You agree to defend, indemnify, and hold harmless** the Maintainer (Pratik M. Tambe), and all downstream recipients of the Project's software, from and against any and all third-party claims, demands, actions, proceedings, damages, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising out of or related to:
+
+- (a) any breach or alleged breach by You of any employment agreement, contractor agreement, IP assignment clause, moonlighting or outside-activity restriction, non-compete agreement, or other contractual obligation;
+- (b) any claim by Your employer, former employer, or any other third party that Your Contribution was made in violation of their intellectual property rights by reason of Your employment relationship or contractual obligations;
+- (c) any material misrepresentation or omission in Your Contributor Application regarding Your employment status, contractual obligations, or the ownership of Your Contribution; or
+- (d) any false or misleading statement made in the CLA Declaration.
+
+This indemnification obligation survives termination or revocation of Your contributor status and continues for as long as the Contribution remains part of the Project or any derivative work.
+
+### 6.3 Notification obligation
+
+If, at any time after Your application is approved, You become aware of any employment, contractual, or legal restriction that could affect the validity of Your representations in §5 or Your ability to contribute, You must **notify the Maintainer in writing within 14 days** at &lt;enthusiasticgeek@gmail.com&gt;. Failure to notify is itself a material breach of this Agreement.
+
+### 6.4 Employer-authorized contributions
+
+If Your employer has authorized Your contributions and holds joint or contingent rights to Your Contribution, Your application must include written evidence of that authorization (e.g., a signed email from an authorized officer of Your employer confirming the grant of permission). Both You and an authorized representative of Your employer must sign the CLA Declaration.
+
+---
+
+## 7. Third-Party Materials
 
 If Your Contribution includes material authored by others, You must:
 
@@ -117,7 +188,7 @@ If Your Contribution includes material authored by others, You must:
 
 ---
 
-## 7. Forking Policy
+## 8. Forking Policy
 
 The vāṇī compiler is published under the MIT License, which permits forking and redistribution. The Maintainer **does not technically prevent forks** of this repository. However:
 
@@ -130,7 +201,7 @@ The Maintainer reserves the right to change the license for future releases. Pas
 
 ---
 
-## 8. Revocation
+## 9. Revocation
 
 Contributor approval may be revoked by the Maintainer at any time for:
 
@@ -139,23 +210,23 @@ Contributor approval may be revoked by the Maintainer at any time for:
 - Inactivity exceeding 24 months with no accepted contributions (approval lapses; reapplication required)
 - Any other reason at the Maintainer's sole discretion
 
-Revocation removes the contributor's username from [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md). Pull requests from revoked contributors will not be merged.
+Revocation removes the contributor's username from [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md). Pull requests from revoked contributors will not be merged. Revocation does not relieve a former contributor of indemnification obligations under §6.2 for Contributions already accepted.
 
 ---
 
-## 9. No Warranty
+## 10. No Warranty
 
 Your Contributions are provided **"AS IS"**, without warranty of any kind, express or implied.
 
 ---
 
-## 10. Project License and Future Relicensing
+## 11. Project License and Future Relicensing
 
 Accepted Contributions will be distributed as part of the Project under the **MIT License** (see [`LICENSE`](LICENSE)). The Maintainer reserves the right to relicense the Project for future releases (e.g., dual-license for commercial use). Your grants under §§3–4 permit such relicensing. This Agreement does not grant You any right to use the Maintainer's name, trademarks, or project branding in a way that implies endorsement of Your own products or services.
 
 ---
 
-## 11. Governing Law
+## 12. Governing Law
 
 This Agreement is governed by applicable law. Any dispute shall first be addressed through good-faith written negotiation between You and the Maintainer. If unresolved after 30 days, the parties agree to binding arbitration before resorting to litigation.
 
@@ -186,4 +257,4 @@ Open a GitHub Discussion in the `vani-compiler` repository, or contact the Maint
 
 ---
 
-*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇी Kosh Publisher Agreement v1.0. Revision: 2026-07-10 v1.1.*
+*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇी Kosh Publisher Agreement v1.0. Revision: 2026-07-10 v1.2.*
