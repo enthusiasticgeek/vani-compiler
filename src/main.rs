@@ -1345,8 +1345,8 @@ fn run() -> Result<ExitCode, String> {
         }
         "build" => {
             let (file, flag_start) = required_file_at(&args, 2, "build")?;
-            let (out, link_args, target, cpu) = parse_build_args(&args, flag_start)?;
-            build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref(), cpu.as_deref())
+            let (out, link_args, target, cpu, sve) = parse_build_args(&args, flag_start)?;
+            build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref(), cpu.as_deref(), sve.as_deref())
         }
         "tokens" => {
             // Debug subcommand: dump the token stream to stdout.
@@ -2505,11 +2505,12 @@ fn parse_run_args(
 fn parse_build_args(
     args: &[String],
     from: usize,
-) -> Result<(Option<PathBuf>, Vec<String>, Option<String>, Option<String>), String> {
+) -> Result<(Option<PathBuf>, Vec<String>, Option<String>, Option<String>, Option<String>), String> {
     let mut out: Option<PathBuf> = None;
     let mut link_args: Vec<String> = Vec::new();
     let mut target: Option<String> = None;
     let mut cpu: Option<String> = None;
+    let mut sve: Option<String> = None;  // "sve" or "sve2"
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if arg == "-o" || arg == "--out" {
@@ -2548,6 +2549,15 @@ fn parse_build_args(
                 .ok_or_else(|| "expected a CPU name after '--cpu'".to_string())?;
             cpu = Some(name.clone());
             idx += 2;
+        } else if arg == "--sve2" {
+            sve = Some("sve2".to_string());
+            idx += 1;
+        } else if arg == "--sve" {
+            // --sve2 overrides --sve if both are given; handled at use site.
+            if sve.is_none() {
+                sve = Some("sve".to_string());
+            }
+            idx += 1;
         } else if arg == "--no-std" {
             // Accepted here; build_program_llvm auto-activates no-std for
             // bare-metal triples, but the explicit flag is also honoured.
@@ -2556,7 +2566,7 @@ fn parse_build_args(
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((out, link_args, target, cpu))
+    Ok((out, link_args, target, cpu, sve))
 }
 
 fn parse_emit_args(
@@ -2980,6 +2990,7 @@ fn build_program_llvm(
     link_args: &[String],
     target: Option<&str>,
     cpu: Option<&str>,
+    sve: Option<&str>,
 ) -> Result<ExitCode, String> {
     let checked = compile_path_or_report(path)?;
     vani::backend_llvm::set_target_triple(target.unwrap_or(""));
@@ -3072,6 +3083,23 @@ fn build_program_llvm(
     let llc_mcpu: &str = cpu.unwrap_or(if target.is_none() { "native" } else { "" });
     if !llc_mcpu.is_empty() {
         llc_cmd.arg(format!("-mcpu={}", llc_mcpu));
+    }
+    // SVE / SVE2 opt-in: --sve / --sve2 forward +sve / +sve2 to llc as -mattr.
+    // Only valid for AArch64 targets; error early on other targets to avoid a
+    // confusing llc diagnostic.
+    if let Some(sve_level) = sve {
+        let is_aarch64 = target
+            .map(|t| t.starts_with("aarch64") || t.starts_with("arm64"))
+            .unwrap_or_else(|| cfg!(target_arch = "aarch64"));
+        if !is_aarch64 {
+            return Err(format!(
+                "--{} requires an AArch64 target (e.g. --target=aarch64-unknown-linux-gnu); \
+                 current target: {}",
+                sve_level,
+                target.unwrap_or("<host>")
+            ));
+        }
+        llc_cmd.arg(format!("-mattr=+{}", sve_level));
     }
     // Default to -O=3. The verifier proves safety upstream so
     // the optimizer is free to assume no UB on the proved paths.
@@ -3294,7 +3322,7 @@ fn run_program_llvm_target(
             }
         }
     }
-    build_program_llvm(path, Some(&elf_path), &[], Some(triple), None)?;
+    build_program_llvm(path, Some(&elf_path), &[], Some(triple), None, None)?;
     // Try QEMU user-mode
     match qemu_for_triple(triple) {
         Some(qemu) => {

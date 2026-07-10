@@ -92,11 +92,21 @@ The GitHub Actions release workflow runs on `ubuntu-latest` (x86-64) only.
 AArch64 cross-test is blocked on adding an `ubuntu-latest` arm64 runner or
 self-hosted Graviton/Pi instance.
 
-### 7. SVE / SVE2 not leveraged
+### 7. SVE / SVE2 — opt-in via `--sve` / `--sve2` ✅ shipped v0.2.4+
 
-For Neoverse N2, AWS Graviton 3, and Apple M4 (which have SVE), LLVM may
-auto-vectorize wider than 128-bit, but vāṇī never requests it explicitly.
-No `+sve` or `+sve2` feature flags are passed to `llc`.
+```
+vanic build server.vani --target=aarch64-unknown-linux-gnu --cpu=neoverse-n2 --sve2
+```
+
+Passes `-mattr=+sve` / `-mattr=+sve2` to `llc`. Requires an AArch64 target
+(errors with a clear message on any other triple). Pairs with `--cpu=` for
+full tuning — e.g. `--cpu=neoverse-n2 --sve2` enables all Graviton 3 /
+Neoverse N2 features. LLVM then uses SVE's scalable vector register width
+for auto-vectorized loops instead of the fixed 128-bit NEON lanes.
+
+> **Note on explicit NEON / SVE intrinsics:** there is still no user-visible
+> `@neon_vaddq_s64` or `target_feature(sve)` surface (gap #2 above).
+> All SIMD comes from LLVM auto-vectorization.
 
 ---
 

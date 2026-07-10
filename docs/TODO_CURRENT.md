@@ -217,7 +217,7 @@ Steps 5–6 are next session / blocked.
 
 ### ARM-4 — SVE / SVE2 opt-in · **P5 · ~4 h (next session)**
 
-- [ ] **ARM-4. Pass `+sve` / `+sve2` feature to llc for capable targets**
+- [x] **ARM-4. Pass `+sve` / `+sve2` feature to llc for capable targets** ✅ done 2026-07-06
   Neoverse N2, Graviton 3, and Apple M4 support SVE (scalable vectors).
   Add `--sve` / `--sve2` flags (or auto-detect from `--cpu=neoverse-n2`).
   Forward as `-mattr=+sve` / `-mattr=+sve2` to `llc`.

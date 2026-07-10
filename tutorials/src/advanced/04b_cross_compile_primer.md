@@ -258,6 +258,15 @@ flashing.
 | 16-bit MMIO register | `mmio_read_u16(addr)` / `mmio_write_u16(addr, val)` |
 | Override cross-linker | `CROSS_CC=arm-none-eabi-gcc vanic build ...` |
 | Run cross-Linux ELF on host | `vanic run --target=aarch64-unknown-linux-gnu` (needs QEMU) |
+| Tune for a specific CPU | `--cpu=cortex-a72` (Pi 4) / `--cpu=neoverse-n2` (Graviton 3) |
+| Enable SVE on Neoverse N2 / Graviton 3 | `--sve` (SVE) or `--sve2` (SVE2); AArch64 only |
+| Enable SVE2 on Apple M-series / Graviton 4 | `--target=aarch64-… --cpu=apple-m4 --sve2` |
+
+> **NEON auto-vectorization and `vectorize.width`:** when building for AArch64 the
+> compiler automatically emits `!llvm.loop.vectorize.width = 2` (instead of the
+> x86-biased `4`) so LLVM's vectorizer picks the natural NEON lane count for i64
+> loops. With `--sve` / `--sve2` the scalable-vector lowering in `llc` overrides
+> this hint and chooses the hardware's native SVE register width.
 
 ## Cross-reference
 
