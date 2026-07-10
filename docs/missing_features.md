@@ -434,11 +434,18 @@ shipped; works for the common cases.
 
 ### SIMD intrinsics
 
-**Not in vāṇी.** No `__m128i` / `__m256i` equivalent.
+**Partially supported.** vāṇी has two explicit SIMD register types:
 
-**Workaround:** `parallel for` lowers to OpenMP (C backend)
-which the C compiler may auto-vectorize. For explicit SIMD,
-`extern "C"` to a C helper compiled with intrinsics.
+- `vec128<T>` — 128-bit, 7 builtins (`simd_splat`, `simd_load`, `simd_store`,
+  `simd_add`, `simd_sub`, `simd_mul`, `simd_reduce_add`). Maps to NEON on
+  AArch64, SSE/AVX on x86-64, RVV on RISC-V.
+- `vec256<T>` — 256-bit, 7 builtins (`simd256_*`). Maps to AVX2 `ymm` on
+  x86-64; legalised as 2×NEON on AArch64 without SVE; single SVE register
+  with `--sve`; RVV with `vsetvli vl=8`.
+
+**Still not available:** platform-specific intrinsics (`__m256i`, `vaddq_s64`,
+`_mm_aesenc_si128`, etc.). For these, use an `extern "C"` FFI shim compiled
+with the target's intrinsic headers. See `docs/simd_ffi_shims.md`.
 
 ---
 
@@ -560,6 +567,7 @@ checking these as the compiler evolves.
 | Generic fn with multiple lifetime-distinct ref params returning a ref | Path-D territory; v1 only does single-ref-param elision. | Split into two narrower fns, each with one ref param. |
 | `async fn` containing a `dyn Iface` method call across an `await` | `dyn`-method receivers can't be held across suspend points (Pin-like restriction would be needed). | Resolve the dyn before the await; pre-compute, then await, then use the result. |
 | Recursive `Drop` impl that calls another `Drop` impl on a borrowed field | Borrow-checker rule: `mut ref Self` during drop can't pass to another `Drop` taking `mut ref Self`. | Implement Drop only at the outermost level; let the compiler chain field-by-field drops automatically. |
+| `ref Vec<T>` parameter + loop-bound bounds check (C backend) | The C backend emits `.len` instead of `->len` in the auto-inserted bounds-check guard when the Vec is a `ref` (pointer) parameter. gcc rejects the generated C with "is a pointer; did you mean `→`?". Affects any fn that takes `ref Vec<T>` and whose loop bound triggers the guard (e.g. `simd_load`/`simd256_load` with a non-trivially-bounded index). LLVM backend is unaffected. | Use `--backend=llvm` (the default) for functions with `ref Vec<T>` parameters and SIMD loads. Alternatively restructure the fn to take `Vec<T>` by value (copy the Vec reference at the call site via a local let). Pre-existing bug; tracked for fix in a future C-backend bounds-check pass. |
 
 The pattern: when two features both reach for "non-Copy
 data", the combination often hits a v1 gap because the

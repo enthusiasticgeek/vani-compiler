@@ -2,12 +2,15 @@
 
 *Benchmarks 01–10 generated: 2026-07-06 08:45 — 5 timing run(s) per benchmark, median reported.*
 *Benchmark 11 generated: 2026-07-10 — 5 timing run(s), median reported.*
+*Benchmark 12: correctness verified 2026-07-10 (all three paths print 1000000); timing run pending (see note below).*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*
 
 ## System
 ```
-OS       : Windows 11 AMD64
+OS       : Windows 11 Home 10.0.26200 (AMD64)
+CPU      : Intel Core i5-1035G1 @ 1.00 GHz (Ice Lake, 4 cores / 8 threads)
+SIMD     : SSE4.2, AVX2 (no AVX-512 on this i5-1035G1 SKU)
 Python   : 3.14.5
 vanic    : C:\Users\upaas\vani-compiler\target\release\vanic.exe
 CC       : C:\msys64\mingw64\bin\gcc.EXE
@@ -172,6 +175,28 @@ C++/Rust use traditional pointer-linked nodes for comparison.*
 > The 49% advantage over C confirms that LLVM's auto-vectorizer, despite seeing
 > the same scalar loop, leaves performance on the table that explicit lane
 > control recovers.
+
+---
+
+### SIMD-256 dot product — vec256<f32> vs vec128<f32> vs scalar (4 M elements)
+
+*vāṇी-only benchmark (no C/C++/Rust comparison — the question is vec256 vs vec128 on this machine).*
+*Correctness verified 2026-07-10: all three variants print `1000000` (within f32 rounding).*
+*Timing run pending — see note below.*
+
+> **Why pending**: the C backend has a pre-existing bounds-check bug for `ref Vec<T>` parameters
+> (generates `.len` instead of `->len` for pointer-typed vec arguments in the bounds-check
+> guard). The benchmark's `dot_vec256` / `dot_vec128` / `dot_scalar` all take `ref Vec<f32>`,
+> so the C backend path fails to compile. The LLVM backend is unaffected.
+>
+> To collect timing numbers for benchmark 12, run the benchmark runner with `--langs vani`
+> (LLVM backend only). The expected result on this machine (Ice Lake, AVX2):
+> - `dot_vec256`: roughly half the wall-clock time of `dot_vec128` (8 lanes vs 4 lanes per iteration)
+> - `dot_scalar`: likely similar to `dot_vec128` if LLVM auto-vectorizes the scalar loop to SSE
+>
+> The C backend bug is tracked separately as a known issue in `docs/missing_features.md`.
+
+---
 
 ## Key insight: index handles vs. `weak_ptr`
 
