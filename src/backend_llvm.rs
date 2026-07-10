@@ -449,6 +449,8 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
         // Machine-word sized.
         Type::ArenaRef(_) => 8,
+        // `vec128<T>` — always 16 bytes (128-bit SIMD register).
+        Type::Vec128(_) => 16,
     }
 }
 
@@ -10126,6 +10128,156 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     trunc, ptr
                 ));
                 return "0".to_string();
+            }
+            // Option 3 — native 128-bit SIMD vector builtins.
+            // All lower to LLVM vector instructions directly;
+            // no runtime helper calls needed.
+            if name == "simd_splat" {
+                // simd_splat(val: T) -> vec128<T>
+                // insertelement then shufflevector-broadcast.
+                let elem_ty = match &expr.ty {
+                    crate::ast::Type::Vec128(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let val = emit_expr(&args[0], ctx, out);
+                let tmp0 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertelement {} undef, {} {}, i32 0\n",
+                    tmp0, vec_ty, llscalar, val
+                ));
+                let mask: Vec<String> = (0..lanes).map(|_| "i32 0".to_string()).collect();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = shufflevector {} {}, {} undef, <{} x i32> <{}>\n",
+                    dest, vec_ty, tmp0, vec_ty, lanes, mask.join(", ")
+                ));
+                return dest;
+            }
+            if name == "simd_load" {
+                // simd_load(v: Vec<T>, idx: i64) -> vec128<T>
+                let elem_ty = match &expr.ty {
+                    crate::ast::Type::Vec128(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let vec_struct = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => vec_struct_name(e),
+                    _ => "%intent_vec_int64_t".to_string(),
+                };
+                let v = emit_expr(&args[0], ctx, out);
+                let idx = emit_expr(&args[1], ctx, out);
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = extractvalue {} {}, 0\n",
+                    data_ptr, vec_struct, v
+                ));
+                let elem_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr inbounds {}, {}* {}, i64 {}\n",
+                    elem_ptr, llscalar, llscalar, data_ptr, idx
+                ));
+                let simd_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast {}* {} to {}*\n",
+                    simd_ptr, llscalar, elem_ptr, vec_ty
+                ));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = load {}, {}* {}, align 16\n",
+                    dest, vec_ty, vec_ty, simd_ptr
+                ));
+                return dest;
+            }
+            if name == "simd_store" {
+                // simd_store(v: Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>
+                // Stores through the data pointer; returns the original Vec.
+                let elem_ty = match &args[2].ty {
+                    crate::ast::Type::Vec128(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let vec_struct = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => vec_struct_name(e),
+                    _ => "%intent_vec_int64_t".to_string(),
+                };
+                let v = emit_expr(&args[0], ctx, out);
+                let idx = emit_expr(&args[1], ctx, out);
+                let data = emit_expr(&args[2], ctx, out);
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = extractvalue {} {}, 0\n",
+                    data_ptr, vec_struct, v
+                ));
+                let elem_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr inbounds {}, {}* {}, i64 {}\n",
+                    elem_ptr, llscalar, llscalar, data_ptr, idx
+                ));
+                let simd_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = bitcast {}* {} to {}*\n",
+                    simd_ptr, llscalar, elem_ptr, vec_ty
+                ));
+                out.push_str(&format!(
+                    "  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 16\n",
+                ));
+                // Return the original Vec value unchanged.
+                return v;
+            }
+            if name == "simd_add" || name == "simd_sub" || name == "simd_mul" {
+                // simd_{add,sub,mul}(a: vec128<T>, b: vec128<T>) -> vec128<T>
+                let elem_ty = match &args[0].ty {
+                    crate::ast::Type::Vec128(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let is_float = matches!(elem_ty, crate::ast::Type::F32 | crate::ast::Type::F64);
+                let op = if name == "simd_add" {
+                    if is_float { "fadd" } else { "add" }
+                } else if name == "simd_sub" {
+                    if is_float { "fsub" } else { "sub" }
+                } else {
+                    if is_float { "fmul" } else { "mul" }
+                };
+                let a = emit_expr(&args[0], ctx, out);
+                let b = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = {} {} {}, {}\n",
+                    dest, op, vec_ty, a, b
+                ));
+                return dest;
+            }
+            if name == "simd_reduce_add" {
+                // simd_reduce_add(v: vec128<T>) -> T
+                // Uses llvm.vector.reduce intrinsic.
+                let elem_ty = match &args[0].ty {
+                    crate::ast::Type::Vec128(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let is_float = matches!(elem_ty, crate::ast::Type::F32 | crate::ast::Type::F64);
+                let v = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                if is_float {
+                    let zero = if llscalar == "float" { "float 0.0" } else { "double 0.0" };
+                    out.push_str(&format!(
+                        "  {} = call {} @llvm.vector.reduce.fadd.v{}{} ({}, {} {})\n",
+                        dest, llscalar, lanes, llscalar, zero, vec_ty, v
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  {} = call {} @llvm.vector.reduce.add.v{}{} ({} {})\n",
+                        dest, llscalar, lanes, llscalar, vec_ty, v
+                    ));
+                }
+                return dest;
             }
             // T2.2 — volatile_read / volatile_write.
             // The `ref i64` arg emits as the alloca pointer
@@ -43524,6 +43676,10 @@ fn is_scalar(ty: &Type) -> bool {
         // FileHandle wraps a FILE* as i64; it's a scalar i64
         // alloca just like any integer binding.
         || matches!(ty, Type::FileHandle)
+        // `vec128<T>` is a 128-bit LLVM vector type (`<N x T>`).
+        // LLVM vector types are first-class SSA values; alloca +
+        // store on `<N x T>` works identically to scalars.
+        || matches!(ty, Type::Vec128(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -43909,7 +44065,27 @@ fn llvm_type_string(ty: &Type) -> String {
             Type::Object(name) => format!("%intent_dyn_{}", name),
             _ => format!("{}*", llvm_type_string(inner)),
         },
+        // `vec128<T>` → LLVM vector type `<N x T>` where N = 128 / bits(T).
+        // Supported element types: i8/u8 (16 lanes), i16/u16 (8), i32/u32/f32 (4),
+        // i64/u64/f64 (2).
+        Type::Vec128(elem) => {
+            let (lanes, llty) = vec128_lanes_and_lltype(elem);
+            format!("<{} x {}>", lanes, llty)
+        }
         _ => llvm_type(ty).to_string(),
+    }
+}
+
+/// Return (lane_count, LLVM scalar type string) for a vec128 element type.
+fn vec128_lanes_and_lltype(elem: &Type) -> (u32, &'static str) {
+    match elem {
+        Type::I8 | Type::U8 => (16, "i8"),
+        Type::I16 | Type::U16 => (8, "i16"),
+        Type::I32 | Type::U32 => (4, "i32"),
+        Type::F32 => (4, "float"),
+        Type::I64 | Type::U64 => (2, "i64"),
+        Type::F64 => (2, "double"),
+        _ => (4, "i32"), // fallback; checker rejects invalid elem types
     }
 }
 

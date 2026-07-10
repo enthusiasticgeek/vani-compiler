@@ -47135,6 +47135,107 @@ fn main() -> i64 { return foo(); }
         );
     }
 
+    // ── Option 3 native SIMD type tests ─────────────────────────────────
+
+    #[test]
+    fn simd_splat_compiles_to_insertelement() {
+        let src = r#"
+intent "simd_splat test";
+fn main() -> i64 {
+    let v: vec128<i32> = simd_splat(42 as i32);
+    return simd_reduce_add(v) as i64;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_splat must compile");
+        assert!(
+            ll.contains("insertelement") || ll.contains("shufflevector"),
+            "simd_splat must emit insertelement/shufflevector in LLVM IR:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_add_emits_vector_add_instruction() {
+        let src = r#"
+intent "simd_add test";
+fn main() -> i64 {
+    let a: vec128<i32> = simd_splat(10 as i32);
+    let b: vec128<i32> = simd_splat(5 as i32);
+    let c: vec128<i32> = simd_add(a, b);
+    return simd_reduce_add(c) as i64;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_add must compile");
+        assert!(
+            ll.contains(" add <4 x i32>"),
+            "simd_add must emit 'add <4 x i32>' in LLVM IR:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_load_store_roundtrip_compiles() {
+        let src = r#"
+intent "simd load/store test";
+fn main() -> i64 {
+    let data: Vec<i32> = vec_fill(8, 1 as i32);
+    let chunk: vec128<i32> = simd_load(data, 0);
+    let doubled: vec128<i32> = simd_add(chunk, chunk);
+    let data2: Vec<i32> = simd_store(data, 0, doubled);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_load/store must compile");
+        assert!(
+            ll.contains("getelementptr inbounds i32"),
+            "simd_load must emit GEP:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_splat_bad_arg_type_errors() {
+        let src = r#"
+intent "simd_splat bad arg";
+fn main() -> i64 {
+    let v: vec128<i64> = simd_splat(true);
+    return 0;
+}
+"#;
+        let result = compile_to_llvm(src);
+        assert!(result.is_err(), "simd_splat(bool) must be rejected");
+    }
+
+    #[test]
+    fn simd_add_wrong_arity_errors() {
+        let src = r#"
+intent "simd_add bad arity";
+fn main() -> i64 {
+    let a: vec128<i32> = simd_splat(1 as i32);
+    let c: vec128<i32> = simd_add(a);
+    return 0;
+}
+"#;
+        let result = compile_to_llvm(src);
+        assert!(result.is_err(), "simd_add with 1 arg must be rejected");
+    }
+
+    #[test]
+    fn vec128_type_parses_and_type_checks() {
+        let src = r#"
+intent "vec128 type";
+fn splat_i64(x: i64) -> vec128<i64> {
+    return simd_splat(x);
+}
+fn main() -> i64 {
+    let v: vec128<i64> = splat_i64(7);
+    return simd_reduce_add(v);
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<i64> function must compile");
+        assert!(
+            ll.contains("<2 x i64>"),
+            "vec128<i64> must lower to <2 x i64> LLVM vector type:\n{ll}"
+        );
+    }
+
     #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"

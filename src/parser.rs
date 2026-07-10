@@ -2031,6 +2031,16 @@ impl Parser {
         }
 
         if self
+            .match_token(|kind| matches!(kind, TokenKind::Vec128))
+            .is_some()
+        {
+            self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+            let element = self.parse_type()?;
+            self.expect_close_angle()?;
+            return Ok(Type::Vec128(Box::new(element)));
+        }
+
+        if self
             .match_token(|kind| matches!(kind, TokenKind::LBracket))
             .is_some()
         {

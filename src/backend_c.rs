@@ -17190,6 +17190,71 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         // coalescing, reordering, or eliding accesses. The i64
         // address is cast through `uintptr_t` to satisfy ISO C
         // strict-aliasing on integer-to-pointer conversion.
+        // Option 3 — native 128-bit SIMD vector builtins.
+        // Uses GCC/Clang __attribute__((vector_size(16))) extension
+        // which both compilers support on x86-64 and AArch64.
+        "simd_splat" => {
+            let elem = match result_ty {
+                Type::Vec128(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let cty = c_vec128_scalar(elem);
+            let vty = c_vec128_type(elem);
+            let val = emit_expr(&args[0]);
+            let lanes = 16 / c_scalar_bytes(elem);
+            let fill: Vec<String> = (0..lanes).map(|_| format!("({})({})", cty, val)).collect();
+            format!("(({}){{{}}})", vty, fill.join(", "))
+        }
+        "simd_load" => {
+            let elem = match result_ty {
+                Type::Vec128(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let cty = c_scalar_type(elem);
+            let vty = c_vec128_type(elem);
+            let v = emit_expr(&args[0]);
+            let idx = emit_expr(&args[1]);
+            format!("(*({vty}*)(({cty}*){v}.data + ({idx})))")
+        }
+        "simd_store" => {
+            let elem = match &args[0].ty {
+                Type::Vec(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let cty = c_scalar_type(elem);
+            let vty = c_vec128_type(elem);
+            let v = emit_expr(&args[0]);
+            let idx = emit_expr(&args[1]);
+            let data = emit_expr(&args[2]);
+            format!("((*({vty}*)(({cty}*){v}.data + ({idx}))) = ({data}), {v})")
+        }
+        "simd_add" | "simd_sub" | "simd_mul" => {
+            let op = match name { "simd_add" => "+", "simd_sub" => "-", _ => "*" };
+            let elem = match result_ty {
+                Type::Vec128(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let vty = c_vec128_type(elem);
+            let a = emit_expr(&args[0]);
+            let b = emit_expr(&args[1]);
+            format!("(({vty})({a}) {op} ({vty})({b}))")
+        }
+        "simd_reduce_add" => {
+            let elem = match &args[0].ty {
+                Type::Vec128(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let lanes = 16 / c_scalar_bytes(elem);
+            let cty = c_scalar_type(elem);
+            let vty = c_vec128_type(elem);
+            let v = emit_expr(&args[0]);
+            let parts: Vec<String> = (0..lanes)
+                .map(|i| format!("({cty})(__srt__[{i}])"))
+                .collect();
+            // GCC/Clang statement expression to avoid re-evaluating v.
+            format!("({{ {vty} __srt__ = ({v}); ({cty})({sum}); }})",
+                sum = parts.join(" + "))
+        }
         "mmio_read_u32" => format!(
             "(*((const volatile uint32_t*)((uintptr_t)({}))))",
             emit_expr(&args[0])
@@ -19138,6 +19203,44 @@ fn emit_float_literal(value: f64, ty: &Type) -> String {
 /// emits a type name into the generated C source. Lives in this
 /// module (not in `ast::Type`) so the AST stays backend-agnostic
 /// for the upcoming LLVM backend migration.
+/// GCC/Clang `__attribute__((vector_size(16)))` type for vec128 element type.
+fn c_vec128_type(elem: &Type) -> String {
+    format!("{} __attribute__((vector_size(16)))", c_scalar_type(elem))
+}
+
+/// The plain C scalar type for a simd element.
+fn c_scalar_type(elem: &Type) -> &'static str {
+    match elem {
+        Type::I8 => "int8_t",
+        Type::U8 => "uint8_t",
+        Type::I16 => "int16_t",
+        Type::U16 => "uint16_t",
+        Type::I32 => "int32_t",
+        Type::U32 => "uint32_t",
+        Type::F32 => "float",
+        Type::I64 => "int64_t",
+        Type::U64 => "uint64_t",
+        Type::F64 => "double",
+        _ => "int32_t",
+    }
+}
+
+/// Same as c_scalar_type but for use in a cast (signed ints for splat fill).
+fn c_vec128_scalar(elem: &Type) -> &'static str {
+    c_scalar_type(elem)
+}
+
+/// Byte size of a simd element type (used to compute lane count).
+fn c_scalar_bytes(elem: &Type) -> usize {
+    match elem {
+        Type::I8 | Type::U8 => 1,
+        Type::I16 | Type::U16 => 2,
+        Type::I32 | Type::U32 | Type::F32 => 4,
+        Type::I64 | Type::U64 | Type::F64 => 8,
+        _ => 4,
+    }
+}
+
 pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
     match ty {
         Type::I8 => "int8_t",
@@ -19325,6 +19428,10 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // which recurses into the inner type. The fallback here
         // keeps any leaf-only path emitting valid C.
         Type::Box(_) => "/* Box<T> */",
+        // `vec128<T>` lowers to `__attribute__((vector_size(16))) T`.
+        // c_leaf_type returns &'static str so it can't synthesize the
+        // per-T spelling; callers route through `c_vec128_type`.
+        Type::Vec128(_) => "/* vec128<T> */",
     }
 }
 
@@ -19777,7 +19884,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Vec128(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -19825,6 +19932,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Graph
         | Type::Trie
         | Type::SkipList
+        | Type::Vec128(_)
         | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => unreachable!("shift count must be an integer"),
     }
 }
