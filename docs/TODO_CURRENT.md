@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-07-06
+Last updated: 2026-07-10
 
 ---
 
@@ -243,41 +243,30 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
 
 ### Quick wins (< 2 h each)
 
-- [ ] **SIMD-1. `xfail_simd_vec128_in_struct` — confirm and pin rejection**
-  `struct Foo { lane: vec128<f32> }` was not added to `examples/edge_cases/`
-  because it was unclear whether the checker actually rejects it. Read the
-  struct-field checker path in `checker.rs` and confirm: if vec128 in struct
-  is rejected → add `xfail_simd_vec128_in_struct.vani`; if it compiles →
-  rename to `mix_simd_struct_field.vani` and update TEST_MATRIX.md.
+- [x] **SIMD-1. `mix_simd_struct_field` — vec128 in struct confirmed** ✅ done 2026-07-10
+  `ast.rs:1257` — `Type::Vec128(_)` falls through to `_ => true` in `is_copy()`;
+  vec128 IS Copy and struct fields are allowed. Added `mix_simd_struct_field.vani`
+  (SIMD + STRT) and updated TEST_MATRIX.md SIMD×STRT cell.
 
-- [ ] **SIMD-2. `simd_store` return type audit**
-  `simd_store(v, i, data)` currently returns a copy of the Vec fat pointer
-  (the checker returns `Type::Vec(elem)` for the ref case). The return value
-  is semantically useless — callers always discard it with `let _ = ...`.
-  Decide: make it `void` (unit) or `i64` (bytes written), update checker +
-  both backends, update all call sites in README / tutorial / benchmark.
+- [x] **SIMD-2. `simd_store` return type — KEEP Vec<T>** ✅ decided 2026-07-10
+  `src/lib.rs:47604` `simd_store_chained_compiles` test uses
+  `simd_store(simd_store(data, 0, a), 4, b)` — chaining REQUIRES the Vec<T> return.
+  Decision: Vec<T> return is load-bearing; no code change. TEST_MATRIX documented.
 
-- [ ] **SIMD-3. Add tutorial QEMU section to `04b_cross_compile_primer.md`**
-  The primer covers `--target=` thoroughly but doesn't mention QEMU user-mode
-  at all. Add a short section pointing to `docs/qemu_testing.md` and showing
-  the one-liner: `vanic run hello.vani --target=aarch64-unknown-linux-gnu`.
+- [x] **SIMD-3. Add QEMU section to `04b_cross_compile_primer.md`** ✅ done 2026-07-10
+  Expanded the existing minimal QEMU paragraph into a full section covering:
+  SVE/RVV CPU flags (`-cpu max`, `-cpu rv64,v=true,vlen=256`), vec128 NEON note,
+  what-QEMU-validates table, and ARM-6 CI snippet.
 
-- [ ] **SIMD-4. `ENM + BOX` xfail pin**
-  `Option<Box<T>>` is documented as rejected in TEST_MATRIX.md but not pinned
-  as an `xfail_*` file. Add `xfail_enum_box_payload.vani`:
-  ```vani
-  fn main() -> i64 {
-    let x: Option<Box<i64>> = Option.Some(box(42));
-    return 0;
-  }
-  ```
-  Run both backends; if clean reject → add to edge_cases + update matrix.
+- [x] **SIMD-4. `ENM + BOX` — `Option<Box<i64>>` COMPILES** ✅ done 2026-07-10
+  Tested `Option.Some(box(42))` — exits 0 on both backends. Not an xfail.
+  Added `mix_enum_option_box.vani` and updated TEST_MATRIX.md ENM×BOX cell.
 
-- [ ] **SIMD-5. `CLO + REF + VEC` edge case**
-  `mix_closure_vec_len_capture.vani` captures a Copy `i64` derived from a Vec.
-  What's missing: closure that captures the `ref Vec` itself (or a `mut ref`).
-  Write `mix_closure_ref_vec_capture.vani` once the ownership semantics of
-  non-Copy ref captures in closures are confirmed.
+- [x] **SIMD-5. `CLO + VEC` fn-ptr passing** ✅ done 2026-07-10
+  Added `mix_closure_ref_vec_capture.vani`: closure capturing Copy scalar derived
+  from Vec, passed as a `fn(i64)->i64` parameter to another function.
+  True `ref Vec` capture in closures (non-Copy borrow) remains a documented
+  open gap in TEST_MATRIX.md (gap #4).
 
 ### Medium (2–8 h each)
 
