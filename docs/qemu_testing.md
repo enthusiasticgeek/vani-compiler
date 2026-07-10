@@ -91,6 +91,7 @@ see [§ Bare-metal / system-mode](#bare-metal--system-mode-not-integrated) below
 |---------|--------------------------|---------------|
 | LLVM auto-vectorization → NEON | `parallel for` bodies, `vec_fill` | ✓ functional |
 | `vec128<T>` explicit SIMD | 7 builtins lower to `dup`, `add.4s`, `addv`, `ldr q0`, etc. | ✓ functional |
+| `vec256<T>` explicit SIMD | 7 `simd256_*` builtins; on AArch64 legalised as 2×128-bit NEON; SVE gives 1 register | ✓ functional |
 | SVE / SVE2 scalable vectors | `--sve` / `--sve2` pass `-mattr=+sve2` to `llc` | ✓ QEMU supports SVE via `-cpu max` |
 | FFI NEON shim | `extern "C"` + `--link-with=neon_shim.o` | ✓ if shim compiled for AArch64 |
 | Performance / timing | wall-clock benchmarks | ✗ QEMU not representative |
@@ -226,33 +227,92 @@ This catches:
 - SIMD IR that is valid x86-64 LLVM but rejected by the AArch64 backend
 - Endianness bugs (AArch64 is LE like x86-64, so this is low-risk here)
 
-### RISC-V QEMU CI: not yet added
+### RISC-V QEMU CI: shipped (SIMD-6, 2026-07-10)
 
-RISC-V CI (equivalent of ARM-6) is a documented gap. Adding it requires:
+`.github/workflows/ci.yml` includes the `test-riscv64-qemu` job, which runs
+the full lib unit test suite under `qemu-riscv64-static` on every push to
+`main`:
 
 ```yaml
-- name: Run lib tests under QEMU (RISC-V 64)
-  run: |
-    sudo apt-get install -y qemu-user-static gcc-riscv64-linux-gnu
-    cargo test --lib --target riscv64gc-unknown-linux-gnu
-  env:
-    CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static
+test-riscv64-qemu:
+  name: Test (RISC-V 64 via QEMU)
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: riscv64gc-unknown-linux-gnu
+    - run: |
+        sudo apt-get update -q
+        sudo apt-get install -q -y gcc-riscv64-linux-gnu qemu-user-static
+    - env:
+        CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+        CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static
+      run: cargo test --lib --target riscv64gc-unknown-linux-gnu
 ```
 
-Until then, RISC-V correctness is inferred from the LLVM backend's target
-independence — no RISC-V specific bugs are known, but no systematic test run
-has been done either.
+This catches RISC-V-specific compiler panics and any IR that the RV64GC
+LLVM backend rejects. The Vector (RVV) extension is not enabled here — these
+are compiler unit tests, not RVV codegen tests.
 
 ---
 
-## Bare-metal / system-mode (not integrated)
+## Bare-metal / system-mode (shipped — SIMD-10, 2026-07-10)
 
-`qemu-system-arm` and `qemu-system-riscv32` can boot bare-metal ELFs on a
-simulated board (e.g., `-machine lm3s6965evb` for Cortex-M3, `-machine
-sifive_u` for SiFive U54). This is **not** wired into `vanic run` — bare-metal
-triples produce only the ELF; you must invoke `qemu-system-*` manually.
+`vanic run` now supports QEMU system-mode via `--qemu-machine=<board>`. Pass a
+bare-metal triple together with `--qemu-machine` and vanic builds the ELF then
+invokes `qemu-system-<arch> -machine <board> -kernel <elf>` automatically.
 
-Minimal Cortex-M QEMU run:
+### ARM (Cortex-M)
+
+```bash
+# lm3s6965evb = TI Stellaris LM3S6965EVB (Cortex-M3)
+vanic run firmware.vani \
+  --target=arm-none-eabi \
+  --qemu-machine=lm3s6965evb
+
+# mps2-an385 = ARM MPS2 (Cortex-M3, larger memory map)
+vanic run firmware.vani \
+  --target=thumbv7em-none-eabihf \
+  --qemu-machine=mps2-an385
+```
+
+Both ARM variants add `-nographic -semihosting` automatically, so semihosting
+`sys_write` / `sys_exit` calls work out of the box.
+
+### RISC-V bare-metal
+
+```bash
+# sifive_e = SiFive E-series (RV32IMAC)
+vanic run blink.vani \
+  --target=riscv32-unknown-none-elf \
+  --qemu-machine=sifive_e
+```
+
+RISC-V variants add `-nographic -bios none` automatically (suppresses OpenSBI).
+
+### Supported boards
+
+| Board name | QEMU binary | Architecture | Notes |
+|-----------|-------------|-------------|-------|
+| `lm3s6965evb` | `qemu-system-arm` | ARMv7-M (Cortex-M3) | Semihosting enabled |
+| `mps2-an385` | `qemu-system-arm` | ARMv7-M (Cortex-M3) | Larger RAM |
+| `virt` | `qemu-system-arm` | ARMv7 / AArch64 | Generic virtio board |
+| `sifive_e` | `qemu-system-riscv32` | RV32IMAC | Minimal SiFive E series |
+| `sifive_u` | `qemu-system-riscv32` | RV32GC | SiFive U-series |
+
+### Binary override
+
+To use a specific QEMU version or path, set `QEMU_SYSTEM_<ARCH>`:
+
+```bash
+QEMU_SYSTEM_ARM=/opt/qemu-8.2/bin/qemu-system-arm \
+  vanic run firmware.vani --target=arm-none-eabi --qemu-machine=lm3s6965evb
+```
+
+### Manual invocation (equivalent)
+
+If you prefer to build separately first:
 
 ```bash
 vanic build firmware.vani --target=arm-none-eabi -o firmware.elf
@@ -263,23 +323,6 @@ qemu-system-arm \
   -semihosting \
   -kernel firmware.elf
 ```
-
-Minimal RISC-V 32-bit QEMU run:
-
-```bash
-CROSS_CC=riscv32-elf-gcc vanic build blink.vani \
-  --target=riscv32-unknown-none-elf -o blink.elf
-
-qemu-system-riscv32 \
-  -machine sifive_e \
-  -nographic \
-  -bios none \
-  -kernel blink.elf
-```
-
-Integrating `qemu-system-*` into `vanic run` is a future work item (no ticket
-yet). The gap is that different boards need different `-machine` flags; there
-is no universal "run any ELF" mode for system QEMU the way user-mode has.
 
 ---
 

@@ -3897,8 +3897,38 @@ On AArch64 targets, `vec128<T>` maps directly to NEON 128-bit
 instruction scheduler accordingly. Add `--sve` / `--sve2` for
 AArch64 v8.2+/v9 SVE auto-vectorization.
 
+**Layer 4 — `vec256<T>` and `simd256_*` builtins.** A 256-bit SIMD
+register type — the same seven operations, twice the lanes:
+
+```vani
+// Eight-lane f32 dot product
+fn dot256(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec256<f32> = simd256_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 8 <= n {
+        acc = simd256_add(acc, simd256_mul(
+            simd256_load(a, i), simd256_load(b, i)));
+        i = i + 8;
+    }
+    return simd256_reduce_add(acc);
+}
+```
+
+| Builtin | What it does |
+|---------|-------------|
+| `simd256_splat(val: T) -> vec256<T>` | Broadcast scalar to all lanes |
+| `simd256_load(v: Vec<T>, idx: i64) -> vec256<T>` | Load N lanes |
+| `simd256_store(v: Vec<T>, idx: i64, d: vec256<T>) -> Vec<T>` | Store N lanes |
+| `simd256_add` / `simd256_sub` / `simd256_mul` | Lane-wise arithmetic |
+| `simd256_reduce_add(v: vec256<T>) -> T` | Horizontal sum |
+
+`vec256<f32>` has 8 lanes (vs 4 in `vec128<f32>`). On x86-64 with AVX2,
+LLVM lowers `<8 x float>` to `ymm` registers. On AArch64 without SVE,
+LLVM legalises the type as two 128-bit NEON registers. With `--sve` / `--sve2`,
+a single SVE scalable register holds the full 256-bit width.
+
 See [tutorials/advanced/05_simd.md](tutorials/src/advanced/05_simd.md)
-for the full guide and decision flowchart.
+for the full guide, decision flowchart, and platform-mapping table.
 
 ---
 

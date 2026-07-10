@@ -77,7 +77,40 @@ Seven built-in operations lower directly to NEON instructions:
 For exotic intrinsics not yet in the builtin set, the FFI shim
 escape hatch remains available — see `docs/simd_ffi_shims.md`.
 
-### 3. `parallel for` unavailable on bare-metal ARM
+### 3. `vec256<T>` + `simd256_*` on AArch64 ✅ shipped (SIMD-9, 2026-07-10)
+
+`vec256<T>` is a 256-bit SIMD type with 7 builtins (`simd256_splat`,
+`simd256_load`, `simd256_store`, `simd256_add`, `simd256_sub`,
+`simd256_mul`, `simd256_reduce_add`). The LLVM IR type is `<N x T>` where N
+is twice the vec128 lane count.
+
+**AArch64 without SVE:** LLVM legalises `<8 x float>` as two 128-bit NEON
+registers. Each `simd256_*` call lowers to two NEON instructions. Functional,
+but no throughput gain vs two `vec128` calls unless the OOO scheduler can
+overlap them.
+
+**AArch64 + SVE (`--sve` / `--sve2`):** With a scalable-vector CPU
+(`--cpu=neoverse-n2`, `--cpu=a64fx`), LLVM can use a single SVE register of
+the appropriate width. A Neoverse N2 has 256-bit SVE; `vec256<f32>` fits in
+one SVE `z`-register and the loop body becomes a single `fmla z0.s, z1.s, z2.s`.
+
+| Target | vec256<f32> LLVM output |
+|--------|------------------------|
+| AArch64, no SVE | 2× `fmla v0.4s, v1.4s, v2.4s` |
+| AArch64 + SVE, 256-bit | 1× `fmla z0.s, z1.s, z2.s` |
+| AArch64 + SVE, 512-bit | 1× `fmla z0.s, ...` (first half only — VLEN matters) |
+
+To check correctness under QEMU with SVE:
+
+```bash
+QEMU_CPU=max qemu-aarch64-static ./program
+```
+
+`-cpu max` exposes the widest possible SVE configuration that QEMU emulates.
+
+---
+
+### 4. `parallel for` unavailable on bare-metal ARM
 
 `parallel for … reduce` emits `CreateThread` (Windows) or `pthread_create`
 (POSIX). Neither exists on bare-metal (`--no-std` + `arm-none-eabi`).
@@ -95,11 +128,18 @@ generated code may include Thumb-2 instructions unsupported on M0.
 All numbers in `benchmarks/results/RESULTS.md` were collected on x86-64
 (Windows 11 AMD64). There are no AArch64 or Graviton reference runs yet.
 
-### 6. No AArch64 CI runner
+### 6. AArch64 CI via QEMU ✅ shipped (SIMD-7, 2026-07-10)
 
-The GitHub Actions release workflow runs on `ubuntu-latest` (x86-64) only.
-AArch64 cross-test is blocked on adding an `ubuntu-latest` arm64 runner or
-self-hosted Graviton/Pi instance.
+`.github/workflows/ci.yml` includes `test-aarch64-qemu`, which runs
+`cargo test --lib --target aarch64-unknown-linux-gnu` under
+`qemu-aarch64-static` on every push to `main`. vanic has no native LLVM
+library dependency (it shells out to `lli`/`llc`), so the binary is pure
+Rust and cross-compiles with no extra steps.
+
+The `tests/edge_cases.rs` integration tests are excluded from the AArch64
+run — those spawn the vanic binary which forks `cc`/`lli` (x86-64 host
+binaries). Full integration tests on real AArch64 hardware are tracked as
+ARM-3.
 
 ### 7. SVE / SVE2 — opt-in via `--sve` / `--sve2` ✅ shipped v0.2.4+
 

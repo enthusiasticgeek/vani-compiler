@@ -5,6 +5,23 @@ is [ONBOARDING.md](ONBOARDING.md) — it covers the tool prerequisites,
 the project layout, the pipeline, and an "end-to-end add a feature"
 checklist.
 
+## Contributor License Agreement
+
+All contributors must sign the **[CLA](CLA.md)** before their first pull
+request is merged. Add the following line to the body of your first PR:
+
+```
+I have read the vāṇी Compiler Contributor License Agreement (CLA.md)
+and agree to its terms.
+
+Signed: [Your Full Name]
+Email:  [your@email.com]
+GitHub: @[your-github-username]
+Date:   [YYYY-MM-DD]
+```
+
+See [CLA.md](CLA.md) for the full text and corporate contributor instructions.
+
 ## Before you open a PR
 
 1. **`cargo test`** (full suite — 1928 lib + 54 e2e + 11 vtables-phase3 +

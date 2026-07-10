@@ -1,0 +1,67 @@
+// Benchmark 12 — SIMD-256 dot product (f32)
+// Compares vec256<f32> (8-lane) vs vec128<f32> (4-lane) vs scalar on 4M elements.
+// On x86-64+AVX2: vec256 path uses ymm registers; vec128 uses xmm.
+// On AArch64 without SVE: vec256 legalises as 2x NEON v-registers.
+
+fn dot_vec256(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec256<f32> = simd256_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 8 <= n {
+        let ai: vec256<f32> = simd256_load(a, i);
+        let bi: vec256<f32> = simd256_load(b, i);
+        acc = simd256_add(acc, simd256_mul(ai, bi));
+        i = i + 8;
+    }
+    let s: f32 = simd256_reduce_add(acc);
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn dot_vec128(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec128<f32> = simd_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 4 <= n {
+        let ai: vec128<f32> = simd_load(a, i);
+        let bi: vec128<f32> = simd_load(b, i);
+        acc = simd_add(acc, simd_mul(ai, bi));
+        i = i + 4;
+    }
+    let s: f32 = simd_reduce_add(acc);
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn dot_scalar(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let s: f32 = 0.0 as f32;
+    let i: i64 = 0;
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn main() -> i64 {
+    let n: i64 = 4000000;
+    let a: Vec<f32> = vec_fill(n, 0.5 as f32);
+    let b: Vec<f32> = vec_fill(n, 0.5 as f32);
+
+    let r256: f32 = dot_vec256(ref a, ref b, n);
+    let r128: f32 = dot_vec128(ref a, ref b, n);
+    let rsc:  f32 = dot_scalar(ref a, ref b, n);
+
+    // Print truncated integer checksums for sanity comparison.
+    // Expected: all three should be in the range 999990-1000010
+    // (1 000 000.0 truncated, with floating-point rounding variance).
+    print r256 as i64;
+    print r128 as i64;
+    print rsc as i64;
+
+    return 0;
+}

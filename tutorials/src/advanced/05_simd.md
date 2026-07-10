@@ -224,6 +224,89 @@ fn main() -> i64 {
 
 ---
 
+## Layer 4 — `vec256<T>` and the `simd256_*` builtins
+
+`vec256<T>` is a **256-bit SIMD register value** — twice the width of
+`vec128<T>`. It holds more lanes per operation, which means fewer loop
+iterations on the same data:
+
+| Element type | Lanes in `vec128<T>` | Lanes in `vec256<T>` |
+|-------------|---------------------|---------------------|
+| `i8` / `u8` | 16 | 32 |
+| `i16` / `u16` | 8 | 16 |
+| `i32` / `u32` / `f32` | 4 | 8 |
+| `i64` / `u64` / `f64` | 2 | 4 |
+
+The `simd256_*` builtins mirror the `simd_*` set exactly — they take
+`vec256<T>` arguments instead of `vec128<T>`:
+
+| Builtin | Signature | What it does |
+|---------|-----------|-------------|
+| `simd256_splat` | `(val: T) -> vec256<T>` | Broadcast scalar to all lanes |
+| `simd256_load` | `(v: Vec<T>, idx: i64) -> vec256<T>` | Load N lanes from `v[idx..]` |
+| `simd256_store` | `(v: Vec<T>, idx: i64, d: vec256<T>) -> Vec<T>` | Store N lanes |
+| `simd256_add` | `(a: vec256<T>, b: vec256<T>) -> vec256<T>` | Lane-wise add |
+| `simd256_sub` | `(a: vec256<T>, b: vec256<T>) -> vec256<T>` | Lane-wise subtract |
+| `simd256_mul` | `(a: vec256<T>, b: vec256<T>) -> vec256<T>` | Lane-wise multiply |
+| `simd256_reduce_add` | `(v: vec256<T>) -> T` | Horizontal sum of all lanes |
+
+### Example — 8-lane f32 dot product
+
+```vani
+fn dot256(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec256<f32> = simd256_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 8 <= n {
+        let ai: vec256<f32> = simd256_load(a, i);
+        let bi: vec256<f32> = simd256_load(b, i);
+        acc = simd256_add(acc, simd256_mul(ai, bi));
+        i = i + 8;
+    }
+    let s: f32 = simd256_reduce_add(acc);
+    // scalar tail
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+```
+
+The step is 8 instead of 4 (compared to `vec128<f32>`). On x86-64 with
+AVX2, LLVM lowers the `<8 x float>` IR to `ymm` register operations
+(`vfmadd231ps ymm0, ymm1, ymm2`). On AArch64 without SVE, LLVM
+legalises the 256-bit type as two 128-bit NEON registers and emits
+pairs of `fmla v0.4s` instructions.
+
+### Platform mapping
+
+| Platform | vec256<f32> ISA mapping | Notes |
+|----------|------------------------|-------|
+| x86-64 + AVX2 | `ymm` registers, 8 f32/op | LLVM selects `vfmadd231ps` etc. |
+| x86-64 (no AVX) | 2× SSE registers (legalized by LLVM) | Still correct; no AVX needed |
+| AArch64 (no SVE) | 2× NEON `v`-registers | Two 128-bit passes per loop iter |
+| AArch64 + SVE | Single scalable vector ≥ 256 bits | Optimal with `--sve` / `--sve2` |
+| RISC-V (RVV, VLEN≥256) | Single `vl=8` e32 register | Optimal on SiFive X280 |
+| RISC-V (RVV, VLEN=128) | Two `vl=4` passes | Correct; LLVM handles it |
+
+### When to prefer vec256 over vec128
+
+Use `vec256<T>` when:
+- The target is x86-64 with AVX2 (LSCPU shows `avx2`) — halves loop iterations
+- The target is AArch64 + SVE — fits in one scalable register
+- The target is RISC-V with VLEN=256 (SiFive X280, Milk-V Pioneer)
+
+Use `vec128<T>` when:
+- The target is AArch64 without SVE — `vec256` adds two-register overhead with no throughput gain
+- You are targeting a minimal RVV core with VLEN=128
+
+When in doubt, profile both. On this project's x86-64 benchmark machine
+(Intel i5-1035G1, Ice Lake — has AVX2), `vec256<f32>` reduces loop
+iterations by half and benchmark 12 (`12_simd256_dot`) measures the
+wall-clock benefit.
+
+---
+
 ## AArch64 / NEON specifics
 
 On AArch64 targets the `vec128<T>` type maps directly to NEON
@@ -328,7 +411,9 @@ Is the loop already fast enough?
               Yes → try #[vectorize] first (one attribute, free).
                         Still slow?
                             → Use vec128<T> for the hot path.
-                            → Use FFI shim for exotic intrinsics.
+                            Still slow?
+                                → Try vec256<T> if target has AVX2 / SVE / VLEN≥256.
+                                → Use FFI shim for exotic intrinsics.
 ```
 
 ---
@@ -339,4 +424,5 @@ Is the loop already fast enough?
 - [04_embedded Embedded + unsafe](04_embedded.md) — MMIO, `#[no_heap]`, bare-metal `parallel for` notes
 - [04c Attributes reference](04c_attributes_reference.md) — `#[vectorize]` and all other `fn` attributes
 - [docs/simd_ffi_shims.md](../../../docs/simd_ffi_shims.md) — NEON / AVX2 FFI shim cookbook
-- [Benchmark 11 — SIMD dot product](../../../benchmarks/11_simd_dot/README.md) — explicit vs. auto-vectorized timings
+- [Benchmark 11 — SIMD dot product](../../../benchmarks/11_simd_dot/README.md) — vec128 explicit vs. auto-vectorized timings
+- [Benchmark 12 — SIMD-256 dot product](../../../benchmarks/12_simd256_dot/README.md) — vec256 vs vec128 vs auto-vectorized on x86-64 AVX2

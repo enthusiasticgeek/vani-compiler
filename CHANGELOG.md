@@ -406,6 +406,47 @@ generics, async/await, and a package manager.
 Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
 [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.
 
+### Feature — QEMU system-mode bare-metal integration (SIMD-10, 2026-07-10)
+
+`vanic run` now supports QEMU system-mode via `--qemu-machine=<board>`. For
+bare-metal triples (`arm-none-eabi`, `riscv32-unknown-none-elf`, etc.), adding
+`--qemu-machine=lm3s6965evb` (or any supported board) builds an ELF and
+launches `qemu-system-arm -machine lm3s6965evb -nographic -semihosting -kernel
+<elf>` automatically. Supported boards: `lm3s6965evb`, `mps2-an385` (ARM),
+`sifive_e`, `sifive_u` (RISC-V 32), `virt` (AArch64). Env-var override:
+`QEMU_SYSTEM_<ARCH>`. Six new unit tests in `src/main.rs`.
+
+### Feature — `vec256<T>` and `simd256_*` builtins (SIMD-9, 2026-07-10)
+
+Added `vec256<T>` — a 256-bit SIMD register type — alongside seven
+`simd256_*` builtins (`simd256_splat`, `simd256_load`, `simd256_store`,
+`simd256_add`, `simd256_sub`, `simd256_mul`, `simd256_reduce_add`). Lane
+counts are twice those of `vec128<T>` (e.g. `vec256<f32>` has 8 lanes). LLVM
+IR type is `<N x T>`; on x86-64+AVX2 this lowers to `ymm` registers; on
+AArch64 without SVE, to two 128-bit NEON registers. Eight files changed;
+two lib tests; three edge-case files (`mix_simd256_basic.vani`,
+`mix_simd256_i32_mul.vani`, `xfail_simd256_type_mismatch.vani`).
+
+### CI — AArch64 and RISC-V QEMU lib-test jobs (SIMD-6, SIMD-7, 2026-07-10)
+
+Added two CI jobs to `.github/workflows/ci.yml`:
+
+- **`test-aarch64-qemu`**: `cargo test --lib --target aarch64-unknown-linux-gnu`
+  under `qemu-aarch64-static`. Validates parser, type-checker, SSA lowerer, and
+  both backends on emulated AArch64. vanic is pure Rust (no native LLVM
+  dependency) so cross-compilation requires no special toolchain.
+- **`test-riscv64-qemu`**: `cargo test --lib --target riscv64gc-unknown-linux-gnu`
+  under `qemu-riscv64-static`. Validates correctness on emulated RV64GC.
+
+Both jobs run on every push to `main` via `ubuntu-latest`.
+
+### Test — `ARR` bucket confirmed live (SIMD-8, 2026-07-10)
+
+Fixed-size arrays (`[T; N]` type, `[e0, …]` literal, `a[i]` indexing) are
+confirmed working. Added `mix_arr_indexing.vani` (ARR+SCAL) and
+`mix_arr_struct_elems.vani` (ARR+STRT) to `examples/edge_cases/`.
+`TEST_MATRIX.md` ARR row is now filled. Pin raised 87 → 89.
+
 ### Performance — SSA LLVM backend alwaysinline optimisations (2026-07-03)
 
 Three `alwaysinline` changes that let LLVM's LICM and ConstraintElimination
