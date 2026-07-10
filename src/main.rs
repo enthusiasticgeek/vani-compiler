@@ -1313,7 +1313,8 @@ fn run() -> Result<ExitCode, String> {
         }
         "run" => {
             let (file, flag_start) = required_file_at(&args, 2, "run")?;
-            let (backend_kind, link_args, big_o_mode, target) = parse_run_args(&args, flag_start)?;
+            let (backend_kind, link_args, big_o_mode, target, qemu_machine) =
+                parse_run_args(&args, flag_start)?;
             match backend_kind {
                 BackendKind::C => run_program(&file, &link_args, big_o_mode),
                 BackendKind::Llvm => {
@@ -1328,12 +1329,23 @@ fn run() -> Result<ExitCode, String> {
                     }
                     if let Some(triple) = &target {
                         if is_bare_metal_triple(triple) {
+                            if let Some(machine) = &qemu_machine {
+                                // System-mode QEMU: build ELF then invoke
+                                // qemu-system-<arch> -machine <board> -kernel <elf>.
+                                return run_bare_metal_qemu_system(
+                                    &file,
+                                    big_o_mode,
+                                    triple,
+                                    machine,
+                                );
+                            }
                             return Err(format!(
                                 "bare-metal target '{}' cannot run via LLVM-JIT.\n\
-                                 Use `vanic build --target={} -o out.elf` to \
-                                 produce an ELF, then run it on your board or \
-                                 via QEMU: qemu-system-<arch> -kernel out.elf",
-                                triple, triple
+                                 Use `--qemu-machine=<board>` to run via QEMU system-mode,\n\
+                                 e.g.: vanic run {} --target={} --qemu-machine=lm3s6965evb\n\
+                                 Or use `vanic build --target={} -o out.elf` to produce \
+                                 an ELF for your board.",
+                                triple, file.display(), triple, triple
                             ));
                         }
                         // Linux cross-targets: build an ELF and try QEMU user-mode.
@@ -2436,11 +2448,21 @@ enum BackendKind {
 fn parse_run_args(
     args: &[String],
     from: usize,
-) -> Result<(BackendKind, Vec<String>, Option<vani::big_o::BigOMode>, Option<String>), String> {
+) -> Result<
+    (
+        BackendKind,
+        Vec<String>,
+        Option<vani::big_o::BigOMode>,
+        Option<String>,
+        Option<String>,
+    ),
+    String,
+> {
     let mut backend = BackendKind::Llvm;
     let mut link_args: Vec<String> = Vec::new();
     let mut big_o_mode: Option<vani::big_o::BigOMode> = None;
     let mut target: Option<String> = None;
+    let mut qemu_machine: Option<String> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if let Some(value) = arg.strip_prefix("--backend=") {
@@ -2495,11 +2517,20 @@ fn parse_run_args(
                 .ok_or_else(|| "expected a triple after '--target'".to_string())?;
             target = Some(triple.clone());
             idx += 2;
+        } else if let Some(board) = arg.strip_prefix("--qemu-machine=") {
+            qemu_machine = Some(board.to_string());
+            idx += 1;
+        } else if arg == "--qemu-machine" {
+            let board = args
+                .get(idx + 1)
+                .ok_or_else(|| "expected a board name after '--qemu-machine'".to_string())?;
+            qemu_machine = Some(board.clone());
+            idx += 2;
         } else {
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((backend, link_args, big_o_mode, target))
+    Ok((backend, link_args, big_o_mode, target, qemu_machine))
 }
 
 fn parse_build_args(
@@ -3275,6 +3306,44 @@ fn qemu_for_triple(triple: &str) -> Option<String> {
     None
 }
 
+/// Map a bare-metal triple + board name to a `qemu-system-*` invocation.
+///
+/// Returns `(binary, args_before_kernel)` on success. The caller appends
+/// `-kernel <elf_path>` before invoking.
+///
+/// Env-var override: `QEMU_SYSTEM_<ARCH>` (e.g. `QEMU_SYSTEM_ARM`) replaces
+/// the binary name, which is useful in CI to pin an exact QEMU version.
+fn board_to_qemu_cmd(
+    triple: &str,
+    machine: &str,
+) -> Result<(String, Vec<String>), String> {
+    let arch = triple.split('-').next().unwrap_or("");
+    let (binary, extra): (&str, &[&str]) = match arch {
+        "arm" | "thumbv6m" | "thumbv7m" | "thumbv7em" | "thumbv8m"
+        | "thumbv6m-none-eabi" | "thumbv7m-none-eabi" | "thumbv7em-none-eabihf" => {
+            ("qemu-system-arm", &["-nographic", "-semihosting"])
+        }
+        "aarch64" => ("qemu-system-aarch64", &["-nographic", "-semihosting"]),
+        "riscv32" => ("qemu-system-riscv32", &["-nographic", "-bios", "none"]),
+        "riscv64" => ("qemu-system-riscv64", &["-nographic", "-bios", "none"]),
+        _ => {
+            return Err(format!(
+                "no QEMU system-mode emulator known for architecture '{}' \
+                 (triple '{}'); supported: arm, aarch64, riscv32, riscv64",
+                arch, triple
+            ))
+        }
+    };
+    // Allow CI / local override of the QEMU binary path.
+    let env_key = format!("QEMU_SYSTEM_{}", arch.to_uppercase());
+    let binary = env::var(&env_key).unwrap_or_else(|_| binary.to_string());
+    let args: Vec<String> = std::iter::once("-machine".to_string())
+        .chain(std::iter::once(machine.to_string()))
+        .chain(extra.iter().map(|s| s.to_string()))
+        .collect();
+    Ok((binary, args))
+}
+
 /// Returns true if `name` resolves to an executable on PATH.
 fn which_on_path(name: &str) -> bool {
     env::var_os("PATH")
@@ -3350,6 +3419,61 @@ fn run_program_llvm_target(
     }
 }
 
+/// Build an ELF for a bare-metal target and run it via QEMU system-mode.
+/// Used for `vanic run --target=<bare-metal-triple> --qemu-machine=<board>`.
+fn run_bare_metal_qemu_system(
+    path: &Path,
+    big_o_mode: Option<vani::big_o::BigOMode>,
+    triple: &str,
+    machine: &str,
+) -> Result<ExitCode, String> {
+    let stem = path
+        .file_stem()
+        .and_then(|n| n.to_str())
+        .unwrap_or("program");
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let elf_path = env::temp_dir().join(format!("vanic-{}-{}-{}.elf", stem, pid, nanos));
+    if let Some(mode) = big_o_mode {
+        if mode != vani::big_o::BigOMode::Off {
+            let checked = compile_path_or_report(path)?;
+            for (name, complexity) in vani::big_o::annotate_program(&checked.ir, mode) {
+                eprintln!("  fn {}: {}", name, complexity);
+            }
+        }
+    }
+    build_program_llvm(path, Some(&elf_path), &[], Some(triple), None, None)?;
+    let (binary, mut qemu_args) = board_to_qemu_cmd(triple, machine)?;
+    qemu_args.push("-kernel".to_string());
+    qemu_args.push(
+        elf_path
+            .to_str()
+            .ok_or_else(|| "ELF path contains non-UTF-8 characters".to_string())?
+            .to_string(),
+    );
+    let status = Command::new(&binary)
+        .args(&qemu_args)
+        .status()
+        .map_err(|e| {
+            let arch = triple.split('-').next().unwrap_or("arch").to_uppercase();
+            format!(
+                "failed to invoke '{}' (board '{}'): {}\n\
+                 hint: install qemu-system-{} and set QEMU_SYSTEM_{} to \
+                 override the binary path",
+                binary,
+                machine,
+                e,
+                triple.split('-').next().unwrap_or("arch"),
+                arch,
+            )
+        })?;
+    let _ = fs::remove_file(&elf_path);
+    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+}
+
 fn temp_paths(source_path: &Path) -> (PathBuf, PathBuf) {
     let stem = source_path
         .file_stem()
@@ -3401,5 +3525,99 @@ mod tests {
             cross_cc_for_triple("riscv32-unknown-none-elf"),
             "riscv32-none-elf-gcc"
         );
+    }
+
+    #[test]
+    fn board_to_qemu_cmd_arm_lm3s6965evb() {
+        std::env::remove_var("QEMU_SYSTEM_ARM");
+        let (bin, args) = board_to_qemu_cmd("arm-none-eabi", "lm3s6965evb").unwrap();
+        assert_eq!(bin, "qemu-system-arm");
+        assert!(
+            args.contains(&"-machine".to_string()),
+            "args must include -machine: {:?}",
+            args
+        );
+        assert!(
+            args.contains(&"lm3s6965evb".to_string()),
+            "args must include board name: {:?}",
+            args
+        );
+        assert!(
+            args.contains(&"-semihosting".to_string()),
+            "ARM boards must include -semihosting: {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn board_to_qemu_cmd_riscv32_sifive_e() {
+        std::env::remove_var("QEMU_SYSTEM_RISCV32");
+        let (bin, args) = board_to_qemu_cmd("riscv32-unknown-none-elf", "sifive_e").unwrap();
+        assert_eq!(bin, "qemu-system-riscv32");
+        assert!(
+            args.contains(&"-machine".to_string()),
+            "args must include -machine: {:?}",
+            args
+        );
+        assert!(
+            args.contains(&"sifive_e".to_string()),
+            "args must include board name: {:?}",
+            args
+        );
+        assert!(
+            args.contains(&"-bios".to_string()) && args.contains(&"none".to_string()),
+            "RISC-V boards must include -bios none: {:?}",
+            args
+        );
+    }
+
+    #[test]
+    fn board_to_qemu_cmd_thumbv7em() {
+        std::env::remove_var("QEMU_SYSTEM_THUMBV7EM");
+        let (bin, args) = board_to_qemu_cmd("thumbv7em-none-eabihf", "mps2-an385").unwrap();
+        assert_eq!(bin, "qemu-system-arm", "thumb triples map to qemu-system-arm");
+        assert!(args.contains(&"mps2-an385".to_string()));
+        assert!(args.contains(&"-semihosting".to_string()));
+    }
+
+    #[test]
+    fn board_to_qemu_cmd_unknown_arch_errors() {
+        let result = board_to_qemu_cmd("mips32-unknown-none-elf", "malta");
+        assert!(result.is_err(), "unknown arch must produce an error");
+        let msg = result.unwrap_err();
+        assert!(
+            msg.contains("mips32"),
+            "error must name the unknown arch: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn parse_run_args_qemu_machine_eq_form() {
+        let args: Vec<String> = vec![
+            "vanic".into(),
+            "run".into(),
+            "prog.vani".into(),
+            "--target=arm-none-eabi".into(),
+            "--qemu-machine=lm3s6965evb".into(),
+        ];
+        let (_, _, _, target, machine) = parse_run_args(&args, 3).unwrap();
+        assert_eq!(target.as_deref(), Some("arm-none-eabi"));
+        assert_eq!(machine.as_deref(), Some("lm3s6965evb"));
+    }
+
+    #[test]
+    fn parse_run_args_qemu_machine_space_form() {
+        let args: Vec<String> = vec![
+            "vanic".into(),
+            "run".into(),
+            "prog.vani".into(),
+            "--target=riscv32-unknown-none-elf".into(),
+            "--qemu-machine".into(),
+            "sifive_e".into(),
+        ];
+        let (_, _, _, target, machine) = parse_run_args(&args, 3).unwrap();
+        assert_eq!(target.as_deref(), Some("riscv32-unknown-none-elf"));
+        assert_eq!(machine.as_deref(), Some("sifive_e"));
     }
 }

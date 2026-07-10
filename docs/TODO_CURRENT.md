@@ -297,12 +297,14 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
   C: `T __attribute__((vector_size(32)))`. 2 lib tests + 3 edge-case files.
   Stretch: `vec512<T>` for AVX-512 / future SVE-512 (same pattern, N×2).
 
-- [ ] **SIMD-10. QEMU system-mode bare-metal integration**
-  `vanic run --target=arm-none-eabi` currently prints a helpful error and
-  stops. Wire in `qemu-system-arm -machine lm3s6965evb -kernel <elf>` as an
-  opt-in: `vanic run --target=arm-none-eabi --qemu-machine=lm3s6965evb`.
-  Requires: flag parsing in `main.rs`, board-name → QEMU flags map, semihosting
-  output detection. Scope is ~4 h for ARM; add riscv32 second.
+- [x] **SIMD-10. QEMU system-mode bare-metal integration** ✅ done 2026-07-10
+  `vanic run --target=arm-none-eabi --qemu-machine=lm3s6965evb` now works.
+  Added `--qemu-machine=<board>` / `--qemu-machine <board>` flag to
+  `parse_run_args`; `board_to_qemu_cmd` maps (arch, board) → `(binary, args)`;
+  `run_bare_metal_qemu_system` builds ELF then invokes `qemu-system-<arch>`.
+  Covered: arm/thumb (semihosting), aarch64 (semihosting), riscv32/riscv64
+  (bios=none). Env-var override: `QEMU_SYSTEM_<ARCH>`. 6 new unit tests in
+  `src/main.rs`. Updated bare-metal error message to suggest `--qemu-machine`.
 
 ### Blocked on hardware
 
