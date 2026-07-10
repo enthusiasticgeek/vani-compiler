@@ -714,6 +714,14 @@ pub struct Function {
     /// determinism rule. Composable with `#[wcet]`, `#[no_heap]`,
     /// and the other primitives.
     pub deterministic_timing: bool,
+    /// When true (`#[vectorize]`), the LLVM backend attaches
+    /// `!llvm.loop.vectorize.enable i1 true` + `!llvm.loop.vectorize.width`
+    /// metadata to every while-loop back-edge in this function, forcing
+    /// LLVM to attempt vectorization even for loops it would otherwise
+    /// leave scalar (e.g. short trip-count or ambiguous aliasing).
+    /// Has no effect on the C backend (which delegates to the C compiler's
+    /// own auto-vectorizer flags). Composable with all other attributes.
+    pub vectorize: bool,
     /// Closure #269: FFI marker. Set when the parser saw
     /// `extern "C" fn name(...) -> R;` — a body-less
     /// declaration of an externally-linked C-ABI symbol.

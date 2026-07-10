@@ -1983,6 +1983,7 @@ fn emit_function(
 
     let mut ctx = FnCtx::new(assert_msg_indices, print_str_indices);
     ctx.current_block = "entry".to_string();
+    ctx.force_vectorize = function.vectorize;
     // Closure #289 tree-LLVM: record the fn's bounded-name
     // (if any) so Return emits can reference the
     // thread-local counter. Then emit the entry sequence.
@@ -2160,6 +2161,11 @@ struct FnCtx<'a> {
     /// instead of `alloca_preamble`. Set for outlined parallel-for functions
     /// where `emit_function`'s two-pass flush is not used.
     skip_alloca_hoisting: bool,
+    /// Set when the enclosing function carries `#[vectorize]`. Forces
+    /// `!llvm.loop.vectorize.enable i1 true` on every while-loop in
+    /// this function, including loops LLVM's cost model would normally
+    /// leave scalar (short/unanalysable trip counts, mild aliasing).
+    force_vectorize: bool,
 }
 
 #[derive(Clone)]
@@ -2194,6 +2200,7 @@ impl<'a> FnCtx<'a> {
             loop_meta_buf: String::new(),
             alloca_preamble: String::new(),
             skip_alloca_hoisting: false,
+            force_vectorize: false,
         }
     }
     fn fresh_tmp(&mut self) -> String {
@@ -3628,26 +3635,49 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // back-edge: overrides the cost model when aliasing is
             // safe, forcing LLVM to vectorize even for nested loops.
             if !ctx.terminated {
-                // Three metadata IDs per loop:
+                // Metadata IDs per loop (3 default, 4 with #[vectorize]):
                 //   !mid   = distinct self-referencing loop-ID node
                 //   !mid+1 = llvm.loop.vectorize.enable i1 true
-                //   !mid+2 = llvm.loop.vectorize.width  i32 4
-                // The width hint is required for LLVM 22+ which may
-                // emit `samesign ult` exit conditions after loop-rotate;
-                // the vectorizer can't determine trip counts from that
-                // form using only the enable flag alone.
-                let mid = NEXT_LOOP_META_ID.fetch_add(3, Ordering::Relaxed);
-                out.push_str(&format!(
-                    "  br label %{}, !llvm.loop !{}\n",
-                    header, mid
-                ));
-                ctx.loop_meta_buf.push_str(&format!(
-                    "!{} = distinct !{{!{}, !{}, !{}}}\n\
-                     !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
-                     !{} = !{{!\"llvm.loop.vectorize.width\", i32 {}}}\n",
-                    mid, mid, mid + 1, mid + 2, mid + 1, mid + 2,
-                    vectorize_width()
-                ));
+                //   !mid+2 = llvm.loop.vectorize.width  i32 N
+                //   !mid+3 = llvm.loop.interleave.count i32 4  (force_vectorize only)
+                //
+                // The width hint is required for LLVM 22+ which may emit
+                // `samesign ult` exit conditions after loop-rotate; the
+                // vectorizer can't determine trip counts from that form using
+                // only the enable flag alone.
+                //
+                // interleave.count = 4 (added when the enclosing fn carries
+                // `#[vectorize]`) requests software pipelining across 4
+                // iterations, which improves throughput on latency-bound
+                // loops beyond what auto-vectorization alone provides.
+                if ctx.force_vectorize {
+                    let mid = NEXT_LOOP_META_ID.fetch_add(4, Ordering::Relaxed);
+                    out.push_str(&format!(
+                        "  br label %{}, !llvm.loop !{}\n",
+                        header, mid
+                    ));
+                    ctx.loop_meta_buf.push_str(&format!(
+                        "!{} = distinct !{{!{}, !{}, !{}, !{}}}\n\
+                         !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
+                         !{} = !{{!\"llvm.loop.vectorize.width\", i32 {}}}\n\
+                         !{} = !{{!\"llvm.loop.interleave.count\", i32 4}}\n",
+                        mid, mid, mid + 1, mid + 2, mid + 3,
+                        mid + 1, mid + 2, vectorize_width(), mid + 3
+                    ));
+                } else {
+                    let mid = NEXT_LOOP_META_ID.fetch_add(3, Ordering::Relaxed);
+                    out.push_str(&format!(
+                        "  br label %{}, !llvm.loop !{}\n",
+                        header, mid
+                    ));
+                    ctx.loop_meta_buf.push_str(&format!(
+                        "!{} = distinct !{{!{}, !{}, !{}}}\n\
+                         !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
+                         !{} = !{{!\"llvm.loop.vectorize.width\", i32 {}}}\n",
+                        mid, mid, mid + 1, mid + 2, mid + 1, mid + 2,
+                        vectorize_width()
+                    ));
+                }
             }
             ctx.loops.pop();
             ctx.terminated = outer_terminated;

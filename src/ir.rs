@@ -115,6 +115,10 @@ pub struct TypedFunction {
     /// `safety::enforce_deterministic_timing` to reject branches
     /// with unequal cycle estimates and data-dependent loops.
     pub deterministic_timing: bool,
+    /// Forwarded from `ast::Function::vectorize`. When true,
+    /// the LLVM backend forces vectorization metadata on every
+    /// while-loop in this function.
+    pub vectorize: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function

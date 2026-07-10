@@ -1588,6 +1588,7 @@ impl Parser {
             bounded_stack: None,
             wcet_cycles: None,
             deterministic_timing: false,
+            vectorize: false,
             recursion_bound: None,
         })
     }
@@ -1618,6 +1619,7 @@ impl Parser {
         let mut no_recursion = false;
         let mut interrupt = false;
         let mut no_mangle = false;
+        let mut vectorize = false;
         let mut link_section: Option<String> = None;
         let mut bounded_stack: Option<u64> = None;
         let mut wcet_cycles: Option<u64> = None;
@@ -1652,6 +1654,7 @@ impl Parser {
                 "no_recursion" => no_recursion = true,
                 "interrupt" => interrupt = true,
                 "no_mangle" => no_mangle = true,
+                "vectorize" => vectorize = true,
                 "link_section" => {
                     self.expect_keyword(
                         "'=' after `link_section`",
@@ -1773,7 +1776,8 @@ impl Parser {
                             "unknown attribute '#[{}]' — recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
-                             `#[no_mangle]`, `#[link_section = \"s\"]`, \
+                             `#[no_mangle]`, `#[vectorize]`, \
+                             `#[link_section = \"s\"]`, \
                              `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
                              `#[deterministic_timing]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
@@ -1808,6 +1812,7 @@ impl Parser {
         f.no_recursion = no_recursion || interrupt || composite_no_recursion;
         f.interrupt = interrupt;
         f.no_mangle = no_mangle;
+        f.vectorize = vectorize;
         f.link_section = link_section;
         f.safety_standard = safety_standard;
         f.bounded_stack = bounded_stack;
@@ -1883,6 +1888,7 @@ impl Parser {
             bounded_stack: None,
             wcet_cycles: None,
             deterministic_timing: false,
+            vectorize: false,
             is_extern: true,
             recursion_bound: None,
         })
@@ -8985,6 +8991,7 @@ pub(crate) fn try_v31_transform(
         bounded_stack: None,
         wcet_cycles: None,
         deterministic_timing: false,
+        vectorize: false,
         recursion_bound: None,
     };
 

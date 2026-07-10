@@ -1878,6 +1878,7 @@ fn lift_closures_in_block(
             bounded_stack: None,
             wcet_cycles: None,
             deterministic_timing: false,
+            vectorize: false,
                         recursion_bound: None,
                     });
                     // Arc 5c: synthesize env-struct + register
@@ -3284,6 +3285,7 @@ fn lift_expr_anon_fn(
             bounded_stack: None,
             wcet_cycles: None,
             deterministic_timing: false,
+            vectorize: false,
                 is_extern: false,
                 recursion_bound: None,
             });
@@ -5457,6 +5459,7 @@ fn hoist_impls_into_functions(
                         bounded_stack: None,
                         wcet_cycles: None,
                         deterministic_timing: false,
+            vectorize: false,
                         is_extern: false,
                     });
                 }
@@ -8361,6 +8364,7 @@ fn check_function(
             bounded_stack: function.bounded_stack,
             wcet_cycles: function.wcet_cycles,
             deterministic_timing: function.deterministic_timing,
+            vectorize: function.vectorize,
             span: function.span,
         };
     }
@@ -8426,6 +8430,7 @@ fn check_function(
             bounded_stack: None,
             wcet_cycles: None,
             deterministic_timing: false,
+            vectorize: false,
             span: function.span,
         };
     }
@@ -8693,6 +8698,7 @@ fn check_function(
             bounded_stack: function.bounded_stack,
             wcet_cycles: function.wcet_cycles,
             deterministic_timing: function.deterministic_timing,
+            vectorize: function.vectorize,
         span: function.span,
     }
 }

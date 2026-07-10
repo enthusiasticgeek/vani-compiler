@@ -47085,6 +47085,57 @@ fn main() -> i64 { return reset_vec(); }
     }
 
     #[test]
+    fn vectorize_attr_accepted_and_emits_interleave_in_llvm() {
+        let src = r#"
+intent "vectorize attr test";
+#[vectorize]
+fn sum_array(data: ref Vec<i64>, n: i64) -> i64 {
+    let s: i64 = 0;
+    let i: i64 = 0;
+    while i < n {
+        s = s + data[i];
+        i = i + 1;
+    }
+    return s;
+}
+fn main() -> i64 {
+    let v: Vec<i64> = vec_fill(4, 1 as i64);
+    return sum_array(ref v, 4);
+}
+"#;
+        // Attribute must parse and compile without error.
+        let ll = compile_to_llvm(src).expect("#[vectorize] must compile");
+        // LLVM IR should contain the interleave.count metadata that
+        // #[vectorize] adds on top of the standard vectorize.enable hint.
+        assert!(
+            ll.contains("llvm.loop.interleave.count"),
+            "expected llvm.loop.interleave.count in LLVM IR:\n{ll}"
+        );
+        assert!(
+            ll.contains("llvm.loop.vectorize.enable"),
+            "expected llvm.loop.vectorize.enable in LLVM IR:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn vectorize_attr_unknown_attr_error() {
+        let src = r#"
+intent "unknown attr";
+#[notanattr]
+fn foo() -> i64 { return 0; }
+fn main() -> i64 { return foo(); }
+"#;
+        let result = compile_to_llvm(src);
+        assert!(result.is_err(), "unknown attribute should be rejected");
+        let diags = result.unwrap_err();
+        let combined: String = diags.iter().map(|d| d.message.clone()).collect::<Vec<_>>().join(" ");
+        assert!(
+            combined.contains("notanattr"),
+            "error should name the unknown attribute: {combined}"
+        );
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";
