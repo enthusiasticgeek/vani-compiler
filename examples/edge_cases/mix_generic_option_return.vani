@@ -1,0 +1,8 @@
+// GEN + ENM: generic fn returning Option<T>; monomorphized to Option<i64>.
+fn safe_first<T>(xs: Vec<T>) -> Option<T> {
+  return Option.Some(xs[0]);
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(42, 1, 2);
+  return option_unwrap_or(safe_first(xs), -1);
+}

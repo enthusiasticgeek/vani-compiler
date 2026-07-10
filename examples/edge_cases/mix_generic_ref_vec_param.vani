@@ -1,0 +1,6 @@
+// GEN + REF + VEC: generic fn over element type; takes ref Vec<T>.
+fn len_of<T>(v: ref Vec<T>) -> i64 { return len(v) as i64; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40);
+  return len_of(ref xs);
+}

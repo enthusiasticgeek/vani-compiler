@@ -1,0 +1,6 @@
+// CONC: Channel<i64> create + send + recv round-trip.
+fn main() -> i64 {
+  let ch: Channel<i64> = channel_new();
+  let _: i64 = channel_send(ref ch, 99);
+  return channel_recv(ref ch);
+}

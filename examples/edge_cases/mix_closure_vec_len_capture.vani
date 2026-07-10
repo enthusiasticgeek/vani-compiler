@@ -1,0 +1,7 @@
+// CLO + VEC: closure capturing Vec length (a Copy i64 derived from Vec).
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30, 40, 50);
+  let n: i64 = len(xs) as i64;
+  let addn = fn(x: i64) -> i64 { return x + n; };
+  return addn(n);
+}

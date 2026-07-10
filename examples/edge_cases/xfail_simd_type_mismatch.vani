@@ -1,0 +1,8 @@
+// xfail: simd_add with mismatched element types (i32 vs f32).
+// The checker must reject with a type error, not a panic.
+fn main() -> i64 {
+  let a: vec128<i32> = simd_splat(1 as i32);
+  let b: vec128<f32> = simd_splat(1.0 as f32);
+  let c: vec128<i32> = simd_add(a, b);
+  return 0;
+}

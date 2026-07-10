@@ -1,0 +1,12 @@
+// SMT + STRT + REF: pure fn with struct ref param; ensures provable from requires.
+struct R { lo: i64, hi: i64 }
+pure fn width(r: ref R) -> i64
+requires r.lo <= r.hi;
+ensures _return >= 0;
+{
+  return r.hi - r.lo;
+}
+fn main() -> i64 {
+  let r: R = R { lo: 3, hi: 10 };
+  return width(ref r);
+}

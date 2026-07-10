@@ -1,0 +1,13 @@
+// SMT + VEC: function with ref Vec<i64> param alongside SMT annotations.
+// Pins that the combo compiles without a panic on both backends.
+fn count(v: ref Vec<i64>, n: i64) -> i64
+requires n >= 0;
+ensures _return >= 0;
+ensures _return == n;
+{
+  return n;
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  return count(ref xs, 0);
+}

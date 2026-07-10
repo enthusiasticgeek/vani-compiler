@@ -1,0 +1,6 @@
+// xfail: vec128<bool> is not a valid SIMD element type.
+// The checker must reject with a type error, not a panic.
+fn main() -> i64 {
+  let v: vec128<bool> = simd_splat(true);
+  return 0;
+}

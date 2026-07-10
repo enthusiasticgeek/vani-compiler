@@ -1,0 +1,14 @@
+// SIMD + CONC: vec128<f32> captured read-only inside parallel-for body.
+// Pins that the parallel-for ctx struct is allocated 16 bytes for
+// the vec128 capture (type_byte_size fix).
+fn main() -> i64 {
+  let scale: vec128<f32> = simd_splat(1.0 as f32);
+  let total: i64 = 0;
+  parallel for i from 0 to 4
+  reduce total with +;
+  {
+    let lane_sum: f32 = simd_reduce_add(scale);
+    total = total + lane_sum as i64;
+  }
+  return total;
+}

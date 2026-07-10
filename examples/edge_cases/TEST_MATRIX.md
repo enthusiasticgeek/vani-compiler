@@ -30,6 +30,7 @@ cell value is the test filename.
 | **CLO** | Closures / fn ptr | anon fns, `fn(...) -> R`, capture |
 | **GEN** | Generics | `fn f<T>(...)`, `struct G<T>`, mono |
 | **UNS** | Unsafe / FFI | `unsafe(reason = "...")`, `extern "C"`, raw ptrs |
+| **SIMD** | SIMD / vec128 | `vec128<T>`, `simd_splat`, `simd_add`, `simd_load`, `simd_store`, `simd_reduce_add` |
 
 ## Single-bucket stress (the foundation tests)
 
@@ -60,6 +61,17 @@ probes a non-obvious feature interaction or boundary value.
 | `xfail_vec_tree_empty_init.vani` | `vec()` of a recursive struct without type-flow inference | rejects with annotation diagnostic |
 | `xfail_match_stmt_without_let.vani` | `match` as standalone statement (no `let` capturing) | rejects with parser diagnostic |
 
+## SIMD tests (new bucket — added 2026-07-10)
+
+| File | Combo | What it tests |
+|---|---|---|
+| `mix_simd_basic.vani` | SIMD | i32 splat + add + reduce_add; 4 lanes × 3 = 12 |
+| `mix_simd_ref_vec.vani` | SIMD + REF + VEC | `simd_load` from `ref Vec<f32>`; hsum 4 elements |
+| `mix_simd_parallel_capture.vani` | SIMD + CONC | `vec128<f32>` captured read-only in `parallel for`; pins ctx 16-byte alloc |
+| `mix_simd_i32_mul.vani` | SIMD | `simd_mul` + `simd_reduce_add` on `vec128<i32>` |
+| `xfail_simd_bool_splat.vani` | SIMD | `vec128<bool>` is not a valid element type — must reject |
+| `xfail_simd_type_mismatch.vani` | SIMD | `simd_add(vec128<i32>, vec128<f32>)` — element type mismatch must reject |
+
 ## Two-feature combinations (the workhorse mid-tier)
 
 | File | Combo | What it tests |
@@ -74,63 +86,73 @@ probes a non-obvious feature interaction or boundary value.
 | `mix_box_dyn_in_struct.vani` | STRT + VEC + BOX + DYN + STR | `Vec<Box<dyn Iface>>` as a struct field alongside `Vec<i64>` + `OwnedStr` |
 | `mix_async_ref_return_to_struct.vani` | ASNC + REF + STRT | `async fn pass(p: ref T) -> ref T` |
 | `mix_unsafe_return_in_block.vani` | UNS + SCAL | `unsafe { return X; }` as fn body |
+| `mix_generic_ref_vec_param.vani` | GEN + REF + VEC | generic fn `len_of<T>(v: ref Vec<T>)` |
+| `mix_generic_box_wrap.vani` | GEN + BOX + VEC | compose `wrap<T>` + `first<T>` generic fns |
+| `mix_generic_option_return.vani` | GEN + ENM | generic fn returning `Option<T>` |
+| `mix_enum_struct_match.vani` | ENM + STRT | match arm extracts struct payload fields |
+| `mix_conc_parallel_struct_capture.vani` | CONC + STRT | struct field accessed via parallel-for capture |
+| `mix_conc_mutex_struct.vani` | CONC + STRT | `Mutex<i64>` as a struct field; lock + guard_get |
+| `mix_conc_channel_send_recv.vani` | CONC | `Channel<i64>` create + send + recv round-trip |
+| `mix_closure_vec_len_capture.vani` | CLO + VEC | closure captures Vec length (Copy i64 from Vec) |
+| `mix_closure_box_dyn_call.vani` | CLO + BOX + DYN | closure applied to result of DYN dispatch on Box |
+| `mix_closure_chain.vani` | CLO | two closures composed in one function |
+| `mix_smt_vec_param.vani` | SMT + VEC | `ref Vec<i64>` param alongside requires/ensures |
+| `mix_smt_pure_struct_ref.vani` | SMT + STRT + REF | `pure fn` with struct ref; ensures provable from requires |
+| `mix_tuple_struct_elem.vani` | TUP + STRT | tuple containing a struct; destructure to access fields |
+| `mix_tuple_fn_return.vani` | TUP | function returning `(i64, i64)`; caller destructures |
 
 ## Coverage matrix — which two-bucket pairs are pinned?
 
 Pairs explicitly exercised somewhere in the existing set:
 
-|       | SCAL | STR | VEC | ARR | TUP | STRT | ENM | REF | BOX | DYN | ASNC | SMT | CONC | CLO | GEN | UNS |
-|-------|------|-----|-----|-----|-----|------|-----|-----|-----|-----|------|-----|------|-----|-----|-----|
-| SCAL  |  ✓   |     |     |     |     |      |     |     |     |     |      |  ✓  |      |     |     |     |
-| STR   |      |  ✓  |     |     |     |  ✓   |     |     |     |     |      |     |      |     |     |     |
-| VEC   |      |  ✓  |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |     |      |     |     |     |
-| ARR   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |     |     |
-| TUP   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |     |     |
-| STRT  |      |  ✓  |  ✓  |     |     |  ✓   |     |  ✓  |  ✓  |  ✓  |  ✓   |     |      |  ✓  |     |     |
-| ENM   |      |     |     |     |     |      |  ✓  |     |     |     |      |     |      |     |     |     |
-| REF   |      |     |     |     |     |  ✓   |     |  ✓  |     |     |  ✓   |     |      |     |     |     |
-| BOX   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |     |      |     |     |     |
-| DYN   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |     |      |  ✓  |     |     |
-| ASNC  |      |     |     |     |     |  ✓   |     |  ✓  |     |     |  ✓   |     |      |     |     |     |
-| SMT   |   ✓  |     |     |     |     |      |     |     |     |     |      |  ✓  |      |     |     |     |
-| CONC  |      |     |     |     |     |      |     |     |     |     |      |     |  ?   |     |     |     |
-| CLO   |      |     |     |     |     |  ✓   |     |     |     |  ✓  |      |     |      |  ?  |     |     |
-| GEN   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |  ?  |     |
-| UNS   |   ✓  |     |     |     |     |      |     |     |     |     |      |     |      |     |     |  ?  |
+|       | SCAL | STR | VEC | ARR | TUP | STRT | ENM | REF | BOX | DYN | ASNC | SMT | CONC | CLO | GEN | UNS | SIMD |
+|-------|------|-----|-----|-----|-----|------|-----|-----|-----|-----|------|-----|------|-----|-----|-----|------|
+| SCAL  |  ✓   |     |     |     |     |      |     |     |     |     |      |  ✓  |      |     |     |     |      |
+| STR   |      |  ✓  |     |     |     |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
+| VEC   |      |  ✓  |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |  ✓  |  ✓   |  ✓  |  ✓  |     |      |
+| ARR   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |     |     |      |
+| TUP   |      |  ✓  |     |     |  ✓  |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
+| STRT  |      |  ✓  |  ✓  |     |  ✓  |  ✓   |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓   |  ✓  |     |     |      |
+| ENM   |      |     |     |     |     |  ✓   |  ✓  |     |     |     |      |     |      |     |  ✓  |     |      |
+| REF   |      |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |  ✓   |  ✓  |      |     |  ✓  |     |  ✓   |
+| BOX   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |  ✓  |     |      |
+| DYN   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |     |     |      |
+| ASNC  |      |     |     |     |     |  ✓   |     |  ✓  |  ✓  |  ✓  |  ✓   |     |      |     |     |     |      |
+| SMT   |   ✓  |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |      |  ✓  |      |     |     |     |      |
+| CONC  |      |     |  ✓  |     |     |  ✓   |     |     |     |     |      |     |  ✓   |     |     |     |  ✓   |
+| CLO   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |     |      |  ✓  |     |     |      |
+| GEN   |      |     |  ✓  |     |     |      |  ✓  |  ✓  |  ✓  |     |      |     |      |     |  ✓  |     |      |
+| UNS   |   ✓  |     |  ✓  |     |     |      |     |     |     |     |      |     |      |     |     |  ✓  |      |
+| SIMD  |      |     |  ✓  |     |     |      |     |  ✓  |     |     |      |     |  ✓   |     |     |     |  ✓   |
 
-✓ = pinned; ? = single-feature only, no cross test in the edge set yet (gap).
+✓ = pinned; ARR row remains empty (fixed-size array literals not yet confirmed in the compiler).
 
 ## Documented gaps (combinations not yet tested)
 
-The blank cells in the matrix correspond to feature pairs we
-haven't constructed a focused mixed-feature test for. Each is a
-candidate for a future adversarial test:
+Gaps addressed in the 2026-07-10 audit round:
+- SIMD bucket added (6 new files); SIMD × REF, SIMD × VEC, SIMD × CONC pinned
+- GEN × REF, GEN × ENM, GEN × VEC cross-tests added
+- ENM + STRT match-extraction added
+- CONC × STRT, CONC × Channel pinned
+- CLO × VEC, CLO × BOX + DYN pinned
+- SMT × VEC, SMT × STRT × REF (`pure fn`) pinned
+- TUP × STRT, TUP return-value pinned
 
-### High-priority gaps (likely surface area for bugs)
+### Remaining gaps
 
-1. **CONC + STR / VEC / STRT / BOX / DYN** — multi-thread tasks
-   passing complex types via channels.
-2. **GEN + any other bucket** — generic fns / structs holding
-   any non-Copy type. Generic monomorphization + complex types
-   is fertile bug territory.
-3. **CLO + capture-rich features** — closure capturing a Box,
-   Vec, struct-with-OwnedStr, etc.
-4. **ASNC + most other features** — async fn doing parallel for,
-   async fn with Mutex, async fn returning Result.
-5. **SMT + complex types** — `ensures` clause referring to
-   struct field, Vec element, ref-deref through call.
-6. **ARR + TUP** — `[(i64, OwnedStr); 4]` (rejected today —
-   tuples are Copy-only; nice to pin the rejection).
-7. **TUP + various** — tuples in any context outside `(i64,
-   i64)` are under-tested.
-8. **ENM + BOX** — `Option<Box<T>>` is rejected; document the
-   rejection.
-9. **ENM + STRT** — enum-with-struct-payload, struct-with-enum-
-   field. Common; under-tested.
-10. **REF + STR** — `ref OwnedStr`, `ref Str`. Likely safe but
-    untested.
-11. **UNS + each feature** — `unsafe` block containing a Box op
-    / Vec op / etc.
+1. **ARR + any** — fixed-size array literal syntax not yet confirmed
+   as a live compiler feature; all ARR cells remain empty.
+2. **ASNC + VEC / Box** — async fn with complex param types across
+   await points. `mix_async_box_dyn.vani` covers ASNC+BOX+DYN in
+   compile-only mode; run-mode async integration is largely untested.
+3. **GEN + STRT methods** — generic struct with `methods on T` block
+   (monomorphization of method dispatch).
+4. **CLO + REF + VEC** — closure capturing a `ref Vec` (as opposed
+   to a Copy length scalar).
+5. **ENM + BOX** — `Option<Box<T>>` is rejected; would be a good
+   `xfail_enum_box_payload.vani` pin.
+6. **REF + STR** — `ref OwnedStr` through function calls.
+7. **UNS + BOX / DYN** — unsafe block touching heap-allocated types.
 
 ### Three-feature combinations not pinned
 

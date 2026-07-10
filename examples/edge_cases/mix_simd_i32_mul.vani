@@ -1,0 +1,9 @@
+// SIMD: vec128<i32> multiply + reduce_add.
+// 4 lanes × (3 × 4) = 4 × 12 = 48; return 48 as i64.
+fn main() -> i64 {
+  let a: vec128<i32> = simd_splat(3 as i32);
+  let b: vec128<i32> = simd_splat(4 as i32);
+  let c: vec128<i32> = simd_mul(a, b);
+  let s: i32 = simd_reduce_add(c);
+  return s as i64;
+}

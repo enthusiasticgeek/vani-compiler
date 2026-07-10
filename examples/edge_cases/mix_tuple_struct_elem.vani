@@ -1,0 +1,11 @@
+// TUP + STRT: tuple containing a struct; destructure to access fields.
+struct Point { x: i64, y: i64 }
+fn make_labeled(p: Point, label: i64) -> (Point, i64) {
+  return (p, label);
+}
+fn main() -> i64 {
+  let p: Point = Point { x: 3, y: 4 };
+  let pair: (Point, i64) = make_labeled(p, 10);
+  let (pt, n) = pair;
+  return pt.x + pt.y + n;
+}

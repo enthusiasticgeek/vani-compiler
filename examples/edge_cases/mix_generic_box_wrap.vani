@@ -1,0 +1,8 @@
+// GEN + BOX + VEC: compose generic wrap-in-Box with generic Vec first.
+fn wrap<T>(v: T) -> Box<T> { return box(v); }
+fn first<T>(xs: Vec<T>) -> T { return xs[0]; }
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10, 20, 30);
+  let b: Box<i64> = wrap(first(xs));
+  return 0;
+}

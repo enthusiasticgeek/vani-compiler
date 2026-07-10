@@ -1,0 +1,12 @@
+// ENM + STRT: enum with struct payload; match extracts and uses fields.
+struct Coord { x: i64, y: i64 }
+enum Shape { Circle(Coord), Empty }
+fn area(s: Shape) -> i64 {
+  return match s {
+    Shape.Circle(c) then c.x * c.y,
+    Shape.Empty then 0,
+  };
+}
+fn main() -> i64 {
+  return area(Shape.Circle(Coord { x: 3, y: 4 }));
+}

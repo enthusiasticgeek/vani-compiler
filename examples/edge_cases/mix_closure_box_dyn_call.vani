@@ -1,0 +1,11 @@
+// CLO + BOX + DYN: closure applied to result of DYN dispatch on Box.
+interface Shape { fn area(self: ref Self) -> i64; }
+struct Rect { w: i64, h: i64 }
+implement Shape for Rect {
+  fn area(self: ref Rect) -> i64 { return self.w * self.h; }
+}
+fn main() -> i64 {
+  let b: Box<dyn Shape> = box(Rect { w: 4, h: 5 } as dyn Shape);
+  let scale = fn(n: i64) -> i64 { return n * 2; };
+  return scale(b.area());
+}

@@ -1,0 +1,8 @@
+// CONC + STRT: Mutex<i64> as a struct field; lock + guard_get.
+struct State { m: Mutex<i64> }
+fn main() -> i64 {
+  let s: State = State { m: mutex_new(42) };
+  let g: Guard<i64> = mutex_lock(ref s.m);
+  let v: i64 = guard_get(ref g);
+  return v;
+}

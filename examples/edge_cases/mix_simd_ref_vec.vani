@@ -1,0 +1,17 @@
+// SIMD + REF + VEC: simd_load from ref Vec<f32>; horizontal sum.
+// Pins the just-fixed ref Vec<T> → ->data C-backend path.
+fn hsum(v: ref Vec<f32>, n: i64) -> f32 {
+  let acc: vec128<f32> = simd_splat(0.0 as f32);
+  let i: i64 = 0;
+  while i + 4 <= n {
+    let chunk: vec128<f32> = simd_load(v, i);
+    acc = simd_add(acc, chunk);
+    i = i + 4;
+  }
+  return simd_reduce_add(acc);
+}
+fn main() -> i64 {
+  let xs: Vec<f32> = vec(1.0 as f32, 2.0 as f32, 3.0 as f32, 4.0 as f32);
+  let s: f32 = hsum(ref xs, 4);
+  return s as i64;
+}

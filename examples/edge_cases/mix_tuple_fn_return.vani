@@ -1,0 +1,8 @@
+// TUP: function returning a tuple; caller destructures both values.
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+fn main() -> i64 {
+  let (q, r) = divmod(17, 5);
+  return q + r;
+}

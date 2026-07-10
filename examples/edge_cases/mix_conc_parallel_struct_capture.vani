@@ -1,0 +1,13 @@
+// CONC + STRT: struct captured inside parallel-for body.
+// Pins that struct fields are accessible via the captured ctx.
+struct Scale { factor: i64 }
+fn main() -> i64 {
+  let s: Scale = Scale { factor: 3 };
+  let total: i64 = 0;
+  parallel for i from 0 to 4
+  reduce total with +;
+  {
+    total = total + s.factor;
+  }
+  return total;
+}

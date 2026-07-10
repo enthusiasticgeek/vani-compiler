@@ -1,0 +1,7 @@
+// CLO: two closures composed; pins multi-closure in same function.
+fn main() -> i64 {
+  let add3 = fn(x: i64) -> i64 { return x + 3; };
+  let mul2 = fn(x: i64) -> i64 { return x * 2; };
+  let n: i64 = add3(5);
+  return mul2(n);
+}
