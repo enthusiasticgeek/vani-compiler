@@ -1345,8 +1345,8 @@ fn run() -> Result<ExitCode, String> {
         }
         "build" => {
             let (file, flag_start) = required_file_at(&args, 2, "build")?;
-            let (out, link_args, target) = parse_build_args(&args, flag_start)?;
-            build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref())
+            let (out, link_args, target, cpu) = parse_build_args(&args, flag_start)?;
+            build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref(), cpu.as_deref())
         }
         "tokens" => {
             // Debug subcommand: dump the token stream to stdout.
@@ -2505,10 +2505,11 @@ fn parse_run_args(
 fn parse_build_args(
     args: &[String],
     from: usize,
-) -> Result<(Option<PathBuf>, Vec<String>, Option<String>), String> {
+) -> Result<(Option<PathBuf>, Vec<String>, Option<String>, Option<String>), String> {
     let mut out: Option<PathBuf> = None;
     let mut link_args: Vec<String> = Vec::new();
     let mut target: Option<String> = None;
+    let mut cpu: Option<String> = None;
     let mut idx = from;
     while let Some(arg) = args.get(idx) {
         if arg == "-o" || arg == "--out" {
@@ -2538,6 +2539,15 @@ fn parse_build_args(
                 .ok_or_else(|| "expected a triple after '--target'".to_string())?;
             target = Some(triple.clone());
             idx += 2;
+        } else if let Some(name) = arg.strip_prefix("--cpu=") {
+            cpu = Some(name.to_string());
+            idx += 1;
+        } else if arg == "--cpu" {
+            let name = args
+                .get(idx + 1)
+                .ok_or_else(|| "expected a CPU name after '--cpu'".to_string())?;
+            cpu = Some(name.clone());
+            idx += 2;
         } else if arg == "--no-std" {
             // Accepted here; build_program_llvm auto-activates no-std for
             // bare-metal triples, but the explicit flag is also honoured.
@@ -2546,7 +2556,7 @@ fn parse_build_args(
             return Err(format!("unexpected argument '{}'", arg));
         }
     }
-    Ok((out, link_args, target))
+    Ok((out, link_args, target, cpu))
 }
 
 fn parse_emit_args(
@@ -2969,8 +2979,10 @@ fn build_program_llvm(
     out_path: Option<&Path>,
     link_args: &[String],
     target: Option<&str>,
+    cpu: Option<&str>,
 ) -> Result<ExitCode, String> {
     let checked = compile_path_or_report(path)?;
+    vani::backend_llvm::set_target_triple(target.unwrap_or(""));
     let ll = emit_llvm_via_ssa(&checked.ir);
     let stem = path
         .file_stem()
@@ -2996,16 +3008,17 @@ fn build_program_llvm(
     // is not installed — the build still completes with llc's own
     // optimizer (the -O=2 below).
     let opt = env::var("OPT").unwrap_or_else(|_| "opt".to_string());
-    // For host builds (no cross-compile target), unlock the native CPU's
-    // full ISA so the loop vectorizer can emit AVX2/AVX-512 intrinsics
-    // rather than being limited to SSE2. The flag is safe because `vanic
-    // build` compiles and runs on the same machine.
-    let opt_mcpu = if target.is_none() { Some("native") } else { None };
+    // CPU selection for opt and llc:
+    //   --cpu=<name>  explicit override (e.g. cortex-a72, neoverse-n2)
+    //   host build    default to "native" so AVX2/AVX-512 is available
+    //   cross build   no -mcpu unless --cpu= is given; llc uses the
+    //                 target triple's default CPU
+    let opt_mcpu: Option<&str> = cpu.or(if target.is_none() { Some("native") } else { None });
     let llc_input = match {
         let mut cmd = Command::new(&opt);
         cmd.arg("-O3");
-        if let Some(cpu) = opt_mcpu {
-            cmd.arg(format!("--mcpu={}", cpu));
+        if let Some(cpu_name) = opt_mcpu {
+            cmd.arg(format!("--mcpu={}", cpu_name));
         }
         cmd.arg("-S")
             .arg(&ll_path)
@@ -3053,8 +3066,12 @@ fn build_program_llvm(
         // Host build: use the native CPU to lower vector IR to the widest
         // available ISA (AVX2, AVX-512). Matches the -mcpu=native passed
         // to opt above so the IR and the lowering agree on feature set.
-        llc_cmd.arg("-mcpu=native");
         llc_cmd.arg("-relocation-model=pic");
+    }
+    // Apply CPU tuning: --cpu=<name> wins; host builds default to native.
+    let llc_mcpu: &str = cpu.unwrap_or(if target.is_none() { "native" } else { "" });
+    if !llc_mcpu.is_empty() {
+        llc_cmd.arg(format!("-mcpu={}", llc_mcpu));
     }
     // Default to -O=3. The verifier proves safety upstream so
     // the optimizer is free to assume no UB on the proved paths.
@@ -3277,7 +3294,7 @@ fn run_program_llvm_target(
             }
         }
     }
-    build_program_llvm(path, Some(&elf_path), &[], Some(triple))?;
+    build_program_llvm(path, Some(&elf_path), &[], Some(triple), None)?;
     // Try QEMU user-mode
     match qemu_for_triple(triple) {
         Some(qemu) => {

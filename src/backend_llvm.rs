@@ -328,6 +328,31 @@ thread_local! {
         std::cell::RefCell<
             std::collections::HashMap<String, Vec<(String, Option<Type>)>>
         > = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Target triple passed in from the build driver (e.g. "aarch64-unknown-linux-gnu").
+    /// Empty string means host build. Read by vectorize_width() to emit target-correct hints.
+    pub(crate) static LLVM_TARGET_TRIPLE: std::cell::RefCell<String> =
+        std::cell::RefCell::new(String::new());
+}
+
+/// Set the current compilation target triple so the LLVM backend can
+/// emit target-correct loop-vectorize hints. Call once per build, before
+/// any emit function. An empty string (the default) means host build.
+pub fn set_target_triple(triple: &str) {
+    LLVM_TARGET_TRIPLE.with(|t| *t.borrow_mut() = triple.to_string());
+}
+
+/// Return the LLVM loop.vectorize.width hint for the current target.
+/// Uses NEON's natural vector width on AArch64 (128-bit = 2×i64 or 4×i32).
+/// Defaults to 4 for x86-64 (AVX2 256-bit = 4×i64).
+fn vectorize_width() -> u32 {
+    LLVM_TARGET_TRIPLE.with(|t| {
+        let triple = t.borrow();
+        if triple.starts_with("aarch64") || triple.starts_with("arm64") {
+            2
+        } else {
+            4
+        }
+    })
 }
 
 /// Closure #283 LLVM half: approximate byte size for an
@@ -3619,8 +3644,9 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 ctx.loop_meta_buf.push_str(&format!(
                     "!{} = distinct !{{!{}, !{}, !{}}}\n\
                      !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
-                     !{} = !{{!\"llvm.loop.vectorize.width\", i32 4}}\n",
-                    mid, mid, mid + 1, mid + 2, mid + 1, mid + 2
+                     !{} = !{{!\"llvm.loop.vectorize.width\", i32 {}}}\n",
+                    mid, mid, mid + 1, mid + 2, mid + 1, mid + 2,
+                    vectorize_width()
                 ));
             }
             ctx.loops.pop();
@@ -43107,8 +43133,9 @@ fn emit_parallel_for_via_gomp(
     ctx.loop_meta_buf.push_str(&format!(
         "!{} = distinct !{{!{}, !{}, !{}}}\n\
          !{} = !{{!\"llvm.loop.vectorize.enable\", i1 true}}\n\
-         !{} = !{{!\"llvm.loop.vectorize.width\", i32 4}}\n",
-        pmid, pmid, pmid + 1, pmid + 2, pmid + 1, pmid + 2
+         !{} = !{{!\"llvm.loop.vectorize.width\", i32 {}}}\n",
+        pmid, pmid, pmid + 1, pmid + 2, pmid + 1, pmid + 2,
+        vectorize_width()
     ));
     deferred.push_str("exit:\n");
     // Combine each thread's partial result into the shared reduction.

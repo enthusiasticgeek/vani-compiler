@@ -214,6 +214,43 @@ point.
 - `examples/language/english/raw_ptr_*.vani` -- raw-pointer
   variants.
 
+## `parallel for` is not available on bare-metal
+
+`parallel for … reduce` lowers to `pthread_create` / `CreateThread`.
+Those symbols do not exist on `arm-none-eabi` or `thumbv7em-none-eabihf` —
+the linker will fail with an undefined-reference error.
+
+**Options on bare-metal:**
+
+| Approach | When to use |
+|---|---|
+| Sequential loop | Single-core MCU (Cortex-M0/M0+), latency is fine |
+| FreeRTOS `xTaskCreate` via FFI | Dual-core MCU (RP2040), need true parallelism |
+| DMA offload | Peripheral handles the accumulation (ADC, DSP core) |
+
+Example — FreeRTOS task via FFI on an RP2040:
+
+```vani
+extern fn xTaskCreate(f: fn() -> i64, name: ref i8,
+                      stack: i64, arg: i64, prio: i64, handle: i64) -> i64;
+extern fn vTaskStartScheduler() -> i64;
+
+fn core1_task() -> i64 {
+    // process second half of buffer here
+    return 0;
+}
+
+fn main() -> i64 {
+    // core 0 processes first half inline; core 1 via FreeRTOS task
+    let _ = xTaskCreate(core1_task, ref "c1" as i8, 512, 0, 1, 0);
+    let _ = vTaskStartScheduler();
+    return 0;
+}
+```
+
+For single-core targets, just use a plain `while` loop — no workaround
+needed, and the verifier + SMT checks still apply.
+
 ## Challenge
 
 Write a `circular_buffer` module that uses `Pool<i64>` to

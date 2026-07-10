@@ -146,4 +146,42 @@ requires len(a) == len(b);
 
 ---
 
+## Bare-metal / RTOS note
+
+`parallel for … reduce` emits `pthread_create` (POSIX) or `CreateThread`
+(Windows). Neither symbol exists on bare-metal targets such as
+`arm-none-eabi` or `thumbv7em-none-eabihf`. Linking for those targets will
+fail with an undefined-reference error.
+
+**Workaround — manual work split via FreeRTOS:**
+
+```vani
+// Split the range by hand and create one task per slice.
+// The FreeRTOS xTaskCreate symbol is available via FFI:
+extern fn xTaskCreate(f: fn() -> i64, name: ref i8, stack: i64,
+                      arg: i64, prio: i64, handle: i64) -> i64;
+
+fn worker_0() -> i64 {
+    // process a[0..n/2]
+    return 0;
+}
+fn worker_1() -> i64 {
+    // process a[n/2..n]
+    return 0;
+}
+fn main() -> i64 {
+    let _ = xTaskCreate(worker_0, ref "w0" as i8, 256, 0, 1, 0);
+    let _ = xTaskCreate(worker_1, ref "w1" as i8, 256, 0, 1, 0);
+    // ... vTaskStartScheduler() via FFI to begin execution
+    return 0;
+}
+```
+
+For single-core bare-metal (Cortex-M0/M0+), the entire premise of
+parallel execution doesn't apply — run the loop body sequentially and
+use DMA for true offload. `parallel for` is a POSIX/Win32 feature;
+use it only when linking against a hosted OS.
+
+---
+
 **Next**: [Sec.3 -- `task` / `join` + atomics / mutexes / channels ->](03_concurrency.md)
