@@ -33179,8 +33179,8 @@ fn is_simd_scalar(ty: &Type) -> bool {
 /// Native 128-bit SIMD vector builtins (Option 3).
 ///
 /// - `simd_splat(val: T) -> vec128<T>` — broadcast scalar to all lanes
-/// - `simd_load(v: Vec<T>, idx: i64) -> vec128<T>` — load N lanes at v[idx..]
-/// - `simd_store(v: Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` — store N lanes
+/// - `simd_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec128<T>` — load N lanes at v[idx..]
+/// - `simd_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` — store N lanes
 /// - `simd_add(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise add
 /// - `simd_sub(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise subtract
 /// - `simd_mul(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise multiply
@@ -33248,10 +33248,32 @@ fn check_simd_builtin(
                     }
                     inner.as_ref().clone()
                 }
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(elem_inner) => {
+                        if !is_simd_scalar(elem_inner.as_ref()) {
+                            diagnostics.push(Diagnostic::new(
+                                args[0].span,
+                                format!(
+                                    "simd_load() requires ref Vec<T> where T is numeric, got ref Vec<{}>",
+                                    elem_inner
+                                ),
+                            ));
+                            return CheckedExpr::fallback(Type::Vec128(Box::new(Type::I64)), span);
+                        }
+                        elem_inner.as_ref().clone()
+                    }
+                    _ => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("simd_load() first argument must be Vec<T> or ref Vec<T>, got {}", v.ty()),
+                        ));
+                        return CheckedExpr::fallback(Type::Vec128(Box::new(Type::I64)), span);
+                    }
+                },
                 other => {
                     diagnostics.push(Diagnostic::new(
                         args[0].span,
-                        format!("simd_load() first argument must be Vec<T>, got {}", other),
+                        format!("simd_load() first argument must be Vec<T> or ref Vec<T>, got {}", other),
                     ));
                     return CheckedExpr::fallback(Type::Vec128(Box::new(Type::I64)), span);
                 }
@@ -33292,10 +33314,32 @@ fn check_simd_builtin(
                     }
                     inner.as_ref().clone()
                 }
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(elem_inner) => {
+                        if !is_simd_scalar(elem_inner.as_ref()) {
+                            diagnostics.push(Diagnostic::new(
+                                args[0].span,
+                                format!(
+                                    "simd_store() requires ref Vec<T> where T is numeric, got ref Vec<{}>",
+                                    elem_inner
+                                ),
+                            ));
+                            return CheckedExpr::fallback(Type::I64, span);
+                        }
+                        elem_inner.as_ref().clone()
+                    }
+                    _ => {
+                        diagnostics.push(Diagnostic::new(
+                            args[0].span,
+                            format!("simd_store() first argument must be Vec<T> or ref Vec<T>, got {}", v.ty()),
+                        ));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                },
                 other => {
                     diagnostics.push(Diagnostic::new(
                         args[0].span,
-                        format!("simd_store() first argument must be Vec<T>, got {}", other),
+                        format!("simd_store() first argument must be Vec<T> or ref Vec<T>, got {}", other),
                     ));
                     return CheckedExpr::fallback(Type::I64, span);
                 }

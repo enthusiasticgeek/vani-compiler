@@ -28,6 +28,11 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 | Linked list — 1 00 |    12.4 ms   |    12.5 ms   |    15.4 ms   |    18.3 ms   | —            | —            |
 | Allocation stress  |    12.2 ms   |     9.6 ms   |    12.7 ms   |    13.9 ms   | —            | —            |
 | Array statistics — |    43.0 ms   |    45.6 ms   |    50.4 ms   |    38.5 ms   | —            | —            |
+| SIMD dot product —  | *not run*    | *not run*    | *not run*    | *not run*    | —            | —            |
+
+> **Benchmark 11** (`11_simd_dot`) was added 2026-07-10 and has not yet been
+> timed on this machine. Run `python3 benchmarks/run_benchmarks.py --bench 11`
+> to collect numbers.
 
 ## Per-benchmark charts
 

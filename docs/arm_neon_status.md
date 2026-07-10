@@ -113,9 +113,10 @@ full tuning — e.g. `--cpu=neoverse-n2 --sve2` enables all Graviton 3 /
 Neoverse N2 features. LLVM then uses SVE's scalable vector register width
 for auto-vectorized loops instead of the fixed 128-bit NEON lanes.
 
-> **Note on explicit NEON / SVE intrinsics:** there is still no user-visible
-> `@neon_vaddq_s64` or `target_feature(sve)` surface (gap #2 above).
-> All SIMD comes from LLVM auto-vectorization.
+> **Note on raw NEON / SVE intrinsics:** there is no user-visible
+> `@neon_vaddq_s64` or `target_feature(sve)` surface beyond what `vec128<T>` +
+> `simd_*` builtins expose. For exotic intrinsics not yet in the builtin set,
+> use the FFI shim escape hatch — see `docs/simd_ffi_shims.md`.
 
 ---
 

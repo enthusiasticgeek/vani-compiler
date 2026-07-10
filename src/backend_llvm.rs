@@ -10156,18 +10156,36 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return dest;
             }
             if name == "simd_load" {
-                // simd_load(v: Vec<T>, idx: i64) -> vec128<T>
+                // simd_load(v: Vec<T> | ref Vec<T>, idx: i64) -> vec128<T>
                 let elem_ty = match &expr.ty {
                     crate::ast::Type::Vec128(e) => e.as_ref().clone(),
                     _ => crate::ast::Type::I64,
                 };
                 let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
                 let vec_ty = format!("<{} x {}>", lanes, llscalar);
-                let vec_struct = match &args[0].ty {
-                    crate::ast::Type::Vec(e) => vec_struct_name(e),
-                    _ => "%intent_vec_int64_t".to_string(),
+                let (vec_struct, v) = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => {
+                        let vs = vec_struct_name(e);
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                    crate::ast::Type::Ref(inner) | crate::ast::Type::RefMut(inner) => {
+                        let vs = if let crate::ast::Type::Vec(e) = inner.as_ref() {
+                            vec_struct_name(e)
+                        } else {
+                            "%intent_vec_int64_t".to_string()
+                        };
+                        let ptr = emit_expr(&args[0], ctx, out);
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load {}, {}* {}\n", loaded, vs, vs, ptr));
+                        (vs, loaded)
+                    }
+                    _ => {
+                        let vs = "%intent_vec_int64_t".to_string();
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
                 };
-                let v = emit_expr(&args[0], ctx, out);
                 let idx = emit_expr(&args[1], ctx, out);
                 let data_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
@@ -10192,19 +10210,37 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 return dest;
             }
             if name == "simd_store" {
-                // simd_store(v: Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>
-                // Stores through the data pointer; returns the original Vec.
+                // simd_store(v: Vec<T> | ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>
+                // Stores through the data pointer; returns the Vec struct value.
                 let elem_ty = match &args[2].ty {
                     crate::ast::Type::Vec128(e) => e.as_ref().clone(),
                     _ => crate::ast::Type::I64,
                 };
                 let (lanes, llscalar) = vec128_lanes_and_lltype(&elem_ty);
                 let vec_ty = format!("<{} x {}>", lanes, llscalar);
-                let vec_struct = match &args[0].ty {
-                    crate::ast::Type::Vec(e) => vec_struct_name(e),
-                    _ => "%intent_vec_int64_t".to_string(),
+                let (vec_struct, v) = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => {
+                        let vs = vec_struct_name(e);
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                    crate::ast::Type::Ref(inner) | crate::ast::Type::RefMut(inner) => {
+                        let vs = if let crate::ast::Type::Vec(e) = inner.as_ref() {
+                            vec_struct_name(e)
+                        } else {
+                            "%intent_vec_int64_t".to_string()
+                        };
+                        let ptr = emit_expr(&args[0], ctx, out);
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load {}, {}* {}\n", loaded, vs, vs, ptr));
+                        (vs, loaded)
+                    }
+                    _ => {
+                        let vs = "%intent_vec_int64_t".to_string();
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
                 };
-                let v = emit_expr(&args[0], ctx, out);
                 let idx = emit_expr(&args[1], ctx, out);
                 let data = emit_expr(&args[2], ctx, out);
                 let data_ptr = ctx.fresh_tmp();

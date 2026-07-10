@@ -3850,7 +3850,7 @@ AVX2 (x86-64) or NEON (AArch64) instructions automatically when
 the loop is safe to vectorize.
 
 **Layer 2 — `#[vectorize]` attribute.** Adds software-pipeline
-interleaving (×4 unroll) on top of auto-vectorize. One attribute,
+interleaving (×4 interleave count) on top of auto-vectorize. One attribute,
 zero code change:
 
 ```vani

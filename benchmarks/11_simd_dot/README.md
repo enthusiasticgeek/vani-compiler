@@ -18,12 +18,13 @@ or beats what the optimizer produces automatically.
 
 ## Expected result
 
-Both vāṇī prints must be the same integer (the dot product checksum
-truncated to i64). The runner checks exit code 0 and that the two
-lines are equal.
+The benchmark prints two integer-truncated checksums (SIMD path, then
+scalar path). Both should be the same or differ by at most 1 due to
+floating-point accumulation order differences.
 
-Approximate range: `1980` to `1990` depending on floating-point
-accumulation order.
+The automated runner checks **exit code 0 only** (`expected: None` in
+`run_benchmarks.py`). Compare the two printed lines manually to verify
+correctness; they should be in the approximate range `1980`–`1990`.
 
 ## Run
 

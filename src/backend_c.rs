@@ -17214,11 +17214,20 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             let vty = c_vec128_type(elem);
             let v = emit_expr(&args[0]);
             let idx = emit_expr(&args[1]);
-            format!("(*({vty}*)(({cty}*){v}.data + ({idx})))")
+            let is_ref = matches!(&args[0].ty, Type::Ref(_) | Type::RefMut(_));
+            if is_ref {
+                format!("(*({vty}*)(({cty}*){v}->data + ({idx})))")
+            } else {
+                format!("(*({vty}*)(({cty}*){v}.data + ({idx})))")
+            }
         }
         "simd_store" => {
             let elem = match &args[0].ty {
                 Type::Vec(e) => e.as_ref(),
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(e) => e.as_ref(),
+                    _ => &Type::I32,
+                },
                 _ => &Type::I32,
             };
             let cty = c_scalar_type(elem);
@@ -17226,7 +17235,12 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             let v = emit_expr(&args[0]);
             let idx = emit_expr(&args[1]);
             let data = emit_expr(&args[2]);
-            format!("((*({vty}*)(({cty}*){v}.data + ({idx}))) = ({data}), {v})")
+            let is_ref = matches!(&args[0].ty, Type::Ref(_) | Type::RefMut(_));
+            if is_ref {
+                format!("((*({vty}*)(({cty}*){v}->data + ({idx}))) = ({data}), *{v})")
+            } else {
+                format!("((*({vty}*)(({cty}*){v}.data + ({idx}))) = ({data}), {v})")
+            }
         }
         "simd_add" | "simd_sub" | "simd_mul" => {
             let op = match name { "simd_add" => "+", "simd_sub" => "-", _ => "*" };

@@ -5,11 +5,10 @@
 //   - SIMD:   explicit vec128<f32> loads + simd_mul + simd_reduce_add
 //   - Scalar: plain while loop relying on LLVM auto-vectorization
 //
-// We time the SIMD path; the scalar checksum is computed once to verify
-// both paths agree. The runner compares the two prints:
+// We time the SIMD path; the scalar checksum is computed once for comparison.
 //   line 1: checksum from SIMD path
 //   line 2: checksum from scalar path
-// They must be equal (both printed, runner checks exit 0 and line equality).
+// Runner checks exit code 0 only; compare lines manually for correctness.
 
 intent "Benchmark: dot product f32 — explicit vec128 vs auto-vectorized scalar";
 

@@ -47237,6 +47237,39 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn simd_load_ref_vec_compiles() {
+        let src = r#"
+intent "simd load through ref Vec";
+fn dot4(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec128<f32> = simd_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 4 <= n {
+        let ai: vec128<f32> = simd_load(a, i);
+        let bi: vec128<f32> = simd_load(b, i);
+        acc = simd_add(acc, simd_mul(ai, bi));
+        i = i + 4;
+    }
+    return simd_reduce_add(acc);
+}
+fn main() -> i64 {
+    let a: Vec<f32> = vec_fill(4, 1.0 as f32);
+    let b: Vec<f32> = vec_fill(4, 2.0 as f32);
+    let r: f32 = dot4(ref a, ref b, 4);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_load via ref Vec<f32> must compile");
+        assert!(
+            ll.contains("load %intent_vec_float, %intent_vec_float*"),
+            "ref Vec<f32> param must emit a struct load before extractvalue:\n{ll}"
+        );
+        assert!(
+            ll.contains("getelementptr inbounds float"),
+            "simd_load must emit GEP into the data pointer:\n{ll}"
+        );
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";

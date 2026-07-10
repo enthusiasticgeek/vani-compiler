@@ -17,7 +17,7 @@
 | Layer | What it does | When to use it |
 |-------|-------------|----------------|
 | Auto-vectorization | LLVM turns scalar loops into SIMD automatically | Always on; free. Use for every tight loop. |
-| `#[vectorize]` attribute | Adds software-pipeline interleaving (×4 unroll) on top of auto-vectorize | Add when profiling shows a bottleneck loop that auto-vectorize alone doesn't saturate |
+| `#[vectorize]` attribute | Adds software-pipeline interleaving (×4 interleave count) on top of auto-vectorize | Add when profiling shows a bottleneck loop that auto-vectorize alone doesn't saturate |
 | `vec128<T>` + `simd_*` | Explicit 128-bit register operations you control | When you need a specific permutation, reduction, or FFI-bridged intrinsic that LLVM won't produce on its own |
 
 Most programs only need Layer 1. Layer 2 costs nothing to add and
@@ -146,8 +146,8 @@ The element type must be a numeric scalar. `vec128<bool>` and
 | Builtin | Signature | What it does |
 |---------|-----------|-------------|
 | `simd_splat` | `(val: T) -> vec128<T>` | Broadcast scalar to all lanes |
-| `simd_load` | `(v: Vec<T>, idx: i64) -> vec128<T>` | Load N lanes from `v[idx..]` |
-| `simd_store` | `(v: Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` | Store N lanes to `v[idx..]` |
+| `simd_load` | `(v: Vec<T> \| ref Vec<T>, idx: i64) -> vec128<T>` | Load N lanes from `v[idx..]` |
+| `simd_store` | `(v: Vec<T> \| ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` | Store N lanes to `v[idx..]` |
 | `simd_add` | `(a: vec128<T>, b: vec128<T>) -> vec128<T>` | Lane-wise add |
 | `simd_sub` | `(a: vec128<T>, b: vec128<T>) -> vec128<T>` | Lane-wise subtract |
 | `simd_mul` | `(a: vec128<T>, b: vec128<T>) -> vec128<T>` | Lane-wise multiply |
