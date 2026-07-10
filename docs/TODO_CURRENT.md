@@ -270,12 +270,11 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
 
 ### Medium (2–8 h each)
 
-- [ ] **SIMD-6. RISC-V QEMU CI (equivalent of ARM-6)**
-  Add a `.github/workflows/ci.yml` job that runs `cargo test --lib` under
-  `qemu-riscv64-static` via `CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER`.
-  Template is in `docs/qemu_testing.md` under "CI integration".
-  Prerequisite: install `qemu-user-static` + `gcc-riscv64-linux-gnu` in the
-  CI base image.
+- [x] **SIMD-6. RISC-V QEMU CI (equivalent of ARM-6)** ✅ done 2026-07-10
+  Added `test-riscv64-qemu` job to `.github/workflows/ci.yml`:
+  `cargo test --lib --target riscv64gc-unknown-linux-gnu` under
+  `CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER=qemu-riscv64-static`.
+  Cross-linker: `riscv64-linux-gnu-gcc`. Packages: `gcc-riscv64-linux-gnu qemu-user-static`.
 
 - [ ] **SIMD-7. AArch64 edge_cases cross-run via QEMU**
   The ARM-6 CI job runs `cargo test --lib` under `qemu-aarch64-static` but
@@ -285,22 +284,18 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
   binary for AArch64 and run the integration tests under full QEMU, or
   document this as a known gap and add it to the AArch64 CI issue.
 
-- [ ] **SIMD-8. `ARR` bucket tests — once syntax confirmed**
-  The `ARR` bucket (fixed-size `[T; N]` arrays) is entirely empty in
-  TEST_MATRIX.md because `[1, 2, 3]` literal syntax was not confirmed as
-  a live compiler feature. Grep `src/parser.rs` for array literal parsing;
-  if it exists, add:
-  - `mix_arr_indexing.vani` — `let a: [i64; 3] = [10, 20, 30]; return a[1];`
-  - `mix_arr_struct_elems.vani` — array of struct values
-  If not implemented, add an issue and mark `ARR` as "not yet implemented"
-  in TEST_MATRIX.md rather than leaving it silently empty.
+- [x] **SIMD-8. `ARR` bucket confirmed and pinned** ✅ done 2026-07-10
+  `parser.rs` has `Type::Array { element, length }` + `ExprKind::ArrayLit`.
+  Syntax: `[T; N]` type, `[e0, e1, …]` literal, `a[i]` indexing — all live.
+  Added `mix_arr_indexing.vani` (ARR+SCAL) and `mix_arr_struct_elems.vani`
+  (ARR+STRT). TEST_MATRIX.md ARR row filled; pin raised 87→89.
 
-- [ ] **SIMD-9. `vec256<T>` / 8-lane and 4-lane-double SIMD builtins**
-  `vec128<T>` covers 128-bit registers (4×f32, 2×f64, 4×i32, etc.).
-  Add `vec256<T>` for 256-bit (8×f32, 4×f64, 8×i32) targeting x86-64 AVX2
-  and AArch64 SVE/NEON-256. Requires `is_simd_scalar` extension, new
-  lane-count table, and LLVM `<8 x float>` / C `__attribute__((vector_size(32)))`
-  emission. Stretch: `vec512<T>` for AVX-512 / future SVE-512.
+- [x] **SIMD-9. `vec256<T>` + `simd256_*` builtins** ✅ done 2026-07-10
+  Added `Type::Vec256(Box<Type>)` in 8 files. 7 builtins: `simd256_splat`,
+  `simd256_load`, `simd256_store`, `simd256_add`, `simd256_sub`, `simd256_mul`,
+  `simd256_reduce_add`. LLVM: `<N x T>` where N = 256/bits(T), align 32.
+  C: `T __attribute__((vector_size(32)))`. 2 lib tests + 3 edge-case files.
+  Stretch: `vec512<T>` for AVX-512 / future SVE-512 (same pattern, N×2).
 
 - [ ] **SIMD-10. QEMU system-mode bare-metal integration**
   `vanic run --target=arm-none-eabi` currently prints a helpful error and

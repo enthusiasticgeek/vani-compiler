@@ -30,7 +30,7 @@ cell value is the test filename.
 | **CLO** | Closures / fn ptr | anon fns, `fn(...) -> R`, capture |
 | **GEN** | Generics | `fn f<T>(...)`, `struct G<T>`, mono |
 | **UNS** | Unsafe / FFI | `unsafe(reason = "...")`, `extern "C"`, raw ptrs |
-| **SIMD** | SIMD / vec128 | `vec128<T>`, `simd_splat`, `simd_add`, `simd_load`, `simd_store`, `simd_reduce_add` |
+| **SIMD** | SIMD / vec128 / vec256 | `vec128<T>`, `vec256<T>`, `simd_splat`, `simd256_splat`, `simd_add`, `simd_load`, `simd_store`, `simd_reduce_add` |
 
 ## Single-bucket stress (the foundation tests)
 
@@ -72,6 +72,9 @@ probes a non-obvious feature interaction or boundary value.
 | `xfail_simd_bool_splat.vani` | SIMD | `vec128<bool>` is not a valid element type — must reject |
 | `xfail_simd_type_mismatch.vani` | SIMD | `simd_add(vec128<i32>, vec128<f32>)` — element type mismatch must reject |
 | `mix_simd_struct_field.vani` | SIMD + STRT | `struct SimdPair { a: vec128<f32>, b: vec128<f32> }` — vec128 is Copy; struct field allowed |
+| `mix_simd256_basic.vani` | SIMD | `vec256<f32>` splat + add + reduce_add; 8 lanes × 3 = 24 |
+| `mix_simd256_i32_mul.vani` | SIMD | `vec256<i32>` mul + reduce_add; 8 lanes × 2×3 = 48 |
+| `xfail_simd256_type_mismatch.vani` | SIMD | `simd256_add(vec256<i32>, vec256<f32>)` — element type mismatch must reject |
 
 ## Two-feature combinations (the workhorse mid-tier)
 
