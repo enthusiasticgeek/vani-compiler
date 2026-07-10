@@ -234,6 +234,106 @@ Steps 5–6 are next session / blocked.
 
 ---
 
+---
+
+## SIMD / QEMU follow-up (added 2026-07-10)
+
+Items surfaced during the SIMD hardening + edge-case audit session.
+Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
+
+### Quick wins (< 2 h each)
+
+- [ ] **SIMD-1. `xfail_simd_vec128_in_struct` — confirm and pin rejection**
+  `struct Foo { lane: vec128<f32> }` was not added to `examples/edge_cases/`
+  because it was unclear whether the checker actually rejects it. Read the
+  struct-field checker path in `checker.rs` and confirm: if vec128 in struct
+  is rejected → add `xfail_simd_vec128_in_struct.vani`; if it compiles →
+  rename to `mix_simd_struct_field.vani` and update TEST_MATRIX.md.
+
+- [ ] **SIMD-2. `simd_store` return type audit**
+  `simd_store(v, i, data)` currently returns a copy of the Vec fat pointer
+  (the checker returns `Type::Vec(elem)` for the ref case). The return value
+  is semantically useless — callers always discard it with `let _ = ...`.
+  Decide: make it `void` (unit) or `i64` (bytes written), update checker +
+  both backends, update all call sites in README / tutorial / benchmark.
+
+- [ ] **SIMD-3. Add tutorial QEMU section to `04b_cross_compile_primer.md`**
+  The primer covers `--target=` thoroughly but doesn't mention QEMU user-mode
+  at all. Add a short section pointing to `docs/qemu_testing.md` and showing
+  the one-liner: `vanic run hello.vani --target=aarch64-unknown-linux-gnu`.
+
+- [ ] **SIMD-4. `ENM + BOX` xfail pin**
+  `Option<Box<T>>` is documented as rejected in TEST_MATRIX.md but not pinned
+  as an `xfail_*` file. Add `xfail_enum_box_payload.vani`:
+  ```vani
+  fn main() -> i64 {
+    let x: Option<Box<i64>> = Option.Some(box(42));
+    return 0;
+  }
+  ```
+  Run both backends; if clean reject → add to edge_cases + update matrix.
+
+- [ ] **SIMD-5. `CLO + REF + VEC` edge case**
+  `mix_closure_vec_len_capture.vani` captures a Copy `i64` derived from a Vec.
+  What's missing: closure that captures the `ref Vec` itself (or a `mut ref`).
+  Write `mix_closure_ref_vec_capture.vani` once the ownership semantics of
+  non-Copy ref captures in closures are confirmed.
+
+### Medium (2–8 h each)
+
+- [ ] **SIMD-6. RISC-V QEMU CI (equivalent of ARM-6)**
+  Add a `.github/workflows/ci.yml` job that runs `cargo test --lib` under
+  `qemu-riscv64-static` via `CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER`.
+  Template is in `docs/qemu_testing.md` under "CI integration".
+  Prerequisite: install `qemu-user-static` + `gcc-riscv64-linux-gnu` in the
+  CI base image.
+
+- [ ] **SIMD-7. AArch64 edge_cases cross-run via QEMU**
+  The ARM-6 CI job runs `cargo test --lib` under `qemu-aarch64-static` but
+  does NOT run `cargo test --test edge_cases`. Edge-case integration tests
+  spawn the `vanic` binary itself — that binary is x86-64 and can't run
+  inside `qemu-aarch64-static`. Possible path: cross-compile the `vanic`
+  binary for AArch64 and run the integration tests under full QEMU, or
+  document this as a known gap and add it to the AArch64 CI issue.
+
+- [ ] **SIMD-8. `ARR` bucket tests — once syntax confirmed**
+  The `ARR` bucket (fixed-size `[T; N]` arrays) is entirely empty in
+  TEST_MATRIX.md because `[1, 2, 3]` literal syntax was not confirmed as
+  a live compiler feature. Grep `src/parser.rs` for array literal parsing;
+  if it exists, add:
+  - `mix_arr_indexing.vani` — `let a: [i64; 3] = [10, 20, 30]; return a[1];`
+  - `mix_arr_struct_elems.vani` — array of struct values
+  If not implemented, add an issue and mark `ARR` as "not yet implemented"
+  in TEST_MATRIX.md rather than leaving it silently empty.
+
+- [ ] **SIMD-9. `vec256<T>` / 8-lane and 4-lane-double SIMD builtins**
+  `vec128<T>` covers 128-bit registers (4×f32, 2×f64, 4×i32, etc.).
+  Add `vec256<T>` for 256-bit (8×f32, 4×f64, 8×i32) targeting x86-64 AVX2
+  and AArch64 SVE/NEON-256. Requires `is_simd_scalar` extension, new
+  lane-count table, and LLVM `<8 x float>` / C `__attribute__((vector_size(32)))`
+  emission. Stretch: `vec512<T>` for AVX-512 / future SVE-512.
+
+- [ ] **SIMD-10. QEMU system-mode bare-metal integration**
+  `vanic run --target=arm-none-eabi` currently prints a helpful error and
+  stops. Wire in `qemu-system-arm -machine lm3s6965evb -kernel <elf>` as an
+  opt-in: `vanic run --target=arm-none-eabi --qemu-machine=lm3s6965evb`.
+  Requires: flag parsing in `main.rs`, board-name → QEMU flags map, semihosting
+  output detection. Scope is ~4 h for ARM; add riscv32 second.
+
+### Blocked on hardware
+
+- [ ] **ARM-3 (existing). AArch64 benchmark run — all 11 benchmarks**
+  All RESULTS.md numbers are x86-64. Run on Graviton 3 / Pi 4 / Apple Silicon.
+  Add `AArch64` column. Validates NEON auto-vectorization quality on real silicon.
+
+- [ ] **RVV-bench. RISC-V Vector benchmark run**
+  Run benchmark 11 (SIMD dot product) on real RISC-V hardware with the V
+  extension (SiFive X280, Milk-V Pioneer, StarFive VisionFive 2).
+  Add `RISC-V (RVV)` column to RESULTS.md. This is the first cross-ISA SIMD
+  comparison point.
+
+---
+
 ## Blocked (not in our control)
 
 | Item | Blocker |
@@ -244,3 +344,4 @@ Steps 5–6 are next session / blocked.
 | Arc 7 Win64 / AArch64 CI wiring | CI runner setup |
 | crates.io publish (item 1) — v0.1.2 tagged and ready | crates.io API token needed (`cargo login`) |
 | ARM-3 AArch64 benchmarks | Real AArch64 hardware needed (QEMU perf numbers not meaningful) |
+| RVV-bench RISC-V benchmarks | Real RISC-V hardware with V extension needed |

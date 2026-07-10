@@ -10,6 +10,54 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-07-10 (SIMD hardening + edge-case audit)
+
+**State**: SIMD correctness bugs fixed, adversarial test suite grown to 84 files, QEMU/RISC-V documented. Compiler version `v0.2.4` (Cargo.toml).
+
+### Shipped this session (2026-07-10) — SIMD hardening + edge-case audit
+
+| Item | What shipped |
+|------|-------------|
+| `simd_load`/`simd_store` accept `ref Vec<T>` | Checker recognises `Type::Ref(Vec(T))`/`RefMut`; LLVM backend emits `load %intent_vec_T` before GEP+extract; C backend uses `->data` instead of `.data`; both paths tested |
+| LLVM intrinsic name fix (`f32`/`f64` suffix) | `simd_reduce_add` for floats now emits `@llvm.vector.reduce.fadd.v4f32` not `v4float`; was silently wrong on every float SIMD reduce |
+| `type_byte_size` Vec128 fix | `Vec128(_) => 16` added before the `_ => 8` fallback; prevented `parallel for` ctx struct underallocation when a `vec128<T>` variable was captured |
+| 23 new SIMD lib tests (29 total) | Categories A–F: all 8 lane types, ref Vec roundtrip, LLVM intrinsic names, C backend `->data`, error rejection, parallel-for capture; all pass |
+| Benchmark 11 (`11_simd_dot`) real numbers | vāṇी 27.8 ms vs C 41.5 ms vs C++ 44.4 ms vs Rust 37.6 ms on this machine; RESULTS.md merged (runner would have wiped old results; fixed by `git show` + manual merge) |
+| 20 new edge-case adversarial tests (84 total) | P1 SIMD (4 mix + 2 xfail), P2 GEN cross (3), P3 ENM+STRT match extraction (1), P4 CONC complex (3), P5 CLO rich (3), P7 SMT×VEC/STRT (2), P8 TUP cross (2); all pass C + LLVM backends |
+| TEST_MATRIX.md: SIMD as bucket 17 | Coverage matrix expanded to 17×17; 20 new cells pinned; documented-gaps list revised; minimum count pin raised 37→80 |
+| `docs/qemu_testing.md` (new) | Full QEMU setup guide: AArch64 NEON/SVE, RISC-V RVV, what QEMU can/cannot test, CI snippets, bare-metal system-mode manual invocation |
+| `docs/arm_neon_status.md` RISC-V section | RVV feature table, `--cpu=sifive-x280` + QEMU v=true example, known gaps list; QEMU testing sub-section added |
+| `docs/simd_ffi_shims.md` "Future" → "Shipped" | Stale "A future Arc will add vec128<T>" replaced with shipped-v0.2.4 instruction table (x86-64/AArch64/RISC-V); "When to use" table updated with `vec128<T>` and RVV rows |
+
+### Key numbers (2026-07-10 session 2)
+- **Lib tests**: 2466+ passing (29 SIMD tests, 23 new this session)
+- **Edge-case files**: 84 (up from 64); all pass C + LLVM backends
+- **Commits this session**: 3 (SIMD fixes+tests, benchmark results, edge-cases, QEMU docs)
+
+### Bugs fixed this session
+
+| Bug | Impact | Fix location |
+|-----|--------|-------------|
+| `simd_load`/`simd_store` rejected `ref Vec<T>` arg | All SAXPY / dot-product examples in README, tutorial, benchmark were false (unreachable) | `checker.rs`, `backend_llvm.rs`, `backend_c.rs` |
+| `simd_reduce_add` f32/f64 emitted `v4float` not `v4f32` | Every float SIMD reduction would produce invalid LLVM IR; `lli`/`opt` would reject | `backend_llvm.rs` |
+| `type_byte_size` returned 8 for `Vec128` | `parallel for` context struct undersized by 8 bytes when a `vec128<T>` was captured; potential silent memory corruption | `backend_llvm.rs` |
+
+### Open TODOs from this session
+See new section **"SIMD / QEMU follow-up"** in `docs/TODO_CURRENT.md`.
+
+### Blocked (unchanged)
+
+| # | Item | Blocker |
+|---|------|---------|
+| B1 | crates.io publish | Needs API token |
+| B2 | macOS verification | No macOS hardware |
+| B3 | Grammar consultant pass | External reviewer needed |
+| B4 | Windows IOCP async-TCP | ~25–35 h; readiness-vs-completion mismatch |
+| ARM-3 | ARM hardware benchmarks | Need physical AArch64 board |
+| RVV-bench | RISC-V benchmark numbers | Need physical RISC-V board (SiFive, Milk-V, StarFive) |
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-07-10
 
 **State**: ARM/NEON + SIMD work complete. Compiler version `v0.2.3` (Cargo.toml).
