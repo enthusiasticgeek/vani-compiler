@@ -6,7 +6,7 @@
 > contributors which combinations are pinned and which are
 > still gaps. Keep updated when you add a new test file.
 
-The matrix uses 16 feature buckets. A row marks which buckets a
+The matrix uses 17 feature buckets. A row marks which buckets a
 single test touches; mixed-feature tests touch multiple. The
 cell value is the test filename.
 
@@ -103,6 +103,8 @@ probes a non-obvious feature interaction or boundary value.
 | `mix_smt_pure_struct_ref.vani` | SMT + STRT + REF | `pure fn` with struct ref; ensures provable from requires |
 | `mix_tuple_struct_elem.vani` | TUP + STRT | tuple containing a struct; destructure to access fields |
 | `mix_tuple_fn_return.vani` | TUP | function returning `(i64, i64)`; caller destructures |
+| `mix_arr_indexing.vani` | ARR | `[i64; 3]` literal + `a[1]` indexing; returns element value |
+| `mix_arr_struct_elems.vani` | ARR + STRT | `[Point; 2]` — array of structs; field access on element |
 
 ## Coverage matrix — which two-bucket pairs are pinned?
 
@@ -113,9 +115,9 @@ Pairs explicitly exercised somewhere in the existing set:
 | SCAL  |  ✓   |     |     |     |     |      |     |     |     |     |      |  ✓  |      |     |     |     |      |
 | STR   |      |  ✓  |     |     |     |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
 | VEC   |      |  ✓  |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |  ✓  |  ✓   |  ✓  |  ✓  |     |      |
-| ARR   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |     |     |      |
+| ARR   |  ✓   |     |     |  ✓  |     |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
 | TUP   |      |  ✓  |     |     |  ✓  |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
-| STRT  |      |  ✓  |  ✓  |     |  ✓  |  ✓   |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓   |  ✓  |     |     |  ✓   |
+| STRT  |      |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓   |  ✓  |     |     |  ✓   |
 | ENM   |      |     |     |     |     |  ✓   |  ✓  |     |  ✓  |     |      |     |      |     |  ✓  |     |      |
 | REF   |      |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |  ✓   |  ✓  |      |     |  ✓  |     |  ✓   |
 | BOX   |      |     |  ✓  |     |     |  ✓   |  ✓  |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |  ✓  |     |      |
@@ -128,7 +130,7 @@ Pairs explicitly exercised somewhere in the existing set:
 | UNS   |   ✓  |     |  ✓  |     |     |      |     |     |     |     |      |     |      |     |     |  ✓  |      |
 | SIMD  |      |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |      |     |  ✓   |     |     |     |  ✓   |
 
-✓ = pinned; ARR row remains empty (fixed-size array literals not yet confirmed in the compiler).
+✓ = pinned. ARR bucket is now populated: `[T; N]` syntax and `a[i]` indexing confirmed live (v0.2.4+).
 
 ## Documented gaps (combinations not yet tested)
 
@@ -141,22 +143,21 @@ Gaps addressed in the 2026-07-10 audit round:
 - CLO × VEC, CLO × BOX + DYN, CLO (fn-ptr arg passing) pinned
 - SMT × VEC, SMT × STRT × REF (`pure fn`) pinned
 - TUP × STRT, TUP return-value pinned
+- ARR bucket filled: `[T; N]` / `a[i]` confirmed live; ARR + SCAL and ARR + STRT pinned
 
 ### Remaining gaps
 
-1. **ARR + any** — fixed-size array literal syntax not yet confirmed
-   as a live compiler feature; all ARR cells remain empty.
-2. **ASNC + VEC / Box** — async fn with complex param types across
+1. **ASNC + VEC / Box** — async fn with complex param types across
    await points. `mix_async_box_dyn.vani` covers ASNC+BOX+DYN in
    compile-only mode; run-mode async integration is largely untested.
-3. **GEN + STRT methods** — generic struct with `methods on T` block
+2. **GEN + STRT methods** — generic struct with `methods on T` block
    (monomorphization of method dispatch).
-4. **CLO + REF + VEC** — closure capturing an actual `ref Vec<T>` value
+3. **CLO + REF + VEC** — closure capturing an actual `ref Vec<T>` value
    (not a Copy scalar derived from it). Whether the checker allows this
    or rejects it as a lifetime escape is unknown; good candidate for
    a `mix_` or `xfail_` pin.
-5. **REF + STR** — `ref OwnedStr` through function calls.
-6. **UNS + BOX / DYN** — unsafe block touching heap-allocated types.
+4. **REF + STR** — `ref OwnedStr` through function calls.
+5. **UNS + BOX / DYN** — unsafe block touching heap-allocated types.
 
 ### Three-feature combinations not pinned
 

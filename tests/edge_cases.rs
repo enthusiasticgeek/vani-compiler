@@ -169,8 +169,8 @@ fn edge_cases_all_compile_and_run_on_llvm_backend() {
 fn edge_cases_count_is_at_least_pinned_minimum() {
     let files = all_edge_case_files();
     assert!(
-        files.len() >= 87,
-        "edge_cases set shrunk below pinned minimum (87); current: {}",
+        files.len() >= 89,
+        "edge_cases set shrunk below pinned minimum (89); current: {}",
         files.len(),
     );
 }

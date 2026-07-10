@@ -56,3 +56,34 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
         run: cargo test --lib --target aarch64-unknown-linux-gnu
+
+  # ── RISC-V 64: lib unit tests via QEMU user-mode ─────────────────────────
+  #
+  # Equivalent of test-aarch64-qemu for RISC-V 64-bit Linux (SIMD-6).
+  # Verifies the compiler itself runs correctly on an emulated RV64GC core.
+  # The Vector (RVV) extension is NOT enabled here — these are compiler unit
+  # tests, not RVV codegen tests. RVV functional testing is done via
+  # `vanic run --target=riscv64-unknown-linux-gnu --cpu=sifive-x280` +
+  # QEMU_RISCV64="qemu-riscv64-static -cpu rv64,v=true,vlen=256".
+  # Real RVV performance numbers require real silicon (tracked: RVV-bench).
+  test-riscv64-qemu:
+    name: Test (RISC-V 64 via QEMU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (RISC-V 64 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: riscv64gc-unknown-linux-gnu
+
+      - name: Install RISC-V cross-toolchain + QEMU user-mode
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y gcc-riscv64-linux-gnu qemu-user-static
+
+      - name: Run lib unit tests on RISC-V 64 (via QEMU)
+        env:
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static
+        run: cargo test --lib --target riscv64gc-unknown-linux-gnu
