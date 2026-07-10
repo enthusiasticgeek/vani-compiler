@@ -401,7 +401,7 @@ generics, async/await, and a package manager.
 
 ---
 
-## [Unreleased] — v0.2.1-dev
+## [v0.3.0] — 2026-07-10
 
 Active development. See [RELEASING.md](RELEASING.md) for the roadmap and
 [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for the current work queue.
