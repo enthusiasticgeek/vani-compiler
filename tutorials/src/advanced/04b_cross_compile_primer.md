@@ -244,6 +244,72 @@ Bare-metal triples cannot run this way -- `vanic run` rejects
 them with a clear error and suggests `vanic build` + physical
 flashing.
 
+### Enabling SIMD extensions in QEMU
+
+By default, QEMU emulates the baseline ISA. Explicit SIMD
+features -- SVE on AArch64, the Vector extension (RVV) on
+RISC-V -- must be enabled via CPU flags.
+
+**AArch64: NEON (always-on) and SVE:**
+
+```bash
+# NEON is always present on any AArch64 QEMU target -- no extra flag needed.
+vanic run simd.vani --target=aarch64-unknown-linux-gnu
+
+# SVE / SVE2: use -cpu max to enable all optional AArch64 extensions.
+QEMU_AARCH64="qemu-aarch64-static -cpu max" \
+  vanic run server.vani --target=aarch64-unknown-linux-gnu --sve2
+```
+
+The `vec128<T>` builtins (`simd_splat`, `simd_add`, `simd_mul`,
+`simd_reduce_add`, `simd_load`, `simd_store`) always lower to NEON
+instructions on AArch64. No extra CPU flag is needed to test them
+under QEMU.
+
+**RISC-V 64-bit: RVV (Vector extension):**
+
+```bash
+# Pass -cpu rv64,v=true,vlen=256 to expose the V extension.
+# vlen is the physical vector register width in bits (128, 256, 512 …).
+QEMU_RISCV64="qemu-riscv64-static -cpu rv64,v=true,vlen=256" \
+  vanic run loop.vani --target=riscv64-unknown-linux-gnu --cpu=sifive-x280
+```
+
+`--cpu=sifive-x280` instructs LLVM to emit RVV instructions;
+the QEMU `-cpu rv64,v=true` flag tells QEMU to execute them.
+Both sides must agree -- omitting either causes illegal-instruction
+faults at runtime.
+
+### What QEMU validates vs. what it cannot
+
+| Scenario | QEMU status |
+|----------|-------------|
+| Exit code / stdout correctness | ✓ fully testable |
+| `vec128<T>` NEON / RVV instruction selection | ✓ functional |
+| SVE register width variants (`-cpu max` vs `neoverse-n2,sve256=on`) | ✓ functional |
+| Compiler ICE / panic detection | ✓ |
+| Benchmark / timing numbers | ✗ meaningless -- QEMU speed reflects host JIT, not target ISA |
+| MMIO peripheral behavior | ✗ needs `qemu-system-*` + board model |
+| Interrupt latency | ✗ not cycle-accurate |
+
+> For the full QEMU reference -- CPU flags, CI setup, RVV FFI shim example,
+> and the `vanic run` discovery algorithm -- see **`docs/qemu_testing.md`**.
+
+### Running the edge-case suite under QEMU (AArch64)
+
+The CI job **ARM-6** runs `cargo test --lib` under QEMU to catch
+AArch64-specific bugs:
+
+```bash
+sudo apt install qemu-user-static gcc-aarch64-linux-gnu
+CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER=qemu-aarch64-static \
+  cargo test --lib --target aarch64-unknown-linux-gnu
+```
+
+Running the full integration tests (`cargo test --test edge_cases`)
+under QEMU is not yet automated (tracked as TODO SIMD-7 in
+`docs/TODO_CURRENT.md`).
+
 ---
 
 ## Summary you can carry

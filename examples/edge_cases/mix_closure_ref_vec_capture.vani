@@ -1,0 +1,10 @@
+fn apply(f: fn(i64) -> i64, x: i64) -> i64 {
+  return f(x);
+}
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(10 as i64, 20 as i64, 30 as i64);
+  let n: i64 = len(xs) as i64;
+  let scale: i64 = n;
+  let f = fn(v: i64) -> i64 { return v * scale; };
+  return apply(f, xs[0]);
+}

@@ -71,6 +71,7 @@ probes a non-obvious feature interaction or boundary value.
 | `mix_simd_i32_mul.vani` | SIMD | `simd_mul` + `simd_reduce_add` on `vec128<i32>` |
 | `xfail_simd_bool_splat.vani` | SIMD | `vec128<bool>` is not a valid element type — must reject |
 | `xfail_simd_type_mismatch.vani` | SIMD | `simd_add(vec128<i32>, vec128<f32>)` — element type mismatch must reject |
+| `mix_simd_struct_field.vani` | SIMD + STRT | `struct SimdPair { a: vec128<f32>, b: vec128<f32> }` — vec128 is Copy; struct field allowed |
 
 ## Two-feature combinations (the workhorse mid-tier)
 
@@ -96,6 +97,8 @@ probes a non-obvious feature interaction or boundary value.
 | `mix_closure_vec_len_capture.vani` | CLO + VEC | closure captures Vec length (Copy i64 from Vec) |
 | `mix_closure_box_dyn_call.vani` | CLO + BOX + DYN | closure applied to result of DYN dispatch on Box |
 | `mix_closure_chain.vani` | CLO | two closures composed in one function |
+| `mix_closure_ref_vec_capture.vani` | CLO + VEC | closure capturing Copy scalar derived from Vec; passed as `fn(i64)->i64` arg |
+| `mix_enum_option_box.vani` | ENM + BOX | `Option<Box<i64>>` type annotation + `Option.Some(box(42))` — compiles and drops |
 | `mix_smt_vec_param.vani` | SMT + VEC | `ref Vec<i64>` param alongside requires/ensures |
 | `mix_smt_pure_struct_ref.vani` | SMT + STRT + REF | `pure fn` with struct ref; ensures provable from requires |
 | `mix_tuple_struct_elem.vani` | TUP + STRT | tuple containing a struct; destructure to access fields |
@@ -112,10 +115,10 @@ Pairs explicitly exercised somewhere in the existing set:
 | VEC   |      |  ✓  |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |  ✓  |  ✓   |  ✓  |  ✓  |     |      |
 | ARR   |      |     |     |     |     |      |     |     |     |     |      |     |      |     |     |     |      |
 | TUP   |      |  ✓  |     |     |  ✓  |  ✓   |     |     |     |     |      |     |      |     |     |     |      |
-| STRT  |      |  ✓  |  ✓  |     |  ✓  |  ✓   |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓   |  ✓  |     |     |      |
-| ENM   |      |     |     |     |     |  ✓   |  ✓  |     |     |     |      |     |      |     |  ✓  |     |      |
+| STRT  |      |  ✓  |  ✓  |     |  ✓  |  ✓   |  ✓  |  ✓  |  ✓  |  ✓  |  ✓   |  ✓  |  ✓   |  ✓  |     |     |  ✓   |
+| ENM   |      |     |     |     |     |  ✓   |  ✓  |     |  ✓  |     |      |     |      |     |  ✓  |     |      |
 | REF   |      |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |  ✓   |  ✓  |      |     |  ✓  |     |  ✓   |
-| BOX   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |  ✓  |     |      |
+| BOX   |      |     |  ✓  |     |     |  ✓   |  ✓  |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |  ✓  |     |      |
 | DYN   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |  ✓   |     |      |  ✓  |     |     |      |
 | ASNC  |      |     |     |     |     |  ✓   |     |  ✓  |  ✓  |  ✓  |  ✓   |     |      |     |     |     |      |
 | SMT   |   ✓  |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |      |  ✓  |      |     |     |     |      |
@@ -123,18 +126,19 @@ Pairs explicitly exercised somewhere in the existing set:
 | CLO   |      |     |  ✓  |     |     |  ✓   |     |     |  ✓  |  ✓  |      |     |      |  ✓  |     |     |      |
 | GEN   |      |     |  ✓  |     |     |      |  ✓  |  ✓  |  ✓  |     |      |     |      |     |  ✓  |     |      |
 | UNS   |   ✓  |     |  ✓  |     |     |      |     |     |     |     |      |     |      |     |     |  ✓  |      |
-| SIMD  |      |     |  ✓  |     |     |      |     |  ✓  |     |     |      |     |  ✓   |     |     |     |  ✓   |
+| SIMD  |      |     |  ✓  |     |     |  ✓   |     |  ✓  |     |     |      |     |  ✓   |     |     |     |  ✓   |
 
 ✓ = pinned; ARR row remains empty (fixed-size array literals not yet confirmed in the compiler).
 
 ## Documented gaps (combinations not yet tested)
 
 Gaps addressed in the 2026-07-10 audit round:
-- SIMD bucket added (6 new files); SIMD × REF, SIMD × VEC, SIMD × CONC pinned
+- SIMD bucket added (7 new files); SIMD × REF, SIMD × VEC, SIMD × CONC, SIMD × STRT pinned
 - GEN × REF, GEN × ENM, GEN × VEC cross-tests added
 - ENM + STRT match-extraction added
+- ENM + BOX: `Option<Box<i64>>` confirmed to compile; pinned as `mix_enum_option_box.vani`
 - CONC × STRT, CONC × Channel pinned
-- CLO × VEC, CLO × BOX + DYN pinned
+- CLO × VEC, CLO × BOX + DYN, CLO (fn-ptr arg passing) pinned
 - SMT × VEC, SMT × STRT × REF (`pure fn`) pinned
 - TUP × STRT, TUP return-value pinned
 
@@ -147,12 +151,12 @@ Gaps addressed in the 2026-07-10 audit round:
    compile-only mode; run-mode async integration is largely untested.
 3. **GEN + STRT methods** — generic struct with `methods on T` block
    (monomorphization of method dispatch).
-4. **CLO + REF + VEC** — closure capturing a `ref Vec` (as opposed
-   to a Copy length scalar).
-5. **ENM + BOX** — `Option<Box<T>>` is rejected; would be a good
-   `xfail_enum_box_payload.vani` pin.
-6. **REF + STR** — `ref OwnedStr` through function calls.
-7. **UNS + BOX / DYN** — unsafe block touching heap-allocated types.
+4. **CLO + REF + VEC** — closure capturing an actual `ref Vec<T>` value
+   (not a Copy scalar derived from it). Whether the checker allows this
+   or rejects it as a lifetime escape is unknown; good candidate for
+   a `mix_` or `xfail_` pin.
+5. **REF + STR** — `ref OwnedStr` through function calls.
+6. **UNS + BOX / DYN** — unsafe block touching heap-allocated types.
 
 ### Three-feature combinations not pinned
 
