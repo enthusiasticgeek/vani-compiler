@@ -1,0 +1,7 @@
+fn main() -> i64 {
+  let a: vec256<i32> = simd256_splat(2 as i32);
+  let b: vec256<i32> = simd256_splat(3 as i32);
+  let c: vec256<i32> = simd256_mul(a, b);
+  let s: i32 = simd256_reduce_add(c);
+  return s as i64;
+}

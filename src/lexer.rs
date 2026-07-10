@@ -141,6 +141,7 @@ pub enum TokenKind {
     Bool,
     Vec,
     Vec128,
+    Vec256,
     LParen,
     RParen,
     LBrace,
@@ -6279,6 +6280,7 @@ impl<'a> Lexer<'a> {
             "bool" => TokenKind::Bool,
             "Vec" => TokenKind::Vec,
             "vec128" => TokenKind::Vec128,
+            "vec256" => TokenKind::Vec256,
             // Phase 8b.1 (2026-06-07): when the word contains
             // non-ASCII characters (e.g. Spanish `función`,
             // French `très`), fall through to the script-keyword

@@ -17269,6 +17269,82 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             format!("({{ {vty} __srt__ = ({v}); ({cty})({sum}); }})",
                 sum = parts.join(" + "))
         }
+        // 256-bit SIMD family — mirrors 128-bit but uses vector_size(32).
+        "simd256_splat" => {
+            let elem = match result_ty {
+                Type::Vec256(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let cty = c_scalar_type(elem);
+            let vty = c_vec256_type(elem);
+            let val = emit_expr(&args[0]);
+            let lanes = 32 / c_scalar_bytes(elem);
+            let fill: Vec<String> = (0..lanes).map(|_| format!("({})({})", cty, val)).collect();
+            format!("(({}){{{}}})", vty, fill.join(", "))
+        }
+        "simd256_load" => {
+            let elem = match result_ty {
+                Type::Vec256(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let cty = c_scalar_type(elem);
+            let vty = c_vec256_type(elem);
+            let v = emit_expr(&args[0]);
+            let idx = emit_expr(&args[1]);
+            let is_ref = matches!(&args[0].ty, Type::Ref(_) | Type::RefMut(_));
+            if is_ref {
+                format!("(*({vty}*)(({cty}*){v}->data + ({idx})))")
+            } else {
+                format!("(*({vty}*)(({cty}*){v}.data + ({idx})))")
+            }
+        }
+        "simd256_store" => {
+            let elem = match &args[0].ty {
+                Type::Vec(e) => e.as_ref(),
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(e) => e.as_ref(),
+                    _ => &Type::I32,
+                },
+                _ => &Type::I32,
+            };
+            let cty = c_scalar_type(elem);
+            let vty = c_vec256_type(elem);
+            let v = emit_expr(&args[0]);
+            let idx = emit_expr(&args[1]);
+            let data = emit_expr(&args[2]);
+            let is_ref = matches!(&args[0].ty, Type::Ref(_) | Type::RefMut(_));
+            if is_ref {
+                format!("((*({vty}*)(({cty}*){v}->data + ({idx}))) = ({data}), *{v})")
+            } else {
+                format!("((*({vty}*)(({cty}*){v}.data + ({idx}))) = ({data}), {v})")
+            }
+        }
+        "simd256_add" | "simd256_sub" | "simd256_mul" => {
+            let op = match name { "simd256_add" => "+", "simd256_sub" => "-", _ => "*" };
+            let elem = match result_ty {
+                Type::Vec256(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let vty = c_vec256_type(elem);
+            let a = emit_expr(&args[0]);
+            let b = emit_expr(&args[1]);
+            format!("(({vty})({a}) {op} ({vty})({b}))")
+        }
+        "simd256_reduce_add" => {
+            let elem = match &args[0].ty {
+                Type::Vec256(e) => e.as_ref(),
+                _ => &Type::I32,
+            };
+            let lanes = 32 / c_scalar_bytes(elem);
+            let cty = c_scalar_type(elem);
+            let vty = c_vec256_type(elem);
+            let v = emit_expr(&args[0]);
+            let parts: Vec<String> = (0..lanes)
+                .map(|i| format!("({cty})(__srt256__[{i}])"))
+                .collect();
+            format!("({{ {vty} __srt256__ = ({v}); ({cty})({sum}); }})",
+                sum = parts.join(" + "))
+        }
         "mmio_read_u32" => format!(
             "(*((const volatile uint32_t*)((uintptr_t)({}))))",
             emit_expr(&args[0])
@@ -19222,6 +19298,11 @@ fn c_vec128_type(elem: &Type) -> String {
     format!("{} __attribute__((vector_size(16)))", c_scalar_type(elem))
 }
 
+/// GCC/Clang `__attribute__((vector_size(32)))` type for vec256 element type.
+fn c_vec256_type(elem: &Type) -> String {
+    format!("{} __attribute__((vector_size(32)))", c_scalar_type(elem))
+}
+
 /// The plain C scalar type for a simd element.
 fn c_scalar_type(elem: &Type) -> &'static str {
     match elem {
@@ -19446,6 +19527,8 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // c_leaf_type returns &'static str so it can't synthesize the
         // per-T spelling; callers route through `c_vec128_type`.
         Type::Vec128(_) => "/* vec128<T> */",
+        // `vec256<T>` lowers to `__attribute__((vector_size(32))) T`.
+        Type::Vec256(_) => "/* vec256<T> */",
     }
 }
 
@@ -19898,7 +19981,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Vec128(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Vec128(_) | Type::Vec256(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -19947,6 +20030,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Trie
         | Type::SkipList
         | Type::Vec128(_)
+        | Type::Vec256(_)
         | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => unreachable!("shift count must be an integer"),
     }
 }

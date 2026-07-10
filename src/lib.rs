@@ -47704,6 +47704,37 @@ fn main() -> i64 { return 0; }
     }
 
     #[test]
+    fn simd256_splat_add_reduce_compiles() {
+        let src = r#"
+intent "vec256 splat + add + reduce_add";
+fn main() -> i64 {
+    let a: vec256<f32> = simd256_splat(1.0 as f32);
+    let b: vec256<f32> = simd256_splat(2.0 as f32);
+    let c: vec256<f32> = simd256_add(a, b);
+    let s: f32 = simd256_reduce_add(c);
+    return s as i64;
+}
+"#;
+        compile_to_c(src).expect("vec256 splat+add+reduce_add must compile");
+        compile_to_llvm(src).expect("vec256 LLVM must compile");
+    }
+
+    #[test]
+    fn simd256_type_mismatch_is_rejected() {
+        let src = r#"
+intent "vec256 type mismatch";
+fn main() -> i64 {
+    let a: vec256<i32> = simd256_splat(1 as i32);
+    let b: vec256<f32> = simd256_splat(1.0 as f32);
+    let c: vec256<i32> = simd256_add(a, b);
+    return 0;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "vec256 type mismatch must be rejected");
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";

@@ -236,6 +236,7 @@ fn type_size(ty: &Type) -> u64 {
         Object(_) => 16,
         Vec(_) => 24, // {data, len, cap}
         Vec128(_) => 16, // 128-bit SIMD register value
+        Vec256(_) => 32, // 256-bit SIMD register value
         Array { element, length } => type_size(element).saturating_mul(*length),
         Tuple(elements) => elements.iter().map(type_size).sum::<u64>().max(8),
         Struct(_) => 32, // estimate; structs lower to nested struct types

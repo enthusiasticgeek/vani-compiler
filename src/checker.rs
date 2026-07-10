@@ -47,11 +47,13 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     // Eliminates the phi-node aliasing that blocks SIMD vectorisation
     // when push_mut is used in tight initialization loops.
     "push_unchecked",
-    // Option 3 — native 128-bit SIMD vector builtins. All operate on
-    // vec128<T> (16-byte SIMD register); lower to LLVM vector IR and
-    // GCC __attribute__((vector_size(16))) in the C backend.
+    // Option 3 — native SIMD vector builtins.
+    // 128-bit family (vec128<T>): vec128 = 16-byte SIMD register.
+    // 256-bit family (vec256<T>): vec256 = 32-byte SIMD register (AVX2/SVE-256/RVV-256).
     "simd_splat", "simd_load", "simd_store",
-    "simd_add", "simd_sub", "simd_mul", "simd_reduce_add"];
+    "simd_add", "simd_sub", "simd_mul", "simd_reduce_add",
+    "simd256_splat", "simd256_load", "simd256_store",
+    "simd256_add", "simd256_sub", "simd256_mul", "simd256_reduce_add"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -18482,6 +18484,12 @@ fn check_call(
                 name, args, env, signatures, span, diagnostics,
             );
         }
+        "simd256_splat" | "simd256_load" | "simd256_store"
+        | "simd256_add" | "simd256_sub" | "simd256_mul" | "simd256_reduce_add" => {
+            return check_simd256_builtin(
+                name, args, env, signatures, span, diagnostics,
+            );
+        }
         // T2.2 — `volatile_read(ptr: ref i64) -> i64` and
         // `volatile_write(ptr: mut ref i64, val: i64) -> i64`.
         // Ref-based volatile access for embedded MMIO registers.
@@ -33176,8 +33184,9 @@ fn is_simd_scalar(ty: &Type) -> bool {
     )
 }
 
-/// Native 128-bit SIMD vector builtins (Option 3).
+/// Native SIMD vector builtins — 128-bit (`vec128<T>`) and 256-bit (`vec256<T>`).
 ///
+/// 128-bit family (AVX2 xmm / NEON q / RVV 128):
 /// - `simd_splat(val: T) -> vec128<T>` — broadcast scalar to all lanes
 /// - `simd_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec128<T>` — load N lanes at v[idx..]
 /// - `simd_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec128<T>) -> Vec<T>` — store N lanes
@@ -33185,6 +33194,15 @@ fn is_simd_scalar(ty: &Type) -> bool {
 /// - `simd_sub(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise subtract
 /// - `simd_mul(a: vec128<T>, b: vec128<T>) -> vec128<T>` — lane-wise multiply
 /// - `simd_reduce_add(v: vec128<T>) -> T` — horizontal add across all lanes
+///
+/// 256-bit family (AVX2 ymm / SVE-256 / RVV-256) — same operations, 2× lanes:
+/// - `simd256_splat(val: T) -> vec256<T>`
+/// - `simd256_load(v: Vec<T>|ref Vec<T>, idx: i64) -> vec256<T>`
+/// - `simd256_store(v: Vec<T>|ref Vec<T>, idx: i64, data: vec256<T>) -> Vec<T>`
+/// - `simd256_add(a: vec256<T>, b: vec256<T>) -> vec256<T>`
+/// - `simd256_sub(a: vec256<T>, b: vec256<T>) -> vec256<T>`
+/// - `simd256_mul(a: vec256<T>, b: vec256<T>) -> vec256<T>`
+/// - `simd256_reduce_add(v: vec256<T>) -> T`
 fn check_simd_builtin(
     name: &str,
     args: &[Expr],
@@ -33424,5 +33442,197 @@ fn check_simd_builtin(
             )
         }
         _ => unreachable!("check_simd_builtin: unexpected name {}", name),
+    }
+}
+
+/// 256-bit SIMD builtins (`simd256_*`). Mirrors `check_simd_builtin`
+/// but uses `Type::Vec256` instead of `Type::Vec128`.
+fn check_simd256_builtin(
+    name: &str,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    // Strip "simd256_" prefix to reuse error messages symmetrically.
+    let short = name.strip_prefix("simd256_").unwrap_or(name);
+    match short {
+        "splat" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("{}() expects 1 argument, got {}", name, args.len()),
+                ));
+                return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+            }
+            let val = check_expr(&args[0], env, signatures, diagnostics);
+            if !is_simd_scalar(val.ty()) {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "{}() requires a numeric scalar element type, got {}",
+                        name, val.ty()
+                    ),
+                ));
+                return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+            }
+            let elem = val.ty().clone();
+            CheckedExpr::new(
+                TypedExprKind::Call {
+                    name: name.to_string(),
+                    name_span: span,
+                    args: vec![val.expr],
+                },
+                Type::Vec256(Box::new(elem)),
+                None,
+                span,
+            )
+        }
+        "load" => {
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!("{}() expects 2 arguments (vec, idx), got {}", name, args.len()),
+                ));
+                return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+            }
+            let v = check_expr(&args[0], env, signatures, diagnostics);
+            let elem = match v.ty() {
+                Type::Vec(inner) => {
+                    if !is_simd_scalar(inner.as_ref()) {
+                        diagnostics.push(Diagnostic::new(args[0].span,
+                            format!("{}() requires Vec<T> where T is a numeric scalar, got Vec<{}>", name, inner)));
+                        return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+                    }
+                    inner.as_ref().clone()
+                }
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(elem_inner) => {
+                        if !is_simd_scalar(elem_inner.as_ref()) {
+                            diagnostics.push(Diagnostic::new(args[0].span,
+                                format!("{}() requires ref Vec<T> where T is numeric, got ref Vec<{}>", name, elem_inner)));
+                            return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+                        }
+                        elem_inner.as_ref().clone()
+                    }
+                    _ => {
+                        diagnostics.push(Diagnostic::new(args[0].span,
+                            format!("{}() first argument must be Vec<T> or ref Vec<T>, got {}", name, v.ty())));
+                        return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(args[0].span,
+                        format!("{}() first argument must be Vec<T> or ref Vec<T>, got {}", name, other)));
+                    return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+                }
+            };
+            let idx_raw = check_expr(&args[1], env, signatures, diagnostics);
+            let idx = coerce_checked(idx_raw, &Type::I64, args[1].span, &format!("{} index", name), diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call { name: name.to_string(), name_span: span, args: vec![v.expr, idx.expr] },
+                Type::Vec256(Box::new(elem)),
+                None,
+                span,
+            )
+        }
+        "store" => {
+            if args.len() != 3 {
+                diagnostics.push(Diagnostic::new(span,
+                    format!("{}() expects 3 arguments (vec, idx, data), got {}", name, args.len())));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let v = check_expr(&args[0], env, signatures, diagnostics);
+            let elem = match v.ty() {
+                Type::Vec(inner) => {
+                    if !is_simd_scalar(inner.as_ref()) {
+                        diagnostics.push(Diagnostic::new(args[0].span,
+                            format!("{}() requires Vec<T> where T is a numeric scalar, got Vec<{}>", name, inner)));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                    inner.as_ref().clone()
+                }
+                Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                    Type::Vec(elem_inner) => {
+                        if !is_simd_scalar(elem_inner.as_ref()) {
+                            diagnostics.push(Diagnostic::new(args[0].span,
+                                format!("{}() requires ref Vec<T> where T is numeric, got ref Vec<{}>", name, elem_inner)));
+                            return CheckedExpr::fallback(Type::I64, span);
+                        }
+                        elem_inner.as_ref().clone()
+                    }
+                    _ => {
+                        diagnostics.push(Diagnostic::new(args[0].span,
+                            format!("{}() first argument must be Vec<T> or ref Vec<T>, got {}", name, v.ty())));
+                        return CheckedExpr::fallback(Type::I64, span);
+                    }
+                },
+                other => {
+                    diagnostics.push(Diagnostic::new(args[0].span,
+                        format!("{}() first argument must be Vec<T> or ref Vec<T>, got {}", name, other)));
+                    return CheckedExpr::fallback(Type::I64, span);
+                }
+            };
+            let idx_raw = check_expr(&args[1], env, signatures, diagnostics);
+            let idx = coerce_checked(idx_raw, &Type::I64, args[1].span, &format!("{} index", name), diagnostics);
+            let data_raw = check_expr(&args[2], env, signatures, diagnostics);
+            let expected_vec256 = Type::Vec256(Box::new(elem.clone()));
+            let data = coerce_checked(data_raw, &expected_vec256, args[2].span, &format!("{} data", name), diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call { name: name.to_string(), name_span: span, args: vec![v.expr, idx.expr, data.expr] },
+                Type::Vec(Box::new(elem)),
+                None,
+                span,
+            )
+        }
+        "add" | "sub" | "mul" => {
+            if args.len() != 2 {
+                diagnostics.push(Diagnostic::new(span,
+                    format!("{}() expects 2 arguments, got {}", name, args.len())));
+                return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+            }
+            let a = check_expr(&args[0], env, signatures, diagnostics);
+            let elem = match a.ty() {
+                Type::Vec256(inner) => inner.as_ref().clone(),
+                other => {
+                    diagnostics.push(Diagnostic::new(args[0].span,
+                        format!("{}() first argument must be vec256<T>, got {}", name, other)));
+                    return CheckedExpr::fallback(Type::Vec256(Box::new(Type::I64)), span);
+                }
+            };
+            let b_raw = check_expr(&args[1], env, signatures, diagnostics);
+            let expected = Type::Vec256(Box::new(elem));
+            let b = coerce_checked(b_raw, &expected, args[1].span, &format!("{} second operand", name), diagnostics);
+            CheckedExpr::new(
+                TypedExprKind::Call { name: name.to_string(), name_span: span, args: vec![a.expr, b.expr] },
+                expected,
+                None,
+                span,
+            )
+        }
+        "reduce_add" => {
+            if args.len() != 1 {
+                diagnostics.push(Diagnostic::new(span,
+                    format!("{}() expects 1 argument, got {}", name, args.len())));
+                return CheckedExpr::fallback(Type::I64, span);
+            }
+            let v = check_expr(&args[0], env, signatures, diagnostics);
+            let elem = match v.ty() {
+                Type::Vec256(inner) => inner.as_ref().clone(),
+                other => {
+                    diagnostics.push(Diagnostic::new(args[0].span,
+                        format!("{}() argument must be vec256<T>, got {}", name, other)));
+                    return CheckedExpr::fallback(Type::I64, span);
+                }
+            };
+            CheckedExpr::new(
+                TypedExprKind::Call { name: name.to_string(), name_span: span, args: vec![v.expr] },
+                elem,
+                None,
+                span,
+            )
+        }
+        _ => unreachable!("check_simd256_builtin: unexpected name {}", name),
     }
 }
