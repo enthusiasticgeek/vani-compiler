@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── x86-64: full test suite including integration tests ──────────────────
+  test-x86:
+    name: Test (x86-64 Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install LLVM tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y llvm clang
+
+      - name: Run full test suite
+        run: cargo test
+
+  # ── AArch64: lib unit tests via QEMU user-mode ───────────────────────────
+  #
+  # Runs the 2000+ compiler unit tests (src/lib.rs) on an emulated AArch64
+  # CPU. Verifies that the IR emitter, type checker, SSA lowerer, and
+  # backend produce identical output when the compiler itself runs on ARM64.
+  #
+  # Integration tests (tests/*.rs) are excluded because they spawn the vanic
+  # binary which in turn invokes cc/llc — those are x86-64 host binaries and
+  # cannot run under AArch64 QEMU. Correctness of the generated code on real
+  # AArch64 hardware is tracked in ARM-3 (needs Graviton / Pi 4 / M-series).
+  test-aarch64-qemu:
+    name: Test (AArch64 via QEMU)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (AArch64 target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+
+      - name: Install AArch64 cross-toolchain + QEMU user-mode
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -q -y gcc-aarch64-linux-gnu qemu-user-static
+
+      - name: Run lib unit tests on AArch64 (via QEMU)
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
+        run: cargo test --lib --target aarch64-unknown-linux-gnu

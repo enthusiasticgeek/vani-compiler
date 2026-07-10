@@ -225,10 +225,12 @@ Steps 5–6 are next session / blocked.
 
 ### ARM-6 — AArch64 CI runner · **P6 · BLOCKED**
 
-- [ ] **ARM-6. Add AArch64 GitHub Actions runner**
-  `.github/workflows/release.yml` only tests `ubuntu-latest` (x86-64).
-  Add a `ubuntu-24.04-arm` or self-hosted Graviton job that runs the full
-  `cargo test` suite. **BLOCKED**: needs CI runner budget / self-hosted Pi.
+- [x] **ARM-6. Add AArch64 GitHub Actions runner** ✅ done 2026-07-06
+  `.github/workflows/ci.yml` added with two jobs: full suite on x86-64
+  and lib unit tests on AArch64 via QEMU user-mode (`qemu-aarch64-static`).
+  Integration tests excluded from AArch64 job (they spawn cc/llc which are
+  host x86-64 binaries). Full end-to-end AArch64 coverage still requires
+  real hardware (tracked in ARM-3).
 
 ---
 
@@ -241,4 +243,4 @@ Steps 5–6 are next session / blocked.
 | Windows IOCP async-TCP (`tcp_echo_epoll` etc.) | Readiness-vs-completion model mismatch (R8 in decisions.md) |
 | Arc 7 Win64 / AArch64 CI wiring | CI runner setup |
 | crates.io publish (item 1) — v0.1.2 tagged and ready | crates.io API token needed (`cargo login`) |
-| ARM-6 AArch64 CI | CI runner budget / self-hosted hardware |
+| ARM-3 AArch64 benchmarks | Real AArch64 hardware needed (QEMU perf numbers not meaningful) |
