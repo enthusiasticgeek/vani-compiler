@@ -1,6 +1,7 @@
 # Benchmark Results — vāṇī vs Rust vs C vs C++
 
-*Generated: 2026-07-06 08:45 — 5 timing run(s) per benchmark, median reported.*
+*Benchmarks 01–10 generated: 2026-07-06 08:45 — 5 timing run(s) per benchmark, median reported.*
+*Benchmark 11 generated: 2026-07-10 — 5 timing run(s), median reported.*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*
 
@@ -28,11 +29,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE
 | Linked list — 1 00 |    12.4 ms   |    12.5 ms   |    15.4 ms   |    18.3 ms   | —            | —            |
 | Allocation stress  |    12.2 ms   |     9.6 ms   |    12.7 ms   |    13.9 ms   | —            | —            |
 | Array statistics — |    43.0 ms   |    45.6 ms   |    50.4 ms   |    38.5 ms   | —            | —            |
-| SIMD dot product —  | *not run*    | *not run*    | *not run*    | *not run*    | —            | —            |
-
-> **Benchmark 11** (`11_simd_dot`) was added 2026-07-10 and has not yet been
-> timed on this machine. Run `python3 benchmarks/run_benchmarks.py --bench 11`
-> to collect numbers.
+| SIMD dot product — |    27.8 ms   |    41.5 ms   |    44.4 ms   |    37.6 ms   | —            | —            |
 
 ## Per-benchmark charts
 
@@ -159,6 +156,23 @@ C++/Rust use traditional pointer-linked nodes for comparison.*
   rs             ███████████████████████████░░░░░░░░░     38.5 ms   10.6% faster
 ```
 
+### SIMD dot product — explicit vec128<f32> vs auto-vectorized (4 M elements)
+
+*vāṇī: explicit `vec128<f32>` simd_mul + simd_reduce_add. C/C++/Rust: scalar loop auto-vectorized by compiler. Compares explicit SIMD vs optimizer output.*
+
+```
+  vani           ███████████████████████░░░░░░░░░░░░░     27.8 ms    baseline
+  c              ██████████████████████████████████░░     41.5 ms   49.4% slower
+  cpp            ████████████████████████████████████     44.4 ms   60.0% slower
+  rs             ██████████████████████████████░░░░░░     37.6 ms   35.4% slower
+```
+
+> **Explicit SIMD wins**: vāṇī's `vec128<f32>` explicit load/mul/reduce path
+> outperforms auto-vectorized scalar loops in all three comparison languages.
+> The 49% advantage over C confirms that LLVM's auto-vectorizer, despite seeing
+> the same scalar loop, leaves performance on the table that explicit lane
+> control recovers.
+
 ## Key insight: index handles vs. `weak_ptr`
 
 Benchmark `05_graph_bfs` is the most architecture-revealing comparison.
@@ -171,4 +185,3 @@ graphs are stored as **integer indices** into a contiguous `Vec<T>`.
 |----------|-------------|------------|----------------|
 | C++ `weak_ptr` | one per node | `lock()` ≥ 2 per access | poor (pointer chase) |
 | vāṇī / C++ index | zero (flat Vec) | none | excellent (contiguous) |
-
