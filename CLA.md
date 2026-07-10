@@ -118,9 +118,36 @@ Subject to the terms of this Agreement (and in particular subject to the represe
 
 ## 4. Patent License Grant
 
-Subject to the terms of this Agreement, You hereby grant to the Maintainer, and to all recipients of software distributed by the Maintainer, a **perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable** (except as stated below) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Project and any derivative works, where such license applies only to those patent claims licensable by You that are necessarily infringed by Your Contribution(s) alone or in combination with the Project.
+Subject to the terms of this Agreement (and in particular subject to the representations and indemnification in §§5–6), You hereby grant to the Maintainer, and to all recipients of software distributed by the Maintainer, a **perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable** (except as stated in §4a) patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Project and any derivative works, where such license applies only to those patent claims licensable by You that are necessarily infringed by Your Contribution(s) alone or in combination with the Project.
 
-If any entity institutes patent litigation against You or any other party alleging that Your Contribution constitutes direct or contributory patent infringement, any patent licenses granted to that entity under this Agreement shall terminate as of the date such litigation is filed.
+This license extends to patent claims held or controlled by Your employer or any entity on whose behalf You are making the Contribution, to the extent such claims are necessarily infringed by Your Contribution.
+
+---
+
+## 4a. Patent Non-Assertion Covenant
+
+**You covenant, on behalf of yourself and your employer, successors, and assigns, not to assert any patent claim against the Project, the Maintainer, or any recipient or user of the Project's software**, where such patent claim:
+
+- (a) covers an invention first disclosed in this Project (see [`PRIOR_ART.md`](PRIOR_ART.md));
+- (b) covers an invention implemented in, substantially derived from, or functionally equivalent to Your Contribution or any existing feature of the Project at the time of Your Contribution; or
+- (c) would, if asserted, prevent or restrict any person from using, distributing, modifying, or building upon the Project under its existing open-source license.
+
+This covenant runs with Your Contribution and is binding on You, Your employer, and any successor or assignee of Your patent rights. You represent that You have the authority to make this covenant on behalf of Your employer with respect to patents that cover Your Contribution.
+
+**You further covenant not to file, fund, or assist any patent application** on any invention first disclosed in [`PRIOR_ART.md`](PRIOR_ART.md) or implemented in the Project at the time of Your Contribution.
+
+---
+
+## 4b. Patent Aggression Termination
+
+If You, Your employer, or any entity acting on Your behalf or to which You have assigned any interest:
+
+- institutes a patent infringement proceeding (including a cross-claim or counterclaim) against the Project, the Maintainer, or any downstream recipient of the Project's software; or
+- funds, controls, or directs any third party to make such an assertion;
+
+then **all patent licenses granted under §4, all copyright licenses granted under §3, and all contributor approvals granted under §2 shall terminate automatically** as of the date such proceeding or assertion is initiated. No notice is required for this termination to take effect.
+
+Termination under this section does not relieve You of indemnification obligations under §6.2 for Contributions already incorporated into the Project.
 
 ---
 
@@ -226,9 +253,78 @@ Accepted Contributions will be distributed as part of the Project under the **MI
 
 ---
 
-## 12. Governing Law
+## 12. Governing Law and Jurisdiction
 
-This Agreement is governed by applicable law. Any dispute shall first be addressed through good-faith written negotiation between You and the Maintainer. If unresolved after 30 days, the parties agree to binding arbitration before resorting to litigation.
+**Intellectual property matters** (patents, copyright, trade secrets) arising
+from this Agreement are governed by **United States federal law**, including
+the Patent Act (35 U.S.C.), the Copyright Act (17 U.S.C.), and the Defend
+Trade Secrets Act (18 U.S.C. § 1836). Federal courts of the United States
+have exclusive jurisdiction over such matters.
+
+**Contract and other disputes** are governed by the laws of **the state in
+which the Maintainer is domiciled at the time the dispute is initiated**. If
+the Maintainer is not domiciled in the United States at that time, the parties
+agree that the **State of California** (chosen because the Project is hosted on
+GitHub, Inc., a California company, and California has strong open-source
+contributor protections) governs, and the state and federal courts located in
+the Northern District of California shall have exclusive jurisdiction.
+
+**Dispute resolution sequence**:
+1. **Written negotiation** — the disputing party notifies the Maintainer in
+   writing; parties have 30 days to resolve in good faith.
+2. **Mediation** — if unresolved, the parties agree to attempt mediation
+   before a mutually agreed neutral mediator for 30 additional days.
+3. **Binding arbitration** — if mediation fails, disputes shall be resolved
+   by binding arbitration under the rules of JAMS (or, if the claim is under
+   USD $10,000, by small claims court in the Maintainer's jurisdiction).
+4. **Litigation** — litigation is a last resort. The prevailing party in any
+   litigation is entitled to reasonable attorneys' fees.
+
+**Patent matters** may be brought directly to federal court without first
+exhausting steps 1–3, given the time-sensitive nature of patent proceedings
+(e.g., inter partes review deadlines).
+
+> **Note on the Maintainer's immigration status**: The Maintainer currently
+> resides in the United States under valid work authorization. US jurisdiction
+> is appropriate because (a) the Project was created and is maintained in the
+> US, (b) the Project is hosted on GitHub (US company), and (c) the Maintainer
+> is physically domiciled in the US. The temporary nature of a US immigration
+> status does not affect legal domicile for contract purposes under US law.
+
+---
+
+## 13. Export Compliance
+
+You represent that Your Contribution does not originate from, and will not be
+submitted by any person in, a country subject to US export controls or
+sanctions (including but not limited to OFAC-sanctioned jurisdictions). You
+are not listed on any US government denied-party list (Entity List, SDN List,
+etc.).
+
+---
+
+## 14. Miscellaneous
+
+**Severability**: If any provision of this Agreement is held unenforceable, it
+shall be modified to the minimum extent necessary to make it enforceable; all
+other provisions remain in full force.
+
+**Entire Agreement**: This Agreement, together with [`PATENTS.md`](PATENTS.md)
+and [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md), constitutes the
+entire agreement between You and the Maintainer regarding Your Contributions
+and supersedes all prior discussions.
+
+**No Waiver**: The Maintainer's failure to enforce any provision does not
+constitute a waiver of the right to enforce it in the future.
+
+**Modification**: The Maintainer may publish revised versions of this CLA. Each
+version is identified by a version number. Your Contributions made after a new
+version is published are governed by the new version. Contributions already
+accepted under a prior version remain governed by that version.
+
+**Assignment**: The Maintainer may assign this Agreement in connection with a
+merger, acquisition, or sale of substantially all assets of the Project. You
+may not assign your rights under this Agreement without written consent.
 
 ---
 
@@ -257,4 +353,4 @@ Open a GitHub Discussion in the `vani-compiler` repository, or contact the Maint
 
 ---
 
-*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇी Kosh Publisher Agreement v1.0. Revision: 2026-07-10 v1.2.*
+*Modeled on the Apache Software Foundation Individual Contributor License Agreement v2.0, with an explicit application-and-approval process inspired by the Vāṇी Kosh Publisher Agreement v1.0. Patent non-assertion and aggression-termination clauses modeled on the Open Invention Network License and Apache License v2.0 §3. Revision: 2026-07-10 v1.3.*
