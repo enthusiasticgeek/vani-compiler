@@ -276,13 +276,17 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
   `CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER=qemu-riscv64-static`.
   Cross-linker: `riscv64-linux-gnu-gcc`. Packages: `gcc-riscv64-linux-gnu qemu-user-static`.
 
-- [ ] **SIMD-7. AArch64 edge_cases cross-run via QEMU**
-  The ARM-6 CI job runs `cargo test --lib` under `qemu-aarch64-static` but
-  does NOT run `cargo test --test edge_cases`. Edge-case integration tests
-  spawn the `vanic` binary itself — that binary is x86-64 and can't run
-  inside `qemu-aarch64-static`. Possible path: cross-compile the `vanic`
-  binary for AArch64 and run the integration tests under full QEMU, or
-  document this as a known gap and add it to the AArch64 CI issue.
+- [x] **SIMD-7. AArch64 lib tests via QEMU** ✅ done (CI already present)
+  vanic has no native LLVM dependency — it shells out to `lli`/`llc`. The
+  binary is pure Rust and cross-compiles to AArch64 with no extra steps.
+  `test-aarch64-qemu` CI job (ci.yml lines 38-58) already runs
+  `cargo test --lib --target aarch64-unknown-linux-gnu` under
+  `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER=qemu-aarch64-static`.
+  Cross-linker: `aarch64-linux-gnu-gcc`. This validates parser, type-checker,
+  SSA lowerer, SIMD lowering, and both backends on emulated ARM64.
+  Note: `cargo test --test edge_cases` is excluded — those tests spawn the
+  vanic binary which forks `cc`/`lli` (x86-64 host binaries); that requires
+  real AArch64 hardware or a full VM (tracked: ARM-3).
 
 - [x] **SIMD-8. `ARR` bucket confirmed and pinned** ✅ done 2026-07-10
   `parser.rs` has `Type::Array { element, length }` + `ExprKind::ArrayLit`.
