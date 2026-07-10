@@ -142,13 +142,16 @@ vanic build sum.vani --link-with=avx2_shim.o -o sum
 
 ---
 
-## When to use `#[vectorize]` vs a shim
+## When to use `vec128<T>` vs a shim vs auto-vectorization
 
 | Situation | Recommended approach |
 |-----------|---------------------|
 | Loop over array, LLVM can prove no aliasing | Auto-vectorization (already on by default) |
 | Latency-bound loop, want software pipelining | `#[vectorize]` attribute on the function |
-| Need a specific NEON / SSE intrinsic (e.g. `vsqrtq_f64`) | FFI shim |
+| Portable SIMD: splat / add / mul / reduce on f32 or i32 | `vec128<T>` builtins (v0.2.4+) |
+| Need a specific NEON intrinsic (e.g. `vsqrtq_f64`, `vrsqrteq_f32`) | FFI shim |
+| Need a specific RVV intrinsic (e.g. `vfmacc_vv_f32m8`) | FFI shim with `<riscv_vector.h>` |
+| AES-NI, SHA extensions, SVE gather-scatter | FFI shim |
 | Hand-tuned crypto / image kernel | FFI shim |
 | Multi-platform code, let LLVM choose | Auto-vectorization |
 
@@ -180,10 +183,24 @@ fn prepare_and_multiply(a: ref Vec<i64>, b: ref Vec<i64>,
 
 ---
 
-## Future: native SIMD types
+## Native SIMD types (shipped v0.2.4)
 
-A future Arc will add `vec128<i32>`, `vec256<f64>`, and a builtin SIMD
-surface (`simd_add`, `simd_load`, `simd_store`, etc.) directly to the vāṇī
-type system. When that ships, FFI shims become the "exotic intrinsics" escape
-hatch (e.g. AES-NI, SHA extensions, SVE gather-scatter) rather than the
-primary SIMD mechanism.
+`vec128<T>` and seven SIMD builtins are live as of v0.2.4. FFI shims are now
+the **exotic intrinsics escape hatch** rather than the primary mechanism.
+
+| Builtin | x86-64 (i32 example) | AArch64 (i32) | RISC-V (i32, LLVM-lowered) |
+|---------|----------------------|--------------|---------------------------|
+| `simd_splat(x)` | `_mm_set1_epi32` | `dup v0.4s, w0` | `vmv.v.x` |
+| `simd_add(a, b)` | `_mm_add_epi32` | `add v0.4s, v1.4s, v2.4s` | `vadd.vv` |
+| `simd_mul(a, b)` | `_mm_mullo_epi32` | `mul v0.4s, v1.4s, v2.4s` | `vmul.vv` |
+| `simd_sub(a, b)` | `_mm_sub_epi32` | `sub v0.4s, v1.4s, v2.4s` | `vsub.vv` |
+| `simd_reduce_add(v)` | phased `_mm_hadd_*` | `addv s0, v1.4s` | `vredsum.vs` |
+| `simd_load(vec, i)` | GEP + load | `ldr q0, [x0, x1, lsl #2]` | `vle32.v` |
+| `simd_store(vec, i, d)` | GEP + store | `str q0, [x0, x1, lsl #2]` | `vse32.v` |
+
+Shims remain the escape hatch for: AES-NI, SHA extensions, Poly1305
+acceleration, SVE scatter-gather, RVV widening multiply (`vwmul.vv`),
+AVX-512 masking, and any intrinsic not yet in the builtin set.
+
+For QEMU setup to test these on AArch64 and RISC-V targets without real
+hardware, see `docs/qemu_testing.md`.

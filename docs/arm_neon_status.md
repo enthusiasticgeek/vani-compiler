@@ -120,11 +120,89 @@ for auto-vectorized loops instead of the fixed 128-bit NEON lanes.
 
 ---
 
+## QEMU testing for AArch64
+
+`vanic run hello.vani --target=aarch64-unknown-linux-gnu` invokes
+`qemu-aarch64-static` automatically if it is on `$PATH` (or `$QEMU_AARCH64`).
+
+This lets an x86-64 development machine run the full compiler + program
+pipeline for AArch64 **functionally** — exit codes, stdout, memory safety,
+ICE/panic detection. It does **not** give meaningful performance numbers.
+
+The CI job **ARM-6** (shipped v0.2.4) runs `cargo test --lib` under
+`qemu-aarch64-static` via `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER`.
+
+To enable SVE in QEMU:
+
+```bash
+QEMU_AARCH64="qemu-aarch64-static -cpu max" \
+  vanic run server.vani --target=aarch64-unknown-linux-gnu --sve2
+```
+
+Full QEMU setup, CPU flags, and limitations are in **`docs/qemu_testing.md`**.
+
+---
+
+## RISC-V status
+
+### Cross-compilation triples
+
+| Triple | ISA | Use case |
+|--------|-----|----------|
+| `riscv32-unknown-none-elf` | RV32IMAC | bare-metal ELF |
+| `riscv64-unknown-linux-gnu` | RV64GC | Linux userspace |
+
+```bash
+# Bare-metal (needs riscv32-elf-gcc or riscv32-unknown-elf-gcc on PATH)
+CROSS_CC=riscv32-elf-gcc vanic build blink.vani \
+  --target=riscv32-unknown-none-elf -o blink.elf
+
+# Linux 64-bit (cross-linker: riscv64-linux-gnu-gcc)
+vanic run hello.vani --target=riscv64-unknown-linux-gnu
+# → automatically invokes qemu-riscv64-static if on PATH
+```
+
+### RISC-V Vector extension (RVV)
+
+| Feature | Status |
+|---------|--------|
+| LLVM auto-vectorization → RVV | ✓ works when `--cpu=<v-capable>` e.g. `sifive-x280` |
+| `vec128<T>` builtins → RVV | ✓ LLVM lowers 128-bit vector IR to `vsetvli` + `vadd.vv` etc. |
+| Explicit RVV intrinsics | Via FFI shim with `<riscv_vector.h>` (see `docs/simd_ffi_shims.md`) |
+| RVV CI | ✗ not yet (RISC-V QEMU CI is a documented gap in ARM-6 follow-up) |
+| RVV benchmarks | ✗ real hardware needed |
+
+To use auto-vectorization with RVV, pass a CPU that includes the V extension:
+
+```bash
+vanic build dot.vani \
+    --target=riscv64-unknown-linux-gnu \
+    --cpu=sifive-x280 \
+    -o dot
+
+# Run under QEMU with V extension enabled
+QEMU_RISCV64="qemu-riscv64-static -cpu rv64,v=true,vlen=256" \
+  qemu-riscv64-static -cpu rv64,v=true,vlen=256 ./dot
+```
+
+For a complete RVV FFI shim example (explicit `vsetvli`/`vadd.vv` via
+`<riscv_vector.h>`) and detailed QEMU CPU flags, see **`docs/qemu_testing.md`**.
+
+### Known gaps
+
+- No RISC-V QEMU CI job (equivalent of ARM-6).
+- No RVV-specific lib tests (AArch64 NEON path tested via `cargo test --lib`
+  under `qemu-aarch64-static`; RISC-V lacks the equivalent).
+- No RISC-V benchmark numbers in `benchmarks/results/RESULTS.md`.
+
+---
+
 ## Recommended reading
 
+- `docs/qemu_testing.md` — QEMU setup, CPU flags, what QEMU can/cannot test
 - `tutorials/src/advanced/04b_cross_compile_primer.md` — full `--target=` walkthrough
 - `tutorials/src/advanced/04_embedded.md` — bare-metal `--no-std` tutorial
 - `tutorials/src/advanced/05_simd.md` — three-layer SIMD guide (auto / `#[vectorize]` / `vec128<T>`)
 - `examples/language/english/bare_metal.vani` — minimal bare-metal example
-- `docs/simd_ffi_shims.md` — NEON / AVX2 FFI shim cookbook
+- `docs/simd_ffi_shims.md` — NEON / RVV / AVX2 FFI shim cookbook
 - `docs/missing_features.md` — broader language gap inventory
