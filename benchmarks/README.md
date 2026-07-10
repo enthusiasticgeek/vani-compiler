@@ -51,6 +51,7 @@ A pre-generated sample is in [results/RESULTS_SAMPLE.md](results/RESULTS_SAMPLE.
 | 08 | `08_linked_list/` | 1 M-node traversal — index vs pointer linked list |
 | 09 | `09_alloc_stress/` | 500 K struct alloc/free cycles — RAII vs manual |
 | 10 | `10_array_stats/` | Mean + variance of 10 M values — pure arithmetic loop |
+| 11 | `11_simd_dot/` | f32 dot product 4 M elements — explicit `vec128<f32>` vs auto-vectorized scalar |
 
 ---
 

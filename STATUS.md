@@ -10,6 +10,42 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-07-10
+
+**State**: ARM/NEON + SIMD work complete. Compiler version `v0.2.3` (Cargo.toml).
+
+### Shipped this session (2026-07-10) — ARM/NEON + SIMD
+
+| Item | What shipped |
+|------|-------------|
+| `--cpu=<name>` flag | Forwards `-mcpu=<cpu>` to both `opt` and `llc`; defaults to `native` on host builds, empty on cross-compile |
+| Target-aware `vectorize.width` | AArch64 targets get width=2 (NEON 64-bit pairs); x86-64 keeps width=4 |
+| `--sve` / `--sve2` flags | Forward `-mattr=+sve` / `-mattr=+sve2` to `llc`; AArch64-only with clear error otherwise |
+| ARM-5 bare-metal parallel-for docs | `02_parallel.md` + `04_embedded.md` notes on FreeRTOS `xTaskCreate` workaround |
+| ARM-6 QEMU CI | `.github/workflows/ci.yml` job: `cargo test --lib` under `qemu-aarch64-static` |
+| `#[vectorize]` attribute | Adds `llvm.loop.interleave.count = 4` on all while-loops; 2 new lib tests |
+| FFI SIMD shim docs | `docs/simd_ffi_shims.md` — NEON `vaddq_s64` + AVX2 `_mm256_add_epi64` examples |
+| `vec128<T>` type + 7 `simd_*` builtins | `simd_splat`, `simd_load`, `simd_store`, `simd_add`, `simd_sub`, `simd_mul`, `simd_reduce_add`; lowers to LLVM vector IR + GNU vector_size in C backend; 6 lib tests all pass |
+| Tutorial `advanced/05_simd.md` | Three-layer SIMD guide; SAXPY + dot-product examples; AArch64/NEON instruction table; decision flowchart |
+| Benchmark 11 (`11_simd_dot`) | f32 dot product: explicit `vec128<f32>` vs auto-vectorized scalar — vāṇी / C / C++ / Rust |
+| README SIMD section | `vec128<T>` overview + builtin table in Part IV |
+
+### Key numbers (2026-07-10)
+- **Lib tests**: 2442+ passing (6 new SIMD tests)
+- **Blocked (unchanged)**: B1 crates.io token · B2 macOS hardware · B3 grammar consultant · B4 Windows IOCP
+
+### Blocked
+
+| # | Item | Blocker |
+|---|------|---------|
+| B1 | crates.io publish | Needs API token |
+| B2 | macOS verification | No macOS hardware |
+| B3 | Grammar consultant pass | External reviewer needed |
+| B4 | Windows IOCP async-TCP | ~25–35 h; readiness-vs-completion mismatch |
+| ARM-3 | ARM hardware benchmarks | Need physical AArch64 board |
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-06-23
 
 **State**: `v0.1.7` + `v0.1.8` tagged. `0.1.8` is the live version. Three new language features shipped (block comments, print blocks, positional break). All prior L18/L19 gaps remain resolved.

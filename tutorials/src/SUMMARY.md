@@ -85,6 +85,7 @@
 - [Cross-compilation and bare-metal targets -- intuition primer](advanced/04b_cross_compile_primer.md)
 - [Embedded targets + `unsafe` + region typing](advanced/04_embedded.md)
 - [Function attributes reference](advanced/04c_attributes_reference.md)
+- [SIMD and NEON vectorization](advanced/05_simd.md)
 - [The `dyn` vtable layout + safety boundary](advanced/05_vtables.md)
 - [Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque](advanced/05b_advanced_collections.md)
 - [SMT trace debugging](advanced/06_smt_debug.md)

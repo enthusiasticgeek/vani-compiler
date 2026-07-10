@@ -1,6 +1,6 @@
-# ARM / AArch64 / NEON status in vāṇī (v0.2.4)
+# ARM / AArch64 / NEON status in vāṇī (v0.2.4+)
 
-> Written 2026-07-06. Current as of v0.2.4.
+> Written 2026-07-06. Updated 2026-07-10.
 
 ---
 
@@ -53,20 +53,29 @@ for the full flow.
 
 ## Known gaps and limitations
 
-### 1. `vectorize.width` hint is x86-biased
+### 1. `vectorize.width` hint is target-aware ✅ fixed v0.2.4+
 
-Every reduction loop emits `!llvm.loop.vectorize.width = 4`. On x86-64 AVX2
-this maps to 4×64-bit = 256-bit (one YMM register). On AArch64 NEON, a
-128-bit register holds only **2×i64**, so width 4 forces two registers and
-may confuse the vectorizer. The correct hint for i64 on AArch64 is `width = 2`;
-for i32 it is `width = 4`.
+The compiler now reads the active LLVM target triple and emits
+`vectorize.width = 2` for AArch64 targets and `width = 4` for x86-64.
+The LLVM target triple is set via `set_target_triple()` before codegen
+and consulted by `vectorize_width()` in `backend_llvm.rs`.
 
-### 2. No explicit NEON / SVE intrinsics
+### 2. Explicit NEON via `vec128<T>` ✅ shipped v0.2.4+
 
-There is no user-visible `@neon_vaddq_s64(…)` or `#[target_feature(neon)]`
-surface. All SIMD comes from LLVM auto-vectorization. Programs that need hand-
-tuned NEON (e.g., cryptography, image processing) must drop to `unsafe { … }`
-FFI calling a hand-written C/assembly function.
+`vec128<T>` is a 128-bit SIMD register value holding N lanes of type T.
+Seven built-in operations lower directly to NEON instructions:
+
+| Builtin | AArch64 (i32 example) |
+|---------|----------------------|
+| `simd_splat(x)` | `dup v0.4s, w0` |
+| `simd_add(a, b)` | `add v0.4s, v1.4s, v2.4s` |
+| `simd_mul(a, b)` | `mul v0.4s, v1.4s, v2.4s` |
+| `simd_reduce_add(v)` | `addv s0, v1.4s` |
+| `simd_load(vec, i)` | `ldr q0, [x0, x1, lsl #2]` |
+| `simd_store(vec, i, d)` | `str q0, [x0, x1, lsl #2]` |
+
+For exotic intrinsics not yet in the builtin set, the FFI shim
+escape hatch remains available — see `docs/simd_ffi_shims.md`.
 
 ### 3. `parallel for` unavailable on bare-metal ARM
 
@@ -114,5 +123,7 @@ for auto-vectorized loops instead of the fixed 128-bit NEON lanes.
 
 - `tutorials/src/advanced/04b_cross_compile_primer.md` — full `--target=` walkthrough
 - `tutorials/src/advanced/04_embedded.md` — bare-metal `--no-std` tutorial
+- `tutorials/src/advanced/05_simd.md` — three-layer SIMD guide (auto / `#[vectorize]` / `vec128<T>`)
 - `examples/language/english/bare_metal.vani` — minimal bare-metal example
+- `docs/simd_ffi_shims.md` — NEON / AVX2 FFI shim cookbook
 - `docs/missing_features.md` — broader language gap inventory

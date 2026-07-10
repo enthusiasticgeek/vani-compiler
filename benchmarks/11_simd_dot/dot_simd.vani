@@ -1,0 +1,66 @@
+// vani-lang: english
+// Benchmark 11 — Dot product of two 4 000 000-element f32 vectors
+//
+// Two variants in one binary:
+//   - SIMD:   explicit vec128<f32> loads + simd_mul + simd_reduce_add
+//   - Scalar: plain while loop relying on LLVM auto-vectorization
+//
+// We time the SIMD path; the scalar checksum is computed once to verify
+// both paths agree. The runner compares the two prints:
+//   line 1: checksum from SIMD path
+//   line 2: checksum from scalar path
+// They must be equal (both printed, runner checks exit 0 and line equality).
+
+intent "Benchmark: dot product f32 — explicit vec128 vs auto-vectorized scalar";
+
+fn dot_simd(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec128<f32> = simd_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 4 <= n {
+        let ai: vec128<f32> = simd_load(a, i);
+        let bi: vec128<f32> = simd_load(b, i);
+        let prod: vec128<f32> = simd_mul(ai, bi);
+        acc = simd_add(acc, prod);
+        i = i + 4;
+    }
+    let result: f32 = simd_reduce_add(acc);
+    // scalar tail
+    while i < n {
+        result = result + a[i] * b[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+fn dot_scalar(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let s: f32 = 0.0 as f32;
+    let i: i64 = 0;
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn main() -> i64 {
+    let n: i64 = 4000000;
+
+    // Build inputs: a[i] = (i % 100) * 0.01, b[i] = 1.0
+    let a: Vec<f32> = vec_with_capacity(n);
+    let b: Vec<f32> = vec_with_capacity(n);
+    let i: i64 = 0;
+    while i < n {
+        let _ = push_unchecked(mut ref a, (i % 100) as f32 * 0.01 as f32);
+        let _ = push_unchecked(mut ref b, 1.0 as f32);
+        i = i + 1;
+    }
+
+    let r1: f32 = dot_simd(ref a, ref b, n);
+    let r2: f32 = dot_scalar(ref a, ref b, n);
+
+    // Print integer-truncated checksums so runner can compare without
+    // floating-point equality issues.
+    print r1 as i64;
+    print r2 as i64;
+    return 0;
+}

@@ -3840,6 +3840,68 @@ async fn read_line(fd: i64) -> OwnedStr {
 See `examples/async_fn.vani`, `examples/tcp_echo_epoll.vani`, and
 [ARC8_V3_PLAN.md](ARC8_V3_PLAN.md) for end-to-end examples.
 
+## SIMD and vectorization
+
+vāṇī has three layers of SIMD support, from automatic to explicit:
+
+**Layer 1 — auto-vectorization (always on).** Every `while` loop
+gets `!llvm.loop.vectorize.enable` metadata. LLVM produces SSE /
+AVX2 (x86-64) or NEON (AArch64) instructions automatically when
+the loop is safe to vectorize.
+
+**Layer 2 — `#[vectorize]` attribute.** Adds software-pipeline
+interleaving (×4 unroll) on top of auto-vectorize. One attribute,
+zero code change:
+
+```vani
+#[vectorize]
+fn dot(a: ref Vec<i64>, b: ref Vec<i64>, n: i64) -> i64 {
+    let s: i64 = 0;
+    let i: i64 = 0;
+    while i < n { s = s + a[i] * b[i]; i = i + 1; }
+    return s;
+}
+```
+
+**Layer 3 — `vec128<T>` and `simd_*` builtins.** A 128-bit SIMD
+register type with seven built-in operations:
+
+```vani
+// Explicit four-lane f32 SAXPY
+fn saxpy(y: ref Vec<f32>, x: ref Vec<f32>, alpha: f32, n: i64) -> i64 {
+    let a: vec128<f32> = simd_splat(alpha);
+    let i: i64 = 0;
+    while i + 4 <= n {
+        let xi: vec128<f32> = simd_load(x, i);
+        let yi: vec128<f32> = simd_load(y, i);
+        let _ = simd_store(y, i, simd_add(yi, simd_mul(a, xi)));
+        i = i + 4;
+    }
+    return 0;
+}
+```
+
+| Builtin | What it does |
+|---------|-------------|
+| `simd_splat(val: T) -> vec128<T>` | Broadcast scalar to all lanes |
+| `simd_load(v: Vec<T>, idx: i64) -> vec128<T>` | Load N lanes from `v[idx..]` |
+| `simd_store(v: Vec<T>, idx: i64, d: vec128<T>) -> Vec<T>` | Store N lanes |
+| `simd_add` / `simd_sub` / `simd_mul` | Lane-wise arithmetic |
+| `simd_reduce_add(v: vec128<T>) -> T` | Horizontal sum |
+
+Lane counts: `i8`/`u8` → 16, `i16`/`u16` → 8, `i32`/`u32`/`f32` → 4,
+`i64`/`u64`/`f64` → 2.
+
+On AArch64 targets, `vec128<T>` maps directly to NEON 128-bit
+`v`-registers. `--cpu=cortex-a72 --target=aarch64-…` tunes the
+instruction scheduler accordingly. Add `--sve` / `--sve2` for
+AArch64 v8.2+/v9 SVE auto-vectorization.
+
+See [tutorials/advanced/05_simd.md](tutorials/src/advanced/05_simd.md)
+for the full guide and decision flowchart.
+
+---
+
 ## File I/O
 
 `FileHandle` is an affine RAII handle. The file is closed automatically
@@ -4633,7 +4695,7 @@ biggest ergonomic gaps:
 - Cranelift backend (fast native JIT, no LLVM dependency).
 - Direct-asm targets (x86_64-linux first, then small-targets).
 - Work-stealing scheduler for `task` fan-out.
-- SIMD-targeted lowering.
+- SVE/SVE2 `vec256<T>` / `vec512<T>` scalable-vector types.
 - GPU / accelerator backends.
 - Richer aliasing rules — region / lifetime inference beyond the
   second-class `ref` / `mut ref` discipline.

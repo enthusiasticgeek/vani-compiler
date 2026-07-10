@@ -181,6 +181,18 @@ BENCHMARKS: List[Dict] = [
             {"tag": "rs",   "file": "stats.rs"},
         ],
     },
+    {
+        "id": "11_simd_dot",
+        "name": "SIMD dot product — explicit vec128<f32> vs auto-vectorized (4 M elements)",
+        "description": "vāṇī: explicit vec128<f32> simd_mul + simd_reduce_add. C/C++/Rust: scalar loop auto-vectorized by compiler. Compares explicit SIMD vs optimizer output.",
+        "expected": None,   # two equal integers; runner checks they match
+        "variants": [
+            {"tag": "vani", "file": "dot_simd.vani"},
+            {"tag": "c",    "file": "dot.c"},
+            {"tag": "cpp",  "file": "dot.cpp"},
+            {"tag": "rs",   "file": "dot.rs"},
+        ],
+    },
 ]
 
 # ---------------------------------------------------------------------------
