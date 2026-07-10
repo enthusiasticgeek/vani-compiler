@@ -10303,9 +10303,11 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 let dest = ctx.fresh_tmp();
                 if is_float {
                     let zero = if llscalar == "float" { "float 0.0" } else { "double 0.0" };
+                    // LLVM intrinsic name mangling uses f32/f64, not float/double.
+                    let float_suffix = if llscalar == "float" { "f32" } else { "f64" };
                     out.push_str(&format!(
                         "  {} = call {} @llvm.vector.reduce.fadd.v{}{} ({}, {} {})\n",
-                        dest, llscalar, lanes, llscalar, zero, vec_ty, v
+                        dest, llscalar, lanes, float_suffix, zero, vec_ty, v
                     ));
                 } else {
                     out.push_str(&format!(
@@ -43003,6 +43005,7 @@ fn type_byte_size(t: &Type) -> u64 {
         Type::Ref(_) | Type::RefMut(_) => 8,
         Type::FnPtr(_, _) => 8,
         Type::Task => 16,
+        Type::Vec128(_) => 16, // 128-bit vector — must be 16 bytes, not the generic 8
         _ => 8, // conservative
     }
 }

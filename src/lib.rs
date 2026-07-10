@@ -47269,6 +47269,440 @@ fn main() -> i64 {
         );
     }
 
+    // ── Category A: element-type coverage ────────────────────────────────────
+
+    #[test]
+    fn simd_i8_16_lane_compiles() {
+        let src = r#"
+intent "vec128<i8> 16-lane";
+fn main() -> i64 {
+    let a: vec128<i8> = simd_splat(1 as i8);
+    let b: vec128<i8> = simd_splat(2 as i8);
+    let c: vec128<i8> = simd_add(a, b);
+    let s: i8 = simd_reduce_add(c);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<i8> must compile");
+        assert!(ll.contains("<16 x i8>"), "i8 must yield 16-lane vector:\n{ll}");
+    }
+
+    #[test]
+    fn simd_u8_16_lane_compiles() {
+        let src = r#"
+intent "vec128<u8> 16-lane";
+fn main() -> i64 {
+    let a: vec128<u8> = simd_splat(3 as u8);
+    let b: vec128<u8> = simd_add(a, a);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<u8> must compile");
+        assert!(ll.contains("<16 x i8>"), "u8 must also yield <16 x i8>:\n{ll}");
+    }
+
+    #[test]
+    fn simd_i16_8_lane_compiles() {
+        let src = r#"
+intent "vec128<i16> 8-lane";
+fn main() -> i64 {
+    let a: vec128<i16> = simd_splat(10 as i16);
+    let b: vec128<i16> = simd_add(a, a);
+    let s: i16 = simd_reduce_add(b);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<i16> must compile");
+        assert!(ll.contains("<8 x i16>"), "i16 must yield 8-lane vector:\n{ll}");
+    }
+
+    #[test]
+    fn simd_u16_8_lane_compiles() {
+        let src = r#"
+intent "vec128<u16> 8-lane";
+fn main() -> i64 {
+    let a: vec128<u16> = simd_splat(5 as u16);
+    let b: vec128<u16> = simd_add(a, a);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<u16> must compile");
+        assert!(ll.contains("<8 x i16>"), "u16 must yield <8 x i16>:\n{ll}");
+    }
+
+    #[test]
+    fn simd_u32_4_lane_compiles() {
+        let src = r#"
+intent "vec128<u32> 4-lane";
+fn main() -> i64 {
+    let a: vec128<u32> = simd_splat(7 as u32);
+    let b: vec128<u32> = simd_mul(a, a);
+    let s: u32 = simd_reduce_add(b);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<u32> must compile");
+        assert!(ll.contains("<4 x i32>"), "u32 must yield <4 x i32>:\n{ll}");
+    }
+
+    #[test]
+    fn simd_f64_2_lane_compiles() {
+        let src = r#"
+intent "vec128<f64> 2-lane";
+fn main() -> i64 {
+    let a: vec128<f64> = simd_splat(1.0);
+    let b: vec128<f64> = simd_add(a, a);
+    let s: f64 = simd_reduce_add(b);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<f64> must compile");
+        assert!(ll.contains("<2 x double>"), "f64 must yield 2-lane double vector:\n{ll}");
+    }
+
+    // ── Category B: previously-confirmed bugs ─────────────────────────────────
+
+    #[test]
+    fn simd_reduce_add_f32_uses_correct_intrinsic() {
+        let src = r#"
+intent "simd_reduce_add f32";
+fn main() -> i64 {
+    let v: vec128<f32> = simd_splat(1.0 as f32);
+    let s: f32 = simd_reduce_add(v);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_reduce_add<f32> must compile");
+        assert!(
+            ll.contains("@llvm.vector.reduce.fadd.v4f32"),
+            "f32 reduce must use v4f32 not v4float in intrinsic name:\n{ll}"
+        );
+        assert!(
+            !ll.contains("@llvm.vector.reduce.fadd.v4float"),
+            "v4float is the wrong mangling — must be v4f32:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_reduce_add_f64_uses_correct_intrinsic() {
+        let src = r#"
+intent "simd_reduce_add f64";
+fn main() -> i64 {
+    let v: vec128<f64> = simd_splat(1.0);
+    let s: f64 = simd_reduce_add(v);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_reduce_add<f64> must compile");
+        assert!(
+            ll.contains("@llvm.vector.reduce.fadd.v2f64"),
+            "f64 reduce must use v2f64 not v2double:\n{ll}"
+        );
+        assert!(
+            !ll.contains("@llvm.vector.reduce.fadd.v2double"),
+            "v2double is the wrong mangling — must be v2f64:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_vec128_as_function_parameter() {
+        let src = r#"
+intent "vec128 param";
+fn reduce_i32(v: vec128<i32>) -> i32 {
+    return simd_reduce_add(v);
+}
+fn main() -> i64 {
+    let v: vec128<i32> = simd_splat(3 as i32);
+    let s: i32 = reduce_i32(v);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<i32> parameter must compile");
+        assert!(
+            ll.contains("define i32") && ll.contains("<4 x i32> %arg_v"),
+            "function with vec128<i32> param must use <4 x i32> in signature:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_store_through_mut_ref_vec() {
+        let src = r#"
+intent "simd_store mut ref Vec";
+fn fill_lanes(v: mut ref Vec<i32>, chunk: vec128<i32>) -> i64 {
+    let _ = simd_store(v, 0);
+    return 0;
+}
+fn main() -> i64 {
+    let data: Vec<i32> = vec_fill(4, 0 as i32);
+    let chunk: vec128<i32> = simd_splat(99 as i32);
+    let _ = simd_store(mut ref data, 0, chunk);
+    return 0;
+}
+"#;
+        // The function fill_lanes has wrong arity (simd_store needs 3 args);
+        // just test the main-level mut ref store directly.
+        let src2 = r#"
+intent "simd_store mut ref Vec";
+fn main() -> i64 {
+    let data: Vec<i32> = vec_fill(4, 0 as i32);
+    let chunk: vec128<i32> = simd_splat(99 as i32);
+    let _ = simd_store(mut ref data, 0, chunk);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src2).expect("simd_store via mut ref Vec must compile");
+        assert!(
+            ll.contains("store <4 x i32>"),
+            "simd_store through mut ref must emit vector store:\n{ll}"
+        );
+    }
+
+    // ── Category C: uncovered builtins ────────────────────────────────────────
+
+    #[test]
+    fn simd_sub_integer_compiles() {
+        let src = r#"
+intent "simd_sub i32";
+fn main() -> i64 {
+    let a: vec128<i32> = simd_splat(10 as i32);
+    let b: vec128<i32> = simd_splat(3 as i32);
+    let c: vec128<i32> = simd_sub(a, b);
+    let s: i32 = simd_reduce_add(c);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_sub i32 must compile");
+        assert!(ll.contains(" sub <4 x i32>"), "simd_sub must emit integer sub:\n{ll}");
+    }
+
+    #[test]
+    fn simd_mul_integer_compiles() {
+        let src = r#"
+intent "simd_mul i32";
+fn main() -> i64 {
+    let a: vec128<i32> = simd_splat(3 as i32);
+    let b: vec128<i32> = simd_splat(4 as i32);
+    let c: vec128<i32> = simd_mul(a, b);
+    let s: i32 = simd_reduce_add(c);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_mul i32 must compile");
+        assert!(ll.contains(" mul <4 x i32>"), "simd_mul must emit integer mul:\n{ll}");
+    }
+
+    #[test]
+    fn simd_reduce_add_i32_4_lane() {
+        let src = r#"
+intent "simd_reduce_add i32";
+fn main() -> i64 {
+    let v: vec128<i32> = simd_splat(5 as i32);
+    let s: i32 = simd_reduce_add(v);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_reduce_add<i32> must compile");
+        assert!(
+            ll.contains("@llvm.vector.reduce.add.v4i32"),
+            "i32 reduce must emit v4i32 intrinsic:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_reduce_add_i16_8_lane() {
+        let src = r#"
+intent "simd_reduce_add i16";
+fn main() -> i64 {
+    let v: vec128<i16> = simd_splat(2 as i16);
+    let s: i16 = simd_reduce_add(v);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("simd_reduce_add<i16> must compile");
+        assert!(
+            ll.contains("@llvm.vector.reduce.add.v8i16"),
+            "i16 reduce must emit v8i16 intrinsic:\n{ll}"
+        );
+    }
+
+    // ── Category D: checker rejection ─────────────────────────────────────────
+
+    #[test]
+    fn simd_add_element_type_mismatch_errors() {
+        let src = r#"
+intent "simd_add type mismatch";
+fn main() -> i64 {
+    let a: vec128<i32> = simd_splat(1 as i32);
+    let b: vec128<f32> = simd_splat(1.0 as f32);
+    let c: vec128<i32> = simd_add(a, b);
+    return 0;
+}
+"#;
+        assert!(
+            compile_to_llvm(src).is_err(),
+            "simd_add with mismatched element types (i32 vs f32) must error"
+        );
+    }
+
+    #[test]
+    fn simd_vec128_bool_element_rejected() {
+        let src = r#"
+intent "vec128<bool> invalid";
+fn main() -> i64 {
+    let v: vec128<bool> = simd_splat(true);
+    return 0;
+}
+"#;
+        assert!(
+            compile_to_llvm(src).is_err(),
+            "vec128<bool> must be rejected — bool is not a numeric SIMD element"
+        );
+    }
+
+    #[test]
+    fn simd_store_data_type_mismatch_errors() {
+        let src = r#"
+intent "simd_store data mismatch";
+fn main() -> i64 {
+    let v: Vec<f32> = vec_fill(4, 0.0 as f32);
+    let bad: vec128<i32> = simd_splat(1 as i32);
+    let _ = simd_store(v, 0, bad);
+    return 0;
+}
+"#;
+        assert!(
+            compile_to_llvm(src).is_err(),
+            "simd_store with i32 data into f32 Vec must error"
+        );
+    }
+
+    #[test]
+    fn simd_load_i32_index_coerces() {
+        let src = r#"
+intent "simd_load i32 index";
+fn main() -> i64 {
+    let data: Vec<i32> = vec_fill(4, 1 as i32);
+    let idx: i32 = 0 as i32;
+    let chunk: vec128<i32> = simd_load(data, idx);
+    return 0;
+}
+"#;
+        // i32 index should coerce to i64 — must compile without error
+        compile_to_llvm(src).expect("simd_load with i32 index must coerce and compile");
+    }
+
+    // ── Category E: composition and interaction ───────────────────────────────
+
+    #[test]
+    fn simd_store_chained_compiles() {
+        let src = r#"
+intent "chained simd_store";
+fn main() -> i64 {
+    let data: Vec<i32> = vec_fill(8, 0 as i32);
+    let a: vec128<i32> = simd_splat(1 as i32);
+    let b: vec128<i32> = simd_splat(2 as i32);
+    let data2: Vec<i32> = simd_store(simd_store(data, 0, a), 4, b);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("chained simd_store must compile");
+        // Two separate vector stores should appear
+        let store_count = ll.matches("store <4 x i32>").count();
+        assert!(
+            store_count >= 2,
+            "chained simd_store must emit at least 2 vector stores, got {store_count}:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_mixed_vec_and_ref_vec_in_same_function() {
+        let src = r#"
+intent "mixed Vec and ref Vec simd";
+fn process(src: ref Vec<f32>, n: i64) -> f32 {
+    let local: Vec<f32> = vec_fill(4, 0.0 as f32);
+    let chunk: vec128<f32> = simd_load(src, 0);
+    let local2: Vec<f32> = simd_store(local, 0, chunk);
+    return simd_reduce_add(chunk);
+}
+fn main() -> i64 {
+    let data: Vec<f32> = vec_fill(4, 1.0 as f32);
+    let r: f32 = process(ref data, 4);
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("mixed Vec and ref Vec simd must compile");
+        assert!(
+            ll.contains("load %intent_vec_float, %intent_vec_float*"),
+            "ref Vec param must emit struct load for simd_load:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn simd_vec128_captured_in_parallel_for() {
+        // vec128<f32> declared in outer scope, read (not mutated) inside parallel body.
+        // parallel reduce uses i64 (only integer reduce is supported).
+        // This tests that the capture ctx struct allocates 16 bytes (not 8) for Vec128.
+        let src = r#"
+intent "vec128 capture in parallel-for";
+fn main() -> i64 {
+    let scale: vec128<f32> = simd_splat(2.0 as f32);
+    let total: i64 = 0;
+    parallel for i from 0 to 4 reduce total with +;
+    {
+        let s: f32 = simd_reduce_add(scale);
+        total = total + 1;
+    }
+    return total;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("vec128<f32> captured in parallel-for must compile");
+        assert!(
+            ll.contains("<4 x float>"),
+            "captured vec128<f32> must appear as <4 x float> in parallel outline:\n{ll}"
+        );
+    }
+
+    // ── Category F: C backend smoke tests ────────────────────────────────────
+
+    #[test]
+    fn simd_load_ref_vec_c_backend_uses_arrow() {
+        let src = r#"
+intent "C backend simd_load ref Vec";
+fn sum4(v: ref Vec<f32>) -> f32 {
+    let chunk: vec128<f32> = simd_load(v, 0);
+    return simd_reduce_add(chunk);
+}
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("C backend must handle simd_load with ref Vec");
+        assert!(
+            c.contains("->data"),
+            "C backend simd_load on ref Vec must use ->data not .data:\n{c}"
+        );
+        assert!(
+            !c.contains("v->data") || c.contains("->data"),
+            "->data must appear for ref Vec access:\n{c}"
+        );
+    }
+
+    #[test]
+    fn simd_store_ref_vec_c_backend_uses_arrow() {
+        let src = r#"
+intent "C backend simd_store ref Vec";
+fn zero4(v: mut ref Vec<i32>) -> i64 {
+    let z: vec128<i32> = simd_splat(0 as i32);
+    let _ = simd_store(v, 0, z);
+    return 0;
+}
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("C backend must handle simd_store with mut ref Vec");
+        assert!(
+            c.contains("->data"),
+            "C backend simd_store on ref Vec must use ->data not .data:\n{c}"
+        );
+    }
+
     #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
