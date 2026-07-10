@@ -5,22 +5,26 @@ is [ONBOARDING.md](ONBOARDING.md) — it covers the tool prerequisites,
 the project layout, the pipeline, and an "end-to-end add a feature"
 checklist.
 
-## Contributor License Agreement
+## Contributor License Agreement and Approval
 
-All contributors must sign the **[CLA](CLA.md)** before their first pull
-request is merged. Add the following line to the body of your first PR:
+**Contribution access is not automatic.** Before opening any pull request, you
+must be listed in [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md).
 
-```
-I have read the vāṇी Compiler Contributor License Agreement (CLA.md)
-and agree to its terms.
+### How to apply
 
-Signed: [Your Full Name]
-Email:  [your@email.com]
-GitHub: @[your-github-username]
-Date:   [YYYY-MM-DD]
-```
+1. **Open a GitHub Issue** titled `[CLA] Contributor application — @your-username`.
+2. Fill in the template from [CLA.md §2](CLA.md) — your legal name, email,
+   affiliation, relevant credentials / background, and what you intend to
+   contribute.
+3. **Wait for written approval** from the Maintainer (Pratik M. Tambe,
+   `@enthusiasticgeek`). Approval may take up to two weeks. The Maintainer
+   reviews credentials and contribution area before deciding.
+4. Once approved, your username is added to `CONTRIBUTORS_APPROVED.md` and
+   you may open pull requests.
 
-See [CLA.md](CLA.md) for the full text and corporate contributor instructions.
+Pull requests from unapproved usernames will not be merged.
+See [CLA.md](CLA.md) for the full agreement text, forking policy, and
+corporate contributor instructions.
 
 ## Before you open a PR
 
