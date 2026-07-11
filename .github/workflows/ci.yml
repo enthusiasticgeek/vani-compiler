@@ -54,7 +54,7 @@ jobs:
       - name: Run lib unit tests on AArch64 (via QEMU)
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER: qemu-aarch64-static -L /usr/aarch64-linux-gnu
         run: cargo test --lib --target aarch64-unknown-linux-gnu
 
   # ── RISC-V 64: lib unit tests via QEMU user-mode ─────────────────────────
@@ -85,5 +85,5 @@ jobs:
       - name: Run lib unit tests on RISC-V 64 (via QEMU)
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
-          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static
+          CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_RUNNER: qemu-riscv64-static -L /usr/riscv64-linux-gnu
         run: cargo test --lib --target riscv64gc-unknown-linux-gnu
