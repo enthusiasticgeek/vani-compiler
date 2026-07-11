@@ -1024,6 +1024,8 @@ fn run() -> Result<ExitCode, String> {
     let args: Vec<String> = env::args().collect();
 
     // Deprecation warning when invoked as `intentc` (legacy alias).
+    // Only emit when stderr is an interactive terminal so that piped
+    // usage (CI, scripts, integration tests) gets clean stderr.
     // The `intentc` [[bin]] entry will be removed at the v0.2.0
     // release boundary. See docs/decisions.md 2026-06-06 entry.
     if args
@@ -1032,10 +1034,13 @@ fn run() -> Result<ExitCode, String> {
         .and_then(|s| s.to_str())
         == Some("intentc")
     {
-        eprintln!(
-            "warning: `intentc` is deprecated and will be removed in v0.2.0. \
-             Use `vanic` instead."
-        );
+        use std::io::IsTerminal as _;
+        if std::io::stderr().is_terminal() {
+            eprintln!(
+                "warning: `intentc` is deprecated and will be removed in v0.2.0. \
+                 Use `vanic` instead."
+            );
+        }
     }
 
     if args.len() < 2 {

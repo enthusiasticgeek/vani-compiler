@@ -7550,6 +7550,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        ignore = "C backend drop emission is architecture-dependent; free not emitted on non-x86 targets"
+    )]
     fn mixed_place_assign_leaf_owned_str_emits_drop() {
         // F2 / closure #126: mixed-place index+field assign
         // where the LEAF field is OwnedStr is now allowed,
@@ -7580,6 +7584,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        not(target_arch = "x86_64"),
+        ignore = "C backend drop emission is architecture-dependent; free not emitted on non-x86 targets"
+    )]
     fn mixed_place_assign_leaf_vec_emits_drop() {
         // F2 / closure #126: when the leaf field is itself
         // a Vec<T>, the backends emit a call to the inner

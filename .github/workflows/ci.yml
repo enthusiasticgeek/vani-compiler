@@ -49,7 +49,7 @@ jobs:
       - name: Install AArch64 cross-toolchain + QEMU user-mode
         run: |
           sudo apt-get update -q
-          sudo apt-get install -q -y gcc-aarch64-linux-gnu qemu-user-static
+          sudo apt-get install -q -y gcc-aarch64-linux-gnu qemu-user-static z3
 
       - name: Run lib unit tests on AArch64 (via QEMU)
         env:
@@ -80,7 +80,7 @@ jobs:
       - name: Install RISC-V cross-toolchain + QEMU user-mode
         run: |
           sudo apt-get update -q
-          sudo apt-get install -q -y gcc-riscv64-linux-gnu qemu-user-static
+          sudo apt-get install -q -y gcc-riscv64-linux-gnu qemu-user-static z3
 
       - name: Run lib unit tests on RISC-V 64 (via QEMU)
         env:
