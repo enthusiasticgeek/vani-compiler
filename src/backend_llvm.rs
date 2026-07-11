@@ -45305,7 +45305,7 @@ mod tests {
         let checked = compile(source).expect("channel program compiles");
         let ll = LlvmBackend.emit(&checked.ir);
         // Two [16 x i64] fields in the struct definition.
-        let canonical = "%intent_channel_i64_16 = type { [16 x i64], [16 x i64], i64, i64 }";
+        let canonical = "%intent_channel_int64_t_16 = type { [16 x i64], [16 x i64], i64, i64 }";
         assert!(
             ll.contains(canonical),
             "expected struct with seq array, got:\n{ll}"

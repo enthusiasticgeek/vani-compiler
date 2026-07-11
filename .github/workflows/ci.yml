@@ -17,10 +17,10 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install LLVM tools
+      - name: Install LLVM tools and SMT solver
         run: |
           sudo apt-get update -q
-          sudo apt-get install -q -y llvm clang
+          sudo apt-get install -q -y llvm clang z3
 
       - name: Run full test suite
         run: cargo test

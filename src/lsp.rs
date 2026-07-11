@@ -2480,7 +2480,7 @@ mod tests {
         assert!(!diags.is_empty(), "expected at least one diagnostic");
         for d in &diags {
             assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
-            assert_eq!(d.source.as_deref(), Some("intentc"));
+            assert_eq!(d.source.as_deref(), Some("vanic"));
             // Range should sit on the only line (line 0) and have a
             // non-negative width.
             assert_eq!(d.range.start.line, 0);
