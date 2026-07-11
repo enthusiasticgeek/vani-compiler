@@ -3692,8 +3692,10 @@ impl Parser {
     /// Parse a Devanagari SOV-style range `for` header (closure
     /// #265):
     ///
-    ///     IDENT 'के लिए' START 'से' END 'तक' [invariants]
-    ///     [reductions] { body }
+    /// ```text
+    /// IDENT 'के लिए' START 'से' END 'तक' [invariants]
+    /// [reductions] { body }
+    /// ```
     ///
     /// Both `के लिए` and `से` / `तक` are already lexed as
     /// `TokenKind::For` / `From` / `To` via the existing
