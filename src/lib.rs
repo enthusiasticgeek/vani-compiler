@@ -41310,7 +41310,12 @@ função main() -> i64 {
         "#;
         let checked = compile(source).expect("compiles");
         let mut diagnostics = Vec::new();
-        // No env var set — pass should produce zero diagnostics.
+        // Hold env_lock and clear both opt-in vars so a concurrent
+        // (or sequentially preceding) test cannot leak them into this
+        // call. Required because env vars are process-global state.
+        let _lock = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("INTENT_MAX_COMPLEXITY");
+        std::env::remove_var("INTENT_CHECK_COMPLEXITY");
         crate::safety::enforce_complexity(&checked.ir, &mut diagnostics);
         assert!(
             diagnostics.is_empty(),
