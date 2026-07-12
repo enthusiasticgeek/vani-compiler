@@ -1184,6 +1184,23 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // circuit evaluation makes the side effect conditional,
         // creating evaluation-order-dependent behaviour.
         crate::safety::enforce_misra_13(&typed_program_view, &mut diagnostics);
+        // S-5 — MISRA C 2012 Rule 14.1: no unreachable / always-dead
+        // branches (literal true/false conditions) in functions tagged
+        // with any composite standard.
+        crate::safety::enforce_misra_no_dead_branch(
+            &typed_program_view, &mut diagnostics,
+        );
+        // S-6 — MISRA C 2012 Rule 15.5: single point of exit. Flag
+        // functions with more than one `return` under composite tags.
+        crate::safety::enforce_misra_single_exit(
+            &typed_program_view, &mut diagnostics,
+        );
+        // S-10 — MISRA C 2012 Rule 2.1: unreachable code after
+        // unconditional jump (return/break/continue). Fires for all
+        // functions (Required rule — not gated behind a composite tag).
+        crate::safety::enforce_dead_code_after_jump(
+            &typed_program_view, &mut diagnostics,
+        );
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to

@@ -1057,7 +1057,7 @@ fn wcet_stmt(
             let e = wcet_body(else_body, fn_map, visiting, recursion_bound)?;
             Some(c.saturating_add(t.max(e)).saturating_add(2))
         }
-        S::While { .. } => None, // unbounded
+        S::While { .. } => None, // unbounded — no static iteration count
         S::For { start, end, body, .. } => {
             let start_const = const_int(start);
             let end_const = const_int(end);
@@ -1068,7 +1068,18 @@ fn wcet_stmt(
             let body_cycles = wcet_body(body, fn_map, visiting, recursion_bound)?;
             Some(body_cycles.saturating_mul(iters).saturating_add(2))
         }
-        S::ForIter { .. } => None, // collection length not statically known
+        S::ForIter { collection_ty, body, .. } => {
+            // S-12: if the collection is a fixed-size array [T; N],
+            // the iteration count is statically known — multiply the
+            // body WCET by N. Vec and slice lengths are dynamic →
+            // return None (UNBOUNDED).
+            if let crate::ast::Type::Array { length, .. } = collection_ty {
+                let body_cycles = wcet_body(body, fn_map, visiting, recursion_bound)?;
+                Some(body_cycles.saturating_mul(*length as u64).saturating_add(2))
+            } else {
+                None // Vec/slice length not statically known
+            }
+        }
         S::TaskSpawn { .. } => None, // concurrent execution; can't model
         S::TaskJoin { .. } => None,
         S::ForIterShallowFree { .. } => Some(1),
@@ -2042,4 +2053,265 @@ pub fn format_safety_attrs_csv(report: &[FnSafetyAttrs]) -> String {
         ));
     }
     out
+}
+
+// ── S-5: MISRA C 2012 Rule 14.1 — no unreachable / always-false branches ──
+
+/// S-5 — MISRA C 2012 Rule 14.1: there shall be no unreachable code.
+/// Under `#[misra_c_2012]` (or any composite that includes it): flag
+/// `if` conditions that are literal `true`/`false` (the body or else
+/// branch is statically dead) and `while false { }` loops.
+/// Only fires when the function carries a MISRA composite tag.
+pub fn enforce_misra_no_dead_branch(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for f in &program.functions {
+        if !matches!(
+            f.safety_standard.as_deref(),
+            Some("misra_c_2012") | Some("asil_d") | Some("do178c_level_a")
+                | Some("iec_62304_class_c")
+        ) {
+            continue;
+        }
+        check_dead_branch_stmts(&f.body, &f.name, diagnostics);
+    }
+}
+
+fn check_dead_branch_stmts(
+    stmts: &[TypedStmt],
+    fn_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in stmts {
+        check_dead_branch_stmt(stmt, fn_name, diagnostics);
+    }
+}
+
+fn check_dead_branch_stmt(
+    stmt: &TypedStmt,
+    fn_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    match stmt {
+        TypedStmt::If {
+            cond,
+            then_body,
+            else_body,
+        } => {
+            let span = cond.span;
+            match &cond.kind {
+                EK::Bool(true) => {
+                    diagnostics.push(Diagnostic::new(
+                        span,
+                        format!(
+                            "MISRA 14.1 (in '{}'): condition is always true — \
+                             else branch is unreachable dead code",
+                            fn_name
+                        ),
+                    ));
+                }
+                EK::Bool(false) => {
+                    diagnostics.push(Diagnostic::new(
+                        span,
+                        format!(
+                            "MISRA 14.1 (in '{}'): condition is always false — \
+                             then branch is unreachable dead code",
+                            fn_name
+                        ),
+                    ));
+                }
+                _ => {}
+            }
+            check_dead_branch_stmts(then_body, fn_name, diagnostics);
+            check_dead_branch_stmts(else_body, fn_name, diagnostics);
+        }
+        TypedStmt::While { cond, body, .. } => {
+            let span = cond.span;
+            if matches!(cond.kind, EK::Bool(false)) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "MISRA 14.1 (in '{}'): `while false` loop body is \
+                         unreachable dead code",
+                        fn_name
+                    ),
+                ));
+            }
+            check_dead_branch_stmts(body, fn_name, diagnostics);
+        }
+        TypedStmt::For { body, .. } | TypedStmt::ForIter { body, .. } => {
+            check_dead_branch_stmts(body, fn_name, diagnostics);
+        }
+        TypedStmt::UnsafeBlock { body, .. }
+        | TypedStmt::TaskSpawn { body, .. } => {
+            check_dead_branch_stmts(body, fn_name, diagnostics);
+        }
+        _ => {}
+    }
+}
+
+// ── S-6: MISRA C 2012 Rule 15.5 — single point of exit ──────────────────
+
+/// S-6 — MISRA C 2012 Rule 15.5: a function should have a single point
+/// of exit at the end. Under `#[misra_c_2012]` (or composites that
+/// include it): flag functions that contain more than one `return`
+/// statement.
+pub fn enforce_misra_single_exit(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for f in &program.functions {
+        if !matches!(
+            f.safety_standard.as_deref(),
+            Some("misra_c_2012") | Some("asil_d") | Some("do178c_level_a")
+                | Some("iec_62304_class_c")
+        ) {
+            continue;
+        }
+        let mut returns: Vec<crate::span::Span> = Vec::new();
+        collect_returns(&f.body, &mut returns);
+        if returns.len() > 1 {
+            // Report on every return after the first.
+            for span in &returns[1..] {
+                diagnostics.push(Diagnostic::new(
+                    *span,
+                    format!(
+                        "MISRA 15.5 (in '{}'): function has {} return statements — \
+                         only one is permitted (single point of exit)",
+                        f.name,
+                        returns.len()
+                    ),
+                ));
+            }
+        }
+    }
+}
+
+fn collect_returns(stmts: &[TypedStmt], out: &mut Vec<crate::span::Span>) {
+    for stmt in stmts {
+        collect_returns_stmt(stmt, out);
+    }
+}
+
+fn collect_returns_stmt(stmt: &TypedStmt, out: &mut Vec<crate::span::Span>) {
+    match stmt {
+        TypedStmt::Return { expr } => out.push(expr.span),
+        TypedStmt::If { then_body, else_body, .. } => {
+            collect_returns(then_body, out);
+            collect_returns(else_body, out);
+        }
+        TypedStmt::While { body, .. }
+        | TypedStmt::For { body, .. }
+        | TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. } => {
+            collect_returns(body, out);
+        }
+        TypedStmt::UnsafeBlock { body, .. } => {
+            collect_returns(body, out);
+        }
+        _ => {}
+    }
+}
+
+// ── S-10: MISRA C 2012 Rule 2.1 — dead code after unconditional jump ─────
+
+/// S-10 — MISRA C 2012 Rule 2.1: a project shall not contain
+/// unreachable code. This pass catches the most common mechanical form:
+/// statements that follow a `return`, `break`, or `continue` inside a
+/// block without any intervening branch. Fires for all functions
+/// (MISRA Rule 2.1 is a Required rule; we emit it as a warning-level
+/// note rather than gating it behind a composite tag so teams without
+/// the full composite still benefit).
+pub fn enforce_dead_code_after_jump(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for f in &program.functions {
+        check_dead_after_jump_stmts(&f.body, &f.name, false, diagnostics);
+    }
+}
+
+/// Returns `true` if the block ends with an unconditional jump (return /
+/// break / continue / panic call) and therefore any subsequent sibling
+/// statement in the *parent* block would be unreachable.
+fn check_dead_after_jump_stmts(
+    stmts: &[TypedStmt],
+    fn_name: &str,
+    _in_loop: bool,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let mut jumped = false;
+    for (i, stmt) in stmts.iter().enumerate() {
+        if jumped {
+            // This statement is unreachable — report it.
+            if let Some(span) = dead_stmt_span(stmt) {
+                diagnostics.push(Diagnostic::new(
+                    span,
+                    format!(
+                        "MISRA 2.1 (in '{}'): unreachable code — \
+                         this statement follows an unconditional jump \
+                         (return / break / continue)",
+                        fn_name
+                    ),
+                ));
+            }
+            // Don't recurse further in this block — the first
+            // unreachable is enough to flag the issue.
+            break;
+        }
+        jumped = check_dead_after_jump_stmt(stmt, fn_name, diagnostics);
+        let _ = i; // suppress unused warning
+    }
+    jumped
+}
+
+fn check_dead_after_jump_stmt(
+    stmt: &TypedStmt,
+    fn_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    match stmt {
+        TypedStmt::Return { .. } => true,
+        TypedStmt::Break { .. } | TypedStmt::Continue { .. } => true,
+        TypedStmt::If { then_body, else_body, .. } => {
+            let then_jumps =
+                check_dead_after_jump_stmts(then_body, fn_name, false, diagnostics);
+            let else_jumps =
+                check_dead_after_jump_stmts(else_body, fn_name, false, diagnostics);
+            then_jumps && else_jumps
+        }
+        TypedStmt::While { body, .. }
+        | TypedStmt::For { body, .. }
+        | TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. } => {
+            check_dead_after_jump_stmts(body, fn_name, true, diagnostics);
+            false
+        }
+        TypedStmt::UnsafeBlock { body, .. } => {
+            check_dead_after_jump_stmts(body, fn_name, false, diagnostics)
+        }
+        _ => false,
+    }
+}
+
+fn dead_stmt_span(stmt: &TypedStmt) -> Option<crate::span::Span> {
+    match stmt {
+        TypedStmt::Let { expr, .. } => Some(expr.span),
+        TypedStmt::Return { expr } => Some(expr.span),
+        TypedStmt::Reassign { expr, .. } => Some(expr.span),
+        TypedStmt::Discard { expr } => Some(expr.span),
+        TypedStmt::Assert { expr, .. } | TypedStmt::Prove { expr } => Some(expr.span),
+        TypedStmt::If { cond, .. } | TypedStmt::While { cond, .. } => Some(cond.span),
+        TypedStmt::For { start, .. } => Some(start.span),
+        TypedStmt::ForIter { collection_ty: _, .. } => None,
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
+            items.first().and_then(|i| match i {
+                crate::ir::TypedPrintItem::Expr(e) => Some(e.span),
+                _ => None,
+            })
+        }
+        _ => None,
+    }
 }

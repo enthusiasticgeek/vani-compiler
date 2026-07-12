@@ -1892,10 +1892,18 @@ fn run() -> Result<ExitCode, String> {
             // deviation record. The artifact reviewers need for
             // ASIL-D / DO-178C / IEC 62304 / MISRA sign-off.
             //
-            // Usage: vanic deviations <path> [--format=csv|json|text] [--out=<file>]
+            // Usage: vanic deviations <path> [--format=csv|json|text]
+            //          [--out=<file>] [--strict]
+            // --strict: exit 1 if any deviation's prefix is "other"
+            //   (i.e. the reason string doesn't start with a recognised
+            //   prefix like MMIO/FFI/DMA/transmute/vendor-SDK). Under
+            //   ASIL-D / DO-178C, every deviation must have a
+            //   reviewable reason category; "other" indicates the
+            //   author skipped the convention.
             // Defaults: --format=text, --out=stdout.
             let mut format = "text";
             let mut out_path: Option<String> = None;
+            let mut strict = false;
             let mut path_arg: Option<String> = None;
             let mut idx = 2;
             while idx < args.len() {
@@ -1914,6 +1922,8 @@ fn run() -> Result<ExitCode, String> {
                     };
                 } else if let Some(value) = arg.strip_prefix("--out=") {
                     out_path = Some(value.to_string());
+                } else if arg == "--strict" {
+                    strict = true;
                 } else if arg.starts_with('-') {
                     return Err(format!("unexpected argument '{}'", arg));
                 } else if path_arg.is_none() {
@@ -1947,6 +1957,24 @@ fn run() -> Result<ExitCode, String> {
                     })?;
                 }
                 None => print!("{}", output),
+            }
+            // --strict: fail if any deviation lacks a recognised prefix.
+            if strict {
+                let uncategorised: Vec<_> = deviations
+                    .iter()
+                    .filter(|d| d.prefix == "other")
+                    .collect();
+                if !uncategorised.is_empty() {
+                    eprintln!(
+                        "deviations --strict: {} deviation{} with unrecognised prefix \
+                         (prefix = \"other\") — add a recognised prefix \
+                         (MMIO / FFI / DMA / transmute / vendor-SDK) to the \
+                         reason string",
+                        uncategorised.len(),
+                        if uncategorised.len() == 1 { "" } else { "s" }
+                    );
+                    return Ok(ExitCode::from(1));
+                }
             }
             Ok(ExitCode::SUCCESS)
         }

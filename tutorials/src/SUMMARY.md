@@ -94,6 +94,7 @@
 - [Adding a new dialect (Tier I rollout)](advanced/09_new_dialect.md)
 - [Compiler internals tour](advanced/10_internals.md)
 - [Using vāṇी with an LLM (Claude / GPT / MCP)](advanced/11_llm_workflows.md)
+- [Safety-critical standards (MISRA / ASIL-D / DO-178C / IEC 62304)](advanced/12_safety_standards.md)
 
 ---
 

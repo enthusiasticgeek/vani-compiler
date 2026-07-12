@@ -1793,23 +1793,67 @@ impl Parser {
         // plain `fn` and `pure fn`.
         let mut f = self.parse_function()?;
         f.recursion_bound = bound_value;
-        f.no_float = no_float;
-        // Standard-composite expansion. Each named composite
-        // expands to a set of primitive constraints. V1 maps
-        // all four composites to the union of currently-
-        // shippable primitives (`no_heap` + `no_recursion`);
-        // the sets diverge as Tier 3 primitives land
-        // (`bounded_stack`, `wcet`, `deterministic_timing`).
-        // The composite NAME is preserved on `f.safety_standard`
-        // so the deviations extractor can label each record
-        // with its target standard.
+        // Standard-composite expansion. Each composite tag
+        // expands to the full constraint set its standard
+        // requires. The composite NAME is preserved on
+        // `f.safety_standard` so the deviations extractor can
+        // label each record with its target standard.
+        //
+        // Expansion matrix:
+        //   misra_c_2012     → no_heap + no_recursion
+        //   iec_62304_class_c→ no_heap + no_recursion
+        //   asil_d           → no_heap + no_recursion + no_float
+        //                      + deterministic_timing
+        //                      (wcet + bounded_stack required but
+        //                      must be explicit — they carry a
+        //                      user-supplied budget value)
+        //   do178c_level_a   → same as asil_d
         let composite_no_heap = safety_standard.is_some();
         let composite_no_recursion = safety_standard.is_some();
+        let composite_no_float = matches!(
+            safety_standard.as_deref(),
+            Some("asil_d") | Some("do178c_level_a")
+        );
+        let composite_deterministic_timing = matches!(
+            safety_standard.as_deref(),
+            Some("asil_d") | Some("do178c_level_a")
+        );
+        // ASIL-D / DO-178C Level A require bounded_stack and wcet
+        // to be explicitly declared (they carry a budget value the
+        // user must supply). Emit an error if either is absent.
+        if matches!(
+            safety_standard.as_deref(),
+            Some("asil_d") | Some("do178c_level_a")
+        ) {
+            let std_name = safety_standard.as_deref().unwrap_or("");
+            if bounded_stack.is_none() {
+                return Err(Diagnostic::new(
+                    self.current().span,
+                    format!(
+                        "`#[{}]` requires `#[bounded_stack(bytes=N)]` — \
+                         declare the worst-case stack budget for this function",
+                        std_name
+                    ),
+                ));
+            }
+            if wcet_cycles.is_none() {
+                return Err(Diagnostic::new(
+                    self.current().span,
+                    format!(
+                        "`#[{}]` requires `#[wcet(cycles=N)]` — \
+                         declare the worst-case execution time budget for this function",
+                        std_name
+                    ),
+                ));
+            }
+        }
         // `#[interrupt]` composite: no_heap + no_recursion +
         // no_lock + no_spawn (last two enforced in
         // `enforce_interrupt`).
         f.no_heap = no_heap || interrupt || composite_no_heap;
         f.no_recursion = no_recursion || interrupt || composite_no_recursion;
+        f.no_float = no_float || composite_no_float;
+        f.deterministic_timing = deterministic_timing || composite_deterministic_timing;
         f.interrupt = interrupt;
         f.no_mangle = no_mangle;
         f.vectorize = vectorize;
@@ -1817,7 +1861,6 @@ impl Parser {
         f.safety_standard = safety_standard;
         f.bounded_stack = bounded_stack;
         f.wcet_cycles = wcet_cycles;
-        f.deterministic_timing = deterministic_timing;
         Ok(f)
     }
 
