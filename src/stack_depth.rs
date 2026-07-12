@@ -50,6 +50,9 @@ pub struct FrameReport {
     pub frame_bytes: u64, // local_bytes + FRAME_OVERHEAD_BYTES
     pub bounded_recursion: Option<u64>, // from #[bounded(N)]
     pub direct_recursion: bool,
+    /// True when the function carries `#[inline]`. The stack analyser folds
+    /// an inline callee's locals into the caller's frame (no separate push).
+    pub inline: bool,
     pub callees: Vec<String>,
 }
 
@@ -102,6 +105,7 @@ pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) 
             frame_bytes,
             bounded_recursion: f.recursion_bound,
             direct_recursion,
+            inline: f.inline,
             callees,
         });
     }
@@ -118,7 +122,7 @@ pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) 
         }
         let mut visiting: HashSet<String> = HashSet::new();
         let mut chain: Vec<String> = Vec::new();
-        let result = traverse_depth(&f.name, &frame_map, &mut visiting, &mut chain);
+        let result = traverse_depth(&f.name, &frame_map, &mut visiting, &mut chain, false);
         entries.push(EntryReport {
             name: f.name.clone(),
             max_depth_bytes: result.depth,
@@ -138,9 +142,18 @@ fn traverse_depth(
     frames: &HashMap<String, FrameReport>,
     visiting: &mut HashSet<String>,
     chain: &mut Vec<String>,
+    // When true, this function is being inlined into its caller: contribute
+    // local_bytes only (no separate frame push, no prologue overhead).
+    is_inline_call: bool,
 ) -> TraverseResult {
     let Some(frame) = frames.get(name) else {
         return TraverseResult { depth: Some(0), chain: vec![] };
+    };
+    // How many bytes this activation contributes to the stack.
+    let frame_contribution = if is_inline_call {
+        frame.local_bytes
+    } else {
+        frame.frame_bytes
     };
     if visiting.contains(name) {
         // Cycle — recursion. Unbounded unless a #[bounded(N)]
@@ -148,7 +161,7 @@ fn traverse_depth(
         if let Some(n) = frame.bounded_recursion {
             // Cap at N additional frames.
             return TraverseResult {
-                depth: Some(frame.frame_bytes.saturating_mul(n + 1)),
+                depth: Some(frame_contribution.saturating_mul(n + 1)),
                 chain: vec![name.to_string()],
             };
         }
@@ -160,10 +173,9 @@ fn traverse_depth(
     let mut best_chain: Vec<String> = vec![name.to_string()];
     for callee in &frame.callees {
         if callee == name {
-            // Self-call — handled via bounded_recursion below
-            // OR flagged unbounded.
+            // Self-call — handled via bounded_recursion or flagged unbounded.
             if let Some(n) = frame.bounded_recursion {
-                let extra = frame.frame_bytes.saturating_mul(n);
+                let extra = frame_contribution.saturating_mul(n);
                 if best.is_some() && extra > best.unwrap_or(0) {
                     best = Some(extra);
                     best_chain = vec![name.to_string(), format!("[bounded {} self-recursion]", n)];
@@ -174,7 +186,10 @@ fn traverse_depth(
             }
             continue;
         }
-        let sub = traverse_depth(callee, frames, visiting, chain);
+        // If the callee is marked inline, fold its locals into the current
+        // frame rather than pushing a new activation record.
+        let callee_is_inline = frames.get(callee.as_str()).map(|f| f.inline).unwrap_or(false);
+        let sub = traverse_depth(callee, frames, visiting, chain, callee_is_inline);
         let combined = match (best, sub.depth) {
             (Some(a), Some(b)) => Some(a.max(b)),
             _ => None,
@@ -199,11 +214,10 @@ fn traverse_depth(
     }
     visiting.remove(name);
     chain.pop();
-    let result = TraverseResult {
-        depth: best.map(|b| b + frame.frame_bytes),
+    TraverseResult {
+        depth: best.map(|b| b + frame_contribution),
         chain: best_chain,
-    };
-    result
+    }
 }
 
 fn type_size(ty: &Type) -> u64 {
@@ -363,9 +377,10 @@ pub fn format_text(report: &StackReport, max_bytes: Option<u64>) -> (String, boo
     let mut failure = false;
     out.push_str("Per-function frame sizes:\n");
     for f in &report.frames {
+        let inline_tag = if f.inline { " [inline]" } else { "" };
         out.push_str(&format!(
-            "  {:<32} {} bytes (locals: {}, prologue: {})\n",
-            f.name, f.frame_bytes, f.local_bytes, FRAME_OVERHEAD_BYTES,
+            "  {:<32} {} bytes (locals: {}, prologue: {}){}\n",
+            f.name, f.frame_bytes, f.local_bytes, FRAME_OVERHEAD_BYTES, inline_tag,
         ));
         if let Some(n) = f.bounded_recursion {
             out.push_str(&format!(

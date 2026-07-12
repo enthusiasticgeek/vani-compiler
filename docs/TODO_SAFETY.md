@@ -111,12 +111,12 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier D — Stack analysis improvements
 
-- [ ] **S-14. Inlining-aware stack depth**
-  `stack_depth.rs` currently treats every call as a full frame push. If the
-  backend would inline a function (small body, `#[inline]`), the frame
-  isn't pushed. Add an `#[inline]` attribute and treat inlined calls as
-  adding their local bytes to the caller's frame rather than a separate
-  frame in the call-chain.
+- [x] **S-14. Inlining-aware stack depth** ✅ 2026-07-12
+  `#[inline]` attribute parsed in `parser.rs`, forwarded through `ast::Function`
+  → `ir::TypedFunction`. `stack_depth.rs` `traverse_depth` now accepts
+  `is_inline_call: bool`; inline callees contribute `local_bytes` only (no
+  `FRAME_OVERHEAD_BYTES` push) and their callee subtrees are still traversed.
+  The text report marks each inline function with `[inline]`.
 
 - [ ] **S-15. `bounded_stack` enforced under composite tags**
   Under `#[asil_d]` / `#[do178c_level_a]`, emit an error if
@@ -237,7 +237,7 @@ self-contained pass in `src/safety.rs`.
 | S-11 | WCET arch table | ✅ 2026-07-12 | wcet_builtin_cycles(): 100+ builtins; conservative per-category |
 | S-12 | WCET bounded loops | ✅ 2026-07-12 | ForIter over [T;N] arrays: body_cycles × N |
 | S-13 | WCET mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
-| S-14 | Stack / inline | [ ] | |
+| S-14 | Stack / inline | ✅ 2026-07-12 | #[inline] attr + traverse_depth is_inline_call flag; locals folded into caller frame |
 | S-15 | Stack mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
 | S-16 | SMT Vec index | ✅ 2026-07-12 | collect_index_bound_axioms: bvult/bvuge bounds before each query |
 | S-17 | SMT loop invariant | ✅ pre-existing | invariant <expr> syntax + check_loop_invariants + z3 verification |

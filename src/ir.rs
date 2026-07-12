@@ -85,6 +85,10 @@ pub struct TypedFunction {
     /// pass (no_heap + no_recursion + no_lock + no_spawn)
     /// via `safety::enforce_interrupt`.
     pub interrupt: bool,
+    /// S-14: forwarded from ast::Function::inline. When true, the
+    /// stack-depth analyser merges this function's locals into the
+    /// caller's frame rather than adding a separate activation record.
+    pub inline: bool,
     /// S-20: optional ISR priority from `#[interrupt(priority=N)]`.
     /// Lower value = higher urgency (NVIC convention). `None` when
     /// `#[interrupt]` is bare or the function is not an ISR.

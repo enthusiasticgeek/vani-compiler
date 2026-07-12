@@ -1,4 +1,4 @@
-use crate::ast::{
+﻿use crate::ast::{
     BinaryOp, ConstDecl, EnumDecl, EnumVariant, Expr, ExprKind, Function, ImplDecl, Intent,
     InterfaceDecl, InterfaceMethod, MatchArm, MethodsBlock, Param, Pattern, Program, Reduction,
     ReductionOp, Stmt, StructDecl, StructField, Type, TypeAlias, UnaryOp, Use, WhereClause,
@@ -55,16 +55,16 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> Program {
-        // Arc 8 v3.1 Phase 1 — clear the v3.1 task registry so
+        // Arc 8 v3.1 Phase 1 â€” clear the v3.1 task registry so
         // multi-program test runs (lib tests, parity sweeps)
         // don't accumulate stale synthesized struct/poll-fn
         // pairs from earlier compiles in the same process.
         crate::ast::V31_TASK_REGISTRY.with(|r| r.borrow_mut().clear());
-        // Phase 3c — clear the enum-name → variants registry for
+        // Phase 3c â€” clear the enum-name â†’ variants registry for
         // the same reason. Populated as enum decls are parsed
         // (see the EnumDecl path inside the parse loop).
         crate::ast::V31_ENUM_REGISTRY.with(|r| r.borrow_mut().clear());
-        // Phase 3d — clear the struct-name → fields registry.
+        // Phase 3d â€” clear the struct-name â†’ fields registry.
         // Populated as struct decls are parsed (see the StructDecl
         // paths inside the parse loop).
         crate::ast::V31_STRUCT_REGISTRY.with(|r| r.borrow_mut().clear());
@@ -141,7 +141,7 @@ impl Parser {
                     }
                 }
             } else if self.check(|kind| matches!(kind, TokenKind::Use)) {
-                // Top-level `use` — `is_pub` is meaningless
+                // Top-level `use` â€” `is_pub` is meaningless
                 // here (top-level items are globally visible
                 // already); pass false.
                 match self.parse_use(false) {
@@ -156,7 +156,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
-                        // Phase 3d — stash struct_name → fields so
+                        // Phase 3d â€” stash struct_name â†’ fields so
                         // the v3.1 desugar can synthesize per-field
                         // default-init for struct locals.
                         crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
@@ -175,7 +175,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Enum)) {
                 match self.parse_enum_decl() {
                     Ok(e) => {
-                        // Phase 3c — stash enum_name → variants
+                        // Phase 3c â€” stash enum_name â†’ variants
                         // into V31_ENUM_REGISTRY so the v3.1
                         // default-init synthesizer can find the
                         // first unit variant for enum locals.
@@ -256,7 +256,7 @@ impl Parser {
                 // bodies call this extern. Caller's responsibility
                 // to ensure the foreign symbol is actually pure
                 // (no side effects, no shared state, deterministic
-                // output) — vāṇी can't verify across the FFI
+                // output) â€” vÄá¹‡à¥€ can't verify across the FFI
                 // boundary.
                 self.bump();
                 match self.parse_extern_fn() {
@@ -301,7 +301,7 @@ impl Parser {
             }
         }
 
-        // Arc 8 v3.1 Phase 1 — flush V31_TASK_REGISTRY entries
+        // Arc 8 v3.1 Phase 1 â€” flush V31_TASK_REGISTRY entries
         // synthesized by try_v31_transform during parse_function.
         // Each entry contributes one struct + one poll fn into
         // the program-level decls.
@@ -309,7 +309,7 @@ impl Parser {
         // Span rewrite: each synthesized item gets a span AFTER
         // all user-level decls (max_user_pos + N). This matters
         // for the `intentc fmt` pass which sorts top-items by
-        // span.start — without the rewrite, the poll fn (which
+        // span.start â€” without the rewrite, the poll fn (which
         // inherits its source async fn's span) would interleave
         // back-to-back with the original fn instead of landing
         // at end-of-program where `parse_program` puts it.
@@ -357,7 +357,7 @@ impl Parser {
         }
     }
 
-    /// Closure #242: parse a `module name { items… }` block.
+    /// Closure #242: parse a `module name { itemsâ€¦ }` block.
     /// Items inside follow the same grammar as top-level items;
     /// each can be prefixed with `pub` to export. v1 forbids
     /// nested `module` declarations.
@@ -383,7 +383,7 @@ impl Parser {
         while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
             // Closure #256: `use foo::bar;` inside a module body
             // is admitted alongside item declarations. The use
-            // path is scoped to this module — the checker's
+            // path is scoped to this module â€” the checker's
             // per-module `qualify` adds it to the local alias
             // map so bare references inside the body resolve
             // through it.
@@ -392,7 +392,7 @@ impl Parser {
             // form. The `pub` is parsed here so it precedes the
             // `use`; UsePath's `is_pub` flag picks it up. After
             // flattening, the checker builds a global re-export
-            // map (`<this_mod>__<local> → <imported_mangled>`)
+            // map (`<this_mod>__<local> â†’ <imported_mangled>`)
             // and rewrites external references to the renamed
             // form.
             //
@@ -427,10 +427,10 @@ impl Parser {
                 continue;
             }
             // Optional `pub` modifier with an optional `(kosh)`
-            // qualifier — closure #258. `pub(kosh)` records the
+            // qualifier â€” closure #258. `pub(kosh)` records the
             // intent that an item is exported within the kosh
             // but NOT through the kosh boundary into external
-            // dependents. Today vāṇī compiles a single kosh,
+            // dependents. Today vÄá¹‡Ä« compiles a single kosh,
             // so the bit is preserved without enforcement;
             // when the future kosh boundary lands existing
             // `pub(kosh)` annotations start being enforced
@@ -441,7 +441,7 @@ impl Parser {
             let is_kosh_only = if is_pub
                 && self.check(|k| matches!(k, TokenKind::LParen))
             {
-                // Peek for `(kosh)` — the only qualifier
+                // Peek for `(kosh)` â€” the only qualifier
                 // we accept in v1.
                 let kosh_ident_next = matches!(
                     self.tokens.get(self.pos + 1).map(|t| &t.kind),
@@ -460,8 +460,8 @@ impl Parser {
                     let span = self.current().span;
                     self.errors.push(Diagnostic::new(
                         span,
-                        "only `pub(kosh)` is supported as a `pub(…)` \
-                         qualifier in v1 — write `pub` for kosh-wide \
+                        "only `pub(kosh)` is supported as a `pub(â€¦)` \
+                         qualifier in v1 â€” write `pub` for kosh-wide \
                          visibility or `pub(kosh)` to mark an item as \
                          internal to this kosh",
                     ));
@@ -543,7 +543,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
-                        // Phase 3d — same registry population as
+                        // Phase 3d â€” same registry population as
                         // the bare-struct branch above; covers
                         // pub/kosh-decorated struct decl sites.
                         crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
@@ -561,7 +561,7 @@ impl Parser {
             } else if self.check(|k| matches!(k, TokenKind::Enum)) {
                 match self.parse_enum_decl() {
                     Ok(e) => {
-                        // Phase 3c — same registry population as
+                        // Phase 3c â€” same registry population as
                         // the bare-enum branch above; covers the
                         // pub/kosh-decorated enum site.
                         crate::ast::V31_ENUM_REGISTRY.with(|reg| {
@@ -647,7 +647,7 @@ impl Parser {
             "'}' to close module",
             |k| matches!(k, TokenKind::RBrace),
         )?;
-        // Reject glob `use foo::*;` inside modules — v1 doesn't
+        // Reject glob `use foo::*;` inside modules â€” v1 doesn't
         // resolve nested-module glob expansion until ALL flatten
         // passes finish, which the per-module qualify map can't
         // see. Surface a clear diagnostic at parse time so the
@@ -657,7 +657,7 @@ impl Parser {
                 self.errors.push(Diagnostic::new(
                     up.span,
                     "glob `use foo::*;` inside a module is not yet \
-                     supported — list the items explicitly or hoist \
+                     supported â€” list the items explicitly or hoist \
                      the import to the top level",
                 ));
             }
@@ -706,7 +706,7 @@ impl Parser {
         if ident_text(on_tok.clone()) != "on" {
             return Err(Diagnostic::new(
                 on_tok.span,
-                "expected 'on' in `methods on <Type> { … }`",
+                "expected 'on' in `methods on <Type> { â€¦ }`",
             ));
         }
         let ty_start_span = self.current().span;
@@ -808,7 +808,7 @@ impl Parser {
                 |k| matches!(k, TokenKind::Arrow),
             )?;
             let return_type = self.parse_type()?;
-            // Phase 2: default body — `{ ... }` instead of `;`
+            // Phase 2: default body â€” `{ ... }` instead of `;`
             let (default_body, end_span) =
                 if self.check(|k| matches!(k, TokenKind::LBrace)) {
                     let body = self.parse_block()?;
@@ -842,7 +842,7 @@ impl Parser {
 
     fn parse_impl_decl(&mut self) -> Result<ImplDecl, Diagnostic> {
         let start = self.expect_keyword("'implement'", |k| matches!(k, TokenKind::Implement))?;
-        // Phase 2: blanket impl type params — `implement<T> Iface for Type<T>`
+        // Phase 2: blanket impl type params â€” `implement<T> Iface for Type<T>`
         let mut impl_type_params: Vec<String> = Vec::new();
         if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
             loop {
@@ -863,8 +863,8 @@ impl Parser {
         }
         let iface_tok = self.expect_ident()?;
         let interface_name = ident_text(iface_tok);
-        // `for` is a reserved keyword (used in `for i from … to
-        // …`), so dispatch on the token kind rather than trying
+        // `for` is a reserved keyword (used in `for i from â€¦ to
+        // â€¦`), so dispatch on the token kind rather than trying
         // to grab it as an identifier.
         self.expect_keyword("'for' in `implement <Iface> for <Type>`", |k| {
             matches!(k, TokenKind::For)
@@ -933,7 +933,7 @@ impl Parser {
         let name_span = name_tok.span;
         let name = ident_text(name_tok);
         // Closure #281: optional generic type parameters
-        // `enum Option<T> { … }` / `enum Result<T, E> { … }`.
+        // `enum Option<T> { â€¦ }` / `enum Result<T, E> { â€¦ }`.
         // Mirrors the fn-generic parser at parse_function.
         let mut type_params: Vec<String> = Vec::new();
         if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
@@ -963,7 +963,7 @@ impl Parser {
             let v_tok = self.expect_ident()?;
             let v_span = v_tok.span;
             let v_name = ident_text(v_tok);
-            // Optional payload: `Name(T1, T2, …)` — types only,
+            // Optional payload: `Name(T1, T2, â€¦)` â€” types only,
             // positional. T1.3 phase 2a. Named fields (`Err {
             // code: i64, msg: String }`) land in phase 2b.
             let mut payload: Vec<Type> = Vec::new();
@@ -1075,25 +1075,25 @@ impl Parser {
 
     /// Parse a `use` declaration. The `is_pub` flag is set
     /// by the caller when a `pub` keyword precedes the
-    /// `use` (closure #257) — only meaningful inside
+    /// `use` (closure #257) â€” only meaningful inside
     /// `module { }` bodies, where it marks the import as
     /// a re-export. Five forms (closures #245, #247, #248,
     /// #253, #254):
     /// - File import: `use "path/to/file.vani";` (quoted
     ///   string, used by the multi-file pipeline).
     /// - Module-path single import: `use foo::bar;` (deep
-    ///   paths `a::b::c::Item` also supported — closure #248).
-    /// - Brace-list import: `use foo::{a, b};` — expands to
+    ///   paths `a::b::c::Item` also supported â€” closure #248).
+    /// - Brace-list import: `use foo::{a, b};` â€” expands to
     ///   one `UsePath` per item.
-    /// - Glob import: `use foo::*;` — closure #253. Brings
+    /// - Glob import: `use foo::*;` â€” closure #253. Brings
     ///   every direct public child of `foo` into scope. The
     ///   checker expands at flatten time.
     /// - Optional `as <local>` rename: `use foo::bar as baz;`
-    ///   and per-entry inside brace lists. Closure #254 —
+    ///   and per-entry inside brace lists. Closure #254 â€”
     ///   resolves collisions between same-leaf imports.
     /// - Optional `pub` prefix (`pub use foo::bar;`) marks
     ///   the import as a re-export when inside a module
-    ///   body — closure #257. The caller passes `is_pub`;
+    ///   body â€” closure #257. The caller passes `is_pub`;
     ///   `parse_use` itself doesn't consume the `pub` token.
     fn parse_use(&mut self, is_pub: bool) -> Result<UseDecl, Diagnostic> {
         let start = self.expect_keyword("'use'", |kind| matches!(kind, TokenKind::Use))?;
@@ -1110,12 +1110,12 @@ impl Parser {
                 span: start.span.merge(semi.span),
             }));
         }
-        // Module-path import. Reads `a::b::…::final_segment`
-        // — closure #248 added support for deep paths
+        // Module-path import. Reads `a::b::â€¦::final_segment`
+        // â€” closure #248 added support for deep paths
         // (nested modules). Everything before the final
         // segment is the module prefix; the final segment is
-        // the item (single-item form), the `{…}` brace list
-        // (multi-item form), or `*` (glob form — closure #253
+        // the item (single-item form), the `{â€¦}` brace list
+        // (multi-item form), or `*` (glob form â€” closure #253
         // brings every direct public child of the module into
         // scope).
         let mod_tok = self.expect_ident()?;
@@ -1149,11 +1149,11 @@ impl Parser {
                 |k| matches!(k, TokenKind::ColonColon),
             )?;
         }
-        // Glob form: `use foo::*;` — closure #253. Capture as a
+        // Glob form: `use foo::*;` â€” closure #253. Capture as a
         // UsePath with the sentinel item `*`; the checker
         // expands it after module flattening (so it can see
         // which items are public). v1 imports only DIRECT
-        // children of the named module — `use foo::*;` does
+        // children of the named module â€” `use foo::*;` does
         // NOT pull in `foo::bar::baz` (the nested-module
         // bar's items). Users who want deeper imports write
         // them explicitly (`use foo::bar::baz;` or
@@ -1202,7 +1202,7 @@ impl Parser {
                     break;
                 }
             }
-            self.expect_keyword("'}' in `use { … }` list", |k| matches!(k, TokenKind::RBrace))?;
+            self.expect_keyword("'}' in `use { â€¦ }` list", |k| matches!(k, TokenKind::RBrace))?;
             let semi = self.expect_keyword("';'", |kind| matches!(kind, TokenKind::Semicolon))?;
             if items.is_empty() {
                 return Err(Diagnostic::new(
@@ -1223,7 +1223,7 @@ impl Parser {
             return Ok(UseDecl::PathMulti(paths));
         }
         // Single-item form: `use foo::bar;` or
-        // `use foo::bar as baz;` (closure #254 — local rename
+        // `use foo::bar as baz;` (closure #254 â€” local rename
         // resolves collisions between same-leaf imports).
         let item_tok = self.expect_ident()?;
         let item = ident_text(item_tok);
@@ -1305,7 +1305,7 @@ impl Parser {
     }
 
     fn parse_function(&mut self) -> Result<Function, Diagnostic> {
-        // Arc 8 step 8b — optional `async` modifier before `fn`.
+        // Arc 8 step 8b â€” optional `async` modifier before `fn`.
         // `async` is a contextual keyword (still a regular ident
         // in expression position); recognized here only when
         // followed by `fn` or `pure fn`. Sets `is_async` so the
@@ -1324,18 +1324,18 @@ impl Parser {
         let name_token = self.expect_ident()?;
         let name_span = name_token.span;
         // Devanagari surface (Phase 1) extension: the entry-point
-        // function can be spelled `main`, `मुख्य` (mukhya),
-        // `प्रमुख` (pramukh), or `प्रधान` (pradhan) — all common
+        // function can be spelled `main`, `à¤®à¥à¤–à¥à¤¯` (mukhya),
+        // `à¤ªà¥à¤°à¤®à¥à¤–` (pramukh), or `à¤ªà¥à¤°à¤§à¤¾à¤¨` (pradhan) â€” all common
         // Sanskrit/Hindi/Marathi words for "main / primary /
         // principal". The parser canonicalizes any of the
         // Devanagari forms to `main` so the checker's entry-point
         // lookup, the backends' symbol emission, and the runtime
         // all keep treating `main` as the unique entry. A program
         // that declares two of these forms (e.g. both `main` and
-        // `मुख्य`) errors at the existing duplicate-fn check.
+        // `à¤®à¥à¤–à¥à¤¯`) errors at the existing duplicate-fn check.
         let name = canonicalize_entry_point_name(ident_text(name_token));
 
-        // Optional generic parameter list: `<T1, T2, …>` after
+        // Optional generic parameter list: `<T1, T2, â€¦>` after
         // the fn name. Names recorded into `type_params`; the
         // checker uses them to recognize `Type::Param(name)`
         // inside the signature / body. T1.4 phase 1: syntax
@@ -1419,7 +1419,7 @@ impl Parser {
             self.parse_type()?
         };
 
-        // Optional `where T is Iface, U is Hash, …` bounds.
+        // Optional `where T is Iface, U is Hash, â€¦` bounds.
         // T1.5 phase 1: syntax accepted; checker emits a WIP
         // gate if any program declares interfaces or impls,
         // since dispatch + bounded generics land in phase 2.
@@ -1448,7 +1448,7 @@ impl Parser {
                     break;
                 }
                 // Allow trailing comma in where-clause
-                // bounds list — after the final comma
+                // bounds list â€” after the final comma
                 // the next token is `{` (body start) or
                 // a contract keyword.
                 if self.check(|k| {
@@ -1498,7 +1498,7 @@ impl Parser {
         let close = self.expect_keyword("'}'", |kind| matches!(kind, TokenKind::RBrace))?;
 
         // Unit-return shorthand: append a synthetic `return 0;`
-        // if the body didn't end with one. Idempotent — if
+        // if the body didn't end with one. Idempotent â€” if
         // the user wrote `return 0;` themselves it would
         // already be there.
         if unit_return {
@@ -1525,9 +1525,9 @@ impl Parser {
         // `Future.Ready(value)`. The user-facing TYPE signature
         // matches Rust's; the actual suspend/resume runtime
         // (state-machine transform + event loop) is queued as
-        // Arc 8 steps 8c–8h.
+        // Arc 8 steps 8câ€“8h.
         let (final_return_type, final_body) = if is_async {
-            // Arc 8 v3.1 Phase 1 — try the state-machine
+            // Arc 8 v3.1 Phase 1 â€” try the state-machine
             // transform first. If body has io_*_async calls
             // AND satisfies linear-core shape, the transform
             // produces a constructor body + Task struct return
@@ -1583,6 +1583,7 @@ impl Parser {
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
+            inline: false,
             no_mangle: false,
             link_section: None,
             safety_standard: None,
@@ -1596,23 +1597,23 @@ impl Parser {
 
     /// Closure #269: parse a body-less `extern "C" fn` declaration.
     /// Surface form:
-    ///   `extern "C" fn name(p1: T1, p2: T2, …) -> R;`
+    ///   `extern "C" fn name(p1: T1, p2: T2, â€¦) -> R;`
     /// The body is supplied by an externally-linked object file
     /// (`.o` / `.a`); the checker registers only the signature.
     /// v1 limits the ABI to `"C"`; other strings reject. Param
     /// + return types are restricted to scalars / `Str` / `ref T`
-    /// — affine types (Vec, OwnedStr, etc.) crossing the FFI
+    /// â€” affine types (Vec, OwnedStr, etc.) crossing the FFI
     /// boundary need explicit conversion helpers, not implicit.
-    /// Parse one-or-more `#[…]` attributes preceding a `fn`
+    /// Parse one-or-more `#[â€¦]` attributes preceding a `fn`
     /// declaration, then the function itself. Recognized
     /// attributes:
-    /// - `#[bounded(N)]` — recursion-depth bound (closure
+    /// - `#[bounded(N)]` â€” recursion-depth bound (closure
     ///   #286). Sets `recursion_bound = Some(N)`.
-    /// - `#[no_heap]` — function (and transitive callees)
+    /// - `#[no_heap]` â€” function (and transitive callees)
     ///   must not allocate. T1.2 of the safety-standard
     ///   alignment arc. Sets `no_heap = true`.
-    /// Multiple attributes stack — `#[bounded(10)] #[no_heap]
-    /// fn foo() { … }` is valid; constraints union.
+    /// Multiple attributes stack â€” `#[bounded(10)] #[no_heap]
+    /// fn foo() { â€¦ }` is valid; constraints union.
     fn parse_attributed_fn(&mut self) -> Result<Function, Diagnostic> {
         let mut bound_value: Option<u64> = None;
         let mut no_heap = false;
@@ -1620,6 +1621,7 @@ impl Parser {
         let mut no_recursion = false;
         let mut interrupt = false;
         let mut interrupt_priority: Option<u32> = None;
+        let mut inline = false;
         let mut no_mangle = false;
         let mut vectorize = false;
         let mut link_section: Option<String> = None;
@@ -1654,6 +1656,7 @@ impl Parser {
                 "no_heap" => no_heap = true,
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
+                "inline" => inline = true,
                 "interrupt" => {
                     interrupt = true;
                     // Optional `(priority=N)` sub-attribute (S-20).
@@ -1709,7 +1712,7 @@ impl Parser {
                     }
                 }
                 "deterministic_timing" => deterministic_timing = true,
-                // T3.1: `#[bounded_stack(bytes=N)]` — declare a
+                // T3.1: `#[bounded_stack(bytes=N)]` â€” declare a
                 // per-fn stack budget. The post-check pass runs
                 // the call-graph stack-depth estimator from this
                 // fn as entry and verifies the worst-case bound.
@@ -1746,7 +1749,7 @@ impl Parser {
                     self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
                     bounded_stack = Some(n);
                 }
-                // T3.2: `#[wcet(cycles=N)]` — per-fn worst-case
+                // T3.2: `#[wcet(cycles=N)]` â€” per-fn worst-case
                 // execution time budget. Post-check pass runs a
                 // coarse cycle estimator and rejects if the
                 // estimate exceeds N or returns UNBOUNDED.
@@ -1798,7 +1801,7 @@ impl Parser {
                         return Err(Diagnostic::new(
                             self.current().span,
                             format!(
-                                "function already tagged for `{}` standard — \
+                                "function already tagged for `{}` standard â€” \
                                  stack additional primitives like `#[no_float]` \
                                  to tighten constraints, but only one composite \
                                  standard tag per function",
@@ -1812,13 +1815,13 @@ impl Parser {
                     return Err(Diagnostic::new(
                         self.current().span,
                         format!(
-                            "unknown attribute '#[{}]' — recognized in v1: \
+                            "unknown attribute '#[{}]' â€” recognized in v1: \
                              primitives `#[bounded(N)]`, `#[no_heap]`, \
                              `#[no_float]`, `#[no_recursion]`, `#[interrupt]`, \
                              `#[no_mangle]`, `#[vectorize]`, \
                              `#[link_section = \"s\"]`, \
                              `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
-                             `#[deterministic_timing]`, \
+                             `#[deterministic_timing]`, `#[inline]`, \
                              `#[interrupt]` or `#[interrupt(priority=N)]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
                              `#[do178c_level_a]`, `#[iec_62304_class_c]`, \
@@ -1842,17 +1845,17 @@ impl Parser {
         // label each record with its target standard.
         //
         // Expansion matrix:
-        //   misra_c_2012      → no_heap + no_recursion
-        //   iec_62304_class_c → no_heap + no_recursion
-        //   asil_d            → no_heap + no_recursion + no_float
+        //   misra_c_2012      â†’ no_heap + no_recursion
+        //   iec_62304_class_c â†’ no_heap + no_recursion
+        //   asil_d            â†’ no_heap + no_recursion + no_float
         //                       + deterministic_timing
         //                       (wcet + bounded_stack required)
-        //   do178c_level_a    → same as asil_d
-        //   iec_61508_sil3    → no_heap + no_recursion + no_float
+        //   do178c_level_a    â†’ same as asil_d
+        //   iec_61508_sil3    â†’ no_heap + no_recursion + no_float
         //                       + deterministic_timing
         //                       (wcet + bounded_stack required)
-        //   iec_61508_sil4    → same as sil3 (strictest)
-        //   autosar_ap        → no_heap + no_recursion
+        //   iec_61508_sil4    â†’ same as sil3 (strictest)
+        //   autosar_ap        â†’ no_heap + no_recursion
         //                       + deterministic_timing
         //                       (float permitted; wcet + bounded_stack
         //                       must still be declared)
@@ -1882,7 +1885,7 @@ impl Parser {
                 return Err(Diagnostic::new(
                     self.current().span,
                     format!(
-                        "`#[{}]` requires `#[bounded_stack(bytes=N)]` — \
+                        "`#[{}]` requires `#[bounded_stack(bytes=N)]` â€” \
                          declare the worst-case stack budget for this function",
                         std_name
                     ),
@@ -1892,7 +1895,7 @@ impl Parser {
                 return Err(Diagnostic::new(
                     self.current().span,
                     format!(
-                        "`#[{}]` requires `#[wcet(cycles=N)]` — \
+                        "`#[{}]` requires `#[wcet(cycles=N)]` â€” \
                          declare the worst-case execution time budget for this function",
                         std_name
                     ),
@@ -1908,6 +1911,7 @@ impl Parser {
         f.deterministic_timing = deterministic_timing || composite_deterministic_timing;
         f.interrupt = interrupt;
         f.interrupt_priority = interrupt_priority;
+        f.inline = inline;
         f.no_mangle = no_mangle;
         f.vectorize = vectorize;
         f.link_section = link_section;
@@ -1920,7 +1924,7 @@ impl Parser {
     fn parse_extern_fn(&mut self) -> Result<Function, Diagnostic> {
         let start = self
             .expect_keyword("'extern'", |k| matches!(k, TokenKind::Extern))?;
-        // Require an explicit ABI string — only "C" in v1.
+        // Require an explicit ABI string â€” only "C" in v1.
         let abi_tok = self.expect_string()?;
         let TokenKind::Str(abi) = abi_tok.kind else {
             unreachable!("expect_string only returns Str tokens")
@@ -1979,6 +1983,7 @@ impl Parser {
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
+            inline: false,
             no_mangle: false,
             link_section: None,
             safety_standard: None,
@@ -1992,7 +1997,7 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<Type, Diagnostic> {
-        // Tuple type `(T1, T2, …, Tn)` — fixed-size product.
+        // Tuple type `(T1, T2, â€¦, Tn)` â€” fixed-size product.
         // Must come before any other `(` consumer in this
         // function. v1 caps at 4 elements; the checker
         // enforces the cap so the parser stays simple.
@@ -2003,7 +2008,7 @@ impl Parser {
             let mut elements = Vec::new();
             elements.push(self.parse_type()?);
             // Must see at least one comma to qualify as a
-            // tuple — a single parenthesized type
+            // tuple â€” a single parenthesized type
             // `(T)` is just grouping.
             self.expect_keyword(
                 "',' (tuple type needs at least two elements)",
@@ -2026,9 +2031,9 @@ impl Parser {
             let _ = start_span;
             return Ok(Type::Tuple(elements));
         }
-        // `fn(T1, T2, ...) -> R` — first-class function pointer
+        // `fn(T1, T2, ...) -> R` â€” first-class function pointer
         // type. Must come BEFORE the `fn` keyword's primary
-        // role as a declaration starter (`fn name() -> R { … }`)
+        // role as a declaration starter (`fn name() -> R { â€¦ }`)
         // would steal the lookahead. Here we're already in a
         // type position, so `fn` unambiguously names the
         // function-pointer type constructor.
@@ -2053,7 +2058,7 @@ impl Parser {
             return Ok(Type::FnPtr(params, Box::new(ret)));
         }
         // Type position borrows: `ref T` / `mut ref T`. Refines
-        // T0.0 — replaces the prior `&T` / `&mut T` shape with a
+        // T0.0 â€” replaces the prior `&T` / `&mut T` shape with a
         // keyword form. `mut ref T` is the only valid composition;
         // `ref mut T` is intentionally rejected so the modifier
         // order matches the call-site form (`mut ref x`).
@@ -2075,11 +2080,11 @@ impl Parser {
             let inner = self.parse_type()?;
             return Ok(Type::Ref(Box::new(inner)));
         }
-        // Raw pointer types — `*const T` and `*mut T`. Permitted
+        // Raw pointer types â€” `*const T` and `*mut T`. Permitted
         // syntactically anywhere a type appears; the checker
         // enforces that they only live inside an
         // `unsafe(reason = "...")` context (block or function).
-        // Layer 1.1+ of `unsafe.md`. The `*` token is `Star` —
+        // Layer 1.1+ of `unsafe.md`. The `*` token is `Star` â€”
         // the same token used for binary multiplication; the
         // parser disambiguates by position (type vs expr).
         if matches!(self.current().kind, TokenKind::Star) {
@@ -2101,7 +2106,7 @@ impl Parser {
             let span = self.current().span;
             return Err(Diagnostic::new(
                 span,
-                "raw pointer type needs `*const T` or `*mut T` — \
+                "raw pointer type needs `*const T` or `*mut T` â€” \
                  the mutability marker is mandatory so reviewers \
                  can tell at a glance whether the pointer can be \
                  written through (Layer 1.1+ of unsafe.md)",
@@ -2204,7 +2209,7 @@ impl Parser {
         // come up elsewhere; the type position is the only place we
         // accept it for now. `Task` is recognized the same way.
         if let TokenKind::Ident(name) = &self.current().kind {
-            // `dyn IfaceName` — fat-pointer interface object.
+            // `dyn IfaceName` â€” fat-pointer interface object.
             // Epic A Phase 1 (closure #220). Contextual keyword
             // recognition keeps the lexer simple; only the type
             // position interprets `dyn` specially.
@@ -2222,7 +2227,7 @@ impl Parser {
                 };
                 return Ok(Type::Object(iface_name));
             }
-            // Arc 5c: `Closure(T1, T2, …) -> R` — fat-pointer
+            // Arc 5c: `Closure(T1, T2, â€¦) -> R` â€” fat-pointer
             // callable. Mirrors `fn(...) -> R` parsing but
             // produces `Type::Closure` so the checker can
             // distinguish closures from plain fn-pointers (the
@@ -2278,13 +2283,13 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Deque(Box::new(element)));
             }
-            // L2 Phase 1 (2026-06-07): Box<T> — owning heap pointer.
+            // L2 Phase 1 (2026-06-07): Box<T> â€” owning heap pointer.
             // Affine; freed at scope exit. v1 restricts T to Copy
             // primitives + Copy structs; the checker enforces.
             // Lookahead: only treat `Box` as the builtin type when
             // immediately followed by `<` (the generic open).
             // Otherwise fall through to the regular type-name path
-            // so user code that declares `struct Box { … }` still
+            // so user code that declares `struct Box { â€¦ }` still
             // works.
             if name == "Box"
                 && matches!(
@@ -2331,7 +2336,7 @@ impl Parser {
                 return Ok(Type::BTreeMap(Box::new(k), Box::new(v)));
             }
             if name == "UnionFind" {
-                // No type params — bare name like `Condvar`.
+                // No type params â€” bare name like `Condvar`.
                 self.bump();
                 return Ok(Type::UnionFind);
             }
@@ -2365,7 +2370,7 @@ impl Parser {
                 self.bump();
                 return Ok(Type::SkipList);
             }
-            // `Pool<T>` and `Handle<T>` — Layer 2 of `unsafe.md`.
+            // `Pool<T>` and `Handle<T>` â€” Layer 2 of `unsafe.md`.
             // The Pool is affine; the Handle is Copy. Builtins
             // and codegen land in Layers 2.1b / 2.1c.
             if name == "Pool" {
@@ -2382,7 +2387,7 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Handle(Box::new(element)));
             }
-            // `Tainted<T>` — Layer 1.3 of `unsafe.md`. Wrapper
+            // `Tainted<T>` â€” Layer 1.3 of `unsafe.md`. Wrapper
             // produced by raw-pointer deref (`*p`) once that
             // operator lands; for now the only producer is
             // the explicit `taint(v)` builtin (intended as a
@@ -2394,7 +2399,7 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::Tainted(Box::new(element)));
             }
-            // `BoundedPtr<T>` — Layer 3.2 of `unsafe.md`. Fat
+            // `BoundedPtr<T>` â€” Layer 3.2 of `unsafe.md`. Fat
             // pointer with runtime bounds checks on the
             // indexed-access path.
             if name == "BoundedPtr" {
@@ -2404,7 +2409,7 @@ impl Parser {
                 self.expect_close_angle()?;
                 return Ok(Type::BoundedPtr(Box::new(element)));
             }
-            // `Region` — Layer 5 v2 foundation of `unsafe.md`.
+            // `Region` â€” Layer 5 v2 foundation of `unsafe.md`.
             // Bare name (no type params); the v1 scaffolding is
             // bytes-only (`region_alloc_i64` is the only
             // allocator; future commits can add per-T variants).
@@ -2412,7 +2417,7 @@ impl Parser {
                 self.bump();
                 return Ok(Type::Region);
             }
-            // `ArenaRef<T>` — Layer 5 lifetime-tagged pointer.
+            // `ArenaRef<T>` â€” Layer 5 lifetime-tagged pointer.
             // Bound to a Region's scope by the no-escape pass.
             if name == "ArenaRef" {
                 self.bump();
@@ -2433,7 +2438,7 @@ impl Parser {
                 self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
                 let element = self.parse_type()?;
                 // Optional `, N` capacity. The checker
-                // validates N is a power of two ≥ 1; we just
+                // validates N is a power of two â‰¥ 1; we just
                 // parse the integer literal here.
                 let capacity = if self
                     .match_token(|kind| matches!(kind, TokenKind::Comma))
@@ -2498,7 +2503,7 @@ impl Parser {
             // `Type::Param` so the checker's substitution
             // pass can target them. Anything else (uppercase
             // ident not in `current_type_params`) is a
-            // user-declared nominal type — `Type::Struct`
+            // user-declared nominal type â€” `Type::Struct`
             // is the placeholder until a checker pass
             // determines whether it's actually struct or
             // enum. T1.4.
@@ -2556,7 +2561,7 @@ impl Parser {
                 // `Name<T1, T2>`. If present, build a
                 // `Type::Apply` for the monomorphization
                 // pass to resolve. Otherwise return the bare
-                // `Type::Struct(n)` (or `Type::Enum(n)` —
+                // `Type::Struct(n)` (or `Type::Enum(n)` â€”
                 // disambiguated in the checker).
                 if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
                     let mut args: Vec<Type> = Vec::new();
@@ -2628,24 +2633,24 @@ impl Parser {
         } else if self.looks_like_sov_for() {
             // Closure #265: Devanagari SOV (subject-object-verb)
             // word order for the range `for`. The English form
-            // `for i from 0 to 5` reads as `के लिए i से 0 तक 5`
-            // with Devanagari keywords — but that puts `से`
+            // `for i from 0 to 5` reads as `à¤•à¥‡ à¤²à¤¿à¤ i à¤¸à¥‡ 0 à¤¤à¤• 5`
+            // with Devanagari keywords â€” but that puts `à¤¸à¥‡`
             // (from) BEFORE its operand, which is grammatically
             // wrong in Hindi/Sanskrit/Marathi (postpositions
             // follow nouns). The natural shape is
-            // `i के लिए 0 से 5 तक { … }` — variable, then "for"
-            // postposition; operand, then `से`; operand, then
-            // `तक`. We detect `IDENT For …` and route to the
+            // `i à¤•à¥‡ à¤²à¤¿à¤ 0 à¤¸à¥‡ 5 à¤¤à¤• { â€¦ }` â€” variable, then "for"
+            // postposition; operand, then `à¤¸à¥‡`; operand, then
+            // `à¤¤à¤•`. We detect `IDENT For â€¦` and route to the
             // SOV parser. AST shape is identical to the
             // English form.
             self.parse_sov_for_stmt(false)
         } else if self.looks_like_sov_parallel_for() {
             // Same SOV detection for `parallel for`. Hindi:
-            // `समान्तर i के लिए 0 से 5 तक reduce total with +; { … }`.
+            // `à¤¸à¤®à¤¾à¤¨à¥à¤¤à¤° i à¤•à¥‡ à¤²à¤¿à¤ 0 à¤¸à¥‡ 5 à¤¤à¤• reduce total with +; { â€¦ }`.
             self.bump(); // consume Parallel keyword
             self.parse_sov_for_stmt(true)
         } else if self.check(|kind| matches!(kind, TokenKind::Parallel)) {
-            // `parallel for i in start..end { … }` — the modifier
+            // `parallel for i in start..end { â€¦ }` â€” the modifier
             // precedes `for`. Consume it then dispatch to the
             // for-stmt parser with the parallel flag.
             self.bump();
@@ -2664,7 +2669,7 @@ impl Parser {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
             } else if let TokenKind::Ident(_) = &self.current().kind {
-                // `break label_name;` — any named loop label
+                // `break label_name;` â€” any named loop label
                 if self.tokens.get(self.pos + 1)
                     .map(|t| matches!(t.kind, TokenKind::Semicolon))
                     .unwrap_or(false)
@@ -2694,7 +2699,7 @@ impl Parser {
                 let t = self.bump();
                 if let TokenKind::Label(name) = t.kind { Some(name) } else { unreachable!() }
             } else if let TokenKind::Ident(_) = &self.current().kind {
-                // `continue label_name;` — any named loop label
+                // `continue label_name;` â€” any named loop label
                 if self.tokens.get(self.pos + 1)
                     .map(|t| matches!(t.kind, TokenKind::Semicolon))
                     .unwrap_or(false)
@@ -2716,8 +2721,8 @@ impl Parser {
             // Tier C SOV-S3/S4 (2026-06-06): SOV block-form
             // verb-at-end for `if` / `while`. Indo-Aryan natural
             // shape puts the verb after the condition before the
-            // body block: `cond यदि { ... }` / `cond यावत् { ... }`.
-            // The classical keyword-first shape (`यदि cond { ... }`)
+            // body block: `cond à¤¯à¤¦à¤¿ { ... }` / `cond à¤¯à¤¾à¤µà¤¤à¥ { ... }`.
+            // The classical keyword-first shape (`à¤¯à¤¦à¤¿ cond { ... }`)
             // also still works; the detector only fires when the
             // verb is immediately followed by `{` at depth 0.
             //
@@ -2731,7 +2736,7 @@ impl Parser {
         } else if let Some(verb) = self.looks_like_sov_verb_at_end() {
             // Closure #266: Devanagari SOV verb-at-end. Statements
             // that read naturally with the verb at the end
-            // (`X पुनरागम;` = "X return;") route through the
+            // (`X à¤ªà¥à¤¨à¤°à¤¾à¤—à¤®;` = "X return;") route through the
             // matching SOV parser. AST shape is identical to
             // the English form.
             self.parse_sov_verb_stmt(verb)
@@ -2742,14 +2747,14 @@ impl Parser {
         } else if self.looks_like_field_assign() {
             self.parse_field_assign_stmt()
         } else if self.looks_like_index_then_field_assign() {
-            // Parse `<ident>[…].field = …;` directly into
+            // Parse `<ident>[â€¦].field = â€¦;` directly into
             // `Stmt::IndexAssign` with a non-empty
             // `field_path`. T1.2 phase 2b follow-up.
             self.parse_index_then_field_assign_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::LBrace)) {
-            // Bare block `{ … }` as a statement — provides an
+            // Bare block `{ â€¦ }` as a statement â€” provides an
             // explicit nested scope. Desugars to
-            // `if true { … }` at parse time so the existing
+            // `if true { â€¦ }` at parse time so the existing
             // If-scope machinery handles binding visibility,
             // affine moves, and codegen. The constant-fold
             // path collapses the `if true` away in both
@@ -2770,10 +2775,10 @@ impl Parser {
             // Last-chance fallback: try to parse an expression
             // followed by `;`. This enables side-effect-bearing
             // call / method-call statements (`x.bump();`, `foo();`)
-            // without forcing users to write `let _ = …;`. The
+            // without forcing users to write `let _ = â€¦;`. The
             // expression's value is discarded; the checker enforces
             // that the result isn't an affine type that would silently
-            // leak (and the existing `let _ = …` desugaring covers
+            // leak (and the existing `let _ = â€¦` desugaring covers
             // the drop chain for Copy results).
             let saved_pos = self.pos;
             let start_span = self.current().span;
@@ -2805,7 +2810,7 @@ impl Parser {
         }
     }
 
-    /// `<ident> [ … ] . <ident> =` (or longer chain) —
+    /// `<ident> [ â€¦ ] . <ident> =` (or longer chain) â€”
     /// the not-yet-supported mixed-place-assign shape.
     /// Used to give users a clean diagnostic + workaround
     /// instead of the opaque "expected statement". v1
@@ -2871,10 +2876,10 @@ impl Parser {
         )
     }
 
-    /// `IDENT For …` — Devanagari SOV-style range-for header
+    /// `IDENT For â€¦` â€” Devanagari SOV-style range-for header
     /// (closure #265). Natural Hindi / Sanskrit / Marathi
     /// puts the loop variable BEFORE the `for` postposition
-    /// (`के लिए`) and the operands BEFORE `से` (from) / `तक`
+    /// (`à¤•à¥‡ à¤²à¤¿à¤`) and the operands BEFORE `à¤¸à¥‡` (from) / `à¤¤à¤•`
     /// (to). The detection key is current==Ident AND next==For.
     fn looks_like_sov_for(&self) -> bool {
         if !matches!(self.current().kind, TokenKind::Ident(_)) {
@@ -2892,15 +2897,15 @@ impl Parser {
     ///   (a) at brace/paren depth 0 (i.e. not inside a sub-
     ///       expression's parentheses or block), and
     ///   (b) immediately followed by `{`
-    /// — that combination is the SOV signature
-    /// (`<cond> यदि { body }`). Returns the verb's TokenKind so
+    /// â€” that combination is the SOV signature
+    /// (`<cond> à¤¯à¤¦à¤¿ { body }`). Returns the verb's TokenKind so
     /// the dispatcher can route to the matching SOV block parser.
     ///
     /// Returns None on:
     ///   - `;` at depth 0 (statement terminator before any block
-    ///     verb — not SOV form)
+    ///     verb â€” not SOV form)
     ///   - EOF reached without finding a verb+brace at depth 0
-    ///   - verb found at the very start (`self.pos`) — that means
+    ///   - verb found at the very start (`self.pos`) â€” that means
     ///     the keyword-first form is being used; let the existing
     ///     dispatchers handle it
     fn looks_like_sov_block_verb(&self) -> Option<TokenKind> {
@@ -2940,15 +2945,15 @@ impl Parser {
         }
     }
 
-    /// `… VERB ;` — Devanagari SOV statement detector
+    /// `â€¦ VERB ;` â€” Devanagari SOV statement detector
     /// (closure #266). Hindi / Sanskrit / Marathi grammar is
-    /// verb-final, so `मेरा नाम Ryan है` ("my name is Ryan")
+    /// verb-final, so `à¤®à¥‡à¤°à¤¾ à¤¨à¤¾à¤® Ryan à¤¹à¥ˆ` ("my name is Ryan")
     /// reads as "my name Ryan is" with the verb at the end.
-    /// The same pattern applies to vāṇी's verb-like
-    /// statements: `पुनरागम X;` (return X) reads more
-    /// naturally as `X पुनरागम;`. Similarly for `print` →
-    /// `लिखो` (Hindi) / `लिहा` (Marathi), `assert` →
-    /// `सुनिश्चित` / `खात्री`, `prove` → `सिद्ध` / `प्रमाण`.
+    /// The same pattern applies to vÄá¹‡à¥€'s verb-like
+    /// statements: `à¤ªà¥à¤¨à¤°à¤¾à¤—à¤® X;` (return X) reads more
+    /// naturally as `X à¤ªà¥à¤¨à¤°à¤¾à¤—à¤®;`. Similarly for `print` â†’
+    /// `à¤²à¤¿à¤–à¥‹` (Hindi) / `à¤²à¤¿à¤¹à¤¾` (Marathi), `assert` â†’
+    /// `à¤¸à¥à¤¨à¤¿à¤¶à¥à¤šà¤¿à¤¤` / `à¤–à¤¾à¤¤à¥à¤°à¥€`, `prove` â†’ `à¤¸à¤¿à¤¦à¥à¤§` / `à¤ªà¥à¤°à¤®à¤¾à¤£`.
     ///
     /// Scans from `self.pos` to the next `;` at depth 0
     /// (tracking parens / brackets / braces). If the token
@@ -2982,14 +2987,14 @@ impl Parser {
                     let prev = &self.tokens[i - 1];
                     // Tier C SOV-S1 (2026-06-06): added `Let` to
                     // the SOV verb-at-end set. Natural Indo-
-                    // Aryan grammar puts `माना` (mānā = "let /
+                    // Aryan grammar puts `à¤®à¤¾à¤¨à¤¾` (mÄnÄ = "let /
                     // assume") at the end of a binding clause:
-                    //   `doubled: i64 = base * 2 माना;`
+                    //   `doubled: i64 = base * 2 à¤®à¤¾à¤¨à¤¾;`
                     // reads as "doubled, of type i64, equals
                     // base times two, [is] let" with the verb
                     // anchoring the sentence at the end. Hindi
                     // and Marathi use the same shape with their
-                    // own forms (`मानो` / `मान`).
+                    // own forms (`à¤®à¤¾à¤¨à¥‹` / `à¤®à¤¾à¤¨`).
                     if matches!(
                         prev.kind,
                         TokenKind::Return
@@ -3010,7 +3015,7 @@ impl Parser {
         }
     }
 
-    /// `Parallel IDENT For …` — Devanagari SOV parallel-for
+    /// `Parallel IDENT For â€¦` â€” Devanagari SOV parallel-for
     /// header. Same shape as `looks_like_sov_for` with an
     /// initial `Parallel` keyword.
     fn looks_like_sov_parallel_for(&self) -> bool {
@@ -3028,14 +3033,14 @@ impl Parser {
 
     /// SOV-S6 top-level detectors (2026-06-19).
 
-    /// `Name संरचना { … }` — struct keyword after the name.
+    /// `Name à¤¸à¤‚à¤°à¤šà¤¨à¤¾ { â€¦ }` â€” struct keyword after the name.
     /// Scans past optional `<T>` generics.
     fn looks_like_sov_struct(&self) -> bool {
         if !matches!(self.current().kind, TokenKind::Ident(_)) {
             return false;
         }
         let mut i = self.pos + 1;
-        // Skip optional `< T, U, … >`
+        // Skip optional `< T, U, â€¦ >`
         if matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Less)) {
             let mut depth = 1i32;
             i += 1;
@@ -3053,7 +3058,7 @@ impl Parser {
         matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Struct))
     }
 
-    /// `Name विकल्प/गणन { … }` — enum keyword after the name.
+    /// `Name à¤µà¤¿à¤•à¤²à¥à¤ª/à¤—à¤£à¤¨ { â€¦ }` â€” enum keyword after the name.
     fn looks_like_sov_enum(&self) -> bool {
         if !matches!(self.current().kind, TokenKind::Ident(_)) {
             return false;
@@ -3076,7 +3081,7 @@ impl Parser {
         matches!(self.tokens.get(i).map(|t| &t.kind), Some(TokenKind::Enum))
     }
 
-    /// `[pure] name(…) [-> T] [where …] [req/ens …] fn { … }`
+    /// `[pure] name(â€¦) [-> T] [where â€¦] [req/ens â€¦] fn { â€¦ }`
     /// Detects SOV fn: `fn` at paren-depth-0 followed by `{`.
     fn looks_like_sov_fn(&self) -> bool {
         let start = match &self.current().kind {
@@ -3131,7 +3136,7 @@ impl Parser {
         }
     }
 
-    /// Parse an SOV struct declaration: `Name [<T>] संरचना { fields }`.
+    /// Parse an SOV struct declaration: `Name [<T>] à¤¸à¤‚à¤°à¤šà¤¨à¤¾ { fields }`.
     fn parse_sov_struct_decl(&mut self) -> Result<StructDecl, Diagnostic> {
         let name_tok = self.expect_ident()?;
         let name_span = name_tok.span;
@@ -3146,7 +3151,7 @@ impl Parser {
             }
             self.expect_close_angle()?;
         }
-        // Consume the SOV struct keyword (संरचना / struct).
+        // Consume the SOV struct keyword (à¤¸à¤‚à¤°à¤šà¤¨à¤¾ / struct).
         self.expect_keyword("'struct' (SOV)", |k| matches!(k, TokenKind::Struct))?;
         let saved_tp = self.current_type_params.clone();
         for tp in &type_params {
@@ -3177,7 +3182,7 @@ impl Parser {
         })
     }
 
-    /// Parse an SOV enum declaration: `Name [<T>] विकल्प/गणन { variants }`.
+    /// Parse an SOV enum declaration: `Name [<T>] à¤µà¤¿à¤•à¤²à¥à¤ª/à¤—à¤£à¤¨ { variants }`.
     fn parse_sov_enum_decl(&mut self) -> Result<EnumDecl, Diagnostic> {
         let name_tok = self.expect_ident()?;
         let name_span = name_tok.span;
@@ -3192,7 +3197,7 @@ impl Parser {
             }
             self.expect_close_angle()?;
         }
-        // Consume the SOV enum keyword (विकल्प / गणन / enum).
+        // Consume the SOV enum keyword (à¤µà¤¿à¤•à¤²à¥à¤ª / à¤—à¤£à¤¨ / enum).
         self.expect_keyword("'enum' (SOV)", |k| matches!(k, TokenKind::Enum))?;
         let saved_tp = self.current_type_params.clone();
         for tp in &type_params {
@@ -3232,8 +3237,8 @@ impl Parser {
     }
 
     /// Rewrite SOV fn token stream then call `parse_function`.
-    /// Input:  `[pure] name(…) [-> T] [where …] [req/ens …] fn {`
-    /// Output: `[pure] fn name(…) [-> T] [where …] [req/ens …] {`
+    /// Input:  `[pure] name(â€¦) [-> T] [where â€¦] [req/ens â€¦] fn {`
+    /// Output: `[pure] fn name(â€¦) [-> T] [where â€¦] [req/ens â€¦] {`
     fn parse_sov_fn(&mut self) -> Result<Function, Diagnostic> {
         let fn_pos = self.sov_fn_keyword_pos();
         let fn_tok = self.tokens.remove(fn_pos);
@@ -3247,11 +3252,11 @@ impl Parser {
         self.parse_function()
     }
 
-    /// `<ident> (. <ident>)+ =` — a chain of field accesses
+    /// `<ident> (. <ident>)+ =` â€” a chain of field accesses
     /// followed by an `=`. Used to disambiguate
     /// `p.x = expr;` (field assignment) from a method call.
     /// The chain must end with an ident (not an integer
-    /// tuple-index — tuple slots aren't reassignable in v1).
+    /// tuple-index â€” tuple slots aren't reassignable in v1).
     /// T1.2 phase 2a follow-up.
     fn looks_like_field_assign(&self) -> bool {
         if !matches!(self.current().kind, TokenKind::Ident(_)) {
@@ -3490,7 +3495,7 @@ impl Parser {
         })
     }
 
-    /// `region <name> { <body> }` — Layer 5 of `unsafe.md`.
+    /// `region <name> { <body> }` â€” Layer 5 of `unsafe.md`.
     /// Sugar that desugars at parse time to:
     /// ```ignore
     /// {                                 // bare block (fresh scope)
@@ -3505,7 +3510,7 @@ impl Parser {
     /// existing scope-exit drop machinery does the work.
     ///
     /// ArenaRefs derived from `<name>` via `region_borrow_i64`
-    /// are local-origin and cannot escape the block — enforced
+    /// are local-origin and cannot escape the block â€” enforced
     /// by Layer 1.2's no-escape dataflow, already extended to
     /// cover `Type::ArenaRef` in the previous commit.
     fn parse_region_block_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -3538,7 +3543,7 @@ impl Parser {
         }
         let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
         let full_span = region_tok.span.merge(close.span);
-        // Wrap in `if true { ... }` — same desugaring the
+        // Wrap in `if true { ... }` â€” same desugaring the
         // parser already uses for bare `{ ... }` statement
         // blocks at `parse_stmt` line ~1894. This gives us
         // a fresh scope so the synthetic Let's binding goes
@@ -3566,17 +3571,17 @@ impl Parser {
         })
     }
 
-    /// `unsafe(reason = "...") { <body> }` — Layer 1.1 of the
-    /// embedded-vāṇी unsafe plan (`unsafe.md`). The `reason`
+    /// `unsafe(reason = "...") { <body> }` â€” Layer 1.1 of the
+    /// embedded-vÄá¹‡à¥€ unsafe plan (`unsafe.md`). The `reason`
     /// clause is mandatory at parse time. Empty / >256-char /
     /// non-ASCII-printable / newline-containing reason strings
     /// are all parse errors.
     ///
     /// Why these rules (kept terse here; full rationale lives in
-    /// `unsafe.md` § "Reason-string rules (v1)"):
+    /// `unsafe.md` Â§ "Reason-string rules (v1)"):
     /// - Non-empty: a missing justification defeats the whole
     ///   point of the in-syntax form.
-    /// - ≤256 chars: keeps the deviation-record artifact compact
+    /// - â‰¤256 chars: keeps the deviation-record artifact compact
     ///   and discoverable; certification reviewers cluster by
     ///   prefix, not by paragraph.
     /// - ASCII-printable + no newlines: the reason flows through
@@ -3587,21 +3592,21 @@ impl Parser {
             self.expect_keyword("'unsafe'", |kind| matches!(kind, TokenKind::Unsafe))?;
         // Require the `(reason = "...")` clause. The mandatory-
         // clause form is what makes the deviation-record extraction
-        // possible — a bare `unsafe { … }` would silently slip past
+        // possible â€” a bare `unsafe { â€¦ }` would silently slip past
         // the audit trail.
         if !self.check(|k| matches!(k, TokenKind::LParen)) {
             return Err(Diagnostic::new(
                 self.current().span,
-                "`unsafe` requires a `(reason = \"…\")` clause — the \
+                "`unsafe` requires a `(reason = \"â€¦\")` clause â€” the \
                  justification is part of the syntax and is emitted as \
                  machine-readable deviation metadata. Example: \
-                 `unsafe(reason = \"MMIO: GPIOA::ODR write\") { … }`",
+                 `unsafe(reason = \"MMIO: GPIOA::ODR write\") { â€¦ }`",
             ));
         }
         self.expect_keyword("'('", |k| matches!(k, TokenKind::LParen))?;
         // Single-keyword `reason` identifier inside the clause.
         // No other keys accepted in v1; future revisions can add
-        // structured keys (e.g. `audit_id = "…"`) without breaking
+        // structured keys (e.g. `audit_id = "â€¦"`) without breaking
         // existing call sites.
         let reason_ident = self.expect_ident()?;
         let reason_kw = ident_text(reason_ident.clone());
@@ -3622,15 +3627,15 @@ impl Parser {
         };
         // Reason-string validation. Each rule emits a precise
         // diagnostic so the user sees exactly which constraint
-        // failed — important when the source string came from a
+        // failed â€” important when the source string came from a
         // template or a copy-paste from another file.
         if reason.is_empty() {
             return Err(Diagnostic::new(
                 reason_span,
-                "`reason` cannot be empty — the deviation-record artifact \
+                "`reason` cannot be empty â€” the deviation-record artifact \
                  needs a non-trivial justification per `unsafe` block. \
-                 Recommended prefixes: \"MMIO: …\", \"FFI: …\", \"DMA: …\", \
-                 \"transmute: …\", \"vendor-SDK: …\"",
+                 Recommended prefixes: \"MMIO: â€¦\", \"FFI: â€¦\", \"DMA: â€¦\", \
+                 \"transmute: â€¦\", \"vendor-SDK: â€¦\"",
             ));
         }
         if reason.len() > 256 {
@@ -3647,7 +3652,7 @@ impl Parser {
         if reason.contains('\n') || reason.contains('\r') {
             return Err(Diagnostic::new(
                 reason_span,
-                "`reason` cannot contain newlines — multi-line reasons \
+                "`reason` cannot contain newlines â€” multi-line reasons \
                  don't survive IR / DWARF metadata round-trip and break \
                  deviation-record extraction tooling",
             ));
@@ -3669,8 +3674,8 @@ impl Parser {
             ));
         }
         self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
-        // Body — same shape as `task <name> { … }` and `if true
-        // { … }`. The block's stmts run in a fresh inner scope.
+        // Body â€” same shape as `task <name> { â€¦ }` and `if true
+        // { â€¦ }`. The block's stmts run in a fresh inner scope.
         self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
         let mut body = Vec::new();
         while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
@@ -3687,7 +3692,7 @@ impl Parser {
 
     fn parse_parallel_for_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         // `parallel` was just bumped by the caller. Only the range
-        // form supports the parallel marker — iter-style `for x in
+        // form supports the parallel marker â€” iter-style `for x in
         // xs` consumes the collection (which can't be raced over).
         self.parse_for_stmt_inner(true)
     }
@@ -3699,20 +3704,20 @@ impl Parser {
         let var = ident_text(var_tok);
         // The two `for` shapes are now disambiguated by the
         // post-counter keyword:
-        //   `for VAR in EXPR { ... }`           → collection-iter
+        //   `for VAR in EXPR { ... }`           â†’ collection-iter
         //                                          (consuming or
-        //                                           borrowing — `ref EXPR`)
-        //   `for VAR from LO to HI { ... }`     → range form
+        //                                           borrowing â€” `ref EXPR`)
+        //   `for VAR from LO to HI { ... }`     â†’ range form
         // Refines T0.0. The prior `0..n` range shape is gone.
         if self.match_token(|k| matches!(k, TokenKind::In)).is_some() {
             // Borrowing form: `for x in ref xs { ... }`. The old
-            // `for x in &xs { ... }` shape is gone — surface a
+            // `for x in &xs { ... }` shape is gone â€” surface a
             // friendly hint if encountered.
             if matches!(self.current().kind, TokenKind::Amp) {
                 let span = self.current().span;
                 return Err(Diagnostic::new(
                     span,
-                    "use `for VAR in ref XS { … }` to iterate by borrow (T0.0)",
+                    "use `for VAR in ref XS { â€¦ }` to iterate by borrow (T0.0)",
                 ));
             }
             let consumes = !self
@@ -3790,11 +3795,11 @@ impl Parser {
     /// #265):
     ///
     /// ```text
-    /// IDENT 'के लिए' START 'से' END 'तक' [invariants]
+    /// IDENT 'à¤•à¥‡ à¤²à¤¿à¤' START 'à¤¸à¥‡' END 'à¤¤à¤•' [invariants]
     /// [reductions] { body }
     /// ```
     ///
-    /// Both `के लिए` and `से` / `तक` are already lexed as
+    /// Both `à¤•à¥‡ à¤²à¤¿à¤` and `à¤¸à¥‡` / `à¤¤à¤•` are already lexed as
     /// `TokenKind::For` / `From` / `To` via the existing
     /// Devanagari alias tables. This parser only swaps the
     /// POSITIONS: variable first, then `for`-postposition,
@@ -3803,23 +3808,23 @@ impl Parser {
     /// passes (checker, SSA, backends) see no difference.
     ///
     /// The `parallel` flag is set by the caller after consuming
-    /// a leading `Parallel` keyword (Hindi: `समान्तर`).
+    /// a leading `Parallel` keyword (Hindi: `à¤¸à¤®à¤¾à¤¨à¥à¤¤à¤°`).
     fn parse_sov_for_stmt(&mut self, parallel: bool) -> Result<Stmt, Diagnostic> {
         let var_tok = self.expect_ident()?;
         let var_span = var_tok.span;
         let var = ident_text(var_tok);
         let for_tok = self.expect_keyword(
-            "'for' / 'के लिए' postposition after the loop variable",
+            "'for' / 'à¤•à¥‡ à¤²à¤¿à¤' postposition after the loop variable",
             |k| matches!(k, TokenKind::For),
         )?;
         let start_expr = self.parse_expr()?;
         self.expect_keyword(
-            "'from' / 'से' postposition after the start value",
+            "'from' / 'à¤¸à¥‡' postposition after the start value",
             |k| matches!(k, TokenKind::From),
         )?;
         let end_expr = self.parse_expr()?;
         self.expect_keyword(
-            "'to' / 'तक' postposition after the end value",
+            "'to' / 'à¤¤à¤•' postposition after the end value",
             |k| matches!(k, TokenKind::To),
         )?;
         let invariants = self.parse_invariants()?;
@@ -3854,7 +3859,7 @@ impl Parser {
             let var_tok = self.expect_ident()?;
             let var = ident_text(var_tok);
             self.expect_keyword("'with'", |kind| matches!(kind, TokenKind::With))?;
-            // Reduction operator — currently `+` only. Other
+            // Reduction operator â€” currently `+` only. Other
             // associative ops (`*`, min, max) are an easy follow-on
             // once we have richer operator-symbol parsing for
             // non-Binary positions.
@@ -3889,7 +3894,7 @@ impl Parser {
                     ReductionOp::BitXor
                 }
                 // `min` and `max` are context-sensitive
-                // identifiers (not reserved keywords) — match
+                // identifiers (not reserved keywords) â€” match
                 // them by literal text so users can declare
                 // struct fields / locals with those names
                 // outside this clause.
@@ -4023,7 +4028,7 @@ impl Parser {
 
     fn parse_let_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'let'", |kind| matches!(kind, TokenKind::Let))?;
-        // Destructure form: `let (a, b, …) = expr;` —
+        // Destructure form: `let (a, b, â€¦) = expr;` â€”
         // produces `Stmt::LetTuple`. The checker desugars to
         // a sequence of `Let`s under the hood. T1.1.
         if self.check(|k| matches!(k, TokenKind::LParen)) {
@@ -4135,7 +4140,7 @@ impl Parser {
 
     fn parse_print_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'print'", |kind| matches!(kind, TokenKind::Print))?;
-        // Block form: `print { items1; items2; items3; }` — each `;`-terminated
+        // Block form: `print { items1; items2; items3; }` â€” each `;`-terminated
         // group becomes a separate output line.
         if self.check(|kind| matches!(kind, TokenKind::LBrace)) {
             self.bump(); // consume `{`
@@ -4277,7 +4282,7 @@ impl Parser {
     /// `looks_like_sov_verb_at_end` has already scanned ahead
     /// and identified which verb closes this statement; we
     /// route to the matching parser. All four AST shapes are
-    /// identical to their English counterparts — the only
+    /// identical to their English counterparts â€” the only
     /// thing that changed is the surface order.
     /// Tier C SOV-S3/S4 (2026-06-06): parse a SOV block-form
     /// statement (`if`/`while` with the verb between the cond
@@ -4309,7 +4314,7 @@ impl Parser {
                     .match_token(|k| matches!(k, TokenKind::Else))
                     .is_some()
                 {
-                    // `else { … }` block. We don't support
+                    // `else { â€¦ }` block. We don't support
                     // `else if` chaining in SOV form (the
                     // keyword-first form should be used for
                     // chains; the SOV detector only fires on
@@ -4358,22 +4363,22 @@ impl Parser {
                     span: start_span.merge(close.span),
                 })
             }
-            // `match` at statement position: vāṇī match is an
+            // `match` at statement position: vÄá¹‡Ä« match is an
             // expression, so its result must be bound. Use the
             // SOV-let form to capture it: `let r: T = scrutinee
-            // match { ... } माना;`. Keyword-first form also
-            // requires explicit binding: `let r = match x { … };`
+            // match { ... } à¤®à¤¾à¤¨à¤¾;`. Keyword-first form also
+            // requires explicit binding: `let r = match x { â€¦ };`
             TokenKind::Match => Err(Diagnostic::new(
                 verb_tok.span,
                 "SOV-match at statement position requires a let binding. \
-                 Use: `r: T = scrutinee match { … } माना;` \
-                 or keyword-first `let r = match scrutinee { … };`"
+                 Use: `r: T = scrutinee match { â€¦ } à¤®à¤¾à¤¨à¤¾;` \
+                 or keyword-first `let r = match scrutinee { â€¦ };`"
                     .to_string(),
             )),
             other => Err(Diagnostic::new(
                 verb_tok.span,
                 format!(
-                    "internal: unexpected SOV block verb {:?} — \
+                    "internal: unexpected SOV block verb {:?} â€” \
                      expected If / While / Match",
                     other
                 ),
@@ -4393,11 +4398,11 @@ impl Parser {
                     span: start_span.merge(semi.span),
                 })
             }
-            // Tier C SOV-S1 (2026-06-06): `<name>[: <type>] = <expr> माना;`
-            // — Sanskrit / Hindi / Marathi natural shape for a
+            // Tier C SOV-S1 (2026-06-06): `<name>[: <type>] = <expr> à¤®à¤¾à¤¨à¤¾;`
+            // â€” Sanskrit / Hindi / Marathi natural shape for a
             // let-binding. The variable name + optional type
             // annotation + initializer expression all appear
-            // before the verb `माना` (mānā) which closes the
+            // before the verb `à¤®à¤¾à¤¨à¤¾` (mÄnÄ) which closes the
             // sentence. Identifier-of-name is the first token;
             // the existing parse_let_binding handles
             // <type> + = + <expr>, so reuse it after bumping
@@ -4479,12 +4484,12 @@ impl Parser {
                 })
             }
             other => {
-                // Shouldn't reach — looks_like_sov_verb_at_end
+                // Shouldn't reach â€” looks_like_sov_verb_at_end
                 // only returns the four supported verbs.
                 Err(Diagnostic::new(
                     start_span,
                     format!(
-                        "internal: unexpected SOV verb {:?} — expected \
+                        "internal: unexpected SOV verb {:?} â€” expected \
                          Return / Print / Assert / Prove",
                         other
                     ),
@@ -4538,7 +4543,7 @@ impl Parser {
     fn parse_unary_expr(&mut self) -> Result<Expr, Diagnostic> {
         // Borrow expressions: `ref x` (immutable) and
         // `mut ref x` (mutable). The old `&x` / `&mut x`
-        // prefix is gone — a friendly diagnostic points at
+        // prefix is gone â€” a friendly diagnostic points at
         // the new shape. Refines T0.0.
         let mut_then_ref = self.check(|k| matches!(k, TokenKind::Mut))
             && matches!(
@@ -4567,7 +4572,7 @@ impl Parser {
                 span,
             });
         }
-        // Old `&` prefix borrow — surface a guidance error.
+        // Old `&` prefix borrow â€” surface a guidance error.
         // We can't accept it here because the parser still
         // needs `&` available as the bitwise-AND binary op.
         if let Some(token) = self.match_token(|kind| matches!(kind, TokenKind::Amp)) {
@@ -4611,7 +4616,7 @@ impl Parser {
             {
                 // Preserve the callee identifier's span
                 // before we move `expr.kind` into the Var
-                // destructure below — `expr.span` is the
+                // destructure below â€” `expr.span` is the
                 // Var span (just the identifier) because
                 // the primary parser wraps Var in an Expr
                 // with its span set to the Ident's span.
@@ -4644,7 +4649,7 @@ impl Parser {
                 }
                 let close = self.expect_keyword("')'", |kind| matches!(kind, TokenKind::RParen))?;
                 let span = name_span.merge(close.span);
-                // Arc 8 step 8f — `await(expr)` parser-level
+                // Arc 8 step 8f â€” `await(expr)` parser-level
                 // desugar. Rewrites to a match that extracts
                 // the Ready payload; the Pending arm panics
                 // (via assert false) and falls through to a
@@ -4770,10 +4775,10 @@ impl Parser {
                     // `TokenKind::Len` lexes the keyword `len`, used
                     // as the unary builtin `len(xs)`. In method-call
                     // position (`obj.len()`), `len` is unambiguously
-                    // an identifier — there's no `len(...)` builtin
+                    // an identifier â€” there's no `len(...)` builtin
                     // syntax after `.`. Recover by mapping the
                     // keyword to a synthetic ident "len" so method-
-                    // call sugar works (`m.len()` → MethodCall).
+                    // call sugar works (`m.len()` â†’ MethodCall).
                     // Closure #312.
                     TokenKind::Len => {
                         let name_text = "len".to_string();
@@ -4869,13 +4874,13 @@ impl Parser {
             } else if let Some(q) =
                 self.match_token(|k| matches!(k, TokenKind::Question))
             {
-                // Postfix `?` — sugar for `try EXPR`. Builds the
+                // Postfix `?` â€” sugar for `try EXPR`. Builds the
                 // same `ExprKind::Try` node the keyword form
                 // produces, so the existing `desugar_try_in_v31_body`
                 // (Arc 8 Phase 2.4) and the synchronous-fn `try`
                 // desugar handle it identically. Narrow-gate
                 // restrictions (Option-like enum, first-let-RHS
-                // position) apply unchanged — diagnostics surface
+                // position) apply unchanged â€” diagnostics surface
                 // through the same checker path.
                 let span = expr.span.merge(q.span);
                 expr = Expr {
@@ -4970,7 +4975,7 @@ impl Parser {
                 })
             }
             TokenKind::Try => {
-                // `try EXPR` — parse inner at call-expr
+                // `try EXPR` â€” parse inner at call-expr
                 // precedence so common forms like
                 // `try maybe(5)` or `try Type.helper(args)`
                 // bind correctly (without this, `try EXPR`
@@ -5004,7 +5009,7 @@ impl Parser {
                 self.expect_keyword("'else' (if-expression)", |k| {
                     matches!(k, TokenKind::Else)
                 })?;
-                // `else if cond { … }` chains — the `else`
+                // `else if cond { â€¦ }` chains â€” the `else`
                 // branch is itself an if-expression. Allow
                 // `if cond { e1 } else if cond2 { e2 } else
                 // { e3 }` as a single nested if-expression
@@ -5040,14 +5045,14 @@ impl Parser {
                 // and `|x, y| x + y`. Desugars to an AnonFn AST
                 // node with all parameters typed `i64` and return
                 // type `i64` (matches the existing v1 closures
-                // surface — all closures take + return i64). Body
+                // surface â€” all closures take + return i64). Body
                 // is `return <expr>;`. Disambiguation: at primary
                 // position `|` always starts a closure shorthand;
                 // bitwise-or `a | b` is a binary infix operator,
                 // never a primary leader. Empty param list
                 // requires `||` which lexes as the OrOr token,
                 // so `|| expr` is naturally unreachable through
-                // this path — keep the shorthand requiring at
+                // this path â€” keep the shorthand requiring at
                 // least one parameter.
                 let pipe_span = token.span;
                 let mut params: Vec<Param> = Vec::new();
@@ -5077,7 +5082,7 @@ impl Parser {
                 // with binary OR / AND / boolean Not still
                 // returns bool. Bool-literal body also returns
                 // bool. Anything else (arithmetic, index, etc.)
-                // defaults to i64 — matches the dominant
+                // defaults to i64 â€” matches the dominant
                 // vec_map / sort_by / vec_fold use cases.
                 let return_type = match &body_expr.kind {
                     ExprKind::Binary { op, .. } => match op {
@@ -5105,7 +5110,7 @@ impl Parser {
                         body,
                         fn_span: pipe_span,
                         // |x| shorthand doesn't support explicit
-                        // capture lists — only the `fn(...)` long
+                        // capture lists â€” only the `fn(...)` long
                         // form does. Implicit captures stay
                         // by-value.
                         ref_captures: Vec::new(),
@@ -5114,10 +5119,10 @@ impl Parser {
                 })
             }
             TokenKind::Fn => {
-                // Anonymous fn expression — `fn(p: T) -> R { body }`.
+                // Anonymous fn expression â€” `fn(p: T) -> R { body }`.
                 // Body is parsed as a regular fn body (Vec<Stmt> with
                 // auto-`return 0` unit-return shorthand). v1 has no
-                // captures — the checker's lambda-lift pass hoists
+                // captures â€” the checker's lambda-lift pass hoists
                 // each AnonFn into a generated `__anon_fn_<N>` top-
                 // level fn; outer-variable references then surface
                 // the usual "unknown variable" diagnostic. Closure #308.
@@ -5242,7 +5247,7 @@ impl Parser {
                 let mut name = first_name.clone();
                 let mut name_span = token.span;
                 // Closure #248: support deep paths
-                // `a::b::c::…` by looping the `::` consumption.
+                // `a::b::c::â€¦` by looping the `::` consumption.
                 // Each segment after the first is concatenated
                 // with `__` to produce the backend-safe
                 // identifier. Nested modules use this to
@@ -5255,7 +5260,7 @@ impl Parser {
                     name = format!("{}__{}", name, next_name);
                     name_span = name_span.merge(next_span);
                 }
-                // Struct literal `Name { field: val, … }` —
+                // Struct literal `Name { field: val, â€¦ }` â€”
                 // we recognize the shape by looking past
                 // `{` for `ident :`. Anything else means
                 // we leave the identifier alone (block,
@@ -5269,7 +5274,7 @@ impl Parser {
                 // Heuristic: a name is "struct-shaped" when either
                 // its FIRST segment OR its LAST segment starts
                 // uppercase. This catches both module-qualified
-                // user structs (`foo::Point` → `foo__Point`,
+                // user structs (`foo::Point` â†’ `foo__Point`,
                 // last segment upper) AND v3.1-synthesized
                 // names (`Task__showcase`, first segment upper)
                 // whose suffix after `__` is the user's
@@ -5334,7 +5339,7 @@ impl Parser {
             }
             TokenKind::LParen => {
                 // Parenthesized form: either grouped expression
-                // `(e)` or tuple `(e1, e2, …)`. Disambiguate
+                // `(e)` or tuple `(e1, e2, â€¦)`. Disambiguate
                 // on the comma after the first sub-expression.
                 let first = self.parse_expr()?;
                 if self
@@ -5408,7 +5413,7 @@ impl Parser {
                 })
             }
             TokenKind::While => {
-                // `while cond { ... }` as an expression — yields the
+                // `while cond { ... }` as an expression â€” yields the
                 // value passed to `break val;`. The checker lowers
                 // `let x: T = while ... { break val; }` to a temp-var
                 // sequence so backends never see WhileLoop directly.
@@ -5443,7 +5448,7 @@ impl Parser {
                 })
             }
             // `min(a, b)` / `max(a, b)` no longer get a
-            // dedicated parse arm — they're regular
+            // dedicated parse arm â€” they're regular
             // identifier calls that the checker dispatches
             // to the intrinsic helper based on the name.
             // This frees `min` / `max` as legal field /
@@ -5539,7 +5544,7 @@ impl Parser {
         }
     }
 
-    /// Arc 8 step 8b — peek for the `async` contextual keyword.
+    /// Arc 8 step 8b â€” peek for the `async` contextual keyword.
     /// True iff current token is `Ident("<async-spelling>")` AND
     /// the next is `fn` (with optional `pure` between). The
     /// identifier shape (not a real `TokenKind::Async`) preserves
@@ -5547,11 +5552,11 @@ impl Parser {
     /// in expression position keep working.
     ///
     /// Per-dialect spellings shipped 2026-06-08 (polish queue):
-    ///   English   — `async`
-    ///   Sanskrit / Hindi / Marathi — `अतुल्यकालिक` (atulyakālika,
+    ///   English   â€” `async`
+    ///   Sanskrit / Hindi / Marathi â€” `à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•` (atulyakÄlika,
     ///                                "non-synchronous")
-    ///   Mandarin  — `异步` (yìbù)
-    ///   Japanese  — `非同期` (hidouki)
+    ///   Mandarin  â€” `å¼‚æ­¥` (yÃ¬bÃ¹)
+    ///   Japanese  â€” `éžåŒæœŸ` (hidouki)
     ///
     /// Caveat: the non-English spellings are tatsama / technical-
     /// coinage attestations, not native-speaker validated.
@@ -5605,36 +5610,36 @@ fn ident_text(token: Token) -> String {
     }
 }
 
-/// Arc 8 step 8f — synthesize the AST for `await(expr)`:
+/// Arc 8 step 8f â€” synthesize the AST for `await(expr)`:
 ///   `match expr { Future.Ready(__v) then __v, Future.Pending then 0 }`
 /// The Pending arm body is a literal `0` (i64). For v1 this
 /// works directly for `Future<i64>`; the user explicitly casts
 /// (`await(future_f64) as f64` would type-check via the
 /// surrounding context's coercion). Non-scalar T should match
-/// Polish (2026-06-08) — async/await dialect lift. Recognize
+/// Polish (2026-06-08) â€” async/await dialect lift. Recognize
 /// the per-dialect spellings of `async` (as a contextual
 /// fn-prefix) and `await` (as a function-call-style operator).
 /// Each predicate returns true when the identifier text matches
 /// the English form OR one of the registered dialect aliases.
 ///
 /// Spellings: English `async` + Sanskrit-rooted Indo-Aryan
-/// `अतुल्यकालिक` (atulyakālika) + Mandarin `异步` (yìbù) +
-/// Japanese `非同期` (hidouki). For `await`: English + Indo-
-/// Aryan `प्रतीक्षा` (pratīkṣā) + Mandarin `等候` (děnghòu —
-/// distinct from `等待` which is Mandarin's `join`) + Japanese
-/// `待機` (taiki). Grammar consultant pass (Tier 3) will
+/// `à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•` (atulyakÄlika) + Mandarin `å¼‚æ­¥` (yÃ¬bÃ¹) +
+/// Japanese `éžåŒæœŸ` (hidouki). For `await`: English + Indo-
+/// Aryan `à¤ªà¥à¤°à¤¤à¥€à¤•à¥à¤·à¤¾` (pratÄ«ká¹£Ä) + Mandarin `ç­‰å€™` (dÄ›nghÃ²u â€”
+/// distinct from `ç­‰å¾…` which is Mandarin's `join`) + Japanese
+/// `å¾…æ©Ÿ` (taiki). Grammar consultant pass (Tier 3) will
 /// revise these against native-speaker active-use spellings.
 fn is_async_ident(name: &str) -> bool {
     matches!(
         name,
-        "async" | "अतुल्यकालिक" | "异步" | "非同期"
+        "async" | "à¤…à¤¤à¥à¤²à¥à¤¯à¤•à¤¾à¤²à¤¿à¤•" | "å¼‚æ­¥" | "éžåŒæœŸ"
     )
 }
 
 fn is_await_ident(name: &str) -> bool {
     matches!(
         name,
-        "await" | "प्रतीक्षा" | "等候" | "待機"
+        "await" | "à¤ªà¥à¤°à¤¤à¥€à¤•à¥à¤·à¤¾" | "ç­‰å€™" | "å¾…æ©Ÿ"
     )
 }
 
@@ -5676,13 +5681,13 @@ fn synthesize_await_desugar(inner: Expr, span: Span) -> Expr {
     }
 }
 
-/// Arc 8 step 8b — recursively rewrite every `Return { expr }`
+/// Arc 8 step 8b â€” recursively rewrite every `Return { expr }`
 /// statement inside an async fn body so `expr` is wrapped in
 /// `Future.Ready(expr)`. Recurses into nested blocks (if /
 /// while / for / ForIter / TaskSpawn) so deep returns lift
 /// correctly. The body's final implicit `return 0` (added by
 /// `parse_function` when the user wrote no explicit return)
-/// gets the same treatment — its synthesized expr becomes
+/// gets the same treatment â€” its synthesized expr becomes
 /// `Future.Ready(0)`.
 fn wrap_returns_in_future_ready(body: &mut Vec<Stmt>) {
     for stmt in body.iter_mut() {
@@ -5734,20 +5739,20 @@ fn wrap_returns_in_future_ready_stmt(stmt: &mut Stmt) {
 ///
 /// Accepted forms:
 /// - `main` (English, unchanged)
-/// - `मुख्य` (mukhya — common across Sanskrit, Hindi, Marathi;
+/// - `à¤®à¥à¤–à¥à¤¯` (mukhya â€” common across Sanskrit, Hindi, Marathi;
 ///   the most natural rendering of "main / chief")
-/// - `प्रमुख` (pramukh — Sanskrit/Hindi/Marathi "primary,
+/// - `à¤ªà¥à¤°à¤®à¥à¤–` (pramukh â€” Sanskrit/Hindi/Marathi "primary,
 ///   foremost"; also a common noun form for a head/leader)
-/// - `प्रधान` (pradhan — Sanskrit/Hindi/Marathi "principal /
+/// - `à¤ªà¥à¤°à¤§à¤¾à¤¨` (pradhan â€” Sanskrit/Hindi/Marathi "principal /
 ///   chief"; the same word used in "Prime Minister",
-///   प्रधानमंत्री)
+///   à¤ªà¥à¤°à¤§à¤¾à¤¨à¤®à¤‚à¤¤à¥à¤°à¥€)
 ///
 /// A program that declares two of these forms (e.g. both `main`
-/// and `मुख्य`) errors at the existing duplicate-fn check —
+/// and `à¤®à¥à¤–à¥à¤¯`) errors at the existing duplicate-fn check â€”
 /// they're aliases for the SAME symbol, not parallel functions.
 fn canonicalize_entry_point_name(name: String) -> String {
     match name.as_str() {
-        "main" | "मुख्य" | "प्रमुख" | "प्रधान" => "main".to_string(),
+        "main" | "à¤®à¥à¤–à¥à¤¯" | "à¤ªà¥à¤°à¤®à¥à¤–" | "à¤ªà¥à¤°à¤§à¤¾à¤¨" => "main".to_string(),
         _ => name,
     }
 }
@@ -5784,7 +5789,7 @@ fn expr_as_int_literal(
 }
 
 // =========================================================
-// Arc 8 v3.1 Phase 1 — compiler-driven state-machine codegen
+// Arc 8 v3.1 Phase 1 â€” compiler-driven state-machine codegen
 // =========================================================
 //
 // For an `async fn` whose body contains calls to the
@@ -5801,12 +5806,12 @@ fn expr_as_int_literal(
 //   diagnostic.
 // - Return type is i64. Each Let RHS is either:
 //   * a Call to `io_recv_async(fd, max)`,
-//     `io_send_async(fd, n)`, or `io_accept_async(fd)` —
+//     `io_send_async(fd, n)`, or `io_accept_async(fd)` â€”
 //     these are SUSPEND POINTS that bump the state tag and
 //     check for Pending (-2) / Error (-1)
-//   * any other i64-typed expression — emitted verbatim in
+//   * any other i64-typed expression â€” emitted verbatim in
 //     the current state's prologue
-// - Return EXPR — rewritten so locals/params reference
+// - Return EXPR â€” rewritten so locals/params reference
 //   `t.field`; emitted in the final state.
 //
 // Out of scope (deferred to Phases 2-4):
@@ -5827,7 +5832,7 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
     fn expr_uses(e: &Expr) -> bool {
         match &e.kind {
             ExprKind::Call { name, args, .. } => {
-                // Phase 4a-broad — `__poll_<inner>` calls trigger
+                // Phase 4a-broad â€” `__poll_<inner>` calls trigger
                 // the v3.1 transform on their callers too, so an
                 // async fn that only awaits sub-tasks (no
                 // io_*_async itself) still gets state-machined.
@@ -5894,14 +5899,14 @@ pub(crate) fn body_uses_io_async(body: &[Stmt]) -> bool {
 
 /// Recursively check whether an expression contains any
 /// `io_*_async` call. Mirror of `body_uses_io_async` but
-/// scoped to a single Expr — used by Phase 2's validator to
+/// scoped to a single Expr â€” used by Phase 2's validator to
 /// decide if a control-flow branch needs the full state-
 /// splitting transform (deferred to Phase 2.1) or can be
 /// emitted verbatim in the current state arm.
 fn expr_contains_io_async(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Call { name, args, .. } => {
-            // Phase 4a-broad — recognize `__poll_<inner>` calls
+            // Phase 4a-broad â€” recognize `__poll_<inner>` calls
             // alongside the io_*_async family so the v3.1
             // transform fires when an async fn body only contains
             // sub-task polls (no other suspends).
@@ -5982,7 +5987,7 @@ fn stmt_contains_io_async(s: &Stmt) -> bool {
     }
 }
 
-/// Phase 2.2 — ANF lift: walk an expression, lifting EVERY
+/// Phase 2.2 â€” ANF lift: walk an expression, lifting EVERY
 /// `io_*_async(args)` call (even at the top level) into a
 /// fresh `__anf_N` Let. Returns (lifted_lets, rewritten_expr).
 /// The lifted_lets must be emitted BEFORE the containing
@@ -6012,7 +6017,7 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
                 span: expr.span,
             };
             // If THIS call is io_*_async, lift it now (nested
-            // case — caller's expr isn't a direct io_*_async
+            // case â€” caller's expr isn't a direct io_*_async
             // call but this sub-expr is).
             if matches!(
                 name.as_str(),
@@ -6085,7 +6090,7 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
     }
 }
 
-/// Phase 2.3a — desugar a `let X = match SCRUT { p0 -> e0,
+/// Phase 2.3a â€” desugar a `let X = match SCRUT { p0 -> e0,
 /// ..., _ -> ed }` where SOME arm contains an io_*_async
 /// suspend into a sequence of:
 ///   let X: i64 = 0;          // placeholder
@@ -6104,12 +6109,12 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
 /// - Arm bodies that produce i64 values
 ///
 /// Phase 2.3b extends literal-pattern support to:
-/// - Pattern::Bool — `match b { true then ..., false then ... }`
-/// - Pattern::Str  — `match s { "foo" then ..., _ then ... }`
-/// - Pattern::Float — `match f { 3.14 then ..., _ then ... }`
+/// - Pattern::Bool â€” `match b { true then ..., false then ... }`
+/// - Pattern::Str  â€” `match s { "foo" then ..., _ then ... }`
+/// - Pattern::Float â€” `match f { 3.14 then ..., _ then ... }`
 ///
 /// Phase 2.3c extends to:
-/// - Pattern::Variant — `match c { Color.Red then ..., _ then ... }`
+/// - Pattern::Variant â€” `match c { Color.Red then ..., _ then ... }`
 ///   Lowered via a tag-extraction sub-match: the original variant
 ///   arms become an i64-returning match (`Color.Red then 0,
 ///   Color.Green then 1, ...`) that runs via the existing
@@ -6118,7 +6123,7 @@ fn anf_lift_expr(expr: &Expr, counter: &mut usize) -> (Vec<Stmt>, Expr) {
 ///
 /// Rejected (deferred to Phase 2.3d):
 /// - Pattern::VariantWithBinding (binding scope across the
-///   tag-extraction → if-chain split needs explicit relifting)
+///   tag-extraction â†’ if-chain split needs explicit relifting)
 /// - Mixed Variant + non-Variant patterns in same match
 /// - Wildcard not at the end
 fn try_desugar_let_match_with_suspends(
@@ -6133,7 +6138,7 @@ fn try_desugar_let_match_with_suspends(
         _ => return None,
     };
     if !expr_contains_io_async(expr) {
-        return None; // No suspends — Phase 2.3-narrow handles it.
+        return None; // No suspends â€” Phase 2.3-narrow handles it.
     }
     // Detect Variant / VariantWithBinding arms. If ANY arm is
     // Variant-shaped, route through the tag-extraction sub-match
@@ -6230,7 +6235,7 @@ fn try_desugar_let_match_with_suspends(
     Some(out)
 }
 
-/// Phase 2.3c — desugar `let X = match SCRUT { Color.Red then EXPR0,
+/// Phase 2.3c â€” desugar `let X = match SCRUT { Color.Red then EXPR0,
 /// Color.Green then EXPR1, ..., _ then EXPRD };` (with suspends in
 /// any arm body) into:
 ///
@@ -6250,7 +6255,7 @@ fn try_desugar_let_match_with_suspends(
 ///
 /// The tag-extraction sub-match runs through the existing
 /// variant-dispatch path (Phase 2.3-narrow handles match in async
-/// fn when no arm suspends — and the tag arms here produce i64
+/// fn when no arm suspends â€” and the tag arms here produce i64
 /// literals, so none suspend). The if-chain then handles the
 /// per-arm suspending bodies via Phase 2.1a/b's state-splitting.
 ///
@@ -6263,7 +6268,7 @@ fn try_desugar_let_match_with_suspends(
 ///
 /// Caveat: Variant scrutinees must be inline (v3.1 i64-only locals
 /// rule). The SCRUT is re-evaluated once per VariantWithBinding
-/// arm — fine for pure helper-fn scrutinees, surprising for
+/// arm â€” fine for pure helper-fn scrutinees, surprising for
 /// impure ones. The user can hoist impure scrutinees into a helper
 /// fn that returns the variant.
 ///
@@ -6271,7 +6276,7 @@ fn try_desugar_let_match_with_suspends(
 /// rule). Non-i64 payloads (e.g. `Result.Err(Str)`) reach the
 /// checker with the user's intended payload type but the
 /// synthesized `let <binding>: i64` annotation causes a checker
-/// type-mismatch — Phase 3 will lift this once non-i64 locals
+/// type-mismatch â€” Phase 3 will lift this once non-i64 locals
 /// across await are supported.
 fn try_desugar_match_via_tag_extraction(
     name: &str,
@@ -6308,7 +6313,7 @@ fn try_desugar_match_via_tag_extraction(
     // maps to its index (0..N-1); wildcard maps to N. For
     // VariantWithBinding arms, the binding is preserved in the
     // tag-extraction pattern but the arm body just returns the
-    // tag literal — the binding is unused at this step.
+    // tag literal â€” the binding is unused at this step.
     let tag_local = format!("__match_tag_{}", name);
     let mut tag_match_arms: Vec<crate::ast::MatchArm> = Vec::new();
     for (idx, (pat, _body, pat_span)) in variant_arms.iter().enumerate() {
@@ -6457,7 +6462,7 @@ fn try_desugar_match_via_tag_extraction(
     Some(out)
 }
 
-/// Phase 2.2 — ANF lift a body of statements. Walks each
+/// Phase 2.2 â€” ANF lift a body of statements. Walks each
 /// stmt, lifting nested io_*_async calls out of expressions
 /// into fresh Let bindings emitted BEFORE the original stmt.
 /// Recurses into nested if/while branches. Phase 2.3a
@@ -6468,12 +6473,12 @@ fn try_desugar_match_via_tag_extraction(
 /// variant before being assigned by the state machine).
 ///
 /// Currently allows:
-///   - I64        — default-inits to `0`              (baseline)
-///   - Bool       — default-inits to `false`          (Phase 3a)
-///   - F64        — default-inits to `0.0`            (Phase 3a)
-///   - Str        — default-inits to `""`             (Phase 3b)
-///   - OwnedStr   — default-inits to `""`             (Phase 3b)
-///   - Enum(name) — default-inits to first UNIT       (Phase 3c)
+///   - I64        â€” default-inits to `0`              (baseline)
+///   - Bool       â€” default-inits to `false`          (Phase 3a)
+///   - F64        â€” default-inits to `0.0`            (Phase 3a)
+///   - Str        â€” default-inits to `""`             (Phase 3b)
+///   - OwnedStr   â€” default-inits to `""`             (Phase 3b)
+///   - Enum(name) â€” default-inits to first UNIT       (Phase 3c)
 ///                  variant of the enum. Requires the enum decl
 ///                  to be visible to the parser (lexically before
 ///                  the async fn) via V31_ENUM_REGISTRY AND to
@@ -6485,7 +6490,7 @@ fn v31_local_type_allowed(ty: &Type) -> bool {
     v31_local_type_allowed_with_params(ty, &[])
 }
 
-/// Phase 4c-broad — generic-aware variant. When `type_params` is
+/// Phase 4c-broad â€” generic-aware variant. When `type_params` is
 /// non-empty, accepts `Type::Param(name)` whose `name` matches
 /// one of the enclosing fn's declared type params. This lifts
 /// the narrow-gate rejection so generic async fns reach the
@@ -6505,13 +6510,13 @@ fn v31_local_type_allowed_with_params(ty: &Type, type_params: &[String]) -> bool
             if v31_enum_default_variant(name).is_some() {
                 return true;
             }
-            // Phase 3d — struct local: allowed only if every field
+            // Phase 3d â€” struct local: allowed only if every field
             // type is itself v31-allowed (recursive). Recursion
             // tracking via STRUCT_VISITING_DEFAULT prevents infinite
             // loops on self-referential structs.
             v31_struct_default_allowed(name)
         }
-        // Phase 3d — Vec<T>: element type must also be v31-
+        // Phase 3d â€” Vec<T>: element type must also be v31-
         // allowed since the default-init synthesizes a 1-element
         // vec containing the element's default (the empty `vec()`
         // can't infer its element type in StructLit field
@@ -6522,7 +6527,7 @@ fn v31_local_type_allowed_with_params(ty: &Type, type_params: &[String]) -> bool
         // struct typedefs + Vec bundles. No backend-side
         // workaround needed.
         Type::Vec(inner) => v31_local_type_allowed_with_params(inner, type_params),
-        // Phase 3f — [T; N]: element type must be v31-allowed
+        // Phase 3f â€” [T; N]: element type must be v31-allowed
         // (default-init emits N copies of default(T) as an
         // ArrayLit). The C backend's FieldAssign routes Array
         // values through memcpy instead of `=` so the synthesizer's
@@ -6537,7 +6542,7 @@ fn v31_local_type_allowed_with_params(ty: &Type, type_params: &[String]) -> bool
     }
 }
 
-/// Phase 3d — Whether a struct type can have its default-init
+/// Phase 3d â€” Whether a struct type can have its default-init
 /// synthesized. Requires every field type to be v31-allowed
 /// (recursive). Uses a thread-local visited set to break cycles
 /// on self-referential structs.
@@ -6548,7 +6553,7 @@ fn v31_struct_default_allowed(struct_name: &str) -> bool {
     }
     VISITING.with(|v| {
         if v.borrow().contains(struct_name) {
-            // Cycle — assume disallowed (self-referential structs
+            // Cycle â€” assume disallowed (self-referential structs
             // can't have a finite default).
             return false;
         }
@@ -6565,7 +6570,7 @@ fn v31_struct_default_allowed(struct_name: &str) -> bool {
     })
 }
 
-/// Phase 3c/3e — Look up the first variant of `enum_name` whose
+/// Phase 3c/3e â€” Look up the first variant of `enum_name` whose
 /// payload types are ALL v3.1-allowed (i.e. each payload type
 /// `v31_local_type_allowed`). Returns the variant name and its
 /// payload types. Unit variants (empty payload) are preferred
@@ -6584,7 +6589,7 @@ fn v31_enum_default_variant(enum_name: &str) -> Option<(String, Vec<Type>)> {
         if let Some((name, _)) = variants.iter().find(|(_, p)| p.is_empty()) {
             return Some((name.clone(), Vec::new()));
         }
-        // Phase 3e — fall back to a payloaded variant whose
+        // Phase 3e â€” fall back to a payloaded variant whose
         // payload types are all v31-allowed.
         variants
             .iter()
@@ -6604,8 +6609,8 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
         // v3.1 caveat #2 polish (2026-06-08): OwnedStr can't be
         // default-init'd as `ExprKind::Str("")` because that
         // types as Str (not OwnedStr), and `can_assign` doesn't
-        // accept Str → OwnedStr in struct-lit field position.
-        // Synthesize `"" + ""` instead — the Binary-Add over two
+        // accept Str â†’ OwnedStr in struct-lit field position.
+        // Synthesize `"" + ""` instead â€” the Binary-Add over two
         // Str literals dispatches through `check_str_concat`
         // which returns Type::OwnedStr (heap-allocating
         // `intent_str_concat` of two empty literals; the cost
@@ -6624,7 +6629,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
                 span,
             }),
         },
-        // Phase 3d — Vec<T>: 1-element vec containing the
+        // Phase 3d â€” Vec<T>: 1-element vec containing the
         // element's recursive default. An empty `vec()` would
         // typecheck-fail in StructLit field position (the checker
         // can't infer the element type without a context-aware
@@ -6637,7 +6642,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
             name_span: span,
             args: vec![v31_default_init_expr(inner, span)],
         },
-        // Phase 3f — [T; N]: ArrayLit with N copies of default(T).
+        // Phase 3f â€” [T; N]: ArrayLit with N copies of default(T).
         // The literal `[d0, d1, ..., dN-1]` typechecks as `[T; N]`
         // when the field annotation matches. Validator already
         // ensured length > 0 so the literal isn't empty.
@@ -6647,7 +6652,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
             ExprKind::ArrayLit { elements }
         }
         Type::Enum(name) | Type::Struct(name) => {
-            // Phase 3d — if `name` is a registered struct (not an
+            // Phase 3d â€” if `name` is a registered struct (not an
             // enum), synthesize `StructName { f0: d0, f1: d1, ...
             // }` with recursive per-field defaults.
             let struct_fields = crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
@@ -6669,7 +6674,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
                     span,
                 };
             }
-            // Phase 3c/3e — synthesize the default variant of the
+            // Phase 3c/3e â€” synthesize the default variant of the
             // registered enum. Unit variants emit `FieldAccess`
             // (`EnumName.Variant`); payloaded variants emit a
             // `MethodCall` constructor (`EnumName.Variant(d0, d1,
@@ -6683,13 +6688,13 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
                     span,
                 });
                 if payload_types.is_empty() {
-                    // Unit variant — `EnumName.Variant`.
+                    // Unit variant â€” `EnumName.Variant`.
                     ExprKind::FieldAccess {
                         object: enum_var,
                         field: variant,
                     }
                 } else {
-                    // Phase 3e — payloaded variant. Synthesize
+                    // Phase 3e â€” payloaded variant. Synthesize
                     // `EnumName.Variant(d0, d1, ...)` as a
                     // MethodCall. Each payload arg recursively
                     // calls `v31_default_init_expr` for its type.
@@ -6713,7 +6718,7 @@ fn v31_default_init_expr(ty: &Type, span: crate::span::Span) -> Expr {
     Expr { kind, span }
 }
 
-/// Phase 2.4 — desugar `let X: T = try EXPR;` in v3.1 async fn
+/// Phase 2.4 â€” desugar `let X: T = try EXPR;` in v3.1 async fn
 /// bodies into a multi-stmt sequence that propagates Err early
 /// and extracts the Ok payload. See `try_v31_transform` for the
 /// full lowering shape.
@@ -6731,7 +6736,7 @@ fn desugar_try_in_v31_body(
     body: &[Stmt],
     return_type: &Type,
 ) -> Result<Vec<Stmt>, Diagnostic> {
-    // Fast path: no `try` anywhere → return body unchanged.
+    // Fast path: no `try` anywhere â†’ return body unchanged.
     let has_try = body.iter().any(|s| match s {
         Stmt::Let { expr, .. } => matches!(expr.kind, ExprKind::Try { .. }),
         _ => false,
@@ -6750,7 +6755,7 @@ fn desugar_try_in_v31_body(
             return Err(Diagnostic::new(
                 span,
                 format!(
-                    "v3.1 async fn uses `try` but return type {:?} is not an enum — \
+                    "v3.1 async fn uses `try` but return type {:?} is not an enum â€” \
                      `try` requires the async fn to return a Result-like enum",
                     return_type
                 ),
@@ -6772,7 +6777,7 @@ fn desugar_try_in_v31_body(
             ),
         ));
     };
-    // Find the first payloaded variant — that's the "Ok" arm
+    // Find the first payloaded variant â€” that's the "Ok" arm
     // (extract its payload as T).
     let ok_variant = variants.iter().find(|(_, p)| !p.is_empty());
     let Some((ok_name, _ok_payload)) = ok_variant else {
@@ -6784,7 +6789,7 @@ fn desugar_try_in_v31_body(
             span,
             format!(
                 "v3.1 async fn uses `try` but return type enum `{}` has no \
-                 payloaded variant — `try` needs an Ok-like variant to extract",
+                 payloaded variant â€” `try` needs an Ok-like variant to extract",
                 enum_name
             ),
         ));
@@ -7037,7 +7042,7 @@ fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
                 }
                 // If the Let's RHS is directly an io_*_async
                 // call, it's already at a valid suspend-point
-                // position — pass through unchanged (but still
+                // position â€” pass through unchanged (but still
                 // ANF-lift its ARGS in case they contain
                 // nested io_*_async calls).
                 let is_direct_suspend = match &expr.kind {
@@ -7111,7 +7116,7 @@ fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
                     span: *span,
                 });
             }
-            // Print / While / other forms — pass through; for
+            // Print / While / other forms â€” pass through; for
             // Phase 2.2 narrow we assume io_*_async only
             // appears in Let RHS / Return / Assign / if-cond
             // contexts. Nested forms in Print items / While
@@ -7122,7 +7127,7 @@ fn anf_lift_body(body: &[Stmt], counter: &mut usize) -> Vec<Stmt> {
     out
 }
 
-/// Phase 2.5b — rewrite `break` / `continue` inside a
+/// Phase 2.5b â€” rewrite `break` / `continue` inside a
 /// Verbatim Stmt::If's branches to state_tag jumps so they
 /// target the ENCLOSING suspending loop (not the synthesized
 /// `while true` wrapping the poll fn body). Recurses into
@@ -7182,7 +7187,7 @@ fn rewrite_break_continue_in_stmts(
                     span: *span,
                 });
             }
-            // Don't recurse into Stmt::While — break/continue
+            // Don't recurse into Stmt::While â€” break/continue
             // inside a USER's nested non-suspending while
             // target THAT while, not the enclosing suspending
             // one. Pass through verbatim.
@@ -7192,7 +7197,7 @@ fn rewrite_break_continue_in_stmts(
     out
 }
 
-/// Phase 2.1c helper — does this body unconditionally exit
+/// Phase 2.1c helper â€” does this body unconditionally exit
 /// via Return on every control-flow path? Used to suppress
 /// the defensive Jump emitted after a Verbatim stmt that
 /// itself always returns (e.g., a non-suspending `if` whose
@@ -7210,7 +7215,7 @@ fn body_all_paths_return(body: &[Stmt]) -> bool {
     }
 }
 
-/// Phase 2.1c — recursively collect i64 Let bindings from a
+/// Phase 2.1c â€” recursively collect i64 Let bindings from a
 /// branch body INCLUDING nested if branches. Each binding
 /// found at any depth needs a field in the task struct so
 /// the state machine can persist it across suspends.
@@ -7222,7 +7227,7 @@ fn collect_branch_locals_recursive(
         match s {
             Stmt::Let { name, annotation, span, .. } => {
                 let ty = annotation.clone().unwrap_or(Type::I64);
-                // Phase 3a — accept i64 / bool / f64; other types
+                // Phase 3a â€” accept i64 / bool / f64; other types
                 // would have been rejected by the branch validator
                 // already, so reaching here with a non-allowed type
                 // is a no-op.
@@ -7241,11 +7246,11 @@ fn collect_branch_locals_recursive(
 
 /// Phase 2.1a + 2.1b branch validator. Each branch of an
 /// if-with-suspend must:
-/// - Be linear (Let / Discard / Return only — no nested if /
+/// - Be linear (Let / Discard / Return only â€” no nested if /
 ///   while / match / break / continue)
 /// - Each Let must be i64
 /// - Phase 2.1a required Return at end; **Phase 2.1b lifts
-///   this** — branches can fall through to a merge state
+///   this** â€” branches can fall through to a merge state
 ///   that the segment collector allocates after both branch
 ///   recursions.
 ///
@@ -7266,7 +7271,7 @@ fn validate_v31_phase_21a_branch(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: {} local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N> (Phase 4c-broad generic locals not yet supported inside branches)",
+                            "v3.1 async fn: {} local '{}' has type {:?} â€” accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N> (Phase 4c-broad generic locals not yet supported inside branches)",
                             branch_label, name, ty
                         ),
                     ));
@@ -7284,7 +7289,7 @@ fn validate_v31_phase_21a_branch(
                             return Err(Diagnostic::new(
                                 crate::span::Span::new(0, 0),
                                 format!(
-                                    "v3.1 async fn: {} has a `print` item with a suspend — Phase 2.2 ANF doesn't lift into print items yet",
+                                    "v3.1 async fn: {} has a `print` item with a suspend â€” Phase 2.2 ANF doesn't lift into print items yet",
                                     branch_label
                                 ),
                             ));
@@ -7310,7 +7315,7 @@ fn validate_v31_phase_21a_branch(
                 // Phase 2.1c: nested ifs inside a suspending
                 // branch. The recursive `collect_into` in the
                 // segment collector already handles state-
-                // splitting at arbitrary depth — we just need
+                // splitting at arbitrary depth â€” we just need
                 // to recursively validate the nested branches
                 // here so non-i64 / break-continue / unsupported
                 // shapes inside them still get diagnosed.
@@ -7318,7 +7323,7 @@ fn validate_v31_phase_21a_branch(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: nested `if` in {} has a suspend in its condition — needs ANF lifting (Phase 2.2)",
+                            "v3.1 async fn: nested `if` in {} has a suspend in its condition â€” needs ANF lifting (Phase 2.2)",
                             branch_label
                         ),
                     ));
@@ -7359,7 +7364,7 @@ fn validate_v31_phase_21a_branch(
                 return Err(Diagnostic::new(
                     crate::span::Span::new(0, 0),
                     format!(
-                        "v3.1 async fn: {} contains an unsupported statement form for Phase 2.1a/b — see ARC8_V3_PLAN.md",
+                        "v3.1 async fn: {} contains an unsupported statement form for Phase 2.1a/b â€” see ARC8_V3_PLAN.md",
                         branch_label
                     ),
                 ));
@@ -7377,10 +7382,10 @@ fn validate_v31_phase_21a_branch(
 /// only, all-i64 params/locals, return i64.
 /// **Phase 2 narrow (added 2026-06-04):** also accepts
 /// Stmt::If / Stmt::While / Stmt::Assign / Stmt::Print /
-/// mid-body Return at the top level — **provided** the
+/// mid-body Return at the top level â€” **provided** the
 /// embedded if/while branches contain no `io_*_async` call.
 /// Bodies that do contain suspends inside control flow are
-/// rejected with a "suspend in branch — Phase 2.1" pointer.
+/// rejected with a "suspend in branch â€” Phase 2.1" pointer.
 fn validate_v31_linear_body(
     type_params: &[String],
     params: &[Param],
@@ -7392,7 +7397,7 @@ fn validate_v31_linear_body(
     // declared param. For non-generic async fns, type_params
     // is empty so behavior matches Phase 3.
     //
-    // Phase 4c-broad — when return_type is a bare Type::Param,
+    // Phase 4c-broad â€” when return_type is a bare Type::Param,
     // we require at least one fn param to share the same
     // Type::Param so the synthesizer can seed the ctor's
     // `__result` default to that param's runtime value. Without
@@ -7434,7 +7439,7 @@ fn validate_v31_linear_body(
             }).unwrap_or(crate::span::Span::new(0, 0)),
             format!(
                 "v3.1 async fn return type {:?} not yet supported \
-                — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
+                â€” Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / \
                 Enum (registered) / Vec<T> / Struct (registered) / \
                 Array<T,N>. Generic returns (Type::Param) deferred \
                 to Phase 4c-broad (see ARC8_V3_PLAN.md blocker notes).",
@@ -7446,7 +7451,7 @@ fn validate_v31_linear_body(
     // type_allowed.
     //
     // A4.4 (2026-06-08): also accept `ref Struct` / `mut ref Struct`
-    // as a param type — the v3.1 Task struct field stores a raw
+    // as a param type â€” the v3.1 Task struct field stores a raw
     // pointer to the borrowed struct (no lifetime tracking; user
     // is responsible for keeping the borrow alive across awaits,
     // same as v1 ref discipline elsewhere). This unblocks
@@ -7455,9 +7460,9 @@ fn validate_v31_linear_body(
     // cancellation guards before every suspend point.
     //
     // Restrictions kept:
-    //   - Ref/RefMut only for params (NOT locals — L4 stays for
+    //   - Ref/RefMut only for params (NOT locals â€” L4 stays for
     //     locals).
-    //   - Inner type must be Struct(name) — no `ref i64`, no
+    //   - Inner type must be Struct(name) â€” no `ref i64`, no
     //     `ref Vec<T>`, no `ref Box<T>`. The narrow case
     //     CancelToken-shaped (a struct with bool / numeric
     //     fields) is the load-bearing one.
@@ -7477,7 +7482,7 @@ fn validate_v31_linear_body(
             return Err(Diagnostic::new(
                 p.span,
                 format!(
-                    "v3.1 async fn parameter '{}' has type {:?} — Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / Enum (registered) / Vec<T> / Struct (registered) / Array<T,N>",
+                    "v3.1 async fn parameter '{}' has type {:?} â€” Phase 3 accepts i64 / bool / f64 / Str / OwnedStr / Enum (registered) / Vec<T> / Struct (registered) / Array<T,N>",
                     p.name, p.ty
                 ),
             ));
@@ -7485,7 +7490,7 @@ fn validate_v31_linear_body(
     }
     // Walk body. Collect Let locals. Phase 1 accepts Let +
     // Return at top level; Phase 2 narrow ALSO accepts if /
-    // while / Assign / Print + mid-body Return — but only
+    // while / Assign / Print + mid-body Return â€” but only
     // when the embedded constructs don't contain io_*_async
     // (suspend-in-branch needs full state-splitting,
     // deferred to Phase 2.1).
@@ -7518,7 +7523,7 @@ fn validate_v31_linear_body(
                         *span,
                         format!(
                             "v3.1 async fn local '{}' has type {:?} containing a generic Type::Param. \
-                             Phase 4c-broad accepts Type::Param ONLY in params and return type — \
+                             Phase 4c-broad accepts Type::Param ONLY in params and return type â€” \
                              generic locals have no well-typed default value at template time.",
                             name, ty
                         ),
@@ -7528,7 +7533,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn local '{}' has type {:?} — accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. For generic async fns, locals stay concrete (Type::Param is allowed only in params and return type).",
+                            "v3.1 async fn local '{}' has type {:?} â€” accepted types: i64 / bool / f64 / Str / OwnedStr / registered Enum / registered Struct / Vec<T> / Array<T,N>. For generic async fns, locals stay concrete (Type::Param is allowed only in params and return type).",
                             name, ty
                         ),
                     ));
@@ -7546,11 +7551,11 @@ fn validate_v31_linear_body(
                     if expr_contains_io_async(expr) {
                         return Err(Diagnostic::new(
                             *span,
-                            "v3.1 async fn: `match` arm contains an `io_*_async` suspend with an unsupported pattern shape — Phase 2.3a desugars Int + Wildcard patterns; Variant/Bool/Str patterns arrive in a future sub-phase",
+                            "v3.1 async fn: `match` arm contains an `io_*_async` suspend with an unsupported pattern shape â€” Phase 2.3a desugars Int + Wildcard patterns; Variant/Bool/Str patterns arrive in a future sub-phase",
                         ));
                     }
                 }
-                // Skip `let _ = ...` (Discard) from locals — but
+                // Skip `let _ = ...` (Discard) from locals â€” but
                 // still process its RHS later in the state machine.
                 if name != "_" {
                     locals.push((name.clone(), ty, *span));
@@ -7564,7 +7569,7 @@ fn validate_v31_linear_body(
             }
             Stmt::Print { .. } => {
                 // Phase 2 narrow: Print is allowed at top level
-                // — emits in the current state's arm as a normal
+                // â€” emits in the current state's arm as a normal
                 // side effect. (Print inside branches is also
                 // allowed if the branch has no suspends.)
             }
@@ -7573,7 +7578,7 @@ fn validate_v31_linear_body(
                     return Err(Diagnostic::new(
                         *span,
                         format!(
-                            "v3.1 async fn: `{} = ...` RHS contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                            "v3.1 async fn: `{} = ...` RHS contains an `io_*_async` call (suspend point inside an expression â€” needs ANF lifting, arrives in Phase 2.2)",
                             assign_name
                         ),
                     ));
@@ -7585,7 +7590,7 @@ fn validate_v31_linear_body(
                 if expr_contains_io_async(cond) {
                     return Err(Diagnostic::new(
                         *span,
-                        "v3.1 async fn: `if` condition contains an `io_*_async` call (suspend point inside an expression — needs ANF lifting, arrives in Phase 2.2)",
+                        "v3.1 async fn: `if` condition contains an `io_*_async` call (suspend point inside an expression â€” needs ANF lifting, arrives in Phase 2.2)",
                     ));
                 }
                 let then_has_suspend = then_body.iter().any(stmt_contains_io_async);
@@ -7604,7 +7609,7 @@ fn validate_v31_linear_body(
                     // list so the task struct has fields for
                     // them. Phase 2.1c uses a recursive helper
                     // to also pick up Lets inside nested if
-                    // branches — they need persistence too
+                    // branches â€” they need persistence too
                     // since the state machine spans nested
                     // suspends.
                     collect_branch_locals_recursive(then_body, &mut locals);
@@ -7656,8 +7661,8 @@ fn validate_v31_linear_body(
     Ok(locals)
 }
 
-/// Build a simple i64 binary subtract expression `a - b` —
-/// vāṇī source convention for negative literals (no unary
+/// Build a simple i64 binary subtract expression `a - b` â€”
+/// vÄá¹‡Ä« source convention for negative literals (no unary
 /// minus literal). Used by the synthesized poll fn to compare
 /// against the -2 (Pending) and -1 (Error) sentinels.
 fn synth_i64_sub(a: i128, b: i128, span: crate::span::Span) -> Expr {
@@ -7685,7 +7690,7 @@ fn synth_field_access(obj_name: &str, field: &str, span: crate::span::Span) -> E
     }
 }
 
-/// Phase 2 — rewrite every Var inside a Stmt that matches
+/// Phase 2 â€” rewrite every Var inside a Stmt that matches
 /// the rename set to a FieldAccess on the task struct. For
 /// Stmt::Assign whose LHS name is in the rename set, emit
 /// a FieldAssign on `__t.<name>` instead. Recursively
@@ -7706,7 +7711,7 @@ fn rewrite_vars_in_stmt(
             expr: rewrite_vars_to_fields(expr, rename_set, obj_name),
             span: *span,
         },
-        // Phase 2.4 — pre-existing FieldAssign (e.g. emitted by
+        // Phase 2.4 â€” pre-existing FieldAssign (e.g. emitted by
         // the try-desugar's early-return path: `__t.__result =
         // __try_X;`) needs its `value` rewritten so any local-
         // var refs inside it route to `__t.<name>`. Without this,
@@ -7776,7 +7781,7 @@ fn rewrite_vars_in_stmt(
                 .collect(),
             span: *span,
         },
-        // Other statement forms — Phase 2 narrow rejects these
+        // Other statement forms â€” Phase 2 narrow rejects these
         // in the validator, so this branch is unreachable in
         // well-formed input. Pass through verbatim as a
         // defensive default.
@@ -7828,7 +7833,7 @@ fn rewrite_vars_to_fields(
         ExprKind::RefMut { inner } => ExprKind::RefMut {
             inner: Box::new(rewrite_vars_to_fields(inner, rename_set, obj_name)),
         },
-        // Phase 2.3 — Match expression: rewrite scrutinee +
+        // Phase 2.3 â€” Match expression: rewrite scrutinee +
         // each arm's body. Patterns themselves don't contain
         // exprs (just literals / variant names / bindings).
         ExprKind::Match { scrutinee, arms } => ExprKind::Match {
@@ -7886,10 +7891,10 @@ fn rewrite_vars_to_fields(
 /// falls through to v1 sync desugar).
 ///
 /// Returns Some(Err(diag)) when the body has io_*_async calls
-/// but doesn't satisfy Phase 1's narrow shape — the diagnostic
+/// but doesn't satisfy Phase 1's narrow shape â€” the diagnostic
 /// is bubbled up so the user sees a clear pointer to which
 /// later phase handles their case.
-/// A4.4 (2026-06-08) — auto-inject cancel-guards before each
+/// A4.4 (2026-06-08) â€” auto-inject cancel-guards before each
 /// suspend point in a v3.1 async fn body. Called by
 /// `try_v31_transform` only when the async fn has a
 /// `ref CancelToken` / `mut ref CancelToken` parameter and the
@@ -7900,7 +7905,7 @@ fn rewrite_vars_to_fields(
 ///   `if <token>.cancelled { return 0 - 1; }`
 /// Suspends nested inside if/while bodies get the same
 /// treatment via recursion. The guard uses `0 - 1` rather than
-/// a bare `-1` literal because vāṇी doesn't have unary minus
+/// a bare `-1` literal because vÄá¹‡à¥€ doesn't have unary minus
 /// (negative literals are lexed as binary subtraction by
 /// existing examples; mirror that convention here).
 fn inject_cancel_guards(body: &[Stmt], token_name: &str, span: Span) -> Vec<Stmt> {
@@ -8006,7 +8011,7 @@ pub(crate) fn try_v31_transform(
     //   3. infer_concrete_type_for_call walks the called fn's
     //      declared params to find the T-bearing slot, with
     //      structural unwrap for v3.1 `__poll_*` calls (this
-    //      session — checker.rs).
+    //      session â€” checker.rs).
     fn_type_params: &[String],
     params: &[Param],
     body: &[Stmt],
@@ -8015,9 +8020,9 @@ pub(crate) fn try_v31_transform(
     if !body_uses_io_async(body) {
         return None; // Caller falls through to v1 desugar.
     }
-    // Phase 2.4 — `try EXPR` desugar for v3.1 async fn bodies.
+    // Phase 2.4 â€” `try EXPR` desugar for v3.1 async fn bodies.
     // Runs FIRST so subsequent passes (ANF, validator,
-    // state-machine collector) see only Match expressions —
+    // state-machine collector) see only Match expressions â€”
     // never the Try keyword. Lowers
     //   let X: T = try EXPR;
     // into
@@ -8027,8 +8032,8 @@ pub(crate) fn try_v31_transform(
     //   }
     //   let X: T = match __try_X_<n> { ResultType.Ok(v) then v, _ then 0 };
     // where ResultType is the async fn's return type (must be a
-    // registered enum with a payloaded first variant — the "Ok"
-    // arm — and any second variant as the "Err" propagation case).
+    // registered enum with a payloaded first variant â€” the "Ok"
+    // arm â€” and any second variant as the "Err" propagation case).
     let try_desugared_body: Vec<Stmt>;
     let body = match desugar_try_in_v31_body(body, return_type) {
         Ok(v) => {
@@ -8037,19 +8042,19 @@ pub(crate) fn try_v31_transform(
         }
         Err(d) => return Some(Err(d)),
     };
-    // Phase 2.2 — ANF lift nested io_*_async calls out of
+    // Phase 2.2 â€” ANF lift nested io_*_async calls out of
     // compound expressions into fresh Let bindings BEFORE
     // running the validator + collector. The lifted body has
     // io_*_async calls only at top-level Let RHS positions
     // (where the segment collector recognizes them as
     // suspend points). The validator + downstream synthesis
-    // see the lifted body — they don't need to know ANF
+    // see the lifted body â€” they don't need to know ANF
     // happened.
     let mut anf_counter: usize = 0;
     let lifted_body = anf_lift_body(body, &mut anf_counter);
     let body = lifted_body.as_slice();
 
-    // A4.4 (2026-06-08) — CancelToken auto-plumbing. When the
+    // A4.4 (2026-06-08) â€” CancelToken auto-plumbing. When the
     // async fn has a `ref CancelToken` / `mut ref CancelToken`
     // parameter AND the return type is i64 (sentinel-friendly),
     // walk the lifted body and inject
@@ -8061,7 +8066,7 @@ pub(crate) fn try_v31_transform(
     //
     // Non-i64 returns (Phase 3-returns ABI: `__result` field +
     // status code) keep the user's manual cancellation pattern
-    // for v1 — auto-injection there would require synthesizing
+    // for v1 â€” auto-injection there would require synthesizing
     // a default `__result` value, which is shape-dependent.
     let cancel_token_param: Option<String> = params.iter().find_map(|p| {
         let inner = match &p.ty {
@@ -8119,7 +8124,7 @@ pub(crate) fn try_v31_transform(
         span: fn_name_span,
     });
     for p in params {
-        // Phase 3-params — keep the user's annotation so non-i64
+        // Phase 3-params â€” keep the user's annotation so non-i64
         // params (bool / Str / Enum / etc.) become task struct
         // fields of the correct type, not forced to i64.
         struct_fields.push(StructField {
@@ -8135,7 +8140,7 @@ pub(crate) fn try_v31_transform(
             span: *span,
         });
     }
-    // Phase 3-returns — non-i64 async fn return types route the
+    // Phase 3-returns â€” non-i64 async fn return types route the
     // result through a synthesized `__result: T` field. Poll fn
     // returns status (0 = Ready, -2 = Pending, -1 = Error)
     // instead of the value; driver reads `t.__result` on status
@@ -8153,8 +8158,8 @@ pub(crate) fn try_v31_transform(
     // Phase 4c-broad: forward the enclosing fn's type params to
     // the synthesized Task__X struct so its field types (which
     // may reference Type::Param(T)) typecheck at template time.
-    // Mono later specializes the struct alongside the fn —
-    // Task__identity<T> → Task__identity__i64 etc.
+    // Mono later specializes the struct alongside the fn â€”
+    // Task__identity<T> â†’ Task__identity__i64 etc.
     let mut task_struct = StructDecl {
         name: task_struct_name.clone(),
         name_span: fn_name_span,
@@ -8192,12 +8197,12 @@ pub(crate) fn try_v31_transform(
     //     where the previous suspend completed; the local is
     //     saved into the task struct field.
     //   - Suspend(name, builtin, args): runs as a suspend point
-    //     (STATE TERMINATOR — bumps state_tag).
-    //   - Discard(expr): non-suspend `let _ = ...;` — emitted
+    //     (STATE TERMINATOR â€” bumps state_tag).
+    //   - Discard(expr): non-suspend `let _ = ...;` â€” emitted
     //     verbatim in current state.
-    //   - Return(expr): top-level return (STATE TERMINATOR —
+    //   - Return(expr): top-level return (STATE TERMINATOR â€”
     //     exits the poll fn entirely).
-    //   - Verbatim(Stmt): Phase 2 narrow — an if / while /
+    //   - Verbatim(Stmt): Phase 2 narrow â€” an if / while /
     //     Assign / Print at top level. The whole statement is
     //     emitted verbatim in the current state's arm with
     //     var-rewriting; does NOT terminate the state (a
@@ -8205,13 +8210,13 @@ pub(crate) fn try_v31_transform(
     //     poll fn naturally without changing the outer state
     //     transitions).
     enum Seg {
-        /// Phase 3a — carries the local's annotation so the
+        /// Phase 3a â€” carries the local's annotation so the
         /// synthesizer's temp local + task struct field codegen
         /// uses the correct type (Bool / f64 / Str / Enum / Struct).
         /// Defaults to I64 when the user wrote `let x = ...;`
         /// without an explicit annotation.
         NonSuspendLet { name: String, ty: Type, expr: Expr, span: crate::span::Span },
-        /// Phase 2.1 — Suspend carries explicit `bump_to`
+        /// Phase 2.1 â€” Suspend carries explicit `bump_to`
         /// because with branching the next state isn't always
         /// `current_index + 1`. Phase 1 sequential bodies still
         /// see `bump_to == current_index + 1` per the collector.
@@ -8225,7 +8230,7 @@ pub(crate) fn try_v31_transform(
         Discard { expr: Expr, span: crate::span::Span },
         Return { expr: Expr, span: crate::span::Span },
         Verbatim(Stmt),
-        /// Phase 2.1a — `if cond { ... } else { ... }` where at
+        /// Phase 2.1a â€” `if cond { ... } else { ... }` where at
         /// least one branch contains a suspend. The current
         /// state ends with a conditional jump to either
         /// then_state or else_state; the cascade enters the
@@ -8233,7 +8238,7 @@ pub(crate) fn try_v31_transform(
         /// (each branch must end with Return per Phase 2.1a's
         /// narrow scope).
         Decision { cond: Expr, then_state: usize, else_state: usize, span: crate::span::Span },
-        /// Phase 2.1b — unconditional state_tag bump. Emitted
+        /// Phase 2.1b â€” unconditional state_tag bump. Emitted
         /// at the END of a non-return-terminated branch to
         /// transfer control to the merge state. Cascade then
         /// enters the merge state on a subsequent poll() call.
@@ -8242,7 +8247,7 @@ pub(crate) fn try_v31_transform(
 
     // Build state_bodies directly via a recursive collector.
     // state_bodies[K] = segs that run when state_tag == K.
-    // Phase 2.1a allows Stmt::If with suspends in branches —
+    // Phase 2.1a allows Stmt::If with suspends in branches â€”
     // each branch becomes its own state chain rooted at an
     // explicit state index. The cascade pattern relies on
     // monotonic state advances, which holds because branch
@@ -8260,7 +8265,7 @@ pub(crate) fn try_v31_transform(
     // state pointed at by current_state. May allocate new
     // states. Returns the index of the state pointed at on
     // exit (useful when callers need to know where execution
-    // continues — for Phase 2.1a both branches must end with
+    // continues â€” for Phase 2.1a both branches must end with
     // Return so the exit-state isn't consumed).
     /// Returns `true` if the body terminated with a top-level
     /// `Return` (no fall-through). Phase 2.1b uses this to
@@ -8282,7 +8287,7 @@ pub(crate) fn try_v31_transform(
         let mut terminated = false;
         for s in stmts {
             if terminated {
-                // Unreachable code after a Return — validator
+                // Unreachable code after a Return â€” validator
                 // should reject this, but bail defensively.
                 break;
             }
@@ -8412,7 +8417,7 @@ pub(crate) fn try_v31_transform(
                         // through, allocate a merge state and
                         // emit Jumps. If BOTH branches terminated
                         // with Return (the Phase 2.1a case),
-                        // skip the merge — the outer flow can
+                        // skip the merge â€” the outer flow can
                         // never reach it. Otherwise the outer
                         // continues at the merge state.
                         if !then_terminated || !else_terminated {
@@ -8432,7 +8437,7 @@ pub(crate) fn try_v31_transform(
                             }
                             *current_state = merge_state;
                         } else {
-                            // Both branches Return — outer flow
+                            // Both branches Return â€” outer flow
                             // is dead. Allocate a defensive empty
                             // state. Validator should reject any
                             // stmts after this if.
@@ -8450,8 +8455,8 @@ pub(crate) fn try_v31_transform(
                     } else {
                         // Phase 2.5: state-splitting for
                         // while-with-suspend.
-                        //   K       : current state — push Jump(loop_header)
-                        //   K+1     : loop_header — push Decision(cond, body_start, post_loop)
+                        //   K       : current state â€” push Jump(loop_header)
+                        //   K+1     : loop_header â€” push Decision(cond, body_start, post_loop)
                         //   K+2     : post_loop (allocated up front so Decision can target it)
                         //   K+3..M  : body states (allocated during recursion)
                         //   K+M's tail: backward Jump(loop_header)
@@ -8541,7 +8546,7 @@ pub(crate) fn try_v31_transform(
     let mut loop_stack: Vec<(usize, usize)> = Vec::new();
     let _ = collect_into(body, &mut state_bodies, &mut start_state, &mut discard_counter, &mut loop_stack);
 
-    // The `states` shape stays the same as before — outer code
+    // The `states` shape stays the same as before â€” outer code
     // just iterates state_bodies. Drop any trailing empty
     // states allocated defensively after Returns/branches.
     let states: Vec<Vec<Seg>> = state_bodies;
@@ -8554,7 +8559,7 @@ pub(crate) fn try_v31_transform(
     //
     // Conservative rule: if a local is ever read in a different
     // state than the one declaring it, treat as cross-state.
-    // Conservative is safe — emitting more fields than strictly
+    // Conservative is safe â€” emitting more fields than strictly
     // needed never breaks correctness, only wastes ~8 bytes
     // per stale field.
     //
@@ -8751,7 +8756,7 @@ pub(crate) fn try_v31_transform(
                     // v3.1 caveat #2 polish, part 2 (2026-06-08):
                     // state-local locals (declared + read entirely
                     // within ONE state-machine arm) elide the
-                    // FieldAssign and the Task struct field —
+                    // FieldAssign and the Task struct field â€”
                     // they live as poll-fn stack locals. Reads
                     // of the name in the same state see the local
                     // directly because the analysis pass above
@@ -8770,7 +8775,7 @@ pub(crate) fn try_v31_transform(
                         });
                     } else {
                         // Cross-state: existing two-step emission.
-                        // Phase 3a — `ty` carries the user-written
+                        // Phase 3a â€” `ty` carries the user-written
                         // annotation (Type::I64 by default).
                         let synth_local = format!("__v3_tmp_{}", name);
                         then_body.push(Stmt::Let {
@@ -8795,7 +8800,7 @@ pub(crate) fn try_v31_transform(
                     }
                 }
                 Seg::Discard { expr, span } => {
-                    // `let _ = EXPR;` — emit as a normal discard with the
+                    // `let _ = EXPR;` â€” emit as a normal discard with the
                     // expr rewritten so any Var refs hit the task struct.
                     let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
                     then_body.push(Stmt::Let {
@@ -8876,7 +8881,7 @@ pub(crate) fn try_v31_transform(
                         // Ensure the task struct knows about this field.
                         // Already added during locals collection if the
                         // user declared it; synthetic discard fields would
-                        // need adding too if we cared (we don't — discards
+                        // need adding too if we cared (we don't â€” discards
                         // skip the save).
                         then_body.push(Stmt::FieldAssign {
                             object: Expr {
@@ -8912,7 +8917,7 @@ pub(crate) fn try_v31_transform(
                 }
                 Seg::Return { expr, span } => {
                     let rewritten_expr = rewrite_vars_to_fields(expr, &rename, &t_param_name);
-                    // Phase 3-returns — for non-i64 returns route
+                    // Phase 3-returns â€” for non-i64 returns route
                     // the value through `__t.__result`, then
                     // return 0 (Ready status). i64 returns keep
                     // the historical ABI (poll returns the value).
@@ -8983,7 +8988,7 @@ pub(crate) fn try_v31_transform(
                     //     __t.state_tag = else_state;
                     //   }
                     // The cascade then enters either then_state
-                    // or else_state on the same poll() call —
+                    // or else_state on the same poll() call â€”
                     // no return -2 here because the decision
                     // itself isn't a suspend point.
                     let rewritten_cond = rewrite_vars_to_fields(cond, &rename, &t_param_name);
@@ -9031,14 +9036,14 @@ pub(crate) fn try_v31_transform(
         });
     }
     // Defensive trailing `return 0 - 1;` inside the cascade
-    // (reached only when no state-tag matches — i.e., the
+    // (reached only when no state-tag matches â€” i.e., the
     // state machine fell through somehow).
     poll_body.push(Stmt::Return {
         expr: synth_i64_sub(0, 1, fn_name_span),
         span: fn_name_span,
     });
 
-    // Phase 2.5 — wrap the cascade in `while true { ... }`
+    // Phase 2.5 â€” wrap the cascade in `while true { ... }`
     // so backward Jumps (loop back-edges) can use `continue`
     // to re-enter the cascade. Non-loop fns hit the trailing
     // return -1 on the first iteration and exit normally.
@@ -9054,7 +9059,7 @@ pub(crate) fn try_v31_transform(
             span: fn_name_span,
         },
         // Defensive trailing return after the while (unreachable
-        // — while-true exits only via `return` inside).
+        // â€” while-true exits only via `return` inside).
         Stmt::Return {
             expr: synth_i64_sub(0, 1, fn_name_span),
             span: fn_name_span,
@@ -9066,7 +9071,7 @@ pub(crate) fn try_v31_transform(
     // enclosing async fn is generic, the poll fn is too. Its
     // single param's type is `mut ref Task__X<T1, T2, ...>`
     // (Type::Apply) so mono can substitute T per call site
-    // and re-collapse Apply<concrete> → Struct(mangled) via
+    // and re-collapse Apply<concrete> â†’ Struct(mangled) via
     // substitute_type_param's Type::Apply branch. For non-
     // generic templates, Type::Apply with empty args degrades
     // gracefully to Type::Struct(name) under existing
@@ -9105,6 +9110,7 @@ pub(crate) fn try_v31_transform(
         no_recursion: false,
         interrupt: false,
         interrupt_priority: None,
+        inline: false,
         no_mangle: false,
         link_section: None,
         safety_standard: None,
@@ -9132,20 +9138,20 @@ pub(crate) fn try_v31_transform(
     }
     for (name, ty, span) in &locals {
         // v3.1 caveat #2 polish, part 2 (2026-06-08): skip
-        // state-local locals — they live as poll-fn stack
+        // state-local locals â€” they live as poll-fn stack
         // locals, not Task struct fields, so they don't need
         // ctor-side default-init either.
         if state_locals.contains(name) {
             continue;
         }
-        // Phase 3a — emit type-appropriate default-init so the
+        // Phase 3a â€” emit type-appropriate default-init so the
         // constructor's StructLit typechecks for non-i64 fields.
         ctor_fields.push((
             name.clone(),
             v31_default_init_expr(ty, *span),
         ));
     }
-    // Phase 3-returns — default-init the synthesized `__result`
+    // Phase 3-returns â€” default-init the synthesized `__result`
     // field if the async fn has a non-i64 return type.
     //
     // Phase 4c-broad: when return_type is Type::Param(name),
@@ -9153,7 +9159,7 @@ pub(crate) fn try_v31_transform(
     // already enforced that one exists). At template time we
     // can't conjure a default value of generic T, but we CAN
     // reuse a parameter's runtime value as the initial slot
-    // contents — the poll fn overwrites `__result` before the
+    // contents â€” the poll fn overwrites `__result` before the
     // first read anyway, so the seed is just a typecheck-
     // satisfying placeholder.
     if return_via_field {
@@ -9186,7 +9192,7 @@ pub(crate) fn try_v31_transform(
         span: fn_name_span,
     }];
 
-    // Phase 4 — also register the synthesized Task__X struct in
+    // Phase 4 â€” also register the synthesized Task__X struct in
     // V31_STRUCT_REGISTRY so OTHER v3.1 async fns can declare a
     // local of this type (`let sub: Task__inner = inner(args);`)
     // and the type-allowed gate accepts it. The struct's fields

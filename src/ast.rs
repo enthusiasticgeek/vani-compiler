@@ -652,6 +652,13 @@ pub struct Function {
     /// parallel-for. Composable with other primitives — the
     /// union of constraints applies.
     pub interrupt: bool,
+    /// S-14: set when the function is annotated `#[inline]`.
+    /// The stack-depth analyser (`stack_depth.rs`) treats inlined callees as
+    /// contributing their local bytes directly to the caller's frame (no
+    /// separate frame push) rather than as a full call frame on the stack.
+    /// This matches LLVM / Clang semantics: truly inlined functions have zero
+    /// additional activation-record overhead.
+    pub inline: bool,
     /// S-20: optional ISR priority level from `#[interrupt(priority=N)]`.
     /// Lower N = higher urgency (NVIC convention: priority 0 is highest).
     /// When set, the preemption checker verifies that any resource accessed
