@@ -1582,6 +1582,7 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            interrupt_priority: None,
             no_mangle: false,
             link_section: None,
             safety_standard: None,
@@ -1618,6 +1619,7 @@ impl Parser {
         let mut no_float = false;
         let mut no_recursion = false;
         let mut interrupt = false;
+        let mut interrupt_priority: Option<u32> = None;
         let mut no_mangle = false;
         let mut vectorize = false;
         let mut link_section: Option<String> = None;
@@ -1652,7 +1654,42 @@ impl Parser {
                 "no_heap" => no_heap = true,
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
-                "interrupt" => interrupt = true,
+                "interrupt" => {
+                    interrupt = true;
+                    // Optional `(priority=N)` sub-attribute (S-20).
+                    if self.check(|k| matches!(k, TokenKind::LParen)) {
+                        self.bump(); // consume `(`
+                        let key_tok = self.expect_ident()?;
+                        let key = ident_text(key_tok);
+                        if key != "priority" {
+                            return Err(Diagnostic::new(
+                                self.current().span,
+                                format!(
+                                    "expected `priority` key in `#[interrupt(priority=N)]`, \
+                                     got `{}`",
+                                    key
+                                ),
+                            ));
+                        }
+                        self.expect_keyword(
+                            "'=' after `priority`",
+                            |k| matches!(k, TokenKind::Equal),
+                        )?;
+                        let n_tok = self.bump();
+                        let prio = match n_tok.kind {
+                            TokenKind::Int(v) if v >= 0 => v as u32,
+                            _ => {
+                                return Err(Diagnostic::new(
+                                    n_tok.span,
+                                    "expected a non-negative integer literal as the \
+                                     interrupt priority (lower = higher urgency)",
+                                ));
+                            }
+                        };
+                        self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+                        interrupt_priority = Some(prio);
+                    }
+                }
                 "no_mangle" => no_mangle = true,
                 "vectorize" => vectorize = true,
                 "link_section" => {
@@ -1754,7 +1791,9 @@ impl Parser {
                 // deviations extractor can populate the
                 // `target_standard` column.
                 "misra_c_2012" | "asil_d" | "do178c_level_a"
-                | "iec_62304_class_c" => {
+                | "iec_62304_class_c"
+                | "iec_61508_sil3" | "iec_61508_sil4"
+                | "autosar_ap" => {
                     if let Some(existing) = &safety_standard {
                         return Err(Diagnostic::new(
                             self.current().span,
@@ -1779,9 +1818,12 @@ impl Parser {
                              `#[no_mangle]`, `#[vectorize]`, \
                              `#[link_section = \"s\"]`, \
                              `#[bounded_stack(bytes=N)]`, `#[wcet(cycles=N)]`, \
-                             `#[deterministic_timing]`; \
+                             `#[deterministic_timing]`, \
+                             `#[interrupt]` or `#[interrupt(priority=N)]`; \
                              standard composites `#[misra_c_2012]`, `#[asil_d]`, \
-                             `#[do178c_level_a]`, `#[iec_62304_class_c]`",
+                             `#[do178c_level_a]`, `#[iec_62304_class_c]`, \
+                             `#[iec_61508_sil3]`, `#[iec_61508_sil4]`, \
+                             `#[autosar_ap]`",
                             other
                         ),
                     ));
@@ -1800,30 +1842,40 @@ impl Parser {
         // label each record with its target standard.
         //
         // Expansion matrix:
-        //   misra_c_2012     → no_heap + no_recursion
-        //   iec_62304_class_c→ no_heap + no_recursion
-        //   asil_d           → no_heap + no_recursion + no_float
-        //                      + deterministic_timing
-        //                      (wcet + bounded_stack required but
-        //                      must be explicit — they carry a
-        //                      user-supplied budget value)
-        //   do178c_level_a   → same as asil_d
+        //   misra_c_2012      → no_heap + no_recursion
+        //   iec_62304_class_c → no_heap + no_recursion
+        //   asil_d            → no_heap + no_recursion + no_float
+        //                       + deterministic_timing
+        //                       (wcet + bounded_stack required)
+        //   do178c_level_a    → same as asil_d
+        //   iec_61508_sil3    → no_heap + no_recursion + no_float
+        //                       + deterministic_timing
+        //                       (wcet + bounded_stack required)
+        //   iec_61508_sil4    → same as sil3 (strictest)
+        //   autosar_ap        → no_heap + no_recursion
+        //                       + deterministic_timing
+        //                       (float permitted; wcet + bounded_stack
+        //                       must still be declared)
         let composite_no_heap = safety_standard.is_some();
         let composite_no_recursion = safety_standard.is_some();
         let composite_no_float = matches!(
             safety_standard.as_deref(),
             Some("asil_d") | Some("do178c_level_a")
+            | Some("iec_61508_sil3") | Some("iec_61508_sil4")
         );
         let composite_deterministic_timing = matches!(
             safety_standard.as_deref(),
             Some("asil_d") | Some("do178c_level_a")
+            | Some("iec_61508_sil3") | Some("iec_61508_sil4")
+            | Some("autosar_ap")
         );
-        // ASIL-D / DO-178C Level A require bounded_stack and wcet
-        // to be explicitly declared (they carry a budget value the
-        // user must supply). Emit an error if either is absent.
+        // These standards require bounded_stack and wcet to be
+        // explicitly declared (budget values supplied by the user).
         if matches!(
             safety_standard.as_deref(),
             Some("asil_d") | Some("do178c_level_a")
+            | Some("iec_61508_sil3") | Some("iec_61508_sil4")
+            | Some("autosar_ap")
         ) {
             let std_name = safety_standard.as_deref().unwrap_or("");
             if bounded_stack.is_none() {
@@ -1855,6 +1907,7 @@ impl Parser {
         f.no_float = no_float || composite_no_float;
         f.deterministic_timing = deterministic_timing || composite_deterministic_timing;
         f.interrupt = interrupt;
+        f.interrupt_priority = interrupt_priority;
         f.no_mangle = no_mangle;
         f.vectorize = vectorize;
         f.link_section = link_section;
@@ -1925,6 +1978,7 @@ impl Parser {
             no_float: false,
             no_recursion: false,
             interrupt: false,
+            interrupt_priority: None,
             no_mangle: false,
             link_section: None,
             safety_standard: None,
@@ -9050,6 +9104,7 @@ pub(crate) fn try_v31_transform(
         no_float: false,
         no_recursion: false,
         interrupt: false,
+        interrupt_priority: None,
         no_mangle: false,
         link_section: None,
         safety_standard: None,

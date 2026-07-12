@@ -3177,3 +3177,219 @@ pub fn enforce_lock_order(
         }
     }
 }
+
+// ── S-20: ISR priority annotation and preemption check ───────────────────────
+
+/// Collect the set of mutex names that a function (transitively) tries to
+/// `mutex_lock`. Used by the ISR preemption checker to find shared resources.
+fn collect_locked_mutexes(stmts: &[crate::ir::TypedStmt]) -> std::collections::HashSet<String> {
+    use crate::ir::TypedStmt as S;
+    use crate::ir::TypedExprKind as EK;
+    let mut result = std::collections::HashSet::new();
+    collect_locked_mutexes_stmts(stmts, &mut result);
+    result
+}
+
+fn collect_locked_mutexes_stmts(
+    stmts: &[crate::ir::TypedStmt],
+    out: &mut std::collections::HashSet<String>,
+) {
+    use crate::ir::TypedStmt as S;
+    for stmt in stmts {
+        match stmt {
+            S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. }
+            | S::Assert { expr, .. } | S::Prove { expr } | S::Return { expr } => {
+                collect_locked_mutexes_expr(expr, out);
+            }
+            S::If { cond, then_body, else_body } => {
+                collect_locked_mutexes_expr(cond, out);
+                collect_locked_mutexes_stmts(then_body, out);
+                collect_locked_mutexes_stmts(else_body, out);
+            }
+            S::While { cond, body, .. } => {
+                collect_locked_mutexes_expr(cond, out);
+                collect_locked_mutexes_stmts(body, out);
+            }
+            S::For { start, end, body, .. } => {
+                collect_locked_mutexes_expr(start, out);
+                collect_locked_mutexes_expr(end, out);
+                collect_locked_mutexes_stmts(body, out);
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => {
+                collect_locked_mutexes_stmts(body, out);
+            }
+            S::IndexAssign { index, value, .. } => {
+                collect_locked_mutexes_expr(index, out);
+                collect_locked_mutexes_expr(value, out);
+            }
+            S::FieldAssign { object, value, .. } => {
+                collect_locked_mutexes_expr(object, out);
+                collect_locked_mutexes_expr(value, out);
+            }
+            S::Print { items } | S::EPrint { items } => {
+                for item in items {
+                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                        collect_locked_mutexes_expr(e, out);
+                    }
+                }
+            }
+            S::Drop { .. } | S::ForIterShallowFree { .. }
+            | S::Break { .. } | S::Continue { .. }
+            | S::TaskJoin { .. } => {}
+        }
+    }
+}
+
+fn collect_locked_mutexes_expr(
+    expr: &crate::ir::TypedExpr,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    match &expr.kind {
+        EK::Call { name, args, .. } if name == "mutex_lock" => {
+            if let Some(arg) = args.first() {
+                if let Some(mx) = extract_mutex_name_from_typed_expr(arg) {
+                    out.insert(mx);
+                }
+            }
+            for a in args {
+                collect_locked_mutexes_expr(a, out);
+            }
+        }
+        EK::Call { args, .. } => {
+            for a in args { collect_locked_mutexes_expr(a, out); }
+        }
+        EK::Unary { expr: inner, .. } | EK::Cast { expr: inner, .. } => {
+            collect_locked_mutexes_expr(inner, out);
+        }
+        EK::Binary { left, right, .. }
+        | EK::Index { array: left, index: right, .. } => {
+            collect_locked_mutexes_expr(left, out);
+            collect_locked_mutexes_expr(right, out);
+        }
+        EK::Block { stmts, tail } => {
+            collect_locked_mutexes_stmts(stmts, out);
+            collect_locked_mutexes_expr(tail, out);
+        }
+        EK::IfExpr { cond, then_value, else_value } => {
+            collect_locked_mutexes_expr(cond, out);
+            collect_locked_mutexes_expr(then_value, out);
+            collect_locked_mutexes_expr(else_value, out);
+        }
+        EK::Match { scrutinee, arms } => {
+            collect_locked_mutexes_expr(scrutinee, out);
+            for arm in arms { collect_locked_mutexes_expr(&arm.body, out); }
+        }
+        EK::EnumVariantWithPayload { payload, .. } => {
+            collect_locked_mutexes_expr(payload, out);
+        }
+        EK::DynCoerce { value, .. } => { collect_locked_mutexes_expr(value, out); }
+        EK::DynDispatch { receiver, args, .. } => {
+            collect_locked_mutexes_expr(receiver, out);
+            for a in args { collect_locked_mutexes_expr(a, out); }
+        }
+        EK::CallIndirect { callee, args } => {
+            collect_locked_mutexes_expr(callee, out);
+            for a in args { collect_locked_mutexes_expr(a, out); }
+        }
+        EK::Tuple { elements } | EK::ArrayLit { elements } => {
+            for e in elements { collect_locked_mutexes_expr(e, out); }
+        }
+        EK::TupleAccess { tuple: inner, .. }
+        | EK::FieldAccess { object: inner, .. } => {
+            collect_locked_mutexes_expr(inner, out);
+        }
+        EK::RefMutIndex { index, .. } => { collect_locked_mutexes_expr(index, out); }
+        EK::Len { array: inner, .. } => { collect_locked_mutexes_expr(inner, out); }
+        EK::StructLit { fields, .. } => {
+            for (_, e) in fields { collect_locked_mutexes_expr(e, out); }
+        }
+        _ => {}
+    }
+}
+
+/// S-20 — ISR priority and preemption check.
+///
+/// A higher-priority ISR (lower priority number) that acquires a mutex
+/// also held by a lower-priority ISR (or the main thread) risks a
+/// **priority inversion** or **deadlock**: if the lower-priority ISR has
+/// already locked the mutex when the higher-priority ISR fires, the
+/// high-priority ISR will spin/block until the lower-priority ISR is
+/// scheduled again — which can never happen while the high-priority ISR
+/// is running.
+///
+/// Check: for every pair of `#[interrupt(priority=P)]` functions that
+/// both call `mutex_lock` on a mutex with the same variable name, emit a
+/// warning when one priority is strictly higher than the other (lower P
+/// value). The canonical fix is to replace the mutex with an atomic
+/// operation or to use a priority-ceiling protocol.
+pub fn enforce_isr_preemption(
+    program: &crate::ir::TypedProgram,
+    diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
+) {
+    // Collect (priority, fn_name, fn_span, locked_mutex_set) for every ISR
+    // that declares a priority.
+    let isrs: Vec<(u32, &str, crate::span::Span, std::collections::HashSet<String>)> =
+        program.functions.iter().filter_map(|f| {
+            if let Some(prio) = f.interrupt_priority {
+                let mx = collect_locked_mutexes(&f.body);
+                Some((prio, f.name.as_str(), f.span, mx))
+            } else {
+                None
+            }
+        }).collect();
+
+    if isrs.len() < 2 {
+        return;
+    }
+
+    // For every pair (i, j) where prio_i < prio_j (i has HIGHER urgency),
+    // check if they share a mutex.
+    for i in 0..isrs.len() {
+        for j in (i + 1)..isrs.len() {
+            let (pi, ni, si, mi) = &isrs[i];
+            let (pj, nj, sj, mj) = &isrs[j];
+            // lower number = higher urgency; only flag when priorities differ
+            if pi == pj {
+                continue;
+            }
+            // find shared mutexes
+            let shared: Vec<&String> = mi.intersection(mj).collect();
+            if shared.is_empty() {
+                continue;
+            }
+            let (high_fn, low_fn, high_span, high_prio, low_prio) = if pi < pj {
+                (ni, nj, si, pi, pj)
+            } else {
+                (nj, ni, sj, pj, pi)
+            };
+            let mutex_list: Vec<&str> = {
+                let mut v: Vec<&str> = shared.iter().map(|s| s.as_str()).collect();
+                v.sort();
+                v
+            };
+            let msg = format!(
+                "[S-20] potential priority inversion: ISR `{}` (priority {}) and ISR `{}` \
+                 (priority {}) both acquire mutex '{}'. If the lower-priority ISR holds \
+                 the lock when the higher-priority ISR fires, the higher-priority ISR \
+                 cannot proceed until the lower one is scheduled — which may never happen.",
+                high_fn, high_prio, low_fn, low_prio,
+                mutex_list.join("', '"),
+            );
+            let hint = format!(
+                "Use an atomic operation or a priority-ceiling protocol instead of a \
+                 mutex for resources shared between ISRs at different priority levels. \
+                 Alternatively, ensure both ISRs use `#[interrupt]` without a mutex \
+                 for this resource."
+            );
+            diagnostics.push(crate::diagnostic::Diagnostic {
+                span: *high_span,
+                message: msg,
+                related: vec![],
+                elaboration: vec![hint],
+            });
+        }
+    }
+}

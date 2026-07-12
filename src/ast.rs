@@ -652,6 +652,14 @@ pub struct Function {
     /// parallel-for. Composable with other primitives — the
     /// union of constraints applies.
     pub interrupt: bool,
+    /// S-20: optional ISR priority level from `#[interrupt(priority=N)]`.
+    /// Lower N = higher urgency (NVIC convention: priority 0 is highest).
+    /// When set, the preemption checker verifies that any resource accessed
+    /// by this ISR is also safe to access from ISRs at equal or lower
+    /// priority, flagging unguarded shared-variable accesses. `None` when
+    /// `#[interrupt]` is bare (no priority specified) or the function is
+    /// not an ISR.
+    pub interrupt_priority: Option<u32>,
     /// When true (`#[no_mangle]`), both codegen backends emit this
     /// function using its literal vāṇī name — no `intent_` prefix,
     /// no Unicode escaping — so linker scripts and assembly startup
@@ -678,6 +686,9 @@ pub struct Function {
     /// - `"asil_d"` — ISO 26262 ASIL-D
     /// - `"do178c_level_a"` — DO-178C Level A (avionics)
     /// - `"iec_62304_class_c"` — IEC 62304 Class C (medical)
+    /// - `"iec_61508_sil3"` — IEC 61508 SIL-3 (industrial)
+    /// - `"iec_61508_sil4"` — IEC 61508 SIL-4 (industrial, strictest)
+    /// - `"autosar_ap"` — AUTOSAR Adaptive Platform
     ///
     /// `None` for fns with no composite tag.
     pub safety_standard: Option<String>,

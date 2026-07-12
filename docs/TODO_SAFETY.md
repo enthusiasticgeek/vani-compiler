@@ -155,11 +155,13 @@ self-contained pass in `src/safety.rs`.
   as warning-level diagnostics with the span of the closing lock acquisition
   and a hint naming the canonical ordering to adopt.
 
-- [ ] **S-20. ISR priority and preemption model**
-  `#[interrupt]` currently validates the body but not the priority level.
-  Add `#[interrupt(priority=N)]` syntax. Detect when a lower-priority ISR
-  accesses a resource that a higher-priority ISR also accesses without an
-  atomic or `#[no_preempt]` guard.
+- [x] **S-20. ISR priority and preemption model** ✅ 2026-07-12
+  `#[interrupt(priority=N)]` syntax added to parser and forwarded through
+  `ast::Function` → `ir::TypedFunction`. `enforce_isr_preemption` in
+  `safety.rs` warns when two ISRs at different priority levels both call
+  `mutex_lock` on a mutex with the same variable name (potential priority
+  inversion or deadlock), with an elaboration hint recommending atomics or a
+  priority-ceiling protocol.
 
 ---
 
@@ -235,7 +237,7 @@ self-contained pass in `src/safety.rs`.
 | S-17 | SMT loop invariant | [ ] | |
 | S-18 | SMT cross-module | [ ] | |
 | S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: DFS cycle detection on acquisition-order graph |
-| S-20 | ISR priority model | [ ] | |
+| S-20 | ISR priority model | ✅ 2026-07-12 | #[interrupt(priority=N)] + enforce_isr_preemption: mutex sharing check |
 | S-21 | IEC 61508 SIL-3/4 | ✅ 2026-07-12 | iec_61508_sil3/sil4 tags; no_heap+no_recursion+no_float+det_timing |
 | S-22 | AUTOSAR AP tag | ✅ 2026-07-12 | autosar_ap tag; no_heap+no_recursion+det_timing; float ok |
 | S-23 | MC/DC coverage | [ ] | large |

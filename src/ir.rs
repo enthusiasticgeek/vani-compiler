@@ -85,6 +85,10 @@ pub struct TypedFunction {
     /// pass (no_heap + no_recursion + no_lock + no_spawn)
     /// via `safety::enforce_interrupt`.
     pub interrupt: bool,
+    /// S-20: optional ISR priority from `#[interrupt(priority=N)]`.
+    /// Lower value = higher urgency (NVIC convention). `None` when
+    /// `#[interrupt]` is bare or the function is not an ISR.
+    pub interrupt_priority: Option<u32>,
     /// Forwarded from `ast::Function::no_mangle`. When true,
     /// both backends emit the function with its literal vāṇī name
     /// (no `intent_` prefix, no Unicode escaping).
