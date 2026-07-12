@@ -619,24 +619,17 @@ fn main() -> i64 {
 
 // ── Category 9: Known-gap documentation tests ───────────────────────────────
 //
-// These tests document CHECK PASSES THAT ARE KNOWN TO BE INCOMPLETE.
-// They are named `gap_*` and verify that the program is ACCEPTED despite
-// containing a real safety issue — recording the gap so future improvements
-// can flip them to rejection tests.
-//
-// DO NOT change these to assert_rejected without first implementing the
-// missing detection logic.
+// These tests were previously KNOWN GAPS and have been FIXED (L20, L21, L22).
+// They now assert the compiler correctly REJECTS these programs.
+// Fixed in: collect_lock_sequence (L20), collect_locked_mutexes (L21),
+// check_eval_order_expr (L22).
 
 #[test]
 fn gap_s19_lock_order_via_transitive_call_not_detected() {
-    // KNOWN GAP (S-19): collect_lock_sequence only walks the body of
-    // each function directly. It does NOT follow calls to helpers.
-    // Here fn_a acquires m_x then calls helper which acquires m_y,
-    // while fn_b acquires m_y then calls helper which acquires m_x.
-    // The effective orderings are m_x→m_y and m_y→m_x, but the pass
-    // sees fn_a as [m_x] and fn_b as [m_y] — only single-element
-    // sequences, never building the cross-function edges.
-    // When this gap is fixed, change assert_accepted → assert_rejected("S-19").
+    // FIXED (L20): collect_lock_sequence now follows calls into user-defined
+    // helpers when building the lock-acquisition sequence. fn_a locks m_x
+    // then (via helper) m_y; fn_b locks m_y then (via helper) m_x —
+    // effective sequences [m_x, m_y] and [m_y, m_x] form a cycle.
     let path = tmp("gap_lock_trans", r#"
 fn acquire_second_y(m_y: ref Mutex<i64>) -> i64 {
   let gy: Guard<i64> = mutex_lock(m_y);
@@ -662,21 +655,14 @@ fn main() -> i64 {
   return 0;
 }
 "#);
-    let (_ok, stderr) = check(&path);
-    assert!(
-        !stderr.contains("S-19"),
-        "Gap is already fixed! Update this test to assert_rejected(\"S-19\"):\n{}",
-        stderr
-    );
+    assert_rejected(&path, "S-19");
 }
 
 #[test]
 fn gap_s20_isr_mutex_through_helper_not_detected() {
-    // KNOWN GAP (S-20): collect_locked_mutexes only walks the ISR's own
-    // body. It does NOT follow calls into helpers. So if an ISR calls a
-    // helper that acquires a mutex, that mutex is not added to the ISR's
-    // lock set and the priority-inversion check misses the shared resource.
-    // When this gap is fixed, change assert to check for "S-20".
+    // FIXED (L21): collect_locked_mutexes now follows calls into user-defined
+    // helpers. Both ISRs call do_lock() which acquires the mutex — the helper's
+    // mutex is now attributed to both ISRs and the priority-inversion is detected.
     let path = tmp("gap_isr_helper", r#"
 fn do_lock(shared: ref Mutex<i64>) -> i64 {
   let g: Guard<i64> = mutex_lock(shared);
@@ -692,21 +678,14 @@ fn low_isr(shared: ref Mutex<i64>) -> i64 {
 }
 fn main() -> i64 { return 0; }
 "#);
-    let (_ok, stderr) = check(&path);
-    assert!(
-        !stderr.contains("S-20"),
-        "Gap is already fixed! Update this test to assert_rejected(\"S-20\"):\n{}",
-        stderr
-    );
+    assert_rejected(&path, "S-20");
 }
 
 #[test]
 fn gap_misra_13_2_non_adjacent_duplicate_not_detected() {
-    // KNOWN GAP (MISRA 13.2): the check only fires when the same variable
-    // appears in ADJACENT arg positions (i == first_pos + 1). If the same
-    // var appears in positions 0 and 2 (one unrelated arg in between), the
-    // diagnostic is not emitted even though evaluation order is still
-    // unspecified. When this gap is fixed, change to assert_rejected.
+    // FIXED (L22): check_eval_order_expr now uses seen.remove() instead of
+    // seen.get(), so any second occurrence of a variable at any distance
+    // (not just adjacent) is detected. foo(x, y, x) is now caught.
     let path = tmp("gap_eval_order_nonadj", r#"
 fn three_args(a: i64, b: i64, c: i64) -> i64 { return a + b + c; }
 #[misra_c_2012]
@@ -715,10 +694,5 @@ fn demo(v: i64, w: i64) -> i64 {
 }
 fn main() -> i64 { return 0; }
 "#);
-    let (_ok, stderr) = check(&path);
-    assert!(
-        !stderr.contains("MISRA 13.2"),
-        "Gap is already fixed! Update this test to assert_rejected(\"MISRA 13.2\"):\n{}",
-        stderr
-    );
+    assert_rejected(&path, "MISRA 13.2");
 }

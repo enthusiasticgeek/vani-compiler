@@ -14,8 +14,9 @@
 >
 > **At v0.1.6 (2026-06-21): 18 of 19 entries fully resolved; 1 partially
 > resolved (L13); 4 remain open (L5, L6, L10-macOS, L14). L19 fully closed.**
-> Three safety-analysis scope limitations added (L20–L22); none block
-> certification but require supplementary verification and TQD disclosure.
+> Three safety-analysis scope limitations (L20–L22) were added and subsequently
+> **fully fixed on 2026-07-12**: transitive lock-order detection (L20), ISR mutex
+> detection through helpers (L21), and MISRA 13.2 non-adjacent duplicate args (L22).
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -38,9 +39,9 @@
 > | L17 | `RwLock<T>` / `ReadGuard` / `WriteGuard` missing | ✅ Resolved v0.1.1 (2026-06-18) |
 > | L18 | File I/O, stdin, stderr, flush — no native surface | ✅ Resolved v0.1.5 (2026-06-21) |
 > | L19 | Bare-metal / custom OS — five gaps block production use | ✅ All 5 gaps resolved v0.1.6 (2026-06-21) |
-> | L20 | S-19 lock-order detection is intra-procedural only | ⬜ Supplementary review required; see below |
-> | L21 | S-20 ISR mutex detection does not follow helper calls | ⬜ Supplementary review required; see below |
-> | L22 | MISRA 13.2 eval-order check: adjacent args only | ⬜ Advisory rule; documented deviation permitted |
+> | L20 | S-19 lock-order detection is intra-procedural only | ✅ Fixed 2026-07-12 — held-set transitive analysis |
+> | L21 | S-20 ISR mutex detection does not follow helper calls | ✅ Fixed 2026-07-12 — collect_locked_mutexes follows calls |
+> | L22 | MISRA 13.2 eval-order check: adjacent args only | ✅ Fixed 2026-07-12 — any-distance duplicate detection |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -1056,9 +1057,17 @@ compiler bugs — the passes produce no false negatives within their
 documented scope. They are documentation entries for Tool Qualification
 purposes.
 
-### L20 — S-19: lock-order deadlock detection is intra-procedural
+### L20 — S-19: lock-order deadlock detection is intra-procedural ✅ Fixed 2026-07-12
 
-**Scope.** `enforce_lock_order` (`src/safety.rs`) collects
+**Fix applied.** `enforce_lock_order` now uses a held-set analysis
+(`build_lock_edges` / `build_lock_edges_expr`) that follows calls into
+user-defined helpers with a clone of the caller's current held-lock set.
+Callee-acquired locks are released on return (clone discarded), preventing
+false cross-call ordering constraints. The `gap_s19_*` adversarial test
+now asserts rejection. The original scope description is preserved below
+for historical reference.
+
+**Original scope.** `enforce_lock_order` (`src/safety.rs`) collected
 `mutex_lock` call sequences by walking each function's body directly,
 then builds a global acquisition-order graph from consecutive pairs
 and runs DFS cycle detection. This correctly detects:
@@ -1087,19 +1096,25 @@ in the Tool Qualification Document. Supplement with:
   under a RTOS scheduler (if applicable) or a controlled sequential
   simulator.
 
-**Fix path.** Extend `collect_lock_sequence` to follow calls into
-non-extern functions (call-graph traversal with cycle guard) before
-building the ordering graph. When fixed, flip the `gap_s19_*` test to
+**Fix path.** ✅ Implemented: replaced flat-sequence collection with
+`build_lock_edges` held-set analysis. `gap_s19_*` now calls
 `assert_rejected("S-19")`.
 
 ---
 
-### L21 — S-20: ISR priority-inversion check does not follow helper calls
+### L21 — S-20: ISR priority-inversion check does not follow helper calls ✅ Fixed 2026-07-12
 
-**Scope.** `enforce_isr_preemption` (`src/safety.rs`) calls
+**Fix applied.** `collect_locked_mutexes` / `collect_locked_mutexes_stmts` /
+`collect_locked_mutexes_expr` now accept `fn_map` and `visiting` parameters.
+When a call to a user-defined (non-extern) function is encountered, the
+function's body is recursively walked to collect transitively acquired mutexes.
+Cycle guard via `visiting` prevents infinite recursion. The `gap_s20_*`
+adversarial test now asserts rejection.
+
+**Original scope.** `enforce_isr_preemption` (`src/safety.rs`) called
 `collect_locked_mutexes` on each ISR's body. A `mutex_lock` in the ISR
-body is attributed to that ISR's lock set. A `mutex_lock` inside a
-helper function called by the ISR is **not** attributed to the ISR.
+body was attributed to that ISR's lock set. A `mutex_lock` inside a
+helper function called by the ISR was **not** attributed to the ISR.
 
 Two ISRs at different priorities sharing a mutex through a common helper
 will not trigger the `[S-20]` warning.
@@ -1115,18 +1130,23 @@ will not trigger the `[S-20]` warning.
 - **Secondary mitigation**: flatten mutex acquisition into the ISR body
   directly. The existing direct-body check then catches ordering issues.
 
-**Fix path.** Extend `collect_locked_mutexes` to follow `Call`
-expressions into non-extern functions (same fixpoint as
-`enforce_no_float`). When fixed, flip the `gap_s20_*` test.
+**Fix path.** ✅ Implemented: `collect_locked_mutexes` now follows calls
+transitively. `gap_s20_*` now calls `assert_rejected("S-20")`.
 
 ---
 
-### L22 — MISRA 13.2: eval-order check fires for adjacent duplicate args only
+### L22 — MISRA 13.2: eval-order check fires for adjacent duplicate args only ✅ Fixed 2026-07-12
 
-**Scope.** `enforce_misra_eval_order` (`src/safety.rs`) flags a
+**Fix applied.** `check_eval_order_expr` (`src/safety.rs`) now uses
+`seen.remove()` instead of `seen.get()`, so any second occurrence of a
+variable in the same call's argument list fires the diagnostic regardless
+of whether the two occurrences are adjacent. The `gap_misra_13_2_*`
+adversarial test now asserts rejection.
+
+**Original scope.** `enforce_misra_eval_order` (`src/safety.rs`) flagged a
 variable that appears in two *consecutive* argument positions
 (positions `k` and `k+1`) of the same call. A variable in positions
-`0` and `2` with an unrelated argument in between is not flagged.
+`0` and `2` with an unrelated argument in between was not flagged.
 
 **Severity.** MISRA C 2012 Rule 13.2 is an **Advisory** rule. Per the
 MISRA compliance process, advisory violations may be documented as
@@ -1141,6 +1161,6 @@ in production code and is almost always caught during review. The
 checked pattern (adjacent: `foo(x, x)`) covers the most common and
 most dangerous real-world occurrence.
 
-**Fix path.** Change the adjacency guard (`if i == first_pos + 1`) to
-fire for *any* second occurrence of a variable in the same arg list,
-regardless of distance. When fixed, flip the `gap_misra_13_2_*` test.
+**Fix path.** ✅ Implemented: `seen.remove()` replaces `seen.get()`;
+adjacency guard removed. `gap_misra_13_2_*` now calls
+`assert_rejected("MISRA 13.2")`.

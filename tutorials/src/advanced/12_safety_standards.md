@@ -304,97 +304,53 @@ probe the safety passes with non-obvious inputs. They cover:
 
 ---
 
-## Known analysis gaps and real-world compliance
+## Previously documented gaps — now fully fixed
 
-Three limitations were discovered via the adversarial test suite and
-are documented here. Each has a corresponding `gap_*` test in
-`tests/safety_adversarial.rs` that currently asserts the program is
-**accepted** — and will tell you to flip it to a rejection test once
-the limitation is resolved.
+Three analysis limitations were discovered via the adversarial test suite
+in the previous release. All three have been fixed as of 2026-07-12.
+Their `gap_*` tests in `tests/safety_adversarial.rs` now assert
+**rejection** (not acceptance), confirming the fixes are in place.
 
-### Gap 1 — S-19: transitive lock-order detection
+### Gap 1 (L20) — S-19: transitive lock-order detection ✅ Fixed
 
-**What it is.** `enforce_lock_order` collects `mutex_lock` call sequences
-by walking each function's body directly. It does **not** follow calls
-into helper functions. If function `A` locks `m_x` then calls `helper`
-which locks `m_y`, and function `B` locks `m_y` then calls a helper
-which locks `m_x`, the effective orderings `m_x→m_y` and `m_y→m_x`
-form a deadlock cycle — but the analyser sees only single-element
-sequences `[m_x]` and `[m_y]`, never building the cross-function edges.
+**Was.** `enforce_lock_order` only walked each function's own body to
+collect `mutex_lock` calls. If `fn_a` locked `m_x` then called a helper
+that locked `m_y`, the cross-function ordering `m_x→m_y` was invisible.
 
-**Workaround.** Inline the locking sequence into the calling function,
-or use a wrapper that acquires both locks in one place:
+**Fix.** The analysis now uses a held-set approach (`build_lock_edges` /
+`build_lock_edges_expr`). When a user-defined callee is encountered, its
+body is walked with a clone of the caller's current held-lock set.
+Callee-acquired locks are released on return (clone discarded), so
+independent sequential calls do not create spurious ordering constraints.
+Only locks truly held by the caller at the call site constrain the callee's
+first lock.
 
-```vani
-// SAFE: both locks always acquired in the same function, in the same order.
-fn with_both_locks(m_x: ref Mutex<i64>, m_y: ref Mutex<i64>) -> i64 {
-  let gx: Guard<i64> = mutex_lock(m_x);
-  let gy: Guard<i64> = mutex_lock(m_y);
-  return 0;
-}
-```
+### Gap 2 (L21) — S-20: ISR mutex acquisition through a helper ✅ Fixed
 
-### Gap 2 — S-20: ISR mutex acquisition through a helper
+**Was.** `collect_locked_mutexes` only walked the ISR's own body. A
+mutex acquired by a helper called from the ISR was invisible to the
+priority-inversion check.
 
-**What it is.** `collect_locked_mutexes` only walks the ISR's own body.
-If an ISR calls a non-ISR helper that acquires a mutex, that mutex is
-not attributed to the ISR's lock set. Two ISRs at different priorities
-that share a resource via a common helper will not trigger the
-priority-inversion warning.
+**Fix.** `collect_locked_mutexes` / `collect_locked_mutexes_stmts` /
+`collect_locked_mutexes_expr` now accept `fn_map` and `visiting`
+parameters and recursively follow calls into user-defined functions,
+building the full transitive mutex set for each ISR.
 
-**Workaround.** Keep `mutex_lock` calls in the ISR body directly, or
-use atomics (`Atomic<T>`) for resources shared across priority levels,
-which are immune to priority inversion.
+### Gap 3 (L22) — MISRA 13.2: non-adjacent duplicate arguments ✅ Fixed
 
-```vani
-// PREFERRED for shared ISR resources: atomic avoids the gap entirely.
-#[interrupt(priority = 1)]
-fn high_isr(counter: ref Atomic<i64>) -> i64 {
-  return atomic_fetch_add(counter, 1);
-}
-```
+**Was.** The MISRA 13.2 eval-order check only fired when the same variable
+appeared in **consecutive** arg positions (positions `k` and `k+1`).
+`foo(x, y, x)` was not flagged.
 
-### Gap 3 — MISRA 13.2: non-adjacent duplicate arguments
-
-**What it is.** The MISRA 13.2 eval-order check only fires when the same
-variable appears in **consecutive** arg positions (positions `k` and
-`k+1`). A variable in positions 0 and 2 of the same call — with an
-unrelated arg in between — does not trigger a diagnostic:
-
-```vani
-// Caught:     foo(x, x)        — x at positions 0 and 1
-// NOT caught: foo(x, y, x)     — x at positions 0 and 2 (gap)
-```
-
-**Severity.** MISRA C 2012 Rule 13.2 is an **Advisory** rule, so a
-documented partial implementation is permitted in the MISRA compliance
-matrix. The pattern is also unusual in practice; the adjacent case
-covers the vast majority of real violations.
+**Fix.** `check_eval_order_expr` now uses `seen.remove()` instead of
+`seen.get()`. Any second occurrence of a variable in the same call's
+arg list fires the diagnostic, regardless of the positions' distance.
 
 ---
 
-## Do these gaps prevent real-world safety certification?
+## Safety certification coverage
 
-**Short answer: No — with conditions.**
-
-Safety standards (ISO 26262, DO-178C, IEC 62304) do not require
-automated tooling to catch *all* possible defects. They require:
-
-1. **Tool qualification documentation** — a Safety Manual or Tool
-   Qualification Document (TQD) that honestly describes what each tool
-   analysis does and does not cover.
-2. **Supplementary verification** — code review, integration tests, or
-   formal proof to cover gaps the tool does not detect.
-3. **Deviation records** — for MISRA Advisory rules, an entry in the
-   MISRA compliance matrix is sufficient.
-
-The three gaps documented above are **over-approximations** (the tool
-misses real issues in specific patterns) rather than
-**under-approximations** (the tool accepts clearly wrong code). All
-three involve patterns that can be found by structured code review.
-
-The broader safety toolchain covers the most critical certification
-objectives independently:
+All previously partial checks are now complete. The full compliance matrix:
 
 | Objective | Tool coverage |
 |---|---|
@@ -409,25 +365,13 @@ objectives independently:
 | MC/DC coverage points | `vanic coverage` — **complete** (runtime counters deferred) |
 | MISRA single exit | Rule 15.5 recursive walk — **complete** |
 | MISRA dead branches | Rule 14.1 literal-condition check — **complete** |
-| Lock-order deadlocks | S-19 intra-function + cross-function (direct) — **partial** |
-| ISR priority inversion | S-20 direct-body detection — **partial** |
-| MISRA eval order | Rule 13.2 adjacent-arg check — **partial** |
+| Lock-order deadlocks | S-19 held-set transitive analysis — **complete** |
+| ISR priority inversion | S-20 transitive mutex collection — **complete** |
+| MISRA eval order | Rule 13.2 any-distance duplicate detection — **complete** |
 
-The three partial checks are supplementary safety aids, not
-certification gates. For a certification-ready project:
-
-1. Add `gap_s19_*` and `gap_s20_*` patterns to your **integration test**
-   suite (the adversarial tests already show how).
-2. Add a code-review checklist item: *"All mutex acquisitions that span
-   two or more functions are reviewed for ordering consistency."*
-3. For MISRA 13.2: add a static analyser (PC-lint, Polyspace, etc.) or
-   extend the check — or document the advisory deviation.
-
-The `gap_*` tests in `tests/safety_adversarial.rs` serve as living
-documentation of these conditions. When the limitations are eventually
-closed in the compiler, those tests will fail with a helpful message
-("Gap is already fixed! Update this test to assert_rejected") — making
-the improvement visible rather than silent.
+Safety standards (ISO 26262, DO-178C, IEC 62304) still require Tool
+Qualification Documentation (TQD) describing the analysis scope, but no
+partial-coverage disclosures are needed for L20–L22 as of this release.
 
 ---
 

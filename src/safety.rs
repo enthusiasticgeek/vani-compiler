@@ -2809,30 +2809,30 @@ fn check_eval_order_expr(
 ) {
     use crate::ir::TypedExprKind as EK;
     if let EK::Call { args, .. } = &expr.kind {
-        // Count occurrences of each Var name across args.
+        // Count occurrences of each Var name across args. Using remove() so
+        // each variable is flagged exactly once (at its second occurrence)
+        // regardless of whether that occurrence is adjacent to the first.
         let mut seen: std::collections::HashMap<&str, (usize, crate::span::Span)> =
             std::collections::HashMap::new();
         for (i, arg) in args.iter().enumerate() {
             if let EK::Var(name) = &arg.kind {
-                if let Some((first_pos, first_span)) = seen.get(name.as_str()) {
-                    // Only flag once per duplicate — use the second occurrence.
-                    if i == first_pos + 1 {
-                        diagnostics.push(Diagnostic::new(
-                            arg.span,
-                            format!(
-                                "MISRA 13.2 (in '{}'): binding '{}' appears at \
-                                 arg positions {} and {} in the same call — \
-                                 C argument evaluation order is unspecified; \
-                                 forbidden under `#{}`",
-                                fn_name,
-                                name,
-                                first_pos + 1,
-                                i + 1,
-                                std_name
-                            ),
-                        ));
-                        let _ = first_span;
-                    }
+                if let Some((first_pos, first_span)) = seen.remove(name.as_str()) {
+                    // Fire for ANY second occurrence, not just adjacent ones (L22 fix).
+                    diagnostics.push(Diagnostic::new(
+                        arg.span,
+                        format!(
+                            "MISRA 13.2 (in '{}'): binding '{}' appears at \
+                             arg positions {} and {} in the same call — \
+                             C argument evaluation order is unspecified; \
+                             forbidden under `#{}`",
+                            fn_name,
+                            name,
+                            first_pos + 1,
+                            i + 1,
+                            std_name
+                        ),
+                    ));
+                    let _ = first_span;
                 } else {
                     seen.insert(name.as_str(), (i, arg.span));
                 }
@@ -2857,60 +2857,87 @@ fn check_eval_order_expr(
 
 // ── S-19: Lock-order graph and deadlock detection ────────────────────────────
 
-/// Walk a statement body and collect, in order, the variable names passed to
-/// `mutex_lock(...)`. The sequence represents a potential lock-acquisition
-/// ordering in that path.
+/// Intern a lock variable name as a stable integer ID for the lock-order graph.
+fn lock_intern(
+    name: &str,
+    lock_id: &mut std::collections::HashMap<String, usize>,
+    id_name: &mut std::collections::HashMap<usize, String>,
+    next_id: &mut usize,
+) -> usize {
+    if let Some(&id) = lock_id.get(name) {
+        id
+    } else {
+        let id = *next_id;
+        *next_id += 1;
+        lock_id.insert(name.to_string(), id);
+        id_name.insert(id, name.to_string());
+        id
+    }
+}
+
+/// Walk `stmts` tracking the set of currently held locks (`held`) and record
+/// lock-acquisition ordering edges directly into `edges`.
 ///
-/// We do a *linear* walk: we do not branch-split (an over-approximation that
-/// is both safe and simple). Branches widen the set of observed lock orders
-/// but never suppress real cycles.
-fn collect_lock_sequence(
+/// When a user-defined callee is encountered the analysis recurses into its
+/// body with a CLONE of `held`.  Callee-acquired locks are released on return,
+/// so the clone is discarded — the caller's `held` set is unchanged after
+/// the call returns.  This prevents spurious ordering constraints between
+/// sequential independent function calls (L20 correctness fix for the
+/// held-set vs. flat-sequence ambiguity).
+fn build_lock_edges(
     stmts: &[crate::ir::TypedStmt],
-    seq: &mut Vec<(String, crate::span::Span)>,
+    held: &mut Vec<(usize, crate::span::Span)>,
+    lock_id: &mut std::collections::HashMap<String, usize>,
+    next_id: &mut usize,
+    id_name: &mut std::collections::HashMap<usize, String>,
+    edges: &mut std::collections::HashMap<usize, std::collections::HashMap<usize, crate::span::Span>>,
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+    visiting: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedStmt as S;
     for stmt in stmts {
         match stmt {
             S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. } => {
-                collect_lock_sequence_expr(expr, seq);
+                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::If { cond, then_body, else_body } => {
-                collect_lock_sequence_expr(cond, seq);
-                collect_lock_sequence(then_body, seq);
-                collect_lock_sequence(else_body, seq);
+                build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                // Linear over-approximation: process both branches sequentially.
+                build_lock_edges(then_body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges(else_body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::While { cond, body, .. } => {
-                collect_lock_sequence_expr(cond, seq);
-                collect_lock_sequence(body, seq);
+                build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::For { start, end, body, .. } => {
-                collect_lock_sequence_expr(start, seq);
-                collect_lock_sequence_expr(end, seq);
-                collect_lock_sequence(body, seq);
+                build_lock_edges_expr(start, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(end, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::ForIter { body, .. }
             | S::TaskSpawn { body, .. }
             | S::UnsafeBlock { body, .. } => {
-                collect_lock_sequence(body, seq);
+                build_lock_edges(body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::Assert { expr, .. } | S::Prove { expr, .. } => {
-                collect_lock_sequence_expr(expr, seq);
+                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::IndexAssign { index, value, .. } => {
-                collect_lock_sequence_expr(index, seq);
-                collect_lock_sequence_expr(value, seq);
+                build_lock_edges_expr(index, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::FieldAssign { object, value, .. } => {
-                collect_lock_sequence_expr(object, seq);
-                collect_lock_sequence_expr(value, seq);
+                build_lock_edges_expr(object, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::Return { expr } => {
-                collect_lock_sequence_expr(expr, seq);
+                build_lock_edges_expr(expr, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
                     if let crate::ir::TypedPrintItem::Expr(e) = item {
-                        collect_lock_sequence_expr(e, seq);
+                        build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
                     }
                 }
             }
@@ -2921,89 +2948,113 @@ fn collect_lock_sequence(
     }
 }
 
-fn collect_lock_sequence_expr(
+fn build_lock_edges_expr(
     expr: &crate::ir::TypedExpr,
-    seq: &mut Vec<(String, crate::span::Span)>,
+    held: &mut Vec<(usize, crate::span::Span)>,
+    lock_id: &mut std::collections::HashMap<String, usize>,
+    next_id: &mut usize,
+    id_name: &mut std::collections::HashMap<usize, String>,
+    edges: &mut std::collections::HashMap<usize, std::collections::HashMap<usize, crate::span::Span>>,
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+    visiting: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedExprKind as EK;
     match &expr.kind {
-        EK::Call { name, args, .. } if name == "mutex_lock" => {
-            if let Some(arg) = args.first() {
-                if let Some(mutex_name) = extract_mutex_name_from_typed_expr(arg) {
-                    seq.push((mutex_name, expr.span));
+        EK::Call { name, args, .. } => {
+            if name == "mutex_lock" {
+                if let Some(arg) = args.first() {
+                    if let Some(mutex_name) = extract_mutex_name_from_typed_expr(arg) {
+                        let new_id = lock_intern(&mutex_name, lock_id, id_name, next_id);
+                        // Every currently held lock must be acquired before this one.
+                        for &(h_id, _h_span) in held.iter() {
+                            if h_id != new_id {
+                                edges.entry(h_id).or_default().entry(new_id).or_insert(expr.span);
+                            }
+                        }
+                        held.push((new_id, expr.span));
+                    }
+                }
+                for a in args {
+                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                }
+            } else if let Some(body) = fn_map.get(name.as_str()) {
+                if !visiting.contains(name.as_str()) {
+                    // Recurse into the callee with a snapshot of the current held set.
+                    // The callee's locks are released on return → discard callee_held.
+                    let mut callee_held = held.clone();
+                    visiting.insert(name.clone());
+                    build_lock_edges(body, &mut callee_held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                    visiting.remove(name.as_str());
+                }
+                for a in args {
+                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+                }
+            } else {
+                for a in args {
+                    build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
                 }
             }
-            // Also walk the args for nested expressions
-            for a in args {
-                collect_lock_sequence_expr(a, seq);
-            }
         }
-        EK::Call { args, .. } => {
-            for a in args {
-                collect_lock_sequence_expr(a, seq);
-            }
-        }
-        EK::Unary { expr: inner, .. }
-        | EK::Cast { expr: inner, .. } => {
-            collect_lock_sequence_expr(inner, seq);
+        EK::Unary { expr: inner, .. } | EK::Cast { expr: inner, .. } => {
+            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::Ref { .. } | EK::RefMut { .. } => {}
         EK::Binary { left, right, .. }
         | EK::Index { array: left, index: right, .. } => {
-            collect_lock_sequence_expr(left, seq);
-            collect_lock_sequence_expr(right, seq);
+            build_lock_edges_expr(left, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(right, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::Block { stmts, tail } => {
-            collect_lock_sequence(stmts, seq);
-            collect_lock_sequence_expr(tail, seq);
+            build_lock_edges(stmts, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(tail, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::IfExpr { cond, then_value, else_value } => {
-            collect_lock_sequence_expr(cond, seq);
-            collect_lock_sequence_expr(then_value, seq);
-            collect_lock_sequence_expr(else_value, seq);
+            build_lock_edges_expr(cond, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(then_value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
+            build_lock_edges_expr(else_value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::Match { scrutinee, arms } => {
-            collect_lock_sequence_expr(scrutinee, seq);
+            build_lock_edges_expr(scrutinee, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             for arm in arms {
-                collect_lock_sequence_expr(&arm.body, seq);
+                build_lock_edges_expr(&arm.body, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
         }
         EK::EnumVariantWithPayload { payload, .. } => {
-            collect_lock_sequence_expr(payload, seq);
+            build_lock_edges_expr(payload, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::DynCoerce { value, .. } => {
-            collect_lock_sequence_expr(value, seq);
+            build_lock_edges_expr(value, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::DynDispatch { receiver, args, .. } => {
-            collect_lock_sequence_expr(receiver, seq);
+            build_lock_edges_expr(receiver, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             for a in args {
-                collect_lock_sequence_expr(a, seq);
+                build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
         }
         EK::CallIndirect { callee, args } => {
-            collect_lock_sequence_expr(callee, seq);
+            build_lock_edges_expr(callee, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             for a in args {
-                collect_lock_sequence_expr(a, seq);
+                build_lock_edges_expr(a, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
         }
         EK::Tuple { elements } | EK::ArrayLit { elements } => {
             for e in elements {
-                collect_lock_sequence_expr(e, seq);
+                build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
         }
         EK::TupleAccess { tuple: inner, .. }
         | EK::FieldAccess { object: inner, .. } => {
-            collect_lock_sequence_expr(inner, seq);
+            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::RefMutIndex { index, .. } => {
-            collect_lock_sequence_expr(index, seq);
+            build_lock_edges_expr(index, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::Len { array: inner, .. } => {
-            collect_lock_sequence_expr(inner, seq);
+            build_lock_edges_expr(inner, held, lock_id, next_id, id_name, edges, fn_map, visiting);
         }
         EK::StructLit { fields, .. } => {
             for (_, e) in fields {
-                collect_lock_sequence_expr(e, seq);
+                build_lock_edges_expr(e, held, lock_id, next_id, id_name, edges, fn_map, visiting);
             }
         }
         _ => {}
@@ -3023,17 +3074,17 @@ fn extract_mutex_name_from_typed_expr(arg: &crate::ir::TypedExpr) -> Option<Stri
 /// Detect lock-acquisition-order cycles across all functions in the program.
 ///
 /// Algorithm:
-/// 1. For each function, collect the flat sequence of `mutex_lock` calls.
-/// 2. For each consecutive pair (A, B) in that sequence, record a directed
-///    edge A → B in a global order graph ("A is acquired before B").
+/// 1. For each function, walk its body with a held-set tracking which locks
+///    are currently held. For each new `mutex_lock`, add edges from every
+///    currently held lock to the new one.
+/// 2. User-defined callees are analysed transitively: the callee receives a
+///    clone of the caller's held set at the call site. Since callee locks are
+///    released on return, the caller's held set is unchanged after the call.
+///    This correctly captures "lock held by caller constrains callee's first
+///    lock" while avoiding spurious bridging across sequential independent calls.
 /// 3. After processing all functions, run a DFS cycle detection on the graph.
 /// 4. Report each cycle as a warning-level diagnostic including the span of
 ///    the lock acquisition that closes the cycle.
-///
-/// This is an inter-function *intra-path* analysis: it finds ordering
-/// inconsistencies across different functions but does not follow call edges
-/// (i.e. it is not transitive). A full transitive analysis would require call
-/// graph construction and is left to a future sprint.
 pub fn enforce_lock_order(
     program: &crate::ir::TypedProgram,
     diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
@@ -3050,45 +3101,25 @@ pub fn enforce_lock_order(
     // reverse map: ID -> name (for diagnostics)
     let mut id_name: HashMap<usize, String> = HashMap::new();
 
-    // Helper: intern a lock name, returning its stable integer ID.
-    macro_rules! intern {
-        ($name:expr) => {{
-            let n: &str = $name;
-            if let Some(&existing) = lock_id.get(n) {
-                existing
-            } else {
-                let id = next_id;
-                next_id += 1;
-                lock_id.insert(n.to_string(), id);
-                id_name.insert(id, n.to_string());
-                id
-            }
-        }};
-    }
+    // Build fn_map once for transitive analysis (L20 fix).
+    let fn_map: HashMap<String, &[crate::ir::TypedStmt]> =
+        program.functions.iter()
+            .filter(|f| !f.is_extern)
+            .map(|f| (f.name.clone(), f.body.as_slice()))
+            .collect();
 
     for func in &program.functions {
         if func.is_extern {
             continue;
         }
-        let mut seq: Vec<(String, crate::span::Span)> = Vec::new();
-        collect_lock_sequence(&func.body, &mut seq);
-        if seq.len() < 2 {
-            continue;
-        }
-        // Intern all names in this function's sequence
-        let ids: Vec<(usize, crate::span::Span)> = seq
-            .iter()
-            .map(|(name, span)| (intern!(name.as_str()), *span))
-            .collect();
-        // Record consecutive pairs as ordering edges
-        for window in ids.windows(2) {
-            let (a, _a_span) = window[0];
-            let (b, b_span) = window[1];
-            if a == b {
-                continue; // re-locking same mutex
-            }
-            edges.entry(a).or_default().entry(b).or_insert(b_span);
-        }
+        let mut held: Vec<(usize, crate::span::Span)> = Vec::new();
+        let mut visiting: HashSet<String> = HashSet::new();
+        visiting.insert(func.name.clone());
+        build_lock_edges(
+            &func.body, &mut held,
+            &mut lock_id, &mut next_id, &mut id_name,
+            &mut edges, &fn_map, &mut visiting,
+        );
     }
 
     if edges.is_empty() {
@@ -3182,56 +3213,65 @@ pub fn enforce_lock_order(
 
 /// Collect the set of mutex names that a function (transitively) tries to
 /// `mutex_lock`. Used by the ISR preemption checker to find shared resources.
-fn collect_locked_mutexes(stmts: &[crate::ir::TypedStmt]) -> std::collections::HashSet<String> {
-    use crate::ir::TypedStmt as S;
-    use crate::ir::TypedExprKind as EK;
+///
+/// `fn_name` seeds the cycle-guard set so we never re-enter the top-level ISR.
+/// `fn_map` provides callee bodies for transitive detection (L21 fix).
+fn collect_locked_mutexes(
+    fn_name: &str,
+    stmts: &[crate::ir::TypedStmt],
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+) -> std::collections::HashSet<String> {
     let mut result = std::collections::HashSet::new();
-    collect_locked_mutexes_stmts(stmts, &mut result);
+    let mut visiting = std::collections::HashSet::new();
+    visiting.insert(fn_name.to_string());
+    collect_locked_mutexes_stmts(stmts, &mut result, fn_map, &mut visiting);
     result
 }
 
 fn collect_locked_mutexes_stmts(
     stmts: &[crate::ir::TypedStmt],
     out: &mut std::collections::HashSet<String>,
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+    visiting: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedStmt as S;
     for stmt in stmts {
         match stmt {
             S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. }
             | S::Assert { expr, .. } | S::Prove { expr } | S::Return { expr } => {
-                collect_locked_mutexes_expr(expr, out);
+                collect_locked_mutexes_expr(expr, out, fn_map, visiting);
             }
             S::If { cond, then_body, else_body } => {
-                collect_locked_mutexes_expr(cond, out);
-                collect_locked_mutexes_stmts(then_body, out);
-                collect_locked_mutexes_stmts(else_body, out);
+                collect_locked_mutexes_expr(cond, out, fn_map, visiting);
+                collect_locked_mutexes_stmts(then_body, out, fn_map, visiting);
+                collect_locked_mutexes_stmts(else_body, out, fn_map, visiting);
             }
             S::While { cond, body, .. } => {
-                collect_locked_mutexes_expr(cond, out);
-                collect_locked_mutexes_stmts(body, out);
+                collect_locked_mutexes_expr(cond, out, fn_map, visiting);
+                collect_locked_mutexes_stmts(body, out, fn_map, visiting);
             }
             S::For { start, end, body, .. } => {
-                collect_locked_mutexes_expr(start, out);
-                collect_locked_mutexes_expr(end, out);
-                collect_locked_mutexes_stmts(body, out);
+                collect_locked_mutexes_expr(start, out, fn_map, visiting);
+                collect_locked_mutexes_expr(end, out, fn_map, visiting);
+                collect_locked_mutexes_stmts(body, out, fn_map, visiting);
             }
             S::ForIter { body, .. }
             | S::TaskSpawn { body, .. }
             | S::UnsafeBlock { body, .. } => {
-                collect_locked_mutexes_stmts(body, out);
+                collect_locked_mutexes_stmts(body, out, fn_map, visiting);
             }
             S::IndexAssign { index, value, .. } => {
-                collect_locked_mutexes_expr(index, out);
-                collect_locked_mutexes_expr(value, out);
+                collect_locked_mutexes_expr(index, out, fn_map, visiting);
+                collect_locked_mutexes_expr(value, out, fn_map, visiting);
             }
             S::FieldAssign { object, value, .. } => {
-                collect_locked_mutexes_expr(object, out);
-                collect_locked_mutexes_expr(value, out);
+                collect_locked_mutexes_expr(object, out, fn_map, visiting);
+                collect_locked_mutexes_expr(value, out, fn_map, visiting);
             }
             S::Print { items } | S::EPrint { items } => {
                 for item in items {
                     if let crate::ir::TypedPrintItem::Expr(e) = item {
-                        collect_locked_mutexes_expr(e, out);
+                        collect_locked_mutexes_expr(e, out, fn_map, visiting);
                     }
                 }
             }
@@ -3245,66 +3285,72 @@ fn collect_locked_mutexes_stmts(
 fn collect_locked_mutexes_expr(
     expr: &crate::ir::TypedExpr,
     out: &mut std::collections::HashSet<String>,
+    fn_map: &std::collections::HashMap<String, &[crate::ir::TypedStmt]>,
+    visiting: &mut std::collections::HashSet<String>,
 ) {
     use crate::ir::TypedExprKind as EK;
     match &expr.kind {
-        EK::Call { name, args, .. } if name == "mutex_lock" => {
-            if let Some(arg) = args.first() {
-                if let Some(mx) = extract_mutex_name_from_typed_expr(arg) {
-                    out.insert(mx);
+        EK::Call { name, args, .. } => {
+            if name == "mutex_lock" {
+                if let Some(arg) = args.first() {
+                    if let Some(mx) = extract_mutex_name_from_typed_expr(arg) {
+                        out.insert(mx);
+                    }
+                }
+            } else if let Some(body) = fn_map.get(name.as_str()) {
+                // Follow call into helper to find transitively-acquired mutexes (L21 fix).
+                if !visiting.contains(name.as_str()) {
+                    visiting.insert(name.clone());
+                    collect_locked_mutexes_stmts(body, out, fn_map, visiting);
+                    visiting.remove(name.as_str());
                 }
             }
-            for a in args {
-                collect_locked_mutexes_expr(a, out);
-            }
-        }
-        EK::Call { args, .. } => {
-            for a in args { collect_locked_mutexes_expr(a, out); }
+            for a in args { collect_locked_mutexes_expr(a, out, fn_map, visiting); }
         }
         EK::Unary { expr: inner, .. } | EK::Cast { expr: inner, .. } => {
-            collect_locked_mutexes_expr(inner, out);
+            collect_locked_mutexes_expr(inner, out, fn_map, visiting);
         }
         EK::Binary { left, right, .. }
         | EK::Index { array: left, index: right, .. } => {
-            collect_locked_mutexes_expr(left, out);
-            collect_locked_mutexes_expr(right, out);
+            collect_locked_mutexes_expr(left, out, fn_map, visiting);
+            collect_locked_mutexes_expr(right, out, fn_map, visiting);
         }
         EK::Block { stmts, tail } => {
-            collect_locked_mutexes_stmts(stmts, out);
-            collect_locked_mutexes_expr(tail, out);
+            collect_locked_mutexes_stmts(stmts, out, fn_map, visiting);
+            collect_locked_mutexes_expr(tail, out, fn_map, visiting);
         }
         EK::IfExpr { cond, then_value, else_value } => {
-            collect_locked_mutexes_expr(cond, out);
-            collect_locked_mutexes_expr(then_value, out);
-            collect_locked_mutexes_expr(else_value, out);
+            collect_locked_mutexes_expr(cond, out, fn_map, visiting);
+            collect_locked_mutexes_expr(then_value, out, fn_map, visiting);
+            collect_locked_mutexes_expr(else_value, out, fn_map, visiting);
         }
         EK::Match { scrutinee, arms } => {
-            collect_locked_mutexes_expr(scrutinee, out);
-            for arm in arms { collect_locked_mutexes_expr(&arm.body, out); }
+            collect_locked_mutexes_expr(scrutinee, out, fn_map, visiting);
+            for arm in arms { collect_locked_mutexes_expr(&arm.body, out, fn_map, visiting); }
         }
         EK::EnumVariantWithPayload { payload, .. } => {
-            collect_locked_mutexes_expr(payload, out);
+            collect_locked_mutexes_expr(payload, out, fn_map, visiting);
         }
-        EK::DynCoerce { value, .. } => { collect_locked_mutexes_expr(value, out); }
+        EK::DynCoerce { value, .. } => { collect_locked_mutexes_expr(value, out, fn_map, visiting); }
         EK::DynDispatch { receiver, args, .. } => {
-            collect_locked_mutexes_expr(receiver, out);
-            for a in args { collect_locked_mutexes_expr(a, out); }
+            collect_locked_mutexes_expr(receiver, out, fn_map, visiting);
+            for a in args { collect_locked_mutexes_expr(a, out, fn_map, visiting); }
         }
         EK::CallIndirect { callee, args } => {
-            collect_locked_mutexes_expr(callee, out);
-            for a in args { collect_locked_mutexes_expr(a, out); }
+            collect_locked_mutexes_expr(callee, out, fn_map, visiting);
+            for a in args { collect_locked_mutexes_expr(a, out, fn_map, visiting); }
         }
         EK::Tuple { elements } | EK::ArrayLit { elements } => {
-            for e in elements { collect_locked_mutexes_expr(e, out); }
+            for e in elements { collect_locked_mutexes_expr(e, out, fn_map, visiting); }
         }
         EK::TupleAccess { tuple: inner, .. }
         | EK::FieldAccess { object: inner, .. } => {
-            collect_locked_mutexes_expr(inner, out);
+            collect_locked_mutexes_expr(inner, out, fn_map, visiting);
         }
-        EK::RefMutIndex { index, .. } => { collect_locked_mutexes_expr(index, out); }
-        EK::Len { array: inner, .. } => { collect_locked_mutexes_expr(inner, out); }
+        EK::RefMutIndex { index, .. } => { collect_locked_mutexes_expr(index, out, fn_map, visiting); }
+        EK::Len { array: inner, .. } => { collect_locked_mutexes_expr(inner, out, fn_map, visiting); }
         EK::StructLit { fields, .. } => {
-            for (_, e) in fields { collect_locked_mutexes_expr(e, out); }
+            for (_, e) in fields { collect_locked_mutexes_expr(e, out, fn_map, visiting); }
         }
         _ => {}
     }
@@ -3329,12 +3375,19 @@ pub fn enforce_isr_preemption(
     program: &crate::ir::TypedProgram,
     diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
 ) {
+    // Build fn_map for transitive mutex collection through helpers (L21 fix).
+    let fn_map: std::collections::HashMap<String, &[crate::ir::TypedStmt]> =
+        program.functions.iter()
+            .filter(|f| !f.is_extern)
+            .map(|f| (f.name.clone(), f.body.as_slice()))
+            .collect();
+
     // Collect (priority, fn_name, fn_span, locked_mutex_set) for every ISR
     // that declares a priority.
     let isrs: Vec<(u32, &str, crate::span::Span, std::collections::HashSet<String>)> =
         program.functions.iter().filter_map(|f| {
             if let Some(prio) = f.interrupt_priority {
-                let mx = collect_locked_mutexes(&f.body);
+                let mx = collect_locked_mutexes(f.name.as_str(), &f.body, &fn_map);
                 Some((prio, f.name.as_str(), f.span, mx))
             } else {
                 None
