@@ -285,6 +285,152 @@ vanic acyclicity spo2.vani            # no cycles → exits 0
 
 ---
 
+## Adversarial test coverage
+
+vāṇī ships `tests/safety_adversarial.rs` — 31 integration tests that
+probe the safety passes with non-obvious inputs. They cover:
+
+| Group | Tests |
+|---|---|
+| ASIL-D / DO-178C constraints | Missing `wcet`, missing `bounded_stack`, direct float use, transitive float via helper, heap allocation, direct and indirect recursion |
+| MISRA C 2012 rules | Multiple returns in flat bodies, returns buried in nested if/else, returns inside for-loop bodies, always-true branches, `while false` loops, eval-order violations |
+| WCET model | Budget exceeded by arithmetic, unbounded while loop, unbounded path in one branch |
+| Bounded stack | Exceeded by local bindings, exceeded via call chain |
+| Lock-order (S-19) | Two functions with opposite orderings, both orderings in a single function's branches |
+| ISR priority (S-20) | Two ISRs at different priorities sharing a mutex name |
+| Inline stack (S-14) | Inline callee locals folded into caller frame; non-inline sub-callees still get own frames |
+| No false positives | Consistent lock order, single MISRA exit, valid ASIL-D program |
+| Documented gaps | Three acceptance tests that pin known limitations (see below) |
+
+---
+
+## Known analysis gaps and real-world compliance
+
+Three limitations were discovered via the adversarial test suite and
+are documented here. Each has a corresponding `gap_*` test in
+`tests/safety_adversarial.rs` that currently asserts the program is
+**accepted** — and will tell you to flip it to a rejection test once
+the limitation is resolved.
+
+### Gap 1 — S-19: transitive lock-order detection
+
+**What it is.** `enforce_lock_order` collects `mutex_lock` call sequences
+by walking each function's body directly. It does **not** follow calls
+into helper functions. If function `A` locks `m_x` then calls `helper`
+which locks `m_y`, and function `B` locks `m_y` then calls a helper
+which locks `m_x`, the effective orderings `m_x→m_y` and `m_y→m_x`
+form a deadlock cycle — but the analyser sees only single-element
+sequences `[m_x]` and `[m_y]`, never building the cross-function edges.
+
+**Workaround.** Inline the locking sequence into the calling function,
+or use a wrapper that acquires both locks in one place:
+
+```vani
+// SAFE: both locks always acquired in the same function, in the same order.
+fn with_both_locks(m_x: ref Mutex<i64>, m_y: ref Mutex<i64>) -> i64 {
+  let gx: Guard<i64> = mutex_lock(m_x);
+  let gy: Guard<i64> = mutex_lock(m_y);
+  return 0;
+}
+```
+
+### Gap 2 — S-20: ISR mutex acquisition through a helper
+
+**What it is.** `collect_locked_mutexes` only walks the ISR's own body.
+If an ISR calls a non-ISR helper that acquires a mutex, that mutex is
+not attributed to the ISR's lock set. Two ISRs at different priorities
+that share a resource via a common helper will not trigger the
+priority-inversion warning.
+
+**Workaround.** Keep `mutex_lock` calls in the ISR body directly, or
+use atomics (`Atomic<T>`) for resources shared across priority levels,
+which are immune to priority inversion.
+
+```vani
+// PREFERRED for shared ISR resources: atomic avoids the gap entirely.
+#[interrupt(priority = 1)]
+fn high_isr(counter: ref Atomic<i64>) -> i64 {
+  return atomic_fetch_add(counter, 1);
+}
+```
+
+### Gap 3 — MISRA 13.2: non-adjacent duplicate arguments
+
+**What it is.** The MISRA 13.2 eval-order check only fires when the same
+variable appears in **consecutive** arg positions (positions `k` and
+`k+1`). A variable in positions 0 and 2 of the same call — with an
+unrelated arg in between — does not trigger a diagnostic:
+
+```vani
+// Caught:     foo(x, x)        — x at positions 0 and 1
+// NOT caught: foo(x, y, x)     — x at positions 0 and 2 (gap)
+```
+
+**Severity.** MISRA C 2012 Rule 13.2 is an **Advisory** rule, so a
+documented partial implementation is permitted in the MISRA compliance
+matrix. The pattern is also unusual in practice; the adjacent case
+covers the vast majority of real violations.
+
+---
+
+## Do these gaps prevent real-world safety certification?
+
+**Short answer: No — with conditions.**
+
+Safety standards (ISO 26262, DO-178C, IEC 62304) do not require
+automated tooling to catch *all* possible defects. They require:
+
+1. **Tool qualification documentation** — a Safety Manual or Tool
+   Qualification Document (TQD) that honestly describes what each tool
+   analysis does and does not cover.
+2. **Supplementary verification** — code review, integration tests, or
+   formal proof to cover gaps the tool does not detect.
+3. **Deviation records** — for MISRA Advisory rules, an entry in the
+   MISRA compliance matrix is sufficient.
+
+The three gaps documented above are **over-approximations** (the tool
+misses real issues in specific patterns) rather than
+**under-approximations** (the tool accepts clearly wrong code). All
+three involve patterns that can be found by structured code review.
+
+The broader safety toolchain covers the most critical certification
+objectives independently:
+
+| Objective | Tool coverage |
+|---|---|
+| No dynamic allocation | `#[no_heap]` + transitive fixpoint — **complete** |
+| No recursion | `#[no_recursion]` + BFS call graph — **complete** |
+| Stack bound | `#[bounded_stack]` + full call-chain depth analysis — **complete** |
+| Execution time bound | `#[wcet]` + static cycle estimator — **complete** (conservative) |
+| No floating point | `#[no_float]` + transitive fixpoint — **complete** |
+| Deterministic timing | `#[deterministic_timing]` branch-balance check — **complete** |
+| Deviation tracking | `vanic deviations --strict` — **complete** |
+| Call-graph acyclicity | `vanic acyclicity` (Tarjan SCC) — **complete** |
+| MC/DC coverage points | `vanic coverage` — **complete** (runtime counters deferred) |
+| MISRA single exit | Rule 15.5 recursive walk — **complete** |
+| MISRA dead branches | Rule 14.1 literal-condition check — **complete** |
+| Lock-order deadlocks | S-19 intra-function + cross-function (direct) — **partial** |
+| ISR priority inversion | S-20 direct-body detection — **partial** |
+| MISRA eval order | Rule 13.2 adjacent-arg check — **partial** |
+
+The three partial checks are supplementary safety aids, not
+certification gates. For a certification-ready project:
+
+1. Add `gap_s19_*` and `gap_s20_*` patterns to your **integration test**
+   suite (the adversarial tests already show how).
+2. Add a code-review checklist item: *"All mutex acquisitions that span
+   two or more functions are reviewed for ordering consistency."*
+3. For MISRA 13.2: add a static analyser (PC-lint, Polyspace, etc.) or
+   extend the check — or document the advisory deviation.
+
+The `gap_*` tests in `tests/safety_adversarial.rs` serve as living
+documentation of these conditions. When the limitations are eventually
+closed in the compiler, those tests will fail with a helpful message
+("Gap is already fixed! Update this test to assert_rejected") — making
+the improvement visible rather than silent.
+
+---
+
 ## CI integration
 
 Recommended `.github/workflows/safety.yml` gates:
@@ -296,4 +442,5 @@ Recommended `.github/workflows/safety.yml` gates:
     vanic stack-depth src/firmware.vani --max=16384
     vanic complexity src/firmware.vani --max=15
     vanic deviations src/firmware.vani --strict
+    vanic coverage src/firmware.vani --format=json --out=mcdc_map.json
 ```

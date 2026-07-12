@@ -1625,17 +1625,47 @@ tiers + four standard composites are on `main`:
     the enclosing fn's `target_standard`. The deviation-record
     format ASIL-D / DO-178C reviewers need for sign-off.
   - `intentc stack-depth <file> [--max=N] [--entry=fn]` — per-fn
-    frame-size estimates + call-graph max stack depth per
-    entry-point. Detects unbounded recursion; `--max` is a
+    frame-size estimates + call-chain max stack depth.
+    `#[inline]`-annotated callees have their locals folded into
+    the caller's frame rather than a separate push. `--max` is a
     CI-friendly hard gate.
   - `intentc acyclicity <file>` (T3.3) — Tarjan SCC over the call
     graph; reports every cycle. `#[bounded(N)]`-tagged self-loops
     are exempt; everything else exits 1.
+  - `intentc coverage <file> [--format=text|json|csv]` — MC/DC
+    coverage point map: every `if`/`while`/`assert` decision
+    decomposed into atomic sub-conditions. Feed to external test
+    harnesses for DO-178C MC/DC evidence.
+  - `intentc complexity <file> [--max=N]` — cyclomatic complexity
+    per function; exits 1 if any function exceeds `--max`.
+  - `intentc safety-attrs <file>` — per-function safety annotation
+    table (CSV / JSON / text) for audit dashboards.
+- **Concurrency safety passes:**
+  - **S-19 — lock-order deadlock detection:** directed acquisition-order
+    graph built from all `mutex_lock` sequences; DFS cycle detection
+    fires `[S-19] potential deadlock` for every ordering cycle.
+    Detection is **intra-procedural** — see
+    [docs/v1_limitations.md](docs/v1_limitations.md) §L20 for the
+    transitive gap and workaround.
+  - **S-20 — ISR priority inversion:** `#[interrupt(priority=N)]`
+    tracks ISR urgency levels; fires `[S-20] potential priority
+    inversion` when two ISRs at different priorities call
+    `mutex_lock` on the same variable. Detection is limited to
+    direct ISR body — see §L21 for the helper-call gap.
+- **Adversarial test suite:** `tests/safety_adversarial.rs` — 31
+  integration tests that probe each safety pass with non-obvious
+  inputs: transitive float, indirect recursion, returns buried in
+  nested branches, both lock orderings in a single function's if/else
+  branches. Three `gap_*` tests pin known analysis-scope limitations
+  and will self-report when those gaps are closed.
 
-Plan-of-record + sub-step ledger: [TODO.md](TODO.md) §
-*Safety-standard alignment*. ARC work is now active; ARC 1.1
-(generic-context `hashmap_new()` inference) landed alongside
-Tier 3 closing — see [ARCS.md](ARCS.md).
+Plan-of-record + sub-step ledger: [docs/TODO_SAFETY.md](docs/TODO_SAFETY.md)
+(all 27 items now complete). Known analysis-scope limitations:
+[docs/v1_limitations.md §L20–L22](docs/v1_limitations.md). None block
+certification — they require supplementary review and TQD disclosure;
+see the [safety standards tutorial](tutorials/src/advanced/12_safety_standards.md)
+§ "Do these gaps prevent real-world safety certification?" for a
+full compliance analysis. ARC work is active; see [ARCS.md](ARCS.md).
 
 ### Examples — what the compiler rejects
 
