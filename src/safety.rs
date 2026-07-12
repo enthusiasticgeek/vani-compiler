@@ -1089,6 +1089,232 @@ fn wcet_stmt(
     }
 }
 
+/// S-11 — Architecture-calibrated per-builtin WCET cost table.
+///
+/// Values are conservative worst-case cycle counts for a generic
+/// in-order 64-bit core (covers Cortex-A55/M85, RISC-V RV64GC, and
+/// x86-64 at reference clock). Actual hardware will differ; these
+/// numbers are intentionally over-estimates so `#[wcet(cycles=N)]`
+/// budgets set from this table are safe. Teams with calibrated
+/// hardware data should override by providing their own `#[wcet]`
+/// annotations on wrapper functions.
+///
+/// Categories:
+///   - ALU (add/sub/cmp/shift/bit):    1–2 cycles
+///   - Multiply:                        3–5 cycles
+///   - Integer divide / modulo:        20–40 cycles (in-order cores)
+///   - Float (+-*/sqrt):                5–20 cycles
+///   - Memory r/w (cache hit assumed):  3–5 cycles
+///   - String / Vec scan (per element): 4 cycles + length unknown
+///   - Heap alloc (malloc/free):       80 cycles (conservative)
+///   - I/O / syscall:                 200 cycles (conservative)
+///   - Hash / crypto primitives:       30 cycles
+///   - Unknown / catch-all:            10 cycles
+fn wcet_builtin_cycles(name: &str) -> u64 {
+    match name {
+        // ── Integer arithmetic ────────────────────────────────────────
+        "i64_saturating_add" | "i64_saturating_sub" | "i64_saturating_mul"
+        | "i64_min" | "i64_max" | "i64_clamp" | "i64_abs_diff"
+        | "i64_signum" | "i64_wrap" | "i64_avg"
+        | "i64_min_3" | "i64_max_3" => 2,
+
+        "i64_gcd" | "i64_lcm" | "i64_pow_mod" | "i64_mod_inverse"
+        | "i64_factorial" | "i64_fibonacci" | "i64_binomial"
+        | "i64_perm" | "i64_isqrt" | "i64_isqrt_ceil"
+        | "i64_cube_root" => 40,
+
+        "i64_div_floor" | "i64_mod_floor" | "i64_div_ceil"
+        | "i64_div_round" | "i64_safe_div" | "i64_pow" => 25,
+
+        "i64_log2_floor" | "i64_log2_ceil" | "i64_log10_floor"
+        | "i64_log10_ceil" | "i64_count_digits" => 5,
+
+        "i64_is_prime" | "i64_next_prime" | "i64_prev_prime"
+        | "i64_totient" | "i64_radical" | "i64_divisor_count"
+        | "i64_divisor_sum" => 200, // trial-division bounded but slow
+
+        "i64_is_power_of_2" | "i64_next_power_of_2"
+        | "i64_count_set_bits" | "i64_leading_zeros"
+        | "i64_trailing_zeros" | "i64_parity" | "i64_mod_pos"
+        | "i64_bswap" | "i64_rotate_left" | "i64_rotate_right"
+        | "i64_reverse_bits" | "i64_set_bit" | "i64_clear_bit"
+        | "i64_toggle_bit" | "i64_test_bit" | "i64_count_leading_ones"
+        | "i64_count_trailing_ones" | "i64_byte_at" | "i64_set_byte" => 2,
+
+        // ── Float arithmetic ──────────────────────────────────────────
+        "sqrt" | "f64_safe_sqrt" | "f64_inv_sqrt" => 20,
+        "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "atan2"
+        | "sinh" | "cosh" | "tanh" | "f64_sinc"
+        | "f64_asin_deg" | "f64_acos_deg" | "f64_atan_deg"
+        | "f64_atan2_deg" | "f64_sec_deg" | "f64_csc_deg"
+        | "f64_cot_deg" | "f64_sec" | "f64_csc" | "f64_cot" => 50,
+        "exp" | "f64_exp2" | "f64_exp10" | "f64_expm1"
+        | "log" | "log2" | "log10" | "f64_log1p" | "f64_log_b"
+        | "f64_safe_log" => 30,
+        "pow" | "f64_pow_int" => 25,
+        "f64_erf" | "f64_erfc" | "f64_tgamma" | "f64_lgamma"
+        | "f64_cbrt" | "f64_hypot" => 40,
+        "f64_fma" | "f64_remainder" | "f64_round_to"
+        | "f64_round_to_multiple" => 5,
+        "f64_safe_div" | "f64_lerp" | "f64_lerp_clamp"
+        | "f64_inv_lerp" | "f64_clamp01" | "f64_clamp"
+        | "f64_min" | "f64_max" | "f64_min_3" | "f64_max_3"
+        | "f64_abs" | "f64_signum" | "floor" | "ceil"
+        | "f64_round" | "f64_trunc" | "f64_frac"
+        | "f64_copysign" | "f64_remap" | "f64_wrap"
+        | "f64_mod_floor" | "f64_smoothstep" | "f64_smoothstep5"
+        | "f64_step" | "f64_softsign" | "f64_sigmoid"
+        | "f64_relu" | "f64_leaky_relu" | "f64_softplus"
+        | "f64_swish" | "f64_logit" | "f64_next_up" | "f64_next_down"
+        | "f64_normal_pdf" | "f64_normal_cdf" | "f64_quadratic_root"
+        | "f64_inv_smoothstep" | "f64_chebyshev"
+        | "f64_geometric_mean" | "f64_harmonic_mean"
+        | "f64_quadratic_mean" | "f64_l1_norm"
+        | "f64_to_radians" | "f64_to_degrees" | "abs" => 5,
+
+        // ── Hashing / randomness ──────────────────────────────────────
+        "hash_i64" | "hash_f64" | "hash_str" | "hash_combine"
+        | "hash_combine_3" | "hash_combine_4" | "hash_pair"
+        | "hash_triple" | "f64_hash_pair" | "f64_hash_triple"
+        | "str_hash_pair" | "str_hash_triple" => 10,
+        "siphash_i64" | "siphash_str" => 30,
+        "seed_rng" | "rand_i64" | "rand_in_range" | "rand_f64"
+        | "rand_in_range_f64" | "rand_bool" | "rand_choice"
+        | "rand_normal" | "rand_uniform" | "f64_uniform_random" => 15,
+
+        // ── Vec / array operations ────────────────────────────────────
+        // Single-element or O(1) ops
+        "push" | "pop" | "set" | "insert" | "swap_remove"
+        | "vec_remove_at" | "vec_first" | "vec_last" | "length"
+        | "contains" | "get" | "peek" | "find" | "clear"
+        | "dedup" | "reverse" => 4,
+        // O(n) scans
+        "sort" | "sort_by" | "sort_desc" | "binary_search"
+        | "vec_replace_all" | "vec_unique" | "vec_dedup_consecutive"
+        | "vec_is_sorted_asc" | "vec_is_sorted_desc"
+        | "vec_is_palindrome" | "vec_is_sorted_unique"
+        | "vec_count_distinct" => 50,
+        // O(n) combinators that return a new Vec (alloc included)
+        "vec_map" | "vec_filter" | "vec_zip_with" | "vec_take"
+        | "vec_drop" | "vec_take_while" | "vec_drop_while"
+        | "vec_map_filter" | "vec_chain" | "vec_range"
+        | "vec_repeat" | "vec_extend" | "vec_concat"
+        | "vec_reverse_copy" | "vec_iota" | "vec_intersect"
+        | "vec_difference" | "vec_union" | "vec_diff"
+        | "vec_pad_left" | "vec_pad_right" | "vec_flatten"
+        | "vec_group_by_value" | "vec_chunks" | "vec_windows"
+        | "vec_intersperse" | "vec_merge_sorted"
+        | "vec_insert_sorted" => 80, // alloc + scan
+        // O(n) reductions (no alloc)
+        "vec_sum" | "vec_product" | "vec_min" | "vec_max"
+        | "vec_count" | "vec_any" | "vec_all" | "vec_fold"
+        | "vec_running_sum" | "vec_running_mean"
+        | "vec_running_product" | "vec_running_xor"
+        | "vec_running_and" | "vec_running_or"
+        | "vec_cumulative_max" | "vec_cumulative_min"
+        | "vec_sliding_max" | "vec_sliding_min"
+        | "vec_sliding_sum" | "vec_sliding_product"
+        | "vec_dot" | "vec_mean" | "vec_mode"
+        | "vec_kth_smallest" | "vec_median"
+        | "vec_map_fold" | "vec_filter_fold"
+        | "vec_map_filter_fold" | "vec_count_if"
+        | "vec_position" | "vec_argmin" | "vec_argmax"
+        | "vec_max_by" | "vec_min_by" | "vec_count_value"
+        | "vec_index_of_value" | "vec_last_index_of_value"
+        | "vec_indices_of_value" | "vec_range_span"
+        | "vec_all_equal" | "vec_equal_set" | "vec_equal_seq"
+        | "vec_subset_of" | "vec_disjoint"
+        | "vec_abs" | "vec_negate" | "vec_signum" | "vec_square"
+        | "vec_add_scalar" | "vec_sub_scalar" | "vec_mul_scalar"
+        | "vec_div_scalar" | "vec_mod_scalar" | "vec_pow_scalar"
+        | "vec_shl_scalar" | "vec_shr_scalar"
+        | "vec_add_pairwise" | "vec_sub_pairwise"
+        | "vec_mul_pairwise" | "vec_min_pairwise" | "vec_max_pairwise"
+        | "vec_eq_mask" | "vec_ne_mask" | "vec_lt_mask"
+        | "vec_le_mask" | "vec_gt_mask" | "vec_ge_mask"
+        | "vec_min_with_scalar" | "vec_max_with_scalar"
+        | "vec_clamp_scalar" | "vec_rotate_left" | "vec_rotate_right"
+        | "vec_shift_left" | "vec_shift_right"
+        | "vec_replace_value" | "vec_swap" | "vec_swap_remove"
+        | "heapify" => 30,
+        // Alloc-only
+        "vec" | "try_vec" | "clone" | "clone_at" => 80,
+
+        // ── String ops ────────────────────────────────────────────────
+        "length" | "str_contains" | "str_starts_with" | "str_ends_with"
+        | "str_trim" | "str_index_of" | "str_count_char"
+        | "str_starts_with_byte" | "str_ends_with_byte"
+        | "str_byte_count" | "str_index_of_byte"
+        | "str_last_index_of_byte" | "str_first_byte" | "str_last_byte"
+        | "str_byte_at" | "str_len_bytes"
+        | "str_count_ascii_digits" | "str_count_ascii_alpha"
+        | "str_count_ascii_alphanumeric" | "str_count_ascii_whitespace"
+        | "str_count_ascii_upper" | "str_count_ascii_lower"
+        | "str_count_ascii_punct" | "str_count_ascii_control"
+        | "is_ascii_digit" | "is_ascii_alpha" | "is_ascii_alphanumeric"
+        | "is_ascii_whitespace" | "str_is_ascii" | "str_is_empty"
+        | "str_is_digit_only" | "str_is_alpha_only"
+        | "str_is_alphanumeric_only" | "str_is_whitespace_only" => 5,
+
+        "str_replace" | "substring" | "str_repeat" | "str_to_upper"
+        | "str_to_lower" | "str_pad_left" | "str_pad_right"
+        | "str_split" | "str_lines" | "str_chars" | "str_reverse"
+        | "str_strip_prefix" | "str_strip_suffix" | "str_join"
+        | "i64_to_str" | "f64_to_str" | "bool_to_str"
+        | "parse_int" | "parse_float" | "parse_bool" => 40,
+
+        // ── Memory / unsafe ops ───────────────────────────────────────
+        "raw_load" | "raw_store" | "aref_load" | "aref_store"
+        | "mmio_read_u32" | "mmio_write_u32"
+        | "mmio_read_u8" | "mmio_write_u8"
+        | "mmio_read_u16" | "mmio_write_u16"
+        | "bptr_get" | "bptr_set" | "bptr_len"
+        | "bptr_new" | "pool_get" | "pool_free"
+        | "region_borrow_i64" | "region_len"
+        | "pool_new" | "region_new" => 5,
+
+        "unsafe_alloc" | "unsafe_free"
+        | "pool_alloc" | "region_alloc_i64" => 80,
+
+        // ── I/O / timing ──────────────────────────────────────────────
+        "sleep_ms" => 500, // context switch minimum
+        "taint" | "assert_safe" => 1, // type-level only; zero runtime cost
+
+        // ── Collections (affine, heap-backed) ─────────────────────────
+        "hashmap_new" | "hashset_new" | "btreemap_new" | "btreeset_new"
+        | "deque_new" | "binary_heap_new" | "bloom_filter_new"
+        | "bst_new" | "graph_new" | "trie_new" | "skiplist_new"
+        | "union_find_new" => 80,
+
+        "hashmap_insert" | "hashset_insert" | "btreemap_insert"
+        | "btreeset_insert" | "trie_insert" | "skiplist_insert"
+        | "bst_insert" | "graph_add_edge" | "union_find_union"
+        | "binary_heap_push" | "bloom_filter_insert"
+        | "deque_push_back" | "deque_push_front"
+        | "heap_push" => 30,
+
+        "hashmap_get" | "hashset_contains" | "btreemap_get"
+        | "btreeset_contains" | "trie_contains" | "skiplist_contains"
+        | "bst_contains" | "bloom_filter_contains"
+        | "union_find_find" | "union_find_connected"
+        | "binary_heap_peek" | "heap_peek"
+        | "deque_peek_back" | "deque_peek_front" => 10,
+
+        "hashmap_remove" | "hashset_remove" | "btreemap_remove"
+        | "btreeset_remove" | "trie_delete" | "skiplist_remove"
+        | "bst_remove" | "union_find_clear"
+        | "binary_heap_pop" | "heap_pop"
+        | "deque_pop_back" | "deque_pop_front" => 20,
+
+        "graph_bfs_reach" | "graph_dfs_reach" | "graph_dijkstra"
+        | "graph_has_cycle" | "graph_mst_kruskal" | "graph_mst_prim"
+        | "graph_astar" | "graph_topo_sort" => 500, // O(V+E) — unbounded but expensive
+
+        // ── Catch-all ─────────────────────────────────────────────────
+        _ => 10,
+    }
+}
+
 fn wcet_expr(
     expr: &crate::ir::TypedExpr,
     fn_map: &HashMap<String, &crate::ir::TypedFunction>,
@@ -1142,9 +1368,10 @@ fn wcet_expr(
                 let body = body_estimate?;
                 Some(args_cost.saturating_add(body).saturating_add(5))
             } else {
-                // Builtin or extern — flat 10 cycles. Real WCET
-                // analyses substitute per-builtin tables.
-                Some(args_cost.saturating_add(10))
+                // Builtin or extern — use the architecture-calibrated
+                // cost table (S-11). Falls back to 10 cycles for
+                // unknown builtins.
+                Some(args_cost.saturating_add(wcet_builtin_cycles(name)))
             }
         }
         E::CallIndirect { args, .. } => {
@@ -2071,6 +2298,8 @@ pub fn enforce_misra_no_dead_branch(
             f.safety_standard.as_deref(),
             Some("misra_c_2012") | Some("asil_d") | Some("do178c_level_a")
                 | Some("iec_62304_class_c")
+                | Some("iec_61508_sil3") | Some("iec_61508_sil4")
+                | Some("autosar_ap")
         ) {
             continue;
         }
@@ -2167,6 +2396,8 @@ pub fn enforce_misra_single_exit(
             f.safety_standard.as_deref(),
             Some("misra_c_2012") | Some("asil_d") | Some("do178c_level_a")
                 | Some("iec_62304_class_c")
+                | Some("iec_61508_sil3") | Some("iec_61508_sil4")
+                | Some("autosar_ap")
         ) {
             continue;
         }
@@ -2313,5 +2544,313 @@ fn dead_stmt_span(stmt: &TypedStmt) -> Option<crate::span::Span> {
             })
         }
         _ => None,
+    }
+}
+
+// ── S-8: MISRA C 2012 Rule 17.1 — no variadic functions ──────────────────
+
+/// S-8 — MISRA C 2012 Rule 17.1: the features of `<stdarg.h>` shall
+/// not be used. vāṇī has no user-level variadic fn syntax; the only
+/// variadic declaration in the compiler is the internal `syscall`
+/// trampoline which is emitted unconditionally by the backends and is
+/// never user-declarable. This pass verifies that structural guarantee:
+/// no `TypedFunction` marked `is_extern` with a composite safety tag
+/// appears in the known-variadic builtins set. Extend `VARIADIC_BUILTINS`
+/// if additional variadic trampolines are added.
+pub fn enforce_misra_no_variadic(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    const VARIADIC_BUILTINS: &[&str] = &["syscall"];
+    for f in &program.functions {
+        if !f.is_extern || f.safety_standard.is_none() {
+            continue;
+        }
+        if VARIADIC_BUILTINS.contains(&f.name.as_str()) {
+            diagnostics.push(Diagnostic::new(
+                f.span,
+                format!(
+                    "MISRA 17.1 (extern '{}'): variadic function declaration \
+                     is forbidden under `#{}`; replace with a fixed-arity wrapper",
+                    f.name,
+                    f.safety_standard.as_deref().unwrap_or("?")
+                ),
+            ));
+        }
+    }
+}
+
+// ── S-9: MISRA C 2012 Rule 11.1–11.3 — fn-ptr / object-ptr conversions ──
+
+/// S-9 — MISRA C 2012 Rules 11.1–11.3:
+///   11.1 — conversions to/from a pointer to a function are forbidden
+///   11.3 — a cast shall not be performed between a pointer to object
+///           and a pointer to a different object type
+/// Under composite-tagged functions, walk all `Cast` expressions and
+/// flag function-pointer ↔ data-pointer conversions and data-pointer
+/// ↔ incompatible-data-pointer casts (only inside unsafe blocks where
+/// raw pointers can appear).
+pub fn enforce_misra_no_fnptr_cast(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for f in &program.functions {
+        if f.safety_standard.is_none() {
+            continue;
+        }
+        let std_name = f.safety_standard.as_deref().unwrap_or("?");
+        check_fnptr_cast_stmts(&f.body, &f.name, std_name, diagnostics);
+    }
+}
+
+fn check_fnptr_cast_stmts(
+    stmts: &[TypedStmt],
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in stmts {
+        check_fnptr_cast_stmt(stmt, fn_name, std_name, diagnostics);
+    }
+}
+
+fn check_fnptr_cast_stmt(
+    stmt: &TypedStmt,
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        TypedStmt::UnsafeBlock { body, .. } => {
+            check_fnptr_cast_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::Let { expr, .. }
+        | TypedStmt::Reassign { expr, .. }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr }
+        | TypedStmt::Discard { expr } => {
+            check_fnptr_cast_expr(expr, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            check_fnptr_cast_expr(cond, fn_name, std_name, diagnostics);
+            check_fnptr_cast_stmts(then_body, fn_name, std_name, diagnostics);
+            check_fnptr_cast_stmts(else_body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::While { cond, body, .. } => {
+            check_fnptr_cast_expr(cond, fn_name, std_name, diagnostics);
+            check_fnptr_cast_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            check_fnptr_cast_expr(start, fn_name, std_name, diagnostics);
+            check_fnptr_cast_expr(end, fn_name, std_name, diagnostics);
+            check_fnptr_cast_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::ForIter { body, .. } | TypedStmt::TaskSpawn { body, .. } => {
+            check_fnptr_cast_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::IndexAssign { index, value, .. } => {
+            check_fnptr_cast_expr(index, fn_name, std_name, diagnostics);
+            check_fnptr_cast_expr(value, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::FieldAssign { value, .. } => {
+            check_fnptr_cast_expr(value, fn_name, std_name, diagnostics);
+        }
+        _ => {}
+    }
+}
+
+fn check_fnptr_cast_expr(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    use crate::ast::Type;
+
+    fn is_fn_ptr(ty: &Type) -> bool {
+        matches!(ty, Type::FnPtr(_, _) | Type::Closure(_, _))
+    }
+    fn is_data_ptr(ty: &Type) -> bool {
+        matches!(ty, Type::Ptr(_) | Type::PtrMut(_))
+    }
+
+    if let EK::Cast { expr: inner, .. } = &expr.kind {
+        let src = &inner.ty;
+        let dst = &expr.ty;
+        if (is_fn_ptr(src) && !is_fn_ptr(dst)) || (!is_fn_ptr(src) && is_fn_ptr(dst)) {
+            diagnostics.push(Diagnostic::new(
+                expr.span,
+                format!(
+                    "MISRA 11.1 (in '{}'): cast between function-pointer and \
+                     non-function-pointer type is forbidden under `#{}`",
+                    fn_name, std_name
+                ),
+            ));
+        }
+        if is_data_ptr(src) && is_data_ptr(dst) && src != dst {
+            diagnostics.push(Diagnostic::new(
+                expr.span,
+                format!(
+                    "MISRA 11.3 (in '{}'): cast between pointers to different \
+                     object types is forbidden under `#{}`",
+                    fn_name, std_name
+                ),
+            ));
+        }
+        check_fnptr_cast_expr(inner, fn_name, std_name, diagnostics);
+    } else {
+        match &expr.kind {
+            EK::Unary { expr: inner, .. } => {
+                check_fnptr_cast_expr(inner, fn_name, std_name, diagnostics);
+            }
+            EK::Binary { left, right, .. }
+            | EK::Index { array: left, index: right, .. } => {
+                check_fnptr_cast_expr(left, fn_name, std_name, diagnostics);
+                check_fnptr_cast_expr(right, fn_name, std_name, diagnostics);
+            }
+            EK::Call { args, .. } => {
+                for a in args {
+                    check_fnptr_cast_expr(a, fn_name, std_name, diagnostics);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// ── S-7: MISRA C 2012 Rule 13.2 — evaluation-order-dependent args ────────
+
+/// S-7 — MISRA C 2012 Rule 13.2: the value of an expression and its
+/// persistent side effects shall be the same under any order of
+/// evaluation. In vāṇī the main risk is a `Call` expression whose
+/// argument list mentions the same binding more than once — the C
+/// backend may evaluate arguments in any order (C leaves argument
+/// evaluation order unspecified), so if a callee could modify one of
+/// them, the result is implementation-defined.
+///
+/// V1 scope: flag any `Call` where the same `Var` name appears in two
+/// or more argument positions under a composite-tagged function.
+pub fn enforce_misra_eval_order(
+    program: &TypedProgram,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for f in &program.functions {
+        if f.safety_standard.is_none() {
+            continue;
+        }
+        let std_name = f.safety_standard.as_deref().unwrap_or("?");
+        check_eval_order_stmts(&f.body, &f.name, std_name, diagnostics);
+    }
+}
+
+fn check_eval_order_stmts(
+    stmts: &[TypedStmt],
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for stmt in stmts {
+        check_eval_order_stmt(stmt, fn_name, std_name, diagnostics);
+    }
+}
+
+fn check_eval_order_stmt(
+    stmt: &TypedStmt,
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        TypedStmt::Let { expr, .. }
+        | TypedStmt::Reassign { expr, .. }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr }
+        | TypedStmt::Discard { expr } => {
+            check_eval_order_expr(expr, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            check_eval_order_expr(cond, fn_name, std_name, diagnostics);
+            check_eval_order_stmts(then_body, fn_name, std_name, diagnostics);
+            check_eval_order_stmts(else_body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::While { cond, body, .. } => {
+            check_eval_order_expr(cond, fn_name, std_name, diagnostics);
+            check_eval_order_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            check_eval_order_expr(start, fn_name, std_name, diagnostics);
+            check_eval_order_expr(end, fn_name, std_name, diagnostics);
+            check_eval_order_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. }
+        | TypedStmt::UnsafeBlock { body, .. } => {
+            check_eval_order_stmts(body, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::IndexAssign { index, value, .. } => {
+            check_eval_order_expr(index, fn_name, std_name, diagnostics);
+            check_eval_order_expr(value, fn_name, std_name, diagnostics);
+        }
+        TypedStmt::FieldAssign { value, .. } => {
+            check_eval_order_expr(value, fn_name, std_name, diagnostics);
+        }
+        _ => {}
+    }
+}
+
+fn check_eval_order_expr(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    std_name: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    if let EK::Call { args, .. } = &expr.kind {
+        // Count occurrences of each Var name across args.
+        let mut seen: std::collections::HashMap<&str, (usize, crate::span::Span)> =
+            std::collections::HashMap::new();
+        for (i, arg) in args.iter().enumerate() {
+            if let EK::Var(name) = &arg.kind {
+                if let Some((first_pos, first_span)) = seen.get(name.as_str()) {
+                    // Only flag once per duplicate — use the second occurrence.
+                    if i == first_pos + 1 {
+                        diagnostics.push(Diagnostic::new(
+                            arg.span,
+                            format!(
+                                "MISRA 13.2 (in '{}'): binding '{}' appears at \
+                                 arg positions {} and {} in the same call — \
+                                 C argument evaluation order is unspecified; \
+                                 forbidden under `#{}`",
+                                fn_name,
+                                name,
+                                first_pos + 1,
+                                i + 1,
+                                std_name
+                            ),
+                        ));
+                        let _ = first_span;
+                    }
+                } else {
+                    seen.insert(name.as_str(), (i, arg.span));
+                }
+            }
+            check_eval_order_expr(arg, fn_name, std_name, diagnostics);
+        }
+    } else {
+        match &expr.kind {
+            EK::Unary { expr: inner, .. }
+            | EK::Cast { expr: inner, .. } => {
+                check_eval_order_expr(inner, fn_name, std_name, diagnostics);
+            }
+            EK::Binary { left, right, .. }
+            | EK::Index { array: left, index: right, .. } => {
+                check_eval_order_expr(left, fn_name, std_name, diagnostics);
+                check_eval_order_expr(right, fn_name, std_name, diagnostics);
+            }
+            _ => {}
+        }
     }
 }

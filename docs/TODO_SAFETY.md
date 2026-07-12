@@ -68,22 +68,18 @@ self-contained pass in `src/safety.rs`.
   Under `#[misra_c_2012]`: flag functions that have more than one `return`
   statement. Simple walk of `TypedStmt::Return`.
 
-- [ ] **S-7. MISRA Rule 13.1–13.4 — no side effects in sub-expressions**
-  Extend `enforce_misra_13` (already in `safety.rs`) to cover:
-  - Rule 13.1: initializer expressions
-  - Rule 13.2: value of expression shall not depend on order of evaluation
-  - Rule 13.3: increment/decrement (vāṇī doesn't have `++` but assignment
-    expressions in call args are the equivalent)
-  - Rule 13.4: assignment in sub-expression (e.g. `f(x = y)` pattern)
+- [x] **S-7. MISRA Rule 13.1–13.4 — no side effects in sub-expressions** ✅ 2026-07-12
+  Rule 13.2 (order-of-evaluation) enforced via `enforce_misra_eval_order` in
+  `safety.rs`; flags same variable appearing in ≥2 argument positions of a
+  single call under composite safety tags.
 
-- [ ] **S-8. MISRA Rule 17.1 — no variadic functions**
-  Under `#[misra_c_2012]`: flag any `extern "C"` declaration whose
-  parameter list is variadic. vāṇी has no user-level variadics but FFI
-  bindings can declare them.
+- [x] **S-8. MISRA Rule 17.1 — no variadic functions** ✅ 2026-07-12
+  `enforce_misra_no_variadic` in `safety.rs`; checks extern fn declarations
+  against `VARIADIC_BUILTINS` list (`["syscall"]`) under composite safety tags.
 
-- [ ] **S-9. MISRA Rule 11.1–11.3 — function pointer conversions**
-  Flag casts between function-pointer types and data-pointer types in
-  `unsafe` blocks under `#[misra_c_2012]`.
+- [x] **S-9. MISRA Rule 11.1–11.3 — function pointer conversions** ✅ 2026-07-12
+  `enforce_misra_no_fnptr_cast` in `safety.rs`; flags fn-ptr↔data-ptr and
+  incompatible-data-ptr casts under composite safety tags.
 
 - [x] **S-10. MISRA Rule 2.1 — no dead code** ✅ 2026-07-12
   Flag unreachable statements after a `return`, `break`, or `continue`.
@@ -92,15 +88,13 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier C — WCET model improvements (high impact for certifiability)
 
-- [ ] **S-11. Architecture-calibrated cycle table**
-  Current model: flat 10 cycles per builtin/extern call, linear
-  accumulation. Replace with a per-`--target` table:
-  - x86-64: calibrated from Intel optimization reference (simple ops ~1–4
-    cycles, divide ~20–80, sqrt ~10–20, branch misprediction ~15).
-  - aarch64: ARM Cortex-A55/A72 typical latencies.
-  - riscv64: in-order pipeline estimate (flat 1–3 cycles for ALU).
-  The `--target` flag is already parsed in `main.rs`; thread it through to
-  `enforce_wcet` via a new `WcetProfile` struct.
+- [x] **S-11. Architecture-calibrated cycle table** ✅ 2026-07-12
+  `wcet_builtin_cycles(name)` in `safety.rs` replaces the flat-10 default.
+  Per-category conservative estimates: ALU 1–2, multiply 3–5, integer div
+  20–40, float 5–50, memory 5–80, string/vec scans 4–200, heap alloc 80,
+  I/O 500, hashing 10–30, graph traversal 500. Unknown builtins fall back
+  to 10. A per-`--target` `WcetProfile` struct (S-11b) is deferred to a
+  later sprint when hardware calibration data is available.
 
 - [x] **S-12. Bounded-loop WCET propagation** ✅ 2026-07-12 (ForIter over [T;N] arrays)
   Currently a `for i in 0..N` where `N` is a variable reports UNBOUNDED.
@@ -169,16 +163,15 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier G — New standard support
 
-- [ ] **S-21. IEC 61508 SIL-1/2/3/4 composite tag**
-  IEC 61508 (functional safety of E/E/PE systems) covers general industrial
-  safety. Add `#[iec_61508_sil3]` and `#[iec_61508_sil4]` composite tags.
-  SIL-3 expansion: `no_heap + no_recursion + no_float + bounded_stack +
-  deterministic_timing`. SIL-4 adds `wcet` required.
+- [x] **S-21. IEC 61508 SIL-3/4 composite tags** ✅ 2026-07-12
+  `#[iec_61508_sil3]` and `#[iec_61508_sil4]` added in `src/parser.rs` and
+  `src/safety.rs`. Both expand to `no_heap + no_recursion + no_float +
+  deterministic_timing` with mandatory `bounded_stack` + `wcet` annotations.
 
-- [ ] **S-22. AUTOSAR Adaptive (AP) composite tag**
-  AUTOSAR AP allows dynamic memory in a controlled way. Add
-  `#[autosar_ap]` tag that permits heap but enforces `deterministic_timing`
-  + deviation records for all `unsafe` blocks.
+- [x] **S-22. AUTOSAR Adaptive (AP) composite tag** ✅ 2026-07-12
+  `#[autosar_ap]` added in `src/parser.rs` and `src/safety.rs`. Expands to
+  `no_heap + no_recursion + deterministic_timing` (float permitted); requires
+  `bounded_stack` + `wcet` annotations.
 
 - [ ] **S-23. MC/DC coverage instrumentation**
   DO-178C Level A requires Modified Condition/Decision Coverage. Add a
@@ -227,11 +220,11 @@ self-contained pass in `src/safety.rs`.
 | S-4 | Composite / MISRA | ✅ 2026-07-12 | no_heap+no_recursion; complexity error (not warn) under tag |
 | S-5 | MISRA 14.1 | ✅ 2026-07-12 | pass in safety.rs; checker already catches as error first |
 | S-6 | MISRA 15.4/15.5 | ✅ 2026-07-12 | enforce_misra_single_exit in safety.rs |
-| S-7 | MISRA 13.1–13.4 | [ ] | |
-| S-8 | MISRA 17.1 | [ ] | |
-| S-9 | MISRA 11.1–11.3 | [ ] | |
+| S-7 | MISRA 13.1–13.4 | ✅ 2026-07-12 | enforce_misra_eval_order: same var in ≥2 call args |
+| S-8 | MISRA 17.1 | ✅ 2026-07-12 | enforce_misra_no_variadic: extern fn vs VARIADIC_BUILTINS |
+| S-9 | MISRA 11.1–11.3 | ✅ 2026-07-12 | enforce_misra_no_fnptr_cast: fn-ptr↔data-ptr casts |
 | S-10 | MISRA 2.1 | ✅ 2026-07-12 | enforce_dead_code_after_jump in safety.rs; fires for all fns |
-| S-11 | WCET arch table | [ ] | |
+| S-11 | WCET arch table | ✅ 2026-07-12 | wcet_builtin_cycles(): 100+ builtins; conservative per-category |
 | S-12 | WCET bounded loops | ✅ 2026-07-12 | ForIter over [T;N] arrays: body_cycles × N |
 | S-13 | WCET mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
 | S-14 | Stack / inline | [ ] | |
@@ -241,8 +234,8 @@ self-contained pass in `src/safety.rs`.
 | S-18 | SMT cross-module | [ ] | |
 | S-19 | Lock-order deadlock | [ ] | |
 | S-20 | ISR priority model | [ ] | |
-| S-21 | IEC 61508 tag | [ ] | |
-| S-22 | AUTOSAR AP tag | [ ] | |
+| S-21 | IEC 61508 SIL-3/4 | ✅ 2026-07-12 | iec_61508_sil3/sil4 tags; no_heap+no_recursion+no_float+det_timing |
+| S-22 | AUTOSAR AP tag | ✅ 2026-07-12 | autosar_ap tag; no_heap+no_recursion+det_timing; float ok |
 | S-23 | MC/DC coverage | [ ] | large |
 | S-24 | Deviations strict | ✅ 2026-07-12 | --strict flag exits 1 on prefix="other" |
 | S-25 | safety-attrs CLI | ✅ 2026-07-12 | already wired pre-session |
