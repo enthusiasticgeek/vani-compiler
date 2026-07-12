@@ -148,10 +148,12 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier F — Concurrency / race safety
 
-- [ ] **S-19. Lock-order graph and deadlock detection**
-  Build a static lock-acquisition-order graph from the program's mutex
-  calls. Detect cycles (A acquires M1 then M2; B acquires M2 then M1 →
-  potential deadlock). Report as a warning-level diagnostic.
+- [x] **S-19. Lock-order graph and deadlock detection** ✅ 2026-07-12
+  `enforce_lock_order` in `safety.rs`. Walks every function body to collect
+  the flat `mutex_lock` acquisition sequence, records directed edges A→B in
+  a global ordering graph, then runs DFS cycle detection. Cycles are emitted
+  as warning-level diagnostics with the span of the closing lock acquisition
+  and a hint naming the canonical ordering to adopt.
 
 - [ ] **S-20. ISR priority and preemption model**
   `#[interrupt]` currently validates the body but not the priority level.
@@ -232,7 +234,7 @@ self-contained pass in `src/safety.rs`.
 | S-16 | SMT Vec index | [ ] | |
 | S-17 | SMT loop invariant | [ ] | |
 | S-18 | SMT cross-module | [ ] | |
-| S-19 | Lock-order deadlock | [ ] | |
+| S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: DFS cycle detection on acquisition-order graph |
 | S-20 | ISR priority model | [ ] | |
 | S-21 | IEC 61508 SIL-3/4 | ✅ 2026-07-12 | iec_61508_sil3/sil4 tags; no_heap+no_recursion+no_float+det_timing |
 | S-22 | AUTOSAR AP tag | ✅ 2026-07-12 | autosar_ap tag; no_heap+no_recursion+det_timing; float ok |

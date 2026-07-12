@@ -1201,6 +1201,30 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         crate::safety::enforce_dead_code_after_jump(
             &typed_program_view, &mut diagnostics,
         );
+        // S-8 — MISRA C 2012 Rule 17.1: no variadic fn declarations
+        // under composite safety tags. vāṇī has no user-level variadics
+        // but the pass guards against future backend changes.
+        crate::safety::enforce_misra_no_variadic(
+            &typed_program_view, &mut diagnostics,
+        );
+        // S-9 — MISRA C 2012 Rules 11.1 / 11.3: fn-ptr ↔ data-ptr
+        // casts and incompatible data-ptr casts forbidden under
+        // composite-tagged functions.
+        crate::safety::enforce_misra_no_fnptr_cast(
+            &typed_program_view, &mut diagnostics,
+        );
+        // S-7 — MISRA C 2012 Rule 13.2: same binding in two argument
+        // positions of a single call — C evaluation order is
+        // unspecified; forbidden under composite-tagged functions.
+        crate::safety::enforce_misra_eval_order(
+            &typed_program_view, &mut diagnostics,
+        );
+        // S-19 — Lock-order cycle detection. Builds a directed
+        // acquisition-order graph across all functions and reports
+        // any cycle as a potential deadlock (warning level).
+        crate::safety::enforce_lock_order(
+            &typed_program_view, &mut diagnostics,
+        );
         // T2.4 — cyclomatic complexity warning. Opt-in via
         // env vars (`INTENT_CHECK_COMPLEXITY=1` or
         // `INTENT_MAX_COMPLEXITY=<N>`). Skipped by default to

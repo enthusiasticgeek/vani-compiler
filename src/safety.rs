@@ -2854,3 +2854,326 @@ fn check_eval_order_expr(
         }
     }
 }
+
+// ── S-19: Lock-order graph and deadlock detection ────────────────────────────
+
+/// Walk a statement body and collect, in order, the variable names passed to
+/// `mutex_lock(...)`. The sequence represents a potential lock-acquisition
+/// ordering in that path.
+///
+/// We do a *linear* walk: we do not branch-split (an over-approximation that
+/// is both safe and simple). Branches widen the set of observed lock orders
+/// but never suppress real cycles.
+fn collect_lock_sequence(
+    stmts: &[crate::ir::TypedStmt],
+    seq: &mut Vec<(String, crate::span::Span)>,
+) {
+    use crate::ir::TypedStmt as S;
+    for stmt in stmts {
+        match stmt {
+            S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. } => {
+                collect_lock_sequence_expr(expr, seq);
+            }
+            S::If { cond, then_body, else_body } => {
+                collect_lock_sequence_expr(cond, seq);
+                collect_lock_sequence(then_body, seq);
+                collect_lock_sequence(else_body, seq);
+            }
+            S::While { cond, body, .. } => {
+                collect_lock_sequence_expr(cond, seq);
+                collect_lock_sequence(body, seq);
+            }
+            S::For { start, end, body, .. } => {
+                collect_lock_sequence_expr(start, seq);
+                collect_lock_sequence_expr(end, seq);
+                collect_lock_sequence(body, seq);
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => {
+                collect_lock_sequence(body, seq);
+            }
+            S::Assert { expr, .. } | S::Prove { expr, .. } => {
+                collect_lock_sequence_expr(expr, seq);
+            }
+            S::IndexAssign { index, value, .. } => {
+                collect_lock_sequence_expr(index, seq);
+                collect_lock_sequence_expr(value, seq);
+            }
+            S::FieldAssign { object, value, .. } => {
+                collect_lock_sequence_expr(object, seq);
+                collect_lock_sequence_expr(value, seq);
+            }
+            S::Return { expr } => {
+                collect_lock_sequence_expr(expr, seq);
+            }
+            S::Print { items } | S::EPrint { items } => {
+                for item in items {
+                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                        collect_lock_sequence_expr(e, seq);
+                    }
+                }
+            }
+            S::Drop { .. } | S::ForIterShallowFree { .. }
+            | S::Break { .. } | S::Continue { .. }
+            | S::TaskJoin { .. } => {}
+        }
+    }
+}
+
+fn collect_lock_sequence_expr(
+    expr: &crate::ir::TypedExpr,
+    seq: &mut Vec<(String, crate::span::Span)>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    match &expr.kind {
+        EK::Call { name, args, .. } if name == "mutex_lock" => {
+            if let Some(arg) = args.first() {
+                if let Some(mutex_name) = extract_mutex_name_from_typed_expr(arg) {
+                    seq.push((mutex_name, expr.span));
+                }
+            }
+            // Also walk the args for nested expressions
+            for a in args {
+                collect_lock_sequence_expr(a, seq);
+            }
+        }
+        EK::Call { args, .. } => {
+            for a in args {
+                collect_lock_sequence_expr(a, seq);
+            }
+        }
+        EK::Unary { expr: inner, .. }
+        | EK::Cast { expr: inner, .. } => {
+            collect_lock_sequence_expr(inner, seq);
+        }
+        EK::Ref { .. } | EK::RefMut { .. } => {}
+        EK::Binary { left, right, .. }
+        | EK::Index { array: left, index: right, .. } => {
+            collect_lock_sequence_expr(left, seq);
+            collect_lock_sequence_expr(right, seq);
+        }
+        EK::Block { stmts, tail } => {
+            collect_lock_sequence(stmts, seq);
+            collect_lock_sequence_expr(tail, seq);
+        }
+        EK::IfExpr { cond, then_value, else_value } => {
+            collect_lock_sequence_expr(cond, seq);
+            collect_lock_sequence_expr(then_value, seq);
+            collect_lock_sequence_expr(else_value, seq);
+        }
+        EK::Match { scrutinee, arms } => {
+            collect_lock_sequence_expr(scrutinee, seq);
+            for arm in arms {
+                collect_lock_sequence_expr(&arm.body, seq);
+            }
+        }
+        EK::EnumVariantWithPayload { payload, .. } => {
+            collect_lock_sequence_expr(payload, seq);
+        }
+        EK::DynCoerce { value, .. } => {
+            collect_lock_sequence_expr(value, seq);
+        }
+        EK::DynDispatch { receiver, args, .. } => {
+            collect_lock_sequence_expr(receiver, seq);
+            for a in args {
+                collect_lock_sequence_expr(a, seq);
+            }
+        }
+        EK::CallIndirect { callee, args } => {
+            collect_lock_sequence_expr(callee, seq);
+            for a in args {
+                collect_lock_sequence_expr(a, seq);
+            }
+        }
+        EK::Tuple { elements } | EK::ArrayLit { elements } => {
+            for e in elements {
+                collect_lock_sequence_expr(e, seq);
+            }
+        }
+        EK::TupleAccess { tuple: inner, .. }
+        | EK::FieldAccess { object: inner, .. } => {
+            collect_lock_sequence_expr(inner, seq);
+        }
+        EK::RefMutIndex { index, .. } => {
+            collect_lock_sequence_expr(index, seq);
+        }
+        EK::Len { array: inner, .. } => {
+            collect_lock_sequence_expr(inner, seq);
+        }
+        EK::StructLit { fields, .. } => {
+            for (_, e) in fields {
+                collect_lock_sequence_expr(e, seq);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Extract a mutex variable name from a `TypedExpr` argument to `mutex_lock`.
+fn extract_mutex_name_from_typed_expr(arg: &crate::ir::TypedExpr) -> Option<String> {
+    use crate::ir::TypedExprKind as EK;
+    match &arg.kind {
+        EK::Ref { name } | EK::RefMut { name } => Some(name.clone()),
+        EK::Var(name) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+/// Detect lock-acquisition-order cycles across all functions in the program.
+///
+/// Algorithm:
+/// 1. For each function, collect the flat sequence of `mutex_lock` calls.
+/// 2. For each consecutive pair (A, B) in that sequence, record a directed
+///    edge A → B in a global order graph ("A is acquired before B").
+/// 3. After processing all functions, run a DFS cycle detection on the graph.
+/// 4. Report each cycle as a warning-level diagnostic including the span of
+///    the lock acquisition that closes the cycle.
+///
+/// This is an inter-function *intra-path* analysis: it finds ordering
+/// inconsistencies across different functions but does not follow call edges
+/// (i.e. it is not transitive). A full transitive analysis would require call
+/// graph construction and is left to a future sprint.
+pub fn enforce_lock_order(
+    program: &crate::ir::TypedProgram,
+    diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
+) {
+    use std::collections::{HashMap, HashSet};
+
+    // lock_name -> integer ID
+    let mut lock_id: HashMap<String, usize> = HashMap::new();
+    let mut next_id: usize = 0;
+
+    // Adjacency list: edge_span[u][v] = first span where u → v was seen.
+    // We record the span so we can point at the code in the diagnostic.
+    let mut edges: HashMap<usize, HashMap<usize, crate::span::Span>> = HashMap::new();
+    // reverse map: ID -> name (for diagnostics)
+    let mut id_name: HashMap<usize, String> = HashMap::new();
+
+    // Helper: intern a lock name, returning its stable integer ID.
+    macro_rules! intern {
+        ($name:expr) => {{
+            let n: &str = $name;
+            if let Some(&existing) = lock_id.get(n) {
+                existing
+            } else {
+                let id = next_id;
+                next_id += 1;
+                lock_id.insert(n.to_string(), id);
+                id_name.insert(id, n.to_string());
+                id
+            }
+        }};
+    }
+
+    for func in &program.functions {
+        if func.is_extern {
+            continue;
+        }
+        let mut seq: Vec<(String, crate::span::Span)> = Vec::new();
+        collect_lock_sequence(&func.body, &mut seq);
+        if seq.len() < 2 {
+            continue;
+        }
+        // Intern all names in this function's sequence
+        let ids: Vec<(usize, crate::span::Span)> = seq
+            .iter()
+            .map(|(name, span)| (intern!(name.as_str()), *span))
+            .collect();
+        // Record consecutive pairs as ordering edges
+        for window in ids.windows(2) {
+            let (a, _a_span) = window[0];
+            let (b, b_span) = window[1];
+            if a == b {
+                continue; // re-locking same mutex
+            }
+            edges.entry(a).or_default().entry(b).or_insert(b_span);
+        }
+    }
+
+    if edges.is_empty() {
+        return;
+    }
+
+    // DFS-based cycle detection. We track the recursion stack (not just
+    // visited) to distinguish back-edges from cross-edges.
+    let all_nodes: HashSet<usize> = edges.keys().copied()
+        .chain(edges.values().flat_map(|m| m.keys().copied()))
+        .collect();
+
+    let mut visited: HashSet<usize> = HashSet::new();
+    let mut on_stack: Vec<usize> = Vec::new();
+    let mut reported: HashSet<(usize, usize)> = HashSet::new();
+
+    fn dfs(
+        node: usize,
+        edges: &HashMap<usize, HashMap<usize, crate::span::Span>>,
+        visited: &mut HashSet<usize>,
+        on_stack: &mut Vec<usize>,
+        reported: &mut HashSet<(usize, usize)>,
+        id_name: &HashMap<usize, String>,
+        diagnostics: &mut Vec<crate::diagnostic::Diagnostic>,
+    ) {
+        visited.insert(node);
+        on_stack.push(node);
+
+        if let Some(neighbours) = edges.get(&node) {
+            for (&next, &span) in neighbours {
+                if !visited.contains(&next) {
+                    dfs(next, edges, visited, on_stack, reported, id_name, diagnostics);
+                } else if on_stack.contains(&next) {
+                    // Found a back-edge: node → next closes a cycle
+                    let cycle_key = (node.min(next), node.max(next));
+                    if reported.insert(cycle_key) {
+                        // Build a human-readable cycle description
+                        let cycle_start = on_stack.iter().position(|&n| n == next).unwrap();
+                        let cycle_nodes = &on_stack[cycle_start..];
+                        let cycle_str: Vec<&str> = cycle_nodes
+                            .iter()
+                            .map(|n| id_name.get(n).map(|s| s.as_str()).unwrap_or("?"))
+                            .collect();
+                        let a_name = id_name.get(&node).map(|s| s.as_str()).unwrap_or("?");
+                        let b_name = id_name.get(&next).map(|s| s.as_str()).unwrap_or("?");
+                        let msg = format!(
+                            "[S-19] potential deadlock: lock-acquisition cycle detected \
+                             ({} → {}). Cycle path: {} → {}. \
+                             If two threads acquire these locks in opposite orders \
+                             they will deadlock.",
+                            a_name, b_name,
+                            cycle_str.join(" → "),
+                            b_name,
+                        );
+                        let hint = format!(
+                            "Establish a global lock ordering and always acquire \
+                             locks in that order. For example, always acquire '{}' \
+                             before '{}'.",
+                            b_name, a_name
+                        );
+                        diagnostics.push(crate::diagnostic::Diagnostic {
+                            span,
+                            message: msg,
+                            related: vec![],
+                            elaboration: vec![hint],
+                        });
+                    }
+                }
+            }
+        }
+
+        on_stack.pop();
+    }
+
+    for &node in &all_nodes {
+        if !visited.contains(&node) {
+            dfs(
+                node,
+                &edges,
+                &mut visited,
+                &mut on_stack,
+                &mut reported,
+                &id_name,
+                diagnostics,
+            );
+        }
+    }
+}
