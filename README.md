@@ -1641,31 +1641,28 @@ tiers + four standard composites are on `main`:
   - `intentc safety-attrs <file>` — per-function safety annotation
     table (CSV / JSON / text) for audit dashboards.
 - **Concurrency safety passes:**
-  - **S-19 — lock-order deadlock detection:** directed acquisition-order
-    graph built from all `mutex_lock` sequences; DFS cycle detection
-    fires `[S-19] potential deadlock` for every ordering cycle.
-    Detection is **intra-procedural** — see
-    [docs/v1_limitations.md](docs/v1_limitations.md) §L20 for the
-    transitive gap and workaround.
+  - **S-19 — lock-order deadlock detection:** held-set transitive analysis
+    (`build_lock_edges`) walks every function and its callees; records
+    ordering edges from every currently held lock to each newly acquired
+    lock; DFS cycle detection fires `[S-19] potential deadlock` for every
+    ordering cycle. Detection is **fully transitive** — callee lock sequences
+    are inlined with correct RAII release semantics (L20, fixed 2026-07-12).
   - **S-20 — ISR priority inversion:** `#[interrupt(priority=N)]`
     tracks ISR urgency levels; fires `[S-20] potential priority
-    inversion` when two ISRs at different priorities call
-    `mutex_lock` on the same variable. Detection is limited to
-    direct ISR body — see §L21 for the helper-call gap.
+    inversion` when two ISRs at different priorities transitively acquire
+    a mutex with the same variable name — including mutexes locked inside
+    helpers called from the ISR (L21, fixed 2026-07-12).
 - **Adversarial test suite:** `tests/safety_adversarial.rs` — 31
   integration tests that probe each safety pass with non-obvious
   inputs: transitive float, indirect recursion, returns buried in
   nested branches, both lock orderings in a single function's if/else
-  branches. Three `gap_*` tests pin known analysis-scope limitations
-  and will self-report when those gaps are closed.
+  branches, transitive lock cycles through helpers, ISR mutexes via
+  helpers, non-adjacent duplicate call args. All 31 pass.
 
 Plan-of-record + sub-step ledger: [docs/TODO_SAFETY.md](docs/TODO_SAFETY.md)
-(all 27 items now complete). Known analysis-scope limitations:
-[docs/v1_limitations.md §L20–L22](docs/v1_limitations.md). None block
-certification — they require supplementary review and TQD disclosure;
-see the [safety standards tutorial](tutorials/src/advanced/12_safety_standards.md)
-§ "Do these gaps prevent real-world safety certification?" for a
-full compliance analysis. ARC work is active; see [ARCS.md](ARCS.md).
+(all 27 items complete; L20–L22 scope gaps closed 2026-07-12). See
+[docs/v1_limitations.md](docs/v1_limitations.md) for historical gap
+records. ARC work is active; see [ARCS.md](ARCS.md).
 
 ### Examples — what the compiler rejects
 

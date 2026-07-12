@@ -71,7 +71,9 @@ self-contained pass in `src/safety.rs`.
 - [x] **S-7. MISRA Rule 13.1–13.4 — no side effects in sub-expressions** ✅ 2026-07-12
   Rule 13.2 (order-of-evaluation) enforced via `enforce_misra_eval_order` in
   `safety.rs`; flags same variable appearing in ≥2 argument positions of a
-  single call under composite safety tags.
+  single call under composite safety tags. Uses `seen.remove()` so any
+  duplicate at any distance is caught, not only adjacent positions (L22 fix
+  2026-07-12).
 
 - [x] **S-8. MISRA Rule 17.1 — no variadic functions** ✅ 2026-07-12
   `enforce_misra_no_variadic` in `safety.rs`; checks extern fn declarations
@@ -150,20 +152,24 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier F — Concurrency / race safety
 
-- [x] **S-19. Lock-order graph and deadlock detection** ✅ 2026-07-12
-  `enforce_lock_order` in `safety.rs`. Walks every function body to collect
-  the flat `mutex_lock` acquisition sequence, records directed edges A→B in
-  a global ordering graph, then runs DFS cycle detection. Cycles are emitted
-  as warning-level diagnostics with the span of the closing lock acquisition
-  and a hint naming the canonical ordering to adopt.
+- [x] **S-19. Lock-order graph and deadlock detection** ✅ 2026-07-12 (enhanced 2026-07-12)
+  `enforce_lock_order` in `safety.rs`. Uses a held-set analysis
+  (`build_lock_edges` / `build_lock_edges_expr`): tracks which locks are
+  currently held; when a new `mutex_lock` is encountered, adds ordering edges
+  from every held lock to the new one. User-defined callees are followed
+  transitively with a clone of the caller's held set — callee locks are
+  released on return (clone discarded), preventing spurious cross-call edges.
+  DFS cycle detection on the resulting graph reports deadlock risks. (L20 fix
+  2026-07-12: previously only walked each function's own body.)
 
-- [x] **S-20. ISR priority and preemption model** ✅ 2026-07-12
+- [x] **S-20. ISR priority and preemption model** ✅ 2026-07-12 (enhanced 2026-07-12)
   `#[interrupt(priority=N)]` syntax added to parser and forwarded through
   `ast::Function` → `ir::TypedFunction`. `enforce_isr_preemption` in
-  `safety.rs` warns when two ISRs at different priority levels both call
-  `mutex_lock` on a mutex with the same variable name (potential priority
-  inversion or deadlock), with an elaboration hint recommending atomics or a
-  priority-ceiling protocol.
+  `safety.rs` warns when two ISRs at different priority levels share a mutex
+  name — now detected transitively through helper calls via `fn_map` and
+  `visiting` parameters in `collect_locked_mutexes`. Hints recommend atomics
+  or a priority-ceiling protocol. (L21 fix 2026-07-12: previously only walked
+  the ISR's own body.)
 
 ---
 
@@ -230,7 +236,7 @@ self-contained pass in `src/safety.rs`.
 | S-4 | Composite / MISRA | ✅ 2026-07-12 | no_heap+no_recursion; complexity error (not warn) under tag |
 | S-5 | MISRA 14.1 | ✅ 2026-07-12 | pass in safety.rs; checker already catches as error first |
 | S-6 | MISRA 15.4/15.5 | ✅ 2026-07-12 | enforce_misra_single_exit in safety.rs |
-| S-7 | MISRA 13.1–13.4 | ✅ 2026-07-12 | enforce_misra_eval_order: same var in ≥2 call args |
+| S-7 | MISRA 13.1–13.4 | ✅ 2026-07-12 | enforce_misra_eval_order: any duplicate at any distance (L22 fix 2026-07-12) |
 | S-8 | MISRA 17.1 | ✅ 2026-07-12 | enforce_misra_no_variadic: extern fn vs VARIADIC_BUILTINS |
 | S-9 | MISRA 11.1–11.3 | ✅ 2026-07-12 | enforce_misra_no_fnptr_cast: fn-ptr↔data-ptr casts |
 | S-10 | MISRA 2.1 | ✅ 2026-07-12 | enforce_dead_code_after_jump in safety.rs; fires for all fns |
@@ -242,8 +248,8 @@ self-contained pass in `src/safety.rs`.
 | S-16 | SMT Vec index | ✅ 2026-07-12 | collect_index_bound_axioms: bvult/bvuge bounds before each query |
 | S-17 | SMT loop invariant | ✅ pre-existing | invariant <expr> syntax + check_loop_invariants + z3 verification |
 | S-18 | SMT cross-module | [ ] | |
-| S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: DFS cycle detection on acquisition-order graph |
-| S-20 | ISR priority model | ✅ 2026-07-12 | #[interrupt(priority=N)] + enforce_isr_preemption: mutex sharing check |
+| S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: held-set transitive analysis + DFS cycle detection (L20 fix 2026-07-12) |
+| S-20 | ISR priority model | ✅ 2026-07-12 | #[interrupt(priority=N)] + enforce_isr_preemption: transitive mutex collection (L21 fix 2026-07-12) |
 | S-21 | IEC 61508 SIL-3/4 | ✅ 2026-07-12 | iec_61508_sil3/sil4 tags; no_heap+no_recursion+no_float+det_timing |
 | S-22 | AUTOSAR AP tag | ✅ 2026-07-12 | autosar_ap tag; no_heap+no_recursion+det_timing; float ok |
 | S-23 | MC/DC coverage | ✅ 2026-07-12 | compute_mcdc_map + vanic coverage subcommand; runtime instrumentation deferred |
