@@ -127,11 +127,12 @@ self-contained pass in `src/safety.rs`.
 
 ## Tier E — SMT verification gaps
 
-- [ ] **S-16. Vec index bounds in SMT**
-  `smt.rs` returns `SkippedUnsupported` for array/Vec indexing. Add
-  encoding: for `xs[i]`, assert `0 <= i < xs_len` as a side-condition and
-  model the element as an opaque symbolic. This enables proofs like
-  `requires i < len(xs)` + `ensures result == xs[i]`.
+- [x] **S-16. Vec/array index bounds in SMT** ✅ 2026-07-12
+  `collect_index_bound_axioms` pre-pass in `smt.rs` walks `prove_expr` and all
+  `requires` before building the query and emits `(assert (bvult i xs_len))`
+  and `(assert (bvuge i #x0...0))` for every `xs[i]` sub-expression where `xs`
+  is a Vec or Array binding. Axioms are de-duplicated with a HashSet so the
+  same index expression appearing in multiple positions only emits once.
 
 - [ ] **S-17. Loop invariant annotation syntax**
   Add `invariant <expr>` inside `while` / `for` bodies (similar to SPARK
@@ -233,7 +234,7 @@ self-contained pass in `src/safety.rs`.
 | S-13 | WCET mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
 | S-14 | Stack / inline | [ ] | |
 | S-15 | Stack mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
-| S-16 | SMT Vec index | [ ] | |
+| S-16 | SMT Vec index | ✅ 2026-07-12 | collect_index_bound_axioms: bvult/bvuge bounds before each query |
 | S-17 | SMT loop invariant | [ ] | |
 | S-18 | SMT cross-module | [ ] | |
 | S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: DFS cycle detection on acquisition-order graph |

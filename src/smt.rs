@@ -631,6 +631,20 @@ fn build_query(
             out.push_str(&format!("(declare-const {} Bool)\n", sanitized));
         }
     }
+    // S-16 — Index bounds axioms.
+    // For every `xs[i]` sub-expression appearing in the goal or requires
+    // where `xs` is a Vec or Array binding, assert `0 ≤ i < len(xs)`.
+    // This lets SMT use the element value in proofs (e.g., if requires
+    // says `i < len(xs)`, the solver can confirm the access is safe).
+    let mut index_axioms: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for req in requires {
+        collect_index_bound_axioms(req, &declared, versions, &mut index_axioms);
+    }
+    collect_index_bound_axioms(prove_expr, &declared, versions, &mut index_axioms);
+    for axiom in &index_axioms {
+        out.push_str(axiom);
+    }
+
     for req in requires {
         // Skip preconditions / facts we can't encode rather than failing
         // the whole query — they just don't contribute to the proof.
@@ -642,6 +656,84 @@ fn build_query(
     out.push_str(&format!("(assert (not {}))\n", encoded));
     out.push_str("(check-sat)\n");
     Ok(out)
+}
+
+/// S-16 — Walk an expression tree and collect SMT-LIB `(assert …)\n` strings
+/// for index bounds: for each `xs[i]` where `xs` resolves to a Vec or Array
+/// binding, emit:
+///   1. `(assert (bvult i_bv64 xs_len))` — upper bound
+///   2. `(assert (bvuge i_bv64 #x0000000000000000))` — lower bound (always
+///      true for unsigned indices, but useful for signed widths cast to u64)
+///
+/// Duplicates across different call sites are suppressed via the `out` HashSet.
+fn collect_index_bound_axioms(
+    expr: &Expr,
+    vars: &HashMap<String, Type>,
+    versions: &HashMap<String, u32>,
+    out: &mut std::collections::HashSet<String>,
+) {
+    use ExprKind::*;
+    match &expr.kind {
+        Index { array, index } => {
+            // Recurse into sub-expressions first.
+            collect_index_bound_axioms(array, vars, versions, out);
+            collect_index_bound_axioms(index, vars, versions, out);
+
+            // Only handle named-base arrays with a Vec/Array type.
+            let Var(name) = &array.kind else { return };
+            let base = parse_versioned_name(name).0;
+            let Some(ty) = vars.get(base) else { return };
+            // Check it has a modelled element type.
+            if smt_array_element(ty).is_none() { return }
+
+            // Determine the length term (declared earlier as <base>_len for
+            // Vec, or as a BV literal for [T; N]).
+            let (arr_smt, _) = smt_array_name_for(name, versions);
+            let len_term = match ty.deref() {
+                Type::Vec(_) => format!("{}_len", sanitize(base)),
+                Type::Array { length, .. } => {
+                    format!("(_ bv{} 64)", length)
+                }
+                _ => return,
+            };
+
+            // Encode the index as a u64 BitVec.
+            let Ok(idx_bv64) = encode_index_to_64(index, vars, versions) else { return };
+
+            // Upper-bound axiom: i < len
+            let upper = format!(
+                "(assert (bvult {} {}))\n",
+                idx_bv64, len_term
+            );
+            // Lower-bound axiom: i >= 0 (for signed widths, bvuge is always
+            // trivially true but doesn't hurt to assert).
+            let lower = format!(
+                "(assert (bvuge {} #x0000000000000000))\n",
+                idx_bv64
+            );
+
+            out.insert(upper);
+            out.insert(lower);
+            // Silence the unused arr_smt binding
+            let _ = arr_smt;
+        }
+        Binary { left, right, .. } => {
+            collect_index_bound_axioms(left, vars, versions, out);
+            collect_index_bound_axioms(right, vars, versions, out);
+        }
+        Unary { expr: inner, .. } | Cast { expr: inner, .. } => {
+            collect_index_bound_axioms(inner, vars, versions, out);
+        }
+        Len { array: inner } => {
+            collect_index_bound_axioms(inner, vars, versions, out);
+        }
+        Call { args, .. } => {
+            for a in args {
+                collect_index_bound_axioms(a, vars, versions, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn int_bits(ty: &Type) -> Option<u32> {
