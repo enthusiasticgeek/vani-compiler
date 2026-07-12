@@ -3572,7 +3572,7 @@ fn flatten_modules_in_program(
                     up.span,
                     format!(
                         "name `{}` is already imported in module `{}`; \
-                         give one a different local name with `use â€¦ as â€¦;`",
+                         give one a different local name with `use … as …;`",
                         local, mod_name
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::duplicate_declaration("import", &local)));
@@ -3592,7 +3592,7 @@ fn flatten_modules_in_program(
                         format!(
                             "re-export collision: `{}::{}` is already \
                              re-exported (would point to both `{}` and \
-                             `{}`); rename one with `pub use â€¦ as â€¦;`",
+                             `{}`); rename one with `pub use … as …;`",
                             mod_name.replace("__", "::"),
                             local,
                             prev.replace("__", "::"),
@@ -4104,7 +4104,7 @@ fn flatten_modules_in_program(
                         up.span,
                         format!(
                             "`use {}::*;` re-imports `{}` (already imported from `{}::{}`); \
-                             rename one with `use â€¦ as â€¦;`",
+                             rename one with `use … as …;`",
                             up.module.replace("__", "::"),
                             suffix,
                             prev_module.replace("__", "::"),
@@ -4141,7 +4141,7 @@ fn flatten_modules_in_program(
                 up.span,
                 format!(
                     "name `{}` is already imported from `{}::{}`; \
-                     give one a different local name with `use â€¦ as â€¦;`",
+                     give one a different local name with `use … as …;`",
                     local,
                     prev_module.replace("__", "::"),
                     prev_item

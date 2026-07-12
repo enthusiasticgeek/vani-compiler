@@ -1656,7 +1656,15 @@ impl Parser {
                 "no_heap" => no_heap = true,
                 "no_float" => no_float = true,
                 "no_recursion" => no_recursion = true,
-                "inline" => inline = true,
+                "inline" => {
+                    if self.check(|k| matches!(k, TokenKind::LParen)) {
+                        return Err(Diagnostic::new(
+                            self.current().span,
+                            "unknown attribute `#[inline(...)]` — `#[inline]` takes no arguments",
+                        ));
+                    }
+                    inline = true;
+                }
                 "interrupt" => {
                     interrupt = true;
                     // Optional `(priority=N)` sub-attribute (S-20).
@@ -5752,7 +5760,7 @@ fn wrap_returns_in_future_ready_stmt(stmt: &mut Stmt) {
 /// they're aliases for the SAME symbol, not parallel functions.
 fn canonicalize_entry_point_name(name: String) -> String {
     match name.as_str() {
-        "main" | "à¤®à¥à¤–à¥à¤¯" | "à¤ªà¥à¤°à¤®à¥à¤–" | "à¤ªà¥à¤°à¤§à¤¾à¤¨" => "main".to_string(),
+        "main" | "मुख्य" | "प्रमुख" | "प्रधान" => "main".to_string(),
         _ => name,
     }
 }

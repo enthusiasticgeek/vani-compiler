@@ -41040,6 +41040,8 @@ função main() -> i64 {
     fn asil_d_composite_rejects_heap_alloc() {
         let source = r#"
             #[asil_d]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=1000)]
             fn bad() -> i64 {
               let v = vec(1, 2, 3);
               return 0;
@@ -41079,6 +41081,8 @@ função main() -> i64 {
         let _guard = EmbeddedTargetGuard::embedded();
         let source = r#"
             #[asil_d]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=100)]
             fn critical() -> i64 {
               unsafe(reason = "MMIO: control register") {
                 let _ = 0;
@@ -41100,6 +41104,8 @@ função main() -> i64 {
     fn do178c_and_iec_62304_composites_recognized() {
         let source = r#"
             #[do178c_level_a]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=100)]
             fn avionics(x: i64) -> i64 { return x; }
             #[iec_62304_class_c]
             fn medical(x: i64) -> i64 { return x; }
@@ -41129,6 +41135,8 @@ função main() -> i64 {
         // #[no_float] on top should still compose — both apply.
         let source = r#"
             #[asil_d] #[no_float]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=100)]
             fn strict(x: i64) -> i64 { return x + 1; }
             fn main() -> i64 { return 0; }
         "#;
@@ -41719,6 +41727,8 @@ função main() -> i64 {
     fn safety_attrs_report_includes_composite_expansion() {
         let source = r#"
             #[asil_d]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=100)]
             fn critical() -> i64 { return 0; }
             fn main() -> i64 { return critical(); }
         "#;
@@ -43197,7 +43207,7 @@ função main() -> i64 {
     fn misra_13_5_rejects_impure_call_in_and_rhs() {
         let source = r#"
             fn check(x: i64) -> bool { return x > 0; }
-            #[asil_d]
+            #[misra_c_2012]
             fn guarded(x: i64) -> bool {
               return x != 0 && check(x);
             }
@@ -43266,7 +43276,7 @@ função main() -> i64 {
     fn misra_13_5_fires_inside_nested_if() {
         let source = r#"
             fn helper(x: i64) -> bool { return x > 0; }
-            #[do178c_level_a]
+            #[misra_c_2012]
             fn complex(x: i64) -> bool {
               if x < 0 {
                 return false;
