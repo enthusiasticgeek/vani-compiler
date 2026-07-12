@@ -1886,6 +1886,73 @@ fn run() -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        "coverage" => {
+            // S-23: MC/DC (Modified Condition/Decision Coverage) map.
+            // DO-178C Level A requires that every boolean condition in
+            // every decision independently affects the outcome. This
+            // subcommand produces the static coverage map — the list of
+            // all condition points a test suite must exercise.
+            //
+            // Usage: vanic coverage <path> [--format=text|json|csv]
+            //                             [--out=<file>]
+            //
+            // The map is consumed by CI tooling alongside runtime hit
+            // data collected by `--instrument-mcdc` (backend
+            // instrumentation is a future sprint; this provides the
+            // static point list).
+            let mut format = "text";
+            let mut out_path: Option<String> = None;
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "csv" => "csv",
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose csv | json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if let Some(value) = arg.strip_prefix("--out=") {
+                    out_path = Some(value.to_string());
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'coverage' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'coverage' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            let (checked, file_map) = vani::compile_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let points = vani::safety::compute_mcdc_map(&checked.ir);
+            let output = match format {
+                "csv" => vani::safety::format_mcdc_csv(&points, &file_map),
+                "json" => vani::safety::format_mcdc_json(&points, &file_map),
+                _ => vani::safety::format_mcdc_text(&points, &file_map),
+            };
+            match out_path {
+                Some(p) => {
+                    fs::write(&p, &output).map_err(|e| {
+                        format!("failed to write '{}': {}", p, e)
+                    })?;
+                }
+                None => print!("{}", output),
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         "deviations" => {
             // T1.1 of the safety-standard alignment arc: extract
             // every `unsafe(reason = "…")` block as a structured

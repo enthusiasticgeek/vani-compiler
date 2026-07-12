@@ -3393,3 +3393,281 @@ pub fn enforce_isr_preemption(
         }
     }
 }
+
+// ── S-23: MC/DC coverage map ─────────────────────────────────────────────────
+
+/// A single boolean decision point that must achieve MC/DC coverage.
+/// Each condition in a compound decision (e.g. `a && b`) becomes its
+/// own entry so that test suites can verify each condition independently
+/// controls the overall outcome.
+#[derive(Debug, Clone)]
+pub struct MCDCPoint {
+    /// Source span of the condition expression.
+    pub span: crate::span::Span,
+    /// Human-readable function name.
+    pub function: String,
+    /// Context kind: "if-condition", "while-condition", "assert",
+    /// "prove", or "sub-condition" for atomic conditions inside a
+    /// compound decision.
+    pub kind: String,
+    /// Index of this point within the function (0-based, stable across
+    /// runs so coverage data from different test runs can be merged).
+    pub index: usize,
+}
+
+/// S-23 — Compute the MC/DC coverage map for a program.
+///
+/// DO-178C Level A requires Modified Condition/Decision Coverage: every
+/// boolean condition in every decision must independently affect the
+/// outcome at least once (true → outcome changes; false → outcome changes).
+///
+/// This function returns the static **coverage map** — the list of all
+/// condition points that a test suite must exercise. The map is consumed
+/// by `vanic coverage` to produce human-readable or machine-readable
+/// artifacts that CI can compare against runtime hit data collected via
+/// the `--instrument-mcdc` code-generation flag (backend instrumentation
+/// is left to a future sprint; this phase produces the map file).
+///
+/// Coverage granularity:
+///   - Every `if`/`while` condition is a decision.
+///   - `assert` and `prove` conditions are decisions.
+///   - Compound conditions (`&&`, `||`) are decomposed: each atomic
+///     sub-condition gets its own `MCDCPoint`.
+pub fn compute_mcdc_map(program: &crate::ir::TypedProgram) -> Vec<MCDCPoint> {
+    let mut points: Vec<MCDCPoint> = Vec::new();
+    for func in &program.functions {
+        if func.is_extern {
+            continue;
+        }
+        let mut counter = 0usize;
+        collect_mcdc_stmts(&func.body, &func.name, &mut counter, &mut points);
+    }
+    points
+}
+
+fn collect_mcdc_stmts(
+    stmts: &[crate::ir::TypedStmt],
+    fn_name: &str,
+    counter: &mut usize,
+    out: &mut Vec<MCDCPoint>,
+) {
+    use crate::ir::TypedStmt as S;
+    for stmt in stmts {
+        match stmt {
+            S::If { cond, then_body, else_body } => {
+                add_mcdc_decision(cond, fn_name, "if-condition", counter, out);
+                collect_mcdc_stmts(then_body, fn_name, counter, out);
+                collect_mcdc_stmts(else_body, fn_name, counter, out);
+            }
+            S::While { cond, body, .. } => {
+                add_mcdc_decision(cond, fn_name, "while-condition", counter, out);
+                collect_mcdc_stmts(body, fn_name, counter, out);
+            }
+            S::For { start, end, body, .. } => {
+                // Range bounds aren't boolean decisions but the body may contain them
+                collect_mcdc_stmts_expr_scan(start, fn_name, counter, out);
+                collect_mcdc_stmts_expr_scan(end, fn_name, counter, out);
+                collect_mcdc_stmts(body, fn_name, counter, out);
+            }
+            S::ForIter { body, .. }
+            | S::TaskSpawn { body, .. }
+            | S::UnsafeBlock { body, .. } => {
+                collect_mcdc_stmts(body, fn_name, counter, out);
+            }
+            S::Assert { expr, .. } => {
+                add_mcdc_decision(expr, fn_name, "assert", counter, out);
+            }
+            S::Prove { expr } => {
+                add_mcdc_decision(expr, fn_name, "prove", counter, out);
+            }
+            S::Let { expr, .. } | S::Discard { expr } | S::Reassign { expr, .. } => {
+                collect_mcdc_stmts_expr_scan(expr, fn_name, counter, out);
+            }
+            S::Return { expr } => {
+                collect_mcdc_stmts_expr_scan(expr, fn_name, counter, out);
+            }
+            S::IndexAssign { index, value, .. } => {
+                collect_mcdc_stmts_expr_scan(index, fn_name, counter, out);
+                collect_mcdc_stmts_expr_scan(value, fn_name, counter, out);
+            }
+            S::FieldAssign { object, value, .. } => {
+                collect_mcdc_stmts_expr_scan(object, fn_name, counter, out);
+                collect_mcdc_stmts_expr_scan(value, fn_name, counter, out);
+            }
+            S::Print { items } | S::EPrint { items } => {
+                for item in items {
+                    if let crate::ir::TypedPrintItem::Expr(e) = item {
+                        collect_mcdc_stmts_expr_scan(e, fn_name, counter, out);
+                    }
+                }
+            }
+            S::Drop { .. } | S::ForIterShallowFree { .. }
+            | S::Break { .. } | S::Continue { .. }
+            | S::TaskJoin { .. } => {}
+        }
+    }
+}
+
+/// Scan an expression for nested decision points (e.g. `if` expressions
+/// inside a let-binding or call argument).
+fn collect_mcdc_stmts_expr_scan(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    counter: &mut usize,
+    out: &mut Vec<MCDCPoint>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    match &expr.kind {
+        EK::IfExpr { cond, then_value, else_value } => {
+            add_mcdc_decision(cond, fn_name, "if-expr-condition", counter, out);
+            collect_mcdc_stmts_expr_scan(then_value, fn_name, counter, out);
+            collect_mcdc_stmts_expr_scan(else_value, fn_name, counter, out);
+        }
+        EK::Block { stmts, tail } => {
+            collect_mcdc_stmts(stmts, fn_name, counter, out);
+            collect_mcdc_stmts_expr_scan(tail, fn_name, counter, out);
+        }
+        EK::Match { scrutinee, arms } => {
+            collect_mcdc_stmts_expr_scan(scrutinee, fn_name, counter, out);
+            for arm in arms {
+                collect_mcdc_stmts_expr_scan(&arm.body, fn_name, counter, out);
+            }
+        }
+        EK::Call { args, .. } | EK::DynDispatch { args, .. } => {
+            for a in args { collect_mcdc_stmts_expr_scan(a, fn_name, counter, out); }
+        }
+        EK::CallIndirect { callee, args } => {
+            collect_mcdc_stmts_expr_scan(callee, fn_name, counter, out);
+            for a in args { collect_mcdc_stmts_expr_scan(a, fn_name, counter, out); }
+        }
+        EK::Binary { left, right, .. }
+        | EK::Index { array: left, index: right, .. } => {
+            collect_mcdc_stmts_expr_scan(left, fn_name, counter, out);
+            collect_mcdc_stmts_expr_scan(right, fn_name, counter, out);
+        }
+        EK::Unary { expr: inner, .. }
+        | EK::Cast { expr: inner, .. }
+        | EK::TupleAccess { tuple: inner, .. }
+        | EK::FieldAccess { object: inner, .. }
+        | EK::Len { array: inner, .. }
+        | EK::DynCoerce { value: inner, .. } => {
+            collect_mcdc_stmts_expr_scan(inner, fn_name, counter, out);
+        }
+        EK::EnumVariantWithPayload { payload, .. } => {
+            collect_mcdc_stmts_expr_scan(payload, fn_name, counter, out);
+        }
+        EK::RefMutIndex { index, .. } => {
+            collect_mcdc_stmts_expr_scan(index, fn_name, counter, out);
+        }
+        EK::Tuple { elements } | EK::ArrayLit { elements } => {
+            for e in elements { collect_mcdc_stmts_expr_scan(e, fn_name, counter, out); }
+        }
+        EK::StructLit { fields, .. } => {
+            for (_, e) in fields { collect_mcdc_stmts_expr_scan(e, fn_name, counter, out); }
+        }
+        _ => {}
+    }
+}
+
+/// Decompose a decision expression into atomic conditions and register each.
+/// Compound `&&` / `||` / `!` are split recursively into sub-conditions.
+fn add_mcdc_decision(
+    expr: &crate::ir::TypedExpr,
+    fn_name: &str,
+    kind: &str,
+    counter: &mut usize,
+    out: &mut Vec<MCDCPoint>,
+) {
+    use crate::ir::TypedExprKind as EK;
+    use crate::ast::BinaryOp;
+    use crate::ast::UnaryOp;
+    match &expr.kind {
+        // Compound decision — recurse into sub-conditions
+        EK::Binary { op: BinaryOp::And, left, right, .. }
+        | EK::Binary { op: BinaryOp::Or, left, right, .. } => {
+            add_mcdc_decision(left, fn_name, "sub-condition", counter, out);
+            add_mcdc_decision(right, fn_name, "sub-condition", counter, out);
+        }
+        EK::Unary { op: UnaryOp::Not, expr: inner, .. } => {
+            add_mcdc_decision(inner, fn_name, "sub-condition", counter, out);
+        }
+        // Atomic condition — register this as a coverage point
+        _ => {
+            let idx = *counter;
+            *counter += 1;
+            out.push(MCDCPoint {
+                span: expr.span,
+                function: fn_name.to_string(),
+                kind: kind.to_string(),
+                index: idx,
+            });
+        }
+    }
+}
+
+/// Format the MC/DC map as plain text.
+pub fn format_mcdc_text(points: &[MCDCPoint], file_map: &crate::diagnostic::FileMap) -> String {
+    let mut out = String::new();
+    let mut current_fn = "";
+    for p in points {
+        if p.function != current_fn {
+            if !current_fn.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(&format!("fn {}:\n", p.function));
+            current_fn = &p.function;
+        }
+        let loc = span_to_location(p.span, file_map);
+        out.push_str(&format!(
+            "  [{:>4}] {} @ {}\n",
+            p.index, p.kind, loc
+        ));
+    }
+    if points.is_empty() {
+        out.push_str("(no decision points found)\n");
+    }
+    out
+}
+
+/// Format the MC/DC map as JSON.
+pub fn format_mcdc_json(points: &[MCDCPoint], file_map: &crate::diagnostic::FileMap) -> String {
+    let mut out = String::from("[\n");
+    for (i, p) in points.iter().enumerate() {
+        let loc = span_to_location(p.span, file_map);
+        out.push_str(&format!(
+            "  {{\"index\":{},\"function\":{:?},\"kind\":{:?},\"location\":{:?}}}{}",
+            p.index, p.function, p.kind, loc,
+            if i + 1 < points.len() { "," } else { "" }
+        ));
+        out.push('\n');
+    }
+    out.push_str("]\n");
+    out
+}
+
+/// Format the MC/DC map as CSV.
+pub fn format_mcdc_csv(points: &[MCDCPoint], file_map: &crate::diagnostic::FileMap) -> String {
+    let mut out = String::from("index,function,kind,location\n");
+    for p in points {
+        let loc = span_to_location(p.span, file_map);
+        out.push_str(&format!(
+            "{},{:?},{:?},{:?}\n",
+            p.index, p.function, p.kind, loc
+        ));
+    }
+    out
+}
+
+fn span_to_location(
+    span: crate::span::Span,
+    file_map: &crate::diagnostic::FileMap,
+) -> String {
+    if let Some((entry, local)) = file_map.lookup(span.start) {
+        let before = &entry.source[..local.min(entry.source.len())];
+        let line = before.bytes().filter(|&b| b == b'\n').count() + 1;
+        let col = local - before.rfind('\n').map(|p| p + 1).unwrap_or(0) + 1;
+        format!("{}:{}:{}", entry.path, line, col)
+    } else {
+        format!("byte {}", span.start)
+    }
+}
