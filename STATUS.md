@@ -10,6 +10,30 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-07-13 (Vec<f64> parity + #[no_nan] + benchmark 12)
+
+**State**: Vec<f64> builtin parity complete (F64-2–F64-5), #[no_nan] safety attribute added (T2.4), benchmark 12 SIMD-256 f32 dot product running, pub(kosh) tutorial example added. Released as **v0.4.1**. Compiler version `v0.4.1` (Cargo.toml).
+
+### Shipped this session (2026-07-13)
+
+| Item | What shipped |
+|------|-------------|
+| Vec<f64> stats builtins (F64-2) | `vec_sum/mean/min/max/argmin/argmax/median/kth_smallest` accept `Vec<f64>`; C + LLVM backends emit `double` helpers |
+| Vec<f64> combinators (F64-3) | `vec_fold/map/filter` accept `Vec<f64>`; mapper/combiner/predicate types updated |
+| `vec_swap` on Vec<f64> (F64-4) | `check_vec_swap_builtin` opened for F64; C: `double tmp`; LLVM: parametric |
+| `vec_dot` on Vec<f64> (F64-5) | Returns `f64`; C: `double` accumulator; LLVM: `fmul`/`fadd` loop |
+| `#[no_nan]` safety attribute (T2.4) | Rejects `f64_nan()` and `vec_kth_smallest<f64>`; implied by asil_d/do178c_level_a/sil3/sil4; 6 lib tests |
+| Benchmark 12 (SIMD-256 f32 dot) | `vec256<f32>`, `vec128<f32>`, `Vec<f32>`, all `simd256_*`/`simd_*` builtins confirmed; results on i5-1035G1 documented |
+| Tutorial: pub(kosh) example | All three visibility tiers shown side-by-side in Beginner 9a |
+| Released v0.4.1 | CHANGELOG stamped, Cargo.toml bumped, tag pushed, GitHub release created |
+
+### Key numbers (2026-07-13)
+- **Lib tests**: 2466+ passing
+- **Compiler version**: `v0.4.1`
+- **Commits this session**: 8
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-07-10 (SIMD hardening + edge-case audit)
 
 **State**: SIMD correctness bugs fixed, adversarial test suite grown to 84 files, QEMU/RISC-V documented. Compiler version `v0.2.4` (Cargo.toml).
