@@ -7,7 +7,7 @@
 
 ## Current status (as of 2026-07-13)
 
-- **Version**: `0.4.2` (tagged v0.1.0 through v0.4.2; see RELEASING.md for full history).
+- **Version**: `0.4.3` (tagged v0.1.0 through v0.4.3; see RELEASING.md for full history).
 - **Tests**: 2466+ lib tests passing.
 - **Dialects**: 62 across 26 scripts.
 - **Blocked**: macOS hardware, grammar consultant, proper IOCP, crates.io API token.

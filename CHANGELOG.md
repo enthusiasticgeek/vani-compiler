@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.4.3] — 2026-07-13
+
+### Changed
+
+- **README.md restructured** — 5 108 lines condensed to ~120. Removed internal
+  arc ledger, duplicate language reference, and scattered sections. Now a clean
+  landing page with one example, install snippet, and links to real docs.
+
+### Added
+
+- **`docs/language_manual.md`** — full language reference: types, ownership,
+  control flow, closures, SMT, safety attributes, SIMD, file I/O, bare-metal,
+  tooling, FFI, and glossary.
+- **`docs/languages.md`** — all 57 human-language dialects with per-dialect
+  native-speaker verification status. Section renamed from
+  "Indian-subcontinent-first" to "Global Language Coverage".
+- **`docs/philosophy.md`** — design rationale, affine ownership rationale,
+  Rust/C++ comparisons, and why Rust for the compiler core.
+
+---
+
 ## [v0.4.2] — 2026-07-13
 
 ### Added
