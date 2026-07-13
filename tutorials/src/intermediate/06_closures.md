@@ -100,21 +100,21 @@ top of it.
 ## Built-in vec combinators
 
 vāṇī ships the common functional combinators as builtins so you
-don't have to hand-roll them. They all accept a `ref Vec<i64>` and
-a function literal, and they return a new `Vec<i64>` (or a scalar).
+don't have to hand-roll them. `vec_map`, `vec_filter`, `vec_fold`,
+`vec_sum`, `vec_min`, and `vec_max` work on both `Vec<i64>` and `Vec<f64>`.
 
-| Builtin | Signature | Returns |
-|---|---|---|
-| `vec_map(v, f)` | `ref Vec<i64>, fn(i64)->i64 -> Vec<i64>` | transformed copy |
-| `vec_filter(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> Vec<i64>` | elements where pred is true |
-| `vec_fold(v, init, f)` | `ref Vec<i64>, i64, fn(i64,i64)->i64 -> i64` | reduce to a single value |
-| `vec_sum(v)` | `ref Vec<i64> -> i64` | sum of all elements |
-| `vec_any(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> bool` | true if any element matches |
-| `vec_all(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> bool` | true if all elements match |
-| `vec_count(v, pred)` | `ref Vec<i64>, fn(i64)->bool -> i64` | count of matching elements |
-| `vec_min(v)` | `ref Vec<i64> -> i64` | minimum value |
-| `vec_max(v)` | `ref Vec<i64> -> i64` | maximum value |
-| `vec_product(v)` | `ref Vec<i64> -> i64` | product of all elements |
+| Builtin | `Vec<i64>` signature | `Vec<f64>` signature | Returns |
+|---|---|---|---|
+| `vec_map(v, f)` | `fn(i64)->i64 -> Vec<i64>` | `fn(f64)->f64 -> Vec<f64>` | transformed copy |
+| `vec_filter(v, pred)` | `fn(i64)->bool -> Vec<i64>` | `fn(f64)->bool -> Vec<f64>` | elements where pred is true |
+| `vec_fold(v, init, f)` | `i64, fn(i64,i64)->i64 -> i64` | `f64, fn(f64,f64)->f64 -> f64` | reduce to single value |
+| `vec_sum(v)` | `-> i64` | `-> f64` | sum of all elements |
+| `vec_min(v)` | `-> i64` | `-> f64` | minimum value |
+| `vec_max(v)` | `-> i64` | `-> f64` | maximum value |
+| `vec_any(v, pred)` | `fn(i64)->bool -> bool` | — | true if any element matches |
+| `vec_all(v, pred)` | `fn(i64)->bool -> bool` | — | true if all elements match |
+| `vec_count(v, pred)` | `fn(i64)->bool -> i64` | — | count of matching elements |
+| `vec_product(v)` | `-> i64` | — | product of all elements |
 
 ```vani
 intent "Intermediate 6 -- built-in vec combinators.";

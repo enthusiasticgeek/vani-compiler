@@ -35,9 +35,9 @@ fn main() -> i64 {
 
 | Builtin | What it does |
 |---------|-------------|
-| `sort(mut ref xs)` | Sort `Vec<i64>` ascending in place |
+| `sort(mut ref xs)` | Sort `Vec<i64>` or `Vec<f64>` ascending in place |
 | `sort_desc(mut ref xs)` | Sort descending in place |
-| `sort_by(mut ref xs, cmp)` | Sort with a comparator fn `(i64, i64) -> i64` |
+| `sort_by(mut ref xs, cmp)` | Custom comparator: `(i64,i64)->i64` for i64; `(f64,f64)->i64` for f64 |
 | `dedup(mut ref xs)` | Remove consecutive duplicates (sort first) |
 | `reverse(mut ref xs)` | Reverse in place |
 | `binary_search(ref xs, v)` | Binary search on sorted vec; returns index or -1 |
@@ -65,12 +65,12 @@ fn main() -> i64 {
 }
 ```
 
-| Builtin | Signature | Description |
-|---------|-----------|-------------|
-| `vec_argmin(ref xs)` | `-> i64` | Index of minimum element |
-| `vec_argmax(ref xs)` | `-> i64` | Index of maximum element |
-| `vec_kth_smallest(mut ref xs, k)` | `-> i64` | k-th smallest (0-indexed); quickselect; partially reorders xs |
-| `vec_median(mut ref xs)` | `-> i64` | Median value; quickselect |
+| Builtin | `Vec<i64>` returns | `Vec<f64>` returns | Description |
+|---------|-------------------|-------------------|-------------|
+| `vec_argmin(ref xs)` | `i64` | `i64` | Index of minimum element (always integer) |
+| `vec_argmax(ref xs)` | `i64` | `i64` | Index of maximum element |
+| `vec_kth_smallest(ref xs, k)` | `i64` | `f64` (qNaN if k out of bounds) | k-th smallest; quickselect |
+| `vec_median(ref xs)` | `i64` | `f64` | Median value; quickselect |
 
 ---
 
@@ -97,15 +97,15 @@ fn main() -> i64 {
 }
 ```
 
-| Builtin | Signature | Description |
-|---------|-----------|-------------|
-| `vec_sum(ref xs)` | `-> i64` | Sum of all elements |
-| `vec_min(ref xs)` | `-> i64` | Minimum element |
-| `vec_max(ref xs)` | `-> i64` | Maximum element |
-| `vec_mean(ref xs)` | `-> i64` | Integer mean (floor division) |
-| `vec_mode(ref xs)` | `-> i64` | Most frequent element |
-| `f64_harmonic_mean(ref xs)` | `Vec<f64> -> f64` | 1 / mean(1/xi) |
-| `f64_geometric_mean(ref xs)` | `Vec<f64> -> f64` | (∏ xi)^(1/n) |
+| Builtin | `Vec<i64>` returns | `Vec<f64>` returns | Description |
+|---------|-------------------|-------------------|-------------|
+| `vec_sum(ref xs)` | `i64` | `f64` | Sum of all elements |
+| `vec_min(ref xs)` | `i64` | `f64` | Minimum element |
+| `vec_max(ref xs)` | `i64` | `f64` | Maximum element |
+| `vec_mean(ref xs)` | `i64` (floor div) | `f64` | Arithmetic mean |
+| `vec_mode(ref xs)` | `i64` | — | Most frequent element |
+| `f64_harmonic_mean(ref xs)` | — | `f64` | 1 / mean(1/xi) |
+| `f64_geometric_mean(ref xs)` | — | `f64` | (∏ xi)^(1/n) |
 
 ---
 
@@ -200,13 +200,14 @@ fn main() -> i64 {
 }
 ```
 
-| Builtin | Signature | Description |
-|---------|-----------|-------------|
-| `map(ref xs, f)` | `(Vec<i64>, fn(i64)->i64) -> Vec<i64>` | Apply f to each element |
-| `filter(ref xs, pred)` | `(Vec<i64>, fn(i64)->bool) -> Vec<i64>` | Keep elements matching pred |
-| `fold(ref xs, init, f)` | `(Vec<i64>, i64, fn(i64,i64)->i64) -> i64` | Left-fold with initial value |
-| `find(ref xs, pred)` | `-> i64` | First matching element, or -1 |
-| `contains(ref xs, v)` | `-> bool` | Any element equals v |
+| Builtin | `Vec<i64>` form | `Vec<f64>` form | Description |
+|---------|-----------------|-----------------|-------------|
+| `vec_map(ref xs, f)` | `fn(i64)->i64 -> Vec<i64>` | `fn(f64)->f64 -> Vec<f64>` | Apply f to each element |
+| `vec_filter(ref xs, pred)` | `fn(i64)->bool -> Vec<i64>` | `fn(f64)->bool -> Vec<f64>` | Keep elements where pred is true |
+| `vec_fold(ref xs, init, f)` | `i64, fn(i64,i64)->i64 -> i64` | `f64, fn(f64,f64)->f64 -> f64` | Left-fold with initial value |
+| `vec_dot(ref xs, ref ys)` | `-> i64` | `-> f64` | Inner / dot product |
+| `find(ref xs, pred)` | `-> i64` | — | First matching element, or -1 |
+| `contains(ref xs, v)` | `-> bool` | — | Any element equals v |
 
 ---
 

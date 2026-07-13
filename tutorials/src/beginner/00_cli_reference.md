@@ -196,7 +196,7 @@ Report per-function Big-O complexity annotations. Same as `--big-o` on run/emit 
 
 ### `vanic safety-attrs <file.vani>`
 
-Report which functions carry which safety attributes (`#[no_heap]`, `#[bounded_stack]`, `#[interrupt]`, `#[no_mangle]`, etc.).
+Report which functions carry which safety attributes (`#[no_heap]`, `#[no_float]`, `#[no_nan]`, `#[no_recursion]`, `#[wcet]`, `#[bounded_stack]`, `#[deterministic_timing]`, `#[interrupt]`, composite standards `#[asil_d]` / `#[do178c_level_a]` / `#[misra_c_2012]`, etc.).
 
 ---
 
