@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "project": "vani-compiler",
+  "enforcement_policy_url": "https://github.com/enthusiasticgeek/vani-compiler/blob/main/CLA.md#9-revocation-and-enforcement",
+  "blacklisted": []
+}

@@ -228,16 +228,86 @@ The Maintainer reserves the right to change the license for future releases. Pas
 
 ---
 
-## 9. Revocation
+## 9. Revocation and Enforcement
 
-Contributor approval may be revoked by the Maintainer at any time for:
+Contributor approval may be revoked by the Maintainer at any time. Revocation
+removes the contributor's GitHub username from
+[`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md) and, for permanent bans,
+adds it to [`governance.json`](governance.json) → `blacklisted`. Pull requests
+from revoked contributors will not be merged. Revocation does not relieve a
+former contributor of indemnification obligations under §6.2 for Contributions
+already accepted.
 
-- Violation of this Agreement (false representations, prohibited content, etc.)
-- Conduct that harms the project community or its users
-- Inactivity exceeding 24 months with no accepted contributions (approval lapses; reapplication required)
-- Any other reason at the Maintainer's sole discretion
+### 9.1 Violation categories
 
-Revocation removes the contributor's username from [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md). Pull requests from revoked contributors will not be merged. Revocation does not relieve a former contributor of indemnification obligations under §6.2 for Contributions already accepted.
+Violations fall into two tiers:
+
+**Tier 1 — Immediate permanent revocation (no warning):**
+
+| Code | Violation |
+|------|-----------|
+| T1-A | **Malicious contribution** — deliberately introducing malware, backdoors, cryptominers, or destructive payloads into the Project |
+| T1-B | **False identity or material misrepresentation** — application or Contributions made under a false GitHub identity, or with materially false employment or IP ownership disclosures (§5.6) |
+| T1-C | **Critical security sabotage** — knowingly introducing or concealing a critical, actively-exploited security vulnerability |
+| T1-D | **Patent aggression** — initiating patent proceedings against the Project, the Maintainer, or any downstream recipient (automatic termination under §4b also applies) |
+| T1-E | **CSAM or illegal content** — submitting any material that violates applicable law |
+
+**Tier 2 — Warning → cure period → revocation:**
+
+| Code | Violation |
+|------|-----------|
+| T2-A | **Unaddressed security vulnerability** — §6.3 notification obligation not met within 14 days of written notice |
+| T2-B | **Repeated harmful conduct** — sustained harassment, hostile communication, or bad-faith review activity |
+| T2-C | **License fraud** — contributing code under a claimed license that the contributor does not hold rights to grant |
+| T2-D | **Employment non-disclosure** — failure to notify the Maintainer of a new employment restriction that could affect the validity of a Contribution (§6.3) |
+| T2-E | **Extended inactivity** — no accepted Contributions for 24+ consecutive months (approval lapses; reapplication required) |
+
+### 9.2 Standard enforcement process (Tier 2)
+
+1. **Notice** — The Maintainer opens a GitHub issue in `vani-compiler` and
+   @-mentions the contributor with the violation code, the affected
+   Contribution(s), the required corrective action, and a **14-day cure
+   deadline**.
+2. **Cure period** — The contributor must take the required action within the
+   deadline (amend the PR, provide missing documentation, contact the Maintainer,
+   etc.).
+3. **Escalation** — If the cure period expires without action:
+   - First offence: 90-day suspension (username removed from `CONTRIBUTORS_APPROVED.md`;
+     reapplication required after the suspension period).
+   - Second offence: permanent revocation and blacklist entry in `governance.json`.
+4. **Resolution** — If the contributor cures within the deadline, the issue is
+   closed as resolved. No suspension is applied for a first-time cure.
+
+### 9.3 Immediate action process (Tier 1)
+
+1. The Maintainer immediately removes the username from `CONTRIBUTORS_APPROVED.md`
+   and adds it to `governance.json → blacklisted` with the violation category
+   and date.
+2. A GitHub issue is opened in `vani-compiler` to notify the contributor and
+   record the decision publicly.
+3. The revocation is permanent unless successfully appealed (§9.4).
+
+### 9.4 Appeal
+
+A revoked contributor (Tier 1 or Tier 2 permanent) may appeal **once** within
+**14 days** of the revocation date by opening a GitHub issue in `vani-compiler`
+with:
+
+- **Title**: `[Revocation appeal] @your-github-username`
+- **Body**: specific grounds (factual error, account compromise, or — for Tier 2
+  permanent only — full remediation with evidence that recurrence is prevented)
+
+The Maintainer will post a decision within 14 days of the appeal issue being
+opened.
+
+| Ground | Applies to |
+|--------|-----------|
+| Factual error — wrong account identified, or violation misattributed | All tiers |
+| Account compromise — violation committed by an attacker; contributor can demonstrate this | All tiers |
+| Full remediation — violation fully corrected, recurrence prevented | Tier 2 permanent only; not available for T1-A, T1-B, T1-C, or T1-E |
+
+If an appeal is upheld, the username is moved back to a pending state and the
+contributor must reapply (§2) before being reinstated to `CONTRIBUTORS_APPROVED.md`.
 
 ---
 

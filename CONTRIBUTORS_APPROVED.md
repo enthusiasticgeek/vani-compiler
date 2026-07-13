@@ -31,10 +31,15 @@ entry here — the project is their original work.
 
 ## Revoked
 
-| GitHub username | Revoked date | Reason |
-|----------------|-------------|--------|
-| *(none)* | — | — |
+Revocations follow the process defined in [CLA.md §9](CLA.md#9-revocation-and-enforcement).
+The `category` column references the violation code from CLA.md §9.1
+(e.g. T1-A, T2-C). Blacklisted entries also appear in
+`governance.json → blacklisted` with the same category and an appeal deadline.
+
+| GitHub username | Revoked date | Category | Reason |
+|----------------|-------------|----------|--------|
+| *(none)* | — | — | — |
 
 ---
 
-*Updated by the Maintainer. Last revision: 2026-07-10.*
+*Updated by the Maintainer. Last revision: 2026-07-13.*

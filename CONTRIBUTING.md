@@ -82,3 +82,23 @@ Small repro program > prose. Include the `vanic` command line,
 the source file, and the output (stderr inclusive). For verifier
 issues, the SMT trace via `VANIC_SMT_DEBUG=1` (or the legacy
 `INTENTC_SMT_DEBUG=1`) is gold.
+
+## Enforcement and revocation
+
+Contributor approval can be suspended or permanently revoked for violations of
+the [CLA](CLA.md). The full violation taxonomy, escalation steps, cure
+timelines, and appeal path are defined in [CLA.md §9](CLA.md#9-revocation-and-enforcement).
+
+**Tier 1 violations** (malicious contributions, false identity, patent
+aggression, illegal content) result in immediate permanent revocation with no
+prior warning. **Tier 2 violations** (unaddressed security issues, license
+fraud, employment non-disclosure) receive a written notice and a 14-day cure
+period before suspension or blacklisting.
+
+To report a violation, open a GitHub issue in `vani-compiler` with the label
+`violation-report`. To appeal a revocation, open an issue titled
+`[Revocation appeal] @your-github-username` within 14 days of the revocation
+date. The Maintainer will respond within 14 days of the appeal being filed.
+
+Revocations are recorded in [`CONTRIBUTORS_APPROVED.md`](CONTRIBUTORS_APPROVED.md)
+and in the machine-readable [`governance.json`](governance.json).
