@@ -6,6 +6,20 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.4.4] — 2026-07-13
+
+### Changed
+
+- **README.md** — benchmark catalogue and results links added to Key docs table.
+- **`docs/language_manual.md`** — four correctness fixes:
+  - `for i in 0 to n` corrected to `for i from 0 to n` (canonical range syntax).
+  - `parallel for` reduce syntax fixed to `reduce sum with +;` form.
+  - `Channel<T, N>` added to Concurrency section with example and primitive-selection table.
+  - Editor integration (LSP) expanded: names `intent-lsp` binary, links to
+    per-editor setup guide in `tutorials/src/installation.md`.
+
+---
+
 ## [v0.4.3] — 2026-07-13
 
 ### Changed
