@@ -472,7 +472,7 @@ deltas are:
 - **Level 3 — closures + iterators:** anonymous fn expressions
   (`fn(x: T) -> R { … }`) lambda-lifted to top-level `__anon_fn_<N>`
   (#308) · eager `vec_map` / `vec_fold` / `vec_filter` on `Vec<i64>`
-  (#309 + #310) · method-call sugar across `Vec`, `HashMap`,
+  (#309 + #310; extended to `Vec<f64>` in F64-3) · method-call sugar across `Vec`, `HashMap`,
   `HashSet`, `BTreeMap`, `BTreeSet`, `Deque` (#311 + #312) ·
   `vec_take` / `vec_drop` + uniform `xs.len()` (#313) · closures
   with captured Copy state (#314), declarable inside `if`/`while`/
@@ -1591,12 +1591,13 @@ DO-178C Level A, and IEC 62304 Class C feasibility. All three
 tiers + four standard composites are on `main`:
 
 - **Feature primitives** (orthogonal, composable, all shipped):
-  `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, `#[no_recursion]`,
+  `#[bounded(N)]`, `#[no_heap]`, `#[no_float]`, `#[no_nan]`, `#[no_recursion]`,
   `#[interrupt]`, `#[bounded_stack(bytes = N)]`,
   `#[wcet(cycles = N)]`, `#[deterministic_timing]`. Each enforces
   one constraint compiler-side via a dedicated `safety::enforce_*`
   pass (call-graph fixpoint for `no_heap`, BFS cycle detection
-  for `no_recursion`, coarse cycle estimator for `wcet`, etc.).
+  for `no_recursion`, static NaN-contract scan for `no_nan`,
+  coarse cycle estimator for `wcet`, etc.).
 - **Standard composites** (hardcoded aliases that expand to
   primitive sets, all shipped): `#[misra_c_2012]`, `#[asil_d]`,
   `#[do178c_level_a]`, `#[iec_62304_class_c]`. Two composite
@@ -4232,7 +4233,7 @@ real use cases:
 | Structure | Shipped form | Flag |
 |-----------|--------------|------|
 | Stack | `Vec<T>` + `push(mut ref xs, v)` + `pop(mut ref xs)` (closure #219) | ✅ AFFINE |
-| Sort (in-place) | `sort(mut ref xs)` / `sort_by(mut ref xs, cmp: fn(i64, i64) -> i64)` on `Vec<i64>` (closure #293) | ✅ AFFINE |
+| Sort (in-place) | `sort(mut ref xs)` / `sort_by(mut ref xs, cmp: fn(i64, i64) -> i64)` on `Vec<i64>` (closure #293); also `Vec<f64>` — f64 `sort_by` comparator is `fn(f64, f64) -> i64` (F64-1) | ✅ AFFINE |
 | Reverse / dedup | `reverse(mut ref xs)` (any Copy element) / `dedup(mut ref xs)` (Vec<i64>) (closure #294) | ✅ AFFINE |
 | Search | `find(ref xs, needle) -> Option<i64>` / `contains(ref xs, needle) -> bool` / `binary_search(ref xs, needle) -> Option<i64>` on `Vec<i64>` (closure #295) | ✅ AFFINE |
 | Mutators | `swap_remove(mut ref xs, i) -> T` / `insert(mut ref xs, i, v) -> i64` / `clear(mut ref xs) -> i64` (any non-array element) (closure #296) | ✅ AFFINE |
@@ -4256,7 +4257,7 @@ real use cases:
 | SkipList | `SkipList<T>` probabilistic ordered set on a node arena; MAX_LEVEL=8 (v1); flat capacity × 8 i32 `forward` index array + per-node `node_levels` + `tail_node` index for O(1) max; geometric level distribution from a stored LCG seed; 7 builtins (`new` / `insert` / `contains` / `remove` / `len` / `min` / `max`) + method sugar; `min` / `max` are both O(1) and return `Option<i64>`; remove tombstones the slot (no compaction) (closure #331 + remove in **#339** + tail tracker in **#341**, **Level 4 #7**) | ✅ AFFINE |
 | Anon fn | `fn(p: T) -> R { body }` in value position; lambda-lifted to `__anon_fn_<N>` (closure #308). v1: no captured environment | ✅ AFFINE |
 | Closures w/ captures | `let f = fn(x) -> R { ...captured_n... }; f(...)` — capture-by-value of Copy outer bindings; callable in same fn only (closure #314). Closures may be declared at top level or inside `if`/`while`/`for` bodies (closure #315) | ✅ AFFINE under v1 Copy contract |
-| Iter combinators | Eager `vec_map(ref xs, f) -> Vec<i64>` + `vec_filter(ref xs, p) -> Vec<i64>` + `vec_fold(ref xs, init, g) -> i64` on Vec<i64> (closures #309 + #310); slicing `vec_take(ref xs, n)` / `vec_drop(ref xs, n)` (closure #313); fused single-pass family `vec_map_fold` / `vec_filter_fold` / `vec_map_filter` / `vec_map_filter_fold` (closures #316 + #317). Pair with anon fns or top-level fn-refs | ✅ AFFINE |
+| Iter combinators | Eager `vec_map` / `vec_filter` / `vec_fold` on `Vec<i64>` and `Vec<f64>` (F64-3 extended to f64; original Vec<i64>: closures #309 + #310); slicing `vec_take(ref xs, n)` / `vec_drop(ref xs, n)` (closure #313); fused single-pass family `vec_map_fold` / `vec_filter_fold` / `vec_map_filter` / `vec_map_filter_fold` (closures #316 + #317). Pair with anon fns or top-level fn-refs | ✅ AFFINE |
 | Method-call sugar | `xs.map(f)` / `xs.filter(p)` / `xs.fold(init, g)` / `xs.sort_by(cmp)` / `xs.sort()` on `Vec<T>` receivers desugar to the builtins (closure #311); `m.get(k)` / `m.insert(k, v)` / `s.contains(v)` / `d.push_back(v)` / `.len()` etc. on HashMap / HashSet / BTreeMap / BTreeSet / Deque (closure #312); `xs.take(n)` / `xs.drop(n)` / uniform `xs.len()` on Vec (closure #313); Vec mutators + search (`xs.push(v)` / `xs.pop()` / `xs.reverse()` / `xs.dedup()` / `xs.swap_remove(i)` / `xs.insert(i, v)` / `xs.clear()` / `xs.find(v)` / `xs.contains(v)` / `xs.binary_search(v)`) (closure #320); `[T; N]` Array sugar (`arr.sort()` / `arr.sort_by(cmp)` / `arr.reverse()` / `arr.find(v)` / `arr.contains(v)` / `arr.binary_search(v)`) (closure #321) | ✅ AFFINE |
 | Queue (concurrent) | `Channel<T, N>` MPSC ring buffer w/ futex blocking | ✅ AFFINE |
 | Wait / signal | `Condvar` w/ `wait` / `wait_timeout` / `notify_one` / `notify_all` (closure #292) | ✅ AFFINE |
@@ -4276,7 +4277,7 @@ plan and affine contract) lives in [TODO.md](TODO.md) under the
 |-------|-------|-------------|
 | **1 — Operations on existing primitives** ✅ **COMPLETE** | `Vec.sort` / `sort_by(fn)` (#293) · `Vec.reverse` / `Vec.dedup` (#294) · `Vec.find` / `contains` / `binary_search` (#295) · `Vec.swap_remove` / `insert` / `clear` (#296) · Array ops on `[i64; N]` (#297) · `str_contains` / `str_starts_with` / `str_ends_with` / `parse_int` / `parse_float` (#298) + heap-allocating `str_trim` (#348) / `str_replace` (#349) -> `OwnedStr`, `str_split` (#350) -> `Vec<OwnedStr>` · Math: `pow` / `sqrt` / `sin` / `cos` / `tan` / `floor` / `ceil` + overloaded `abs` (#299) · RNG: `seed_rng` / `rand_i64` / `rand_in_range` (#300) · Hash: `hash_i64` / `hash_f64` / `hash_str` / `hash_combine` (FNV-1a) (#301 + `hash_f64` in #347) + `siphash_i64` / `siphash_str` (SipHash-2-4 keyed, adversarial-resistant) (#351) | ✅ AFFINE |
 | **2 — Generic containers** (deps: Level 1, generic decls #281) ✅ **COMPLETE** | ✅ BinaryHeap-on-Vec (#302) · ✅ `Deque<i64>` (#303) · ✅ `HashSet<i64>` (#304) · ✅ `HashMap<i64, i64>` (#305, AFFINE under Copy-V; AFFINE-TENSION queued for non-Copy V) · ✅ `BTreeSet<i64>` (#306, sorted-Vec backing) · ✅ `BTreeMap<i64, i64>` (#307, parallel sorted-Vec backing). Dedicated `BinaryHeap<T>` wrapper landed at Level 4 (#326); node-arena B-tree variants → Level 4 | ✅ / ⚠️ AFFINE-TENSION |
-| **3 — Closures + iterators** | ✅ Anonymous fn expressions w/o captures (#308) · ✅ Eager `vec_map` / `vec_fold` / `vec_filter` on Vec<i64> via fn-ptr args (#309 + #310) · ✅ Method-call sugar across Vec + affine containers (#311 + #312) · ✅ `vec_take` / `vec_drop` + uniform `xs.len()` (#313) · ✅ Closures w/ captured state (#314 + nested scopes #315) · ✅ Fused single-pass combinators `vec_map_fold` / `vec_filter_fold` / `vec_map_filter` / `vec_map_filter_fold` (#316 + #317) · ✅ Auto-fusion of `vec_map + vec_fold` chains (#318). ⏳ Auto-fusion of more chain shapes; non-Copy captures; capture-by-ref; passing closures as fn-ptr args; `.collect()` / `vec_zip` | ✅ / ⚠️ AFFINE-TENSION |
+| **3 — Closures + iterators** | ✅ Anonymous fn expressions w/o captures (#308) · ✅ Eager `vec_map` / `vec_fold` / `vec_filter` on Vec<i64> and Vec<f64> via fn-ptr args (#309 + #310; f64 in F64-3) · ✅ Method-call sugar across Vec + affine containers (#311 + #312) · ✅ `vec_take` / `vec_drop` + uniform `xs.len()` (#313) · ✅ Closures w/ captured state (#314 + nested scopes #315) · ✅ Fused single-pass combinators `vec_map_fold` / `vec_filter_fold` / `vec_map_filter` / `vec_map_filter_fold` (#316 + #317) · ✅ Auto-fusion of `vec_map + vec_fold` chains (#318). ⏳ Auto-fusion of more chain shapes; non-Copy captures; capture-by-ref; passing closures as fn-ptr args; `.collect()` / `vec_zip` | ✅ / ⚠️ AFFINE-TENSION |
 | **4 — Advanced / domain-specific** | BST / AVL / red-black via node arena + `i32` child indices (✅), B-tree arena (✅), Trie arena (✅), graphs as `Vec<Node>` + `Vec<Vec<u32>>` adjacency (✅), graph algorithms BFS / DFS / Dijkstra / A* / topo / Kruskal / Prim (✅), Union-Find (✅), skip list (✅), Bloom filter (✅) | ✅ AFFINE |
 
 **Deferred / non-compliant** (flagged with reasoning + substitute):
