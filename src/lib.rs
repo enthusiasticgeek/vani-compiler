@@ -41775,6 +41775,41 @@ função main() -> i64 {
             errs
         );
     }
+
+    #[test]
+    fn no_nan_allows_vec_kth_smallest_i64() {
+        // vec_kth_smallest on Vec<i64> returns -1 as sentinel, NOT NaN.
+        // Must NOT be rejected by #[no_nan].
+        let source = r#"
+            #[no_nan]
+            fn ok() -> i64 {
+              let xs: Vec<i64> = vec(3, 1, 2);
+              let k: i64 = vec_kth_smallest(ref xs, 1);
+              return k;
+            }
+            fn main() -> i64 { return ok(); }
+        "#;
+        let _ = compile(source).expect("#[no_nan] + vec_kth_smallest<i64> must compile");
+    }
+
+    #[test]
+    fn no_nan_catches_f64_nan_in_nested_expr() {
+        // f64_nan() buried inside an if-expression must still be caught.
+        let source = r#"
+            #[no_nan]
+            fn bad(flag: bool) -> f64 {
+              let v: f64 = if flag { 1.0 } else { f64_nan() };
+              return v;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_nan] must catch f64_nan() in nested expr");
+        assert!(
+            errs.iter().any(|d| d.message.contains("NaN") && d.message.contains("no_nan")),
+            "expected no_nan diagnostic for nested f64_nan(), got: {:?}",
+            errs
+        );
+    }
     // -----------------------------------------------------------------
     // T2.5 — `#[no_recursion]` strict variant. Stricter than
     // `#[bounded(0)]` because the diagnostic explicitly names

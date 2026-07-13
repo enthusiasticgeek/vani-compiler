@@ -17,7 +17,7 @@ stack on top for extra tightening.
 
 ```vani
 // ISO 26262 ASIL-D — most stringent automotive level.
-// Implies: no_heap + no_recursion + no_float + deterministic_timing.
+// Implies: no_heap + no_recursion + no_float + no_nan + deterministic_timing.
 // Requires: #[bounded_stack(bytes=N)] and #[wcet(cycles=N)] to be
 // declared explicitly (the budgets are yours to choose).
 #[asil_d]
@@ -64,12 +64,12 @@ fn dose_clamp(dose: i64, max: i64) -> i64 {
 
 ### Expansion matrix
 
-| Tag | `no_heap` | `no_recursion` | `no_float` | `deterministic_timing` | `bounded_stack` required | `wcet` required |
-|---|---|---|---|---|---|---|
-| `misra_c_2012` | ✅ | ✅ | | | | |
-| `iec_62304_class_c` | ✅ | ✅ | | | | |
-| `asil_d` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `do178c_level_a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Tag | `no_heap` | `no_recursion` | `no_float` | `no_nan` | `deterministic_timing` | `bounded_stack` required | `wcet` required |
+|---|---|---|---|---|---|---|---|
+| `misra_c_2012` | ✅ | ✅ | | | | | |
+| `iec_62304_class_c` | ✅ | ✅ | | | | | |
+| `asil_d` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `do178c_level_a` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ---
 
@@ -359,6 +359,7 @@ All previously partial checks are now complete. The full compliance matrix:
 | Stack bound | `#[bounded_stack]` + full call-chain depth analysis — **complete** |
 | Execution time bound | `#[wcet]` + static cycle estimator — **complete** (conservative) |
 | No floating point | `#[no_float]` + transitive fixpoint — **complete** |
+| No NaN-contract builtins | `#[no_nan]` rejects `f64_nan()` and `vec_kth_smallest` on `Vec<f64>` — **complete** |
 | Deterministic timing | `#[deterministic_timing]` branch-balance check — **complete** |
 | Deviation tracking | `vanic deviations --strict` — **complete** |
 | Call-graph acyclicity | `vanic acyclicity` (Tarjan SCC) — **complete** |

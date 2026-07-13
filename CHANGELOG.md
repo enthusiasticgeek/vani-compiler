@@ -6,6 +6,27 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`Vec<f64>` builtin parity (F64-2 – F64-5)**: `vec_sum`, `vec_mean`,
+  `vec_min`, `vec_max`, `vec_argmin`, `vec_argmax`, `vec_median`,
+  `vec_kth_smallest`, `vec_fold`, `vec_map`, `vec_filter`, `vec_swap`,
+  and `vec_dot` now accept `Vec<f64>` arguments. Both the C and LLVM
+  backends emit dedicated `double`-typed helpers. All operations that
+  previously required a `Vec<i64>` now work identically on `Vec<f64>`.
+- **`#[no_nan]` safety attribute (T2.4)**: new primitive that rejects
+  calls to builtins with a documented NaN-as-error-sentinel contract:
+  `f64_nan()` (explicit NaN constructor) and `vec_kth_smallest` on
+  `Vec<f64>` (returns quiet NaN `0x7FF8000000000000` on out-of-bounds).
+  Automatically implied by `#[asil_d]`, `#[do178c_level_a]`,
+  `#[iec_61508_sil3]`, and `#[iec_61508_sil4]`. Composes with
+  `#[no_float]`. 6 lib tests cover rejection, acceptance, nesting,
+  and composite implication.
+
+---
+
 ## [v0.3.1] — 2026-07-11
 
 ### Fixed — CI / Test Harness
