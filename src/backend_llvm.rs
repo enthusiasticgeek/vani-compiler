@@ -7405,9 +7405,8 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // Closures #569/#570/#572: 1-arg scalar reductions returning i64.
-            if matches!(name.as_str(),
-                "vec_range_span" | "vec_mode" | "vec_median") {
+            // Closures #569/#570: 1-arg scalar reductions (i64 only).
+            if matches!(name.as_str(), "vec_range_span" | "vec_mode") {
                 let op = name.strip_prefix("vec_").unwrap();
                 let xs = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
@@ -7417,8 +7416,24 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // Closure #571: vec_kth_smallest(ref xs, k) -> i64.
-            if name == "vec_kth_smallest" {
+            // Closure #572: vec_median — i64 uses preamble helper;
+            // f64 falls through to the generic double-underscore dispatch.
+            if name == "vec_median"
+                && !matches!(vec_element_of_first_arg(args).as_ref(), Some(Type::F64))
+            {
+                let xs = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_vec_int64_t_median(%intent_vec_i64* {})\n",
+                    dest, xs
+                ));
+                return dest;
+            }
+            // Closure #571: vec_kth_smallest — i64 uses preamble helper;
+            // f64 falls through to the generic double-underscore dispatch.
+            if name == "vec_kth_smallest"
+                && !matches!(vec_element_of_first_arg(args).as_ref(), Some(Type::F64))
+            {
                 let xs = emit_expr(&args[0], ctx, out);
                 let k = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
@@ -7480,14 +7495,26 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // Closures #562/#565: i64 scalar reductions.
-            if matches!(name.as_str(), "vec_count_distinct" | "vec_mean") {
-                let op = name.strip_prefix("vec_").unwrap();
+            // Closure #565: vec_count_distinct (i64 only).
+            if name == "vec_count_distinct" {
                 let xs = emit_expr(&args[0], ctx, out);
                 let dest = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = call i64 @intent_vec_int64_t_{}(%intent_vec_i64* {})\n",
-                    dest, op, xs
+                    "  {} = call i64 @intent_vec_int64_t_count_distinct(%intent_vec_i64* {})\n",
+                    dest, xs
+                ));
+                return dest;
+            }
+            // Closure #562: vec_mean — i64 uses preamble helper;
+            // f64 falls through to the generic double-underscore dispatch.
+            if name == "vec_mean"
+                && !matches!(vec_element_of_first_arg(args).as_ref(), Some(Type::F64))
+            {
+                let xs = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i64 @intent_vec_int64_t_mean(%intent_vec_i64* {})\n",
+                    dest, xs
                 ));
                 return dest;
             }
@@ -15122,6 +15149,9 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     | "vec_max"
                     | "vec_argmin"
                     | "vec_argmax"
+                    | "vec_mean"
+                    | "vec_median"
+                    | "vec_kth_smallest"
                     | "vec_count_value"
                     | "vec_index_of_value"
                     | "vec_last_index_of_value"
@@ -15179,7 +15209,7 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 } else if let Some(op) = name.strip_prefix("vec_") {
                     // closure #322 reductions + #324 chain share
                     // this strip-the-`vec_` prefix shape.
-                    if matches!(op, "sum" | "product" | "min" | "max" | "argmin" | "argmax" | "count_value" | "index_of_value" | "last_index_of_value" | "count" | "any" | "all" | "chain") {
+                    if matches!(op, "sum" | "product" | "min" | "max" | "argmin" | "argmax" | "mean" | "median" | "kth_smallest" | "count_value" | "index_of_value" | "last_index_of_value" | "count" | "any" | "all" | "chain") {
                         op
                     } else {
                         name.as_str()
@@ -39065,8 +39095,381 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         ));
         out.push_str("  ret i64 %r\n");
         out.push_str("}\n");
+        // ---- F64-2: descriptive-stats reductions for Vec<f64>.
+        // These helpers are emitted only when element == F64; they
+        // mirror the i64 alloca-loop pattern above and use the
+        // element-typed variables elt / ep / epp already in scope.
+        if matches!(element, Type::F64) {
+            // sum(xs_p) -> double
+            let sum_name = format!("@intent_vec_{}__sum", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p) {{\n",
+                sn = sum_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %sdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %slp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %sdata = load {ep}, {epp} %sdp\n", ep = ep, epp = epp));
+            out.push_str("  %sn = load i64, i64* %slp\n");
+            out.push_str("  %sacc_p = alloca double\n");
+            out.push_str("  store double 0.0, double* %sacc_p\n");
+            out.push_str("  %si_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %si_p\n");
+            out.push_str("  br label %sum_loop\n");
+            out.push_str("sum_loop:\n");
+            out.push_str("  %si = load i64, i64* %si_p\n");
+            out.push_str("  %scont = icmp ult i64 %si, %sn\n");
+            out.push_str("  br i1 %scont, label %sum_body, label %sum_done\n");
+            out.push_str("sum_body:\n");
+            out.push_str(&format!(
+                "  %sslot = getelementptr double, {ep} %sdata, i64 %si\n", ep = ep));
+            out.push_str(&format!("  %sv = load double, {ep} %sslot\n", ep = ep));
+            out.push_str("  %sacc = load double, double* %sacc_p\n");
+            out.push_str("  %sacc1 = fadd double %sacc, %sv\n");
+            out.push_str("  store double %sacc1, double* %sacc_p\n");
+            out.push_str("  %si1 = add i64 %si, 1\n");
+            out.push_str("  store i64 %si1, i64* %si_p\n");
+            out.push_str("  br label %sum_loop\n");
+            out.push_str("sum_done:\n");
+            out.push_str("  %sresult = load double, double* %sacc_p\n");
+            out.push_str("  ret double %sresult\n");
+            out.push_str("}\n");
+
+            // mean(xs_p) -> double  (0.0 for empty)
+            let mean_name = format!("@intent_vec_{}__mean", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p) {{\n",
+                sn = mean_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %mdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %mlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %mdata = load {ep}, {epp} %mdp\n", ep = ep, epp = epp));
+            out.push_str("  %mn = load i64, i64* %mlp\n");
+            out.push_str("  %mempty = icmp eq i64 %mn, 0\n");
+            out.push_str("  br i1 %mempty, label %mean_zero, label %mean_acc\n");
+            out.push_str("mean_zero:\n");
+            out.push_str("  ret double 0.0\n");
+            out.push_str("mean_acc:\n");
+            out.push_str("  %msum_p = alloca double\n");
+            out.push_str("  store double 0.0, double* %msum_p\n");
+            out.push_str("  %mi_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %mi_p\n");
+            out.push_str("  br label %mean_loop\n");
+            out.push_str("mean_loop:\n");
+            out.push_str("  %mi = load i64, i64* %mi_p\n");
+            out.push_str("  %mcont = icmp ult i64 %mi, %mn\n");
+            out.push_str("  br i1 %mcont, label %mean_body, label %mean_done\n");
+            out.push_str("mean_body:\n");
+            out.push_str(&format!(
+                "  %mslot = getelementptr double, {ep} %mdata, i64 %mi\n", ep = ep));
+            out.push_str(&format!("  %mv = load double, {ep} %mslot\n", ep = ep));
+            out.push_str("  %msum = load double, double* %msum_p\n");
+            out.push_str("  %msum1 = fadd double %msum, %mv\n");
+            out.push_str("  store double %msum1, double* %msum_p\n");
+            out.push_str("  %mi1 = add i64 %mi, 1\n");
+            out.push_str("  store i64 %mi1, i64* %mi_p\n");
+            out.push_str("  br label %mean_loop\n");
+            out.push_str("mean_done:\n");
+            out.push_str("  %mfinal = load double, double* %msum_p\n");
+            out.push_str("  %mlen_f = sitofp i64 %mn to double\n");
+            out.push_str("  %mresult = fdiv double %mfinal, %mlen_f\n");
+            out.push_str("  ret double %mresult\n");
+            out.push_str("}\n");
+
+            // min(xs_p, def) -> double  (def for empty)
+            let min_name = format!("@intent_vec_{}__min", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p, double %def) {{\n",
+                sn = min_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %mndp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %mnlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %mndata = load {ep}, {epp} %mndp\n", ep = ep, epp = epp));
+            out.push_str("  %mnn = load i64, i64* %mnlp\n");
+            out.push_str("  %mnempty = icmp eq i64 %mnn, 0\n");
+            out.push_str("  br i1 %mnempty, label %min_ret_def, label %min_init\n");
+            out.push_str("min_ret_def:\n");
+            out.push_str("  ret double %def\n");
+            out.push_str("min_init:\n");
+            out.push_str(&format!("  %mn0 = load double, {ep} %mndata\n", ep = ep));
+            out.push_str("  %mnbest_p = alloca double\n");
+            out.push_str("  store double %mn0, double* %mnbest_p\n");
+            out.push_str("  %mni_p = alloca i64\n");
+            out.push_str("  store i64 1, i64* %mni_p\n");
+            out.push_str("  br label %min_loop\n");
+            out.push_str("min_loop:\n");
+            out.push_str("  %mni = load i64, i64* %mni_p\n");
+            out.push_str("  %mncont = icmp ult i64 %mni, %mnn\n");
+            out.push_str("  br i1 %mncont, label %min_body, label %min_done\n");
+            out.push_str("min_body:\n");
+            out.push_str(&format!(
+                "  %mnslot = getelementptr double, {ep} %mndata, i64 %mni\n", ep = ep));
+            out.push_str(&format!("  %mnv = load double, {ep} %mnslot\n", ep = ep));
+            out.push_str("  %mnbest = load double, double* %mnbest_p\n");
+            out.push_str("  %mnlt = fcmp olt double %mnv, %mnbest\n");
+            out.push_str("  %mnnew = select i1 %mnlt, double %mnv, double %mnbest\n");
+            out.push_str("  store double %mnnew, double* %mnbest_p\n");
+            out.push_str("  %mni1 = add i64 %mni, 1\n");
+            out.push_str("  store i64 %mni1, i64* %mni_p\n");
+            out.push_str("  br label %min_loop\n");
+            out.push_str("min_done:\n");
+            out.push_str("  %mnresult = load double, double* %mnbest_p\n");
+            out.push_str("  ret double %mnresult\n");
+            out.push_str("}\n");
+
+            // max(xs_p, def) -> double  (def for empty)
+            let max_name = format!("@intent_vec_{}__max", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p, double %def) {{\n",
+                sn = max_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %mxdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %mxlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %mxdata = load {ep}, {epp} %mxdp\n", ep = ep, epp = epp));
+            out.push_str("  %mxn = load i64, i64* %mxlp\n");
+            out.push_str("  %mxempty = icmp eq i64 %mxn, 0\n");
+            out.push_str("  br i1 %mxempty, label %max_ret_def, label %max_init\n");
+            out.push_str("max_ret_def:\n");
+            out.push_str("  ret double %def\n");
+            out.push_str("max_init:\n");
+            out.push_str(&format!("  %mx0 = load double, {ep} %mxdata\n", ep = ep));
+            out.push_str("  %mxbest_p = alloca double\n");
+            out.push_str("  store double %mx0, double* %mxbest_p\n");
+            out.push_str("  %mxi_p = alloca i64\n");
+            out.push_str("  store i64 1, i64* %mxi_p\n");
+            out.push_str("  br label %max_loop\n");
+            out.push_str("max_loop:\n");
+            out.push_str("  %mxi = load i64, i64* %mxi_p\n");
+            out.push_str("  %mxcont = icmp ult i64 %mxi, %mxn\n");
+            out.push_str("  br i1 %mxcont, label %max_body, label %max_done\n");
+            out.push_str("max_body:\n");
+            out.push_str(&format!(
+                "  %mxslot = getelementptr double, {ep} %mxdata, i64 %mxi\n", ep = ep));
+            out.push_str(&format!("  %mxv = load double, {ep} %mxslot\n", ep = ep));
+            out.push_str("  %mxbest = load double, double* %mxbest_p\n");
+            out.push_str("  %mxgt = fcmp ogt double %mxv, %mxbest\n");
+            out.push_str("  %mxnew = select i1 %mxgt, double %mxv, double %mxbest\n");
+            out.push_str("  store double %mxnew, double* %mxbest_p\n");
+            out.push_str("  %mxi1 = add i64 %mxi, 1\n");
+            out.push_str("  store i64 %mxi1, i64* %mxi_p\n");
+            out.push_str("  br label %max_loop\n");
+            out.push_str("max_done:\n");
+            out.push_str("  %mxresult = load double, double* %mxbest_p\n");
+            out.push_str("  ret double %mxresult\n");
+            out.push_str("}\n");
+
+            // argmin(xs_p, def_idx) -> i64  (def_idx for empty)
+            let argmin_name = format!("@intent_vec_{}__argmin", tag);
+            out.push_str(&format!(
+                "define i64 {sn}({sty}* %xs_p, i64 %def) {{\n",
+                sn = argmin_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %amdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %amlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %amdata = load {ep}, {epp} %amdp\n", ep = ep, epp = epp));
+            out.push_str("  %amn = load i64, i64* %amlp\n");
+            out.push_str("  %amempty = icmp eq i64 %amn, 0\n");
+            out.push_str("  br i1 %amempty, label %amin_ret_def, label %amin_init\n");
+            out.push_str("amin_ret_def:\n");
+            out.push_str("  ret i64 %def\n");
+            out.push_str("amin_init:\n");
+            out.push_str(&format!("  %am0 = load double, {ep} %amdata\n", ep = ep));
+            out.push_str("  %ambest_p = alloca double\n");
+            out.push_str("  store double %am0, double* %ambest_p\n");
+            out.push_str("  %ami_p = alloca i64\n");
+            out.push_str("  store i64 1, i64* %ami_p\n");
+            out.push_str("  %amidx_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %amidx_p\n");
+            out.push_str("  br label %amin_loop\n");
+            out.push_str("amin_loop:\n");
+            out.push_str("  %ami = load i64, i64* %ami_p\n");
+            out.push_str("  %amcont = icmp ult i64 %ami, %amn\n");
+            out.push_str("  br i1 %amcont, label %amin_body, label %amin_done\n");
+            out.push_str("amin_body:\n");
+            out.push_str(&format!(
+                "  %amslot = getelementptr double, {ep} %amdata, i64 %ami\n", ep = ep));
+            out.push_str(&format!("  %amv = load double, {ep} %amslot\n", ep = ep));
+            out.push_str("  %ambest = load double, double* %ambest_p\n");
+            out.push_str("  %amlt = fcmp olt double %amv, %ambest\n");
+            out.push_str("  br i1 %amlt, label %amin_update, label %amin_skip\n");
+            out.push_str("amin_update:\n");
+            out.push_str("  store double %amv, double* %ambest_p\n");
+            out.push_str("  store i64 %ami, i64* %amidx_p\n");
+            out.push_str("  br label %amin_skip\n");
+            out.push_str("amin_skip:\n");
+            out.push_str("  %ami1 = add i64 %ami, 1\n");
+            out.push_str("  store i64 %ami1, i64* %ami_p\n");
+            out.push_str("  br label %amin_loop\n");
+            out.push_str("amin_done:\n");
+            out.push_str("  %amresult = load i64, i64* %amidx_p\n");
+            out.push_str("  ret i64 %amresult\n");
+            out.push_str("}\n");
+
+            // argmax(xs_p, def_idx) -> i64  (def_idx for empty)
+            let argmax_name = format!("@intent_vec_{}__argmax", tag);
+            out.push_str(&format!(
+                "define i64 {sn}({sty}* %xs_p, i64 %def) {{\n",
+                sn = argmax_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %axdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %axlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %axdata = load {ep}, {epp} %axdp\n", ep = ep, epp = epp));
+            out.push_str("  %axn = load i64, i64* %axlp\n");
+            out.push_str("  %axempty = icmp eq i64 %axn, 0\n");
+            out.push_str("  br i1 %axempty, label %amax_ret_def, label %amax_init\n");
+            out.push_str("amax_ret_def:\n");
+            out.push_str("  ret i64 %def\n");
+            out.push_str("amax_init:\n");
+            out.push_str(&format!("  %ax0 = load double, {ep} %axdata\n", ep = ep));
+            out.push_str("  %axbest_p = alloca double\n");
+            out.push_str("  store double %ax0, double* %axbest_p\n");
+            out.push_str("  %axi_p = alloca i64\n");
+            out.push_str("  store i64 1, i64* %axi_p\n");
+            out.push_str("  %axidx_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %axidx_p\n");
+            out.push_str("  br label %amax_loop\n");
+            out.push_str("amax_loop:\n");
+            out.push_str("  %axi = load i64, i64* %axi_p\n");
+            out.push_str("  %axcont = icmp ult i64 %axi, %axn\n");
+            out.push_str("  br i1 %axcont, label %amax_body, label %amax_done\n");
+            out.push_str("amax_body:\n");
+            out.push_str(&format!(
+                "  %axslot = getelementptr double, {ep} %axdata, i64 %axi\n", ep = ep));
+            out.push_str(&format!("  %axv = load double, {ep} %axslot\n", ep = ep));
+            out.push_str("  %axbest = load double, double* %axbest_p\n");
+            out.push_str("  %axgt = fcmp ogt double %axv, %axbest\n");
+            out.push_str("  br i1 %axgt, label %amax_update, label %amax_skip\n");
+            out.push_str("amax_update:\n");
+            out.push_str("  store double %axv, double* %axbest_p\n");
+            out.push_str("  store i64 %axi, i64* %axidx_p\n");
+            out.push_str("  br label %amax_skip\n");
+            out.push_str("amax_skip:\n");
+            out.push_str("  %axi1 = add i64 %axi, 1\n");
+            out.push_str("  store i64 %axi1, i64* %axi_p\n");
+            out.push_str("  br label %amax_loop\n");
+            out.push_str("amax_done:\n");
+            out.push_str("  %axresult = load i64, i64* %axidx_p\n");
+            out.push_str("  ret i64 %axresult\n");
+            out.push_str("}\n");
+
+            // kth_smallest(xs_p, k) -> double
+            // O(n^2) count-based selection: for each candidate x,
+            // count fewer = #{y < x} and nm = #{y <= x}.
+            // The k-th smallest is x where fewer <= k < nm.
+            // Returns quiet NaN (0x7FF8000000000000) on bounds error.
+            let kth_name = format!("@intent_vec_{}__kth_smallest", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p, i64 %k) {{\n",
+                sn = kth_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %kthdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %kthlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %kthdata = load {ep}, {epp} %kthdp\n", ep = ep, epp = epp));
+            out.push_str("  %kthn = load i64, i64* %kthlp\n");
+            out.push_str("  %kth_empty = icmp eq i64 %kthn, 0\n");
+            out.push_str("  br i1 %kth_empty, label %kth_nan, label %kth_bounds\n");
+            out.push_str("kth_bounds:\n");
+            out.push_str("  %kth_neg = icmp slt i64 %k, 0\n");
+            out.push_str("  %kth_over = icmp sge i64 %k, %kthn\n");
+            out.push_str("  %kth_bad = or i1 %kth_neg, %kth_over\n");
+            out.push_str("  br i1 %kth_bad, label %kth_nan, label %kth_outer_init\n");
+            out.push_str("kth_nan:\n");
+            out.push_str("  ret double 0x7FF8000000000000\n");
+            out.push_str("kth_outer_init:\n");
+            out.push_str("  %kthi_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %kthi_p\n");
+            out.push_str("  br label %kth_outer\n");
+            out.push_str("kth_outer:\n");
+            out.push_str("  %kthi = load i64, i64* %kthi_p\n");
+            out.push_str("  %kth_o_cont = icmp ult i64 %kthi, %kthn\n");
+            out.push_str("  br i1 %kth_o_cont, label %kth_outer_body, label %kth_no_match\n");
+            out.push_str("kth_outer_body:\n");
+            out.push_str(&format!(
+                "  %kth_xp = getelementptr double, {ep} %kthdata, i64 %kthi\n", ep = ep));
+            out.push_str(&format!("  %kth_x = load double, {ep} %kth_xp\n", ep = ep));
+            out.push_str("  %kth_fewer_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %kth_fewer_p\n");
+            out.push_str("  %kth_nm_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %kth_nm_p\n");
+            out.push_str("  %kthj_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %kthj_p\n");
+            out.push_str("  br label %kth_inner\n");
+            out.push_str("kth_inner:\n");
+            out.push_str("  %kthj = load i64, i64* %kthj_p\n");
+            out.push_str("  %kth_i_cont = icmp ult i64 %kthj, %kthn\n");
+            out.push_str("  br i1 %kth_i_cont, label %kth_inner_body, label %kth_check\n");
+            out.push_str("kth_inner_body:\n");
+            out.push_str(&format!(
+                "  %kth_yp = getelementptr double, {ep} %kthdata, i64 %kthj\n", ep = ep));
+            out.push_str(&format!("  %kth_y = load double, {ep} %kth_yp\n", ep = ep));
+            out.push_str("  %kth_lt = fcmp olt double %kth_y, %kth_x\n");
+            out.push_str("  %kth_le = fcmp ole double %kth_y, %kth_x\n");
+            out.push_str("  %kth_fewer = load i64, i64* %kth_fewer_p\n");
+            out.push_str("  %kth_fewer1 = add i64 %kth_fewer, 1\n");
+            out.push_str("  %kth_fewer_new = select i1 %kth_lt, i64 %kth_fewer1, i64 %kth_fewer\n");
+            out.push_str("  store i64 %kth_fewer_new, i64* %kth_fewer_p\n");
+            out.push_str("  %kth_nm = load i64, i64* %kth_nm_p\n");
+            out.push_str("  %kth_nm1 = add i64 %kth_nm, 1\n");
+            out.push_str("  %kth_nm_new = select i1 %kth_le, i64 %kth_nm1, i64 %kth_nm\n");
+            out.push_str("  store i64 %kth_nm_new, i64* %kth_nm_p\n");
+            out.push_str("  %kthj1 = add i64 %kthj, 1\n");
+            out.push_str("  store i64 %kthj1, i64* %kthj_p\n");
+            out.push_str("  br label %kth_inner\n");
+            out.push_str("kth_check:\n");
+            out.push_str("  %kth_fewer_f = load i64, i64* %kth_fewer_p\n");
+            out.push_str("  %kth_nm_f = load i64, i64* %kth_nm_p\n");
+            out.push_str("  %kth_c1 = icmp sle i64 %kth_fewer_f, %k\n");
+            out.push_str("  %kth_c2 = icmp slt i64 %k, %kth_nm_f\n");
+            out.push_str("  %kth_match = and i1 %kth_c1, %kth_c2\n");
+            out.push_str("  br i1 %kth_match, label %kth_found, label %kth_next_outer\n");
+            out.push_str("kth_found:\n");
+            out.push_str("  ret double %kth_x\n");
+            out.push_str("kth_next_outer:\n");
+            out.push_str("  %kthi1 = add i64 %kthi, 1\n");
+            out.push_str("  store i64 %kthi1, i64* %kthi_p\n");
+            out.push_str("  br label %kth_outer\n");
+            out.push_str("kth_no_match:\n");
+            out.push_str("  ret double 0x7FF8000000000000\n");
+            out.push_str("}\n");
+
+            // median(xs_p) -> double  (0.0 for empty)
+            let median_name = format!("@intent_vec_{}__median", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p) {{\n",
+                sn = median_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %medlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str("  %medn = load i64, i64* %medlp\n");
+            out.push_str("  %med_empty = icmp eq i64 %medn, 0\n");
+            out.push_str("  br i1 %med_empty, label %med_zero, label %med_call\n");
+            out.push_str("med_zero:\n");
+            out.push_str("  ret double 0.0\n");
+            out.push_str("med_call:\n");
+            out.push_str("  %med_n1 = sub i64 %medn, 1\n");
+            out.push_str("  %med_k = udiv i64 %med_n1, 2\n");
+            out.push_str(&format!(
+                "  %med_r = call double {kth}({sty}* %xs_p, i64 %med_k)\n",
+                kth = kth_name, sty = s_ty,
+            ));
+            out.push_str("  ret double %med_r\n");
+            out.push_str("}\n");
+        }
         // ---- vec_map / vec_fold / reductions: i64 element only
-        // for v1. F64 support queued as F64-2/F64-3 follow-ups.
+        // for v1 (F64-3 queued for map/fold/filter on f64).
         if matches!(element, Type::I64) {
         // ---- vec_map / vec_fold: eager iterator combinators
         // taking fn-ptr args (closure #309). v1 i64 element only.

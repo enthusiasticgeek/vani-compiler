@@ -11547,6 +11547,92 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
             ));
         }
     }
+    // F64-2: descriptive-stats reductions for Vec<f64>. These
+    // mirror the i64 variants but use `double` for element-typed
+    // values.  argmin/argmax are still index-valued (int64_t).
+    // kth_smallest/median use the same O(n²) count-based
+    // selection algorithm as the i64 preamble helpers.
+    if matches!(element, Type::F64) {
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__sum(const {sn}* xs) {{\
+\n    double acc = 0.0;\
+\n    for (uint64_t i = 0; i < xs->len; i++) acc += xs->data[i];\
+\n    return acc;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__mean(const {sn}* xs) {{\
+\n    if (xs->len == 0) return 0.0;\
+\n    double acc = 0.0;\
+\n    for (uint64_t i = 0; i < xs->len; i++) acc += xs->data[i];\
+\n    return acc / (double)xs->len;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__min(const {sn}* xs, double def) {{\
+\n    if (xs->len == 0) return def;\
+\n    double m = xs->data[0];\
+\n    for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] < m) m = xs->data[i];\
+\n    return m;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__max(const {sn}* xs, double def) {{\
+\n    if (xs->len == 0) return def;\
+\n    double m = xs->data[0];\
+\n    for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] > m) m = xs->data[i];\
+\n    return m;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED int64_t {sn}__argmin(const {sn}* xs, int64_t def) {{\
+\n    if (xs->len == 0) return def;\
+\n    double mv = xs->data[0]; int64_t mi = 0;\
+\n    for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] < mv) {{ mv = xs->data[i]; mi = (int64_t)i; }}\
+\n    return mi;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED int64_t {sn}__argmax(const {sn}* xs, int64_t def) {{\
+\n    if (xs->len == 0) return def;\
+\n    double mv = xs->data[0]; int64_t mi = 0;\
+\n    for (uint64_t i = 1; i < xs->len; i++) if (xs->data[i] > mv) {{ mv = xs->data[i]; mi = (int64_t)i; }}\
+\n    return mi;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__kth_smallest(const {sn}* xs, int64_t k) {{\
+\n    if (!xs || xs->len == 0) return 0.0/0.0;\
+\n    if (k < 0 || k >= (int64_t)xs->len) return 0.0/0.0;\
+\n    for (uint64_t i = 0; i < xs->len; i++) {{\
+\n        double x = xs->data[i];\
+\n        int64_t fewer = 0, nm = 0;\
+\n        for (uint64_t j = 0; j < xs->len; j++) {{\
+\n            double y = xs->data[j];\
+\n            if (y < x) fewer++;\
+\n            if (y <= x) nm++;\
+\n        }}\
+\n        if (fewer <= k && k < nm) return x;\
+\n    }}\
+\n    return 0.0/0.0;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__median(const {sn}* xs) {{\
+\n    if (!xs || xs->len == 0) return 0.0;\
+\n    int64_t k = (int64_t)((xs->len - 1) / 2);\
+\n    return {sn}__kth_smallest(xs, k);\
+\n}}\n",
+            sn = struct_name,
+        ));
+    }
 
     // `__set(xs, i, v)`: store the new value at xs.data[i].
     // For non-Copy elements (Vec<T>, Array<T, N>) the old slot
@@ -16126,10 +16212,17 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_int64_t_mode({})",
             emit_expr(&args[0])
         ),
-        "vec_median" => format!(
-            "intent_vec_int64_t_median({})",
-            emit_expr(&args[0])
-        ),
+        "vec_median" => match args[0].ty.deref() {
+            Type::Vec(element) if matches!(element.as_ref(), Type::F64) => format!(
+                "{}({})",
+                vec_helper(element, "median"),
+                emit_expr(&args[0])
+            ),
+            _ => format!(
+                "intent_vec_int64_t_median({})",
+                emit_expr(&args[0])
+            ),
+        },
         "vec_running_mean" => format!(
             "intent_vec_int64_t_running_mean({})",
             emit_expr(&args[0])
@@ -16139,11 +16232,19 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             emit_expr(&args[0]),
             emit_expr(&args[1])
         ),
-        "vec_kth_smallest" => format!(
-            "intent_vec_int64_t_kth_smallest({}, ({}))",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        "vec_kth_smallest" => match args[0].ty.deref() {
+            Type::Vec(element) if matches!(element.as_ref(), Type::F64) => format!(
+                "{}({}, ({}))",
+                vec_helper(element, "kth_smallest"),
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            ),
+            _ => format!(
+                "intent_vec_int64_t_kth_smallest({}, ({}))",
+                emit_expr(&args[0]),
+                emit_expr(&args[1])
+            ),
+        },
         // Closures #546-#549: modular/bit-shift scalar broadcast.
         "vec_mod_scalar" | "vec_pow_scalar"
         | "vec_shl_scalar" | "vec_shr_scalar" => {
@@ -16187,10 +16288,17 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
             "intent_vec_int64_t_count_distinct({})",
             emit_expr(&args[0])
         ),
-        "vec_mean" => format!(
-            "intent_vec_int64_t_mean({})",
-            emit_expr(&args[0])
-        ),
+        "vec_mean" => match args[0].ty.deref() {
+            Type::Vec(element) if matches!(element.as_ref(), Type::F64) => format!(
+                "{}({})",
+                vec_helper(element, "mean"),
+                emit_expr(&args[0])
+            ),
+            _ => format!(
+                "intent_vec_int64_t_mean({})",
+                emit_expr(&args[0])
+            ),
+        },
         // Closure #563: vec_indices_of_value(ref xs, v) -> Vec<i64>.
         "vec_indices_of_value" => format!(
             "intent_vec_int64_t_indices_of_value({}, ({}))",

@@ -23350,7 +23350,9 @@ fn check_vec_reduction_builtin(
         "vec_count" | "vec_any" | "vec_all" => 2,
         _ => unreachable!(),
     };
-    let ret_ty = || -> Type {
+    // Conservative fallback used only when arg-count is wrong
+    // (before element_type is known).
+    let fallback_ret_ty = || -> Type {
         match name {
             "vec_any" | "vec_all" => Type::Bool,
             _ => Type::I64,
@@ -23367,7 +23369,7 @@ fn check_vec_reduction_builtin(
                 args.len()
             ),
         ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
-        return CheckedExpr::fallback(ret_ty(), span);
+        return CheckedExpr::fallback(fallback_ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
     let element_type = match xs.ty() {
@@ -23376,39 +23378,75 @@ fn check_vec_reduction_builtin(
             _ => {
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
-                    format!("{}() requires a `ref Vec<i64>` argument, got {}", name, xs.ty()),
+                    format!("{}() requires a `ref Vec<_>` argument, got {}", name, xs.ty()),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-                return CheckedExpr::fallback(ret_ty(), span);
+                return CheckedExpr::fallback(fallback_ret_ty(), span);
             }
         },
         other => {
             diagnostics.push(Diagnostic::new(
                 args[0].span,
-                format!("{}() requires a `ref Vec<i64>` argument, got {}", name, other),
+                format!("{}() requires a `ref Vec<_>` argument, got {}", name, other),
             ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-            return CheckedExpr::fallback(ret_ty(), span);
+            return CheckedExpr::fallback(fallback_ret_ty(), span);
         }
     };
-    if !matches!(element_type, Type::I64) {
+    // Determine return type now that element_type is known.
+    let ret_ty: Type = if matches!(element_type, Type::F64) {
+        match name {
+            "vec_any" | "vec_all" => Type::Bool,
+            // argmin/argmax return an index (always i64).
+            "vec_argmin" | "vec_argmax" => Type::I64,
+            // kth_smallest/median/sum/mean/min/max return f64.
+            _ => Type::F64,
+        }
+    } else {
+        match name {
+            "vec_any" | "vec_all" => Type::Bool,
+            _ => Type::I64,
+        }
+    };
+    // v1: i64 always supported; f64 supported for the core
+    // descriptive-stats subset (F64-2). Other element types and
+    // other f64 reductions (count_distinct, mode, range_span,
+    // count_value, etc.) remain i64-only for now.
+    let f64_supported = matches!(name,
+        "vec_sum" | "vec_mean" | "vec_min" | "vec_max"
+        | "vec_argmin" | "vec_argmax"
+        | "vec_median" | "vec_kth_smallest"
+    );
+    if !(matches!(element_type, Type::I64)
+        || (matches!(element_type, Type::F64) && f64_supported))
+    {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() only supports `Vec<i64>` in v1, got element type {}",
+                "{}() only supports `Vec<i64>` in v1 (or `Vec<f64>` for vec_sum/mean/min/max/argmin/argmax/median/kth_smallest), got element type {}",
                 name, element_type
             ),
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-        return CheckedExpr::fallback(ret_ty(), span);
+        return CheckedExpr::fallback(ret_ty, span);
     }
     let mut typed_args = vec![xs.expr];
     match name {
         "vec_sum" | "vec_product"
         | "vec_count_distinct" | "vec_mean"
         | "vec_range_span" | "vec_mode" | "vec_median" => {}
-        "vec_min" | "vec_max" | "vec_argmin" | "vec_argmax" => {
+        "vec_min" | "vec_max" => {
+            // Default value type matches the element type.
+            let def_raw = check_expr(&args[1], env, signatures, diagnostics);
+            let def = coerce_checked(
+                def_raw, &element_type, args[1].span,
+                "default value for empty Vec", diagnostics,
+            );
+            typed_args.push(def.expr);
+        }
+        "vec_argmin" | "vec_argmax" => {
+            // Default is the fallback INDEX (always i64).
             let def_raw = check_expr(&args[1], env, signatures, diagnostics);
             let def = coerce_checked(
                 def_raw, &Type::I64, args[1].span,
-                "default value for empty Vec", diagnostics,
+                "default index for empty Vec", diagnostics,
             );
             typed_args.push(def.expr);
         }
@@ -23421,6 +23459,7 @@ fn check_vec_reduction_builtin(
             typed_args.push(v.expr);
         }
         "vec_kth_smallest" => {
+            // k is a rank/index (always i64).
             let k_raw = check_expr(&args[1], env, signatures, diagnostics);
             let k = coerce_checked(
                 k_raw, &Type::I64, args[1].span,
@@ -23447,7 +23486,7 @@ fn check_vec_reduction_builtin(
             name_span: span,
             args: typed_args,
         },
-        ret_ty(),
+        ret_ty,
         None,
         span,
     )
