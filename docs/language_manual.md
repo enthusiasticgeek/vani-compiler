@@ -1,0 +1,454 @@
+# vāṇī Language Manual
+
+> **Quick navigation** — use your browser's in-page search (`Ctrl-F` / `Cmd-F`).
+> The [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) covers the
+> same material with worked examples and exercises.
+
+---
+
+## Contents
+
+1. [Syntax conventions](#syntax-conventions)
+2. [Types](#types)
+3. [Ownership and references](#ownership-and-references)
+4. [Control flow](#control-flow)
+5. [Functions and closures](#functions-and-closures)
+6. [Structs, enums, and generics](#structs-enums-and-generics)
+7. [Collections](#collections)
+8. [Strings](#strings)
+9. [Error handling](#error-handling)
+10. [Modules and visibility](#modules-and-visibility)
+11. [Concurrency](#concurrency)
+12. [Async / await](#async--await)
+13. [SMT verification](#smt-verification)
+14. [Safety attributes](#safety-attributes)
+15. [SIMD and vectorization](#simd-and-vectorization)
+16. [File I/O](#file-io)
+17. [Bare-metal and cross-compilation](#bare-metal-and-cross-compilation)
+18. [Tooling reference](#tooling-reference)
+19. [FFI and linking](#ffi-and-linking)
+20. [Glossary](#glossary)
+
+---
+
+## Syntax conventions
+
+vāṇī accepts multiple spellings for most constructs. All aliases resolve to the
+same AST node — generated code is identical regardless of which form you use.
+
+| Canonical | Accepted aliases |
+|-----------|-----------------|
+| `let`     | `assign` |
+| `return`  | `give`, `give_back`, `give back` |
+| `pub`     | `public` |
+| `module`  | `mod` |
+| `fn`      | (no alias; keyword-first) |
+
+Comments: `//` single-line, `/* … */` block (nesting supported).
+
+Human-language aliases are enabled per file with `// vani-lang: hindi` (or any
+supported dialect). See [Language Coverage](languages.md).
+
+---
+
+## Types
+
+### Scalar types
+
+| Type | Width | Notes |
+|------|-------|-------|
+| `i8` `i16` `i32` `i64` | 8–64 bit signed | `i64` is the default integer |
+| `u8` `u16` `u32` `u64` | 8–64 bit unsigned | |
+| `f32` `f64` | 32/64-bit float | |
+| `bool` | 1 bit logical | `true` / `false` |
+
+### Compound types
+
+| Type | Syntax | Notes |
+|------|--------|-------|
+| Fixed array | `[T; N]` | stack-allocated, Copy |
+| Vector | `Vec<T>` | heap-allocated, affine |
+| SIMD 128-bit | `vec128<T>` | 4×f32, 2×f64, 16×i8, … |
+| SIMD 256-bit | `vec256<T>` | 8×f32, 4×f64, … (AVX2/SVE/RVV) |
+| Tuple | `(T, U)` | positional fields |
+| String (borrowed) | `Str` | `&str` equivalent; `len()` |
+| String (owned) | `OwnedStr` | heap, affine |
+| Optional | `Opt<T>` | `Opt.Some(x)` / `Opt.None` |
+| Result | `Result<T, E>` | `Result.Ok(x)` / `Result.Err(e)` |
+| Box | `Box<T>` | heap pointer, affine |
+| Interface object | `dyn Iface` | fat pointer, heap |
+
+### Casts
+
+```vani
+let x: i64 = 3;
+let y: f64 = x as f64;
+let z: i32 = y as i32;   // truncates
+```
+
+---
+
+## Ownership and references
+
+vāṇī uses **affine ownership** — a value is consumed at most once.
+
+```vani
+let a: Vec<i64> = vec(1, 2, 3);
+let b: Vec<i64> = a;          // a is moved; a is no longer accessible
+```
+
+**References** are second-class (cannot be stored past the call).
+
+```vani
+fn sum(xs: ref Vec<i64>) -> i64 { … }   // shared borrow
+fn fill(xs: mut ref Vec<i64>) { … }     // mutable borrow
+
+let xs: Vec<i64> = vec(1, 2, 3);
+let s: i64 = sum(ref xs);
+```
+
+**Smart pointers**
+
+| Type | Semantics |
+|------|-----------|
+| `Box<T>` | unique heap pointer; drops on scope exit |
+| `Arc<T>` | shared heap pointer; ref-counted |
+| `Mutex<T>` / `Guard<T>` | mutual exclusion; RAII unlock |
+| `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` | reader-writer lock |
+
+---
+
+## Control flow
+
+```vani
+// if / else
+if x > 0 { … } else { … }
+
+// while
+while cond { … }
+
+// for over range
+for i in 0 to n { … }
+
+// for over collection
+for x in ref xs { … }
+
+// named labels
+outer: for i in 0 to n {
+    inner: while true {
+        break outer;
+    }
+}
+
+// match
+match opt {
+    Opt.Some(v) then { … }
+    Opt.None    then { … }
+}
+```
+
+---
+
+## Functions and closures
+
+```vani
+fn add(a: i64, b: i64) -> i64 { return a + b; }
+
+// function pointer
+let f: fn(i64, i64) -> i64 = add;
+
+// closure (captures by ref or move)
+let mul: fn(i64) -> i64 = fn(x: i64) -> i64 { return x * 2; };
+
+// higher-order
+let doubled: Vec<i64> = vec_map(ref xs, fn(x: i64) -> i64 { return x * 2; });
+```
+
+---
+
+## Structs, enums, and generics
+
+```vani
+struct Point { x: f64, y: f64 }
+
+enum Shape {
+    Circle(f64),
+    Rect(f64, f64),
+}
+
+struct Pair<T, U> { first: T, second: U }
+
+interface Drawable {
+    fn draw(self: ref Self) -> i64;
+}
+
+implement Drawable for Point {
+    fn draw(self: ref Self) -> i64 { … }
+}
+```
+
+---
+
+## Collections
+
+| Builtin | Signature | Notes |
+|---------|-----------|-------|
+| `vec(a, b, …)` | `-> Vec<T>` | literal |
+| `vec_fill(n, val)` | `-> Vec<T>` | bulk init |
+| `vec_with_capacity(n)` | `-> Vec<T>` | pre-alloc |
+| `vec_push(mut ref xs, val)` | `-> ()` | append |
+| `vec_len(ref xs)` | `-> i64` | length |
+| `vec_sum/min/max/mean` | `-> T` | `Vec<i64>` and `Vec<f64>` |
+| `vec_fold/map/filter` | HOF | `Vec<i64>` and `Vec<f64>` |
+| `vec_dot(ref a, ref b)` | `-> T` | `Vec<i64>→i64`, `Vec<f64>→f64` |
+| `sort(mut ref xs)` | in-place | `Vec<i64>` and `Vec<f64>` |
+| `vec_kth_smallest(ref xs, k)` | `-> T` | returns -1 / qNaN on OOB |
+| `HashMap<K, V>` | | `hashmap_new/insert/get/remove` |
+
+---
+
+## Strings
+
+```vani
+let s: Str = "hello";
+let n: i64  = str_len(s);
+let t: OwnedStr = str_concat(s, " world");
+let i: i64  = str_find(s, "ell");   // -1 if absent
+```
+
+---
+
+## Error handling
+
+```vani
+fn parse(s: Str) -> Result<i64, Str> { … }
+
+// try propagates Err upward
+let n: i64 = try parse("42");
+
+// explicit match
+match parse("x") {
+    Result.Ok(v)  then { print v; }
+    Result.Err(e) then { eprint e; }
+}
+```
+
+---
+
+## Modules and visibility
+
+```vani
+module math {
+    pub fn sqrt(x: f64) -> f64 { … }          // public API
+    pub(kosh) fn helper() -> f64 { … }        // package-internal only
+    fn internal() -> f64 { … }                // private to module
+}
+
+use math::sqrt;
+let r: f64 = sqrt(2.0);
+```
+
+`kosh` (कोश) is Sanskrit for "repository" — equivalent to Rust's `pub(crate)`.
+
+---
+
+## Concurrency
+
+```vani
+// parallel for with reduction
+let sum: i64 = 0;
+parallel for i in 0 to n reduce(sum += xs[i]) { }
+
+// task (affine handle — forgetting to join is a compile error)
+let t: TaskHandle = task { expensive_work(); };
+join t;
+
+// mutex
+let m: Mutex<i64> = mutex_new(0);
+let g: Guard<i64> = mutex_lock(ref m);
+*g = *g + 1;
+// Guard drops here → unlock
+```
+
+---
+
+## Async / await
+
+```vani
+async fn fetch(url: Str) -> Result<OwnedStr, Str> { … }
+
+async fn main_async() -> i64 {
+    let body: OwnedStr = try await fetch("http://example.com");
+    print body;
+    return 0;
+}
+```
+
+Compiles to a cooperative state machine. Backends: epoll (Linux),
+kqueue (macOS), IOCP (Windows).
+
+---
+
+## SMT verification
+
+```vani
+fn divide(a: i64, b: i64) -> i64
+  requires b != 0
+  ensures  result * b == a
+{
+  return a / b;
+}
+
+fn sum_to(n: i64) -> i64 {
+  let s: i64 = 0;
+  for i in 0 to n
+    invariant s == i * (i - 1) / 2
+  {
+    s = s + i;
+  }
+  prove s == n * (n - 1) / 2;
+  return s;
+}
+```
+
+Backed by Z3. Three-stage pipeline: constant-fold → structural tautology →
+full SMT solve. `--no-verify` skips SMT for fast iteration.
+
+---
+
+## Safety attributes
+
+| Attribute | Effect |
+|-----------|--------|
+| `#[no_heap]` | Rejects any heap allocation transitively |
+| `#[no_float]` | Rejects any floating-point operation |
+| `#[no_nan]` | Rejects builtins with NaN-as-error-sentinel (`f64_nan`, `vec_kth_smallest<f64>`) |
+| `#[no_recursion]` | Rejects recursive calls |
+| `#[wcet(cycles=N)]` | Enforces worst-case execution time bound |
+| `#[bounded_stack(bytes=N)]` | Enforces stack frame bound |
+| `#[deterministic_timing]` | Rejects timing-variant operations |
+| `#[interrupt(priority=N)]` | ISR declaration; priority-inversion checked |
+| `#[asil_d]` | ISO 26262 ASIL-D (implies no_heap + no_float + no_nan + no_recursion + wcet + deterministic_timing) |
+| `#[do178c_level_a]` | DO-178C DAL A (same implications as asil_d) |
+| `#[iec_61508_sil3]` / `#[sil4]` | IEC 61508 SIL-3/4 (implies no_nan) |
+| `#[misra_c_2012]` | MISRA C 2012 rule set |
+
+See [tutorials/src/advanced/12_safety_standards.md](../tutorials/src/advanced/12_safety_standards.md)
+for the full compliance matrix.
+
+---
+
+## SIMD and vectorization
+
+```vani
+fn dot(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec256<f32> = simd256_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 8 <= n {
+        acc = simd256_add(acc, simd256_mul(simd256_load(a, i),
+                                           simd256_load(b, i)));
+        i = i + 8;
+    }
+    return simd256_reduce_add(acc);
+}
+```
+
+| Type | Lanes (f32) | x86-64 | AArch64 | RISC-V |
+|------|------------|--------|---------|--------|
+| `vec128<T>` | 4 | `xmm` (SSE) | NEON `v` | RVV VLEN=128 |
+| `vec256<T>` | 8 | `ymm` (AVX2) | 2× NEON | RVV VLEN=256 |
+
+`#[vectorize]` hints LLVM to auto-vectorize a loop.
+
+---
+
+## File I/O
+
+```vani
+let fh: FileHandle = file_open("data.txt");
+if file_is_ok(ref fh) {
+    let line: OwnedStr = file_read_line(mut ref fh);
+    file_write(mut ref fh, "written\n");
+    file_close(fh);           // affine — compile error to use after close
+}
+let input: OwnedStr = stdin_read_line();
+```
+
+---
+
+## Bare-metal and cross-compilation
+
+```bash
+# Cross-compile for ARM Cortex-M (no libc)
+vanic build firmware.vani --target=thumbv7em-none-eabihf --no-std -o firmware.elf
+
+# Cross-compile for AArch64 + QEMU test
+vanic build prog.vani --target=aarch64-unknown-linux-gnu -o prog_arm
+qemu-aarch64-static prog_arm
+```
+
+Attributes: `#[no_mangle]`, `#[link_section = ".vectors"]`.
+MMIO: `mmio_read_u32(addr)` / `mmio_write_u32(addr, val)` (also u8/u16).
+
+---
+
+## Tooling reference
+
+```bash
+vanic build   prog.vani -o prog          # AOT native binary (LLVM → llc → cc)
+vanic run     prog.vani                  # compile + run via lli
+vanic check   prog.vani                  # type-check + SMT verify only
+vanic check   prog.vani --no-verify      # skip SMT
+vanic check   prog.vani --json           # JSON diagnostics
+vanic emit    prog.vani                  # LLVM IR (default)
+vanic emit    prog.vani --backend=c      # C output
+vanic fmt     prog.vani                  # canonical formatting
+vanic ast     prog.vani                  # parsed AST dump
+vanic ir      prog.vani                  # typed IR dump
+vanic tokens  prog.vani                  # token stream
+vanic lsp                                # Language Server (stdio)
+vanic coverage prog.vani                 # MC/DC coverage map
+vanic safety-attrs prog.vani             # list active safety attributes
+```
+
+**Editor integration:** `vanic lsp` speaks LSP over stdio. Configure VS Code,
+Neovim, or any LSP client to invoke it on `.vani` files.
+
+---
+
+## FFI and linking
+
+```vani
+extern "C" fn printf(fmt: Str, val: i64) -> i32;
+
+fn main() -> i64 {
+    printf("value = %ld\n", 42);
+    return 0;
+}
+```
+
+```bash
+vanic build prog.vani --link-with libfoo.a -lfoo -o prog
+```
+
+The C backend (`--backend=c`) produces a `.c` file suitable for integration
+into any existing build system without LLVM on the host.
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|------|---------|
+| **affine** | Used at most once; compile-time checked |
+| **kosh** | Sanskrit for "repository"; used in `pub(kosh)` (≈ Rust `pub(crate)`) |
+| **scrutinee** | The expression being matched in a `match` |
+| **second-class reference** | A `ref` that cannot escape its scope; no lifetime annotations needed |
+| **SMT** | Satisfiability Modulo Theories; Z3 is the solver |
+| **vtable** | Fat pointer dispatch table for `dyn Iface` |
+| **affine drop** | Deterministic destructor call at scope exit (no GC) |
+| **MMIO** | Memory-mapped I/O; `mmio_read/write_u8/u16/u32` |
+| **qNaN** | Quiet NaN; returned by `vec_kth_smallest<f64>` on out-of-bounds |
+| **kosh** (package) | A single buildable project; defined by `vani.toml` |
+
+Full glossary (60+ terms): see the previous [README.md history](https://github.com/enthusiasticgeek/vani-compiler/blob/v0.4.1/README.md#glossary).
