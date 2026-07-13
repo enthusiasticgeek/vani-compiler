@@ -131,6 +131,50 @@ Rust calls a "crate" -- a single buildable package. The
 `pub(kosh)` tier lets you control sharing within YOUR project
 without exposing helpers as part of the public-published API.
 
+Here is all three tiers side by side:
+
+```
+module stats {
+    // Tier 1 — public API.  Callers outside this package can use this.
+    pub fn mean(xs: ref Vec<i64>, n: i64) -> i64 {
+        return sum_all(ref xs) / n;
+    }
+
+    // Tier 2 — package-internal.  Other modules in YOUR project can call
+    // this (e.g. a sibling `module report` that also needs the raw sum),
+    // but users who depend on your package cannot.
+    pub(kosh) fn sum_all(xs: ref Vec<i64>) -> i64 {
+        let s: i64 = 0;
+        let i: i64 = 0;
+        while i < vec_len(ref xs) {
+            s = s + xs[i];
+            i = i + 1;
+        }
+        return s;
+    }
+
+    // Tier 3 — private.  Only callable from inside this module.
+    fn assert_nonempty(n: i64) -> i64 {
+        assert n > 0 : "stats require at least one element";
+        return n;
+    }
+}
+
+// Inside the same package (e.g. module report):
+//   stats::mean(ref xs, n)     -- OK, pub
+//   stats::sum_all(ref xs)     -- OK, pub(kosh)
+//   stats::assert_nonempty(n)  -- REJECTED: private to stats
+
+// Outside the package (a downstream user):
+//   stats::mean(ref xs, n)     -- OK, pub
+//   stats::sum_all(ref xs)     -- REJECTED: pub(kosh) stops at package boundary
+//   stats::assert_nonempty(n)  -- REJECTED: private to stats
+```
+
+The rule of thumb: use `pub` for the API you're willing to support
+forever; use `pub(kosh)` for cross-module helpers that are an
+implementation detail of your package; leave everything else private.
+
 ## Nested modules
 
 Modules can contain modules:
