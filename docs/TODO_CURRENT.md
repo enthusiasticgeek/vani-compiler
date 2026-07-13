@@ -324,6 +324,62 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
 
 ---
 
+---
+
+## Vec\<f64\> builtin parity (added 2026-07-13)
+
+These items directly unblock `vani-probability` and `vani-calculus` packages.
+Root cause: all vec builtins that aggregate or reorder elements restrict to `Vec<i64>` in v1
+via a hard `!matches!(element_type, Type::I64)` guard in `check_vec_reduction_builtin`
+([checker.rs:23387](../src/checker.rs)) and sibling functions. The for-in-ref loop,
+`xs[i]` indexing, and `set(mut ref xs, i, v)` already work on `Vec<f64>`.
+
+Priority order matches what the packages need first.
+
+- [ ] **F64-1. Extend `sort` / `sort_by` to `Vec<f64>`** (~1 h · P1)
+  `check_sort_builtin` at `checker.rs:21645` rejects non-i64 element types.
+  Add `Vec<f64>` branch: `sort_by` accepts `fn(f64, f64) -> i64` comparator;
+  `sort` sorts ascending using the natural `<` order.
+  C backend: `qsort` with a `double`-typed comparator shim.
+  LLVM backend: same pattern as the existing `Vec<i64>` sort lowering.
+  Add 3 lib tests: `sort_f64_ascending`, `sort_by_f64_custom_order`,
+  `sort_f64_rejects_wrong_comparator_type`.
+  **Unblocks:** `median`, `quantile`, `iqr`, `spearman_r` in vani-probability.
+
+- [ ] **F64-2. Extend `vec_sum`, `vec_mean`, `vec_min`, `vec_max`, `vec_argmin`,
+  `vec_argmax`, `vec_median`, `vec_kth_smallest` to `Vec<f64>`** (~3 h · P2)
+  `check_vec_reduction_builtin` at `checker.rs:23329` has a single `!matches!(element_type, Type::I64)`
+  guard. Change to allow `Type::F64` as well. Return type: `f64` for the scalar
+  reductions, `i64` for `vec_argmin` / `vec_argmax` (index is always integral).
+  C backend: duplicate the i64 emit paths with `double` casts.
+  LLVM backend: use `fsub`/`fcmp` equivalents.
+  Add lib tests for each new f64 overload.
+  **Unblocks:** cleaner implementations of descriptive stats in vani-probability;
+  `vec_mean` / `vec_min` / `vec_max` on sample Vecs.
+
+- [ ] **F64-3. Extend `vec_fold`, `vec_map`, `vec_filter` to `Vec<f64>`** (~2 h · P3)
+  `check_vec_map_fold_builtin` at `checker.rs:21777`. Predicate/combiner types change:
+  `vec_fold` init and combiner become `f64`; `vec_map` mapper is `fn(f64) -> f64`;
+  `vec_filter` predicate is `fn(f64) -> bool`.
+  Add lib tests for each.
+  **Unblocks:** `kahan_sum`, `partial_sum` (style only — manual loops are a complete
+  workaround today) in vani-calculus; functional accumulation patterns in vani-probability.
+
+- [ ] **F64-4. Extend `vec_swap` to `Vec<f64>`** (~30 min · P4)
+  `check_vec_swap_builtin` at `checker.rs:21979` hard-codes `mut ref Vec<i64>`.
+  Add `Vec<f64>` branch. C backend: `double tmp` swap shim.
+  Add 1 lib test.
+  **Unblocks:** cleaner manual sort implementations in both packages; currently
+  workaround is `set(mut ref xs, j, xs[j])` + temp variable which works but is verbose.
+
+- [ ] **F64-5. Extend `vec_dot` to `Vec<f64>`** (~1 h · P5)
+  `check_vec_utility_builtin` at `checker.rs:22397` restricts `vec_dot` to `Vec<i64>`.
+  Return type `f64`. C backend: `double` accumulator. LLVM: `fadd` reduction.
+  Add 2 lib tests.
+  **Unblocks:** OLS regression dot products and inner-product operations in vani-probability.
+
+---
+
 ## Blocked (not in our control)
 
 | Item | Blocker |
