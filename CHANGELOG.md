@@ -6,6 +6,19 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.4.2] — 2026-07-13
+
+### Added
+
+- **`scripts/sync_version.py`**: single source of truth for the project version.
+  Reads `Cargo.toml` and patches the "Current version" line in `RELEASING.md`
+  and the version line in `TODO.md`. Run after every Cargo.toml bump.
+- **`.githooks/pre-commit`**: blocks commits when any version-bearing doc is
+  stale relative to `Cargo.toml`. Install once per clone:
+  `git config core.hooksPath .githooks`.
+
+---
+
 ## [v0.4.1] — 2026-07-13
 
 ### Added
