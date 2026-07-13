@@ -13396,6 +13396,85 @@ fn main() -> i64 {
         );
     }
 
+    // ---- F64-3 tests: vec_map / vec_fold / vec_filter on Vec<f64> ----
+
+    #[test]
+    fn vec_map_f64_typechecks() {
+        let source = r#"
+            fn scale(x: f64) -> f64 { return x * 2.0; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let ys: Vec<f64> = vec_map(ref xs, scale);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("vec_map on Vec<f64> must type-check");
+    }
+
+    #[test]
+    fn vec_fold_f64_typechecks() {
+        let source = r#"
+            fn add(acc: f64, x: f64) -> f64 { return acc + x; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let s: f64 = vec_fold(ref xs, 0.0, add);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("vec_fold on Vec<f64> must type-check");
+    }
+
+    #[test]
+    fn vec_filter_f64_typechecks() {
+        let source = r#"
+            fn is_positive(x: f64) -> bool { return x > 0.0; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, -2.0, 3.0);
+              let ys: Vec<f64> = vec_filter(ref xs, is_positive);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("vec_filter on Vec<f64> must type-check");
+    }
+
+    #[test]
+    fn vec_map_f64_rejects_wrong_mapper_type() {
+        let source = r#"
+            fn bad_map(x: i64) -> i64 { return x + 1; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0);
+              let ys: Vec<f64> = vec_map(ref xs, bad_map);
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("vec_map with fn(i64)->i64 on Vec<f64> must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("fn(f64) -> f64")),
+            "expected f64-signature diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn vec_filter_f64_rejects_wrong_predicate_type() {
+        let source = r#"
+            fn bad_pred(x: i64) -> bool { return x > 0; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, -2.0);
+              let ys: Vec<f64> = vec_filter(ref xs, bad_pred);
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("vec_filter with fn(i64)->bool on Vec<f64> must fail");
+        assert!(
+            errors.iter().any(|e| e.message.contains("fn(f64) -> bool")),
+            "expected f64-predicate-signature diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn reverse_typechecks_on_vec_i64() {
         let source = r#"

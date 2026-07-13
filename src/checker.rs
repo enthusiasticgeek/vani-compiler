@@ -21792,7 +21792,8 @@ fn check_vec_map_fold_builtin(
         "vec_fold" => 3,
         _ => unreachable!(),
     };
-    let ret_ty = || -> Type {
+    // Fallback used only on arity errors (before element_type is known).
+    let fallback_ret_ty = || -> Type {
         match name {
             "vec_map" | "vec_filter" => Type::Vec(Box::new(Type::I64)),
             _ => Type::I64,
@@ -21809,7 +21810,7 @@ fn check_vec_map_fold_builtin(
                 args.len()
             ),
         ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(want_args, args.len())));
-        return CheckedExpr::fallback(ret_ty(), span);
+        return CheckedExpr::fallback(fallback_ret_ty(), span);
     }
     let xs = check_expr(&args[0], env, signatures, diagnostics);
     let element_type = match xs.ty() {
@@ -21819,46 +21820,60 @@ fn check_vec_map_fold_builtin(
                 diagnostics.push(Diagnostic::new(
                     args[0].span,
                     format!(
-                        "{}() requires a `ref Vec<i64>` argument, got {}",
+                        "{}() requires a `ref Vec<_>` argument, got {}",
                         name,
                         xs.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-                return CheckedExpr::fallback(ret_ty(), span);
+                return CheckedExpr::fallback(fallback_ret_ty(), span);
             }
         },
         other => {
             diagnostics.push(Diagnostic::new(
                 args[0].span,
                 format!(
-                    "{}() requires a `ref Vec<i64>` argument, got {}",
+                    "{}() requires a `ref Vec<_>` argument, got {}",
                     name, other
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-            return CheckedExpr::fallback(ret_ty(), span);
+            return CheckedExpr::fallback(fallback_ret_ty(), span);
         }
     };
-    if !matches!(element_type, Type::I64) {
+    // v1: i64 always supported; f64 supported for all three ops (F64-3).
+    if !matches!(element_type, Type::I64 | Type::F64) {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "{}() only supports `Vec<i64>` in v1, got element type {}",
+                "{}() only supports `Vec<i64>` or `Vec<f64>` in v1, got element type {}",
                 name, element_type
             ),
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
-        return CheckedExpr::fallback(ret_ty(), span);
+        return CheckedExpr::fallback(fallback_ret_ty(), span);
     }
+    // Return type is now element-aware.
+    let ret_ty: Type = match name {
+        "vec_map" | "vec_filter" => Type::Vec(Box::new(element_type.clone())),
+        _ => element_type.clone(),
+    };
     let mut typed_args = vec![xs.expr];
     match name {
         "vec_map" => {
             let f = check_expr(&args[1], env, signatures, diagnostics);
-            let expected = Type::FnPtr(vec![Type::I64], Box::new(Type::I64));
+            let expected = Type::FnPtr(
+                vec![element_type.clone()],
+                Box::new(element_type.clone()),
+            );
             if f.ty() != &expected {
+                let sig_str = if matches!(element_type, Type::F64) {
+                    "fn(f64) -> f64"
+                } else {
+                    "fn(i64) -> i64"
+                };
                 diagnostics.push(Diagnostic::new(
                     args[1].span,
                     format!(
-                        "vec_map mapper must be `fn(i64) -> i64`, got {}",
-                        f.ty()
+                        "vec_map mapper must be `{}`, got {}",
+                        sig_str, f.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
@@ -21866,13 +21881,18 @@ fn check_vec_map_fold_builtin(
         }
         "vec_filter" => {
             let p = check_expr(&args[1], env, signatures, diagnostics);
-            let expected = Type::FnPtr(vec![Type::I64], Box::new(Type::Bool));
+            let expected = Type::FnPtr(vec![element_type.clone()], Box::new(Type::Bool));
             if p.ty() != &expected {
+                let sig_str = if matches!(element_type, Type::F64) {
+                    "fn(f64) -> bool"
+                } else {
+                    "fn(i64) -> bool"
+                };
                 diagnostics.push(Diagnostic::new(
                     args[1].span,
                     format!(
-                        "vec_filter predicate must be `fn(i64) -> bool`, got {}",
-                        p.ty()
+                        "vec_filter predicate must be `{}`, got {}",
+                        sig_str, p.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
@@ -21882,7 +21902,7 @@ fn check_vec_map_fold_builtin(
             let init_raw = check_expr(&args[1], env, signatures, diagnostics);
             let init = coerce_checked(
                 init_raw,
-                &Type::I64,
+                &element_type,
                 args[1].span,
                 "vec_fold initial accumulator",
                 diagnostics,
@@ -21890,15 +21910,20 @@ fn check_vec_map_fold_builtin(
             typed_args.push(init.expr);
             let g = check_expr(&args[2], env, signatures, diagnostics);
             let expected = Type::FnPtr(
-                vec![Type::I64, Type::I64],
-                Box::new(Type::I64),
+                vec![element_type.clone(), element_type.clone()],
+                Box::new(element_type.clone()),
             );
             if g.ty() != &expected {
+                let sig_str = if matches!(element_type, Type::F64) {
+                    "fn(f64, f64) -> f64"
+                } else {
+                    "fn(i64, i64) -> i64"
+                };
                 diagnostics.push(Diagnostic::new(
                     args[2].span,
                     format!(
-                        "vec_fold combiner must be `fn(i64, i64) -> i64`, got {}",
-                        g.ty()
+                        "vec_fold combiner must be `{}`, got {}",
+                        sig_str, g.ty()
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
             }
@@ -21912,7 +21937,7 @@ fn check_vec_map_fold_builtin(
             name_span: span,
             args: typed_args,
         },
-        ret_ty(),
+        ret_ty,
         None,
         span,
     )

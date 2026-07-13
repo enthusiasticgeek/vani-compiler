@@ -11632,6 +11632,59 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
 \n}}\n",
             sn = struct_name,
         ));
+        // F64-3: map / fold / filter for Vec<f64>.
+        // map: (const sn* xs, fn(double)->double f) -> sn
+        out.push_str(&format!(
+            "typedef double (*{sn}__map_fn)(double);\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED {sn} {sn}__map(const {sn}* xs, {sn}__map_fn f) {{\
+\n    {sn} out;\
+\n    out.len = xs->len;\
+\n    out.capacity = xs->len;\
+\n    if (xs->len == 0) {{ out.data = (double*)0; return out; }}\
+\n    out.data = (double*)malloc(xs->len * sizeof(double));\
+\n    if (!out.data) abort();\
+\n    for (uint64_t i = 0; i < xs->len; i++) out.data[i] = f(xs->data[i]);\
+\n    return out;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        // fold: (const sn* xs, double init, fn(double, double)->double g) -> double
+        out.push_str(&format!(
+            "typedef double (*{sn}__fold_fn)(double, double);\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__fold(const {sn}* xs, double init, {sn}__fold_fn g) {{\
+\n    double acc = init;\
+\n    for (uint64_t i = 0; i < xs->len; i++) acc = g(acc, xs->data[i]);\
+\n    return acc;\
+\n}}\n",
+            sn = struct_name,
+        ));
+        // filter: (const sn* xs, fn(double)->bool p) -> sn
+        out.push_str(&format!(
+            "typedef bool (*{sn}__pred_fn)(double);\n",
+            sn = struct_name,
+        ));
+        out.push_str(&format!(
+            "static INTENT_UNUSED {sn} {sn}__filter(const {sn}* xs, {sn}__pred_fn p) {{\
+\n    {sn} out;\
+\n    uint64_t hits = 0;\
+\n    for (uint64_t i = 0; i < xs->len; i++) {{ if (p(xs->data[i])) hits++; }}\
+\n    out.len = hits;\
+\n    out.capacity = hits;\
+\n    if (hits == 0) {{ out.data = (double*)0; return out; }}\
+\n    out.data = (double*)malloc(hits * sizeof(double));\
+\n    if (!out.data) abort();\
+\n    uint64_t w = 0;\
+\n    for (uint64_t i = 0; i < xs->len; i++) {{ if (p(xs->data[i])) out.data[w++] = xs->data[i]; }}\
+\n    return out;\
+\n}}\n",
+            sn = struct_name,
+        ));
     }
 
     // `__set(xs, i, v)`: store the new value at xs.data[i].

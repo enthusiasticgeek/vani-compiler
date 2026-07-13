@@ -39467,6 +39467,188 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
             ));
             out.push_str("  ret double %med_r\n");
             out.push_str("}\n");
+
+            // F64-3: map / fold / filter for Vec<f64>.
+
+            // map(xs_p, f: double(double)*) -> Vec<f64>
+            let f64_map_name = format!("@intent_vec_{}__map", tag);
+            out.push_str(&format!(
+                "define {sty} {sn}({sty}* %xs_p, double (double)* %f) {{\n",
+                sn = f64_map_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %fmp_dp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fmp_lp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %fmp_src = load {ep}, {epp} %fmp_dp\n", ep = ep, epp = epp));
+            out.push_str("  %fmp_n = load i64, i64* %fmp_lp\n");
+            out.push_str("  %fmp_empty = icmp eq i64 %fmp_n, 0\n");
+            out.push_str("  br i1 %fmp_empty, label %fmap_empty, label %fmap_alloc\n");
+            out.push_str("fmap_alloc:\n");
+            out.push_str("  %fmp_bytes = mul i64 %fmp_n, 8\n");
+            out.push_str("  %fmp_dst_i8 = call i8* @malloc(i64 %fmp_bytes)\n");
+            out.push_str(&format!("  %fmp_dst = bitcast i8* %fmp_dst_i8 to {ep}\n", ep = ep));
+            out.push_str("  %fmp_i_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %fmp_i_p\n");
+            out.push_str("  br label %fmap_loop\n");
+            out.push_str("fmap_loop:\n");
+            out.push_str("  %fmp_i = load i64, i64* %fmp_i_p\n");
+            out.push_str("  %fmp_cont = icmp slt i64 %fmp_i, %fmp_n\n");
+            out.push_str("  br i1 %fmp_cont, label %fmap_body, label %fmap_done\n");
+            out.push_str("fmap_body:\n");
+            out.push_str(&format!(
+                "  %fmp_src_slot = getelementptr double, {ep} %fmp_src, i64 %fmp_i\n", ep = ep));
+            out.push_str(&format!("  %fmp_src_v = load double, {ep} %fmp_src_slot\n", ep = ep));
+            out.push_str("  %fmp_mapped = call double %f(double %fmp_src_v)\n");
+            out.push_str(&format!(
+                "  %fmp_dst_slot = getelementptr double, {ep} %fmp_dst, i64 %fmp_i\n", ep = ep));
+            out.push_str(&format!("  store double %fmp_mapped, {ep} %fmp_dst_slot\n", ep = ep));
+            out.push_str("  %fmp_i1 = add i64 %fmp_i, 1\n");
+            out.push_str("  store i64 %fmp_i1, i64* %fmp_i_p\n");
+            out.push_str("  br label %fmap_loop\n");
+            out.push_str("fmap_done:\n");
+            out.push_str(&format!(
+                "  %fmr0 = insertvalue {sty} undef, {ep} %fmp_dst, 0\n", sty = s_ty, ep = ep));
+            out.push_str(&format!(
+                "  %fmr1 = insertvalue {sty} %fmr0, i64 %fmp_n, 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fmr2 = insertvalue {sty} %fmr1, i64 %fmp_n, 2\n", sty = s_ty));
+            out.push_str(&format!("  ret {sty} %fmr2\n", sty = s_ty));
+            out.push_str("fmap_empty:\n");
+            out.push_str(&format!(
+                "  %fme0 = insertvalue {sty} undef, {ep} null, 0\n", sty = s_ty, ep = ep));
+            out.push_str(&format!(
+                "  %fme1 = insertvalue {sty} %fme0, i64 0, 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fme2 = insertvalue {sty} %fme1, i64 0, 2\n", sty = s_ty));
+            out.push_str(&format!("  ret {sty} %fme2\n", sty = s_ty));
+            out.push_str("}\n");
+
+            // fold(xs_p, init: double, g: double(double, double)*) -> double
+            let f64_fold_name = format!("@intent_vec_{}__fold", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p, double %init, double (double, double)* %g) {{\n",
+                sn = f64_fold_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %ffd_dp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %ffd_lp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %ffd_data = load {ep}, {epp} %ffd_dp\n", ep = ep, epp = epp));
+            out.push_str("  %ffd_n = load i64, i64* %ffd_lp\n");
+            out.push_str("  %ffd_acc_p = alloca double\n");
+            out.push_str("  store double %init, double* %ffd_acc_p\n");
+            out.push_str("  %ffd_i_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %ffd_i_p\n");
+            out.push_str("  br label %ffold_loop\n");
+            out.push_str("ffold_loop:\n");
+            out.push_str("  %ffd_i = load i64, i64* %ffd_i_p\n");
+            out.push_str("  %ffd_cont = icmp slt i64 %ffd_i, %ffd_n\n");
+            out.push_str("  br i1 %ffd_cont, label %ffold_body, label %ffold_done\n");
+            out.push_str("ffold_body:\n");
+            out.push_str(&format!(
+                "  %ffd_slot = getelementptr double, {ep} %ffd_data, i64 %ffd_i\n", ep = ep));
+            out.push_str(&format!("  %ffd_v = load double, {ep} %ffd_slot\n", ep = ep));
+            out.push_str("  %ffd_acc = load double, double* %ffd_acc_p\n");
+            out.push_str("  %ffd_next = call double %g(double %ffd_acc, double %ffd_v)\n");
+            out.push_str("  store double %ffd_next, double* %ffd_acc_p\n");
+            out.push_str("  %ffd_i1 = add i64 %ffd_i, 1\n");
+            out.push_str("  store i64 %ffd_i1, i64* %ffd_i_p\n");
+            out.push_str("  br label %ffold_loop\n");
+            out.push_str("ffold_done:\n");
+            out.push_str("  %ffd_r = load double, double* %ffd_acc_p\n");
+            out.push_str("  ret double %ffd_r\n");
+            out.push_str("}\n");
+
+            // filter(xs_p, p: i1(double)*) -> Vec<f64>. Two-pass.
+            let f64_filter_name = format!("@intent_vec_{}__filter", tag);
+            out.push_str(&format!(
+                "define {sty} {sn}({sty}* %xs_p, i1 (double)* %p) {{\n",
+                sn = f64_filter_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %fft_dp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fft_lp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!("  %fft_data = load {ep}, {epp} %fft_dp\n", ep = ep, epp = epp));
+            out.push_str("  %fft_n = load i64, i64* %fft_lp\n");
+            // Pass 1: count matching elements
+            out.push_str("  %fft_cnt_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %fft_cnt_p\n");
+            out.push_str("  %fft_i1_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %fft_i1_p\n");
+            out.push_str("  br label %fft_count\n");
+            out.push_str("fft_count:\n");
+            out.push_str("  %fft_ci = load i64, i64* %fft_i1_p\n");
+            out.push_str("  %fft_cc = icmp slt i64 %fft_ci, %fft_n\n");
+            out.push_str("  br i1 %fft_cc, label %fft_count_body, label %fft_alloc\n");
+            out.push_str("fft_count_body:\n");
+            out.push_str(&format!(
+                "  %fft_cs = getelementptr double, {ep} %fft_data, i64 %fft_ci\n", ep = ep));
+            out.push_str(&format!("  %fft_cv = load double, {ep} %fft_cs\n", ep = ep));
+            out.push_str("  %fft_ck = call i1 %p(double %fft_cv)\n");
+            out.push_str("  br i1 %fft_ck, label %fft_count_inc, label %fft_count_skip\n");
+            out.push_str("fft_count_inc:\n");
+            out.push_str("  %fft_old = load i64, i64* %fft_cnt_p\n");
+            out.push_str("  %fft_new = add i64 %fft_old, 1\n");
+            out.push_str("  store i64 %fft_new, i64* %fft_cnt_p\n");
+            out.push_str("  br label %fft_count_skip\n");
+            out.push_str("fft_count_skip:\n");
+            out.push_str("  %fft_ci1 = add i64 %fft_ci, 1\n");
+            out.push_str("  store i64 %fft_ci1, i64* %fft_i1_p\n");
+            out.push_str("  br label %fft_count\n");
+            out.push_str("fft_alloc:\n");
+            out.push_str("  %fft_hits = load i64, i64* %fft_cnt_p\n");
+            out.push_str("  %fft_z = icmp eq i64 %fft_hits, 0\n");
+            out.push_str("  br i1 %fft_z, label %fft_empty, label %fft_fill_alloc\n");
+            out.push_str("fft_fill_alloc:\n");
+            out.push_str("  %fft_bytes = mul i64 %fft_hits, 8\n");
+            out.push_str("  %fft_dst8 = call i8* @malloc(i64 %fft_bytes)\n");
+            out.push_str(&format!("  %fft_dst = bitcast i8* %fft_dst8 to {ep}\n", ep = ep));
+            out.push_str("  %fft_wi_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %fft_wi_p\n");
+            out.push_str("  %fft_i2_p = alloca i64\n");
+            out.push_str("  store i64 0, i64* %fft_i2_p\n");
+            out.push_str("  br label %fft_fill\n");
+            out.push_str("fft_fill:\n");
+            out.push_str("  %fft_fi = load i64, i64* %fft_i2_p\n");
+            out.push_str("  %fft_fc = icmp slt i64 %fft_fi, %fft_n\n");
+            out.push_str("  br i1 %fft_fc, label %fft_fill_body, label %fft_fill_done\n");
+            out.push_str("fft_fill_body:\n");
+            out.push_str(&format!(
+                "  %fft_fs = getelementptr double, {ep} %fft_data, i64 %fft_fi\n", ep = ep));
+            out.push_str(&format!("  %fft_fv = load double, {ep} %fft_fs\n", ep = ep));
+            out.push_str("  %fft_fk = call i1 %p(double %fft_fv)\n");
+            out.push_str("  br i1 %fft_fk, label %fft_fill_store, label %fft_fill_next\n");
+            out.push_str("fft_fill_store:\n");
+            out.push_str("  %fft_wi = load i64, i64* %fft_wi_p\n");
+            out.push_str(&format!(
+                "  %fft_dst_slot = getelementptr double, {ep} %fft_dst, i64 %fft_wi\n", ep = ep));
+            out.push_str(&format!("  store double %fft_fv, {ep} %fft_dst_slot\n", ep = ep));
+            out.push_str("  %fft_wi1 = add i64 %fft_wi, 1\n");
+            out.push_str("  store i64 %fft_wi1, i64* %fft_wi_p\n");
+            out.push_str("  br label %fft_fill_next\n");
+            out.push_str("fft_fill_next:\n");
+            out.push_str("  %fft_fi1 = add i64 %fft_fi, 1\n");
+            out.push_str("  store i64 %fft_fi1, i64* %fft_i2_p\n");
+            out.push_str("  br label %fft_fill\n");
+            out.push_str("fft_fill_done:\n");
+            out.push_str(&format!(
+                "  %ffd0 = insertvalue {sty} undef, {ep} %fft_dst, 0\n", sty = s_ty, ep = ep));
+            out.push_str(&format!(
+                "  %ffd1 = insertvalue {sty} %ffd0, i64 %fft_hits, 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %ffd2 = insertvalue {sty} %ffd1, i64 %fft_hits, 2\n", sty = s_ty));
+            out.push_str(&format!("  ret {sty} %ffd2\n", sty = s_ty));
+            out.push_str("fft_empty:\n");
+            out.push_str(&format!(
+                "  %ffe0 = insertvalue {sty} undef, {ep} null, 0\n", sty = s_ty, ep = ep));
+            out.push_str(&format!(
+                "  %ffe1 = insertvalue {sty} %ffe0, i64 0, 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %ffe2 = insertvalue {sty} %ffe1, i64 0, 2\n", sty = s_ty));
+            out.push_str(&format!("  ret {sty} %ffe2\n", sty = s_ty));
+            out.push_str("}\n");
         }
         // ---- vec_map / vec_fold / reductions: i64 element only
         // for v1 (F64-3 queued for map/fold/filter on f64).
