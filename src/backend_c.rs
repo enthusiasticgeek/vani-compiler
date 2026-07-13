@@ -11685,6 +11685,17 @@ static INTENT_UNUSED {opt_name} {sn}__heap_peek(const {sn}* xs) {{\
 \n}}\n",
             sn = struct_name,
         ));
+        // dot(xs, ys) -> double: pairwise multiply + accumulate.
+        out.push_str(&format!(
+            "static INTENT_UNUSED double {sn}__dot(const {sn}* xs, const {sn}* ys) INTENT_UNUSED;\n\
+             static INTENT_UNUSED double {sn}__dot(const {sn}* xs, const {sn}* ys) {{\
+\n    uint64_t n = xs->len < ys->len ? xs->len : ys->len;\
+\n    double acc = 0.0;\
+\n    for (uint64_t i = 0; i < n; i++) acc = acc + xs->data[i] * ys->data[i];\
+\n    return acc;\
+\n}}\n",
+            sn = struct_name,
+        ));
     }
 
     // `__set(xs, i, v)`: store the new value at xs.data[i].
@@ -16393,12 +16404,22 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
                 emit_expr(&args[2])
             )
         }
-        // Closure #399: vec_dot(ref xs, ref ys) -> i64.
-        "vec_dot" => format!(
-            "intent_vec_int64_t_dot({}, {})",
-            emit_expr(&args[0]),
-            emit_expr(&args[1])
-        ),
+        // Closure #399: vec_dot(ref xs, ref ys) -> element_type.
+        "vec_dot" => {
+            match args[0].ty.deref() {
+                Type::Vec(element) if matches!(element.as_ref(), Type::F64) => format!(
+                    "{}({}, {})",
+                    vec_helper(element, "dot"),
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1]),
+                ),
+                _ => format!(
+                    "intent_vec_int64_t_dot({}, {})",
+                    emit_expr(&args[0]),
+                    emit_expr(&args[1]),
+                ),
+            }
+        }
         // Closure #407: set ops on Vec<i64>.
         "vec_intersect" => format!(
             "intent_vec_int64_t_intersect({}, {})",

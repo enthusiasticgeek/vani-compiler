@@ -8588,15 +8588,26 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 return dest;
             }
-            // Closure #399: vec_dot(ref xs, ref ys) -> i64.
+            // Closure #399: vec_dot(ref xs, ref ys) -> element_type.
             if name == "vec_dot" {
+                let is_f64 = matches!(
+                    vec_element_of_first_arg(args).as_ref(),
+                    Some(Type::F64)
+                );
                 let xs = emit_expr(&args[0], ctx, out);
                 let ys = emit_expr(&args[1], ctx, out);
                 let dest = ctx.fresh_tmp();
-                out.push_str(&format!(
-                    "  {} = call i64 @intent_vec_int64_t_dot(%intent_vec_i64* {}, %intent_vec_i64* {})\n",
-                    dest, xs, ys
-                ));
+                if is_f64 {
+                    out.push_str(&format!(
+                        "  {} = call double @intent_vec_double__dot(%intent_vec_double* {}, %intent_vec_double* {})\n",
+                        dest, xs, ys
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  {} = call i64 @intent_vec_int64_t_dot(%intent_vec_i64* {}, %intent_vec_i64* {})\n",
+                        dest, xs, ys
+                    ));
+                }
                 return dest;
             }
             // Closure #407: set ops on Vec<i64>.
@@ -39658,6 +39669,56 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                 "  %ffe2 = insertvalue {sty} %ffe1, i64 0, 2\n", sty = s_ty));
             out.push_str(&format!("  ret {sty} %ffe2\n", sty = s_ty));
             out.push_str("}\n");
+
+            // dot(xs_p, ys_p) -> double: pairwise fmul + fadd.
+            let dot_name = format!("@intent_vec_{}__dot", tag);
+            out.push_str(&format!(
+                "define double {sn}({sty}* %xs_p, {sty}* %ys_p) {{\n",
+                sn = dot_name, sty = s_ty,
+            ));
+            out.push_str(&format!(
+                "  %fdot_xdp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fdot_xlp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fdot_ydp = getelementptr {sty}, {sty}* %ys_p, i32 0, i32 0\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fdot_ylp = getelementptr {sty}, {sty}* %ys_p, i32 0, i32 1\n", sty = s_ty));
+            out.push_str(&format!(
+                "  %fdot_xsrc = load {ep}, {epp} %fdot_xdp\n", ep = ep, epp = epp));
+            out.push_str(&format!(
+                "  %fdot_ysrc = load {ep}, {epp} %fdot_ydp\n", ep = ep, epp = epp));
+            out.push_str("  %fdot_xlen = load i64, i64* %fdot_xlp\n");
+            out.push_str("  %fdot_ylen = load i64, i64* %fdot_ylp\n");
+            out.push_str("  %fdot_xlt = icmp ult i64 %fdot_xlen, %fdot_ylen\n");
+            out.push_str("  %fdot_n = select i1 %fdot_xlt, i64 %fdot_xlen, i64 %fdot_ylen\n");
+            out.push_str("  %fdot_i_p = alloca i64\n");
+            out.push_str("  %fdot_acc_p = alloca double\n");
+            out.push_str("  store i64 0, i64* %fdot_i_p\n");
+            out.push_str("  store double 0.0, double* %fdot_acc_p\n");
+            out.push_str("  br label %fdot_head\n");
+            out.push_str("fdot_head:\n");
+            out.push_str("  %fdot_i = load i64, i64* %fdot_i_p\n");
+            out.push_str("  %fdot_done = icmp uge i64 %fdot_i, %fdot_n\n");
+            out.push_str("  br i1 %fdot_done, label %fdot_fin, label %fdot_body\n");
+            out.push_str("fdot_body:\n");
+            out.push_str(&format!(
+                "  %fdot_xs = getelementptr double, {ep} %fdot_xsrc, i64 %fdot_i\n", ep = ep));
+            out.push_str(&format!(
+                "  %fdot_ys = getelementptr double, {ep} %fdot_ysrc, i64 %fdot_i\n", ep = ep));
+            out.push_str(&format!("  %fdot_xv = load double, {ep} %fdot_xs\n", ep = ep));
+            out.push_str(&format!("  %fdot_yv = load double, {ep} %fdot_ys\n", ep = ep));
+            out.push_str("  %fdot_prod = fmul double %fdot_xv, %fdot_yv\n");
+            out.push_str("  %fdot_acc_cur = load double, double* %fdot_acc_p\n");
+            out.push_str("  %fdot_acc_new = fadd double %fdot_acc_cur, %fdot_prod\n");
+            out.push_str("  store double %fdot_acc_new, double* %fdot_acc_p\n");
+            out.push_str("  %fdot_i_next = add i64 %fdot_i, 1\n");
+            out.push_str("  store i64 %fdot_i_next, i64* %fdot_i_p\n");
+            out.push_str("  br label %fdot_head\n");
+            out.push_str("fdot_fin:\n");
+            out.push_str("  %fdot_r = load double, double* %fdot_acc_p\n");
+            out.push_str("  ret double %fdot_r\n");
+            out.push_str("}\n\n");
         }
         // ---- vec_map / vec_fold / reductions: i64 element only
         // for v1 (F64-3 queued for map/fold/filter on f64).

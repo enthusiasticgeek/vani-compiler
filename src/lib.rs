@@ -20132,6 +20132,36 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_dot_f64_typechecks() {
+        // F64-5: vec_dot on Vec<f64> returns f64.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let ys: Vec<f64> = vec(4.0, 5.0, 6.0);
+              let d: f64 = vec_dot(ref xs, ref ys);
+              let d2: f64 = xs.dot(ref ys);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("vec_dot on Vec<f64> must type-check");
+        compile_to_llvm(source).expect("vec_dot on Vec<f64> must compile to LLVM");
+    }
+
+    #[test]
+    fn vec_dot_f64_rejects_wrong_type() {
+        // vec_dot on a non-vec type must still fail.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0);
+              let d: f64 = vec_dot(xs, xs);
+              return 0;
+            }
+        "#;
+        assert!(compile_to_c(source).is_err(),
+            "vec_dot must require ref args");
+    }
+
+    #[test]
     fn vec_running_sum_typecheck_and_compile() {
         // Closure #398: vec_running_sum(ref xs) -> Vec<i64>.
         let source = r#"

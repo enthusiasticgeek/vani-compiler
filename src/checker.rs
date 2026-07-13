@@ -22567,6 +22567,18 @@ fn check_vec_utility_builtin(
         );
     }
     let a1_raw = check_expr(&args[1], env, signatures, diagnostics);
+    // For vec_dot, stash the element type before a0_raw is consumed by typed_args.
+    let dot_element_type: Option<Type> = if name == "vec_dot" {
+        match a0_raw.ty() {
+            Type::Ref(inner) | Type::RefMut(inner) => match inner.as_ref() {
+                Type::Vec(el) => Some((**el).clone()),
+                _ => None,
+            },
+            _ => None,
+        }
+    } else {
+        None
+    };
     let typed_args = match name {
         "vec_range" | "vec_repeat" => {
             let a0 = coerce_checked(
@@ -22609,10 +22621,38 @@ fn check_vec_utility_builtin(
             }
             vec![a0_raw.expr, a1_raw.expr]
         }
-        "vec_concat" | "vec_dot"
+        // Closure #399: vec_dot supports Vec<i64> and Vec<f64>.
+        "vec_dot" => {
+            let ok = |t: &Type| -> bool {
+                matches!(
+                    t,
+                    Type::Ref(inner) | Type::RefMut(inner)
+                        if matches!(&**inner, Type::Vec(el) if matches!(**el, Type::I64 | Type::F64))
+                )
+            };
+            if !ok(&a0_raw.ty()) {
+                diagnostics.push(Diagnostic::new(
+                    args[0].span,
+                    format!(
+                        "vec_dot() arg 0 must be `ref Vec<i64>` or `ref Vec<f64>`, got {}",
+                        a0_raw.ty()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+            }
+            if !ok(&a1_raw.ty()) {
+                diagnostics.push(Diagnostic::new(
+                    args[1].span,
+                    format!(
+                        "vec_dot() arg 1 must be `ref Vec<i64>` or `ref Vec<f64>`, got {}",
+                        a1_raw.ty()
+                    ),
+                ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+            }
+            vec![a0_raw.expr, a1_raw.expr]
+        }
+        "vec_concat"
         // Closure #407: vec_intersect / vec_difference / vec_union
-        // â€” all (ref Vec<i64>, ref Vec<i64>) -> Vec<i64> (or i64
-        // for vec_dot).
+        // â€” all (ref Vec<i64>, ref Vec<i64>) -> Vec<i64>.
         | "vec_intersect" | "vec_difference" | "vec_union" => {
             // Both ref Vec<i64> (or mut ref â€” both readable).
             let ok = |t: &Type| -> bool {
@@ -22644,8 +22684,9 @@ fn check_vec_utility_builtin(
         _ => unreachable!(),
     };
     let ret_ty = match name {
-        // Closure #399: vec_dot returns i64 (scalar).
-        "vec_extend" | "vec_dot" => Type::I64,
+        "vec_extend" => Type::I64,
+        // Closure #399: vec_dot returns the element type (i64 or f64).
+        "vec_dot" => dot_element_type.unwrap_or(Type::I64),
         _ => Type::Vec(Box::new(Type::I64)),
     };
     CheckedExpr::new(
