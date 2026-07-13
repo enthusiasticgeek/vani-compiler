@@ -193,6 +193,15 @@ BENCHMARKS: List[Dict] = [
             {"tag": "rs",   "file": "dot.rs"},
         ],
     },
+    {
+        "id": "12_simd256_dot",
+        "name": "SIMD-256 dot product — vec256<f32> vs vec128<f32> vs scalar (4 M elements)",
+        "description": "vāṇī-only: vec256 (ymm/SVE) vs vec128 (xmm/NEON) vs auto-vectorized scalar.",
+        "expected": None,   # three integer checksums; compare manually
+        "variants": [
+            {"tag": "vani", "file": "dot_simd256.vani"},
+        ],
+    },
 ]
 
 # ---------------------------------------------------------------------------
