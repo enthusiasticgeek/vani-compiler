@@ -128,13 +128,13 @@ if x > 0 { … } else { … }
 while cond { … }
 
 // for over range
-for i in 0 to n { … }
+for i from 0 to n { … }
 
 // for over collection
 for x in ref xs { … }
 
 // named labels
-outer: for i in 0 to n {
+outer: for i from 0 to n {
     inner: while true {
         break outer;
     }
@@ -257,7 +257,11 @@ let r: f64 = sqrt(2.0);
 ```vani
 // parallel for with reduction
 let sum: i64 = 0;
-parallel for i in 0 to n reduce(sum += xs[i]) { }
+parallel for i from 0 to n
+reduce sum with +;
+{
+    sum = sum + xs[i];
+}
 
 // task (affine handle — forgetting to join is a compile error)
 let t: TaskHandle = task { expensive_work(); };
@@ -268,7 +272,21 @@ let m: Mutex<i64> = mutex_new(0);
 let g: Guard<i64> = mutex_lock(ref m);
 *g = *g + 1;
 // Guard drops here → unlock
+
+// channel — bounded MPMC queue
+let ch: Channel<i64, 16> = channel_new();
+let _ = channel_send(ref ch, 42);   // blocks if full
+let v: i64 = channel_recv(ref ch);  // blocks if empty
 ```
+
+| Primitive | Use when |
+|-----------|----------|
+| `Atomic<T>` | Simple counter / flag with no-lock guarantee |
+| `Mutex<T>` / `Guard<T>` | Guarded mutation of a value |
+| `RwLock<T>` / `ReadGuard<T>` / `WriteGuard<T>` | Read-heavy shared state |
+| `Channel<T, N>` | Producer-consumer queue; moves ownership across threads |
+| `Condvar` | Wait until a non-trivial predicate is true |
+| `Barrier` | All N threads reach a checkpoint before proceeding |
 
 ---
 
@@ -411,8 +429,12 @@ vanic coverage prog.vani                 # MC/DC coverage map
 vanic safety-attrs prog.vani             # list active safety attributes
 ```
 
-**Editor integration:** `vanic lsp` speaks LSP over stdio. Configure VS Code,
-Neovim, or any LSP client to invoke it on `.vani` files.
+**Editor integration:** Build `intent-lsp` (`cargo build --release --bin intent-lsp`)
+and point your editor at the binary. Speaks LSP over stdio; supports hover types,
+go-to-definition, find-references, rename, completion, and semantic highlighting.
+
+Full per-editor setup (VS Code, Neovim/nvim-lspconfig, Emacs/eglot):
+see [tutorials/src/installation.md — Editor integration (LSP)](../tutorials/src/installation.md#editor-integration-lsp).
 
 ---
 
