@@ -13169,8 +13169,8 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn sort_rejects_non_i64_element() {
-        // v1 supports Vec<i64> only — other widths surface a
+    fn sort_rejects_unsupported_element() {
+        // v1 supports Vec<i64> and Vec<f64> only — other widths surface a
         // clear "v1" diagnostic so users know it's a known
         // restriction, not a parser failure.
         let source = r#"
@@ -13184,8 +13184,60 @@ fn main() -> i64 {
         assert!(
             errors
                 .iter()
-                .any(|e| e.message.contains("only supports `Vec<i64>` in v1")),
+                .any(|e| e.message.contains("only supports") && e.message.contains("in v1")),
             "expected v1-restriction diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn sort_f64_ascending() {
+        // sort on Vec<f64> must type-check and compile after F64-1.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(3.0, 1.0, 2.0);
+              let _ = sort(mut ref xs);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("sort on Vec<f64> must type-check");
+    }
+
+    #[test]
+    fn sort_by_f64_custom_order() {
+        // sort_by on Vec<f64> requires a fn(f64, f64) -> i64 comparator.
+        let source = r#"
+            fn cmp_desc(a: f64, b: f64) -> i64 {
+              if a > b { return -1; }
+              if a < b { return 1; }
+              return 0;
+            }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.5, 3.0, 2.5);
+              let _ = sort_by(mut ref xs, cmp_desc);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("sort_by with fn(f64, f64) -> i64 on Vec<f64> must type-check");
+    }
+
+    #[test]
+    fn sort_by_f64_rejects_wrong_comparator_type() {
+        // sort_by on Vec<f64> must reject an i64 comparator.
+        let source = r#"
+            fn cmp_i64(a: i64, b: i64) -> i64 { return a - b; }
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0);
+              let _ = sort_by(mut ref xs, cmp_i64);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("sort_by with fn(i64,i64)->i64 on Vec<f64> must fail");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("fn(f64, f64) -> i64")),
+            "expected f64 comparator-signature diagnostic, got: {:?}",
             errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
         );
     }

@@ -21709,14 +21709,14 @@ fn check_sort_builtin(
         }
     };
     let _ = is_array;
-    // v1 restriction: i64 element only. Wider widths would
-    // need element-typed runtime helpers (i32 / u64 / etc.)
-    // and are queued as a follow-up.
-    if !matches!(element_type, Type::I64) {
+    // v1 restriction: i64 and f64 elements only. Wider integer
+    // widths and user-defined types would need additional
+    // element-typed runtime helpers and are queued as follow-ups.
+    if !matches!(element_type, Type::I64 | Type::F64) {
         let container = if matches!(xs.ty().deref(), Type::Array { .. }) {
             "[i64; N]"
         } else {
-            "Vec<i64>"
+            "Vec<i64> or Vec<f64>"
         };
         diagnostics.push(Diagnostic::new(
             args[0].span,
@@ -21729,22 +21729,27 @@ fn check_sort_builtin(
     }
     let mut typed_args = vec![xs.expr];
     if name == "sort_by" {
-        // Comparator: v1 element is `i64` (Copy), so the
-        // comparator takes values directly. strcmp convention:
-        // negative / zero / positive. When wider non-Copy
-        // element widths land, the comparator will switch to
-        // `fn(ref T, ref T) -> i64` to avoid moves.
+        // Comparator takes element values directly (both i64 and f64
+        // are Copy). strcmp convention: negative / zero / positive.
+        // When non-Copy element widths land the comparator will
+        // switch to `fn(ref T, ref T) -> i64` to avoid moves.
         let cmp = check_expr(&args[1], env, signatures, diagnostics);
+        let cmp_arg = if matches!(element_type, Type::F64) { Type::F64 } else { Type::I64 };
         let expected = Type::FnPtr(
-            vec![Type::I64, Type::I64],
+            vec![cmp_arg.clone(), cmp_arg.clone()],
             Box::new(Type::I64),
         );
         if cmp.ty() != &expected {
+            let expected_str = if matches!(element_type, Type::F64) {
+                "fn(f64, f64) -> i64"
+            } else {
+                "fn(i64, i64) -> i64"
+            };
             diagnostics.push(Diagnostic::new(
                 args[1].span,
                 format!(
-                    "sort_by comparator must be `fn(i64, i64) -> i64`, got {}",
-                    cmp.ty()
+                    "sort_by comparator must be `{}`, got {}",
+                    expected_str, cmp.ty()
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }

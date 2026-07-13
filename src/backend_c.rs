@@ -10970,31 +10970,33 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
     }
 
     // Data-structures roadmap Level 1: in-place `sort` /
-    // `sort_by` on `Vec<i64>`. v1 restricts to i64 — the
-    // runtime helper is monomorphized over that width. The
-    // checker rejects non-i64 element types at the call site
-    // so this emit gate matches the surface. The comparator
-    // takes i64 values directly (i64 is Copy); strcmp
-    // convention: negative / zero / positive.
-    if matches!(element, Type::I64) {
+    // `sort_by`. v1 supports i64 and f64 elements; the helpers
+    // are monomorphized over the element width via `{ct}`.
+    // The comparator takes element values directly (both are
+    // Copy); strcmp convention: negative / zero / positive.
+    if matches!(element, Type::I64 | Type::F64) {
+        let ct = c_element.clone();
         out.push_str(&format!(
-            "typedef int64_t (*{sn}__cmp_fn)(int64_t, int64_t);\n",
+            "typedef int64_t (*{sn}__cmp_fn)({ct}, {ct});\n",
             sn = struct_name,
+            ct = ct,
         ));
         out.push_str(&format!(
-            "static INTENT_UNUSED int64_t {sn}__cmp_ascending(int64_t a, int64_t b) {{\
+            "static INTENT_UNUSED int64_t {sn}__cmp_ascending({ct} a, {ct} b) {{\
 \n    return (a > b) - (a < b);\
 \n}}\n",
             sn = struct_name,
+            ct = ct,
         ));
         // Hoare-partition quicksort with insertion-sort cutoff
-        // (N < 16).
+        // (N < 16). Counter variables (lo/hi/i/j/mid) stay
+        // int64_t; only element-typed slots use {ct}.
         out.push_str(&format!(
-            "static INTENT_UNUSED void {sn}__qsort_impl(int64_t* a, int64_t lo, int64_t hi, {sn}__cmp_fn cmp) {{\
+            "static INTENT_UNUSED void {sn}__qsort_impl({ct}* a, int64_t lo, int64_t hi, {sn}__cmp_fn cmp) {{\
 \n    while (lo < hi) {{\
 \n        if (hi - lo < 16) {{\
 \n            for (int64_t i = lo + 1; i <= hi; i++) {{\
-\n                int64_t key = a[i];\
+\n                {ct} key = a[i];\
 \n                int64_t j = i - 1;\
 \n                while (j >= lo && cmp(a[j], key) > 0) {{\
 \n                    a[j + 1] = a[j];\
@@ -11005,14 +11007,14 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
 \n            return;\
 \n        }}\
 \n        int64_t mid = lo + (hi - lo) / 2;\
-\n        int64_t pivot = a[mid];\
+\n        {ct} pivot = a[mid];\
 \n        int64_t i = lo - 1;\
 \n        int64_t j = hi + 1;\
 \n        for (;;) {{\
 \n            do {{ i++; }} while (cmp(a[i], pivot) < 0);\
 \n            do {{ j--; }} while (cmp(a[j], pivot) > 0);\
 \n            if (i >= j) break;\
-\n            int64_t tmp = a[i]; a[i] = a[j]; a[j] = tmp;\
+\n            {ct} tmp = a[i]; a[i] = a[j]; a[j] = tmp;\
 \n        }}\
 \n        /* Tail-recurse on the larger side to bound stack depth. */\
 \n        if (j - lo < hi - (j + 1)) {{\
@@ -11025,6 +11027,7 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
 \n    }}\
 \n}}\n",
             sn = struct_name,
+            ct = ct,
         ));
         out.push_str(&format!(
             "static INTENT_UNUSED int64_t {sn}__sort({sn}* xs) {{\
@@ -11044,6 +11047,10 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
 \n}}\n",
             sn = struct_name,
         ));
+    }
+    // Data-structures roadmap Level 3 — eager iterator
+    // combinators and reductions: i64 element only for v1.
+    if matches!(element, Type::I64) {
         // Data-structures roadmap Level 3 — eager iterator
         // combinators (closure #309). v1 Vec<i64> only; both
         // helpers borrow xs and take an explicit fn-ptr.

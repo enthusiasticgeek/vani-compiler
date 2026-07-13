@@ -38757,44 +38757,50 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("}\n");
     }
 
-    // ---- sort / sort_by: in-place insertion sort. v1: i64
-    // element only (matches tree-C's `Type::I64` gate in
-    // `emit_vec_bundle`). Insertion sort is O(n^2) worst case
-    // but lands the API cleanly; a quicksort upgrade is a
-    // straightforward follow-up. The user-supplied comparator
-    // for `sort_by` has shape `i64(i64, i64)` — i64 is Copy
-    // so the comparator takes values directly. Returns
-    // strcmp convention (negative / zero / positive).
-    if matches!(element, Type::I64) {
+    // ---- sort / sort_by: in-place insertion sort + quicksort.
+    // v1 supports i64 and f64 elements; IR types are parameterised
+    // via `elt` / `ep` / `epp` locals. The user-supplied comparator
+    // for `sort_by` always returns i64 (strcmp convention) but
+    // takes element-typed args. Both types are Copy so the
+    // comparator takes values directly.
+    if matches!(element, Type::I64 | Type::F64) {
+        let elt = if matches!(element, Type::F64) { "double" } else { "i64" };
+        let ep  = if matches!(element, Type::F64) { "double*" } else { "i64*" };
+        let epp = if matches!(element, Type::F64) { "double**" } else { "i64**" };
+        let cmp_gt = if matches!(element, Type::F64) { "fcmp ogt double" } else { "icmp sgt i64" };
+        let cmp_lt = if matches!(element, Type::F64) { "fcmp olt double" } else { "icmp slt i64" };
+        let _cmp_ge = if matches!(element, Type::F64) { "fcmp oge double" } else { "icmp sge i64" };
+        let cmp_fn_ty = format!("i64 ({elt}, {elt})*", elt = elt);
+
         let sort_name = format!("@intent_vec_{}__sort", tag);
         let sort_by_name = format!("@intent_vec_{}__sort_by", tag);
         let sort_with_name = format!("@intent_vec_{}__sort_with", tag);
         let cmp_asc_name = format!("@intent_vec_{}__cmp_asc", tag);
         // Default ascending comparator: strcmp convention.
         out.push_str(&format!(
-            "define internal i64 {cmp}(i64 %a, i64 %b) {{\n",
-            cmp = cmp_asc_name,
+            "define internal i64 {cmp}({elt} %a, {elt} %b) {{\n",
+            cmp = cmp_asc_name, elt = elt,
         ));
-        out.push_str("  %gt = icmp sgt i64 %a, %b\n");
-        out.push_str("  %lt = icmp slt i64 %a, %b\n");
+        out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
+        out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
         out.push_str("  %g = zext i1 %gt to i64\n");
         out.push_str("  %l = zext i1 %lt to i64\n");
         out.push_str("  %r = sub i64 %g, %l\n");
         out.push_str("  ret i64 %r\n");
         out.push_str("}\n");
         // qsort comparator for the ascending case: adapts the system
-        // qsort(void*,void*)->int ABI to our i64 values.
+        // qsort(void*,void*)->int ABI to our element values.
         let qsort_cmp_name = format!("@intent_vec_{}__qsort_cmp_asc", tag);
         out.push_str(&format!(
             "define internal i32 {qcmp}(i8* %ap, i8* %bp) {{\n",
             qcmp = qsort_cmp_name,
         ));
-        out.push_str("  %a_p = bitcast i8* %ap to i64*\n");
-        out.push_str("  %b_p = bitcast i8* %bp to i64*\n");
-        out.push_str("  %a = load i64, i64* %a_p\n");
-        out.push_str("  %b = load i64, i64* %b_p\n");
-        out.push_str("  %gt = icmp sgt i64 %a, %b\n");
-        out.push_str("  %lt = icmp slt i64 %a, %b\n");
+        out.push_str(&format!("  %a_p = bitcast i8* %ap to {ep}\n", ep = ep));
+        out.push_str(&format!("  %b_p = bitcast i8* %bp to {ep}\n", ep = ep));
+        out.push_str(&format!("  %a = load {elt}, {ep} %a_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %b = load {elt}, {ep} %b_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
+        out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
         out.push_str("  %g = zext i1 %gt to i32\n");
         out.push_str("  %l = zext i1 %lt to i32\n");
         out.push_str("  %r = sub i32 %g, %l\n");
@@ -38802,9 +38808,10 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("}\n");
         // sort_with: insertion sort retained for sort_by (rare; correctness > speed).
         out.push_str(&format!(
-            "define i64 {sn_with}({sty}* %xs_p, i64 (i64, i64)* %cmp) {{\n",
+            "define i64 {sn_with}({sty}* %xs_p, {cft} %cmp) {{\n",
             sn_with = sort_with_name,
             sty = s_ty,
+            cft = cmp_fn_ty,
         ));
         out.push_str(&format!(
             "  %data_p = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 0\n",
@@ -38814,21 +38821,21 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
             "  %len_p = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n",
             sty = s_ty,
         ));
-        out.push_str("  %data = load i64*, i64** %data_p\n");
+        out.push_str(&format!("  %data = load {ep}, {epp} %data_p\n", ep = ep, epp = epp));
         out.push_str("  %len = load i64, i64* %len_p\n");
         out.push_str("  %i_p = alloca i64\n");
         out.push_str("  store i64 1, i64* %i_p\n");
         out.push_str("  %j_p = alloca i64\n");
-        out.push_str("  %key_p = alloca i64\n");
+        out.push_str(&format!("  %key_p = alloca {elt}\n", elt = elt));
         out.push_str("  br label %sort_outer\n");
         out.push_str("sort_outer:\n");
         out.push_str("  %i_v = load i64, i64* %i_p\n");
         out.push_str("  %i_cont = icmp slt i64 %i_v, %len\n");
         out.push_str("  br i1 %i_cont, label %sort_outer_body, label %sort_done\n");
         out.push_str("sort_outer_body:\n");
-        out.push_str("  %slot_i = getelementptr i64, i64* %data, i64 %i_v\n");
-        out.push_str("  %key_v = load i64, i64* %slot_i\n");
-        out.push_str("  store i64 %key_v, i64* %key_p\n");
+        out.push_str(&format!("  %slot_i = getelementptr {elt}, {ep} %data, i64 %i_v\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %key_v = load {elt}, {ep} %slot_i\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %key_v, {ep} %key_p\n", elt = elt, ep = ep));
         out.push_str("  %i_m1 = sub i64 %i_v, 1\n");
         out.push_str("  store i64 %i_m1, i64* %j_p\n");
         out.push_str("  br label %sort_inner\n");
@@ -38837,27 +38844,27 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %j_ok = icmp sge i64 %j_v, 0\n");
         out.push_str("  br i1 %j_ok, label %sort_inner_cmp, label %sort_inner_done\n");
         out.push_str("sort_inner_cmp:\n");
-        out.push_str("  %slot_j = getelementptr i64, i64* %data, i64 %j_v\n");
-        out.push_str("  %slot_jv = load i64, i64* %slot_j\n");
-        out.push_str("  %key_load = load i64, i64* %key_p\n");
-        out.push_str(
-            "  %cmp_r = call i64 %cmp(i64 %slot_jv, i64 %key_load)\n",
-        );
+        out.push_str(&format!("  %slot_j = getelementptr {elt}, {ep} %data, i64 %j_v\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %slot_jv = load {elt}, {ep} %slot_j\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %key_load = load {elt}, {ep} %key_p\n", elt = elt, ep = ep));
+        out.push_str(&format!(
+            "  %cmp_r = call i64 %cmp({elt} %slot_jv, {elt} %key_load)\n", elt = elt,
+        ));
         out.push_str("  %cmp_gt = icmp sgt i64 %cmp_r, 0\n");
         out.push_str("  br i1 %cmp_gt, label %sort_inner_shift, label %sort_inner_done\n");
         out.push_str("sort_inner_shift:\n");
         out.push_str("  %j_p1 = add i64 %j_v, 1\n");
-        out.push_str("  %slot_jp1 = getelementptr i64, i64* %data, i64 %j_p1\n");
-        out.push_str("  store i64 %slot_jv, i64* %slot_jp1\n");
+        out.push_str(&format!("  %slot_jp1 = getelementptr {elt}, {ep} %data, i64 %j_p1\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %slot_jv, {ep} %slot_jp1\n", elt = elt, ep = ep));
         out.push_str("  %j_dec = sub i64 %j_v, 1\n");
         out.push_str("  store i64 %j_dec, i64* %j_p\n");
         out.push_str("  br label %sort_inner\n");
         out.push_str("sort_inner_done:\n");
         out.push_str("  %j_final = load i64, i64* %j_p\n");
         out.push_str("  %insert_at = add i64 %j_final, 1\n");
-        out.push_str("  %insert_p = getelementptr i64, i64* %data, i64 %insert_at\n");
-        out.push_str("  %k = load i64, i64* %key_p\n");
-        out.push_str("  store i64 %k, i64* %insert_p\n");
+        out.push_str(&format!("  %insert_p = getelementptr {elt}, {ep} %data, i64 %insert_at\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %k = load {elt}, {ep} %key_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %k, {ep} %insert_p\n", elt = elt, ep = ep));
         out.push_str("  %i_next = add i64 %i_v, 1\n");
         out.push_str("  store i64 %i_next, i64* %i_p\n");
         out.push_str("  br label %sort_outer\n");
@@ -38871,8 +38878,8 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         // median-of-3 pivot (~20 frames for 1M elements = well within limits).
         let qs_impl_name = format!("@intent_vec_{}__qs_impl", tag);
         out.push_str(&format!(
-            "define internal void {fn}(i64* %a, i64 %lo, i64 %hi) {{\n",
-            fn = qs_impl_name,
+            "define internal void {fn}({ep} %a, i64 %lo, i64 %hi) {{\n",
+            fn = qs_impl_name, ep = ep,
         ));
         out.push_str("entry:\n");
         // All mutable-counter allocas in the entry block (SSA requirement).
@@ -38896,8 +38903,8 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %is_ok  = icmp sle i64 %is_i, %hi\n");
         out.push_str("  br i1 %is_ok, label %is_body, label %qs_ret\n");
         out.push_str("is_body:\n");
-        out.push_str("  %is_kp  = getelementptr i64, i64* %a, i64 %is_i\n");
-        out.push_str("  %is_key = load i64, i64* %is_kp\n");
+        out.push_str(&format!("  %is_kp  = getelementptr {elt}, {ep} %a, i64 %is_i\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %is_key = load {elt}, {ep} %is_kp\n", elt = elt, ep = ep));
         out.push_str("  %is_j0  = sub i64 %is_i, 1\n");
         out.push_str("  store i64 %is_j0, i64* %is_j_p\n");
         out.push_str("  br label %is_inner\n");
@@ -38906,22 +38913,22 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %is_jge = icmp sge i64 %is_j, %lo\n");
         out.push_str("  br i1 %is_jge, label %is_cmp, label %is_place\n");
         out.push_str("is_cmp:\n");
-        out.push_str("  %is_jp  = getelementptr i64, i64* %a, i64 %is_j\n");
-        out.push_str("  %is_jv  = load i64, i64* %is_jp\n");
-        out.push_str("  %is_gt  = icmp sgt i64 %is_jv, %is_key\n");
+        out.push_str(&format!("  %is_jp  = getelementptr {elt}, {ep} %a, i64 %is_j\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %is_jv  = load {elt}, {ep} %is_jp\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %is_gt  = {cgt} %is_jv, %is_key\n", cgt = cmp_gt));
         out.push_str("  br i1 %is_gt, label %is_shift, label %is_place\n");
         out.push_str("is_shift:\n");
         out.push_str("  %is_j1  = add i64 %is_j, 1\n");
-        out.push_str("  %is_j1p = getelementptr i64, i64* %a, i64 %is_j1\n");
-        out.push_str("  store i64 %is_jv, i64* %is_j1p\n");
+        out.push_str(&format!("  %is_j1p = getelementptr {elt}, {ep} %a, i64 %is_j1\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %is_jv, {ep} %is_j1p\n", elt = elt, ep = ep));
         out.push_str("  %is_jd  = sub i64 %is_j, 1\n");
         out.push_str("  store i64 %is_jd, i64* %is_j_p\n");
         out.push_str("  br label %is_inner\n");
         out.push_str("is_place:\n");
         out.push_str("  %is_jf  = load i64, i64* %is_j_p\n");
         out.push_str("  %is_dst = add i64 %is_jf, 1\n");
-        out.push_str("  %is_dp  = getelementptr i64, i64* %a, i64 %is_dst\n");
-        out.push_str("  store i64 %is_key, i64* %is_dp\n");
+        out.push_str(&format!("  %is_dp  = getelementptr {elt}, {ep} %a, i64 %is_dst\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %is_key, {ep} %is_dp\n", elt = elt, ep = ep));
         out.push_str("  %is_in  = add i64 %is_i, 1\n");
         out.push_str("  store i64 %is_in, i64* %is_i_p\n");
         out.push_str("  br label %is_outer\n");
@@ -38929,43 +38936,43 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("med3:\n");
         out.push_str("  %half   = sdiv i64 %rng, 2\n");
         out.push_str("  %mid    = add i64 %lo, %half\n");
-        out.push_str("  %p_lo   = getelementptr i64, i64* %a, i64 %lo\n");
-        out.push_str("  %p_mid  = getelementptr i64, i64* %a, i64 %mid\n");
-        out.push_str("  %p_hi   = getelementptr i64, i64* %a, i64 %hi\n");
-        out.push_str("  %v_lo   = load i64, i64* %p_lo\n");
-        out.push_str("  %v_mid  = load i64, i64* %p_mid\n");
-        out.push_str("  %v_hi   = load i64, i64* %p_hi\n");
-        out.push_str("  %lm_gt  = icmp sgt i64 %v_lo, %v_mid\n");
+        out.push_str(&format!("  %p_lo   = getelementptr {elt}, {ep} %a, i64 %lo\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %p_mid  = getelementptr {elt}, {ep} %a, i64 %mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %p_hi   = getelementptr {elt}, {ep} %a, i64 %hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %v_lo   = load {elt}, {ep} %p_lo\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %v_mid  = load {elt}, {ep} %p_mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %v_hi   = load {elt}, {ep} %p_hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %lm_gt  = {cgt} %v_lo, %v_mid\n", cgt = cmp_gt));
         out.push_str("  br i1 %lm_gt, label %sw_lm, label %af_lm\n");
         out.push_str("sw_lm:\n");
-        out.push_str("  store i64 %v_mid, i64* %p_lo\n");
-        out.push_str("  store i64 %v_lo,  i64* %p_mid\n");
+        out.push_str(&format!("  store {elt} %v_mid, {ep} %p_lo\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %v_lo,  {ep} %p_mid\n", elt = elt, ep = ep));
         out.push_str("  br label %af_lm\n");
         out.push_str("af_lm:\n");
-        out.push_str("  %v_lo2  = load i64, i64* %p_lo\n");
-        out.push_str("  %v_hi2  = load i64, i64* %p_hi\n");
-        out.push_str("  %lh_gt  = icmp sgt i64 %v_lo2, %v_hi2\n");
+        out.push_str(&format!("  %v_lo2  = load {elt}, {ep} %p_lo\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %v_hi2  = load {elt}, {ep} %p_hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %lh_gt  = {cgt} %v_lo2, %v_hi2\n", cgt = cmp_gt));
         out.push_str("  br i1 %lh_gt, label %sw_lh, label %af_lh\n");
         out.push_str("sw_lh:\n");
-        out.push_str("  store i64 %v_hi2, i64* %p_lo\n");
-        out.push_str("  store i64 %v_lo2, i64* %p_hi\n");
+        out.push_str(&format!("  store {elt} %v_hi2, {ep} %p_lo\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %v_lo2, {ep} %p_hi\n", elt = elt, ep = ep));
         out.push_str("  br label %af_lh\n");
         out.push_str("af_lh:\n");
-        out.push_str("  %v_mid3 = load i64, i64* %p_mid\n");
-        out.push_str("  %v_hi3  = load i64, i64* %p_hi\n");
-        out.push_str("  %mh_gt  = icmp sgt i64 %v_mid3, %v_hi3\n");
+        out.push_str(&format!("  %v_mid3 = load {elt}, {ep} %p_mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %v_hi3  = load {elt}, {ep} %p_hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %mh_gt  = {cgt} %v_mid3, %v_hi3\n", cgt = cmp_gt));
         out.push_str("  br i1 %mh_gt, label %sw_mh, label %af_mh\n");
         out.push_str("sw_mh:\n");
-        out.push_str("  store i64 %v_hi3,  i64* %p_mid\n");
-        out.push_str("  store i64 %v_mid3, i64* %p_hi\n");
+        out.push_str(&format!("  store {elt} %v_hi3,  {ep} %p_mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %v_mid3, {ep} %p_hi\n", elt = elt, ep = ep));
         out.push_str("  br label %af_mh\n");
         out.push_str("af_mh:\n");
         // After median-of-3: a[lo] <= a[mid] <= a[hi].
         // Move pivot (a[mid]) to a[hi] so Lomuto can use a[lo] as the min sentinel.
-        out.push_str("  %piv    = load i64, i64* %p_mid\n");
-        out.push_str("  %hi_v   = load i64, i64* %p_hi\n");
-        out.push_str("  store i64 %hi_v, i64* %p_mid\n");
-        out.push_str("  store i64 %piv,  i64* %p_hi\n");
+        out.push_str(&format!("  %piv    = load {elt}, {ep} %p_mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %hi_v   = load {elt}, {ep} %p_hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %hi_v, {ep} %p_mid\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %piv,  {ep} %p_hi\n", elt = elt, ep = ep));
         // Lomuto partition on [lo, hi-1] with pivot sitting at a[hi].
         out.push_str("  store i64 %lo, i64* %pt_i_p\n");
         out.push_str("  store i64 %lo, i64* %pt_j_p\n");
@@ -38977,15 +38984,15 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  br i1 %pt_ok, label %pt_body, label %pt_fin\n");
         out.push_str("pt_body:\n");
         out.push_str("  %pi     = load i64, i64* %pt_i_p\n");
-        out.push_str("  %pa_jp  = getelementptr i64, i64* %a, i64 %pj\n");
-        out.push_str("  %pa_jv  = load i64, i64* %pa_jp\n");
-        out.push_str("  %lt_pv  = icmp slt i64 %pa_jv, %piv\n");
+        out.push_str(&format!("  %pa_jp  = getelementptr {elt}, {ep} %a, i64 %pj\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %pa_jv  = load {elt}, {ep} %pa_jp\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %lt_pv  = {clt} %pa_jv, %piv\n", clt = cmp_lt));
         out.push_str("  br i1 %lt_pv, label %pt_swap, label %pt_next\n");
         out.push_str("pt_swap:\n");
-        out.push_str("  %pa_ip  = getelementptr i64, i64* %a, i64 %pi\n");
-        out.push_str("  %pa_iv  = load i64, i64* %pa_ip\n");
-        out.push_str("  store i64 %pa_jv, i64* %pa_ip\n");
-        out.push_str("  store i64 %pa_iv, i64* %pa_jp\n");
+        out.push_str(&format!("  %pa_ip  = getelementptr {elt}, {ep} %a, i64 %pi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %pa_iv  = load {elt}, {ep} %pa_ip\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %pa_jv, {ep} %pa_ip\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %pa_iv, {ep} %pa_jp\n", elt = elt, ep = ep));
         out.push_str("  %pi1    = add i64 %pi, 1\n");
         out.push_str("  store i64 %pi1, i64* %pt_i_p\n");
         out.push_str("  br label %pt_next\n");
@@ -38996,21 +39003,21 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("pt_fin:\n");
         // Place pivot in its final position: swap a[i] with a[hi] (= pivot).
         out.push_str("  %pif    = load i64, i64* %pt_i_p\n");
-        out.push_str("  %pa_fp  = getelementptr i64, i64* %a, i64 %pif\n");
-        out.push_str("  %pa_fv  = load i64, i64* %pa_fp\n");
-        out.push_str("  %pa_hv  = load i64, i64* %p_hi\n");
-        out.push_str("  store i64 %pa_hv, i64* %pa_fp\n");
-        out.push_str("  store i64 %pa_fv, i64* %p_hi\n");
+        out.push_str(&format!("  %pa_fp  = getelementptr {elt}, {ep} %a, i64 %pif\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %pa_fv  = load {elt}, {ep} %pa_fp\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %pa_hv  = load {elt}, {ep} %p_hi\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %pa_hv, {ep} %pa_fp\n", elt = elt, ep = ep));
+        out.push_str(&format!("  store {elt} %pa_fv, {ep} %p_hi\n", elt = elt, ep = ep));
         // Recurse on [lo, pif-1] and [pif+1, hi].
         out.push_str("  %left_hi  = sub i64 %pif, 1\n");
         out.push_str("  %right_lo = add i64 %pif, 1\n");
         out.push_str(&format!(
-            "  call void {fn}(i64* %a, i64 %lo, i64 %left_hi)\n",
-            fn = qs_impl_name,
+            "  call void {fn}({ep} %a, i64 %lo, i64 %left_hi)\n",
+            fn = qs_impl_name, ep = ep,
         ));
         out.push_str(&format!(
-            "  call void {fn}(i64* %a, i64 %right_lo, i64 %hi)\n",
-            fn = qs_impl_name,
+            "  call void {fn}({ep} %a, i64 %right_lo, i64 %hi)\n",
+            fn = qs_impl_name, ep = ep,
         ));
         out.push_str("  br label %qs_ret\n");
         out.push_str("qs_ret:\n");
@@ -39030,32 +39037,37 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
             "  %qs_lp = getelementptr {sty}, {sty}* %xs_p, i32 0, i32 1\n",
             sty = s_ty,
         ));
-        out.push_str("  %qs_d = load i64*, i64** %qs_dp\n");
+        out.push_str(&format!("  %qs_d = load {ep}, {epp} %qs_dp\n", ep = ep, epp = epp));
         out.push_str("  %qs_l = load i64, i64* %qs_lp\n");
         out.push_str("  %qs_ne = icmp sgt i64 %qs_l, 1\n");
         out.push_str("  br i1 %qs_ne, label %do_sort, label %skip_sort\n");
         out.push_str("do_sort:\n");
         out.push_str("  %qs_hi = sub i64 %qs_l, 1\n");
         out.push_str(&format!(
-            "  call void {fn}(i64* %qs_d, i64 0, i64 %qs_hi)\n",
-            fn = qs_impl_name,
+            "  call void {fn}({ep} %qs_d, i64 0, i64 %qs_hi)\n",
+            fn = qs_impl_name, ep = ep,
         ));
         out.push_str("  br label %skip_sort\n");
         out.push_str("skip_sort:\n");
         out.push_str("  ret i64 0\n");
         out.push_str("}\n");
         out.push_str(&format!(
-            "define i64 {sn}({sty}* %xs_p, i64 (i64, i64)* %cmp) {{\n",
+            "define i64 {sn}({sty}* %xs_p, {cft} %cmp) {{\n",
             sn = sort_by_name,
             sty = s_ty,
+            cft = cmp_fn_ty,
         ));
         out.push_str(&format!(
-            "  %r = call i64 {sn_with}({sty}* %xs_p, i64 (i64, i64)* %cmp)\n",
+            "  %r = call i64 {sn_with}({sty}* %xs_p, {cft} %cmp)\n",
             sn_with = sort_with_name,
             sty = s_ty,
+            cft = cmp_fn_ty,
         ));
         out.push_str("  ret i64 %r\n");
         out.push_str("}\n");
+        // ---- vec_map / vec_fold / reductions: i64 element only
+        // for v1. F64 support queued as F64-2/F64-3 follow-ups.
+        if matches!(element, Type::I64) {
         // ---- vec_map / vec_fold: eager iterator combinators
         // taking fn-ptr args (closure #309). v1 i64 element only.
         // map allocates a fresh result Vec via malloc; fold
@@ -40948,6 +40960,7 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  ret %Enum_Option__i64 %bs_n2\n");
         out.push_str("}\n");
         } // end if option_i64_registered
+        } // end if matches!(element, Type::I64) — map/fold/reductions
     }
 
     // ---- reverse: two-pointer in-place swap. Any Copy
