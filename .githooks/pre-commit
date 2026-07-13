@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+# Runs sync_version.py in check mode.  If any version-bearing doc is stale
+# compared to Cargo.toml, the commit is blocked with instructions to fix it.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+SCRIPT="$(git rev-parse --show-toplevel)/scripts/sync_version.py"
+
+if ! command -v python3 &>/dev/null; then
+    echo "pre-commit: python3 not found — skipping version check"
+    exit 0
+fi
+
+python3 "$SCRIPT" --check
