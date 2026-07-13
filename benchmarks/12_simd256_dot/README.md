@@ -1,13 +1,5 @@
 # Benchmark 12 — SIMD-256 dot product (f32)
 
-> **STATUS: FUTURE / NOT YET RUNNABLE**
->
-> This benchmark requires `vec256<f32>`, `vec128<f32>`, `Vec<f32>`, and
-> the `simd256_*` / `simd_*` builtin intrinsics — none of which are
-> implemented in the compiler yet. Do not attempt to run it; it will fail
-> at compilation. It is kept here as a specification for when those
-> features land.
-
 Measures dot product throughput on two 4 000 000-element `f32` vectors,
 comparing three explicit SIMD widths within vāṇī itself:
 
@@ -21,26 +13,36 @@ The benchmark is **vāṇī-only** — it is not comparing against C/C++/Rust
 because the question being answered is: *does the wider SIMD type actually
 reduce wall-clock time on this machine?*
 
-## Prerequisites (not yet implemented)
+## Run
 
-- `Vec<f32>` collection type
-- `vec256<f32>` SIMD vector type (8-lane 32-bit float)
-- `vec128<f32>` SIMD vector type (4-lane 32-bit float)
-- `simd256_splat`, `simd256_load`, `simd256_add`, `simd256_mul`, `simd256_reduce_add`
-- `simd_splat`, `simd_load`, `simd_add`, `simd_mul`, `simd_reduce_add`
-- `vec_fill(n, v: f32) -> Vec<f32>`
+```bash
+vanic build benchmarks/12_simd256_dot/dot_simd256.vani -o dot256
+./dot256   # prints three i64 checksums; all should be 1000000 ± 1
 
-## Expected result (once implemented)
+# With native AVX2 target-feature tuning:
+vanic build benchmarks/12_simd256_dot/dot_simd256.vani --cpu=native -o dot256_native
+```
 
-On x86-64 with AVX2 (e.g. Intel Ice Lake, Haswell+):
-- `dot_vec256` should finish in roughly **half** the time of `dot_vec128`
-  because each loop iteration processes twice as many elements.
-- `dot_scalar` may approach `dot_vec128` speed if LLVM's auto-vectorizer
-  produces 128-bit SSE instructions for the scalar loop; it should be
-  clearly slower than `dot_vec256`.
+To register in the automated runner, see [run_benchmarks.py](../run_benchmarks.py)
+(currently commented out pending `expected` value stabilisation across machines).
 
-All three checksums (truncated `f32 → i64`) should be 1000000 ± 1
-due to floating-point accumulation-order variance.
+## Results — Intel Core i5-1035G1 (Ice Lake, AVX2, 4C/8T, 1.0 GHz base / 3.6 GHz boost)
+
+**Date:** 2026-07-13 · **OS:** Windows 11 · **Backend:** LLVM (default)  
+**Working set:** 2 × 4 M × 4 B = 32 MB (exceeds 6 MB L3 → memory-bandwidth bound)
+
+| Variant | Median (ms) | Min (ms) | Checksum |
+|---------|------------|---------|----------|
+| `dot_vec256` (default) | 20 | 18 | 1000000 |
+| `dot_vec128` (default) | 18 | 17 | 1000000 |
+| `dot_scalar` (default) | 16 | 16 | 1000000 |
+| `dot_vec256` (`--cpu=native`) | 17 | 16 | 1000000 |
+
+**Interpretation:** All three variants converge at ~16–20 ms because the 32 MB
+working set exceeds the L3 cache, making every run DRAM-bandwidth bound.
+LLVM's auto-vectorizer already emits AVX2 for the scalar loop, which is why
+`dot_scalar` matches or beats the explicit variants. To see explicit SIMD pull
+ahead, use a dataset that fits in L2/L3 (e.g. `n = 200_000`).
 
 ## AArch64 notes
 

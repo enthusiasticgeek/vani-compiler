@@ -193,9 +193,15 @@ BENCHMARKS: List[Dict] = [
             {"tag": "rs",   "file": "dot.rs"},
         ],
     },
-    # Benchmark 12 (12_simd256_dot) is a FUTURE benchmark — requires
-    # vec256<f32>, Vec<f32>, and simd256_* builtins which are not yet
-    # implemented. Do not register it here until those features land.
+    {
+        "id": "12_simd256_dot",
+        "name": "SIMD-256 dot product — vec256<f32> vs vec128<f32> vs scalar (4 M elements)",
+        "description": "vani-only: vec256 (ymm/SVE) vs vec128 (xmm/NEON) vs auto-vectorized scalar.",
+        "expected": None,   # three i64 checksums (all 1000000); compare manually
+        "variants": [
+            {"tag": "vani", "file": "dot_simd256.vani"},
+        ],
+    },
 ]
 
 # ---------------------------------------------------------------------------
