@@ -1580,6 +1580,7 @@ impl Parser {
             is_extern: false,
             no_heap: false,
             no_float: false,
+            no_nan: false,
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
@@ -1618,6 +1619,7 @@ impl Parser {
         let mut bound_value: Option<u64> = None;
         let mut no_heap = false;
         let mut no_float = false;
+        let mut no_nan = false;
         let mut no_recursion = false;
         let mut interrupt = false;
         let mut interrupt_priority: Option<u32> = None;
@@ -1655,6 +1657,7 @@ impl Parser {
                 }
                 "no_heap" => no_heap = true,
                 "no_float" => no_float = true,
+                "no_nan" => no_nan = true,
                 "no_recursion" => no_recursion = true,
                 "inline" => {
                     if self.check(|k| matches!(k, TokenKind::LParen)) {
@@ -1874,6 +1877,7 @@ impl Parser {
             Some("asil_d") | Some("do178c_level_a")
             | Some("iec_61508_sil3") | Some("iec_61508_sil4")
         );
+        let composite_no_nan = composite_no_float;
         let composite_deterministic_timing = matches!(
             safety_standard.as_deref(),
             Some("asil_d") | Some("do178c_level_a")
@@ -1916,6 +1920,7 @@ impl Parser {
         f.no_heap = no_heap || interrupt || composite_no_heap;
         f.no_recursion = no_recursion || interrupt || composite_no_recursion;
         f.no_float = no_float || composite_no_float;
+        f.no_nan = no_nan || composite_no_nan;
         f.deterministic_timing = deterministic_timing || composite_deterministic_timing;
         f.interrupt = interrupt;
         f.interrupt_priority = interrupt_priority;
@@ -1988,6 +1993,7 @@ impl Parser {
             is_pure: false,
             no_heap: false,
             no_float: false,
+            no_nan: false,
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
@@ -9115,6 +9121,7 @@ pub(crate) fn try_v31_transform(
         is_extern: false,
         no_heap: false,
         no_float: false,
+        no_nan: false,
         no_recursion: false,
         interrupt: false,
         interrupt_priority: None,

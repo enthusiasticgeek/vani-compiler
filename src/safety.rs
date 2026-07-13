@@ -819,6 +819,141 @@ fn walk_expr_for_float(
     }
 }
 
+
+/// T2.4 -- enforce `#[no_nan]` per function. Rejects any call
+/// to a builtin whose documented error contract is to return
+/// IEEE-754 quiet NaN:
+///   - `f64_nan`             -- the explicit NaN literal.
+///   - `vec_kth_smallest`    -- returns qNaN (0x7FF8000000000000)
+///                              when k is out of bounds on Vec<f64>.
+/// Mathematical builtins that CAN produce NaN on bad inputs
+/// (sqrt, log, asin, ...) are NOT flagged here -- those require
+/// value-range analysis beyond what the static pass supports.
+/// Implied by `#[asil_d]`, `#[do178c_level_a]`, `#[iec_61508_sil3]`,
+/// `#[iec_61508_sil4]`.
+pub fn enforce_no_nan(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
+    for f in &program.functions {
+        if !f.no_nan {
+            continue;
+        }
+        for stmt in &f.body {
+            walk_stmt_for_nan(stmt, f, diagnostics);
+        }
+    }
+}
+
+/// Returns true if a builtin call is DEFINED to produce NaN
+/// as part of its error contract (not merely capable of doing
+/// so on bad inputs).
+fn is_nan_producing_builtin(name: &str, args: &[TypedExpr]) -> bool {
+    use crate::ast::Type;
+    match name {
+        // f64_nan() is the explicit NaN constructor -- always NaN.
+        "f64_nan" => true,
+        // vec_kth_smallest returns quiet NaN as an out-of-bounds
+        // sentinel, but only when the element type is f64.
+        "vec_kth_smallest" => args.first().map_or(false, |a| {
+            // Strip the outer Ref / RefMut to reach the Vec.
+            let inner = match &a.ty {
+                Type::Ref(i) | Type::RefMut(i) => i.as_ref(),
+                other => other,
+            };
+            matches!(inner, Type::Vec(el) if matches!(el.as_ref(), Type::F64))
+        }),
+        _ => false,
+    }
+}
+
+fn walk_stmt_for_nan(
+    stmt: &TypedStmt,
+    f: &crate::ir::TypedFunction,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    match stmt {
+        TypedStmt::Let { expr, .. }
+        | TypedStmt::Reassign { expr, .. }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr }
+        | TypedStmt::Discard { expr } => walk_expr_for_nan(expr, f, diagnostics),
+        TypedStmt::IndexAssign { value, .. }
+        | TypedStmt::FieldAssign { value, .. } => walk_expr_for_nan(value, f, diagnostics),
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
+            for item in items {
+                if let crate::ir::TypedPrintItem::Expr(e) = item {
+                    walk_expr_for_nan(e, f, diagnostics);
+                }
+            }
+        }
+        TypedStmt::If { cond, then_body, else_body } => {
+            walk_expr_for_nan(cond, f, diagnostics);
+            for s in then_body { walk_stmt_for_nan(s, f, diagnostics); }
+            for s in else_body { walk_stmt_for_nan(s, f, diagnostics); }
+        }
+        TypedStmt::While { cond, body, .. } => {
+            walk_expr_for_nan(cond, f, diagnostics);
+            for s in body { walk_stmt_for_nan(s, f, diagnostics); }
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            walk_expr_for_nan(start, f, diagnostics);
+            walk_expr_for_nan(end, f, diagnostics);
+            for s in body { walk_stmt_for_nan(s, f, diagnostics); }
+        }
+        TypedStmt::ForIter { body, .. }
+        | TypedStmt::TaskSpawn { body, .. }
+        | TypedStmt::UnsafeBlock { body, .. } => {
+            for s in body { walk_stmt_for_nan(s, f, diagnostics); }
+        }
+        _ => {}
+    }
+}
+
+fn walk_expr_for_nan(
+    expr: &TypedExpr,
+    f: &crate::ir::TypedFunction,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if let TypedExprKind::Call { name, args, .. } = &expr.kind {
+        if is_nan_producing_builtin(name, args) {
+            diagnostics.push(Diagnostic::new(
+                expr.span,
+                format!(
+                    "'{}()' may produce IEEE-754 NaN as an error sentinel -- \
+                     forbidden in `#[no_nan]` function '{}'.",
+                    name, f.name
+                ),
+            ));
+        }
+        for a in args { walk_expr_for_nan(a, f, diagnostics); }
+        return;
+    }
+    match &expr.kind {
+        TypedExprKind::Binary { left, right, .. } => {
+            walk_expr_for_nan(left, f, diagnostics);
+            walk_expr_for_nan(right, f, diagnostics);
+        }
+        TypedExprKind::Unary { expr: e, .. } | TypedExprKind::Cast { expr: e, .. } => {
+            walk_expr_for_nan(e, f, diagnostics);
+        }
+        TypedExprKind::Index { array, index, .. } => {
+            walk_expr_for_nan(array, f, diagnostics);
+            walk_expr_for_nan(index, f, diagnostics);
+        }
+        TypedExprKind::ArrayLit { elements } | TypedExprKind::Tuple { elements } => {
+            for e in elements { walk_expr_for_nan(e, f, diagnostics); }
+        }
+        TypedExprKind::IfExpr { cond, then_value, else_value } => {
+            walk_expr_for_nan(cond, f, diagnostics);
+            walk_expr_for_nan(then_value, f, diagnostics);
+            walk_expr_for_nan(else_value, f, diagnostics);
+        }
+        TypedExprKind::Block { stmts, tail } => {
+            for s in stmts { walk_stmt_for_nan(s, f, diagnostics); }
+            walk_expr_for_nan(tail, f, diagnostics);
+        }
+        _ => {}
+    }
+}
 /// T2.5 — enforce `#[no_recursion]` strict. Detects direct
 /// self-call OR mutual recursion via cycle in the call graph.
 pub fn enforce_no_recursion(program: &TypedProgram, diagnostics: &mut Vec<Diagnostic>) {
@@ -2129,6 +2264,7 @@ pub struct FnSafetyAttrs {
     pub safety_standard: Option<String>,
     pub no_heap: bool,
     pub no_float: bool,
+    pub no_nan: bool,
     pub no_recursion: bool,
     pub interrupt: bool,
     pub deterministic_timing: bool,
@@ -2152,6 +2288,7 @@ pub fn compute_safety_attrs_report(program: &TypedProgram) -> Vec<FnSafetyAttrs>
             safety_standard: f.safety_standard.clone(),
             no_heap: f.no_heap,
             no_float: f.no_float,
+            no_nan: f.no_nan,
             no_recursion: f.no_recursion,
             interrupt: f.interrupt,
             deterministic_timing: f.deterministic_timing,
@@ -2177,6 +2314,7 @@ pub fn format_safety_attrs_text(report: &[FnSafetyAttrs]) -> String {
         if r.is_pure { attrs.push("pure".to_string()); }
         if r.no_heap { attrs.push("#[no_heap]".to_string()); }
         if r.no_float { attrs.push("#[no_float]".to_string()); }
+        if r.no_nan { attrs.push("#[no_nan]".to_string()); }
         if r.no_recursion { attrs.push("#[no_recursion]".to_string()); }
         if r.interrupt { attrs.push("#[interrupt]".to_string()); }
         if r.deterministic_timing {
@@ -2199,7 +2337,7 @@ pub fn format_safety_attrs_text(report: &[FnSafetyAttrs]) -> String {
         out.push_str(&format!("{}: {}\n", r.name, attr_str));
     }
     let tagged = report.iter().filter(|r| {
-        r.safety_standard.is_some() || r.no_heap || r.no_float
+        r.safety_standard.is_some() || r.no_heap || r.no_float || r.no_nan
             || r.no_recursion || r.interrupt || r.deterministic_timing
             || r.bounded_stack_bytes.is_some() || r.wcet_cycles.is_some()
             || r.bounded_recursion.is_some() || r.is_pure

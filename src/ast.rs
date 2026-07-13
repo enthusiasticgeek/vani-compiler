@@ -636,6 +636,15 @@ pub struct Function {
     /// timing, no IEEE-754 corner cases on a target without
     /// an FPU). Composable with other safety primitives.
     pub no_float: bool,
+    /// T2.4 of the safety-standard alignment arc: set by the
+    /// parser when the function declaration is annotated
+    /// `#[no_nan]`. Rejects builtins DEFINED to produce IEEE-754
+    /// NaN as part of their error contract: `f64_nan` (explicit
+    /// NaN literal) and `vec_kth_smallest` on Vec<f64> (uses
+    /// quiet NaN as the out-of-bounds sentinel). Implied by
+    /// `#[asil_d]`, `#[do178c_level_a]`, `#[iec_61508_sil3]`,
+    /// `#[iec_61508_sil4]`. Composable with `#[no_float]`.
+    pub no_nan: bool,
     /// T2.5 of the safety-standard alignment arc: set by the
     /// parser when the function declaration is annotated
     /// `#[no_recursion]`. Strict variant of the existing

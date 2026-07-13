@@ -76,6 +76,10 @@ pub struct TypedFunction {
     /// `ast::Function::no_float`. Triggers the no-float pass
     /// in `safety::enforce_no_float`.
     pub no_float: bool,
+    /// T2.4 of safety-standard arc: forwarded from
+    /// `ast::Function::no_nan`. Triggers the no-nan pass
+    /// in `safety::enforce_no_nan`.
+    pub no_nan: bool,
     /// T2.5 of safety-standard arc: forwarded from
     /// `ast::Function::no_recursion`. Triggers the
     /// no-recursion pass in `safety::enforce_no_recursion`.

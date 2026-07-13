@@ -1152,6 +1152,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
         // attributes. No env-var global mode for these in v1;
         // strict opt-in via the function annotation.
         crate::safety::enforce_no_float(&typed_program_view, &mut diagnostics);
+        crate::safety::enforce_no_nan(&typed_program_view, &mut diagnostics);
         crate::safety::enforce_no_recursion(&typed_program_view, &mut diagnostics);
         // T2.2 â€” `#[interrupt]` ISR calling convention. Local
         // pass checks for blocking lock acquires + task spawn +
@@ -1924,6 +1925,7 @@ fn lift_closures_in_block(
                         is_extern: false,
                         no_heap: false,
             no_float: false,
+            no_nan: false,
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
@@ -3333,6 +3335,7 @@ fn lift_expr_anon_fn(
                 is_pure: false,
                         no_heap: false,
             no_float: false,
+            no_nan: false,
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
@@ -5509,6 +5512,7 @@ fn hoist_impls_into_functions(
                         recursion_bound: None,
                         no_heap: false,
                         no_float: false,
+                        no_nan: false,
                         no_recursion: false,
                         interrupt: false,
             interrupt_priority: None,
@@ -8416,6 +8420,7 @@ fn check_function(
             recursion_bound: function.recursion_bound,
             no_heap: function.no_heap,
             no_float: function.no_float,
+            no_nan: function.no_nan,
             no_recursion: function.no_recursion,
             interrupt: function.interrupt,
             interrupt_priority: function.interrupt_priority,
@@ -8484,6 +8489,7 @@ fn check_function(
             recursion_bound: None,
             no_heap: false,
             no_float: false,
+            no_nan: false,
             no_recursion: false,
             interrupt: false,
             interrupt_priority: None,
@@ -8754,6 +8760,7 @@ fn check_function(
         recursion_bound: function.recursion_bound,
         no_heap: function.no_heap,
         no_float: function.no_float,
+        no_nan: function.no_nan,
         no_recursion: function.no_recursion,
             interrupt: function.interrupt,
             interrupt_priority: function.interrupt_priority,

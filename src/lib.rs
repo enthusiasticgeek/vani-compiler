@@ -41700,6 +41700,81 @@ função main() -> i64 {
         );
     }
 
+
+    // -----------------------------------------------------------------
+    // T2.4 -- `#[no_nan]` attribute. Rejects builtins DEFINED to
+    // produce IEEE-754 quiet NaN as part of their error contract:
+    //   - f64_nan()               -- the explicit NaN constructor.
+    //   - vec_kth_smallest on Vec<f64> -- returns qNaN on out-of-bounds.
+    // Implied by `#[asil_d]`, `#[do178c_level_a]`, etc.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn no_nan_rejects_f64_nan_call() {
+        let source = r#"
+            #[no_nan]
+            fn bad() -> f64 {
+              let n: f64 = f64_nan();
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_nan] + f64_nan() rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("NaN") && d.message.contains("no_nan")),
+            "expected no_nan diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn no_nan_accepts_regular_f64_arithmetic() {
+        let source = r#"
+            #[no_nan]
+            fn ok(x: f64, y: f64) -> f64 { return x + y; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let _ = compile(source).expect("#[no_nan] + plain f64 arithmetic compiles");
+    }
+
+    #[test]
+    fn no_nan_rejects_vec_kth_smallest_f64() {
+        let source = r#"
+            #[no_nan]
+            fn bad() -> f64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let k: f64 = vec_kth_smallest(ref xs, 1);
+              return k;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[no_nan] + vec_kth_smallest<f64> rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("NaN") && d.message.contains("no_nan")),
+            "expected no_nan diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    #[test]
+    fn asil_d_implies_no_nan_rejects_f64_nan() {
+        let source = r#"
+            #[asil_d]
+            #[bounded_stack(bytes=256)]
+            #[wcet(cycles=1000)]
+            fn bad() -> f64 {
+              let n: f64 = f64_nan();
+              return n;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("#[asil_d] implies #[no_nan]; f64_nan() rejected");
+        assert!(
+            errs.iter().any(|d| d.message.contains("NaN")),
+            "expected no_nan diagnostic via asil_d, got: {:?}",
+            errs
+        );
+    }
     // -----------------------------------------------------------------
     // T2.5 — `#[no_recursion]` strict variant. Stricter than
     // `#[bounded(0)]` because the diagnostic explicitly names
