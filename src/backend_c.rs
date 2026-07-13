@@ -16473,8 +16473,13 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         // Closure #387: vec_swap(mut ref xs, i, j) -> i64.
         "vec_swap" => {
+            let (sn, ct) = match args[0].ty.deref() {
+                Type::Vec(element) => (vec_c_struct(element), c_leaf_type(element).to_string()),
+                _ => ("intent_vec_int64_t".to_string(), "int64_t".to_string()),
+            };
             format!(
-                "({{ intent_vec_int64_t* __vs_xs = ({xs}); int64_t __vs_i = ({i}); int64_t __vs_j = ({j}); int64_t __vs_t = __vs_xs->data[__vs_i]; __vs_xs->data[__vs_i] = __vs_xs->data[__vs_j]; __vs_xs->data[__vs_j] = __vs_t; (int64_t)0; }})",
+                "({{ {sn}* __vs_xs = ({xs}); int64_t __vs_i = ({i}); int64_t __vs_j = ({j}); {ct} __vs_t = __vs_xs->data[__vs_i]; __vs_xs->data[__vs_i] = __vs_xs->data[__vs_j]; __vs_xs->data[__vs_j] = __vs_t; (int64_t)0; }})",
+                sn = sn, ct = ct,
                 xs = emit_expr(&args[0]),
                 i = emit_expr(&args[1]),
                 j = emit_expr(&args[2]),

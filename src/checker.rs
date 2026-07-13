@@ -22028,13 +22028,13 @@ fn check_vec_swap_builtin(
     let xs = check_expr(&args[0], env, signatures, diagnostics);
     let ok = matches!(
         xs.ty(),
-        Type::RefMut(inner) if matches!(&**inner, Type::Vec(el) if matches!(**el, Type::I64))
+        Type::RefMut(inner) if matches!(&**inner, Type::Vec(el) if matches!(**el, Type::I64 | Type::F64))
     );
     if !ok {
         diagnostics.push(Diagnostic::new(
             args[0].span,
             format!(
-                "vec_swap() arg 0 must be `mut ref Vec<i64>`, got {}",
+                "vec_swap() arg 0 must be `mut ref Vec<i64>` or `mut ref Vec<f64>`, got {}",
                 xs.ty()
             ),
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));

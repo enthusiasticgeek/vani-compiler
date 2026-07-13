@@ -20070,6 +20070,35 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn vec_swap_f64_typechecks() {
+        // F64-4: vec_swap / xs.swap should work on Vec<f64>.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0, 3.0);
+              vec_swap(mut ref xs, 0, 2);
+              xs.swap(0, 1);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("vec_swap on Vec<f64> must type-check");
+        compile_to_llvm(source).expect("vec_swap on Vec<f64> must compile to LLVM");
+    }
+
+    #[test]
+    fn vec_swap_f64_rejects_wrong_type() {
+        // vec_swap on a plain Vec<f64> (not mut ref) must still fail.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<f64> = vec(1.0, 2.0);
+              vec_swap(xs, 0, 1);
+              return 0;
+            }
+        "#;
+        assert!(compile_to_c(source).is_err(),
+            "vec_swap on Vec<f64> must require mut ref");
+    }
+
+    #[test]
     fn vec_set_ops_typecheck_and_compile() {
         // Closure #407: vec_intersect / vec_difference / vec_union.
         let source = r#"

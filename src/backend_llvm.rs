@@ -7018,39 +7018,48 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // Closure #387: vec_swap(mut ref xs, i, j) -> i64.
             // Inline 3-step swap via the Vec's data pointer.
             if name == "vec_swap" {
+                let is_f64 = matches!(
+                    vec_element_of_first_arg(args).as_ref(),
+                    Some(Type::F64)
+                );
+                let (svty, elt, elp, elpp) = if is_f64 {
+                    ("%intent_vec_double", "double", "double*", "double**")
+                } else {
+                    ("%intent_vec_i64", "i64", "i64*", "i64**")
+                };
                 let xs = emit_expr(&args[0], ctx, out);
                 let i = emit_expr(&args[1], ctx, out);
                 let j = emit_expr(&args[2], ctx, out);
                 let dp = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_vec_i64, %intent_vec_i64* {}, i32 0, i32 0\n",
-                    dp, xs
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    dp, svty, svty, xs
                 ));
                 let data = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load i64*, i64** {}\n", data, dp
+                    "  {} = load {}, {} {}\n", data, elp, elpp, dp
                 ));
                 let ip = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr i64, i64* {}, i64 {}\n", ip, data, i
+                    "  {} = getelementptr {}, {} {}, i64 {}\n", ip, elt, elp, data, i
                 ));
                 let jp = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr i64, i64* {}, i64 {}\n", jp, data, j
+                    "  {} = getelementptr {}, {} {}, i64 {}\n", jp, elt, elp, data, j
                 ));
                 let vi = ctx.fresh_tmp();
                 let vj = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load i64, i64* {}\n", vi, ip
+                    "  {} = load {}, {} {}\n", vi, elt, elp, ip
                 ));
                 out.push_str(&format!(
-                    "  {} = load i64, i64* {}\n", vj, jp
+                    "  {} = load {}, {} {}\n", vj, elt, elp, jp
                 ));
                 out.push_str(&format!(
-                    "  store i64 {}, i64* {}\n", vj, ip
+                    "  store {} {}, {} {}\n", elt, vj, elp, ip
                 ));
                 out.push_str(&format!(
-                    "  store i64 {}, i64* {}\n", vi, jp
+                    "  store {} {}, {} {}\n", elt, vi, elp, jp
                 ));
                 return "0".to_string();
             }
