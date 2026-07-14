@@ -2621,6 +2621,9 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
             if var == name { false } else { expr_mentions_var(body, name) }
         }
         ExprKind::AnonFn { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
+        ExprKind::IndirectCall { callee, args } => {
+            expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))
+        }
     }
 }
 
@@ -2830,6 +2833,12 @@ fn walk_expr_for_captures(
             // Nested anon fns are lifted independently; their
             // own captures aren't ours to track.
         }
+        ExprKind::IndirectCall { callee, args } => {
+            walk_expr_for_captures(callee, bound, env, top_level_names, captures, seen);
+            for a in args {
+                walk_expr_for_captures(a, bound, env, top_level_names, captures, seen);
+            }
+        }
     }
 }
 
@@ -3030,6 +3039,12 @@ fn rename_vars_in_expr(
                 rename_vars_in_expr(body, rename);
             }
         }
+        ExprKind::IndirectCall { callee, args } => {
+            rename_vars_in_expr(callee, rename);
+            for a in args {
+                rename_vars_in_expr(a, rename);
+            }
+        }
         ExprKind::AnonFn { .. } => {}
     }
 }
@@ -3226,6 +3241,12 @@ fn rewrite_closure_calls_in_expr(
         }
         ExprKind::Forall { body, .. } => {
             rewrite_closure_calls_in_expr(body, closures);
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            rewrite_closure_calls_in_expr(callee, closures);
+            for a in args {
+                rewrite_closure_calls_in_expr(a, closures);
+            }
         }
         ExprKind::AnonFn { .. } => {}
     }
@@ -3432,6 +3453,12 @@ fn lift_expr_anon_fn(
         }
         ExprKind::Forall { body, .. } => {
             lift_expr_anon_fn(body, counter, hoisted);
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            lift_expr_anon_fn(callee, counter, hoisted);
+            for a in args {
+                lift_expr_anon_fn(a, counter, hoisted);
+            }
         }
     }
 }
@@ -4665,6 +4692,12 @@ fn resolve_enum_types_in_expr(
             resolve_enum_types_in_type(ty, enums);
             resolve_enum_types_in_expr(body, enums);
         }
+        ExprKind::IndirectCall { callee, args } => {
+            resolve_enum_types_in_expr(callee, enums);
+            for a in args {
+                resolve_enum_types_in_expr(a, enums);
+            }
+        }
     }
 }
 
@@ -5061,6 +5094,12 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
         ExprKind::Forall { ty, body, .. } => {
             sub_aliases_in_type(ty, aliases);
             sub_aliases_in_expr(body, aliases);
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            sub_aliases_in_expr(callee, aliases);
+            for a in args {
+                sub_aliases_in_expr(a, aliases);
+            }
         }
     }
 }
@@ -7406,6 +7445,10 @@ fn expand_blanket_impls(
                         method_span: *method_span,
                         args: args.iter().map(|a| subst_expr(a, param, concrete)).collect(),
                     },
+                    ExprKind::IndirectCall { callee, args } => ExprKind::IndirectCall {
+                        callee: Box::new(subst_expr(callee, param, concrete)),
+                        args: args.iter().map(|a| subst_expr(a, param, concrete)).collect(),
+                    },
                     other => other.clone(),
                 };
                 crate::ast::Expr { kind: new_kind, span: expr.span }
@@ -9139,6 +9182,12 @@ fn walk_branch_mutations_in_expr(
         }
         ExprKind::Forall { body, .. } => {
             walk_branch_mutations_in_expr(body, out);
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            walk_branch_mutations_in_expr(callee, out);
+            for a in args {
+                walk_branch_mutations_in_expr(a, out);
+            }
         }
         ExprKind::AnonFn { .. } => {
             // Anon fn body is lifted to a top-level fn before
@@ -13764,6 +13813,52 @@ fn check_expr(
         }
         ExprKind::Call { name, name_span, args, .. } => {
             check_call(name, *name_span, args, env, signatures, expr.span, diagnostics)
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            let callee_checked = check_expr(callee, env, signatures, diagnostics);
+            let callee_ty = callee_checked.ty().clone();
+            let (param_types, ret_ty): (Vec<Type>, Type) = match &callee_ty {
+                Type::FnPtr(params, ret) => (params.clone(), (**ret).clone()),
+                Type::Closure(params, ret) => (params.clone(), (**ret).clone()),
+                other => {
+                    diagnostics.push(Diagnostic::new(
+                        callee.span,
+                        format!(
+                            "indirect call: expected a fn(…)->T or Closure(…,T) value, got {}",
+                            other
+                        ),
+                    ));
+                    return CheckedExpr::fallback_integer(expr.span);
+                }
+            };
+            if args.len() != param_types.len() {
+                diagnostics.push(Diagnostic::new(
+                    expr.span,
+                    format!(
+                        "indirect call: {} arguments given, {} expected",
+                        args.len(),
+                        param_types.len()
+                    ),
+                ));
+                return CheckedExpr::fallback_integer(expr.span);
+            }
+            let typed_args: Vec<TypedExpr> = args
+                .iter()
+                .zip(param_types.iter())
+                .map(|(arg, expected)| {
+                    let checked = check_expr(arg, env, signatures, diagnostics);
+                    coerce_checked(checked, expected, arg.span, "indirect call argument", diagnostics).expr
+                })
+                .collect();
+            CheckedExpr::new(
+                TypedExprKind::CallIndirect {
+                    callee: Box::new(callee_checked.expr),
+                    args: typed_args,
+                },
+                ret_ty,
+                None,
+                expr.span,
+            )
         }
         ExprKind::MethodCall { receiver, method, method_span, args } => {
             // T1.3 phase 2b: `EnumName.Variant(payload)` is the
@@ -30345,6 +30440,10 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
                 body: Box::new(substitute_expr(body, &inner_subs)),
             }
         }
+        ExprKind::IndirectCall { callee, args } => ExprKind::IndirectCall {
+            callee: Box::new(substitute_expr(callee, subs)),
+            args: args.iter().map(|a| substitute_expr(a, subs)).collect(),
+        },
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before contract substitution runs.
             unreachable!("AnonFn should have been lifted before substitute_expr")
@@ -30463,6 +30562,9 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
         ExprKind::Forall { var, body, .. } => {
             // The bound variable is locally scoped â€” don't count it.
             if var == name { false } else { expr_mentions(body, name) }
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            expr_mentions(callee, name) || args.iter().any(|a| expr_mentions(a, name))
         }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before fact-tracking analysis runs.
@@ -31384,6 +31486,12 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
                 pin_var_to_version(body, name, version);
             }
         }
+        ExprKind::IndirectCall { callee, args } => {
+            pin_var_to_version(callee, name, version);
+            for a in args {
+                pin_var_to_version(a, name, version);
+            }
+        }
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before SMT version-pinning runs.
             unreachable!("AnonFn should have been lifted before pin_var_to_version")
@@ -32154,6 +32262,10 @@ fn pretty_expr(expr: &Expr) -> String {
                 .map(|p| format!("{}: {}", p.name, p.ty))
                 .collect();
             format!("fn({}) -> {} {{ â€¦ }}", parts.join(", "), return_type)
+        }
+        ExprKind::IndirectCall { callee, args } => {
+            let parts: Vec<String> = args.iter().map(pretty_expr).collect();
+            format!("({})({})", pretty_expr(callee), parts.join(", "))
         }
     }
 }

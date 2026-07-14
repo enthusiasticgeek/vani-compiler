@@ -1168,6 +1168,17 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
             }
             out.push(')');
         }
+        ExprKind::IndirectCall { callee, args } => {
+            format_expr(callee, true, out);
+            out.push('(');
+            for (i, a) in args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                format_expr(a, false, out);
+            }
+            out.push(')');
+        }
         ExprKind::MethodCall { receiver, method, args, .. } => {
             format_expr(receiver, true, out);
             out.push('.');

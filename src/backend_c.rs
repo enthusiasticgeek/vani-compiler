@@ -12366,7 +12366,7 @@ fn while_bounds_hints(cond: &TypedExpr, body: &[TypedStmt]) -> Vec<String> {
         },
         _ => return vec![],
     };
-    let mut vec_names: std::collections::BTreeSet<String> = Default::default();
+    let mut vec_names: std::collections::BTreeMap<String, bool> = Default::default();
     collect_vec_idx_names(body, &loop_var, &mut vec_names);
     if vec_names.is_empty() {
         return vec![];
@@ -12374,19 +12374,24 @@ fn while_bounds_hints(cond: &TypedExpr, body: &[TypedStmt]) -> Vec<String> {
     let upper_str = emit_expr(upper);
     vec_names
         .into_iter()
-        .map(|vn| {
+        .map(|(vn, is_ref)| {
             let local = local_name(&vn);
+            let len_field = if is_ref {
+                format!("{local}->len")
+            } else {
+                format!("{local}.len")
+            };
             if is_le {
                 // j <= upper: max index is upper; abort if upper >= vec.len
                 format!(
-                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi >= (int64_t)({}.len), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi >= (int64_t)({}.len)) __builtin_unreachable(); }}\n",
-                    upper_str, local, local
+                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi >= (int64_t)({}), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi >= (int64_t)({})) __builtin_unreachable(); }}\n",
+                    upper_str, len_field, len_field
                 )
             } else {
                 // j < upper: max index is upper-1; abort if upper > vec.len
                 format!(
-                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi > (int64_t)({}.len), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi > (int64_t)({}.len)) __builtin_unreachable(); }}\n",
-                    upper_str, local, local
+                    "  {{ int64_t _ihi = (int64_t)({}); if (__builtin_expect(_ihi > (int64_t)({}), 0)) {{ fprintf(stderr, \"loop bound out of vec range\\n\"); abort(); }} if (_ihi > (int64_t)({})) __builtin_unreachable(); }}\n",
+                    upper_str, len_field, len_field
                 )
             }
         })
@@ -12396,7 +12401,7 @@ fn while_bounds_hints(cond: &TypedExpr, body: &[TypedStmt]) -> Vec<String> {
 fn collect_vec_idx_names(
     body: &[TypedStmt],
     loop_var: &str,
-    out: &mut std::collections::BTreeSet<String>,
+    out: &mut std::collections::BTreeMap<String, bool>,
 ) {
     use crate::ir::TypedStmt as S;
     for stmt in body {
@@ -12421,25 +12426,29 @@ fn collect_vec_idx_names(
 fn collect_vec_idx_in_expr(
     expr: &TypedExpr,
     loop_var: &str,
-    out: &mut std::collections::BTreeSet<String>,
+    out: &mut std::collections::BTreeMap<String, bool>,
 ) {
     use crate::ir::TypedExprKind as E;
+    use crate::ast::Type;
     match &expr.kind {
         E::Index { array, index, .. } => {
             if let E::Var(vec_name) = &array.kind {
                 if expr_is_loop_var(index, loop_var) {
-                    out.insert(vec_name.clone());
+                    let is_ref = matches!(&array.ty, Type::Ref(_) | Type::RefMut(_));
+                    out.entry(vec_name.clone()).or_insert(is_ref);
                 }
             }
             collect_vec_idx_in_expr(array, loop_var, out);
             collect_vec_idx_in_expr(index, loop_var, out);
         }
         E::Call { name, args, .. } => {
-            // set_mut(mut ref vec, loop_var [as u64], value) — in-place write
+            // set_mut(mut ref vec, loop_var [as u64], value) — in-place write;
+            // the underlying binding is owned (not a pointer) since set_mut
+            // borrows it with `mut ref` at the call site.
             if (name == "set_mut" || name == "set") && args.len() >= 2 {
                 if let E::RefMut { name: vn } | E::Ref { name: vn } = &args[0].kind {
                     if expr_is_loop_var(&args[1], loop_var) {
-                        out.insert(vn.clone());
+                        out.entry(vn.clone()).or_insert(false);
                     }
                 }
             }

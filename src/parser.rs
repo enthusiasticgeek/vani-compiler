@@ -4635,12 +4635,36 @@ impl Parser {
                 // the primary parser wraps Var in an Expr
                 // with its span set to the Ident's span.
                 let name_span = expr.span;
-                let ExprKind::Var(name) = expr.kind else {
-                    return Err(Diagnostic::new(
-                        expr.span,
-                        "only named functions can be called",
-                    ));
-                };
+                // Non-Var callees (e.g. `fs[0](10)`) produce an
+                // IndirectCall node; the checker verifies the callee
+                // type is fn(T…)->R or Closure and lowers to
+                // TypedExprKind::CallIndirect.
+                if !matches!(expr.kind, ExprKind::Var(_)) {
+                    let callee = expr;
+                    let mut iargs = Vec::new();
+                    if !self.check(|kind| matches!(kind, TokenKind::RParen)) {
+                        loop {
+                            iargs.push(self.parse_expr()?);
+                            if self
+                                .match_token(|kind| matches!(kind, TokenKind::Comma))
+                                .is_none()
+                            {
+                                break;
+                            }
+                            if self.check(|k| matches!(k, TokenKind::RParen)) {
+                                break;
+                            }
+                        }
+                    }
+                    let close = self.expect_keyword("')'", |kind| matches!(kind, TokenKind::RParen))?;
+                    let span = name_span.merge(close.span);
+                    expr = Expr {
+                        kind: ExprKind::IndirectCall { callee: Box::new(callee), args: iargs },
+                        span,
+                    };
+                    continue;
+                }
+                let ExprKind::Var(name) = expr.kind else { unreachable!() };
 
                 let mut args = Vec::new();
                 if !self.check(|kind| matches!(kind, TokenKind::RParen)) {

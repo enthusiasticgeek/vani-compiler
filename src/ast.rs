@@ -1741,6 +1741,14 @@ pub enum ExprKind {
         name_span: Span,
         args: Vec<Expr>,
     },
+    /// `callee_expr(args)` where the callee is not a bare identifier —
+    /// e.g. `fs[0](10)` or `get_fn()(42)`. The checker type-checks
+    /// the callee expression, verifies its type is `fn(T…)->R` or
+    /// `Closure(T…,R)`, and lowers to `TypedExprKind::CallIndirect`.
+    IndirectCall {
+        callee: Box<Expr>,
+        args: Vec<Expr>,
+    },
     /// `receiver.method(args)` — desugared by the checker
     /// to a regular `Call` whose name is the mangled
     /// `<TypeName>_<methodName>` and whose first argument

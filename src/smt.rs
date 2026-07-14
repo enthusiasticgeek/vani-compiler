@@ -1520,6 +1520,9 @@ fn encode_expr(
             let body_smt = encode_expr(body, &inner_vars, Some(&Type::Bool), versions)?;
             Ok(format!("(forall (({} {})) {})", var, sort, body_smt))
         }
+        ExprKind::IndirectCall { .. } => Err(EncodeError::Unsupported(
+            "indirect fn call expressions not supported in SMT v1".into(),
+        )),
         ExprKind::AnonFn { .. } => Err(EncodeError::Unsupported(
             "anonymous fn expressions not supported in SMT v1".into(),
         )),
