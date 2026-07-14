@@ -1,7 +1,17 @@
 # vāṇī (वाणी) — the vāṇी compiler & programming language
 
 <p align="center">
-  <img src="vani_logo1.png" alt="vāṇī logo" width=720">
+  <div style="width:720px; aspect-ratio:3/1; overflow:hidden;">
+    <img src="vani_logo1.png"
+         alt="VANI logo"
+         style="
+             width:100%;
+             height:300%;
+             object-fit:cover;
+             object-position:center;
+             transform:translateY(-33.333%);
+         ">
+ </div>
 </p>
 
 <p align="center">
