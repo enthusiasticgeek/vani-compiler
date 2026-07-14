@@ -22,7 +22,7 @@
 
 **Verbose Alternative Natural Interface — code like you speak.**
 
-vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems language with the semantic model of Rust/C++ — static types, affine ownership, LLVM/C codegen, no GC — but a surface that reads left-to-right at speaking pace. It also natively understands 57 human languages via a `// vani-lang:` pragma.
+vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems language with the semantic model of Rust/C++ — static types, affine ownership, LLVM/C codegen, no GC — but a surface that reads left-to-right at speaking pace. It also natively understands 62 human languages via a `// vani-lang:` pragma.
 
 *Familiar terrain, lighter outerwear.* If you've programmed in **C**, the route here should feel **C-scenic** — the same close-to-the-metal view, the same predictable cost, with the guardrails you used to keep in your head now kept by the compiler. If you're at home in **Rust**, the model is more **Rust-ic** than a re-invention — the same affine ownership, second-class references, monomorphized generics, and deterministic drop, dressed in softer punctuation. (These comparisons are descriptive; see *Trademark* below.)
 
@@ -90,9 +90,9 @@ See [INSTALL.md](INSTALL.md) for platform-specific prerequisites (z3, LLVM tools
 
 | Document | Contents |
 |----------|---------|
-| [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) | 40+ lessons: Beginner → Intermediate → Advanced |
+| [Tutorial Book](https://enthusiasticgeek.github.io/vani-compiler/) | 84 lessons: Beginner (25) → Intermediate (37) → Advanced (22) |
 | [Language Manual](docs/language_manual.md) | Types, ownership, control flow, SIMD, FFI, tooling |
-| [Language Coverage](docs/languages.md) | All 57 human-language dialects + verification status |
+| [Language Coverage](docs/languages.md) | All 62 human-language dialects + verification status |
 | [Design Philosophy](docs/philosophy.md) | Why the design is the way it is; comparisons with Rust/C++ |
 | [Safety Standards](tutorials/src/advanced/12_safety_standards.md) | ASIL-D, DO-178C, IEC 61508, MISRA C 2012 compliance |
 | [Benchmarks](benchmarks/README.md) | 12 benchmarks vs C / C++ / Rust — catalogue, methodology, open gaps |
@@ -107,7 +107,7 @@ See [INSTALL.md](INSTALL.md) for platform-specific prerequisites (z3, LLVM tools
 
 ## Contributing
 
-Open an issue or PR. The lexer keyword table is one file — adding or correcting a human-language dialect is a mechanical 6-touchpoint change. Native-speaker corrections for any of the 57 shipped dialects are especially welcome; see [Language Coverage](docs/languages.md) for per-dialect verification status.
+Open an issue or PR. The lexer keyword table is one file — adding or correcting a human-language dialect is a mechanical 6-touchpoint change. Native-speaker corrections for any of the 62 shipped dialects are especially welcome; see [Language Coverage](docs/languages.md) for per-dialect verification status.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) · [ONBOARDING.md](ONBOARDING.md) · [STATUS.md](STATUS.md)
 

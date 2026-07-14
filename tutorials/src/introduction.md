@@ -63,13 +63,13 @@ for step-by-step instructions (Linux / macOS / Windows + WSL2).
 
 ## Tracks
 
-- **[Beginner](beginner/01_hello_world.md)** (12 lessons,
+- **[Beginner](beginner/01_hello_world.md)** (25 lessons,
   ~30 min each) -- the language surface. After this track you can
   read most of the English-keyword example corpus on your own.
-- **[Intermediate](intermediate/01_struct_methods.md)** (12
+- **[Intermediate](intermediate/01_struct_methods.md)** (37
   lessons) -- structs, generics, dyn dispatch, design patterns,
   SMT verification.
-- **[Advanced](advanced/01_async.md)** (10 lessons) -- async,
+- **[Advanced](advanced/01_async.md)** (22 lessons) -- async,
   parallel, embedded, vtable internals, dialect contribution,
   compiler internals.
 
