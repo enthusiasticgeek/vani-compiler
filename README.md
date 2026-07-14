@@ -28,6 +28,8 @@ vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems l
 
 > **Naming.** The CLI binary is **`vanic`** — a contraction of *vāṇī* + *saṃkalaka* (Sanskrit: "assembler / collector"). Other GitHub projects named "vani" are unrelated to this work.
 
+> **Development note.** vāṇī is an experiment in human-directed AI-assisted compiler construction. The language architecture, design decisions, feature roadmap, and safety philosophy were conceived and directed by the author; the implementation was carried out by [Claude](https://claude.ai) (Anthropic) through iterative prompt engineering. This approach lets a single person build a production-grade compiler at a pace that would otherwise require a team — but it also means the codebase is young and bugs are to be expected. **vāṇī is still in its infancy.** Treat it as a research and learning tool, not production-ready infrastructure. Bug reports and contributions are very welcome.
+
 ---
 
 ## In one glance
