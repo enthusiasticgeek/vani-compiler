@@ -12,11 +12,9 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.1.6 (2026-06-21): 18 of 19 entries fully resolved; 1 partially
-> resolved (L13); 4 remain open (L5, L6, L10-macOS, L14). L19 fully closed.**
-> Three safety-analysis scope limitations (L20–L22) were added and subsequently
-> **fully fixed on 2026-07-12**: transitive lock-order detection (L20), ISR mutex
-> detection through helpers (L21), and MISRA 13.2 non-adjacent duplicate args (L22).
+> **At v0.4.5 (2026-07-13): 19 of 19 original entries resolved; L20–L22 added
+> and fixed. Open items: L5 (by design), L6 (by design), L10-macOS (no hardware),
+> L13 (partial — `match` SOV by design), L14 (by design for v1).**
 >
 > | # | Summary | Status |
 > |---|---|---|

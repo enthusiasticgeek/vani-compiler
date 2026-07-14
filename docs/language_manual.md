@@ -9,7 +9,8 @@
 ## Contents
 
 1. [Syntax conventions](#syntax-conventions)
-2. [Types](#types)
+2. [Multilingual keywords](#multilingual-keywords)
+3. [Types](#types)
 3. [Ownership and references](#ownership-and-references)
 4. [Control flow](#control-flow)
 5. [Functions and closures](#functions-and-closures)
@@ -35,6 +36,7 @@
 
 vāṇī accepts multiple spellings for most constructs. All aliases resolve to the
 same AST node — generated code is identical regardless of which form you use.
+The compiler ships 62 dialects across 26 scripts (see §[Multilingual keywords](#multilingual-keywords)).
 
 | Canonical | Accepted aliases |
 |-----------|-----------------|
@@ -48,6 +50,112 @@ Comments: `//` single-line, `/* … */` block (nesting supported).
 
 Human-language aliases are enabled per file with `// vani-lang: hindi` (or any
 supported dialect). See [Language Coverage](languages.md).
+
+---
+
+## Multilingual keywords
+
+vāṇī ships 62 dialects across 26 scripts. The tables below show every
+structural keyword in **English → Sanskrit → Hindi → Marathi**; the same
+pattern extends to all other dialects (see [Language Coverage](languages.md)).
+
+Enable dialect purity per file:
+
+```vani
+// vani-lang: sanskrit
+
+कार्य योग(क: i64, ख: i64) -> i64 { पुनरागम क + ख; }
+```
+
+### Declarations and visibility
+
+| English | Sanskrit (*saṁskṛta*) | Hindi (*hindī*) | Marathi (*marāṭhī*) |
+|---------|----------------------|-----------------|---------------------|
+| `fn` | `कार्य` *kārya* | `फलन` *phalan* | `कार्य` *kārya* |
+| `let` / `assign` | `माना` *mānā* | `माना` *mānā* | `मान` *māna* |
+| `struct` | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* | `संरचना` *saṁracanā* |
+| `enum` | `विकल्प` *vikalpa* | `गणन` *gaṇan* | `गणन` *gaṇan* |
+| `const` | `स्थिर` *sthira* | `स्थिर` *sthira* | `स्थिर` *sthira* |
+| `pub` / `public` | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* | `सार्वजनिक` *sārvajanik* |
+| `module` / `mod` | `खण्ड` *khaṇḍa* | `मॉड्यूल` *mōḍyūla* | `मॉड्यूल` *mōḍyūla* |
+| `use` | `उपयोग` *upayog* | `उपयोग` *upayog* | `उपयोग` *upayog* |
+| `extern` | `बाह्य` *bāhya* | `बाह्य` *bāhya* | `बाह्य` *bāhya* |
+| `interface` / `trait` | `संकेत` *saṅket* | `संकेत` *saṅket* | `संकेत` *saṅket* |
+| `implement` / `impl` | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* | `कार्यान्वित` *kāryānvit* |
+| `where` | `यत्र` *yatra* | `जहाँ` *jahāṃ* | `जिथे` *jithe* |
+| `is` | `अस्ति` *asti* | `है` *hai* | `आहे` *āhe* |
+
+### Control flow
+
+| English | Sanskrit | Hindi | Marathi |
+|---------|----------|-------|---------|
+| `return` / `give` | `पुनरागम` *punarāgama* | `लौटाओ` *lauṭāo* | `परत` *parat* |
+| `if` | `यदि` *yadi* | `अगर` *agar* | `जर` *jar* |
+| `else` | `अन्यथा` *anyathā* | `नहीं तो` *nahīṁ to* | `नाहीतर` *nāhītar* |
+| `while` | `यावत्` *yāvat* | `जबतक` *jab tak* | `जोपर्यंत` *jopar­yaṃta* |
+| `for` | `प्रति` *prati* | `के लिए` *ke liye* | `साठी` *sāṭhī* |
+| `from` | `से` *se* | `से` *se* | `से` *se* |
+| `to` | `तक` *tak* | `तक` *tak* | `तक` *tak* |
+| `break` | `विराम` *virāma* | `रुको` *ruko* | `थांब` *thāmba* |
+| `continue` | `अग्रे` *agre* | `आगे` *āge* | `पुढे` *puḍhe* |
+| `match` | `मेल` *mela* | `मिलान` *milān* | `जुळवा` *juḷvā* |
+| `then` | `तदा` *tadā* | `तो` *to* | `तर` *tar* |
+
+### References and mutation
+
+| English | Sanskrit | Hindi | Marathi |
+|---------|----------|-------|---------|
+| `ref` | `दृष्ट्या` *dṛṣṭyā* | `देखो` *dekho* | `पहा` *pahā* |
+| `mut` | `परिवर्तनीय` *parivartanīya* | `परिवर्तनीय` *parivartanīya* | `बदल` *badla* |
+
+### Verification
+
+| English | Sanskrit | Hindi | Marathi |
+|---------|----------|-------|---------|
+| `requires` | `अपेक्षित` *apekṣita* | `चाहिए` *cāhiye* | `पाहिजे` *pāhije* |
+| `ensures` | `सुनिश्चयित` *sunishcayita* | `निश्चित` *nishcit* | `निश्चित` *nishcit* |
+| `prove` | `प्रमाण` *pramāṇa* | `सिद्ध करो` *siddha karo* | `सिद्ध करा` *siddha karā* |
+| `assert` | `सिद्धम्` *siddham* | `सुनिश्चित` *sunishcit* | `खात्री` *khātrī* |
+| `invariant` | `अपरिवर्तनीय` *aparivartanīya* | `अपरिवर्तनीय` | `अपरिवर्तनीय` |
+
+### Concurrency
+
+| English | Sanskrit | Hindi | Marathi |
+|---------|----------|-------|---------|
+| `parallel` | `समानांतर` *samānāntara* | `समानांतर` *samānāntara* | `समानांतर` *samānāntara* |
+| `reduce` | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* | `संक्षेप` *saṁkṣepa* |
+| `task` | `नियोग` *niyog* | `नियोग` *niyog* | `नियोग` *niyog* |
+| `join` | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* | `संयोजन` *saṁyojan* |
+
+### Devanagari type names
+
+| English type | Devanagari | Romanization |
+|-------------|-----------|--------------|
+| `i64` | `पूर्णांक` | *pūrṇāṃka* |
+| `f64` | `दशांश` | *daśāṃśa* |
+| `bool` | `तर्क` | *tarka* |
+| `Vec` | `सूची` | *sūcī* |
+| `i8`/`i16`/`i32` | `पूर्णांक८`/`१६`/`३२` | width-explicit |
+| `u8`…`u64` | `अहस्ताक्षरित८`…`६४` | unsigned |
+
+Integer and float literals accept Devanagari digits `०–९` (U+0966–U+096F).
+`५ * २` parses as `5 * 2`; `३.१४` as the f64 `3.14`.
+
+### SOV (verb-final) statement shapes
+
+For Sanskrit / Hindi / Marathi, the parser accepts **verb-at-end order**
+alongside keyword-first:
+
+| Construct | Keyword-first | SOV form |
+|-----------|--------------|----------|
+| `let` | `माना x: i64 = 5;` | `x: i64 = 5 माना;` |
+| `return` | `पुनरागम x;` | `x पुनरागम;` |
+| `print` | `लिख x;` | `x लिख;` |
+| `prove` | `प्रमाण expr;` | `expr प्रमाण;` |
+| range `for` | — | `i प्रति 0 से 3 तक { … }` |
+
+Top-level `fn` / `struct` / `enum` declarations remain keyword-first (SOV
+there would feel forced). `match` SOV is available inside SOV-let.
 
 ---
 
@@ -204,6 +312,16 @@ implement Drawable for Point {
 | `sort(mut ref xs)` | in-place | `Vec<i64>` and `Vec<f64>` |
 | `vec_kth_smallest(ref xs, k)` | `-> T` | returns -1 / qNaN on OOB |
 | `HashMap<K, V>` | | `hashmap_new/insert/get/remove` |
+| `HashSet<T>` | | `hashset_new/insert/contains/remove` |
+| `BTreeMap<K, V>` | | sorted map; `btreemap_range_keys/values` |
+| `BTreeSet<T>` | | sorted set; range queries |
+| `BinaryHeap<T>` | | `heap_push/pop/peek`; max-heap |
+| `Deque<T>` | | ring buffer; `deque_push_front/push_back/pop_front/pop_back` |
+| `Graph` | | weighted directed; BFS/DFS/Dijkstra/A*/topo/Kruskal/Prim |
+| `Bst<T>` | | AVL self-balancing BST; insert/delete/contains |
+| `SkipList<T>` | | probabilistic sorted list; `skiplist_insert/remove/max` |
+| `UnionFind` | | path-compression + union-by-rank; `uf_new/union/find` |
+| `BloomFilter` | | probabilistic membership; `bloom_insert/contains` |
 
 ---
 
@@ -427,6 +545,14 @@ vanic tokens  prog.vani                  # token stream
 vanic lsp                                # Language Server (stdio)
 vanic coverage prog.vani                 # MC/DC coverage map
 vanic safety-attrs prog.vani             # list active safety attributes
+
+# Package manager (Kosh)
+vanic add foo@^1.0                       # fetch from Kosh registry → vendor/foo/
+vanic remove foo                         # remove dep + vendor dir
+vanic vendor                             # copy all deps into vendor/
+vanic search query                       # search registry by name
+vanic update                             # re-resolve deps to latest compatible
+vanic publish                            # build tarball + create GitHub Release
 ```
 
 **Editor integration:** Build `intent-lsp` (`cargo build --release --bin intent-lsp`)

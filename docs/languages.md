@@ -1,6 +1,6 @@
 # vāṇī — Global Language Coverage
 
-vāṇī supports 57 human languages via a per-file pragma:
+vāṇī supports 62 dialects across 26 scripts via a per-file pragma:
 
 ```vani
 // vani-lang: hindi

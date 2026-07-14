@@ -105,7 +105,7 @@ safety-critical, performance-sensitive, long-lived codebase.
 | Error handling | `Result<T,E>` + `?` | `Result<T,E>` + `try` (or `?`) |
 | Verification | None built-in | Z3 SMT: `requires` / `ensures` / `prove` |
 | Safety attrs | None | `#[asil_d]`, `#[no_nan]`, `#[wcet]`, … |
-| Multilingual | No | 57 human languages via `// vani-lang:` |
+| Multilingual | No | 62 dialects across 26 scripts via `// vani-lang:` |
 | C backend | No | Yes (via `--backend=c` or `emit-c`) |
 
 vāṇī is an independent project with no affiliation with the Rust project or
