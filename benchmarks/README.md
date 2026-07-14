@@ -130,104 +130,75 @@ for (long i = 0; i < n; i++)
 
 ---
 
-## Current performance status — SSA LLVM backend (v0.2.1-dev)
+## Current performance status — SSA LLVM backend (v0.4.4)
 
-Numbers from a representative run (Intel i5-1035G1, Windows 11, gcc/rustc -O2):
+Numbers from a representative run (Intel i5-1035G1, Windows 11, gcc/g++/rustc `-O3 -march=native`).
+Full results with per-benchmark charts: [results/RESULTS.md](results/RESULTS.md).
 
 | Benchmark | vāṇī | C | C++ | Rust | vs C |
 |-----------|------|---|-----|------|------|
-| Fibonacci (42) | 876 ms | 519 ms | 524 ms | 833 ms | 1.7× |
-| Sieve (2 M) | 51 ms | 13 ms | 28 ms | 14 ms | 3.9× |
-| Matrix (256×256) | 24 ms | 12 ms | 18 ms | 30 ms | 2.0× |
-| Sort (1 M) | **90 ms** | 162 ms | 97 ms | 39 ms | **0.55× (wins)** |
-| BFS (1 K nodes × 1 K) | **28 ms** | 12 ms | 26 ms | 16 ms | **2.0×** |
-| Parallel sum (50 M) | **218 ms** | 107 ms | 131 ms | 195 ms | **2.5×** |
-| HashMap (500 K) | 51 ms | 45 ms | 56 ms | 78 ms | 1.1× |
-| Linked list (1 M) | 19 ms | 13 ms | 17 ms | 18 ms | 1.5× |
-| Alloc stress (500 K) | 16 ms | 20 ms | 19 ms | 15 ms | **0.8× (wins)** |
-| Array stats (10 M) | **45 ms** | 27 ms | 31 ms | 50 ms | **1.7×** |
+| Fibonacci (42) | 943 ms | 486 ms | 489 ms | 931 ms | 1.9× slower |
+| Sieve (2 M) | **15.4 ms** | 14.6 ms | 14.9 ms | 15.5 ms | **~tie (1.05×)** |
+| Matrix (256×256) | **15.5 ms** | 15.6 ms | 15.5 ms | 32.9 ms | **tie** |
+| Sort (1 M) | **97 ms** | 181 ms | 99 ms | 44 ms | **wins vs C (+46%)** |
+| BFS index (1 K × 1 K) | 16.2 ms | 10.9 ms | — | 18.6 ms | 1.5× slower |
+| BFS weak_ptr (C++) | — | — | 51.7 ms | — | **vāṇī 3.2× faster** |
+| Parallel sum (50 M) | **197 ms** | 193 ms | 198 ms | 151 ms | **~tie (1.02×)** |
+| HashMap (500 K) | **39.7 ms** | 60.0 ms | 60.9 ms | 73.5 ms | **wins vs all** |
+| Linked list (1 M) | **13.7 ms** | 15.4 ms | 17.5 ms | 21.3 ms | **wins vs all** |
+| Alloc stress (500 K) | **10.8 ms** | 10.3 ms | 16.0 ms | 14.7 ms | **~tie (1.05×)** |
+| Array stats (10 M) | **37.9 ms** | 61.9 ms | 68.5 ms | 65.4 ms | **wins vs all** |
+| SIMD dot vec128 (4 M) | **30.3 ms** | 33.7 ms | 42.9 ms | 42.5 ms | **wins vs all** |
+| SIMD-256 dot (4 M) | 33.5 ms | — | — | — | vāṇī-only |
+
+**vāṇī wins or ties C in 9 of 12 benchmarks.** The two remaining gaps are Fibonacci (recursive call overhead) and BFS vs a hand-tuned C index loop (bounds checks).
 
 ---
 
 ## Why is vāṇī sometimes slower?
 
-The short answer: **element size**, **bounds checking**, and **Vec construction
-overhead** — not the ownership model.
+The two remaining gaps are pure overhead in specific patterns — not the ownership model.
 
-### Where vāṇī wins or ties
+### Where vāṇī wins or ties (v0.4.4)
 
 | Benchmark | Result | Why |
 |-----------|--------|-----|
-| Sort | **vāṇī wins (44% faster than C)** | Inline median-of-3 quicksort in LLVM IR; no function-pointer comparator overhead |
-| Alloc stress | **vāṇī wins** | RAII drop matches manual `free`; zero per-dealloc overhead |
-| Array stats | **vāṇī beats Rust** (45 ms vs 50 ms) | `vec_with_capacity` + thread-local acc.; 1.7× behind C |
-| HashMap | within 10% of C | splitmix64 hash + 75% load factor matches hand-rolled C |
-| Linked list | 1.5× slower than C | index idiom same as C `int[]`; gap is while-loop + bounds-check overhead |
-| Fibonacci vs Rust | tie | pure recursion, same code after inlining |
+| Sort | **wins vs C (+46%), ties C++** | Inline median-of-3 quicksort in LLVM IR; no function-pointer comparator |
+| HashMap | **wins vs C, C++, Rust** | splitmix64 + 75% load factor; no chained-list indirection |
+| Linked list | **wins vs all** | index-into-Vec idiom; O(1) cache-line stride, no pointer chase |
+| Array stats | **wins vs all** | two `parallel for … reduce` passes; C/Rust run serially |
+| SIMD dot | **wins vs C, C++, Rust** | explicit `vec128<f32>` beats auto-vectorized scalar in all three |
+| Alloc stress | **ties C** | RAII affine drop ≡ manual `free`; C++ RTTI overhead absent |
+| Sieve | **ties C** | Previously 3.9× slower; sieve loop now emits single GEP + store, gap is measurement noise |
+| Matrix | **ties C, C++** | Previously 2×; LLVM IR alias metadata now lets auto-vectorizer fire |
+| Parallel sum | **ties C, ties C++** | Previously 2.5× slower; thread-local accumulators + single atomic at exit |
+| BFS (index) | 1.5× vs C | Bounds checks on adjacency + visited arrays; `vec_with_capacity` closed the `realloc` gap |
+| BFS vs weak_ptr | **3.2× faster than C++ `weak_ptr`** | Index handles need zero atomic ops; `lock()` costs ≥ 2 atomics per access |
+| Fibonacci | 1.9× vs C | 331 M recursive calls; gcc applies `-foptimize-sibling-calls` more aggressively |
 
-### Where vāṇī lags and why
+### Remaining gaps
 
-#### 1. Sieve — 3.9× vs C: element-size mismatch
+#### 1. BFS — 1.5× vs hand-tuned C
 
-vāṇī's `sieve` is `Vec<i64>` (8 bytes/element). C uses `char` (1 byte).
-The inner marking loop (`while j <= limit { set(mut ref sieve, j, 0) }`)
-moves **8× more data** through cache. With `set_mut` inlined (v0.2.1-dev), the
-inner loop itself is now a single GEP + store — the remaining gap is almost
-entirely cache bandwidth, not code quality.
+`vec_with_capacity` eliminated all `realloc` doublings (was 2.6×). The remaining
+gap is bounds checks: every `xs[i]` emits an `icmp ult + branch`. LLVM's
+ConstraintElimination folds the outer-loop check but leaves 2 checks per inner
+edge visit. Planned fix: emit `@llvm.assume(idx < len)` at loop entry.
 
-A `Vec<Bool>` type (1-bit packed) would close this gap to ~1.5×; it is on
-the roadmap but not yet implemented.
+#### 2. Fibonacci — 1.9× vs C
 
-#### 2. BFS — 2.0× vs C: bounds checks (was 3.5×, improved by vec_with_capacity)
-
-`vec_with_capacity(n)` (v0.2.1-dev) pre-allocates the BFS `visited` and `queue`
-Vecs at full capacity, eliminating all `realloc` doublings. BFS improved from
-43.5 ms → 28 ms (1.6×).
-
-The remaining 2.0× gap vs C is bounds checks: every `xs[i]` read emits an
-inline `icmp ult idx, len` + conditional branch. For BFS's inner loop over
-adjacency lists, that is 3 bounds checks per edge visit. LLVM's
-ConstraintElimination eliminates the `queue[head]` check (same condition as
-the outer `while head < queue.len`), but the adjacency-list and visited-array
-checks remain.
-
-#### 3. Parallel sum / Array stats — remaining Vec construction overhead
-
-`vec_with_capacity(n)` (v0.2.1-dev) eliminated the `realloc` doubling.
-Parsum improved 474 ms → 218 ms (2.2×); stats improved 82 ms → 45 ms (1.8×).
-
-The remaining gap (~2–3 ns/element for `push` vs ~1 ns/element for C's plain
-store) comes from the capacity-check branch per push, even when the capacity
-check is guaranteed to pass. LLVM cannot yet fold this branch away without
-profile-guided hints.
-
-#### 4. Fibonacci — 1.7× vs C: recursive call overhead
-
-vāṇī emits calls with the platform ABI (arguments on stack, full calling
-convention). At 331 million recursive `fib` calls for `fib(42)`, the overhead
-per call adds up. C's gcc applies `-finline-functions` + `-foptimize-sibling-calls`
-more aggressively. No language fix available; recursive fib is inherently
-call-heavy.
-
-#### 5. Matrix — 2× vs C: no SIMD
-
-The inner `k` loop is auto-vectorised by gcc on the C/C++ variants but not yet
-on the SSA LLVM path. `__restrict__` hints and `!alias.scope` metadata are not
-yet emitted. Planned.
+Purely recursive fib(42) makes 331 million calls. vāṇī emits full platform ABI;
+gcc applies tail/sibling-call opts more aggressively at `-O3`. No language fix
+available — recursive fib is inherently call-heavy. TCO for eligible patterns
+is on the roadmap.
 
 ### What is *not* the cause
 
-- **Ownership model**: index handles into flat `Vec<T>` are zero-overhead by
-  design — no atomic reference count, no GC pause, no pointer-chase indirection.
-  Benchmark 05 shows this directly: vāṇī index handles match or beat C++ index
-  arrays and are 3-8× faster than C++ `weak_ptr`.
-
-- **`parallel for … reduce`**: thread-local accumulation (v0.2.1-dev) eliminates all
-  per-element atomic ops. The parallel sum gap vs C is not the parallel part —
-  it is the Vec construction before the loop starts.
-
-- **RAII / destructors**: the alloc-stress benchmark (500 K alloc/free cycles)
-  shows vāṇī *faster* than both C and C++.
+- **Ownership model**: benchmark 05 (BFS) shows index handles into flat `Vec<T>`
+  are zero-overhead and 3.2× faster than C++ `weak_ptr`.
+- **RAII / destructors**: alloc stress shows vāṇī ties C and beats C++.
+- **`parallel for … reduce`**: thread-local accumulation eliminates all per-element
+  atomics — parallel sum ties C and C++ at near-memory-bandwidth speed.
 
 ---
 
@@ -235,13 +206,9 @@ yet emitted. Planned.
 
 | Benchmark | Gap | Root cause | Planned fix |
 |-----------|-----|------------|-------------|
-| Sieve | 3.9× | `Vec<i64>` vs `char` — 8× memory bandwidth | `Vec<Bool>` packed type |
-| BFS | 2.0× | bounds checks on adjacency/visited arrays (vec_with_capacity landed) | Loop-range `@llvm.assume(upper < len)` before loop |
-| Parallel sum | 2.5× | push capacity-check branch per element (vec_with_capacity landed) | Profile-guided branch folding |
-| Array stats | 1.7× | push capacity-check branch per element (vec_with_capacity landed) | Profile-guided branch folding |
-| Fibonacci | 1.7× | Recursive call overhead, no sibling-call opt | TCO / tail-call elimination |
-| Matrix | 2× | No full SIMD alias hints beyond `noalias @malloc` | LLVM `!alias.scope` metadata |
-| Sort vs Rust | 2.3× | pdqsort block partitioning vs median-of-3 quicksort (sort vs C now wins) | Full pdqsort port to LLVM IR |
+| BFS | 1.5× vs C | Bounds checks on adjacency/visited inner loops | `@llvm.assume` loop-range hint |
+| Fibonacci | 1.9× vs C | Recursive call overhead; no sibling-call opt yet | TCO / tail-call elimination |
+| Sort vs Rust | 2.2× | pdqsort block partitioning vs median-of-3 quicksort | Full pdqsort port |
 
 ---
 

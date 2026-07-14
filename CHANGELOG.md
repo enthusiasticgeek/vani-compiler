@@ -6,6 +6,23 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.4.5] — 2026-07-13
+
+### Changed
+
+- **README.md** — restored C-scenic / Rust-ic introduction paragraph and full
+  Trademark section (unregistered common-law marks + third-party marks notice).
+  Added naming/disambiguation note for the `vanic` CLI binary.
+- **`benchmarks/README.md`** — updated performance table to v0.4.5 actuals
+  (fresh 3-run median, `-O3 -march=native`). vāṇī wins or ties C in 9 of 12
+  benchmarks. Rewrote "Where vāṇī wins" and "Open gaps" sections to reflect
+  closed gaps (sieve, matrix, parallel-sum, array-stats, linked-list, hashmap).
+  Removed stale v0.2.1-dev analysis.
+- **`benchmarks/results/RESULTS.md`** — regenerated from fresh 12-benchmark
+  run (2026-07-13 20:17). All 12 benchmarks with bar charts.
+
+---
+
 ## [v0.4.4] — 2026-07-13
 
 ### Changed

@@ -24,6 +24,10 @@
 
 vāṇī (pronounced *vaa-NEE*; Sanskrit वाणी = *speech*) is a systems language with the semantic model of Rust/C++ — static types, affine ownership, LLVM/C codegen, no GC — but a surface that reads left-to-right at speaking pace. It also natively understands 57 human languages via a `// vani-lang:` pragma.
 
+*Familiar terrain, lighter outerwear.* If you've programmed in **C**, the route here should feel **C-scenic** — the same close-to-the-metal view, the same predictable cost, with the guardrails you used to keep in your head now kept by the compiler. If you're at home in **Rust**, the model is more **Rust-ic** than a re-invention — the same affine ownership, second-class references, monomorphized generics, and deterministic drop, dressed in softer punctuation. (These comparisons are descriptive; see *Trademark* below.)
+
+> **Naming.** The CLI binary is **`vanic`** — a contraction of *vāṇī* + *saṃkalaka* (Sanskrit: "assembler / collector"). Other GitHub projects named "vani" are unrelated to this work.
+
 ---
 
 ## In one glance
@@ -107,6 +111,12 @@ Open an issue or PR. The lexer keyword table is one file — adding or correctin
 
 ---
 
-## License
+## License & Trademark
 
-MIT. See [LICENSE](LICENSE). `vāṇī` and `vanic` are project identifiers; other GitHub projects named "vani" are unrelated.
+Released under the [MIT License](LICENSE).
+
+### Trademark
+
+The project name **VANI** (वाणी, *vāṇī*) and the tagline *"code like you speak"* are unregistered common-law marks of The VANI Authors. You may use them to refer to the project ("compatible with VANI", "implementation of VANI") and in good-faith forks. Please don't use them in a way that implies endorsement by the project, or as your own product brand. If in doubt, ask in an issue.
+
+**Third-party marks.** Names such as *Rust*, *C*, *C++*, *LLVM*, *Linux*, *Windows*, *macOS*, *Z3*, *Python*, *Sanskrit*, *Hindi*, *Marathi*, and any others used in comparison or discussion are the marks of their respective owners. References here are descriptive (nominative fair use) and do not imply affiliation, sponsorship, or endorsement. Playful coinages like *"C-scenic"* and *"Rust-ic"* are English wordplay, not adoption of any third-party mark.
