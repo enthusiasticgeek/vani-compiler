@@ -363,6 +363,143 @@ Priority order matches what the packages need first.
 
 ---
 
+## Implementable gaps and bugs (added 2026-07-14)
+
+Sourced from `docs/missing_features.md` audit. All items are within our control —
+no hardware, no external tokens, no grammar consultants required.
+
+---
+
+### Bugs (< 1 h each)
+
+- [ ] **B1. C-backend bounds-check `.len` vs `->len` on `ref Vec<T>` params** (~30 min)
+  Loop-bound guard emits `param.len` instead of `param->len` when the Vec is a
+  reference parameter. `gcc` rejects the generated C. LLVM backend unaffected.
+  Affects any fn taking `ref Vec<T>` whose loop index triggers the bounds-check
+  guard (e.g. `simd_load` / `simd256_load` with non-trivially-bounded index).
+  Fix: detect `ref`-typed Vec params in the C backend bounds-check emitter and
+  emit `->len` instead of `.len`.
+
+- [ ] **B2. `pub use foo::bar as baz` rename re-export** (~30 min)
+  The resolver handles `use foo::bar as baz` (local rename) already.
+  `pub use foo::bar as baz` (re-export with rename) is not wired.
+  Fix: in the `pub use` resolver path, propagate the alias name rather than
+  the original symbol name when an `as` clause is present.
+
+- [ ] **B3. Anonymous fn called inline from Vec slot (`fs[0](10)`)** (~30 min)
+  Checker rejects with "only named functions can be called". The value at `fs[0]`
+  is already typed as `fn(i64)->i64`; the restriction is overly conservative.
+  Fix: in `check_call`, when the callee is an index expression whose type is
+  `Type::Closure` / `Type::FnPtr`, allow the call without requiring a named fn.
+
+---
+
+### Short (2–4 h each)
+
+- [ ] **M1. `if let` / `while let`** (~2 h)
+  Pattern binding is match-only in v1. `if let Opt.Some(v) = expr { … }` and
+  `while let Opt.Some(v) = expr { … }` are ergonomic gaps that real user code hits.
+  Fix: parser desugar to `match expr { Opt.Some(v) then { … } _ then {} }`;
+  checker already handles the resulting match arms.
+
+- [ ] **M2. Or-patterns in match arms** (~2 h)
+  `Opt.Some(1) | Opt.Some(2) then { … }` — each variant currently needs its own arm.
+  Fix: parser accept `|`-separated patterns in a single arm; checker splits into
+  synthetic arms sharing the same body node; exhaustiveness check folds them.
+
+- [ ] **M3. Pattern guards** (~2 h)
+  `Opt.Some(n) if n > 0 then { … }` — conditions inside arms aren't supported.
+  Fix: parser extend match arm to accept optional `if <expr>` after the pattern;
+  checker evaluates the guard as a boolean; SMT can discharge static guards.
+
+- [ ] **M4. `vec512<T>` + `simd512_*` builtins** (~2 h)
+  Identical pattern to `vec256<T>` (SIMD-9, done 2026-07-10). Eight files need
+  a `Type::Vec512(Box<Type>)` variant and 7 builtins: `simd512_splat/load/store/
+  add/sub/mul/reduce_add`. LLVM: `<N x T>` with N=512/bits(T), align 64.
+  C: `T __attribute__((vector_size(64)))`. Maps to AVX-512 `zmm` / SVE-512 /
+  RVV VLEN=512. 2 lib tests + edge-case file.
+
+- [ ] **M5. `OwnedStr` payload bound in match arm returned as `OwnedStr`** (~2 h)
+  Match-arm binding for an `OwnedStr` enum payload is exposed as `Str` (read-only
+  view); returning the binding produces a `Str`-typed arm, mismatching arms that
+  produce `OwnedStr`. Fix: in the checker's match-arm binder, when the payload type
+  is `OwnedStr` and the scrutinee is by-value, bind as `OwnedStr` not `Str`.
+
+- [ ] **M6. Generic type inference from `Vec<T>`-typed argument** (~3 h)
+  Inference supports `Literal / Var / Ref(Var)` at the `T` position but not
+  `Apply(Vec, T)`. `fn foo<T>(xs: Vec<T>) -> T` called with a `Vec<i64>` arg
+  fails to infer `T=i64`. Fix: extend the inference unifier to walk `Apply`
+  constructor arguments recursively.
+
+---
+
+### Medium (4–8 h each)
+
+- [ ] **L1. Slice patterns** (~5 h)
+  `[first, .., last]` destructuring on `Vec<T>` / `[T; N]`. Parser extension to
+  recognise `[pat, .., pat]` in match position; checker binds `first` and `last`
+  to the element type; both backends emit index + length checks; `..` matches
+  zero or more middle elements (no binding in v1).
+
+- [ ] **L2. `#[repr(C)]` / `#[repr(packed)]`** (~4 h)
+  Struct layout is compiler-chosen today. `#[repr(C)]` forces C-ABI field ordering
+  and natural alignment; `#[repr(packed)]` removes padding. C backend: emit
+  `__attribute__((packed))` / already C-ordered. LLVM backend: emit explicit
+  field offsets via `getelementptr` with `!tbaa` metadata; packed structs use
+  `align 1` loads/stores.
+
+- [ ] **L3. `select!` over multiple futures** (~6 h)
+  Cannot wait on "whichever future completes first." Fix: `select { await f1 =>
+  pat { … }, await f2 => pat { … } }` syntax; compiler generates a round-robin
+  poll loop over the listed futures, breaking on the first `Ready`. Integrates
+  with the existing Arc 8 state-machine lowering.
+
+- [ ] **L4. Runtime integer overflow guards** (~6 h)
+  `i64::MAX + 1` silently wraps today — a real safety gap for `#[asil_d]` /
+  `#[do178c_level_a]` code. Fix: emit an `icmp` + conditional branch to a
+  `__vani_overflow_trap` at every `+`, `-`, `*`, `<<` site; then elide via the
+  existing SMT discharge pass when the operand bounds are provably safe. The
+  elision infrastructure already exists; only guard generation is missing.
+
+- [ ] **L5. Closure capturing non-Copy (affine) bindings** (~6 h)
+  Closures currently reject affine captures (`closure_captures_affine`).
+  Fix: introduce move-capture semantics — the closure takes ownership of the
+  captured binding at creation; the original binding is marked moved; the
+  closure's synthesised struct carries a field of the affine type; drop fires
+  on the closure's own scope exit.
+
+---
+
+### Large (dedicated session, 6–12 h each)
+
+- [ ] **XL1. `Vec<bool>` packed type** (~8 h)
+  Add `Type::VecBool`; lexer/parser recognise `Vec<bool>`; checker routes bool
+  element operations; C backend emits a `uint64_t[]` bit-array with
+  `(arr[i/64] >> (i%64)) & 1` get / set; LLVM backend uses `i1` vector with
+  `trunc` / `zext`. Closes the sieve 8× memory-bandwidth gap.
+
+- [ ] **XL2. `vanic test` — built-in test runner** (~8 h)
+  Collect fns annotated `#[test]`; emit a synthesised `main` that calls each,
+  catches assertion failures, and prints a pass/fail summary with elapsed time.
+  `vanic test file.vani` / `vanic test dir/` invocation. Mirrors the
+  cross-backend parity runner already in `run_end_to_end.rs`.
+
+- [ ] **XL3. `Stream<T>` + `for await`** (~10 h)
+  Define `Stream<T>` interface (`fn poll_next(self: mut ref Self) -> Opt<T>`);
+  desugar `for await x in s { … }` to a poll loop; integrate with the Arc 8
+  async state-machine transform so `for await` can appear inside `async fn`.
+
+- [ ] **XL4. Nested monomorphization (multi-pass)** (~10 h)
+  Generic fn calling generic fn currently fails — the monomorphizer is single-pass
+  and only collects `(fn, concrete-type)` pairs from non-generic call sites.
+  Specializations of generic fns that themselves call other generics are never
+  collected. Fix: make the monomorphizer iterate: after generating a round of
+  specializations, scan the new bodies for generic calls, add them to the needed
+  set, and repeat until stable. Regression test:
+  `nested_generic_call_pins_current_behavior` in `src/lib.rs`.
+
+---
+
 ## Blocked (not in our control)
 
 | Item | Blocker |
