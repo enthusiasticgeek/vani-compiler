@@ -1,227 +1,457 @@
-# Benchmark Review Questions for Vani
+I've expanded the checklist into a reviewer-focused benchmark audit document that incorporates the specific observations from the benchmark report.
 
-Use this checklist before publishing benchmark results or comparing Vani against other languages.
+# Benchmark Review & Publication Checklist for Vani
 
----
-
-# 1. Benchmark Fairness
-
-## Algorithms
-
-* [ ] Is every implementation using the exact same algorithm?
-* [ ] Is the asymptotic complexity identical?
-* [ ] Are any language-specific optimizations changing the algorithm?
-* [ ] Is any benchmark comparing different data structures rather than different languages?
-* [ ] Does every implementation produce identical output?
+This document is intended to be used before publishing benchmark results, writing blog posts, or submitting papers. It focuses on the questions experienced compiler engineers and systems programmers are likely to ask.
 
 ---
 
-## Compiler Flags
+# Executive Summary
 
-* [ ] Are all languages compiled with equivalent optimization levels?
-* [ ] Are CPU-specific optimizations enabled equally?
-* [ ] Are link-time optimizations either enabled or disabled consistently?
-* [ ] Are debug checks disabled in release builds?
+The benchmark suite should aim to demonstrate **three different things**, which should never be conflated:
 
----
+1. **Compiler Quality**
 
-## Runtime Environment
+   * Does the compiler generate efficient machine code?
 
-* [ ] Same operating system?
-* [ ] Same compiler versions?
-* [ ] Same LLVM version where applicable?
-* [ ] Same CPU frequency?
-* [ ] Hyper-threading status documented?
-* [ ] CPU governor fixed?
-* [ ] Turbo Boost documented?
-* [ ] Same number of benchmark iterations?
+2. **Library Quality**
+
+   * Are the standard library implementations competitive?
+
+3. **Language Design**
+
+   * Does the language naturally encourage faster, safer, or more cache-friendly designs?
+
+The third category is often the most valuable because it remains true even as compiler optimizations evolve.
 
 ---
 
-# 2. Code Generation
+# Benchmark Classification
 
-Ask for every benchmark:
+## Category A — Compiler Code Generation
 
-* [ ] Is LLVM generating similar assembly?
-* [ ] Are vector instructions emitted?
-* [ ] Are unnecessary bounds checks eliminated?
-* [ ] Is loop unrolling occurring?
-* [ ] Is dead-code elimination affecting results?
-* [ ] Is inlining equivalent?
+Purpose:
 
----
-
-# 3. Library Comparisons
-
-When comparing library performance:
-
-* [ ] Is the comparison really about the language?
-* [ ] Or is it comparing standard library implementations?
-* [ ] Which sorting algorithm is used?
-* [ ] Which hash table implementation is used?
-* [ ] Which allocator is being used?
-* [ ] Is memory preallocated equally?
-
----
-
-# 4. Data Structure Fairness
+> Does LLVM generate code comparable to C/C++?
 
 Examples:
 
-## Graphs
-
-* [ ] Pointer graph?
-* [ ] Index graph?
-* [ ] CSR?
-* [ ] Adjacency list?
-
-Question:
-
-> Am I comparing languages or graph representations?
-
----
-
-## Linked Lists
-
-* [ ] Pointer linked list?
-* [ ] Index linked list?
-
-Question:
-
-> Is the benchmark demonstrating a language feature or a better data structure?
-
----
-
-# 5. Parallel Benchmarks
-
-* [ ] Are all languages using parallel implementations?
-* [ ] Same number of worker threads?
-* [ ] Same scheduling strategy?
-* [ ] Same reduction algorithm?
-* [ ] Same synchronization primitives?
-
-Question:
-
-> Am I comparing serial code against parallel code?
-
----
-
-# 6. SIMD Benchmarks
-
-* [ ] Auto-vectorization?
-* [ ] Explicit SIMD?
-* [ ] Same vector width?
-* [ ] Same instruction set (AVX2, AVX-512, NEON, SVE)?
-* [ ] Memory alignment documented?
-
----
-
-# 7. Memory Allocation
+* Fibonacci
+* Matrix multiplication
+* Sieve
 
 Questions:
 
+* [ ] Is the algorithm identical?
+* [ ] Same loop ordering?
+* [ ] Same recursion?
+* [ ] Same integer widths?
+* [ ] Same compiler optimizations?
+* [ ] Same CPU target?
+
+---
+
+## Category B — Standard Library
+
+Purpose:
+
+> How competitive are the library implementations?
+
+Examples:
+
+* sort()
+* HashMap
+* Vec
+* String
+
+Questions:
+
+* [ ] Which algorithm?
 * [ ] Which allocator?
-* [ ] malloc?
-* [ ] jemalloc?
-* [ ] mimalloc?
-* [ ] tcmalloc?
-* [ ] Language runtime allocator?
-
-Also ask:
-
-* [ ] Number of allocations?
-* [ ] Allocation size?
-* [ ] Object lifetime?
+* [ ] Which hash table implementation?
+* [ ] Same load factor?
+* [ ] Same reserve() behavior?
+* [ ] Same hash function?
 
 ---
 
-# 8. Cache Effects
+## Category C — Language Design
 
-Questions:
+Purpose:
 
-* [ ] Is the workload cache-friendly?
-* [ ] Sequential access?
-* [ ] Random access?
-* [ ] Pointer chasing?
-* [ ] NUMA effects?
-* [ ] Working set size?
-
----
-
-# 9. Safety Costs
-
-Questions:
-
-* [ ] Bounds checking?
-* [ ] Overflow checking?
-* [ ] Reference counting?
-* [ ] Atomic operations?
-* [ ] Borrow checking (compile-time only)?
-* [ ] Runtime ownership costs?
-
----
-
-# 10. What Is Actually Being Measured?
-
-For every benchmark ask:
-
-* [ ] Compiler quality?
-* [ ] Standard library quality?
-* [ ] Runtime quality?
-* [ ] Memory allocator?
-* [ ] Data structure?
-* [ ] Language design?
-* [ ] Programmer ergonomics?
-
----
-
-# 11. Architecture Questions
-
-These are often more valuable than raw timings.
+> Does Vani encourage better programs?
 
 Examples:
 
-* Why does Vani encourage this representation?
-* Does affine ownership eliminate runtime overhead?
-* Can this benchmark exist without `unsafe`?
-* Can users accidentally write a slower representation?
-* Is the fast implementation the idiomatic one?
+* Index handles
+* Ownership
+* Affine borrows
+* Parallel reductions
+* Region typing
+
+These are architectural comparisons rather than compiler comparisons.
 
 ---
 
-# 12. Reviewer Questions
-
-Expect reviewers to ask:
-
-* Why is Rust slower here?
-* Why is C faster here?
-* Are these equivalent algorithms?
-* Can you show the generated assembly?
-* Can you publish the benchmark source?
-* Can the results be reproduced?
-* Are warm-up runs discarded?
-* Are medians reported?
-* What is the variance?
-* What hardware was used?
-* Which compiler versions were used?
+# Benchmark-Specific Review Questions
 
 ---
 
-# 13. Reproducibility Checklist
+# Fibonacci
 
-* [ ] Publish benchmark source code.
-* [ ] Publish compiler versions.
-* [ ] Publish CPU model.
-* [ ] Publish RAM configuration.
-* [ ] Publish operating system.
-* [ ] Publish compiler flags.
-* [ ] Publish benchmark harness.
-* [ ] Publish raw timing data.
-* [ ] Publish generated assembly (optional but recommended).
+Current Results
+
+```text
+C      486 ms
+C++    488 ms
+Rust   930 ms
+Vani   943 ms
+```
+
+Reviewer Questions
+
+* Why is Rust almost identical to Vani?
+* Why is C nearly 2× faster?
+* Is LLVM producing identical assembly?
+* Are recursive calls inlined differently?
+* Are stack frames identical?
+* Is tail-call optimization disabled?
+* Are integer overflow semantics affecting optimization?
+
+Action Items
+
+* [ ] Compare generated assembly.
+* [ ] Verify recursion implementation.
+* [ ] Verify optimization flags.
+* [ ] Verify identical source algorithm.
 
 ---
 
-# 14. Language Design Questions
+# Matrix Multiplication
+
+Current Results
+
+```text
+Vani   15.5 ms
+C      15.6 ms
+C++    15.5 ms
+Rust   32.9 ms
+```
+
+What Looks Good
+
+* LLVM appears to generate C-quality code.
+* Arithmetic-heavy loops are competitive.
+
+Reviewer Questions
+
+Rust normally performs similarly to C for naïve matrix multiplication.
+
+Why is Rust over 2× slower?
+
+Possible explanations:
+
+* bounds checks
+* iterator implementation
+* alias analysis
+* optimization issue
+* benchmark implementation
+* different memory layout
+
+Action Items
+
+* [ ] Compare assembly.
+* [ ] Verify loop ordering.
+* [ ] Verify identical indexing.
+* [ ] Verify cache behavior.
+
+---
+
+# Sieve
+
+Current Results
+
+```text
+Vani 15.4
+C    14.6
+Rust 15.5
+```
+
+Assessment
+
+This is a believable compiler benchmark.
+
+Questions
+
+* Are all arrays contiguous?
+* Is bounds checking removed?
+* Is the implementation identical?
+
+---
+
+# Graph BFS
+
+Current Results
+
+```text
+C                10.9
+Vani             16.2
+Rust             18.6
+C++ index        19.2
+C++ weak_ptr     51.7
+```
+
+This is arguably the strongest benchmark in the suite.
+
+The interesting comparison is **not** against Rust.
+
+It is against **C++ shared_ptr/weak_ptr**.
+
+The benchmark demonstrates that Vani's ownership model encourages an index-based graph representation that avoids:
+
+* reference counting
+* atomic operations
+* pointer chasing
+* weak pointer lock()
+
+This is a language design argument rather than a compiler argument.
+
+Questions
+
+* Is the graph representation documented?
+* Are allocations identical?
+* Is graph density identical?
+* Is traversal order identical?
+
+Recommendation
+
+Rename the benchmark to something like:
+
+> **Index Handles vs shared_ptr/weak_ptr Graphs**
+
+That better reflects what is actually being measured.
+
+---
+
+# Linked List
+
+Current Results
+
+```text
+Vani index list
+Rust pointer list
+```
+
+Reviewer Concern
+
+These are different data structures.
+
+This is **not** a pure language benchmark.
+
+Instead it is comparing:
+
+* contiguous index storage
+* pointer-linked nodes
+
+Recommendation
+
+Rename to:
+
+> Index-based linked list versus pointer-linked list
+
+---
+
+# Sorting
+
+Current Results
+
+```text
+Rust 44 ms
+Vani 97 ms
+```
+
+Assessment
+
+This is believable.
+
+Rust's sort implementation is extremely optimized.
+
+Questions
+
+* introsort?
+* pdqsort?
+* timsort?
+* quicksort?
+* stable or unstable?
+
+Document:
+
+* algorithm
+* implementation
+* stability
+* complexity
+
+---
+
+# HashMap
+
+Current Results
+
+```text
+Vani 39.7
+C    60
+C++  60.9
+Rust 73.5
+```
+
+Potentially impressive.
+
+Reviewer Questions
+
+* robin-hood?
+* SwissTable?
+* quadratic probing?
+* linear probing?
+* SIMD lookup?
+* hash function?
+* load factor?
+* reserve()?
+* collision strategy?
+
+Without this information reviewers cannot interpret the results.
+
+---
+
+# Parallel Sum
+
+Current Results
+
+```text
+Vani parallel for
+
+C OpenMP
+
+Rust std::thread
+```
+
+Good benchmark.
+
+However reviewers will ask:
+
+* same number of threads?
+* same scheduling?
+* same chunk size?
+* same reduction tree?
+
+---
+
+# Array Statistics
+
+Current Results
+
+```text
+Vani parallel
+
+C sequential
+
+Rust sequential
+```
+
+Reviewer Concern
+
+This is comparing:
+
+parallel
+
+vs
+
+serial.
+
+Not languages.
+
+A stronger comparison would include:
+
+* OpenMP
+* Rayon
+* Intel TBB
+
+---
+
+# SIMD
+
+Current Results
+
+Explicit SIMD vs compiler auto-vectorization.
+
+This demonstrates:
+
+* language intrinsics
+* explicit vector programming
+
+Questions
+
+* AVX2?
+* AVX-512?
+* NEON?
+* SVE?
+* aligned loads?
+* fused multiply-add?
+* horizontal reductions?
+
+---
+
+# Allocation Stress
+
+Questions
+
+* Which allocator?
+* malloc?
+* jemalloc?
+* mimalloc?
+* Windows Heap?
+* Rust default allocator?
+
+---
+
+# Strongest Architectural Argument
+
+This statement is more valuable than any timing graph:
+
+> Vani has no weak_ptr equivalent because affine ownership encourages cyclic structures to be represented using integer handles into contiguous storage.
+
+This implies:
+
+* fewer heap allocations
+* no atomic reference counting
+* better cache locality
+* simpler ownership
+* no weak pointer locking
+
+This is a language design contribution.
+
+Emphasize this more than raw benchmark numbers.
+
+---
+
+# Reproducibility Checklist
+
+Publish:
+
+* [ ] Benchmark source
+* [ ] Compiler versions
+* [ ] LLVM version
+* [ ] CPU model
+* [ ] RAM
+* [ ] Operating system
+* [ ] Compiler flags
+* [ ] Raw timings
+* [ ] Median calculation
+* [ ] Number of runs
+* [ ] Generated assembly (recommended)
+
+---
+
+# Questions Every Benchmark Should Answer
 
 Instead of asking:
 
@@ -229,20 +459,30 @@ Instead of asking:
 
 Ask:
 
-* Why is Vani fast?
-* Which language features enable this?
-* Which runtime costs are avoided?
-* Which bugs are prevented?
-* Which optimizations become possible?
-* Which APIs become simpler?
-* Which unsafe code disappears?
+* Why is it faster?
+* Is this compiler quality?
+* Is this library quality?
+* Is this language design?
+* Is this better cache locality?
+* Is this fewer allocations?
+* Is this fewer atomics?
+* Is this better data layout?
+* Is this because of ownership?
+* Is this because of affine borrowing?
 
 ---
 
-# 15. The Most Important Question
+# Final Takeaway
 
-For every benchmark, ask yourself:
+The benchmark suite is strongest when it demonstrates **architectural advantages**, not simply lower execution times.
 
-> **Am I demonstrating that Vani is a faster compiler, a better standard library, or a better language design?**
+The overall message should be:
 
-Keeping those three categories separate makes benchmark results easier to interpret and strengthens the credibility of any performance claims.
+* Vani's LLVM backend generates code that is generally competitive with optimized C and C++.
+* Vani's ownership model encourages data representations (such as contiguous index-based graphs) that can outperform pointer-heavy alternatives.
+* Language features like `parallel for` and reductions make efficient parallel code easier to express.
+* Performance claims are most compelling when they are explained by the language's design rather than by isolated benchmark results.
+
+That narrative is more durable and persuasive than claiming Vani is simply "the fastest" language.
+
+This version is closer to what a performance reviewer or conference reviewer would use. It blends a publication checklist with concrete observations and anticipated criticisms for each benchmark, making it useful both as an internal review document and as guidance for refining our benchmark suite.
