@@ -28607,6 +28607,29 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn top_level_use_of_pub_use_as_rename() {
+        // B2 regression guard: `pub use foo::bar as baz` inside a module
+        // re-exports `bar` under the alias `baz`. A top-level
+        // `use facade::item_a;` then brings `item_a` into scope as a bare
+        // name, so the call `item_a()` must resolve without the `facade::`
+        // qualifier. Closure #254 + closure #245 interaction.
+        let source = r#"
+            module a { pub fn item() -> i64 { return 11; } }
+            module b { pub fn item() -> i64 { return 22; } }
+            module facade {
+              pub use a::item as item_a;
+              pub use b::item as item_b;
+            }
+            use facade::item_a;
+            use facade::item_b;
+            fn main() -> i64 {
+              return item_a() + item_b();
+            }
+        "#;
+        compile(source).expect("top-level use of pub-use-as alias should resolve");
+    }
+
+    #[test]
     fn plain_use_inside_module_does_not_re_export() {
         // Closure #256 added module-local `use foo::bar;` —
         // body-scoped, NOT re-exported. External callers must
