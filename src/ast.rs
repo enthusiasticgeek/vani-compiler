@@ -1678,6 +1678,26 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// `if let Pattern = scrutinee { then_body } [else { else_body }]`
+    /// Sugar for a single-arm match in statement position. M1.
+    IfLet {
+        pattern: Pattern,
+        pattern_span: Span,
+        scrutinee: Expr,
+        then_body: Vec<Stmt>,
+        else_body: Vec<Stmt>,
+        span: Span,
+    },
+    /// `while let Pattern = scrutinee { body }` — loop-while-match. M1.
+    WhileLet {
+        label: Option<String>,
+        pattern: Pattern,
+        pattern_span: Span,
+        scrutinee: Expr,
+        invariants: Vec<Expr>,
+        body: Vec<Stmt>,
+        span: Span,
+    },
 }
 
 impl Stmt {
@@ -1702,7 +1722,9 @@ impl Stmt {
             | Stmt::ForIter { span, .. }
             | Stmt::TaskSpawn { span, .. }
             | Stmt::TaskJoin { span, .. }
-            | Stmt::UnsafeBlock { span, .. } => *span,
+            | Stmt::UnsafeBlock { span, .. }
+            | Stmt::IfLet { span, .. }
+            | Stmt::WhileLet { span, .. } => *span,
         }
     }
 }

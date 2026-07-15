@@ -1,0 +1,37 @@
+// M1: if let / while let pattern binding in statement position.
+enum Opt {
+  None,
+  Some(i64),
+}
+
+fn next_opt(v: i64) -> Opt {
+  if v > 0 {
+    return Opt.Some(v - 1);
+  }
+  return Opt.None;
+}
+
+fn main() -> i64 {
+  // if let with payload binding
+  let a: Opt = Opt.Some(42);
+  if let Opt.Some(n) = a {
+    print n;
+  }
+
+  // if let without payload
+  let b: Opt = Opt.None;
+  if let Opt.None = b {
+    print 0;
+  } else {
+    print 1;
+  }
+
+  // while let: iterate until None
+  let cur: Opt = Opt.Some(3);
+  while let Opt.Some(v) = cur {
+    print v;
+    cur = next_opt(v);
+  }
+
+  return 0;
+}

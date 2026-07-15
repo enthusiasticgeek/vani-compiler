@@ -1483,6 +1483,16 @@ fn compute_indirect_locks(
             Stmt::ForIter { body, .. } => walk_stmts(body, param_names, signatures, out),
             Stmt::TaskSpawn { body, .. } => walk_stmts(body, param_names, signatures, out),
             Stmt::UnsafeBlock { body, .. } => walk_stmts(body, param_names, signatures, out),
+            Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+                walk_expr(scrutinee, param_names, signatures, out);
+                walk_stmts(then_body, param_names, signatures, out);
+                walk_stmts(else_body, param_names, signatures, out);
+            }
+            Stmt::WhileLet { scrutinee, invariants, body, .. } => {
+                walk_expr(scrutinee, param_names, signatures, out);
+                for inv in invariants { walk_expr(inv, param_names, signatures, out); }
+                walk_stmts(body, param_names, signatures, out);
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
         }
     }
@@ -2568,6 +2578,16 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
         }
         S::TaskSpawn { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
         S::UnsafeBlock { body, .. } => body.iter().any(|s| stmt_mentions_var(s, name)),
+        S::IfLet { scrutinee, then_body, else_body, .. } => {
+            expr_mentions_var(scrutinee, name)
+                || then_body.iter().any(|s| stmt_mentions_var(s, name))
+                || else_body.iter().any(|s| stmt_mentions_var(s, name))
+        }
+        S::WhileLet { scrutinee, invariants, body, .. } => {
+            expr_mentions_var(scrutinee, name)
+                || invariants.iter().any(|e| expr_mentions_var(e, name))
+                || body.iter().any(|s| stmt_mentions_var(s, name))
+        }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => false,
     }
 }
@@ -2736,6 +2756,16 @@ fn walk_stmt_for_captures(
             for s in body {
                 walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen);
             }
+        }
+        S::IfLet { scrutinee, then_body, else_body, .. } => {
+            walk_expr_for_captures(scrutinee, bound, env, top_level_names, captures, seen);
+            for s in then_body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
+            for s in else_body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
+        }
+        S::WhileLet { scrutinee, invariants, body, .. } => {
+            walk_expr_for_captures(scrutinee, bound, env, top_level_names, captures, seen);
+            for inv in invariants { walk_expr_for_captures(inv, bound, env, top_level_names, captures, seen); }
+            for s in body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
     }
@@ -2947,6 +2977,16 @@ fn rename_vars_in_stmt(
                 rename_vars_in_stmt(s, rename);
             }
         }
+        S::IfLet { scrutinee, then_body, else_body, .. } => {
+            rename_vars_in_expr(scrutinee, rename);
+            for s in then_body { rename_vars_in_stmt(s, rename); }
+            for s in else_body { rename_vars_in_stmt(s, rename); }
+        }
+        S::WhileLet { scrutinee, invariants, body, .. } => {
+            rename_vars_in_expr(scrutinee, rename);
+            for inv in invariants { rename_vars_in_expr(inv, rename); }
+            for s in body { rename_vars_in_stmt(s, rename); }
+        }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
     }
 }
@@ -3123,6 +3163,16 @@ fn rewrite_closure_calls_in_stmt(
             for s in body {
                 rewrite_closure_calls_in_stmt(s, closures);
             }
+        }
+        S::IfLet { scrutinee, then_body, else_body, .. } => {
+            rewrite_closure_calls_in_expr(scrutinee, closures);
+            for s in then_body { rewrite_closure_calls_in_stmt(s, closures); }
+            for s in else_body { rewrite_closure_calls_in_stmt(s, closures); }
+        }
+        S::WhileLet { scrutinee, invariants, body, .. } => {
+            rewrite_closure_calls_in_expr(scrutinee, closures);
+            for inv in invariants { rewrite_closure_calls_in_expr(inv, closures); }
+            for s in body { rewrite_closure_calls_in_stmt(s, closures); }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
     }
@@ -3323,6 +3373,16 @@ fn lift_stmt_anon_fn(
             for s in body {
                 lift_stmt_anon_fn(s, counter, hoisted);
             }
+        }
+        S::IfLet { scrutinee, then_body, else_body, .. } => {
+            lift_expr_anon_fn(scrutinee, counter, hoisted);
+            for s in then_body { lift_stmt_anon_fn(s, counter, hoisted); }
+            for s in else_body { lift_stmt_anon_fn(s, counter, hoisted); }
+        }
+        S::WhileLet { scrutinee, invariants, body, .. } => {
+            lift_expr_anon_fn(scrutinee, counter, hoisted);
+            for inv in invariants { lift_expr_anon_fn(inv, counter, hoisted); }
+            for s in body { lift_stmt_anon_fn(s, counter, hoisted); }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
     }
@@ -4580,6 +4640,16 @@ fn resolve_enum_types_in_stmt(
                 }
             }
         }
+        Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+            resolve_enum_types_in_expr(scrutinee, enums);
+            for s in then_body { resolve_enum_types_in_stmt(s, enums); }
+            for s in else_body { resolve_enum_types_in_stmt(s, enums); }
+        }
+        Stmt::WhileLet { scrutinee, invariants, body, .. } => {
+            resolve_enum_types_in_expr(scrutinee, enums);
+            for inv in invariants { resolve_enum_types_in_expr(inv, enums); }
+            for s in body { resolve_enum_types_in_stmt(s, enums); }
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
 }
@@ -4985,6 +5055,16 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
                     }
                 }
             }
+        }
+        Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+            sub_aliases_in_expr(scrutinee, aliases);
+            for s in then_body { sub_aliases_in_stmt(s, aliases); }
+            for s in else_body { sub_aliases_in_stmt(s, aliases); }
+        }
+        Stmt::WhileLet { scrutinee, invariants, body, .. } => {
+            sub_aliases_in_expr(scrutinee, aliases);
+            for inv in invariants { sub_aliases_in_expr(inv, aliases); }
+            for s in body { sub_aliases_in_stmt(s, aliases); }
         }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
@@ -12340,6 +12420,18 @@ fn check_one_stmt(
             }
             false
         }
+        Stmt::IfLet { pattern, pattern_span, scrutinee, then_body, else_body, span } => {
+            check_iflet_stmt(
+                pattern, *pattern_span, scrutinee, then_body, else_body, *span,
+                env, signatures, function, loops, smt_facts, body, diagnostics,
+            )
+        }
+        Stmt::WhileLet { label, pattern, pattern_span, scrutinee, invariants, body: while_body, span } => {
+            check_whilelet_stmt(
+                label.as_deref(), pattern, *pattern_span, scrutinee, invariants, while_body, *span,
+                env, signatures, function, loops, smt_facts, body, diagnostics,
+            )
+        }
     }
 }
 
@@ -12370,6 +12462,405 @@ fn emit_drops_through_loop(env: &Env, loop_body_depth: usize, body: &mut Vec<Typ
             }
         }
     }
+}
+
+/// Lower `if let Pattern = scrutinee { then } [else { els }]` to TypedStmt::If.
+#[allow(clippy::too_many_arguments)]
+fn check_iflet_stmt(
+    pattern: &crate::ast::Pattern,
+    pattern_span: Span,
+    scrutinee: &Expr,
+    then_body: &[Stmt],
+    else_body: &[Stmt],
+    span: Span,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    function: &Function,
+    loops: &mut Vec<LoopFrame>,
+    smt_facts: &mut Vec<Expr>,
+    body: &mut Vec<TypedStmt>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    use crate::ir::{TypedExpr, TypedExprKind, TypedMatchArm, TypedStmt as TS};
+    verify_call_args_in_expr(scrutinee, smt_facts, env, signatures, diagnostics);
+    let scrut_checked = check_expr(scrutinee, env, signatures, diagnostics);
+    let enum_name = match scrut_checked.ty() {
+        Type::Enum(n) => n.clone(),
+        other => {
+            diagnostics.push(Diagnostic::new(
+                scrutinee.span,
+                format!("if let scrutinee must be an enum type, got {}", other),
+            ));
+            return false;
+        }
+    };
+    let Some(enum_decl) = env.lookup_enum(&enum_name).cloned() else {
+        diagnostics.push(Diagnostic::new(scrutinee.span, format!("enum '{}' not declared", enum_name)));
+        return false;
+    };
+    let (variant_name, opt_binding) = match pattern {
+        crate::ast::Pattern::Variant { variant, .. } => (variant.clone(), None),
+        crate::ast::Pattern::VariantWithBinding { variant, binding, .. } => {
+            (variant.clone(), Some(binding.clone()))
+        }
+        other => {
+            diagnostics.push(Diagnostic::new(
+                pattern_span,
+                format!("if let only supports enum variant patterns, got {:?}", other),
+            ));
+            return false;
+        }
+    };
+    let Some(tag) = enum_decl.variants.iter().position(|v| v == &variant_name) else {
+        diagnostics.push(Diagnostic::new(
+            pattern_span,
+            format!("enum '{}' has no variant '{}'", enum_name, variant_name),
+        ));
+        return false;
+    };
+    let payload_ty: Option<Type> = enum_decl.payload_types[tag].clone();
+    let tmp_name = format!("__iflet_tmp_{}", span.start);
+    body.push(TS::Let {
+        name: tmp_name.clone(),
+        ty: scrut_checked.ty().clone(),
+        expr: scrut_checked.expr.clone(),
+    });
+    env.insert_current(tmp_name.clone(), VarInfo {
+        ty: scrut_checked.ty().clone(),
+        constant: None,
+        moved: None,
+        decl_span: span,
+        vec_literal_elements: None,
+        array_version: 0,
+        guarded_mutex: None,
+        no_drop: false,
+        is_const: false,
+        struct_literal_fields: None,
+        moved_fields: std::collections::BTreeMap::new(),
+        ref_aliases: Vec::new(),
+    });
+    let tmp_var_expr = TypedExpr {
+        kind: TypedExprKind::Var(tmp_name.clone()),
+        ty: scrut_checked.ty().clone(),
+        constant: None,
+        span,
+        binding_decl_span: None,
+    };
+    let cond_expr = TypedExpr {
+        kind: TypedExprKind::Match {
+            scrutinee: Box::new(tmp_var_expr.clone()),
+            arms: vec![
+                TypedMatchArm {
+                    variant: variant_name.clone(),
+                    tag: tag as u32,
+                    is_wildcard: false,
+                    int_value: None,
+                    binding: None,
+                    body: TypedExpr { kind: TypedExprKind::Bool(true), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(true)), span, binding_decl_span: None },
+                },
+                TypedMatchArm {
+                    variant: String::new(),
+                    tag: 0,
+                    is_wildcard: true,
+                    int_value: None,
+                    binding: None,
+                    body: TypedExpr { kind: TypedExprKind::Bool(false), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(false)), span, binding_decl_span: None },
+                },
+            ],
+        },
+        ty: Type::Bool,
+        constant: None,
+        span,
+        binding_decl_span: None,
+    };
+    let pre_env = env.clone();
+    let pre_facts = smt_facts.clone();
+    env.push_scope();
+    let mut then_stmts: Vec<TS> = Vec::new();
+    if let (Some(binding), Some(ref p_ty)) = (opt_binding, &payload_ty) {
+        let view_ty = match p_ty {
+            Type::OwnedStr => Type::Str,
+            other => other.clone(),
+        };
+        let payload_expr = TypedExpr {
+            kind: TypedExprKind::Match {
+                scrutinee: Box::new(tmp_var_expr.clone()),
+                arms: vec![TypedMatchArm {
+                    variant: variant_name.clone(),
+                    tag: tag as u32,
+                    is_wildcard: false,
+                    int_value: None,
+                    binding: Some(("__pl".to_string(), view_ty.clone())),
+                    body: TypedExpr {
+                        kind: TypedExprKind::Var("__pl".to_string()),
+                        ty: view_ty.clone(),
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    },
+                }],
+            },
+            ty: view_ty.clone(),
+            constant: None,
+            span,
+            binding_decl_span: None,
+        };
+        then_stmts.push(TS::Let { name: binding.clone(), ty: view_ty.clone(), expr: payload_expr });
+        env.insert_current(binding.clone(), VarInfo {
+            ty: view_ty.clone(),
+            constant: None,
+            moved: None,
+            decl_span: pattern_span,
+            vec_literal_elements: None,
+            array_version: 0,
+            guarded_mutex: None,
+            no_drop: !view_ty.is_copy(),
+            is_const: false,
+            struct_literal_fields: None,
+            moved_fields: std::collections::BTreeMap::new(),
+            ref_aliases: Vec::new(),
+        });
+    }
+    let then_terminated = check_stmt_list(
+        then_body, env, signatures, function, loops, smt_facts, &mut then_stmts, diagnostics,
+    );
+    if !then_terminated {
+        emit_current_scope_drops(env, &mut then_stmts, diagnostics);
+    }
+    env.pop_scope();
+    let then_env = std::mem::replace(env, pre_env.clone());
+    *smt_facts = pre_facts.clone();
+    env.push_scope();
+    let mut else_stmts: Vec<TS> = Vec::new();
+    let else_terminated = check_stmt_list(
+        else_body, env, signatures, function, loops, smt_facts, &mut else_stmts, diagnostics,
+    );
+    if !else_terminated {
+        emit_current_scope_drops(env, &mut else_stmts, diagnostics);
+    }
+    env.pop_scope();
+    let else_env = std::mem::replace(env, pre_env.clone());
+    *smt_facts = pre_facts;
+    let pre_non_copy: Vec<(String, VarInfo)> = pre_env
+        .all_bindings()
+        .filter(|(_, info)| !info.ty.is_copy())
+        .map(|(n, i)| (n.clone(), i.clone()))
+        .collect();
+    for (var_name, pre_info) in &pre_non_copy {
+        let then_moved = match (then_terminated, then_env.lookup(var_name)) {
+            (true, _) => None,
+            (_, Some(info)) => info.moved,
+            _ => pre_info.moved,
+        };
+        let else_moved = match (else_terminated, else_env.lookup(var_name)) {
+            (true, _) => None,
+            (_, Some(info)) => info.moved,
+            _ => pre_info.moved,
+        };
+        match (then_moved, else_moved) {
+            (Some(m), None) => {
+                then_stmts.push(TypedStmt::Drop { name: var_name.clone(), ty: pre_info.ty.clone(), moved_fields: Vec::new() });
+                if let Some(info_mut) = env.lookup_mut(var_name) { info_mut.moved = Some(m); }
+            }
+            (None, Some(m)) => {
+                else_stmts.push(TypedStmt::Drop { name: var_name.clone(), ty: pre_info.ty.clone(), moved_fields: Vec::new() });
+                if let Some(info_mut) = env.lookup_mut(var_name) { info_mut.moved = Some(m); }
+            }
+            (Some(m), Some(_)) => {
+                if let Some(info_mut) = env.lookup_mut(var_name) { info_mut.moved = Some(m); }
+            }
+            (None, None) => {}
+        }
+    }
+    body.push(TypedStmt::If { cond: cond_expr, then_body: then_stmts, else_body: else_stmts });
+    if !scrut_checked.ty().is_copy() {
+        if let Some(info_mut) = env.lookup_mut(&tmp_name) {
+            info_mut.moved = Some(span);
+        }
+    }
+    then_terminated && else_terminated
+}
+
+/// Lower `while let Pattern = scrutinee { body }` to TypedStmt::While.
+#[allow(clippy::too_many_arguments)]
+fn check_whilelet_stmt(
+    label: Option<&str>,
+    pattern: &crate::ast::Pattern,
+    pattern_span: Span,
+    scrutinee: &Expr,
+    _invariants: &[Expr],
+    while_body: &[Stmt],
+    span: Span,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    function: &Function,
+    loops: &mut Vec<LoopFrame>,
+    smt_facts: &mut Vec<Expr>,
+    body: &mut Vec<TypedStmt>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    use crate::ir::{TypedExpr, TypedExprKind, TypedMatchArm, TypedStmt as TS};
+    verify_call_args_in_expr(scrutinee, smt_facts, env, signatures, diagnostics);
+    let scrut_checked = check_expr(scrutinee, env, signatures, diagnostics);
+    let enum_name = match scrut_checked.ty() {
+        Type::Enum(n) => n.clone(),
+        other => {
+            diagnostics.push(Diagnostic::new(
+                scrutinee.span,
+                format!("while let scrutinee must be an enum type, got {}", other),
+            ));
+            return false;
+        }
+    };
+    let Some(enum_decl) = env.lookup_enum(&enum_name).cloned() else {
+        diagnostics.push(Diagnostic::new(scrutinee.span, format!("enum '{}' not declared", enum_name)));
+        return false;
+    };
+    let (variant_name, opt_binding) = match pattern {
+        crate::ast::Pattern::Variant { variant, .. } => (variant.clone(), None),
+        crate::ast::Pattern::VariantWithBinding { variant, binding, .. } => {
+            (variant.clone(), Some(binding.clone()))
+        }
+        other => {
+            diagnostics.push(Diagnostic::new(
+                pattern_span,
+                format!("while let only supports enum variant patterns, got {:?}", other),
+            ));
+            return false;
+        }
+    };
+    let Some(tag) = enum_decl.variants.iter().position(|v| v == &variant_name) else {
+        diagnostics.push(Diagnostic::new(
+            pattern_span,
+            format!("enum '{}' has no variant '{}'", enum_name, variant_name),
+        ));
+        return false;
+    };
+    let payload_ty: Option<Type> = enum_decl.payload_types[tag].clone();
+    let emit_label = label.map(|l| l.to_string());
+    let tmp_name = format!("__wl_tmp_{}", span.start);
+    let mut inner_body: Vec<TS> = Vec::new();
+    inner_body.push(TS::Let {
+        name: tmp_name.clone(),
+        ty: scrut_checked.ty().clone(),
+        expr: scrut_checked.expr.clone(),
+    });
+    let tmp_var_expr = TypedExpr {
+        kind: TypedExprKind::Var(tmp_name.clone()),
+        ty: scrut_checked.ty().clone(),
+        constant: None,
+        span,
+        binding_decl_span: None,
+    };
+    let is_match_expr = TypedExpr {
+        kind: TypedExprKind::Match {
+            scrutinee: Box::new(tmp_var_expr.clone()),
+            arms: vec![
+                TypedMatchArm {
+                    variant: variant_name.clone(),
+                    tag: tag as u32,
+                    is_wildcard: false,
+                    int_value: None,
+                    binding: None,
+                    body: TypedExpr { kind: TypedExprKind::Bool(true), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(true)), span, binding_decl_span: None },
+                },
+                TypedMatchArm {
+                    variant: String::new(),
+                    tag: 0,
+                    is_wildcard: true,
+                    int_value: None,
+                    binding: None,
+                    body: TypedExpr { kind: TypedExprKind::Bool(false), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(false)), span, binding_decl_span: None },
+                },
+            ],
+        },
+        ty: Type::Bool,
+        constant: None,
+        span,
+        binding_decl_span: None,
+    };
+    let not_match_expr = TypedExpr {
+        kind: TypedExprKind::Unary { op: crate::ast::UnaryOp::Not, expr: Box::new(is_match_expr) },
+        ty: Type::Bool,
+        constant: None,
+        span,
+        binding_decl_span: None,
+    };
+    inner_body.push(TS::If {
+        cond: not_match_expr,
+        then_body: vec![TS::Break { label: emit_label.clone() }],
+        else_body: vec![],
+    });
+    env.push_scope();
+    env.insert_current(tmp_name.clone(), VarInfo {
+        ty: scrut_checked.ty().clone(),
+        constant: None,
+        moved: None,
+        decl_span: span,
+        vec_literal_elements: None,
+        array_version: 0,
+        guarded_mutex: None,
+        no_drop: true,
+        is_const: false,
+        struct_literal_fields: None,
+        moved_fields: std::collections::BTreeMap::new(),
+        ref_aliases: Vec::new(),
+    });
+    if let (Some(binding), Some(ref p_ty)) = (opt_binding, &payload_ty) {
+        let view_ty = match p_ty {
+            Type::OwnedStr => Type::Str,
+            other => other.clone(),
+        };
+        let payload_expr = TypedExpr {
+            kind: TypedExprKind::Match {
+                scrutinee: Box::new(tmp_var_expr.clone()),
+                arms: vec![TypedMatchArm {
+                    variant: variant_name.clone(),
+                    tag: tag as u32,
+                    is_wildcard: false,
+                    int_value: None,
+                    binding: Some(("__wl_pl".to_string(), view_ty.clone())),
+                    body: TypedExpr {
+                        kind: TypedExprKind::Var("__wl_pl".to_string()),
+                        ty: view_ty.clone(),
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    },
+                }],
+            },
+            ty: view_ty.clone(),
+            constant: None,
+            span,
+            binding_decl_span: None,
+        };
+        inner_body.push(TS::Let { name: binding.clone(), ty: view_ty.clone(), expr: payload_expr });
+        env.insert_current(binding.clone(), VarInfo {
+            ty: view_ty.clone(),
+            constant: None,
+            moved: None,
+            decl_span: pattern_span,
+            vec_literal_elements: None,
+            array_version: 0,
+            guarded_mutex: None,
+            no_drop: !view_ty.is_copy(),
+            is_const: false,
+            struct_literal_fields: None,
+            moved_fields: std::collections::BTreeMap::new(),
+            ref_aliases: Vec::new(),
+        });
+    }
+    loops.push(LoopFrame { pre_env: env.clone(), body_scope_depth: env.scopes.len(), value_temp: None, label: emit_label.clone() });
+    check_stmt_list(while_body, env, signatures, function, loops, smt_facts, &mut inner_body, diagnostics);
+    emit_current_scope_drops(env, &mut inner_body, diagnostics);
+    loops.pop();
+    env.pop_scope();
+    body.push(TypedStmt::While {
+        label: emit_label,
+        cond: TypedExpr { kind: TypedExprKind::Bool(true), ty: Type::Bool, constant: Some(crate::ir::TypedConst::Bool(true)), span, binding_decl_span: None },
+        body: inner_body,
+    });
+    false
 }
 
 fn validate_array_element_type(ty: &Type, span: Span, diagnostics: &mut Vec<Diagnostic>) {
@@ -19980,6 +20471,16 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                 Stmt::ForIter { body, .. } => walk(body, param_names, locks),
                 Stmt::TaskSpawn { body, .. } => walk(body, param_names, locks),
                 Stmt::UnsafeBlock { body, .. } => walk(body, param_names, locks),
+                Stmt::IfLet { scrutinee, then_body, else_body, .. } => {
+                    walk_expr(scrutinee, param_names, locks);
+                    walk(then_body, param_names, locks);
+                    walk(else_body, param_names, locks);
+                }
+                Stmt::WhileLet { scrutinee, invariants, body, .. } => {
+                    walk_expr(scrutinee, param_names, locks);
+                    for inv in invariants { walk_expr(inv, param_names, locks); }
+                    walk(body, param_names, locks);
+                }
                 Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
             }
         }

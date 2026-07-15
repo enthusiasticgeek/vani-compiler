@@ -830,6 +830,34 @@ fn format_param(p: &Param, out: &mut String) {
     out.push_str(&type_to_source(&p.ty));
 }
 
+fn format_pattern(p: &crate::ast::Pattern, out: &mut String) {
+    use crate::ast::Pattern;
+    match p {
+        Pattern::Variant { enum_name, variant } => {
+            out.push_str(enum_name);
+            out.push('.');
+            out.push_str(variant);
+        }
+        Pattern::VariantWithBinding { enum_name, variant, binding } => {
+            out.push_str(enum_name);
+            out.push('.');
+            out.push_str(variant);
+            out.push('(');
+            out.push_str(binding);
+            out.push(')');
+        }
+        Pattern::Int(n) => out.push_str(&n.to_string()),
+        Pattern::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Pattern::Str(s) => {
+            out.push('"');
+            out.push_str(&escape_string(s));
+            out.push('"');
+        }
+        Pattern::Float(f) => out.push_str(&format!("{:?}", f)),
+        Pattern::Wildcard => out.push('_'),
+    }
+}
+
 fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
     let pad = INDENT.repeat(depth);
     // Drain any comments that appeared before this statement,
@@ -1102,6 +1130,59 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             out.push_str("unsafe(reason = \"");
             out.push_str(&escape_string(reason));
             out.push_str("\") {\n");
+            for s in body {
+                format_stmt(s, depth + 1, ctx, out);
+            }
+            ctx.drain_to(span.end, depth + 1, out);
+            out.push_str(&pad);
+            out.push_str("}\n");
+        }
+        Stmt::IfLet { pattern, scrutinee, then_body, else_body, span, .. } => {
+            out.push_str(&pad);
+            out.push_str("if let ");
+            format_pattern(pattern, out);
+            out.push_str(" = ");
+            format_expr(scrutinee, false, out);
+            out.push_str(" {\n");
+            for s in then_body {
+                format_stmt(s, depth + 1, ctx, out);
+            }
+            if else_body.is_empty() {
+                ctx.drain_to(span.end, depth + 1, out);
+                out.push_str(&pad);
+                out.push_str("}\n");
+            } else {
+                let else_start = else_body.first().map(|s| s.span().start).unwrap_or(span.end);
+                ctx.drain_to(else_start, depth + 1, out);
+                out.push_str(&pad);
+                out.push_str("} else {\n");
+                for s in else_body {
+                    format_stmt(s, depth + 1, ctx, out);
+                }
+                ctx.drain_to(span.end, depth + 1, out);
+                out.push_str(&pad);
+                out.push_str("}\n");
+            }
+        }
+        Stmt::WhileLet { label, pattern, scrutinee, invariants, body, span, .. } => {
+            out.push_str(&pad);
+            if let Some(lbl) = label {
+                out.push_str(lbl);
+                out.push_str(": ");
+            }
+            out.push_str("while let ");
+            format_pattern(pattern, out);
+            out.push_str(" = ");
+            format_expr(scrutinee, false, out);
+            out.push('\n');
+            for inv in invariants {
+                out.push_str(&pad);
+                out.push_str("invariant ");
+                format_expr(inv, false, out);
+                out.push_str(";\n");
+            }
+            out.push_str(&pad);
+            out.push_str("{\n");
             for s in body {
                 format_stmt(s, depth + 1, ctx, out);
             }

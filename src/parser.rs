@@ -3458,6 +3458,37 @@ impl Parser {
 
     fn parse_if_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'if'", |kind| matches!(kind, TokenKind::If))?;
+        // `if let Pattern = scrutinee { … } [else { … }]` — M1
+        if self.match_token(|k| matches!(k, TokenKind::Let)).is_some() {
+            let (pattern, pattern_span) = self.parse_pattern()?;
+            self.expect_keyword("'=' (if-let binding)", |k| matches!(k, TokenKind::Equal))?;
+            let scrutinee = self.parse_expr()?;
+            let then_body = self.parse_block()?;
+            let (else_body, end_span) = if self
+                .match_token(|k| matches!(k, TokenKind::Else))
+                .is_some()
+            {
+                if self.check(|k| matches!(k, TokenKind::If)) {
+                    let inner = self.parse_if_stmt()?;
+                    let span = inner.span();
+                    (vec![inner], span)
+                } else {
+                    let stmts = self.parse_block()?;
+                    let span = stmts.last().map(|s| s.span()).unwrap_or(start.span);
+                    (stmts, span)
+                }
+            } else {
+                (Vec::new(), then_body.last().map(|s| s.span()).unwrap_or(start.span))
+            };
+            return Ok(Stmt::IfLet {
+                pattern,
+                pattern_span,
+                scrutinee,
+                then_body,
+                else_body,
+                span: start.span.merge(end_span),
+            });
+        }
         let cond = self.parse_expr()?;
         let then_body = self.parse_block()?;
         let (else_body, end_span) = if self
@@ -3486,6 +3517,43 @@ impl Parser {
             else_body,
             span: start.span.merge(end_span),
         })
+    }
+
+    fn parse_pattern(&mut self) -> Result<(crate::ast::Pattern, crate::span::Span), Diagnostic> {
+        use crate::ast::Pattern;
+        if self.check(|k| matches!(k, TokenKind::True)) {
+            let tok = self.bump();
+            return Ok((Pattern::Bool(true), tok.span));
+        }
+        if self.check(|k| matches!(k, TokenKind::False)) {
+            let tok = self.bump();
+            return Ok((Pattern::Bool(false), tok.span));
+        }
+        if let Some(tok) = self.match_token(|k| matches!(k, TokenKind::Str(_))) {
+            let span = tok.span;
+            let text = match tok.kind { TokenKind::Str(s) => s, _ => unreachable!() };
+            return Ok((Pattern::Str(text), span));
+        }
+        let first_tok = self.expect_ident()?;
+        let pat_start = first_tok.span;
+        let first_text = ident_text(first_tok);
+        if first_text == "_" {
+            return Ok((Pattern::Wildcard, pat_start));
+        }
+        self.expect_keyword("'.' (variant in pattern)", |k| matches!(k, TokenKind::Dot))?;
+        let variant_tok = self.expect_ident()?;
+        let mut pat_span = pat_start.merge(variant_tok.span);
+        let variant = ident_text(variant_tok);
+        if self.check(|k| matches!(k, TokenKind::LParen)) {
+            self.bump();
+            let binding_tok = self.expect_ident()?;
+            let binding = ident_text(binding_tok);
+            let close = self.expect_keyword("')' (pattern binding close)", |k| matches!(k, TokenKind::RParen))?;
+            pat_span = pat_start.merge(close.span);
+            Ok((Pattern::VariantWithBinding { enum_name: first_text, variant, binding }, pat_span))
+        } else {
+            Ok((Pattern::Variant { enum_name: first_text, variant }, pat_span))
+        }
     }
 
     fn parse_for_stmt(&mut self) -> Result<Stmt, Diagnostic> {
@@ -4011,6 +4079,24 @@ impl Parser {
 
     fn parse_while_stmt(&mut self) -> Result<Stmt, Diagnostic> {
         let start = self.expect_keyword("'while'", |kind| matches!(kind, TokenKind::While))?;
+        // `while let Pattern = scrutinee { … }` — M1
+        if self.match_token(|k| matches!(k, TokenKind::Let)).is_some() {
+            let (pattern, pattern_span) = self.parse_pattern()?;
+            self.expect_keyword("'=' (while-let binding)", |k| matches!(k, TokenKind::Equal))?;
+            let scrutinee = self.parse_expr()?;
+            let invariants = self.parse_invariants()?;
+            let body = self.parse_block()?;
+            let end_span = body.last().map(|s| s.span()).unwrap_or(start.span);
+            return Ok(Stmt::WhileLet {
+                label: None,
+                pattern,
+                pattern_span,
+                scrutinee,
+                invariants,
+                body,
+                span: start.span.merge(end_span),
+            });
+        }
         let cond = self.parse_expr()?;
         let invariants = self.parse_invariants()?;
         let body = self.parse_block()?;
