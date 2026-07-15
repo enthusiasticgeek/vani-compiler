@@ -13588,6 +13588,13 @@ fn inject_branch_drops(expr: &mut TypedExpr) {
                 .map(|arm| {
                     let mut v = Vec::new();
                     collect_branch_var_leaves(&arm.body, &mut v);
+                    // M5: exclude arm-local binding names — they only exist
+                    // in THIS arm's scope (the C backend declares them inside
+                    // a braced case block) and must not be dropped in sibling
+                    // arms where the name is not in scope.
+                    if let Some((bname, _)) = &arm.binding {
+                        v.retain(|(n, _)| n != bname);
+                    }
                     v
                 })
                 .collect();
@@ -16157,10 +16164,10 @@ fn check_expr(
                                         other => other,
                                     }
                                 } else {
-                                    match ty {
-                                        Type::OwnedStr => Type::Str,
-                                        other => other,
-                                    }
+                                    // M5: by-value scrutinee — OwnedStr payload moves
+                                    // into the binding (binding owns the heap). Binding
+                                    // is no_drop so scope-exit won't double-free.
+                                    ty
                                 };
                                 (binding.clone(), view_ty)
                             })
@@ -16380,6 +16387,17 @@ fn check_expr(
                 }
             }
             let _ = wildcard_arm_index;
+            // M5: By-value match on a non-Copy scrutinee moves it —
+            // mark the variable as moved so emit_current_scope_drops
+            // skips its Drop and avoids a double-free of OwnedStr
+            // payloads (or other heap-owning enum fields).
+            if !raw_scrut_ty.is_any_ref() && !raw_scrut_ty.is_copy() {
+                if let ExprKind::Var(scrut_name) = &scrutinee.kind {
+                    if let Some(info) = env.lookup_mut(scrut_name) {
+                        info.moved = Some(scrutinee.span);
+                    }
+                }
+            }
             let unified = result_ty.unwrap_or(Type::I64);
             // Constant-fold: if the scrutinee is an integer
             // constant and one of the arms' int_value matches

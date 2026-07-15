@@ -1,0 +1,21 @@
+// M5: OwnedStr payload binding in match arm returns as OwnedStr.
+enum Msg { None, Text(OwnedStr) }
+
+fn identity(m: Msg) -> OwnedStr {
+  return match m {
+    Msg.Text(s) then s,
+    Msg.None then "empty" + "",
+  };
+}
+
+fn main() -> i64 {
+  let m: Msg = Msg.Text("hello" + "");
+  let r: OwnedStr = identity(m);
+  print r;
+
+  let m2: Msg = Msg.None;
+  let r2: OwnedStr = identity(m2);
+  print r2;
+
+  return 0;
+}
