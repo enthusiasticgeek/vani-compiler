@@ -48243,6 +48243,25 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn m6_generic_infer_through_apply_struct() {
+        // M6: T must be inferred from Apply { name: "Wrap", args: [Param("T")] }
+        // vs Struct("Wrap__i64") — the mangled form after type-decl mono.
+        let src = r#"
+intent "m6 generic infer through user-defined generic struct";
+struct Wrap<T> { val: T }
+fn unbox<T>(w: Wrap<T>) -> T { return w.val; }
+fn main() -> i64 {
+    let a: Wrap<i64> = Wrap { val: 7 };
+    return unbox(a);
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_ok(), "M6 Apply inference must succeed: {:?}", result.err());
+        let c = result.unwrap();
+        assert!(c.contains("fn_unbox__i64"), "should emit unbox specialisation for i64");
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";

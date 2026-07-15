@@ -6584,6 +6584,54 @@ fn infer_concrete_type_for_call(
             (Type::Array { element: p, .. }, Type::Array { element: a, .. }) => {
                 unify_param_to_arg(p, a)
             }
+            // M6: Apply/Apply — recurse when both sides are still in
+            // Apply form (e.g. inside a generic template body before
+            // type-decl monomorphization has run on this site).
+            (Type::Apply { name: pn, args: pa }, Type::Apply { name: an, args: aa })
+                if pn == an && pa.len() == aa.len() =>
+            {
+                for (p, a) in pa.iter().zip(aa.iter()) {
+                    if let Some(result) = unify_param_to_arg(p, a) {
+                        return Some(result);
+                    }
+                }
+                None
+            }
+            // M6: Apply { name: pn, args: [Param] } vs a mangled
+            // Struct/Enum produced by rewrite_apply_in_ty.
+            // e.g. Apply{Wrap,[Param(T)]} vs Struct("Wrap__i64")
+            // → extract T = I64 by stripping the prefix and
+            // un-mangling the suffix. Only works when the Apply has
+            // exactly one Param arg (the v1 single-T restriction).
+            (Type::Apply { name: pn, args: pa }, Type::Struct(sn) | Type::Enum(sn))
+                if pa.len() == 1
+                    && matches!(&pa[0], Type::Param(_))
+                    && sn.starts_with(pn.as_str())
+                    && sn.len() > pn.len() + 2
+                    && sn.as_bytes().get(pn.len()) == Some(&b'_')
+                    && sn.as_bytes().get(pn.len() + 1) == Some(&b'_') =>
+            {
+                let suffix = &sn[pn.len() + 2..];
+                fn unmangle_scalar(s: &str) -> Type {
+                    match s {
+                        "i64" => Type::I64,
+                        "i32" => Type::I32,
+                        "i16" => Type::I16,
+                        "i8" => Type::I8,
+                        "u64" => Type::U64,
+                        "u32" => Type::U32,
+                        "u16" => Type::U16,
+                        "u8" => Type::U8,
+                        "f64" => Type::F64,
+                        "f32" => Type::F32,
+                        "bool" => Type::Bool,
+                        "Str" => Type::Str,
+                        "OwnedStr" => Type::OwnedStr,
+                        other => Type::Struct(other.to_string()),
+                    }
+                }
+                Some(unmangle_scalar(suffix))
+            }
             _ => None,
         }
     }

@@ -1,0 +1,15 @@
+// M6: generic T inference through an Apply constructor (user-defined
+// generic struct). Pre-fix: T was inferred as the whole Wrap__i64
+// monomorphized type, generating garbage like Wrap__Struct_Wrap__i64__.
+struct Wrap<T> { val: T }
+
+fn unbox<T>(w: Wrap<T>) -> T { return w.val; }
+
+fn main() -> i64 {
+  let a: Wrap<i64> = Wrap { val: 40 };
+  let b: Wrap<i64> = Wrap { val: 2 };
+  let x: i64 = unbox(a);
+  let y: i64 = unbox(b);
+  print x + y;   // 42
+  return 0;
+}
