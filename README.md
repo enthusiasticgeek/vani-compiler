@@ -75,6 +75,67 @@ See [INSTALL.md](INSTALL.md) for platform-specific prerequisites (z3, LLVM tools
 
 ---
 
+## Platform & architecture support
+
+Pre-built `vanic` binaries ship for all five targets on every [GitHub release](https://github.com/enthusiasticgeek/vani-compiler/releases). `cargo install vanic` works on any Rust-supported host.
+
+| | x86-64 | AArch64 / ARM64 | RISC-V 64 |
+|---|---|---|---|
+| **Linux** | ✅ verified (Ubuntu 20–24, Debian, Arch, Fedora) | ✅ verified (cross-compiled; runs natively) | ✅ cross-compiled; QEMU run tested |
+| **macOS** | ✅ binary shipped | ✅ Apple Silicon — binary shipped | — |
+| **Windows** | ✅ verified — MSYS2 GNU toolchain + MSVC | — | — |
+| **WSL 2** | ✅ identical to Linux | — | — |
+| **Bare-metal** | C backend → link with any BSP | C backend → link with any BSP | C backend → link with any BSP |
+
+> macOS binaries are built and shipped by CI; empirical on-device verification is pending (no macOS host). All lib tests and e2e tests pass on Linux x86-64 and Windows x86-64.
+
+### SIMD widths
+
+| Type | Width | x86-64 | AArch64 | RISC-V |
+|---|---|---|---|---|
+| `vec128<T>` | 128-bit | SSE2 / SSE4.1 `xmm` | NEON `v` regs | RVV VLEN=128 |
+| `vec256<T>` | 256-bit | AVX-256 `ymm` | SVE-256 | RVV VLEN=256 |
+| `vec512<T>` | 512-bit | AVX-512 `zmm` | SVE-512 | RVV VLEN=512 |
+
+All three widths are ordinary generic types with consistent builtin names (`simd128_add`, `simd256_add`, `simd512_add`, etc.) — no architecture-specific intrinsic headers required.
+
+---
+
+## Why vāṇī?
+
+Systems languages occupy a narrow band: C is powerful but unsafe; Rust is safe but imposes lifetime annotations; neither has formal proofs or safety-certification enforcement in the language itself. vāṇī fills a specific gap.
+
+| | C | Rust | vāṇī |
+|---|---|---|---|
+| Memory safety | ✗ manual | ✅ lifetime annotations required | ✅ no annotation syntax |
+| Formal proofs (`requires` / `ensures`) | ✗ | ✗ | ✅ Z3-backed, compile-time |
+| Safety-critical standards (ASIL-D, DO-178C) | external lint | external lint | ✅ compiler-enforced attributes |
+| SIMD | intrinsic headers | `std::simd` (nightly) | ✅ stable first-class types |
+| Source in any human language | ✗ | ✗ | ✅ 62 dialects, 26 scripts |
+| Readable C output for audit / embedded | ✅ | ✗ | ✅ C backend |
+
+Six concrete reasons to choose vāṇī:
+
+**1. Ownership without lifetime annotations.**
+Rust's affine ownership model, but you never write `'a`. References are second-class (`ref x`, `mut ref x`) — their scope is enforced at the call site by the type system, not by a separate lifetime parameter. The mental load of borrow-checking is real; the annotation syntax is optional complexity vāṇī removes.
+
+**2. Formal verification as language syntax, not a plugin.**
+`requires`, `ensures`, `prove`, and loop `invariant` are keywords, not library macros or separate tooling. Z3 discharges them at compile time via a three-stage pipeline (constant-fold → structural tautology → full SMT solve). Contracts on arithmetic, ordering, and data-structure invariants are verified in the same `vanic check` pass that type-checks your program.
+
+**3. Safety-critical certification in the compiler.**
+`#[asil_d]`, `#[do178c_level_a]`, `#[wcet = "120ns"]`, `#[no_nan]`, `#[no_heap]` are enforced by the type and safety checker, not by an external linting overlay. Annotate a function with `#[asil_d]` and the compiler rejects FP without determinism guards, unguarded recursion, missing `wcet` bounds, and non-deterministic timing — at the same pass that checks types. ISO 26262, DO-178C, IEC 62304, and MISRA C 2012 rule coverage is built in.
+
+**4. Write source code in any of 62 human languages.**
+Add `// vani-lang: hindi` and every keyword (`let`, `fn`, `return`, `match`) accepts its Devanagari equivalent. 62 dialects across 26 scripts are shipped and enforced: Devanagari, Bengali, Tamil, Arabic, Japanese, Mandarin, Russian, and more. A dialect purity checker rejects out-of-language identifiers, keeping multilingual codebases coherent. No other production systems language offers this.
+
+**5. SIMD at every width with no intrinsic headers.**
+`vec128<T>`, `vec256<T>`, and `vec512<T>` are generic types you use like any other. `simd256_add(a, b)` compiles to AVX-256 `ymm` operations on x86-64, NEON on AArch64, and RVV on RISC-V. You write once; the backend selects the right instruction set. No `#include <immintrin.h>`, no `_mm256_add_ps`, no `#ifdef __AVX2__`.
+
+**6. Two backends for two deployment realities.**
+The LLVM backend (`--backend=llvm`, default) optimises through `opt -O3` and `llc` for maximum throughput. The C backend (`--backend=c`) emits readable, portable C that can be compiled with any C11 compiler on any target, audited line-by-line, and linked into existing embedded BSPs without an LLVM toolchain on the host. Switch with one flag; both backends pass the same test suite.
+
+---
+
 ## What it targets
 
 | Domain | Key feature |
