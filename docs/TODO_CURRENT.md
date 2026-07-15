@@ -390,40 +390,31 @@ no hardware, no external tokens, no grammar consultants required.
 
 ### Short (2–4 h each)
 
-- [ ] **M1. `if let` / `while let`** (~2 h)
-  Pattern binding is match-only in v1. `if let Opt.Some(v) = expr { … }` and
-  `while let Opt.Some(v) = expr { … }` are ergonomic gaps that real user code hits.
-  Fix: parser desugar to `match expr { Opt.Some(v) then { … } _ then {} }`;
-  checker already handles the resulting match arms.
+- [x] **M1. `if let` / `while let`** ✅ done 2026-07-15 (commit `e210b13`)
+  Parser desugars to `match expr { Opt.Some(v) then { … } _ then {} }`;
+  checker handles the resulting match arms.
 
-- [ ] **M2. Or-patterns in match arms** (~2 h)
-  `Opt.Some(1) | Opt.Some(2) then { … }` — each variant currently needs its own arm.
-  Fix: parser accept `|`-separated patterns in a single arm; checker splits into
-  synthetic arms sharing the same body node; exhaustiveness check folds them.
+- [x] **M2. Or-patterns in match arms** ✅ done 2026-07-15 (commit `bb2d562`)
+  Parser accepts `|`-separated patterns in a single arm; expands to synthetic
+  arms sharing the same body before type-checking.
 
-- [ ] **M3. Pattern guards** (~2 h)
-  `Opt.Some(n) if n > 0 then { … }` — conditions inside arms aren't supported.
-  Fix: parser extend match arm to accept optional `if <expr>` after the pattern;
-  checker evaluates the guard as a boolean; SMT can discharge static guards.
+- [x] **M3. Pattern guards** ✅ done 2026-07-15 (commit `c0a1fd3`)
+  Parser extends match arm with optional `if <expr>`; guarded + unguarded arms
+  for the same variant merge into one switch case with if/else inside.
 
-- [ ] **M4. `vec512<T>` + `simd512_*` builtins** (~2 h)
-  Identical pattern to `vec256<T>` (SIMD-9, done 2026-07-10). Eight files need
-  a `Type::Vec512(Box<Type>)` variant and 7 builtins: `simd512_splat/load/store/
-  add/sub/mul/reduce_add`. LLVM: `<N x T>` with N=512/bits(T), align 64.
-  C: `T __attribute__((vector_size(64)))`. Maps to AVX-512 `zmm` / SVE-512 /
-  RVV VLEN=512. 2 lib tests + edge-case file.
+- [x] **M4. `vec512<T>` + `simd512_*` builtins** ✅ done 2026-07-15 (commit `316d419`)
+  `Type::Vec512(Box<Type>)` + 7 builtins (splat/load/store/add/sub/mul/reduce_add).
+  LLVM: `<N x T>` with align 64; C: `__attribute__((vector_size(64)))`.
+  Targets AVX-512 zmm / SVE-512 / RVV VLEN=512.
 
-- [ ] **M5. `OwnedStr` payload bound in match arm returned as `OwnedStr`** (~2 h)
-  Match-arm binding for an `OwnedStr` enum payload is exposed as `Str` (read-only
-  view); returning the binding produces a `Str`-typed arm, mismatching arms that
-  produce `OwnedStr`. Fix: in the checker's match-arm binder, when the payload type
-  is `OwnedStr` and the scrutinee is by-value, bind as `OwnedStr` not `Str`.
+- [x] **M5. `OwnedStr` payload bound in match arm returned as `OwnedStr`** ✅ done 2026-07-15 (commits `72df520`, `2102688`)
+  Scrutinee Drop suppressed only on direct move-out (arm body = Var(binding));
+  view-only / no-binding arms retain the Drop. Fixes double-free exit-116 crash.
 
-- [ ] **M6. Generic type inference from `Vec<T>`-typed argument** (~3 h)
-  Inference supports `Literal / Var / Ref(Var)` at the `T` position but not
-  `Apply(Vec, T)`. `fn foo<T>(xs: Vec<T>) -> T` called with a `Vec<i64>` arg
-  fails to infer `T=i64`. Fix: extend the inference unifier to walk `Apply`
-  constructor arguments recursively.
+- [x] **M6. Generic type inference from user-defined Apply constructors** ✅ done 2026-07-15 (commit `81ead74`)
+  `unify_param_to_arg` now handles `Apply { name, [Param(T)] }` vs mangled
+  `Struct("name__suffix")` / `Enum("name__suffix")` — strips prefix, un-mangles
+  scalar suffix to recover T. Also adds Apply/Apply arm for pre-mono cases.
 
 ---
 
