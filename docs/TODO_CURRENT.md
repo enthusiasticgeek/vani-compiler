@@ -372,25 +372,19 @@ no hardware, no external tokens, no grammar consultants required.
 
 ### Bugs (< 1 h each)
 
-- [ ] **B1. C-backend bounds-check `.len` vs `->len` on `ref Vec<T>` params** (~30 min)
-  Loop-bound guard emits `param.len` instead of `param->len` when the Vec is a
-  reference parameter. `gcc` rejects the generated C. LLVM backend unaffected.
-  Affects any fn taking `ref Vec<T>` whose loop index triggers the bounds-check
-  guard (e.g. `simd_load` / `simd256_load` with non-trivially-bounded index).
-  Fix: detect `ref`-typed Vec params in the C backend bounds-check emitter and
-  emit `->len` instead of `.len`.
+- [x] **B1. C-backend bounds-check `.len` vs `->len` on `ref Vec<T>` params** ✅ done 2026-07-14
+  `while_bounds_hints` now tracks `is_ref` per vec name via `BTreeMap<String,bool>`;
+  emits `xs->len` for `ref Vec<T>` params (C pointer) instead of `xs.len`.
 
-- [ ] **B2. `pub use foo::bar as baz` rename re-export** (~30 min)
-  The resolver handles `use foo::bar as baz` (local rename) already.
-  `pub use foo::bar as baz` (re-export with rename) is not wired.
-  Fix: in the `pub use` resolver path, propagate the alias name rather than
-  the original symbol name when an `as` clause is present.
+- [x] **B2. `pub use foo::bar as baz` rename re-export** ✅ done 2026-07-14
+  Implementation was already correct; added `top_level_use_of_pub_use_as_rename`
+  regression test to lock the closure-#254 + closure-#245 interaction.
 
-- [ ] **B3. Anonymous fn called inline from Vec slot (`fs[0](10)`)** (~30 min)
-  Checker rejects with "only named functions can be called". The value at `fs[0]`
-  is already typed as `fn(i64)->i64`; the restriction is overly conservative.
-  Fix: in `check_call`, when the callee is an index expression whose type is
-  `Type::Closure` / `Type::FnPtr`, allow the call without requiring a named fn.
+- [x] **B3. Anonymous fn called inline from Vec slot (`fs[0](10)`)** ✅ done 2026-07-14
+  Added `ExprKind::IndirectCall { callee, args }` AST node. Parser emits it for
+  non-Var callees; checker type-checks callee as `FnPtr`/`Closure` and lowers to
+  existing `TypedExprKind::CallIndirect`. Updated all exhaustive `ExprKind` walkers
+  (10 in checker.rs, format.rs, smt.rs).
 
 ---
 

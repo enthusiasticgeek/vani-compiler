@@ -6,6 +6,22 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.5.0] — 2026-07-15
+
+### Added
+
+- **`if let` / `while let`** — bind enum payload variables in conditional and loop position (M1).
+- **Or-patterns** — combine multiple patterns in one match arm with `|`; compiler expands before type-checking (M2).
+- **Pattern guards** — `Opt.Some(n) if n > 0 then …` refines which values an arm matches; guarded and unguarded arms for the same variant merge into one switch case with an `if`/`else` (M3).
+- **`vec512<T>` + `simd512_*` builtins** — 512-bit SIMD targeting AVX-512/SVE-512/RVV VLEN=512; 7 builtins: splat, load, store, add, sub, mul, reduce_add (M4).
+
+### Fixed
+
+- **OwnedStr double-free in by-value enum match** — scrutinee Drop is now suppressed only when the arm body is a direct move-out (`Var(binding)`), not for view-only or no-binding arms (M5).
+- **Generic T inference through user-defined Apply constructors** — `unify_param_to_arg` now strips the `"Name__"` prefix from monomorphized struct/enum names to recover the concrete T, fixing garbage specialization names like `unbox__Struct_Wrap__i64__` (M6).
+
+---
+
 ## [v0.4.5] — 2026-07-13
 
 ### Changed
