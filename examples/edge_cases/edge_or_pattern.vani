@@ -1,0 +1,29 @@
+// M2: or-patterns in match arms.
+enum Color { Red, Green, Blue, Other }
+
+fn is_primary(c: Color) -> i64 {
+  return match c {
+    Color.Red | Color.Green | Color.Blue then 1,
+    Color.Other then 0,
+  };
+}
+
+enum Opt { None, Some(i64) }
+
+fn main() -> i64 {
+  print is_primary(Color.Red);
+  print is_primary(Color.Green);
+  print is_primary(Color.Blue);
+  print is_primary(Color.Other);
+
+  // or-patterns with integer literals
+  let x: i64 = 2;
+  let msg: i64 = match x {
+    1 | 2 | 3 then 10,
+    4 | 5 then 20,
+    _ then 99,
+  };
+  print msg;
+
+  return 0;
+}

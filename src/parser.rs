@@ -4367,9 +4367,73 @@ impl Parser {
                     }
                 }
             };
+            // Collect additional or-patterns: `Pat1 | Pat2 | Pat3 then body`
+            let mut or_patterns: Vec<(Pattern, Span)> = vec![(pattern, pat_span)];
+            while self.match_token(|k| matches!(k, TokenKind::Pipe)).is_some() {
+                // Parse the next alternative pattern using the same logic above.
+                let (alt_pat, alt_span) = if self.check(|k| matches!(k, TokenKind::True)) {
+                    let tok = self.bump();
+                    (Pattern::Bool(true), tok.span)
+                } else if self.check(|k| matches!(k, TokenKind::False)) {
+                    let tok = self.bump();
+                    (Pattern::Bool(false), tok.span)
+                } else if self.check(|k| matches!(k, TokenKind::Str(_))) {
+                    let tok = self.bump();
+                    let span = tok.span;
+                    let text = match tok.kind { TokenKind::Str(s) => s, _ => unreachable!() };
+                    (Pattern::Str(text), span)
+                } else if self.check(|k| matches!(k, TokenKind::Minus | TokenKind::Int(_) | TokenKind::Float(_))) {
+                    let alt_start = self.current().span;
+                    let negative = self.match_token(|k| matches!(k, TokenKind::Minus)).is_some();
+                    let lit_tok = self.bump();
+                    let lit_span = lit_tok.span;
+                    match lit_tok.kind {
+                        TokenKind::Int(v) => {
+                            let value = if negative {
+                                v.checked_neg().ok_or_else(|| Diagnostic::new(
+                                    alt_start.merge(lit_span),
+                                    "integer pattern overflow when negating",
+                                ))?
+                            } else { v };
+                            (Pattern::Int(value), alt_start.merge(lit_span))
+                        }
+                        TokenKind::Float(v) => {
+                            let value = if negative { -v } else { v };
+                            (Pattern::Float(value), alt_start.merge(lit_span))
+                        }
+                        _ => return Err(Diagnostic::new(lit_span, "expected integer or float literal in match pattern")),
+                    }
+                } else {
+                    let first_tok = self.expect_ident()?;
+                    let alt_start = first_tok.span;
+                    let first_text = ident_text(first_tok);
+                    if first_text == "_" {
+                        (Pattern::Wildcard, alt_start)
+                    } else {
+                        self.expect_keyword("'.' (variant in match pattern)", |k| matches!(k, TokenKind::Dot))?;
+                        let variant_tok = self.expect_ident()?;
+                        let mut alt_pat_span = alt_start.merge(variant_tok.span);
+                        let variant = ident_text(variant_tok);
+                        if self.check(|k| matches!(k, TokenKind::LParen)) {
+                            self.bump();
+                            let binding_tok = self.expect_ident()?;
+                            let binding = ident_text(binding_tok);
+                            let close = self.expect_keyword("')' (variant payload binding close)", |k| matches!(k, TokenKind::RParen))?;
+                            alt_pat_span = alt_start.merge(close.span);
+                            (Pattern::VariantWithBinding { enum_name: first_text, variant, binding }, alt_pat_span)
+                        } else {
+                            (Pattern::Variant { enum_name: first_text, variant }, alt_pat_span)
+                        }
+                    }
+                };
+                or_patterns.push((alt_pat, alt_span));
+            }
             self.expect_keyword("'then'", |k| matches!(k, TokenKind::Then))?;
             let body = self.parse_expr()?;
-            arms.push(MatchArm { pattern, pattern_span: pat_span, body });
+            // Expand or-patterns: push one arm per alternative with a cloned body.
+            for (pat, pspan) in or_patterns {
+                arms.push(MatchArm { pattern: pat, pattern_span: pspan, body: body.clone() });
+            }
             if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
                 break;
             }
