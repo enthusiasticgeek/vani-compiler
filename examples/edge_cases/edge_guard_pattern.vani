@@ -1,0 +1,52 @@
+// M3: pattern guards in match arms.
+enum Opt { None, Some(i64) }
+
+fn classify(x: i64) -> i64 {
+  return match x {
+    1 | 2 | 3 then 10,
+    _ then 99,
+  };
+}
+
+fn sign(x: i64) -> i64 {
+  return match x {
+    0 then 0,
+    _ then 1,
+  };
+}
+
+fn main() -> i64 {
+  let a: Opt = Opt.Some(5);
+  let r1: i64 = match a {
+    Opt.Some(n) if n > 0 then 1,
+    Opt.Some(n) then 2,
+    Opt.None then 3,
+  };
+  print r1;
+
+  let b: Opt = Opt.Some(0);
+  let r2: i64 = match b {
+    Opt.Some(n) if n > 0 then 1,
+    Opt.Some(n) then 2,
+    Opt.None then 3,
+  };
+  print r2;
+
+  let c: Opt = Opt.None;
+  let r3: i64 = match c {
+    Opt.Some(n) if n > 0 then 1,
+    Opt.Some(n) then 2,
+    Opt.None then 3,
+  };
+  print r3;
+
+  let x: i64 = 7;
+  let r4: i64 = match x {
+    0 then 0,
+    _ if x > 0 then 1,
+    _ then -1,
+  };
+  print r4;
+
+  return 0;
+}

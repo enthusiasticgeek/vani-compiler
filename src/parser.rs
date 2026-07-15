@@ -4428,11 +4428,17 @@ impl Parser {
                 };
                 or_patterns.push((alt_pat, alt_span));
             }
+            // Optional `if <guard>` between patterns and `then` (M3).
+            let guard: Option<Expr> = if self.match_token(|k| matches!(k, TokenKind::If)).is_some() {
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             self.expect_keyword("'then'", |k| matches!(k, TokenKind::Then))?;
             let body = self.parse_expr()?;
-            // Expand or-patterns: push one arm per alternative with a cloned body.
+            // Expand or-patterns: push one arm per alternative with a cloned body and guard.
             for (pat, pspan) in or_patterns {
-                arms.push(MatchArm { pattern: pat, pattern_span: pspan, body: body.clone() });
+                arms.push(MatchArm { pattern: pat, pattern_span: pspan, guard: guard.clone(), body: body.clone() });
             }
             if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
                 break;
@@ -5846,6 +5852,7 @@ fn synthesize_await_desugar(inner: Expr, span: Span) -> Expr {
                 binding: "__await_v".to_string(),
             },
             pattern_span: span,
+            guard: None,
             body: v_var,
         },
         MatchArm {
@@ -5854,6 +5861,7 @@ fn synthesize_await_desugar(inner: Expr, span: Span) -> Expr {
                 variant: "Pending".to_string(),
             },
             pattern_span: span,
+            guard: None,
             body: Expr {
                 kind: ExprKind::Int(0),
                 span,
@@ -6508,6 +6516,7 @@ fn try_desugar_match_via_tag_extraction(
         tag_match_arms.push(crate::ast::MatchArm {
             pattern: pat.clone(),
             pattern_span: *pat_span,
+            guard: None,
             body: Expr {
                 kind: ExprKind::Int(idx as i128),
                 span: *pat_span,
@@ -6519,6 +6528,7 @@ fn try_desugar_match_via_tag_extraction(
         tag_match_arms.push(crate::ast::MatchArm {
             pattern: crate::ast::Pattern::Wildcard,
             pattern_span: span,
+            guard: None,
             body: Expr {
                 kind: ExprKind::Int(wildcard_tag),
                 span,
@@ -6609,6 +6619,7 @@ fn try_desugar_match_via_tag_extraction(
                         binding: pat_binding.clone(),
                     },
                     pattern_span: arm_span,
+                    guard: None,
                     body: Expr {
                         kind: ExprKind::Var(pat_binding.clone()),
                         span: arm_span,
@@ -6617,6 +6628,7 @@ fn try_desugar_match_via_tag_extraction(
                 crate::ast::MatchArm {
                     pattern: crate::ast::Pattern::Wildcard,
                     pattern_span: arm_span,
+                    guard: None,
                     body: Expr {
                         kind: ExprKind::Int(0),
                         span: arm_span,
@@ -7026,11 +7038,13 @@ fn desugar_try_in_v31_body(
                                     binding: format!("__discard_ok_{}", n),
                                 },
                                 pattern_span: try_local_span,
+                                guard: None,
                                 body: Expr { kind: ExprKind::Int(0), span: try_local_span },
                             },
                             crate::ast::MatchArm {
                                 pattern: crate::ast::Pattern::Wildcard,
                                 pattern_span: try_local_span,
+                                guard: None,
                                 body: Expr { kind: ExprKind::Int(1), span: try_local_span },
                             },
                         ],
@@ -7104,6 +7118,7 @@ fn desugar_try_in_v31_body(
                                     binding: pat_binding.clone(),
                                 },
                                 pattern_span: try_local_span,
+                                guard: None,
                                 body: Expr {
                                     kind: ExprKind::Var(pat_binding.clone()),
                                     span: try_local_span,
@@ -7112,6 +7127,7 @@ fn desugar_try_in_v31_body(
                             crate::ast::MatchArm {
                                 pattern: crate::ast::Pattern::Wildcard,
                                 pattern_span: try_local_span,
+                                guard: None,
                                 body: Expr { kind: ExprKind::Int(0), span: try_local_span },
                             },
                         ],
@@ -7175,6 +7191,7 @@ fn substitute_var_in_expr(expr: &Expr, target: &str, replacement: &Expr) -> Expr
             arms: arms.iter().map(|a| crate::ast::MatchArm {
                 pattern: a.pattern.clone(),
                 pattern_span: a.pattern_span,
+                guard: a.guard.as_ref().map(|g| substitute_var_in_expr(g, target, replacement)),
                 body: substitute_var_in_expr(&a.body, target, replacement),
             }).collect(),
         },
@@ -8029,6 +8046,7 @@ fn rewrite_vars_to_fields(
             arms: arms.iter().map(|a| crate::ast::MatchArm {
                 pattern: a.pattern.clone(),
                 pattern_span: a.pattern_span,
+                guard: a.guard.as_ref().map(|g| rewrite_vars_to_fields(g, rename_set, obj_name)),
                 body: rewrite_vars_to_fields(&a.body, rename_set, obj_name),
             }).collect(),
         },

@@ -1921,6 +1921,11 @@ pub enum ExprKind {
 pub struct MatchArm {
     pub pattern: Pattern,
     pub pattern_span: Span,
+    /// Optional `if <guard>` condition between pattern and `then`.
+    /// Guard is type-checked as Bool; arm body is wrapped in an
+    /// assertion so guard failure aborts (SMT should prove guards
+    /// always hold at their match point). M3.
+    pub guard: Option<Expr>,
     pub body: Expr,
 }
 

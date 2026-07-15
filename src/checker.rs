@@ -1,4 +1,4 @@
-﻿use crate::ast::{BinaryOp, EnumDecl, Expr, ExprKind, Function, Param, Program, Stmt, StructDecl, Type, UnaryOp};
+use crate::ast::{BinaryOp, EnumDecl, Expr, ExprKind, Function, Param, Program, Stmt, StructDecl, Type, UnaryOp};
 use crate::diagnostic::Diagnostic;
 use crate::ir::{
     TypedConst, TypedExpr, TypedExprKind, TypedFunction, TypedParam, TypedProgram, TypedStmt,
@@ -2621,7 +2621,8 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         ExprKind::FieldAccess { object, .. } => expr_mentions_var(object, name),
         ExprKind::Match { scrutinee, arms } => {
             expr_mentions_var(scrutinee, name)
-                || arms.iter().any(|a| expr_mentions_var(&a.body, name))
+                || arms.iter().any(|a| expr_mentions_var(&a.body, name)
+                    || a.guard.as_ref().map_or(false, |g| expr_mentions_var(g, name)))
         }
         ExprKind::IfExpr { cond, then_value, else_value } => {
             expr_mentions_var(cond, name)
@@ -2831,6 +2832,9 @@ fn walk_expr_for_captures(
         ExprKind::Match { scrutinee, arms } => {
             walk_expr_for_captures(scrutinee, bound, env, top_level_names, captures, seen);
             for arm in arms {
+                if let Some(g) = &arm.guard {
+                    walk_expr_for_captures(g, bound, env, top_level_names, captures, seen);
+                }
                 walk_expr_for_captures(&arm.body, bound, env, top_level_names, captures, seen);
             }
         }
@@ -3049,6 +3053,7 @@ fn rename_vars_in_expr(
         ExprKind::Match { scrutinee, arms } => {
             rename_vars_in_expr(scrutinee, rename);
             for arm in arms {
+                if let Some(g) = &mut arm.guard { rename_vars_in_expr(g, rename); }
                 rename_vars_in_expr(&mut arm.body, rename);
             }
         }
@@ -3264,6 +3269,7 @@ fn rewrite_closure_calls_in_expr(
         ExprKind::Match { scrutinee, arms } => {
             rewrite_closure_calls_in_expr(scrutinee, closures);
             for arm in arms {
+                if let Some(g) = &mut arm.guard { rewrite_closure_calls_in_expr(g, closures); }
                 rewrite_closure_calls_in_expr(&mut arm.body, closures);
             }
         }
@@ -3483,6 +3489,7 @@ fn lift_expr_anon_fn(
         ExprKind::Match { scrutinee, arms } => {
             lift_expr_anon_fn(scrutinee, counter, hoisted);
             for arm in arms {
+                if let Some(g) = &mut arm.guard { lift_expr_anon_fn(g, counter, hoisted); }
                 lift_expr_anon_fn(&mut arm.body, counter, hoisted);
             }
         }
@@ -3785,6 +3792,7 @@ fn flatten_modules_in_program(
                     rewrite_expr(scrutinee, qualify);
                     for a in arms {
                         rewrite_pattern(&mut a.pattern, qualify);
+                        if let Some(g) = &mut a.guard { rewrite_expr(g, qualify); }
                         rewrite_expr(&mut a.body, qualify);
                     }
                 }
@@ -4415,6 +4423,7 @@ fn rewrite_expr_for_alias(
                 | crate::ast::Pattern::VariantWithBinding { enum_name, .. } = &mut a.pattern {
                     *enum_name = qualify(enum_name);
                 }
+                if let Some(g) = &mut a.guard { rewrite_expr_for_alias(g, qualify); }
                 rewrite_expr_for_alias(&mut a.body, qualify);
             }
         }
@@ -4679,6 +4688,7 @@ fn resolve_enum_types_in_expr(
         ExprKind::Match { scrutinee, arms } => {
             resolve_enum_types_in_expr(scrutinee, enums);
             for arm in arms {
+                if let Some(g) = &mut arm.guard { resolve_enum_types_in_expr(g, enums); }
                 resolve_enum_types_in_expr(&mut arm.body, enums);
             }
         }
@@ -5092,6 +5102,7 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
         ExprKind::Match { scrutinee, arms } => {
             sub_aliases_in_expr(scrutinee, aliases);
             for arm in arms {
+                if let Some(g) = &mut arm.guard { sub_aliases_in_expr(g, aliases); }
                 sub_aliases_in_expr(&mut arm.body, aliases);
             }
         }
@@ -5914,11 +5925,13 @@ fn rewrite_guard_ifs_in_stmt_list(body: &mut Vec<Stmt>) {
                 MatchArm {
                     pattern: Pattern::Bool(true),
                     pattern_span: guard_span,
+                    guard: None,
                     body: x_expr,
                 },
                 MatchArm {
                     pattern: Pattern::Bool(false),
                     pattern_span: guard_span,
+                    guard: None,
                     body: false_body,
                 },
             ],
@@ -6230,6 +6243,7 @@ fn try_rewrite_block_stmts(
                         binding: fresh,
                     },
                     pattern_span: try_span,
+                    guard: None,
                     body: some_arm_body,
                 },
                 MatchArm {
@@ -6238,6 +6252,7 @@ fn try_rewrite_block_stmts(
                         variant: none_variant.to_string(),
                     },
                     pattern_span: try_span,
+                    guard: None,
                     body: none_arm_body,
                 },
             ],
@@ -7085,7 +7100,10 @@ fn monomorphize_type_decls_in_program(
             }
             ExprKind::Match { scrutinee, arms } => {
                 f(scrutinee);
-                for arm in arms { f(&arm.body); }
+                for arm in arms {
+                    if let Some(g) = &arm.guard { f(g); }
+                    f(&arm.body);
+                }
             }
             ExprKind::Block { stmts, tail } => {
                 for s in stmts { walk_stmt_kids(s, f); }
@@ -9230,6 +9248,7 @@ fn walk_branch_mutations_in_expr(
         ExprKind::Match { scrutinee, arms } => {
             walk_branch_mutations_in_expr(scrutinee, out);
             for arm in arms {
+                if let Some(g) = &arm.guard { walk_branch_mutations_in_expr(g, out); }
                 walk_branch_mutations_in_expr(&arm.body, out);
             }
         }
@@ -13161,6 +13180,7 @@ fn collect_ref_sources_in_expr_impl(
         ExprKind::Match { scrutinee, arms } => {
             collect_ref_sources_in_expr_impl(scrutinee, skip_call_args, out);
             for a in arms {
+                if let Some(g) = &a.guard { collect_ref_sources_in_expr_impl(g, skip_call_args, out); }
                 collect_ref_sources_in_expr_impl(&a.body, skip_call_args, out);
             }
         }
@@ -15837,8 +15857,11 @@ fn check_expr(
                     Option<i128>,
                 ) = match &arm.pattern {
                     crate::ast::Pattern::Wildcard => {
-                        wildcard_seen = true;
-                        wildcard_arm_index = Some(arm_idx);
+                        // M3: guarded wildcards don't close off further arms.
+                        if arm.guard.is_none() {
+                            wildcard_seen = true;
+                            wildcard_arm_index = Some(arm_idx);
+                        }
                         (None, None, None)
                     }
                     crate::ast::Pattern::Int(v) => {
@@ -15864,14 +15887,15 @@ fn check_expr(
                             ).with_elaboration(crate::diagnostic_elaborations::const_expr_overflow()));
                             continue;
                         }
-                        if seen_ints.contains(v) {
+                        // M3: guarded arms may share a pattern value with a following unguarded arm.
+                        if arm.guard.is_none() && seen_ints.contains(v) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!("match arm for integer pattern '{}' appears twice", v),
                             ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
-                        seen_ints.push(*v);
+                        if arm.guard.is_none() { seen_ints.push(*v); }
                         (None, None, Some(*v))
                     }
                     crate::ast::Pattern::Bool(b) => {
@@ -15885,14 +15909,15 @@ fn check_expr(
                             ).with_elaboration(crate::diagnostic_elaborations::match_wrong_pattern_type("bool", &scrut_ty.to_string())));
                             continue;
                         }
-                        if seen_bools.contains(b) {
+                        // M3: guarded arms may share a bool value with a following unguarded arm.
+                        if arm.guard.is_none() && seen_bools.contains(b) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!("match arm for bool pattern '{}' appears twice", b),
                             ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
-                        seen_bools.push(*b);
+                        if arm.guard.is_none() { seen_bools.push(*b); }
                         // Encode bool as 0/1 integer dispatch
                         // so the existing backend switch logic
                         // works uniformly.
@@ -15973,7 +15998,8 @@ fn check_expr(
                             ).with_elaboration(crate::diagnostic_elaborations::field_not_found(pat_variant, enum_name)));
                             continue;
                         };
-                        if seen_variants.contains(&pat_variant.as_str()) {
+                        // M3: guarded arms may share a variant with a following unguarded arm.
+                        if arm.guard.is_none() && seen_variants.contains(&pat_variant.as_str()) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!(
@@ -15983,7 +16009,7 @@ fn check_expr(
                             ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
-                        seen_variants.push(pat_variant);
+                        if arm.guard.is_none() { seen_variants.push(pat_variant); }
                         (Some(tag as u32), Some(pat_variant.clone()), None)
                     }
                     crate::ast::Pattern::VariantWithBinding {
@@ -16060,7 +16086,8 @@ fn check_expr(
                             seen_variants.push(pat_variant);
                             continue;
                         }
-                        if seen_variants.contains(&pat_variant.as_str()) {
+                        // M3: guarded arms may share a variant with a following unguarded arm.
+                        if arm.guard.is_none() && seen_variants.contains(&pat_variant.as_str()) {
                             diagnostics.push(Diagnostic::new(
                                 arm.pattern_span,
                                 format!(
@@ -16070,7 +16097,7 @@ fn check_expr(
                             ).with_elaboration(crate::diagnostic_elaborations::match_arm_after_wildcard()));
                             continue;
                         }
-                        seen_variants.push(pat_variant);
+                        if arm.guard.is_none() { seen_variants.push(pat_variant); }
                         (Some(tag as u32), Some(pat_variant.clone()), None)
                     }
                 };
@@ -16164,11 +16191,66 @@ fn check_expr(
                         moved_fields: std::collections::BTreeMap::new(),
                         ref_aliases: Vec::new(),
                     });
+                    // M3: type-check optional guard with binding in scope.
+                    let guard_typed = arm.guard.as_ref().map(|g| {
+                        let gc = check_expr(g, env, signatures, diagnostics);
+                        if gc.ty() != &Type::Bool {
+                            diagnostics.push(Diagnostic::new(
+                                g.span,
+                                format!("pattern guard must be Bool, got {}", gc.ty()),
+                            ));
+                        }
+                        gc.expr
+                    });
                     let bc = check_expr(&arm.body, env, signatures, diagnostics);
                     env.pop_scope();
-                    bc
+                    if let Some(gexpr) = guard_typed {
+                        let body_ty = bc.expr.ty.clone();
+                        let body_span = arm.body.span;
+                        let wrapped = crate::ir::TypedExpr {
+                            kind: crate::ir::TypedExprKind::Block {
+                                stmts: vec![crate::ir::TypedStmt::Assert { expr: gexpr, message: None }],
+                                tail: Box::new(bc.expr),
+                            },
+                            ty: body_ty,
+                            constant: None,
+                            span: body_span,
+                            binding_decl_span: None,
+                        };
+                        CheckedExpr { expr: wrapped, flexible_integer: false, flexible_float: false }
+                    } else {
+                        bc
+                    }
                 } else {
-                    check_expr(&arm.body, env, signatures, diagnostics)
+                    // M3: type-check optional guard (no binding scope).
+                    let guard_typed = arm.guard.as_ref().map(|g| {
+                        let gc = check_expr(g, env, signatures, diagnostics);
+                        if gc.ty() != &Type::Bool {
+                            diagnostics.push(Diagnostic::new(
+                                g.span,
+                                format!("pattern guard must be Bool, got {}", gc.ty()),
+                            ));
+                        }
+                        gc.expr
+                    });
+                    let bc = check_expr(&arm.body, env, signatures, diagnostics);
+                    if let Some(gexpr) = guard_typed {
+                        let body_ty = bc.expr.ty.clone();
+                        let body_span = arm.body.span;
+                        let wrapped = crate::ir::TypedExpr {
+                            kind: crate::ir::TypedExprKind::Block {
+                                stmts: vec![crate::ir::TypedStmt::Assert { expr: gexpr, message: None }],
+                                tail: Box::new(bc.expr),
+                            },
+                            ty: body_ty,
+                            constant: None,
+                            span: body_span,
+                            binding_decl_span: None,
+                        };
+                        CheckedExpr { expr: wrapped, flexible_integer: false, flexible_float: false }
+                    } else {
+                        bc
+                    }
                 };
                 if let Some(expected) = &result_ty {
                     if body_checked.ty() != expected {
@@ -16185,14 +16267,54 @@ fn check_expr(
                     result_ty = Some(body_checked.ty().clone());
                 }
                 let is_wildcard = matches!(arm.pattern, crate::ast::Pattern::Wildcard);
-                typed_arms.push(crate::ir::TypedMatchArm {
-                    variant: variant_name_opt.unwrap_or_default(),
-                    tag: tag_opt.unwrap_or(0),
-                    is_wildcard,
-                    int_value: int_opt,
-                    binding: arm_binding,
-                    body: body_checked.expr,
-                });
+                // M3: if this arm has a guard AND the previous arm in typed_arms has
+                // the same tag and a guarded body (Block{Assert,tail}), they were
+                // already pushed with a pending flag. Instead, if THIS arm has no guard
+                // and the last pushed arm has the same tag — merge: replace last arm's
+                // block-assert body with IfExpr(extracted_guard, old_tail, new_body).
+                let this_tag = tag_opt.unwrap_or(if is_wildcard { u32::MAX } else { 0 });
+                let merged = if arm.guard.is_none() {
+                    // Check if last pushed arm has same tag and a Block{Assert,tail} body.
+                    if let Some(last) = typed_arms.last_mut() {
+                        let same_tag = (last.is_wildcard && is_wildcard) ||
+                            (!last.is_wildcard && !is_wildcard && last.tag == this_tag)
+                            || (last.int_value == int_opt && int_opt.is_some());
+                        if same_tag {
+                            if let crate::ir::TypedExprKind::Block { ref stmts, ref tail } = last.body.kind.clone() {
+                                if stmts.len() == 1 {
+                                    if let crate::ir::TypedStmt::Assert { ref expr, message: None } = stmts[0] {
+                                        let guard_cond = expr.clone();
+                                        let then_val = *tail.clone();
+                                        let else_val = body_checked.expr.clone();
+                                        let merged_body = crate::ir::TypedExpr {
+                                            kind: crate::ir::TypedExprKind::IfExpr {
+                                                cond: Box::new(guard_cond),
+                                                then_value: Box::new(then_val),
+                                                else_value: Box::new(else_val),
+                                            },
+                                            ty: body_checked.expr.ty.clone(),
+                                            constant: None,
+                                            span: arm.body.span,
+                                            binding_decl_span: None,
+                                        };
+                                        last.body = merged_body;
+                                        true
+                                    } else { false }
+                                } else { false }
+                            } else { false }
+                        } else { false }
+                    } else { false }
+                } else { false };
+                if !merged {
+                    typed_arms.push(crate::ir::TypedMatchArm {
+                        variant: variant_name_opt.unwrap_or_default(),
+                        tag: tag_opt.unwrap_or(0),
+                        is_wildcard,
+                        int_value: int_opt,
+                        binding: arm_binding,
+                        body: body_checked.expr,
+                    });
+                }
             }
             // Exhaustiveness:
             //   - enum dispatch: every declared variant
@@ -30892,6 +31014,7 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
                 .map(|a| crate::ast::MatchArm {
                     pattern: a.pattern.clone(),
                     pattern_span: a.pattern_span,
+                    guard: a.guard.as_ref().map(|g| substitute_expr(g, subs)),
                     body: substitute_expr(&a.body, subs),
                 })
                 .collect(),
@@ -31043,7 +31166,8 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
         ExprKind::FieldAccess { object, .. } => expr_mentions(object, name),
         ExprKind::Match { scrutinee, arms } => {
             expr_mentions(scrutinee, name)
-                || arms.iter().any(|a| expr_mentions(&a.body, name))
+                || arms.iter().any(|a| expr_mentions(&a.body, name)
+                    || a.guard.as_ref().map_or(false, |g| expr_mentions(g, name)))
         }
         ExprKind::IfExpr { cond, then_value, else_value } => {
             expr_mentions(cond, name)
@@ -31953,6 +32077,7 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
         ExprKind::Match { scrutinee, arms } => {
             pin_var_to_version(scrutinee, name, version);
             for arm in arms.iter_mut() {
+                if let Some(g) = &mut arm.guard { pin_var_to_version(g, name, version); }
                 pin_var_to_version(&mut arm.body, name, version);
             }
         }
@@ -33202,6 +33327,7 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
                         }
                     },
                     pattern_span: t.span,
+                    guard: None,
                     body: typed_to_expr(&a.body),
                 })
                 .collect(),

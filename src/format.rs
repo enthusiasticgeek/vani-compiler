@@ -1388,6 +1388,10 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
                         out.push('_');
                     }
                 }
+                if let Some(g) = &arm.guard {
+                    out.push_str(" if ");
+                    format_expr(g, false, out);
+                }
                 out.push_str(" then ");
                 format_expr(&arm.body, false, out);
                 out.push(',');
@@ -1676,6 +1680,7 @@ mod tests {
                 zero_expr(scrutinee);
                 for arm in arms {
                     arm.pattern_span = crate::span::Span::new(0, 0);
+                    if let Some(g) = &mut arm.guard { zero_expr(g); }
                     zero_expr(&mut arm.body);
                 }
             }
