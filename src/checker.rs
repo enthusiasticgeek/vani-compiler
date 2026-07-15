@@ -15893,6 +15893,11 @@ fn check_expr(
             let mut seen_ints: Vec<i128> = Vec::new();
             let mut seen_bools: Vec<bool> = Vec::new();
             let mut result_ty: Option<Type> = None;
+            // M5: set to true if any arm directly moves an OwnedStr
+            // payload out (arm body is exactly Var(binding)). Used
+            // after the loop to decide whether to suppress the
+            // scrutinee's scope-exit Drop.
+            let mut any_arm_moved_ownedstr_direct = false;
             // A wildcard arm covers every remaining variant. v1
             // requires it to appear last â€” once seen, arms after
             // it are dead.
@@ -16172,27 +16177,23 @@ fn check_expr(
                 // scope is the same dangling-Str hazard that
                 // already exists for any Str produced from an
                 // OwnedStr in this language. Closure #128 / D3.
+                // original_payload_ty: the raw enum payload type
+                // before any view/borrow transformation. Used in
+                // the body-checking block to detect M5 direct-move.
+                let mut original_payload_ty: Option<Type> = None;
                 let arm_binding: Option<(String, Type)> = match &arm.pattern {
                     crate::ast::Pattern::VariantWithBinding {
                         enum_name: pat_enum,
                         variant: pat_variant,
                         binding,
                     } => {
-                        // Look up against the scrutinee's enum
-                        // name first (which is the mangled
-                        // monomorphic name, e.g. `Option__i64`).
-                        // This works even when multiple
-                        // monomorphic instantiations of the same
-                        // generic enum coexist (e.g.
-                        // `Option<i64>` AND `Option<f64>`) â€”
-                        // resolving by the unmangled base name
-                        // would be ambiguous. Closure #298 fix.
                         let scrutinee_enum = enum_name_opt.as_deref().unwrap_or(pat_enum);
                         lookup_enum_variant_payload(env, scrutinee_enum, pat_variant)
                             .or_else(|| {
                                 lookup_enum_variant_payload(env, pat_enum, pat_variant)
                             })
                             .map(|ty| {
+                                original_payload_ty = Some(ty.clone());
                                 // Phase 11 L3 (2026-06-15): when the
                                 // scrutinee is `ref Enum` / `mut ref
                                 // Enum`, give non-Copy payload bindings
@@ -16212,18 +16213,48 @@ fn check_expr(
                                         other => other,
                                     }
                                 } else {
-                                    // M5: by-value scrutinee — OwnedStr payload moves
-                                    // into the binding (binding owns the heap). Binding
-                                    // is no_drop so scope-exit won't double-free.
-                                    ty
+                                    // By-value scrutinee: expose OwnedStr
+                                    // payload as Str (read-only view) by
+                                    // default. The scrutinee's own scope-exit
+                                    // Drop frees the heap once. M5: if the
+                                    // arm body DIRECTLY moves the binding out
+                                    // (body == Var(binding)), the type is
+                                    // upgraded to OwnedStr below.
+                                    match ty {
+                                        Type::OwnedStr => Type::Str,
+                                        other => other,
+                                    }
                                 };
                                 (binding.clone(), view_ty)
                             })
                     }
                     _ => None,
                 };
+                // final_arm_binding may be upgraded to OwnedStr below.
+                let mut final_arm_binding = arm_binding.clone();
                 let body_checked = if let Some((bname, bty)) = &arm_binding {
                     env.push_scope();
+                    // M5: if the arm body is EXACTLY Var(bname) and
+                    // the original payload was OwnedStr, the payload
+                    // is being moved directly out of the enum. Use
+                    // OwnedStr binding (char*) in that arm so the
+                    // returned value owns the heap. The scrutinee's
+                    // scope-exit Drop is suppressed after the match
+                    // (see `any_arm_moved_ownedstr_direct` below) to
+                    // prevent a double-free. All other uses (len(s),
+                    // etc.) keep the Str view so the scrutinee's
+                    // Drop fires normally and frees the payload once.
+                    let direct_move = original_payload_ty.as_ref()
+                        .map_or(false, |pty| pty == &Type::OwnedStr)
+                        && !raw_scrut_ty.is_any_ref()
+                        && matches!(&arm.body.kind, ExprKind::Var(n) if n == bname);
+                    let actual_bty = if direct_move {
+                        any_arm_moved_ownedstr_direct = true;
+                        final_arm_binding = Some((bname.clone(), Type::OwnedStr));
+                        Type::OwnedStr
+                    } else {
+                        bty.clone()
+                    };
                     // Phase 11 (2026-06-07): for affine-payload
                     // bindings (Vec<T>, structs with owning fields,
                     // â€¦) the binding is a non-owning view over the
@@ -16233,9 +16264,9 @@ fn check_expr(
                     // or we'd double-free. Copy payloads (i64,
                     // bool, â€¦) drop trivially so the flag has no
                     // observable effect on them.
-                    let binding_is_affine = !bty.is_copy();
+                    let binding_is_affine = !actual_bty.is_copy();
                     env.insert_current(bname.clone(), VarInfo {
-                        ty: bty.clone(),
+                        ty: actual_bty.clone(),
                         constant: None,
                         moved: None,
                         decl_span: arm.pattern_span,
@@ -16368,7 +16399,7 @@ fn check_expr(
                         tag: tag_opt.unwrap_or(0),
                         is_wildcard,
                         int_value: int_opt,
-                        binding: arm_binding,
+                        binding: final_arm_binding,
                         body: body_checked.expr,
                     });
                 }
@@ -16435,11 +16466,19 @@ fn check_expr(
                 }
             }
             let _ = wildcard_arm_index;
-            // M5: By-value match on a non-Copy scrutinee moves it —
-            // mark the variable as moved so emit_current_scope_drops
-            // skips its Drop and avoids a double-free of OwnedStr
-            // payloads (or other heap-owning enum fields).
-            if !raw_scrut_ty.is_any_ref() && !raw_scrut_ty.is_copy() {
+            // M5: suppress the scrutinee's scope-exit Drop ONLY
+            // when at least one arm directly moved its OwnedStr
+            // payload (arm body == Var(binding)). Without this,
+            // the scope-exit Drop would free a buffer whose
+            // ownership was transferred to the returned OwnedStr
+            // → use-after-free for the caller.
+            // Cases that do NOT trigger this (no binding, or
+            // binding used view-only like len(s)) keep the
+            // scrutinee Drop so the payload is freed correctly.
+            if any_arm_moved_ownedstr_direct
+                && !raw_scrut_ty.is_any_ref()
+                && !raw_scrut_ty.is_copy()
+            {
                 if let ExprKind::Var(scrut_name) = &scrutinee.kind {
                     if let Some(info) = env.lookup_mut(scrut_name) {
                         info.moved = Some(scrutinee.span);
