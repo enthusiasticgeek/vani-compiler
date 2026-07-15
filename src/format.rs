@@ -1791,6 +1791,15 @@ mod tests {
                     *span = crate::span::Span::new(0, 0);
                     *reason_span = crate::span::Span::new(0, 0);
                 }
+                Stmt::IfLet { then_body, else_body, span, .. } => {
+                    zero_stmts(then_body);
+                    zero_stmts(else_body);
+                    *span = crate::span::Span::new(0, 0);
+                }
+                Stmt::WhileLet { body, span, .. } => {
+                    zero_stmts(body);
+                    *span = crate::span::Span::new(0, 0);
+                }
             }
         }
     }

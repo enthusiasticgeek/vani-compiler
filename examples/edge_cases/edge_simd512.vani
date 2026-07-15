@@ -1,0 +1,24 @@
+// M4: vec512<T> + simd512_* builtins.
+fn main() -> i64 {
+  // splat + add + reduce_add (f32, 16 lanes)
+  let a: vec512<f32> = simd512_splat(1.0 as f32);
+  let b: vec512<f32> = simd512_splat(2.0 as f32);
+  let c: vec512<f32> = simd512_add(a, b);
+  let s: f32 = simd512_reduce_add(c);
+  // 16 lanes * 3.0 = 48
+  print s as i64;
+
+  // sub
+  let d: vec512<f32> = simd512_sub(b, a);
+  let s2: f32 = simd512_reduce_add(d);
+  // 16 lanes * 1.0 = 16
+  print s2 as i64;
+
+  // mul
+  let e: vec512<f32> = simd512_mul(a, b);
+  let s3: f32 = simd512_reduce_add(e);
+  // 16 lanes * 2.0 = 32
+  print s3 as i64;
+
+  return 0;
+}

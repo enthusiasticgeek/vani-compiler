@@ -453,6 +453,8 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         Type::Vec128(_) => 16,
         // `vec256<T>` — always 32 bytes (256-bit SIMD register).
         Type::Vec256(_) => 32,
+        // `vec512<T>` — always 64 bytes (512-bit SIMD register).
+        Type::Vec512(_) => 64,
     }
 }
 
@@ -10504,6 +10506,163 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     _ => crate::ast::Type::I64,
                 };
                 let (lanes, llscalar) = vec256_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let is_float = matches!(elem_ty, crate::ast::Type::F32 | crate::ast::Type::F64);
+                let v = emit_expr(&args[0], ctx, out);
+                let dest = ctx.fresh_tmp();
+                if is_float {
+                    let zero = if llscalar == "float" { "float 0.0" } else { "double 0.0" };
+                    let float_suffix = if llscalar == "float" { "f32" } else { "f64" };
+                    out.push_str(&format!(
+                        "  {} = call {} @llvm.vector.reduce.fadd.v{}{} ({}, {} {})\n",
+                        dest, llscalar, lanes, float_suffix, zero, vec_ty, v
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  {} = call {} @llvm.vector.reduce.add.v{}{} ({} {})\n",
+                        dest, llscalar, lanes, llscalar, vec_ty, v
+                    ));
+                }
+                return dest;
+            }
+            // 512-bit SIMD family — mirrors the 256-bit block above
+            // but uses vec512_lanes_and_lltype and align 64.
+            if name == "simd512_splat" {
+                let elem_ty = match &expr.ty {
+                    crate::ast::Type::Vec512(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec512_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let val = emit_expr(&args[0], ctx, out);
+                let tmp0 = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = insertelement {} undef, {} {}, i32 0\n",
+                    tmp0, vec_ty, llscalar, val
+                ));
+                let mask: Vec<String> = (0..lanes).map(|_| "i32 0".to_string()).collect();
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = shufflevector {} {}, {} undef, <{} x i32> <{}>\n",
+                    dest, vec_ty, tmp0, vec_ty, lanes, mask.join(", ")
+                ));
+                return dest;
+            }
+            if name == "simd512_load" {
+                let elem_ty = match &expr.ty {
+                    crate::ast::Type::Vec512(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec512_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let (vec_struct, v) = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => {
+                        let vs = vec_struct_name(e);
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                    crate::ast::Type::Ref(inner) | crate::ast::Type::RefMut(inner) => {
+                        let vs = if let crate::ast::Type::Vec(e) = inner.as_ref() {
+                            vec_struct_name(e)
+                        } else {
+                            "%intent_vec_int64_t".to_string()
+                        };
+                        let ptr = emit_expr(&args[0], ctx, out);
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load {}, {}* {}\n", loaded, vs, vs, ptr));
+                        (vs, loaded)
+                    }
+                    _ => {
+                        let vs = "%intent_vec_int64_t".to_string();
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                };
+                let idx = emit_expr(&args[1], ctx, out);
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
+                let elem_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr inbounds {}, {}* {}, i64 {}\n",
+                    elem_ptr, llscalar, llscalar, data_ptr, idx
+                ));
+                let simd_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = load {}, {}* {}, align 64\n", dest, vec_ty, vec_ty, simd_ptr));
+                return dest;
+            }
+            if name == "simd512_store" {
+                let elem_ty = match &args[2].ty {
+                    crate::ast::Type::Vec512(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec512_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let (vec_struct, v) = match &args[0].ty {
+                    crate::ast::Type::Vec(e) => {
+                        let vs = vec_struct_name(e);
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                    crate::ast::Type::Ref(inner) | crate::ast::Type::RefMut(inner) => {
+                        let vs = if let crate::ast::Type::Vec(e) = inner.as_ref() {
+                            vec_struct_name(e)
+                        } else {
+                            "%intent_vec_int64_t".to_string()
+                        };
+                        let ptr = emit_expr(&args[0], ctx, out);
+                        let loaded = ctx.fresh_tmp();
+                        out.push_str(&format!("  {} = load {}, {}* {}\n", loaded, vs, vs, ptr));
+                        (vs, loaded)
+                    }
+                    _ => {
+                        let vs = "%intent_vec_int64_t".to_string();
+                        let val = emit_expr(&args[0], ctx, out);
+                        (vs, val)
+                    }
+                };
+                let idx = emit_expr(&args[1], ctx, out);
+                let data = emit_expr(&args[2], ctx, out);
+                let data_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = extractvalue {} {}, 0\n", data_ptr, vec_struct, v));
+                let elem_ptr = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = getelementptr inbounds {}, {}* {}, i64 {}\n",
+                    elem_ptr, llscalar, llscalar, data_ptr, idx
+                ));
+                let simd_ptr = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = bitcast {}* {} to {}*\n", simd_ptr, llscalar, elem_ptr, vec_ty));
+                out.push_str(&format!("  store {vec_ty} {data}, {vec_ty}* {simd_ptr}, align 64\n"));
+                return v;
+            }
+            if name == "simd512_add" || name == "simd512_sub" || name == "simd512_mul" {
+                let elem_ty = match &args[0].ty {
+                    crate::ast::Type::Vec512(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec512_lanes_and_lltype(&elem_ty);
+                let vec_ty = format!("<{} x {}>", lanes, llscalar);
+                let is_float = matches!(elem_ty, crate::ast::Type::F32 | crate::ast::Type::F64);
+                let op = if name == "simd512_add" {
+                    if is_float { "fadd" } else { "add" }
+                } else if name == "simd512_sub" {
+                    if is_float { "fsub" } else { "sub" }
+                } else {
+                    if is_float { "fmul" } else { "mul" }
+                };
+                let a = emit_expr(&args[0], ctx, out);
+                let b = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = {} {} {}, {}\n", dest, op, vec_ty, a, b));
+                return dest;
+            }
+            if name == "simd512_reduce_add" {
+                let elem_ty = match &args[0].ty {
+                    crate::ast::Type::Vec512(e) => e.as_ref().clone(),
+                    _ => crate::ast::Type::I64,
+                };
+                let (lanes, llscalar) = vec512_lanes_and_lltype(&elem_ty);
                 let vec_ty = format!("<{} x {}>", lanes, llscalar);
                 let is_float = matches!(elem_ty, crate::ast::Type::F32 | crate::ast::Type::F64);
                 let v = emit_expr(&args[0], ctx, out);
@@ -43834,6 +43993,7 @@ fn type_byte_size(t: &Type) -> u64 {
         Type::Task => 16,
         Type::Vec128(_) => 16, // 128-bit vector — must be 16 bytes
         Type::Vec256(_) => 32, // 256-bit vector — must be 32 bytes
+        Type::Vec512(_) => 64, // 512-bit vector — must be 64 bytes
         _ => 8, // conservative
     }
 }
@@ -44543,11 +44703,12 @@ fn is_scalar(ty: &Type) -> bool {
         // FileHandle wraps a FILE* as i64; it's a scalar i64
         // alloca just like any integer binding.
         || matches!(ty, Type::FileHandle)
-        // `vec128<T>` / `vec256<T>` are LLVM vector types (`<N x T>`).
+        // `vec128<T>` / `vec256<T>` / `vec512<T>` are LLVM vector types (`<N x T>`).
         // LLVM vector types are first-class SSA values; alloca +
         // store on `<N x T>` works identically to scalars.
         || matches!(ty, Type::Vec128(_))
         || matches!(ty, Type::Vec256(_))
+        || matches!(ty, Type::Vec512(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -44947,6 +45108,13 @@ fn llvm_type_string(ty: &Type) -> String {
             let (lanes, llty) = vec256_lanes_and_lltype(elem);
             format!("<{} x {}>", lanes, llty)
         }
+        // `vec512<T>` → LLVM vector type `<N x T>` where N = 512 / bits(T).
+        // Supported element types: i8/u8 (64 lanes), i16/u16 (32), i32/u32/f32 (16),
+        // i64/u64/f64 (8).
+        Type::Vec512(elem) => {
+            let (lanes, llty) = vec512_lanes_and_lltype(elem);
+            format!("<{} x {}>", lanes, llty)
+        }
         _ => llvm_type(ty).to_string(),
     }
 }
@@ -44975,6 +45143,20 @@ fn vec256_lanes_and_lltype(elem: &Type) -> (u32, &'static str) {
         Type::I64 | Type::U64 => (4, "i64"),
         Type::F64 => (4, "double"),
         _ => (8, "i32"), // fallback; checker rejects invalid elem types
+    }
+}
+
+/// Return (lane_count, LLVM scalar type string) for a vec512 element type.
+/// Exactly 2× the lane count of vec256 for the same element type.
+fn vec512_lanes_and_lltype(elem: &Type) -> (u32, &'static str) {
+    match elem {
+        Type::I8 | Type::U8 => (64, "i8"),
+        Type::I16 | Type::U16 => (32, "i16"),
+        Type::I32 | Type::U32 => (16, "i32"),
+        Type::F32 => (16, "float"),
+        Type::I64 | Type::U64 => (8, "i64"),
+        Type::F64 => (8, "double"),
+        _ => (16, "i32"), // fallback; checker rejects invalid elem types
     }
 }
 

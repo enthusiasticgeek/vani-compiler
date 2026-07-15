@@ -48212,6 +48212,37 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn simd512_splat_add_reduce_compiles() {
+        let src = r#"
+intent "vec512 splat + add + reduce_add";
+fn main() -> i64 {
+    let a: vec512<f32> = simd512_splat(1.0 as f32);
+    let b: vec512<f32> = simd512_splat(2.0 as f32);
+    let c: vec512<f32> = simd512_add(a, b);
+    let s: f32 = simd512_reduce_add(c);
+    return s as i64;
+}
+"#;
+        compile_to_c(src).expect("vec512 splat+add+reduce_add must compile");
+        compile_to_llvm(src).expect("vec512 LLVM must compile");
+    }
+
+    #[test]
+    fn simd512_type_mismatch_is_rejected() {
+        let src = r#"
+intent "vec512 type mismatch";
+fn main() -> i64 {
+    let a: vec512<i32> = simd512_splat(1 as i32);
+    let b: vec512<f32> = simd512_splat(1.0 as f32);
+    let c: vec512<i32> = simd512_add(a, b);
+    return 0;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "vec512 type mismatch must be rejected");
+    }
+
+    #[test]
     fn no_std_omits_stdio_include() {
         let src = r#"
 intent "no_std test";
