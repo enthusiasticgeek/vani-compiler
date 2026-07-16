@@ -19545,6 +19545,20 @@ fn emit_binary(
         return format!("(strcmp({}, {}) {} 0)", emit_expr(left), emit_expr(right), cmp);
     }
 
+    // L4: integer overflow guards for Add/Sub/Mul.  When the `checked`
+    // flag is still set (i.e. the SMT elision pass did not discharge it)
+    // and the result type is an integer, replace raw arithmetic with a
+    // call to a per-type/per-op helper that uses __builtin_*_overflow and
+    // aborts on overflow. Float Add/Sub/Mul are IEEE-754 and have no UB,
+    // so they skip this path. Str Add is already handled above.
+    if checked
+        && matches!(op, BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul)
+        && left.ty.is_integer()
+    {
+        let helper = overflow_helper(op, &left.ty);
+        return format!("{}({}, {})", helper, emit_expr(left), emit_expr(right));
+    }
+
     let right_expr = match op {
         BinaryOp::Div | BinaryOp::Rem if checked => {
             format!("{}({})", divisor_helper(&right.ty), emit_expr(right))
@@ -20196,6 +20210,19 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         ("u32", "uint32_t", false),
         ("u64", "uint64_t", false),
     ];
+    // L4: overflow-check helpers for Add/Sub/Mul.
+    // (bool = signed). Only emit each helper when it appears in the body.
+    let overflow_kinds: &[(&str, &str, bool)] = &[
+        ("i8", "int8_t", true),
+        ("i16", "int16_t", true),
+        ("i32", "int32_t", true),
+        ("i64", "int64_t", true),
+        ("u8", "uint8_t", false),
+        ("u16", "uint16_t", false),
+        ("u32", "uint32_t", false),
+        ("u64", "uint64_t", false),
+    ];
+    let overflow_ops: &[&str] = &["add", "sub", "mul"];
     let used_divisors: Vec<&(&str, &str, &str)> = divisor_kinds
         .iter()
         .filter(|(ty, _, _)| body.contains(&format!("intent_check_{}_divisor(", ty)))
@@ -20204,8 +20231,13 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
         .iter()
         .filter(|(ty, _, _)| body.contains(&format!("intent_check_{}_shift(", ty)))
         .collect();
+    let used_overflows: Vec<(&(&str, &str, bool), &str)> = overflow_kinds
+        .iter()
+        .flat_map(|k| overflow_ops.iter().map(move |op| (k, *op)))
+        .filter(|(k, op)| body.contains(&format!("intent_check_{}_{op}(", k.0)))
+        .collect();
 
-    if !needs_bounds && used_divisors.is_empty() && used_shifts.is_empty() {
+    if !needs_bounds && used_divisors.is_empty() && used_shifts.is_empty() && used_overflows.is_empty() {
         return;
     }
 
@@ -20253,6 +20285,34 @@ fn emit_runtime_helpers(out: &mut String, body: &str) {
             out.push_str("assert(");
         }
         out.push_str("(uint64_t)x < bits); return x; }\n");
+    }
+
+    // L4: overflow helpers for Add/Sub/Mul.
+    // Uses GCC/Clang __builtin_*_overflow, which is available in GCC 5+
+    // and Clang 3.8+. The builtin returns true if the operation overflowed.
+    // Both signed and unsigned overflow are trapped (unsigned wrapping is
+    // defined C behavior but still undesired in ASIL-D / DO-178C contexts).
+    for ((ty, c_ty, _signed), op) in &used_overflows {
+        let builtin = match *op {
+            "add" => "__builtin_add_overflow",
+            "sub" => "__builtin_sub_overflow",
+            "mul" => "__builtin_mul_overflow",
+            _ => unreachable!(),
+        };
+        out.push_str(&format!(
+            "static INTENT_UNUSED inline {c} intent_check_{t}_{op}({c} a, {c} b) {{\n\
+    {c} r;\n\
+    if (__builtin_expect({bl}(a, b, &r), 0)) {{\n\
+        fprintf(stderr, \"integer overflow in {t} {op}\\n\");\n\
+        abort();\n\
+    }}\n\
+    return r;\n\
+}}\n",
+            c = c_ty,
+            t = ty,
+            op = op,
+            bl = builtin,
+        ));
     }
     out.push('\n');
 }
@@ -20322,6 +20382,28 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Vec512(_)
         | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => unreachable!("shift count must be an integer"),
     }
+}
+
+// L4: map (op, ty) → the name of the overflow-checking helper.
+fn overflow_helper(op: BinaryOp, ty: &Type) -> String {
+    let ty_name = match ty {
+        Type::I8 => "i8",
+        Type::I16 => "i16",
+        Type::I32 => "i32",
+        Type::I64 => "i64",
+        Type::U8 => "u8",
+        Type::U16 => "u16",
+        Type::U32 => "u32",
+        Type::U64 => "u64",
+        _ => unreachable!("overflow_helper called on non-integer type"),
+    };
+    let op_name = match op {
+        BinaryOp::Add => "add",
+        BinaryOp::Sub => "sub",
+        BinaryOp::Mul => "mul",
+        _ => unreachable!("overflow_helper called on non-arithmetic op"),
+    };
+    format!("intent_check_{ty_name}_{op_name}")
 }
 
 pub(crate) fn function_name(name: &str) -> String {

@@ -45667,50 +45667,33 @@ função main() -> i64 {
     // need to be updated to reflect the new emission pattern.
 
     #[test]
-    fn integer_overflow_runtime_wraps_emits_plain_add_in_llvm() {
-        // Confirm that i64 addition over function parameters emits a plain
-        // `add i64` instruction.  Function parameters are opaque at compile
+    fn integer_overflow_runtime_emits_overflow_guard_in_llvm() {
+        // L4: i64 addition now emits sadd.with.overflow instead of a plain
+        // `add i64` instruction. Function parameters are opaque at compile
         // time so this exercises the pure runtime arithmetic path.
-        // Documents the current "silent wrap" behavior: no overflow guard is
-        // emitted at arithmetic op sites (the preamble always forward-declares
-        // overflow intrinsics but they are never called for plain addition).
-        // Update this test when a future pass introduces runtime overflow guards.
         let source = r#"
             fn adder(a: i64, b: i64) -> i64 { return a + b; }
             fn main() -> i64 { return adder(1, 2); }
         "#;
         let ll = compile_to_llvm(source).expect("i64 parameter addition compiles");
         assert!(
-            ll.contains("add i64"),
-            "expected plain `add i64` in LLVM IR (overflow gap: no guard emitted):\n{}",
-            &ll[..ll.len().min(2000)]
-        );
-        // The overflow-checking CALL pattern would be:
-        //   call {i64, i1} @llvm.sadd.with.overflow.i64(...)
-        // A forward-declare is harmless; a call means a guard was added.
-        assert!(
-            !ll.contains("call {i64, i1} @llvm.sadd.with.overflow"),
-            "overflow-check call found — runtime guard behavior has changed:\n{}",
+            ll.contains("sadd.with.overflow"),
+            "expected `sadd.with.overflow` in LLVM IR (L4 overflow guard):\n{}",
             &ll[..ll.len().min(2000)]
         );
     }
 
     #[test]
-    fn integer_overflow_runtime_wraps_emits_plain_mul_in_llvm() {
-        // Confirm user multiplication emits plain `mul i64`.
-        // Note: the stdlib preamble always emits a `binomial` helper that
-        // uses @llvm.smul.with.overflow for its own saturation logic — that
-        // is deliberate and separate from user arithmetic.  This test only
-        // checks that user `a * b` emits plain mul (no check for the stdlib
-        // helper's presence, which is unrelated).
+    fn integer_overflow_runtime_mul_emits_overflow_guard_in_llvm() {
+        // L4: user i64 multiplication emits smul.with.overflow.
         let source = r#"
             fn multiplier(a: i64, b: i64) -> i64 { return a * b; }
             fn main() -> i64 { return multiplier(3, 4); }
         "#;
         let ll = compile_to_llvm(source).expect("i64 parameter multiplication compiles");
         assert!(
-            ll.contains("mul i64"),
-            "expected plain `mul i64` in LLVM IR (overflow gap: no per-op guard emitted):\n{}",
+            ll.contains("smul.with.overflow"),
+            "expected `smul.with.overflow` in LLVM IR (L4 overflow guard):\n{}",
             &ll[..ll.len().min(2000)]
         );
     }
@@ -46043,12 +46026,13 @@ função main() -> i64 {
             .expect("runtime i64 overflow must compile on LLVM backend (wraps silently)");
     }
 
-    // ── Integer overflow: wrapping semantics (no guard emitted) ─────────────
+    // ── Integer overflow: runtime guards emitted (L4) ───────────────────────
+    // L4 changes the old wrapping-silent behavior: overflow now traps at
+    // runtime via __builtin_*_overflow (C) / llvm.s*add.with.overflow (LLVM).
 
     #[test]
-    fn runtime_i64_max_plus_one_emits_no_overflow_guard() {
-        // v1 wraps silently: no __builtin_add_overflow in C output,
-        // no `add nsw i64` in LLVM output (nsw = no-signed-wrap, traps on UB).
+    fn runtime_i64_max_plus_one_emits_overflow_guard() {
+        // L4: runtime overflow on i64 is now guarded, not silently wrapped.
         let source = r#"
             fn get_max() -> i64 { return 9223372036854775807; }
             fn main() -> i64 {
@@ -46058,20 +46042,20 @@ função main() -> i64 {
         "#;
         let c = compile_to_c(source).expect("i64 max+1 must compile to C");
         assert!(
-            !c.contains("__builtin_add_overflow") && !c.contains("__builtin_sadd_overflow"),
-            "C backend must not emit an overflow guard for i64 addition; got snippet:\n{}",
+            c.contains("__builtin_add_overflow"),
+            "C backend must emit __builtin_add_overflow for i64 +; got snippet:\n{}",
             &c[..c.len().min(2000)]
         );
         let ll = compile_to_llvm(source).expect("i64 max+1 must compile to LLVM");
         assert!(
-            !ll.contains("add nsw i64"),
-            "LLVM backend must not emit `add nsw i64` (trapping); wrap silently; got snippet:\n{}",
+            ll.contains("sadd.with.overflow"),
+            "LLVM backend must emit sadd.with.overflow for i64 +; got snippet:\n{}",
             &ll[..ll.len().min(2000)]
         );
     }
 
     #[test]
-    fn runtime_i64_min_minus_one_emits_no_overflow_guard() {
+    fn runtime_i64_min_minus_one_emits_overflow_guard() {
         let source = r#"
             fn get_min() -> i64 { return -9223372036854775808; }
             fn main() -> i64 {
@@ -46081,19 +46065,18 @@ função main() -> i64 {
         "#;
         let c = compile_to_c(source).expect("i64 min-1 must compile to C");
         assert!(
-            !c.contains("__builtin_sub_overflow") && !c.contains("__builtin_ssub_overflow"),
-            "C backend must not emit a subtraction overflow guard"
+            c.contains("__builtin_sub_overflow"),
+            "C backend must emit __builtin_sub_overflow for i64 -"
         );
         let ll = compile_to_llvm(source).expect("i64 min-1 must compile to LLVM");
         assert!(
-            !ll.contains("sub nsw i64"),
-            "LLVM backend must not emit `sub nsw i64` (trapping)"
+            ll.contains("ssub.with.overflow"),
+            "LLVM backend must emit ssub.with.overflow for i64 -"
         );
     }
 
     #[test]
-    fn runtime_i64_min_times_neg_one_emits_no_overflow_guard() {
-        // i64::MIN * -1 overflows back to i64::MIN in two's complement.
+    fn runtime_i64_min_times_neg_one_emits_overflow_guard() {
         let source = r#"
             fn get_min() -> i64 { return -9223372036854775808; }
             fn main() -> i64 {
@@ -46103,13 +46086,13 @@ função main() -> i64 {
         "#;
         let c = compile_to_c(source).expect("i64 min*-1 must compile to C");
         assert!(
-            !c.contains("__builtin_mul_overflow") && !c.contains("__builtin_smul_overflow"),
-            "C backend must not emit a multiplication overflow guard"
+            c.contains("__builtin_mul_overflow"),
+            "C backend must emit __builtin_mul_overflow for i64 *"
         );
         let ll = compile_to_llvm(source).expect("i64 min*-1 must compile to LLVM");
         assert!(
-            !ll.contains("mul nsw i64"),
-            "LLVM backend must not emit `mul nsw i64` (trapping)"
+            ll.contains("smul.with.overflow"),
+            "LLVM backend must emit smul.with.overflow for i64 *"
         );
     }
 
@@ -48495,6 +48478,98 @@ fn main() -> i64 {
 "#;
         let result = compile_to_c(src);
         assert!(result.is_err(), "slice pattern on Vec<OwnedStr> (non-Copy elem) must be rejected");
+    }
+
+    // ── L4 Runtime integer overflow guards ────────────────────────────────────
+
+    #[test]
+    fn overflow_guard_add_emitted_in_c() {
+        let src = r#"
+intent "ovf_add";
+fn add(a: i64, b: i64) -> i64 { return a + b; }
+fn main() -> i64 { return add(1, 2); }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("intent_check_i64_add"),
+            "C output must contain overflow-check wrapper for i64 +"
+        );
+        assert!(
+            c.contains("__builtin_add_overflow"),
+            "C output must use __builtin_add_overflow"
+        );
+    }
+
+    #[test]
+    fn overflow_guard_sub_emitted_in_c() {
+        let src = r#"
+intent "ovf_sub";
+fn sub(a: i64, b: i64) -> i64 { return a - b; }
+fn main() -> i64 { return sub(5, 3); }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("intent_check_i64_sub"),
+            "C output must contain overflow-check wrapper for i64 -"
+        );
+    }
+
+    #[test]
+    fn overflow_guard_mul_emitted_in_c() {
+        let src = r#"
+intent "ovf_mul";
+fn mul(a: i32, b: i32) -> i32 { return a * b; }
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("intent_check_i32_mul"),
+            "C output must contain overflow-check wrapper for i32 *"
+        );
+    }
+
+    #[test]
+    fn overflow_guard_unsigned_add_emitted_in_c() {
+        let src = r#"
+intent "ovf_u64";
+fn uadd(a: u64, b: u64) -> u64 { return a + b; }
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("intent_check_u64_add"),
+            "C output must contain overflow-check wrapper for u64 +"
+        );
+    }
+
+    #[test]
+    fn overflow_guard_not_emitted_for_float_add() {
+        let src = r#"
+intent "ovf_float";
+fn fadd(a: f64, b: f64) -> f64 { return a + b; }
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            !c.contains("intent_check_f64_add"),
+            "float + must NOT use the overflow helper (IEEE-754 has no UB)"
+        );
+    }
+
+    #[test]
+    fn overflow_guard_not_emitted_for_comparison() {
+        let src = r#"
+intent "ovf_cmp";
+fn gt(a: i64, b: i64) -> bool { return a > b; }
+fn main() -> i64 { return 0; }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            !c.contains("intent_check_i64_add")
+                && !c.contains("intent_check_i64_sub")
+                && !c.contains("intent_check_i64_mul"),
+            "comparison ops must not emit overflow helpers"
+        );
     }
 
 }

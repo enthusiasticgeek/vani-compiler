@@ -371,11 +371,13 @@ pub enum TypedExprKind {
         op: BinaryOp,
         left: Box<TypedExpr>,
         right: Box<TypedExpr>,
-        /// Whether the runtime safety guard (divisor != 0 for Div/Rem,
-        /// 0 <= rhs < bits for Shl/Shr) is still required. Default
-        /// true; the SMT-discharge pass flips to false when the
-        /// guard is provably unnecessary. Ignored for Add/Sub/Mul/
-        /// comparison ops.
+        /// Whether the runtime safety guard is still required. Default
+        /// true; the SMT-discharge pass flips to false when provably safe.
+        /// Semantics per op:
+        ///   Div/Rem   → divisor != 0
+        ///   Shl/Shr   → 0 <= rhs < bits(lhs)
+        ///   Add/Sub/Mul (integer) → result does not overflow the type (L4)
+        /// Ignored for comparison ops and float arithmetic.
         checked: bool,
     },
     Call {

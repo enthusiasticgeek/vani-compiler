@@ -4756,14 +4756,144 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             let r = emit_expr(right, ctx, out);
             let ty = llvm_type(&left.ty);
             let signed = left.ty.is_signed_integer();
-            // Runtime safety guards mirror the C backend's
-            // `intent_check_*_divisor` and `intent_check_*_shift`
-            // helpers. Fire only when `checked: true` AND the op is
-            // one where the verifier might have left the guard in
-            // place (Div/Rem/Shl/Shr). For other ops `checked` is
-            // meaningless and ignored.
+            // Runtime safety guards. Fire only when `checked: true`.
+            // Div/Rem: divisor != 0. Shl/Shr: count in [0, bits).
+            // Add/Sub/Mul: integer overflow (L4). The overflow check uses
+            // llvm.s{add,sub,mul}.with.overflow for signed types and an
+            // explicit carry/borrow ICmp for unsigned types. The `dest`
+            // for Add/Sub/Mul is written by the overflow path and returned
+            // early so the fall-through arithmetic below is bypassed.
             if *checked {
                 match op {
+                    BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul if left.ty.is_integer() => {
+                        // For signed types, use the LLVM with-overflow intrinsic.
+                        // For unsigned types, emit an explicit wraparound check.
+                        let bits = left.ty.bits().unwrap_or(64);
+                        let ok = ctx.fresh_label("arith_ok");
+                        let fail = ctx.fresh_label("arith_fail");
+                        let result = ctx.fresh_tmp();
+                        if signed {
+                            let intrinsic_ty = format!("i{}", bits);
+                            let intrinsic = match op {
+                                BinaryOp::Add => format!("@llvm.sadd.with.overflow.i{}", bits),
+                                BinaryOp::Sub => format!("@llvm.ssub.with.overflow.i{}", bits),
+                                BinaryOp::Mul => format!("@llvm.smul.with.overflow.i{}", bits),
+                                _ => unreachable!(),
+                            };
+                            let pair = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = call {{{}, i1}} {}({} {}, {} {})\n",
+                                pair, intrinsic_ty, intrinsic,
+                                intrinsic_ty, l,
+                                intrinsic_ty, r
+                            ));
+                            out.push_str(&format!(
+                                "  {} = extractvalue {{{}, i1}} {}, 0\n",
+                                result, intrinsic_ty, pair
+                            ));
+                            let of = ctx.fresh_tmp();
+                            out.push_str(&format!(
+                                "  {} = extractvalue {{{}, i1}} {}, 1\n",
+                                of, intrinsic_ty, pair
+                            ));
+                            let no_of = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = xor i1 {}, true\n", no_of, of));
+                            out.push_str(&format!(
+                                "  br i1 {}, label %{}, label %{}\n",
+                                no_of, ok, fail
+                            ));
+                        } else {
+                            // Unsigned: for Add, overflow iff result < lhs.
+                            // For Sub, overflow iff rhs > lhs.
+                            // For Mul, use the same with-overflow intrinsic
+                            // (llvm.umul.with.overflow is the unsigned variant).
+                            match op {
+                                BinaryOp::Add => {
+                                    out.push_str(&format!(
+                                        "  {} = add {} {}, {}\n",
+                                        result, ty, l, r
+                                    ));
+                                    let of = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = icmp ult {} {}, {}\n",
+                                        of, ty, result, l
+                                    ));
+                                    let no_of = ctx.fresh_tmp();
+                                    out.push_str(&format!("  {} = xor i1 {}, true\n", no_of, of));
+                                    out.push_str(&format!(
+                                        "  br i1 {}, label %{}, label %{}\n",
+                                        no_of, ok, fail
+                                    ));
+                                }
+                                BinaryOp::Sub => {
+                                    let of = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = icmp ugt {} {}, {}\n",
+                                        of, ty, r, l
+                                    ));
+                                    let no_of = ctx.fresh_tmp();
+                                    out.push_str(&format!("  {} = xor i1 {}, true\n", no_of, of));
+                                    out.push_str(&format!(
+                                        "  br i1 {}, label %{}, label %{}\n",
+                                        no_of, ok, fail
+                                    ));
+                                    // Emit the actual sub after the branch
+                                    // (the fail block never reaches here).
+                                    out.push_str(&format!("{}:\n", ok));
+                                    ctx.current_block = ok.clone();
+                                    out.push_str(&format!(
+                                        "  {} = sub {} {}, {}\n",
+                                        result, ty, l, r
+                                    ));
+                                    // Jump over the ok label below.
+                                    let after = ctx.fresh_label("after_sub");
+                                    out.push_str(&format!("  br label %{}\n", after));
+                                    out.push_str(&format!("{}:\n", fail));
+                                    out.push_str("  call void @abort()\n");
+                                    out.push_str("  unreachable\n");
+                                    out.push_str(&format!("{}:\n", after));
+                                    ctx.current_block = after;
+                                    return result;
+                                }
+                                BinaryOp::Mul => {
+                                    let bits_str = format!("i{}", bits);
+                                    let intrinsic = format!("@llvm.umul.with.overflow.i{}", bits);
+                                    let pair = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = call {{{}, i1}} {}({} {}, {} {})\n",
+                                        pair, bits_str, intrinsic,
+                                        bits_str, l,
+                                        bits_str, r
+                                    ));
+                                    out.push_str(&format!(
+                                        "  {} = extractvalue {{{}, i1}} {}, 0\n",
+                                        result, bits_str, pair
+                                    ));
+                                    let of = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = extractvalue {{{}, i1}} {}, 1\n",
+                                        of, bits_str, pair
+                                    ));
+                                    let no_of = ctx.fresh_tmp();
+                                    out.push_str(&format!("  {} = xor i1 {}, true\n", no_of, of));
+                                    out.push_str(&format!(
+                                        "  br i1 {}, label %{}, label %{}\n",
+                                        no_of, ok, fail
+                                    ));
+                                }
+                                _ => unreachable!(),
+                            }
+                        }
+                        out.push_str(&format!("{}:\n", fail));
+                        out.push_str("  call void @abort()\n");
+                        out.push_str("  unreachable\n");
+                        out.push_str(&format!("{}:\n", ok));
+                        ctx.current_block = ok;
+                        // For the unsigned Sub case we returned early above.
+                        // For all other cases (signed + unsigned Add/Mul),
+                        // `result` already holds the value.
+                        return result;
+                    }
                     BinaryOp::Div | BinaryOp::Rem => {
                         let nz = ctx.fresh_tmp();
                         out.push_str(&format!(
