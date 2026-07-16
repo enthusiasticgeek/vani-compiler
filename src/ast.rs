@@ -429,6 +429,21 @@ pub struct ConstDecl {
     pub span: Span,
 }
 
+/// `#[repr(...)]` layout attribute on a struct declaration.
+/// Parsed from `#[repr(C)]` or `#[repr(packed)]`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ReprAttr {
+    /// `#[repr(C)]` — field order and alignment match the C ABI for
+    /// the target. The C backend already emits fields in declaration
+    /// order, so this is a no-op there; the LLVM backend emits a
+    /// standard (non-packed) `type { ... }` which also matches C
+    /// layout on all supported targets.
+    C,
+    /// `#[repr(packed)]` — no inter-field padding. C backend emits
+    /// `__attribute__((packed))`; LLVM backend emits `<{ ... }>`.
+    Packed,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StructDecl {
     pub name: String,
@@ -444,6 +459,8 @@ pub struct StructDecl {
     pub type_params: Vec<String>,
     pub fields: Vec<StructField>,
     pub span: Span,
+    /// Optional `#[repr(C)]` / `#[repr(packed)]` layout attribute.
+    pub repr: Option<ReprAttr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

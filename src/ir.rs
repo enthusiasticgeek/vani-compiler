@@ -26,6 +26,9 @@ pub struct TypedProgram {
 pub struct TypedStructDecl {
     pub name: String,
     pub fields: Vec<(String, Type)>,
+    /// Propagated from `StructDecl::repr`; `None` for structs without a
+    /// `#[repr(...)]` attribute or for compiler-synthesised structs.
+    pub repr: Option<crate::ast::ReprAttr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

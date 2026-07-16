@@ -1286,17 +1286,28 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
     // User-declared structs emitted before vec / tuple
     // typedefs so other shapes can reference them. T1.2.
+    // `#[repr(packed)]` uses LLVM's packed-struct syntax `<{ ... }>`;
+    // `#[repr(C)]` and the default both use ordinary `{ ... }`.
     for decl in &program.structs {
         let parts: Vec<String> = decl
             .fields
             .iter()
             .map(|(_, ty)| llvm_type_string(ty))
             .collect();
-        out.push_str(&format!(
-            "%Struct_{} = type {{ {} }}\n",
-            decl.name,
-            parts.join(", "),
-        ));
+        let is_packed = matches!(decl.repr, Some(crate::ast::ReprAttr::Packed));
+        if is_packed {
+            out.push_str(&format!(
+                "%Struct_{} = type <{{ {} }}>\n",
+                decl.name,
+                parts.join(", "),
+            ));
+        } else {
+            out.push_str(&format!(
+                "%Struct_{} = type {{ {} }}\n",
+                decl.name,
+                parts.join(", "),
+            ));
+        }
     }
     if !program.structs.is_empty() {
         out.push('\n');

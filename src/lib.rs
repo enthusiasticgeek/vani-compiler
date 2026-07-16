@@ -48337,5 +48337,75 @@ fn main() -> i64 { return _start(); }
         );
     }
 
+    // ── L2: #[repr(C)] / #[repr(packed)] ──────────────────────────────────
+
+    #[test]
+    fn repr_c_struct_parses_and_compiles_to_c() {
+        let src = r#"
+intent "repr_c_test";
+#[repr(C)]
+struct Point { x: i64, y: i64 }
+fn main() -> i64 {
+    let p = Point { x: 1, y: 2 };
+    return p.x + p.y;
+}
+"#;
+        let c = compile_to_c(src).expect("#[repr(C)] struct must compile to C");
+        // Backend emits `Struct_Point` via struct_c_name().
+        assert!(c.contains("Struct_Point"), "Struct_Point must appear in C output:\n{c}");
+        // #[repr(C)] needs no packed attribute — natural layout is already C-ABI.
+        assert!(!c.contains("__attribute__((packed))"), "repr(C) must not emit packed:\n{c}");
+    }
+
+    #[test]
+    fn repr_packed_struct_emits_packed_attr_in_c() {
+        // `len` is a vāṇī builtin keyword — use `nbytes` instead.
+        let src = r#"
+intent "repr_packed_test";
+#[repr(packed)]
+struct Header { tag: i64, nbytes: i64 }
+fn main() -> i64 {
+    let h = Header { tag: 0xAB, nbytes: 16 };
+    return h.tag;
+}
+"#;
+        let c = compile_to_c(src).expect("#[repr(packed)] struct must compile to C");
+        assert!(
+            c.contains("__attribute__((packed))"),
+            "repr(packed) must emit __attribute__((packed)) in C output:\n{c}"
+        );
+    }
+
+    #[test]
+    fn repr_packed_struct_emits_packed_type_in_llvm() {
+        let src = r#"
+intent "repr_packed_llvm_test";
+#[repr(packed)]
+struct Wire { a: i64, b: i64 }
+fn main() -> i64 {
+    let w = Wire { a: 7, b: 3 };
+    return w.a;
+}
+"#;
+        let ll = compile_to_llvm(src).expect("#[repr(packed)] struct must compile to LLVM IR");
+        // LLVM packed struct uses `<{ ... }>` syntax.
+        assert!(
+            ll.contains("<{"),
+            "repr(packed) must emit LLVM packed-struct syntax `<{{...}}>` in:\n{ll}"
+        );
+    }
+
+    #[test]
+    fn repr_unknown_variant_is_rejected() {
+        let src = r#"
+intent "repr_bad";
+#[repr(simd)]
+struct Bad { x: i64 }
+fn main() -> i64 { return 0; }
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "unknown repr variant `simd` must be a compile error");
+    }
+
 }
 

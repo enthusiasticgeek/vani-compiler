@@ -1258,6 +1258,7 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
                     .iter()
                     .map(|f| (f.name.clone(), f.ty.clone()))
                     .collect(),
+                repr: s.repr.clone(),
             })
             .collect();
         let enums: Vec<crate::ir::TypedEnumDecl> = program
@@ -1973,6 +1974,7 @@ fn lift_closures_in_block(
                             type_params: Vec::new(),
                             fields: env_fields,
                             span: *fn_span,
+                            repr: None,
                         });
                         let magic_name = format!("__intent_make_closure_{}", closure_id);
                         let capture_types: Vec<crate::ast::Type> = capture_names_only.iter()

@@ -19968,10 +19968,13 @@ pub(crate) fn emit_struct_bundle(
             }
         }
     }
-    // Body close — `struct Name { ... };` (matching the
-    // `struct Name {` opening that paired with the forward
-    // typedef). The forward decl already aliased Name.
-    out.push_str("};\n");
+    // Body close.  For `#[repr(packed)]` append GCC/Clang packed
+    // attribute; for `#[repr(C)]` the layout is already C-ABI
+    // natural so no extra annotation is needed.
+    match &decl.repr {
+        Some(crate::ast::ReprAttr::Packed) => out.push_str("} __attribute__((packed));\n"),
+        _ => out.push_str("};\n"),
+    }
     let _ = cname;
 }
 

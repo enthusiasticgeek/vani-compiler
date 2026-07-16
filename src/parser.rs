@@ -232,6 +232,14 @@ impl Parser {
                         self.sync_to_top_level();
                     }
                 }
+            } else if self.looks_like_repr_before_struct() {
+                match self.parse_struct_decl() {
+                    Ok(s) => structs.push(s),
+                    Err(e) => {
+                        self.errors.push(e);
+                        self.sync_to_top_level();
+                    }
+                }
             } else if self.check(|k| matches!(k, TokenKind::Hash)) {
                 // Closure #286: `#[bounded(N)]` attribute
                 // before a function declaration. v1 only
@@ -540,10 +548,10 @@ impl Parser {
                     }
                     Err(e) => { self.errors.push(e); self.sync_past_brace(); }
                 }
-            } else if self.check(|k| matches!(k, TokenKind::Struct)) {
+            } else if self.looks_like_repr_before_struct() || self.check(|k| matches!(k, TokenKind::Struct)) {
                 match self.parse_struct_decl() {
                     Ok(s) => {
-                        // Phase 3d â€” same registry population as
+                        // Phase 3d — same registry population as
                         // the bare-struct branch above; covers
                         // pub/kosh-decorated struct decl sites.
                         crate::ast::V31_STRUCT_REGISTRY.with(|reg| {
@@ -1011,7 +1019,54 @@ impl Parser {
         })
     }
 
+    /// Return true when the current position looks like `#[repr(…)]` before
+    /// a `struct` keyword — used by the top-level / module-body dispatchers to
+    /// intercept repr-before-struct before the generic `#[fn-attr]` handler.
+    fn looks_like_repr_before_struct(&self) -> bool {
+        matches!(self.tokens.get(self.pos).map(|t| &t.kind), Some(TokenKind::Hash))
+            && matches!(self.tokens.get(self.pos + 1).map(|t| &t.kind), Some(TokenKind::LBracket))
+            && matches!(
+                self.tokens.get(self.pos + 2).map(|t| &t.kind),
+                Some(TokenKind::Ident(n)) if n == "repr"
+            )
+    }
+
+    /// Try to consume a single `#[repr(C)]` or `#[repr(packed)]` attribute.
+    /// Returns `Ok(None)` when the current token is not `#`.
+    fn try_parse_repr_attr(&mut self) -> Result<Option<crate::ast::ReprAttr>, Diagnostic> {
+        if !self.check(|k| matches!(k, TokenKind::Hash)) {
+            return Ok(None);
+        }
+        // Only consume if the next tokens spell `#[repr(…)]`.
+        if !self.looks_like_repr_before_struct() {
+            return Ok(None);
+        }
+        self.bump(); // `#`
+        self.expect_keyword("'['", |k| matches!(k, TokenKind::LBracket))?;
+        let _repr_tok = self.expect_ident()?; // "repr"
+        self.expect_keyword("'('", |k| matches!(k, TokenKind::LParen))?;
+        let variant_tok = self.expect_ident()?;
+        let variant = ident_text(variant_tok.clone());
+        let repr = match variant.as_str() {
+            "C" => crate::ast::ReprAttr::C,
+            "packed" => crate::ast::ReprAttr::Packed,
+            other => {
+                return Err(Diagnostic::new(
+                    variant_tok.span,
+                    format!(
+                        "unknown repr `{other}` — only `#[repr(C)]` and \
+                         `#[repr(packed)]` are supported in v1"
+                    ),
+                ));
+            }
+        };
+        self.expect_keyword("')'", |k| matches!(k, TokenKind::RParen))?;
+        self.expect_keyword("']'", |k| matches!(k, TokenKind::RBracket))?;
+        Ok(Some(repr))
+    }
+
     fn parse_struct_decl(&mut self) -> Result<StructDecl, Diagnostic> {
+        let repr = self.try_parse_repr_attr()?;
         let start = self.expect_keyword("'struct'", |k| matches!(k, TokenKind::Struct))?;
         let name_tok = self.expect_ident()?;
         let name_span = name_tok.span;
@@ -1070,6 +1125,7 @@ impl Parser {
             type_params,
             fields,
             span: start.span.merge(close.span),
+            repr,
         })
     }
 
@@ -3203,6 +3259,7 @@ impl Parser {
             type_params,
             fields,
             span: name_span.merge(close.span),
+            repr: None,
         })
     }
 
@@ -8382,6 +8439,7 @@ pub(crate) fn try_v31_transform(
         type_params: fn_type_params.to_vec(),
         fields: struct_fields,
         span: fn_name_span,
+        repr: None,
     };
 
     // Walk the body again, splitting into states.
