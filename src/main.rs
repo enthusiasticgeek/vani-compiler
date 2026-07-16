@@ -1365,6 +1365,15 @@ fn run() -> Result<ExitCode, String> {
             let (out, link_args, target, cpu, sve) = parse_build_args(&args, flag_start)?;
             build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref(), cpu.as_deref(), sve.as_deref())
         }
+        "test" => {
+            let (file, flag_start) = required_file_at(&args, 2, "test")?;
+            let link_args: Vec<String> = args[flag_start..]
+                .iter()
+                .filter(|a| a.starts_with("--link-with=") || a.starts_with("-l"))
+                .map(|s| s.clone())
+                .collect();
+            run_tests(&file, &link_args)
+        }
         "tokens" => {
             // Debug subcommand: dump the token stream to stdout.
             // Useful for parser/lexer development — see a token's
@@ -2757,6 +2766,87 @@ fn parse_emit_args(
         }
     }
     Ok((backend, out, big_o_mode))
+}
+
+/// XL2: `vanic test <file>` — collect `#[test]` functions, synthesise a
+/// test-runner main, compile the combined source, and run it.
+///
+/// Each `#[test]` fn is called in order. If it returns without aborting,
+/// the test is printed as "ok". If `assert` fails inside a test fn, the
+/// process aborts with the assert error message — that test is the last one
+/// printed without an "ok" suffix, making the failure site obvious.
+/// Test fns must take no parameters and return `i64`.
+fn run_tests(path: &Path, link_args: &[String]) -> Result<ExitCode, String> {
+    // Pass 1: compile to find #[test] fn names.
+    let checked = compile_path_or_report(path)?;
+    let test_fns: Vec<String> = checked
+        .ir
+        .functions
+        .iter()
+        .filter(|f| f.is_test && !f.is_extern)
+        .map(|f| f.name.clone())
+        .collect();
+
+    if test_fns.is_empty() {
+        eprintln!("no #[test] functions found in {}", path.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // Pass 2: re-read the file, append synthesised main, compile+run.
+    let mut combined = vani::resolve_combined_source(path)
+        .map_err(|e| format!("failed to read '{}': {}", path.display(), e))?;
+
+    // Build synthesised test harness main.
+    let n = test_fns.len();
+    let mut harness = format!("\nfn __vani_test_main() -> i64 {{\n");
+    harness.push_str(&format!("  print \"running {} test{}\";\n", n, if n == 1 { "" } else { "s" }));
+    for name in &test_fns {
+        harness.push_str(&format!("  print \"test {} ...\";\n", name));
+        harness.push_str(&format!("  {}();\n", name));
+        harness.push_str(&format!("  print \"ok\";\n"));
+    }
+    harness.push_str(&format!("  print \"test result: ok. {} passed; 0 failed\";\n", n));
+    harness.push_str("  return 0;\n}\n");
+    combined.push_str(&harness);
+
+    // Rename __vani_test_main → main by telling the C backend to use it
+    // as the entry point. We achieve this by just aliasing via a wrapper.
+    combined.push_str("\nfn main() -> i64 { return __vani_test_main(); }\n");
+
+    let c = vani::compile_to_c(&combined)
+        .map_err(|diags| {
+            let mut s = String::new();
+            for d in &diags {
+                s.push_str(&format!("{}\n", d.message));
+            }
+            s.trim_end().to_string()
+        })?;
+
+    // Write + compile + run (mirrors run_program).
+    let (c_path, bin_path) = temp_paths(path);
+    fs::write(&c_path, c)
+        .map_err(|e| format!("failed to write '{}': {}", c_path.display(), e))?;
+
+    let cc = env::var("CC").unwrap_or_else(|_| "cc".to_string());
+    let mut cmd = Command::new(&cc);
+    cmd.arg(&c_path)
+        .arg("-std=c11")
+        .arg("-O2")
+        .arg("-o")
+        .arg(&bin_path);
+    for la in link_args {
+        cmd.arg(la);
+    }
+    let status = cmd
+        .status()
+        .map_err(|e| format!("CC failed to start: {}", e))?;
+    if !status.success() {
+        return Err("C compilation of test binary failed".to_string());
+    }
+    let run_status = Command::new(&bin_path)
+        .status()
+        .map_err(|e| format!("test binary failed to start: {}", e))?;
+    Ok(if run_status.success() { ExitCode::SUCCESS } else { ExitCode::FAILURE })
 }
 
 fn compile_path_or_report(

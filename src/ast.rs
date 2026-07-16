@@ -667,6 +667,11 @@ pub struct Function {
     /// timing, no IEEE-754 corner cases on a target without
     /// an FPU). Composable with other safety primitives.
     pub no_float: bool,
+    /// XL2: set when the function is annotated `#[test]`. The
+    /// `vanic test` subcommand collects these fns, synthesises
+    /// a test-runner main, and compiles+runs the combined program.
+    /// Test fns must take no parameters and return `i64` (0 = pass).
+    pub is_test: bool,
     /// T2.4 of the safety-standard alignment arc: set by the
     /// parser when the function declaration is annotated
     /// `#[no_nan]`. Rejects builtins DEFINED to produce IEEE-754

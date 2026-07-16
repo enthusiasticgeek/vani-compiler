@@ -463,11 +463,11 @@ no hardware, no external tokens, no grammar consultants required.
   udiv/urem/lshr/and extraction; `emit_vec_bool_helpers_llvm` for push/pop/free/clone/set_mut.
   `vec_struct_tag(Type::Bool)` = `"bool"` so struct name = `%intent_vec_bool`. 6/6 tests pass.
 
-- [ ] **XL2. `vanic test` — built-in test runner** (~8 h)
-  Collect fns annotated `#[test]`; emit a synthesised `main` that calls each,
-  catches assertion failures, and prints a pass/fail summary with elapsed time.
-  `vanic test file.vani` / `vanic test dir/` invocation. Mirrors the
-  cross-backend parity runner already in `run_end_to_end.rs`.
+- [x] **XL2. `vanic test` — built-in test runner** ✅ done 2026-07-16
+  `#[test]` attribute in ast/ir/parser/checker sets is_test flag. `vanic test file.vani`
+  collects is_test fns, synthesises a harness main (each fn called in order; pass = print
+  "ok", fail = assert aborts with message), compiles+runs via CC. `resolve_combined_source()`
+  public API in lib.rs for multi-file imports. 4 lib tests pass.
 
 - [ ] **XL3. `Stream<T>` + `for await`** (~10 h)
   Define `Stream<T>` interface (`fn poll_next(self: mut ref Self) -> Opt<T>`);

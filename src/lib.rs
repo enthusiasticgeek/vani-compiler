@@ -137,6 +137,27 @@ pub fn compile_path(
     }
 }
 
+/// XL2: public helper for `vanic test`. Collects the fully-resolved combined
+/// source (entry + all transitive `use` imports) without running the compiler.
+/// Returns the concatenated source string on success.
+pub fn resolve_combined_source(entry: &std::path::Path) -> Result<String, String> {
+    let mut visited: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    let mut combined = String::new();
+    let mut file_map = diagnostic::FileMap::new();
+    if let Some(manifest_path) = manifest::find_manifest(
+        entry.parent().unwrap_or(entry),
+    ) {
+        if let Ok(m) = manifest::load_manifest(&manifest_path) {
+            for dep in &m.deps {
+                resolve_uses(&dep.entry_path, &mut visited, &mut combined, &mut file_map)?;
+            }
+        }
+    }
+    resolve_uses(entry, &mut visited, &mut combined, &mut file_map)?;
+    Ok(combined)
+}
+
 fn resolve_uses(
     path: &std::path::Path,
     visited: &mut std::collections::HashSet<std::path::PathBuf>,
@@ -48701,6 +48722,187 @@ fn main() -> i64 { return leak_check(); }
             c.contains("free((void*)__aff_env);"),
             "Drop must free the heap env struct itself"
         );
+    }
+
+    // ── XL1: Vec<bool> packed bit-array ─────────────────────────────────────
+
+    /// XL1 basic: Vec<bool> literal compiles on both backends.
+    #[test]
+    fn vec_bool_literal_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false, true);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Vec<bool> literal must compile on C backend");
+        compile_to_llvm(source).expect("Vec<bool> literal must compile on LLVM backend");
+    }
+
+    /// XL1 read: indexing Vec<bool> returns a bool element.
+    #[test]
+    fn vec_bool_index_read_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false, true);
+              let b: bool = bs[0];
+              if b { return 1; }
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Vec<bool> index read must compile on C backend");
+        compile_to_llvm(source).expect("Vec<bool> index read must compile on LLVM backend");
+    }
+
+    /// XL1 write: IndexAssign into Vec<bool> compiles.
+    #[test]
+    fn vec_bool_index_write_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false, true);
+              bs[1] = true;
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Vec<bool> index write must compile on C backend");
+        compile_to_llvm(source).expect("Vec<bool> index write must compile on LLVM backend");
+    }
+
+    /// XL1 push: push onto Vec<bool> compiles.
+    #[test]
+    fn vec_bool_push_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false);
+              let _ = push(mut ref bs, true);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Vec<bool> push must compile on C backend");
+        compile_to_llvm(source).expect("Vec<bool> push must compile on LLVM backend");
+    }
+
+    /// XL1 C preamble: packed-bit struct and helpers appear in C output.
+    #[test]
+    fn vec_bool_c_output_uses_bitpacked_struct() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false, true);
+              let b: bool = bs[0];
+              if b { return 1; }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("Vec<bool> must compile on C backend");
+        assert!(
+            c.contains("intent_vec_bool"),
+            "C output must define intent_vec_bool struct; got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        assert!(
+            c.contains("uint64_t* __restrict__ data"),
+            "intent_vec_bool must use uint64_t* data (bit-packed); got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        assert!(
+            c.contains("intent_vec_bool__get"),
+            "C output must define __get helper for bit extraction; got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        assert!(
+            !c.contains("bool* __restrict__ data"),
+            "intent_vec_bool must NOT use bool* data (would be byte-per-bit, not packed)"
+        );
+    }
+
+    /// XL1 LLVM preamble: LLVM output uses i64* for Vec<bool> data field.
+    #[test]
+    fn vec_bool_llvm_output_uses_i64_data() {
+        let source = r#"
+            fn main() -> i64 {
+              let bs: Vec<bool> = vec(true, false, true);
+              let b: bool = bs[1];
+              if b { return 0; }
+              return 1;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("Vec<bool> must compile on LLVM backend");
+        assert!(
+            ll.contains("%intent_vec_bool = type { i64*, i64, i64 }"),
+            "LLVM output must define %intent_vec_bool with i64* data field; got snippet:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    // ── XL2: #[test] attribute + is_test propagation ──────────────────────
+
+    /// XL2 parse: #[test] attribute parses and sets is_test = true on the function.
+    #[test]
+    fn test_attribute_sets_is_test_flag() {
+        let source = r#"
+            #[test]
+            fn my_test() -> i64 {
+              assert 1 == 1;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] fn must compile");
+        let test_fns: Vec<_> = checked.ir.functions.iter().filter(|f| f.is_test).collect();
+        assert_eq!(test_fns.len(), 1, "expected exactly 1 test fn");
+        assert_eq!(test_fns[0].name, "my_test");
+    }
+
+    /// XL2: multiple #[test] fns all get is_test = true; non-test fns don't.
+    #[test]
+    fn multiple_test_fns_are_collected() {
+        let source = r#"
+            #[test]
+            fn test_a() -> i64 { return 0; }
+            #[test]
+            fn test_b() -> i64 { return 0; }
+            fn helper() -> i64 { return 42; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("multiple #[test] fns must compile");
+        let names: Vec<_> = checked
+            .ir
+            .functions
+            .iter()
+            .filter(|f| f.is_test)
+            .map(|f| f.name.as_str())
+            .collect();
+        assert!(names.contains(&"test_a"), "test_a must be collected");
+        assert!(names.contains(&"test_b"), "test_b must be collected");
+        assert!(!names.contains(&"helper"), "helper must NOT be collected");
+        assert!(!names.contains(&"main"), "main must NOT be collected");
+    }
+
+    /// XL2: #[test] and #[no_heap] can stack on the same fn.
+    #[test]
+    fn test_attribute_stacks_with_no_heap() {
+        let source = r#"
+            #[test]
+            #[no_heap]
+            fn safe_test() -> i64 { return 0; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let checked = compile(source).expect("#[test] + #[no_heap] must compile");
+        let f = checked.ir.functions.iter().find(|f| f.name == "safe_test").unwrap();
+        assert!(f.is_test, "is_test must be true");
+        assert!(f.no_heap, "no_heap must be true");
+    }
+
+    /// XL2: resolve_combined_source returns the source text for a single file.
+    #[test]
+    fn resolve_combined_source_returns_source() {
+        // Write a temp file and verify resolve_combined_source reads it.
+        let dir = std::env::temp_dir();
+        let path = dir.join("xl2_test_source.vani");
+        std::fs::write(&path, "fn main() -> i64 { return 0; }\n").unwrap();
+        let src = crate::resolve_combined_source(&path)
+            .expect("resolve_combined_source must succeed for valid .vani file");
+        assert!(src.contains("fn main"), "source must contain fn main");
     }
 
     // ── L3: select { await <poll> then <binding> { body } … } ─────────────

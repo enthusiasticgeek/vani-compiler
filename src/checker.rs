@@ -1957,6 +1957,7 @@ fn lift_closures_in_block(
             deterministic_timing: false,
             vectorize: false,
                         recursion_bound: None,
+                        is_test: false,
                     });
                     // Arc 5c: synthesize env-struct + register
                     // closure-make magic-call entry so Var(bind_name)
@@ -3520,6 +3521,7 @@ fn lift_expr_anon_fn(
             vectorize: false,
                 is_extern: false,
                 recursion_bound: None,
+                is_test: false,
             });
             // Replace the AnonFn expression with a Var that
             // resolves against the lifted fn's signature.
@@ -5751,6 +5753,7 @@ fn hoist_impls_into_functions(
                         deterministic_timing: false,
             vectorize: false,
                         is_extern: false,
+                        is_test: false,
                     });
                 }
             } else {
@@ -8717,6 +8720,7 @@ fn check_function(
             wcet_cycles: function.wcet_cycles,
             deterministic_timing: function.deterministic_timing,
             vectorize: function.vectorize,
+            is_test: function.is_test,
             span: function.span,
         };
     }
@@ -8786,6 +8790,7 @@ fn check_function(
             wcet_cycles: None,
             deterministic_timing: false,
             vectorize: false,
+            is_test: false,
             span: function.span,
         };
     }
@@ -9057,6 +9062,7 @@ fn check_function(
             wcet_cycles: function.wcet_cycles,
             deterministic_timing: function.deterministic_timing,
             vectorize: function.vectorize,
+            is_test: function.is_test,
         span: function.span,
     }
 }

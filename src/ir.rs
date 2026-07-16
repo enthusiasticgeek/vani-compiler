@@ -134,6 +134,10 @@ pub struct TypedFunction {
     /// the LLVM backend forces vectorization metadata on every
     /// while-loop in this function.
     pub vectorize: bool,
+    /// XL2: forwarded from `ast::Function::is_test`. When true,
+    /// `vanic test` includes this function in the synthesised
+    /// test-runner main. Not used by the codegen backends.
+    pub is_test: bool,
     /// Source-byte range covering the entire `fn` declaration
     /// (`fn` keyword through the closing `}`). Carried forward
     /// from the AST so LSP features can pin "which function
