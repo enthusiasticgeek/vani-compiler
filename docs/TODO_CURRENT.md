@@ -456,11 +456,12 @@ no hardware, no external tokens, no grammar consultants required.
 
 ### Large (dedicated session, 6–12 h each)
 
-- [ ] **XL1. `Vec<bool>` packed type** (~8 h)
-  Add `Type::VecBool`; lexer/parser recognise `Vec<bool>`; checker routes bool
-  element operations; C backend emits a `uint64_t[]` bit-array with
-  `(arr[i/64] >> (i%64)) & 1` get / set; LLVM backend uses `i1` vector with
-  `trunc` / `zext`. Closes the sieve 8× memory-bandwidth gap.
+- [x] **XL1. `Vec<bool>` packed type** ✅ done 2026-07-16
+  No new Type variant — `Type::Vec(Box::new(Type::Bool))` throughout. C backend
+  emits `uint64_t[]` bit-array (`intent_vec_bool`) with `(data[i/64] >> (i%64)) & 1`
+  read and bitwise-set/clear write. LLVM backend uses `i64*` data field with
+  udiv/urem/lshr/and extraction; `emit_vec_bool_helpers_llvm` for push/pop/free/clone/set_mut.
+  `vec_struct_tag(Type::Bool)` = `"bool"` so struct name = `%intent_vec_bool`. 6/6 tests pass.
 
 - [ ] **XL2. `vanic test` — built-in test runner** (~8 h)
   Collect fns annotated `#[test]`; emit a synthesised `main` that calls each,

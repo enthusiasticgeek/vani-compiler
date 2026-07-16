@@ -1512,12 +1512,12 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         out.push('\n');
     }
     for elt in &vec_elements {
-        // In-buffer slot spelling (arrays as bare `[N x T]`).
-        // Phase 2c.
+        // XL1: Vec<bool> uses i64* (64-bit words) not i1* in its packed layout.
+        let data_ptr_ty = if *elt == Type::Bool { "i64".to_string() } else { vec_element_value_str(elt) };
         out.push_str(&format!(
             "{} = type {{ {}*, i64, i64 }}\n",
             vec_struct_name(elt),
-            vec_element_value_str(elt)
+            data_ptr_ty
         ));
     }
     if !vec_elements.is_empty() {
@@ -4032,6 +4032,17 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
             // pointee type is `value.ty` (the leaf field
             // type). T1.2 phase 2b follow-up.
             if let Type::Vec(element) = &underlying {
+                // XL1: Vec<bool> — packed bit write via @intent_vec_bool__set_mut.
+                if **element == Type::Bool {
+                    let idx_v = emit_expr(index, ctx, out);
+                    let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                    let val_v = emit_expr(value, ctx, out);
+                    out.push_str(&format!(
+                        "  call void @intent_vec_bool__set_mut(%intent_vec_bool* {addr}, i64 {idx}, i1 {val})\n",
+                        addr = addr, idx = idx_i64, val = val_v
+                    ));
+                    return;
+                }
                 let s_ty = vec_struct_name(element);
                 let elt_ty = llvm_type_string(element);
                 let data_p = ctx.fresh_tmp();
@@ -15636,6 +15647,31 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 if let Some((arr_ty, addr)) = ctx.locals.get(name).cloned() {
                     let underlying = arr_ty.deref().clone();
                     if let Type::Vec(element) = &underlying {
+                        // XL1: Vec<bool> — packed bit read.
+                        if **element == Type::Bool {
+                            let s_ty = "%intent_vec_bool";
+                            let data_p = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = getelementptr {}, {}* {}, i64 0, i32 0\n", data_p, s_ty, s_ty, addr));
+                            let data = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = load i64*, i64** {}\n", data, data_p));
+                            let idx_v = emit_expr(index, ctx, out);
+                            let idx_i64 = widen_index_to_64(&idx_v, &index.ty, ctx, out);
+                            let wi = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = udiv i64 {}, 64\n", wi, idx_i64));
+                            let bi = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = urem i64 {}, 64\n", bi, idx_i64));
+                            let wp = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = getelementptr i64, i64* {}, i64 {}\n", wp, data, wi));
+                            let wv = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = load i64, i64* {}\n", wv, wp));
+                            let sh = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = lshr i64 {}, {}\n", sh, wv, bi));
+                            let bit = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = and i64 {}, 1\n", bit, sh));
+                            let v = ctx.fresh_tmp();
+                            out.push_str(&format!("  {} = trunc i64 {} to i1\n", v, bit));
+                            return v;
+                        }
                         // Vec read: load `data` field, GEP, load element.
                         let s_ty = vec_struct_name(element);
                         // String form so struct / tuple
@@ -38605,7 +38641,144 @@ fn emit_intent_array_helpers_i64_llvm(out: &mut String) {
     }
 }
 
+/// XL1: emit LLVM IR push/pop/free/clone helpers for packed-bit Vec<bool>.
+/// Layout: %intent_vec_bool = type { i64*, i64, i64 }  (data, len_bits, cap_bits)
+fn emit_vec_bool_helpers_llvm(out: &mut String) {
+    let s = "%intent_vec_bool";
+    // ---- push(xs, v) -> xs'
+    out.push_str(&format!(
+        "define {s} @intent_vec_bool__push({s} %xs, i1 %v) alwaysinline {{\n\
+         \x20 %data = extractvalue {s} %xs, 0\n\
+         \x20 %len  = extractvalue {s} %xs, 1\n\
+         \x20 %cap  = extractvalue {s} %xs, 2\n\
+         \x20 %nl   = add i64 %len, 1\n\
+         \x20 %need = icmp ugt i64 %nl, %cap\n\
+         \x20 br i1 %need, label %grow, label %store_v\n\
+         grow:\n\
+         \x20 %cdbl = mul i64 %cap, 2\n\
+         \x20 %cz   = icmp eq i64 %cap, 0\n\
+         \x20 %nc   = select i1 %cz, i64 64, i64 %cdbl\n\
+         \x20 %nw   = udiv i64 %nc, 64\n\
+         \x20 %nb   = mul i64 %nw, 8\n\
+         \x20 %orp  = bitcast i64* %data to i8*\n\
+         \x20 %nrp  = call i8* @realloc(i8* %orp, i64 %nb)\n\
+         \x20 %ndg  = bitcast i8* %nrp to i64*\n\
+         \x20 br label %store_v\n\
+         store_v:\n\
+         \x20 %nd   = phi i64* [ %ndg, %grow ], [ %data, %0 ]\n\
+         \x20 %ncp  = phi i64  [ %nc,  %grow ], [ %cap,  %0 ]\n\
+         \x20 %wi   = udiv i64 %len, 64\n\
+         \x20 %bi   = urem i64 %len, 64\n\
+         \x20 %wp   = getelementptr i64, i64* %nd, i64 %wi\n\
+         \x20 %wv   = load i64, i64* %wp\n\
+         \x20 %bit  = sext i1 %v to i64\n\
+         \x20 %bsh  = shl i64 %bit, %bi\n\
+         \x20 %msk  = shl i64 1, %bi\n\
+         \x20 %nmsk = xor i64 %msk, -1\n\
+         \x20 %cl   = and i64 %wv, %nmsk\n\
+         \x20 %nwv  = or i64 %cl, %bsh\n\
+         \x20 store i64 %nwv, i64* %wp\n\
+         \x20 %r0   = insertvalue {s} undef, i64* %nd, 0\n\
+         \x20 %r1   = insertvalue {s} %r0, i64 %nl, 1\n\
+         \x20 %r2   = insertvalue {s} %r1, i64 %ncp, 2\n\
+         \x20 ret {s} %r2\n\
+         }}\n",
+        s = s
+    ));
+    // ---- push_mut(*xs, v) -> i64 (new len)
+    out.push_str(&format!(
+        "define i64 @intent_vec_bool__push_mut({s}* %xs, i1 %v) alwaysinline {{\n\
+         \x20 %old = load {s}, {s}* %xs\n\
+         \x20 %new = call {s} @intent_vec_bool__push({s} %old, i1 %v)\n\
+         \x20 store {s} %new, {s}* %xs\n\
+         \x20 %nl  = extractvalue {s} %new, 1\n\
+         \x20 ret i64 %nl\n\
+         }}\n",
+        s = s
+    ));
+    // ---- pop_mut(*xs) -> i1
+    out.push_str(&format!(
+        "define i1 @intent_vec_bool__pop_mut({s}* %xs) {{\n\
+         \x20 %v    = load {s}, {s}* %xs\n\
+         \x20 %len  = extractvalue {s} %v, 1\n\
+         \x20 %ok   = icmp ugt i64 %len, 0\n\
+         \x20 br i1 %ok, label %do_pop, label %empty\n\
+         empty:\n\
+         \x20 call void @abort()\n\
+         \x20 unreachable\n\
+         do_pop:\n\
+         \x20 %nl   = sub i64 %len, 1\n\
+         \x20 %data = extractvalue {s} %v, 0\n\
+         \x20 %wi   = udiv i64 %nl, 64\n\
+         \x20 %bi   = urem i64 %nl, 64\n\
+         \x20 %wp   = getelementptr i64, i64* %data, i64 %wi\n\
+         \x20 %wv   = load i64, i64* %wp\n\
+         \x20 %sh   = lshr i64 %wv, %bi\n\
+         \x20 %bit  = and i64 %sh, 1\n\
+         \x20 %r1   = insertvalue {s} %v, i64 %nl, 1\n\
+         \x20 store {s} %r1, {s}* %xs\n\
+         \x20 %res  = trunc i64 %bit to i1\n\
+         \x20 ret i1 %res\n\
+         }}\n",
+        s = s
+    ));
+    // ---- free(xs): free the data buffer
+    out.push_str(&format!(
+        "define void @intent_vec_bool__free({s} %xs) alwaysinline {{\n\
+         \x20 %data = extractvalue {s} %xs, 0\n\
+         \x20 %raw  = bitcast i64* %data to i8*\n\
+         \x20 call void @free(i8* %raw)\n\
+         \x20 ret void\n\
+         }}\n",
+        s = s
+    ));
+    // ---- clone(xs) -> xs' (deep copy)
+    out.push_str(&format!(
+        "define {s} @intent_vec_bool__clone({s} %xs) {{\n\
+         \x20 %data = extractvalue {s} %xs, 0\n\
+         \x20 %cap  = extractvalue {s} %xs, 2\n\
+         \x20 %nw   = add i64 %cap, 63\n\
+         \x20 %nwd  = udiv i64 %nw, 64\n\
+         \x20 %nb   = mul i64 %nwd, 8\n\
+         \x20 %raw  = bitcast i64* %data to i8*\n\
+         \x20 %nr   = call i8* @malloc(i64 %nb)\n\
+         \x20 call void @llvm.memcpy.p0i8.p0i8.i64(i8* %nr, i8* %raw, i64 %nb, i1 false)\n\
+         \x20 %nd   = bitcast i8* %nr to i64*\n\
+         \x20 %len  = extractvalue {s} %xs, 1\n\
+         \x20 %r0   = insertvalue {s} undef, i64* %nd, 0\n\
+         \x20 %r1   = insertvalue {s} %r0, i64 %len, 1\n\
+         \x20 %r2   = insertvalue {s} %r1, i64 %cap, 2\n\
+         \x20 ret {s} %r2\n\
+         }}\n",
+        s = s
+    ));
+    // ---- set_mut(*xs, i, v) [used by IndexAssign]
+    out.push_str(&format!(
+        "define void @intent_vec_bool__set_mut({s}* %xs, i64 %i, i1 %v) alwaysinline {{\n\
+         \x20 %vv   = load {s}, {s}* %xs\n\
+         \x20 %data = extractvalue {s} %vv, 0\n\
+         \x20 %wi   = udiv i64 %i, 64\n\
+         \x20 %bi   = urem i64 %i, 64\n\
+         \x20 %wp   = getelementptr i64, i64* %data, i64 %wi\n\
+         \x20 %wv   = load i64, i64* %wp\n\
+         \x20 %bit  = sext i1 %v to i64\n\
+         \x20 %bsh  = shl i64 %bit, %bi\n\
+         \x20 %msk  = shl i64 1, %bi\n\
+         \x20 %nmsk = xor i64 %msk, -1\n\
+         \x20 %cl   = and i64 %wv, %nmsk\n\
+         \x20 %nwv  = or i64 %cl, %bsh\n\
+         \x20 store i64 %nwv, i64* %wp\n\
+         \x20 ret void\n\
+         }}\n",
+        s = s
+    ));
+}
+
 pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
+    if *element == Type::Bool {
+        emit_vec_bool_helpers_llvm(out);
+        return;
+    }
     let s_ty = vec_struct_name(element);
     // In-buffer value spelling — handles arrays as `[N x T]`
     // rather than the alloca-pointer `[N x T]*` form. Phase
@@ -43182,6 +43355,12 @@ pub(crate) fn vec_struct_tag(element: &Type) -> String {
         // earlier-arm shadowing made the trailing duplicates
         // unreachable. Removed.
 
+        // XL1: Vec<bool> uses the "bool" tag (matching the C backend) so the
+        // LLVM struct name is %intent_vec_bool, consistent with all hardcoded
+        // helper references in emit_vec_bool_helpers_llvm. Without this arm
+        // Type::Bool falls to the `_` branch which calls llvm_type(Bool) = "i1",
+        // producing %intent_vec_i1 and breaking the typedef/helper name match.
+        Type::Bool => "bool".to_string(),
         // Scalars + ref/atomic/channel go through the
         // existing leaf spelling, with `%`/`*`/space replaced
         // by `_` so the identifier stays well-formed.
