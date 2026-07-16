@@ -6395,37 +6395,46 @@ fn monomorphize_generics_in_program(
     if generic_templates.is_empty() {
         return;
     }
-    // Walk every function's body for calls to generic fns
-    // and record the inferred concrete type. Specializations
-    // are deduplicated by (fn_name, concrete_type_name).
-    // Use a Vec + linear dedup since Type doesn't derive Ord
-    // (some variants carry Spans).
+    // XL4: multi-pass worklist -- seed from non-generic fns, then scan
+    // each newly-generated specialization for more generic calls.
+    // Repeat until no new (fn, T) pairs are discovered (stable).
     let mut needed: Vec<(String, Type)> = Vec::new();
+    // Keys of already-generated stubs: "fn_name__mangle".
+    let mut generated_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    // Seed round: walk every non-generic fn body.
     for f in &program.functions {
         if !f.type_params.is_empty() {
-            continue; // skip generic templates
+            continue;
         }
-        // Seed a per-fn local-binding map with the function's
-        // parameters. The walker extends it as it sees
-        // annotated `let` bindings so a generic call with a
-        // Var first argument can resolve the binding's type.
-        let mut scope: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        let mut scope: std::collections::HashMap<String, Type> =
+            std::collections::HashMap::new();
         for p in &f.params {
             scope.insert(p.name.clone(), p.ty.clone());
         }
         for stmt in &f.body {
             collect_generic_calls_in_stmt(
-                stmt, &generic_templates, &mut needed, &mut scope, diagnostics);
+                stmt, &generic_templates, &mut needed, &mut scope, diagnostics,
+            );
         }
     }
-    // Generate specialized fns. For templates carrying
-    // `where T is Iface` bounds, verify the concrete type
-    // satisfies each bound (i.e. the program has a matching
-    // `implement Iface for <concrete>` decl) before
-    // specializing. T1.5 phase 2.
-    let mut specialized: Vec<Function> = Vec::new();
-    for (fn_name, concrete_ty) in &needed {
-        let template = match generic_templates.get(fn_name) {
+    // Worklist: generate substituted stubs and scan each for more calls.
+    // worklist_pos walks `needed`; new entries appended by scanning newly-
+    // generated stubs extend the same vec, so the loop picks them up.
+    let mut spec_stubs: Vec<Function> = Vec::new();
+    let mut worklist_pos = 0;
+    while worklist_pos < needed.len() {
+        let (fn_name, concrete_ty) = needed[worklist_pos].clone();
+        worklist_pos += 1;
+
+        let key = format!("{}__{}", fn_name, type_mangle(&concrete_ty));
+        if generated_keys.contains(&key) {
+            continue;
+        }
+        generated_keys.insert(key);
+
+        let template = match generic_templates.get(&fn_name) {
             Some(t) => t,
             None => continue,
         };
@@ -6433,22 +6442,26 @@ fn monomorphize_generics_in_program(
         for clause in &template.where_clauses {
             let satisfied = program.impls.iter().any(|impl_decl| {
                 impl_decl.interface_name == clause.interface_name
-                    && &impl_decl.for_type == concrete_ty
+                    && &impl_decl.for_type == &concrete_ty
             });
             if !satisfied {
-                diagnostics.push(Diagnostic::new(
-                    clause.span,
-                    format!(
-                        "generic function '{}' requires `{} is {}`, but no \
-                         `implement {} for {}` is in scope. Add the impl or \
-                         pick a type that satisfies the bound.",
-                        fn_name,
-                        clause.type_param,
-                        clause.interface_name,
-                        clause.interface_name,
-                        concrete_ty
-                    ),
-                ).with_elaboration(crate::diagnostic_elaborations::iface_not_impl(&clause.interface_name, &concrete_ty.to_string())));
+                diagnostics.push(
+                    Diagnostic::new(
+                        clause.span,
+                        format!(
+                            "generic function '{}' requires `{} is {}`, but no                              `implement {} for {}` is in scope. Add the impl or pick a type that satisfies the bound.",
+                            fn_name,
+                            clause.type_param,
+                            clause.interface_name,
+                            clause.interface_name,
+                            concrete_ty
+                        ),
+                    )
+                    .with_elaboration(crate::diagnostic_elaborations::iface_not_impl(
+                        &clause.interface_name,
+                        &concrete_ty.to_string(),
+                    )),
+                );
                 bound_violation = true;
             }
         }
@@ -6456,43 +6469,57 @@ fn monomorphize_generics_in_program(
             continue;
         }
         if template.type_params.len() != 1 {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic function '{}' has {} type parameters â€” v1 supports \
-                     only one (T1.4 phase 2 follow-up).",
-                    fn_name,
-                    template.type_params.len()
+            diagnostics.push(
+                Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic function '{}' has {} type parameters -- v1 supports only one (T1.4 phase 2 follow-up).",
+                        fn_name,
+                        template.type_params.len()
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::non_generic_where_clause(&fn_name),
                 ),
-            ).with_elaboration(crate::diagnostic_elaborations::non_generic_where_clause(fn_name)));
+            );
             continue;
         }
-        let t_name = &template.type_params[0];
-        let specialized_name = format!("{}__{}", fn_name, type_mangle(concrete_ty));
-        let mut clone = template.clone();
-        clone.name = specialized_name.clone();
-        clone.type_params.clear();
-        // Bounds have been satisfied by the impl-existence
-        // check above; the specialized fn is no longer
-        // generic so drop the where-clauses too.
-        clone.where_clauses.clear();
-        // Substitute Type::Param(t_name) â†’ concrete in params,
-        // return type, and body.
-        for p in clone.params.iter_mut() {
-            substitute_type_param(&mut p.ty, t_name, concrete_ty);
+        let t_name = template.type_params[0].clone();
+        let mut stub = template.clone();
+        stub.name = format!("{}__{}", fn_name, type_mangle(&concrete_ty));
+        stub.type_params.clear();
+        stub.where_clauses.clear();
+        for p in stub.params.iter_mut() {
+            substitute_type_param(&mut p.ty, &t_name, &concrete_ty);
         }
-        substitute_type_param(&mut clone.return_type, t_name, concrete_ty);
-        for s in clone.body.iter_mut() {
-            substitute_type_param_in_stmt(s, t_name, concrete_ty);
+        substitute_type_param(&mut stub.return_type, &t_name, &concrete_ty);
+        for s in stub.body.iter_mut() {
+            substitute_type_param_in_stmt(s, &t_name, &concrete_ty);
         }
-        specialized.push(clone);
+        // XL4 core: scan the new stub for generic calls it makes.
+        // These become new worklist entries so their specializations
+        // are generated in subsequent iterations.
+        {
+            let mut scope: std::collections::HashMap<String, Type> =
+                std::collections::HashMap::new();
+            for p in &stub.params {
+                scope.insert(p.name.clone(), p.ty.clone());
+            }
+            for stmt in &stub.body {
+                collect_generic_calls_in_stmt(
+                    stmt, &generic_templates, &mut needed, &mut scope, diagnostics,
+                );
+            }
+        }
+        spec_stubs.push(stub);
     }
-    // Rewrite call sites to use specialized names.
+    // Rewrite call sites to use specialized names -- non-generic fns.
     for f in program.functions.iter_mut() {
         if !f.type_params.is_empty() {
             continue;
         }
-        let mut scope: std::collections::HashMap<String, Type> = std::collections::HashMap::new();
+        let mut scope: std::collections::HashMap<String, Type> =
+            std::collections::HashMap::new();
         for p in &f.params {
             scope.insert(p.name.clone(), p.ty.clone());
         }
@@ -6500,30 +6527,40 @@ fn monomorphize_generics_in_program(
             rewrite_generic_calls_in_stmt(stmt, &generic_templates, &mut scope);
         }
     }
-    // Surface dead-generic diagnostic for any generic
-    // template that didn't get specialized (no call sites
-    // inferred concrete types for it).
-    let specialized_names: std::collections::HashSet<&String> = needed
-        .iter()
-        .map(|(n, _)| n)
-        .collect();
+    // Rewrite call sites in specializations (the step the single-pass
+    // design skipped, breaking chains like wrap <- double_wrap).
+    for stub in spec_stubs.iter_mut() {
+        let mut scope: std::collections::HashMap<String, Type> =
+            std::collections::HashMap::new();
+        for p in &stub.params {
+            scope.insert(p.name.clone(), p.ty.clone());
+        }
+        for stmt in stub.body.iter_mut() {
+            rewrite_generic_calls_in_stmt(stmt, &generic_templates, &mut scope);
+        }
+    }
+    // Surface dead-generic diagnostic: templates never reached by the worklist.
+    let specialized_fn_names: std::collections::HashSet<&str> =
+        needed.iter().map(|(n, _)| n.as_str()).collect();
     for (name, template) in &generic_templates {
-        if !specialized_names.contains(name) {
-            diagnostics.push(Diagnostic::new(
-                template.span,
-                format!(
-                    "generic function '{}' is declared but never called with \
-                     concrete types â€” monomorphization couldn't specialize it. \
-                     Either call it from a non-generic call site or remove the \
-                     declaration.",
-                    name
+        if !specialized_fn_names.contains(name.as_str()) {
+            diagnostics.push(
+                Diagnostic::new(
+                    template.span,
+                    format!(
+                        "generic function '{}' is declared but never called with concrete types -- monomorphization couldn't specialize it. Either call it from a non-generic call site or remove the declaration.",
+                        name
+                    ),
+                )
+                .with_elaboration(
+                    crate::diagnostic_elaborations::unknown_function(name),
                 ),
-            ).with_elaboration(crate::diagnostic_elaborations::unknown_function(name)));
+            );
         }
     }
     // Remove original generics; append specializations.
     program.functions.retain(|f| f.type_params.is_empty());
-    program.functions.extend(specialized);
+    program.functions.extend(spec_stubs);
 }
 
 /// Walk a stmt and collect (generic-fn-name, inferred-T) pairs
