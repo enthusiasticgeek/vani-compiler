@@ -448,12 +448,9 @@ no hardware, no external tokens, no grammar consultants required.
   existing SMT discharge pass when the operand bounds are provably safe. The
   elision infrastructure already exists; only guard generation is missing.
 
-- [ ] **L5. Closure capturing non-Copy (affine) bindings** (~6 h)
-  Closures currently reject affine captures (`closure_captures_affine`).
-  Fix: introduce move-capture semantics — the closure takes ownership of the
-  captured binding at creation; the original binding is marked moved; the
-  closure's synthesised struct carries a field of the affine type; drop fires
-  on the closure's own scope exit.
+- [x] **L5. Closure capturing non-Copy (affine) bindings** (~6 h) — DONE 2026-07-15 (commit 76a9aea)
+  FnOnce semantics: heap-malloc env; env-nulled after call; scope-exit Drop;
+  moved-callee guard rejects double-call. Tests in lib.rs: `aff_closure_*`.
 
 ---
 
