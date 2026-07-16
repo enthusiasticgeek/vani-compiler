@@ -469,19 +469,16 @@ no hardware, no external tokens, no grammar consultants required.
   "ok", fail = assert aborts with message), compiles+runs via CC. `resolve_combined_source()`
   public API in lib.rs for multi-file imports. 4 lib tests pass.
 
-- [ ] **XL3. `Stream<T>` + `for await`** (~10 h)
-  Define `Stream<T>` interface (`fn poll_next(self: mut ref Self) -> Opt<T>`);
-  desugar `for await x in s { … }` to a poll loop; integrate with the Arc 8
-  async state-machine transform so `for await` can appear inside `async fn`.
+- [x] **XL3. `for await x in expr { body }` syntax** (parser sugar only)
+  Desugars at parse time to `while let Option.Some(x) = expr { body }`.
+  No new AST/IR node. 4 lib tests pass.
 
-- [ ] **XL4. Nested monomorphization (multi-pass)** (~10 h)
-  Generic fn calling generic fn currently fails — the monomorphizer is single-pass
-  and only collects `(fn, concrete-type)` pairs from non-generic call sites.
-  Specializations of generic fns that themselves call other generics are never
-  collected. Fix: make the monomorphizer iterate: after generating a round of
-  specializations, scan the new bodies for generic calls, add them to the needed
-  set, and repeat until stable. Regression test:
-  `nested_generic_call_pins_current_behavior` in `src/lib.rs`.
+- [x] **XL4. Nested monomorphization (multi-pass)** (~10 h)
+  Replaced single-pass monomorphizer with worklist-based approach that scans
+  each newly-generated specialization for more generic calls and iterates until
+  stable. Two-level (`wrap <- double_wrap`) and three-level (`f<-g<-h`) chains
+  now compile. `nested_generic_call_pins_current_behavior` and
+  `nested_generic_three_level_chain_fails` both succeed in the `Ok(_)` branch.
 
 ---
 
