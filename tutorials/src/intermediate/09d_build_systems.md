@@ -1,8 +1,9 @@
 # Intermediate 9d — Build-system integration: Makefile, CMake, Meson
 
 > **Learning goal**: integrate vāṇī into an existing C/C++ build pipeline using
-> `vanic emit --backend=c` to generate portable C, then compile and link that C
-> with Makefile, CMake, or Meson (including Ninja-backend CMake/Meson projects).
+> either the **C backend** (`vanic emit --backend=c`) or the **LLVM backend**
+> (`vanic emit`, then `llc`), with Makefile, CMake, or Meson
+> (including Ninja-backend projects).
 
 > **Prerequisite**: [FFI: `extern "C"` + `--link-with`](09_ffi.md)
 
@@ -10,20 +11,28 @@
 
 ## How the integration works
 
-vāṇī has two compilation modes:
+`vanic emit` type-checks the program, applies SMT verification, and writes
+lowered output to a file. Two backends are available:
 
-| Mode | Command | Use case |
-|------|---------|----------|
-| Build native binary directly | `vanic build src/main.vani -o hello` | standalone vāṇī project |
-| Emit C for external toolchain | `vanic emit src/main.vani --backend=c -o build/main.c` | mixed C+vāṇī; embedded BSP; audit trail |
-
-The second mode is the integration point. `vanic emit` type-checks the program,
-applies SMT verification, and writes readable C to a file. Your existing build
-system then compiles and links that C exactly like any other `.c` source.
+| Backend | Emit command | Output | Then |
+|---------|-------------|--------|------|
+| **C** | `vanic emit src/main.vani --backend=c -o build/main.c` | portable C11 | compile with any `cc` |
+| **LLVM** | `vanic emit src/main.vani -o build/main.ll` | LLVM IR (`.ll`) | `llc -filetype=obj` → `.o` |
 
 When the entry file uses `use "other.vani"` imports, vāṇī follows them
-transitively and includes all modules in the emitted output — so you get one
-`.c` file per entry point, not one per source file.
+transitively and includes all modules in the emitted output — one file
+per entry point, not one per source file.
+
+### Which backend to pick for build-system integration
+
+| Situation | Backend |
+|-----------|---------|
+| Embedded target without LLVM toolchain | **C** — compiles with any C11 compiler |
+| Need readable, auditable output (safety-critical review) | **C** |
+| Maximum optimization (LLVM `-O3` passes + LTO) | **LLVM** |
+| Linking with other LLVM-compiled libraries for LTO | **LLVM** |
+| Cross-compiling via `llc --mtriple=` | **LLVM** |
+| Existing CMake/Meson project already uses LLVM tools | **LLVM** |
 
 ---
 
@@ -313,6 +322,262 @@ Clang cross-toolchain.
 
 ---
 
+## LLVM backend
+
+The LLVM backend emits `.ll` (LLVM IR text format). Your build system then
+calls `llc` to compile the IR to a native object file, which links exactly
+like any other `.o`. Because `llc` understands the same LLVM IR that Clang
+and `rustc` emit, the resulting object participates in LTO alongside other
+LLVM-compiled code.
+
+**Core pipeline:**
+
+```bash
+vanic emit src/main.vani -o build/main.ll        # vāṇī → LLVM IR
+llc -O3 -filetype=obj build/main.ll -o build/main.o   # IR → object
+cc build/main.o c_helper.o -o build/myproject    # link
+```
+
+Optional — run LLVM's optimizer explicitly before `llc`:
+
+```bash
+opt -O3 build/main.ll -o build/main_opt.ll
+llc -filetype=obj build/main_opt.ll -o build/main.o
+```
+
+`vanic build` already pipes through `opt` and `llc` internally; the manual
+step is only needed when you want to control the optimization flags yourself
+or chain additional LLVM passes.
+
+---
+
+### Makefile — LLVM backend
+
+```makefile
+VANIC ?= vanic
+LLC   ?= llc
+CC    ?= cc
+LLCFLAGS = -O3
+
+SRC    = src/main.vani
+LL_OUT = build/main.ll
+OBJ    = build/main.o
+C_OBJ  = build/c_helper.o
+BIN    = build/myproject
+
+VANI_SRCS = $(wildcard src/*.vani)
+
+.PHONY: run check build clean
+
+run: build
+	./$(BIN)
+
+check:
+	$(VANIC) check $(SRC)
+
+build: $(BIN)
+
+# Step 1 — vāṇī → LLVM IR
+$(LL_OUT): $(VANI_SRCS)
+	mkdir -p build
+	$(VANIC) emit $(SRC) -o $(LL_OUT)
+
+# Step 2 — LLVM IR → native object
+$(OBJ): $(LL_OUT)
+	$(LLC) $(LLCFLAGS) -filetype=obj $(LL_OUT) -o $(OBJ)
+
+# Step 3 — compile C helper
+$(C_OBJ): c_helper.c
+	$(CC) -O2 -c c_helper.c -o $(C_OBJ)
+
+# Step 4 — link
+$(BIN): $(OBJ) $(C_OBJ)
+	$(CC) $(OBJ) $(C_OBJ) -o $(BIN)
+
+clean:
+	rm -rf build/
+```
+
+**Cross-compilation with `llc`:** override the target triple with `LLCFLAGS`:
+
+```makefile
+# AArch64 cross-compile — same Makefile, different flags
+make LLCFLAGS="-O3 --mtriple=aarch64-unknown-linux-gnu" \
+     CC=aarch64-linux-gnu-gcc
+```
+
+---
+
+### CMake — LLVM backend
+
+```cmake
+cmake_minimum_required(VERSION 3.20)
+project(myproject LANGUAGES C)
+
+find_program(VANIC vanic REQUIRED
+  DOC "vāṇī compiler (cargo install vanic)")
+find_program(LLC llc REQUIRED
+  DOC "LLVM object-code compiler")
+
+set(VANI_ENTRY  ${CMAKE_SOURCE_DIR}/src/main.vani)
+set(VANI_LL     ${CMAKE_BINARY_DIR}/main.ll)
+set(VANI_OBJ    ${CMAKE_BINARY_DIR}/main.o)
+
+file(GLOB_RECURSE VANI_SRCS ${CMAKE_SOURCE_DIR}/src/*.vani)
+
+# Step 1 — vāṇī → LLVM IR
+add_custom_command(
+  OUTPUT  ${VANI_LL}
+  COMMAND ${VANIC} emit ${VANI_ENTRY} -o ${VANI_LL}
+  DEPENDS ${VANI_SRCS}
+  COMMENT "vāṇī → LLVM IR"
+  VERBATIM
+)
+
+# Step 2 — LLVM IR → native object
+add_custom_command(
+  OUTPUT  ${VANI_OBJ}
+  COMMAND ${LLC} -O3 -filetype=obj ${VANI_LL} -o ${VANI_OBJ}
+  DEPENDS ${VANI_LL}
+  COMMENT "LLVM IR → object"
+  VERBATIM
+)
+
+# Step 3 — wrap the object in an IMPORTED target so add_executable can link it
+add_library(myproject_vani OBJECT IMPORTED GLOBAL)
+set_target_properties(myproject_vani PROPERTIES
+  IMPORTED_OBJECTS ${VANI_OBJ}
+)
+add_custom_target(vani_compile DEPENDS ${VANI_OBJ})
+add_dependencies(myproject_vani vani_compile)
+
+# Step 4 — link with the C side
+add_executable(myproject c_helper.c)
+target_link_libraries(myproject PRIVATE myproject_vani)
+```
+
+**Ninja backend** — same `CMakeLists.txt`, pass `-G Ninja` at configure time:
+
+```bash
+cmake -B build -G Ninja
+ninja -C build
+```
+
+CMake writes the dependency edges (`main.ll` depends on `.vani` sources,
+`main.o` depends on `main.ll`) into `.ninja` files — a change to any
+`.vani` file triggers re-emit → re-compile → re-link automatically.
+
+**Cross-compilation** — pass the triple to `llc` via a CMake cache variable:
+
+```cmake
+set(LLC_TARGET_TRIPLE "" CACHE STRING "llc --mtriple value; empty = host")
+
+if(LLC_TARGET_TRIPLE)
+  set(LLC_MTRIPLE_FLAG "--mtriple=${LLC_TARGET_TRIPLE}")
+endif()
+
+add_custom_command(
+  OUTPUT  ${VANI_OBJ}
+  COMMAND ${LLC} -O3 -filetype=obj ${LLC_MTRIPLE_FLAG} ${VANI_LL} -o ${VANI_OBJ}
+  DEPENDS ${VANI_LL}
+  VERBATIM
+)
+```
+
+```bash
+cmake -B build -G Ninja \
+      -DLLC_TARGET_TRIPLE=aarch64-unknown-linux-gnu \
+      -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc
+ninja -C build
+```
+
+---
+
+### Meson — LLVM backend
+
+```meson
+project('myproject', 'c',
+  default_options: ['c_std=c11', 'optimization=2'])
+
+vanic = find_program('vanic', required: true)
+llc   = find_program('llc',   required: true)
+
+# Step 1 — vāṇī → LLVM IR
+vani_ll = custom_target('vani_emit_ll',
+  input:        'src/main.vani',
+  output:       'main.ll',
+  command:      [vanic, 'emit', '@INPUT@', '-o', '@OUTPUT@'],
+  depend_files: files('src/math.vani'),
+)
+
+# Step 2 — LLVM IR → native object
+vani_obj = custom_target('vani_llc',
+  input:   vani_ll,
+  output:  'main.o',
+  command: [llc, '-O3', '-filetype=obj', '@INPUT@', '-o', '@OUTPUT@'],
+)
+
+# Step 3 — link
+executable('myproject',
+  sources:   ['c_helper.c', vani_obj],
+)
+```
+
+**Build:**
+
+```bash
+meson setup build          # Meson always defaults to Ninja
+ninja -C build
+./build/myproject
+```
+
+**Cross-compilation** — declare a Meson cross-file and override the `llc`
+triple. `meson.build` stays unchanged; the cross-file controls the toolchain:
+
+`cross-aarch64.ini`:
+
+```ini
+[binaries]
+c       = 'aarch64-linux-gnu-gcc'
+llc     = 'llc'
+
+[built-in options]
+llc_mtriple = 'aarch64-unknown-linux-gnu'
+```
+
+Then pass the triple explicitly in the `custom_target` if the cross-file
+exposes it as a machine option, or simply set an environment variable:
+
+```bash
+LLC_MTRIPLE=aarch64-unknown-linux-gnu meson setup build --cross-file cross-aarch64.ini
+ninja -C build
+```
+
+---
+
+### LTO with other LLVM-compiled libraries
+
+When your project also compiles C or C++ with Clang, you can perform
+full-program LTO by keeping the vāṇī IR in bitcode form and letting the
+linker (`lld`) run the optimiser across all translation units:
+
+```makefile
+# Emit bitcode instead of text IR
+$(LL_OUT): $(VANI_SRCS)
+	$(VANIC) emit $(SRC) -o $(LL_OUT)          # text IR (.ll)
+	opt -O3 $(LL_OUT) -o build/main.bc         # text IR → bitcode
+
+# Compile other C files with Clang, also emitting bitcode
+build/c_helper.bc: c_helper.c
+	clang -O3 -flto -emit-llvm -c c_helper.c -o build/c_helper.bc
+
+# LTO link via lld
+$(BIN): build/main.bc build/c_helper.bc
+	clang -fuse-ld=lld -flto build/main.bc build/c_helper.bc -o $(BIN)
+```
+
+---
+
 ## Checking without emitting (CI usage)
 
 All three build systems can call `vanic check` as a pre-build validation step
@@ -350,14 +615,17 @@ run_target('check',
 
 ## Which approach to choose
 
-| Situation | Recommended approach |
-|-----------|---------------------|
-| Pure vāṇī project, simple needs | `vanic build` directly; Makefile wrapper for familiar targets |
-| New project with C helpers | CMake + `add_custom_command` |
-| Embedded Linux / Yocto recipe | Meson `custom_target` |
-| Existing large C/C++ CMake project | Add `add_custom_command` + `add_library` to existing `CMakeLists.txt` |
-| Bare-metal with proprietary BSP toolchain | Makefile B — emit C, then compile with the BSP's own `cc` |
-| Need fast incremental builds | Any approach with Ninja backend (`-G Ninja` for CMake, default for Meson) |
+| Situation | Backend | Build system |
+|-----------|---------|--------------|
+| Pure vāṇī project, simple needs | either | `vanic build` directly; Makefile wrapper |
+| Embedded target, no LLVM on device | **C** | Makefile B or Meson |
+| Safety-critical audit — need readable output | **C** | any |
+| Existing C/C++ CMake project | **C** or **LLVM** | Add `add_custom_command` to existing `CMakeLists.txt` |
+| Embedded Linux / Yocto recipe | **C** | Meson `custom_target` |
+| Maximum optimization, LLVM `-O3` passes | **LLVM** | Makefile or CMake |
+| LTO across vāṇī + Clang/C++ objects | **LLVM** | Makefile (bitcode → `lld`) |
+| Cross-compile via `llc --mtriple=` | **LLVM** | Makefile or CMake with triple variable |
+| Fast incremental builds | either | Ninja backend (`-G Ninja` for CMake, default for Meson) |
 
 > **Note on raw Ninja**: `.ninja` files are generated by CMake or Meson — you
 > do not write them by hand. Choose CMake or Meson as the frontend; Ninja
