@@ -1470,6 +1470,11 @@ fn encode_expr(
                             "payloaded variant destructure patterns not yet supported in SMT".into(),
                         ));
                     }
+                    crate::ast::Pattern::Slice { .. } => {
+                        return Err(EncodeError::Unsupported(
+                            "slice patterns not yet supported in SMT".into(),
+                        ));
+                    }
                 }
             }
             acc.ok_or_else(|| EncodeError::Unsupported(

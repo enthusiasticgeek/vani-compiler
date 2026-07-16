@@ -4411,6 +4411,35 @@ impl Parser {
                     }
                     _ => return Err(Diagnostic::new(lit_span, "expected integer or float literal in match pattern")),
                 }
+            } else if self.check(|k| matches!(k, TokenKind::LBracket)) {
+                // L1: slice / vec destructure pattern `[a, b, .., x, y]`.
+                let bracket_tok = self.bump(); // `[`
+                let pat_start = bracket_tok.span;
+                let mut heads: Vec<String> = Vec::new();
+                let mut tail_bindings: Vec<String> = Vec::new();
+                let mut has_rest = false;
+                loop {
+                    if self.check(|k| matches!(k, TokenKind::RBracket | TokenKind::Eof)) {
+                        break;
+                    }
+                    if !has_rest && self.check(|k| matches!(k, TokenKind::DotDot)) {
+                        self.bump(); // consume `..`
+                        has_rest = true;
+                        if self.check(|k| matches!(k, TokenKind::Comma)) {
+                            self.bump(); // optional `,` after `..`
+                        }
+                        continue;
+                    }
+                    let name_tok = self.expect_ident()?;
+                    let name = ident_text(name_tok);
+                    if has_rest { tail_bindings.push(name); } else { heads.push(name); }
+                    if self.check(|k| matches!(k, TokenKind::Comma)) {
+                        self.bump(); // `,` separator
+                    }
+                }
+                let close = self.expect_keyword("']' (slice pattern close)", |k| matches!(k, TokenKind::RBracket))?;
+                let pat_span = pat_start.merge(close.span);
+                (Pattern::Slice { heads, tail: tail_bindings, has_rest }, pat_span)
             } else {
                 let first_tok = self.expect_ident()?;
                 let pat_start = first_tok.span;
@@ -4470,6 +4499,35 @@ impl Parser {
                         }
                         _ => return Err(Diagnostic::new(lit_span, "expected integer or float literal in match pattern")),
                     }
+                } else if self.check(|k| matches!(k, TokenKind::LBracket)) {
+                    // L1: slice / vec destructure in or-pattern alternative.
+                    let bracket_tok = self.bump(); // `[`
+                    let alt_start = bracket_tok.span;
+                    let mut heads: Vec<String> = Vec::new();
+                    let mut tail_bindings: Vec<String> = Vec::new();
+                    let mut has_rest = false;
+                    loop {
+                        if self.check(|k| matches!(k, TokenKind::RBracket | TokenKind::Eof)) {
+                            break;
+                        }
+                        if !has_rest && self.check(|k| matches!(k, TokenKind::DotDot)) {
+                            self.bump();
+                            has_rest = true;
+                            if self.check(|k| matches!(k, TokenKind::Comma)) {
+                                self.bump();
+                            }
+                            continue;
+                        }
+                        let name_tok = self.expect_ident()?;
+                        let name = ident_text(name_tok);
+                        if has_rest { tail_bindings.push(name); } else { heads.push(name); }
+                        if self.check(|k| matches!(k, TokenKind::Comma)) {
+                            self.bump();
+                        }
+                    }
+                    let close = self.expect_keyword("']' (slice pattern close)", |k| matches!(k, TokenKind::RBracket))?;
+                    let alt_span = alt_start.merge(close.span);
+                    (Pattern::Slice { heads, tail: tail_bindings, has_rest }, alt_span)
                 } else {
                     let first_tok = self.expect_ident()?;
                     let alt_start = first_tok.span;

@@ -1996,6 +1996,19 @@ pub enum Pattern {
     /// the wildcard — documented as v1 limitation.
     /// Closure #278.
     Float(f64),
+    /// `[a, b, .., x, y] then …` — slice/vec destructure.
+    /// Scrutinee must be `Vec<T>` or `[T; N]`. `heads`
+    /// are binding names (or `"_"`) for elements before the
+    /// `..` rest marker; `tail` are binding names after `..`.
+    /// `has_rest = false` means an exact-length pattern with
+    /// no `..` (all elements in `heads`, `tail` is empty).
+    /// At least one of `heads`/`tail` may be non-empty.
+    /// v1 restriction: element type must be Copy. L1.
+    Slice {
+        heads: Vec<String>,
+        tail: Vec<String>,
+        has_rest: bool,
+    },
     /// `_ then …` — catch-all that covers every remaining
     /// variant; must appear last in the arm list.
     Wildcard,

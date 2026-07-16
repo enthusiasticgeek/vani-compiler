@@ -855,6 +855,23 @@ fn format_pattern(p: &crate::ast::Pattern, out: &mut String) {
         }
         Pattern::Float(f) => out.push_str(&format!("{:?}", f)),
         Pattern::Wildcard => out.push('_'),
+        Pattern::Slice { heads, tail, has_rest } => {
+            out.push('[');
+            for (i, h) in heads.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(h);
+            }
+            if *has_rest {
+                if !heads.is_empty() { out.push_str(", "); }
+                out.push_str("..");
+                if !tail.is_empty() { out.push_str(", "); }
+            }
+            for (i, t) in tail.iter().enumerate() {
+                if i > 0 { out.push_str(", "); }
+                out.push_str(t);
+            }
+            out.push(']');
+        }
     }
 }
 
@@ -1386,6 +1403,23 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
                     }
                     crate::ast::Pattern::Wildcard => {
                         out.push('_');
+                    }
+                    crate::ast::Pattern::Slice { heads, tail, has_rest } => {
+                        out.push('[');
+                        for (i, h) in heads.iter().enumerate() {
+                            if i > 0 { out.push_str(", "); }
+                            out.push_str(h);
+                        }
+                        if *has_rest {
+                            if !heads.is_empty() { out.push_str(", "); }
+                            out.push_str("..");
+                            if !tail.is_empty() { out.push_str(", "); }
+                        }
+                        for (i, t) in tail.iter().enumerate() {
+                            if i > 0 { out.push_str(", "); }
+                            out.push_str(t);
+                        }
+                        out.push(']');
                     }
                 }
                 if let Some(g) = &arm.guard {

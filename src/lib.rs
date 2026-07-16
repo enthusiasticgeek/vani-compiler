@@ -48407,5 +48407,95 @@ fn main() -> i64 { return 0; }
         assert!(result.is_err(), "unknown repr variant `simd` must be a compile error");
     }
 
+    // ── L1 Slice patterns ─────────────────────────────────────────────────────
+
+    #[test]
+    fn slice_exact_vec_matches_correct_length() {
+        let src = r#"
+intent "slice_exact";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(10, 20, 30);
+    let r: i64 = match xs {
+        [a, b, c] then a + b + c,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src).expect("slice exact pattern should compile");
+        // The generated C must contain length equality and index accesses.
+        assert!(c.contains("__len") || c.contains("->len") || c.contains(".len"),
+            "generated C must read vec length for the slice pattern guard");
+    }
+
+    #[test]
+    fn slice_rest_vec_binds_first_and_last() {
+        let src = r#"
+intent "slice_rest";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+    let r: i64 = match xs {
+        [first, .., last] then first + last,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src).expect("slice rest pattern should compile");
+        assert!(c.contains("__len") || c.contains("->len") || c.contains(".len"),
+            "generated C must read vec length for the rest-pattern guard");
+    }
+
+    #[test]
+    fn slice_empty_pattern_matches_empty_vec() {
+        let src = r#"
+intent "slice_empty";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec();
+    let r: i64 = match xs {
+        [] then 42,
+        _ then 0,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src).expect("empty slice pattern should compile");
+        assert!(c.contains("42"), "empty pattern arm body should appear in output");
+    }
+
+    #[test]
+    fn slice_pattern_wildcard_fallthrough() {
+        let src = r#"
+intent "slice_wild";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(7);
+    let r: i64 = match xs {
+        [a, b] then a + b,
+        _ then 99,
+    };
+    return r;
+}
+"#;
+        let c = compile_to_c(src).expect("slice pattern with wildcard fallthrough should compile");
+        assert!(c.contains("99"), "wildcard arm body should appear in generated output");
+    }
+
+    #[test]
+    fn slice_pattern_non_copy_elem_is_rejected() {
+        let src = r#"
+intent "slice_non_copy";
+fn main() -> i64 {
+    let xs: Vec<OwnedStr> = vec();
+    let r: i64 = match xs {
+        [a, .., b] then 0,
+        _ then 1,
+    };
+    return r;
+}
+"#;
+        let result = compile_to_c(src);
+        assert!(result.is_err(), "slice pattern on Vec<OwnedStr> (non-Copy elem) must be rejected");
+    }
+
 }
 

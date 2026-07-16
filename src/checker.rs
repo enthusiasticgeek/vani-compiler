@@ -14238,6 +14238,353 @@ fn check_match_float(
     )
 }
 
+// L1: `match xs { [a, .., b] then … }` — slice/vec destructure.
+// Desugars into a chain of IfExpr nodes keyed on length checks, with
+// inner Blocks that bind element names before evaluating the arm body.
+// Mirrors the `check_match_float` shape: collect arms → build chain
+// from bottom to top → wrap in a Block that temps the scrutinee.
+// Only Copy element types are supported in v1 (documented limitation).
+fn check_match_slice(
+    scrutinee: &CheckedExpr,
+    arms: &[crate::ast::MatchArm],
+    span: Span,
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    let scrut_ty = scrutinee.ty().clone();
+    let (elem_ty, static_len): (Type, u64) = match &scrut_ty {
+        Type::Vec(inner) => ((**inner).clone(), 0),
+        Type::Array { element, length } => ((**element).clone(), *length),
+        other => {
+            diagnostics.push(Diagnostic::new(
+                span,
+                format!(
+                    "slice pattern `[…]` requires a `Vec<T>` or `[T; N]` scrutinee, \
+                     but got `{}`",
+                    other
+                ),
+            ));
+            return CheckedExpr::fallback_integer(span);
+        }
+    };
+    if !elem_ty.is_copy() {
+        diagnostics.push(Diagnostic::new(
+            span,
+            format!(
+                "slice patterns on `Vec<{e}>` are not yet supported in v1 — \
+                 element type `{e}` is non-Copy; only Copy element types \
+                 (i64, bool, f64, …) are supported",
+                e = elem_ty
+            ),
+        ));
+        return CheckedExpr::fallback_integer(span);
+    }
+
+    // Unique temp name for the scrutinee.
+    let tmp = format!("__slice_scr_{}", span.start);
+
+    // Collect typed arms into (length_condition, arm_block) pairs.
+    let mut typed_arms: Vec<(TypedExpr, TypedExpr)> = Vec::new();
+    let mut wildcard_body: Option<TypedExpr> = None;
+    let mut result_ty: Option<Type> = None;
+    let mut wildcard_seen = false;
+
+    for arm in arms {
+        if wildcard_seen {
+            diagnostics.push(Diagnostic::new(
+                arm.pattern_span,
+                "match arm is unreachable: a wildcard `_` arm above already \
+                 covers every remaining case"
+                    .to_string(),
+            ));
+            continue;
+        }
+        match &arm.pattern {
+            crate::ast::Pattern::Wildcard => {
+                wildcard_seen = true;
+                let body = check_expr(&arm.body, env, signatures, diagnostics);
+                unify_arm_type(&body, &mut result_ty, diagnostics, arm.body.span);
+                wildcard_body = Some(body.expr);
+            }
+            crate::ast::Pattern::Slice { heads, tail, has_rest } => {
+                let needed = (heads.len() + tail.len()) as u64;
+                // Push head + tail bindings into a fresh scope so the arm
+                // body can reference them by name.
+                env.push_scope();
+                for name in heads.iter().chain(tail.iter()) {
+                    if name == "_" {
+                        continue;
+                    }
+                    env.insert_current(name.clone(), VarInfo {
+                        ty: elem_ty.clone(),
+                        constant: None,
+                        moved: None,
+                        decl_span: arm.pattern_span,
+                        vec_literal_elements: None,
+                        array_version: 0,
+                        guarded_mutex: None,
+                        no_drop: true, // element reads don't own the buffer
+                        is_const: false,
+                        struct_literal_fields: None,
+                        moved_fields: std::collections::BTreeMap::new(),
+                        ref_aliases: Vec::new(),
+                    });
+                }
+                let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
+                env.pop_scope();
+                unify_arm_type(&body_checked, &mut result_ty, diagnostics, arm.body.span);
+
+                // Build the scrutinee Var expression (references the tmp).
+                let scr_var = |ty: Type| TypedExpr {
+                    kind: TypedExprKind::Var(tmp.clone()),
+                    ty,
+                    constant: None,
+                    span,
+                    binding_decl_span: None,
+                };
+                let len_node = TypedExpr {
+                    kind: TypedExprKind::Len {
+                        array: Box::new(scr_var(scrut_ty.clone())),
+                        length: static_len,
+                    },
+                    ty: Type::U64,
+                    constant: if static_len > 0 { Some(TypedConst::Int(static_len as i128)) } else { None },
+                    span,
+                    binding_decl_span: None,
+                };
+
+                // Length condition: len >= needed (has_rest) or len == needed (exact).
+                let needed_expr = TypedExpr {
+                    kind: TypedExprKind::Int(needed as i128),
+                    ty: Type::U64,
+                    constant: Some(TypedConst::Int(needed as i128)),
+                    span,
+                    binding_decl_span: None,
+                };
+                let cond_op = if *has_rest { BinaryOp::Ge } else { BinaryOp::Eq };
+                let cond = TypedExpr {
+                    kind: TypedExprKind::Binary {
+                        op: cond_op,
+                        left: Box::new(len_node.clone()),
+                        right: Box::new(needed_expr),
+                        checked: false,
+                    },
+                    ty: Type::Bool,
+                    constant: None,
+                    span,
+                    binding_decl_span: None,
+                };
+
+                // Build let stmts for each non-`_` binding.
+                let mut bind_stmts: Vec<TypedStmt> = Vec::new();
+                for (i, name) in heads.iter().enumerate() {
+                    if name == "_" {
+                        continue;
+                    }
+                    let idx = TypedExpr {
+                        kind: TypedExprKind::Int(i as i128),
+                        ty: Type::U64,
+                        constant: Some(TypedConst::Int(i as i128)),
+                        span,
+                        binding_decl_span: None,
+                    };
+                    let elem = TypedExpr {
+                        kind: TypedExprKind::Index {
+                            array: Box::new(scr_var(scrut_ty.clone())),
+                            index: Box::new(idx),
+                            checked: false,
+                        },
+                        ty: elem_ty.clone(),
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    };
+                    bind_stmts.push(TypedStmt::Let { name: name.clone(), ty: elem_ty.clone(), expr: elem });
+                }
+                let tail_len = tail.len() as u64;
+                for (i, name) in tail.iter().enumerate() {
+                    if name == "_" {
+                        continue;
+                    }
+                    // tail[i] is at index (len - tail_len + i) = len - (tail_len - i).
+                    let offset = tail_len - i as u64;
+                    let offset_expr = TypedExpr {
+                        kind: TypedExprKind::Int(offset as i128),
+                        ty: Type::U64,
+                        constant: Some(TypedConst::Int(offset as i128)),
+                        span,
+                        binding_decl_span: None,
+                    };
+                    let tail_idx = TypedExpr {
+                        kind: TypedExprKind::Binary {
+                            op: BinaryOp::Sub,
+                            left: Box::new(len_node.clone()),
+                            right: Box::new(offset_expr),
+                            checked: false,
+                        },
+                        ty: Type::U64,
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    };
+                    let elem = TypedExpr {
+                        kind: TypedExprKind::Index {
+                            array: Box::new(scr_var(scrut_ty.clone())),
+                            index: Box::new(tail_idx),
+                            checked: false,
+                        },
+                        ty: elem_ty.clone(),
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    };
+                    bind_stmts.push(TypedStmt::Let { name: name.clone(), ty: elem_ty.clone(), expr: elem });
+                }
+
+                // Wrap body in a Block that provides the element bindings.
+                let arm_body_ty = body_checked.expr.ty.clone();
+                let arm_block = if bind_stmts.is_empty() {
+                    body_checked.expr
+                } else {
+                    TypedExpr {
+                        kind: TypedExprKind::Block {
+                            stmts: bind_stmts,
+                            tail: Box::new(body_checked.expr),
+                        },
+                        ty: arm_body_ty,
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    }
+                };
+                typed_arms.push((cond, arm_block));
+            }
+            other => {
+                diagnostics.push(Diagnostic::new(
+                    arm.pattern_span,
+                    format!(
+                        "match on `Vec<T>` / `[T; N]` only accepts `[…]` slice \
+                         patterns or `_` wildcard; got a {} pattern",
+                        match other {
+                            crate::ast::Pattern::Int(_) => "integer",
+                            crate::ast::Pattern::Bool(_) => "bool",
+                            crate::ast::Pattern::Float(_) => "float",
+                            crate::ast::Pattern::Str(_) => "string",
+                            crate::ast::Pattern::Variant { .. } => "variant",
+                            crate::ast::Pattern::VariantWithBinding { .. } => "variant-binding",
+                            _ => "unexpected",
+                        }
+                    ),
+                ));
+                continue;
+            }
+        }
+    }
+
+    let unified = result_ty.unwrap_or(Type::I64);
+    let default_body = wildcard_body.unwrap_or_else(|| TypedExpr {
+        kind: TypedExprKind::Int(0),
+        ty: unified.clone(),
+        constant: Some(TypedConst::Int(0)),
+        span,
+        binding_decl_span: None,
+    });
+
+    // Build the if/else chain from bottom (wildcard/default) to top.
+    let mut chain = default_body;
+    for (cond, arm_block) in typed_arms.into_iter().rev() {
+        let arm_ty = arm_block.ty.clone();
+        chain = TypedExpr {
+            kind: TypedExprKind::IfExpr {
+                cond: Box::new(cond),
+                then_value: Box::new(arm_block),
+                else_value: Box::new(chain),
+            },
+            ty: arm_ty,
+            constant: None,
+            span,
+            binding_decl_span: None,
+        };
+    }
+
+    // Wrap in a Block that binds the scrutinee to `tmp`.
+    // For Vec<T> scrutinees the binding is a shallow struct copy; the
+    // original binding's Drop (in the enclosing scope) frees the buffer.
+    let bind_stmt = TypedStmt::Let {
+        name: tmp.clone(),
+        ty: scrut_ty.clone(),
+        expr: scrutinee.expr.clone(),
+    };
+    // For fresh Vec expressions (not a Var) we also need to drop the
+    // temp so the buffer doesn't leak. Use the bind/result/drop pattern
+    // from check_match_str.
+    let needs_drop = crate::ir::is_fresh_non_copy(&scrutinee.expr);
+    if needs_drop {
+        let result_tmp = format!("__slice_result_{}", span.start);
+        let result_stmt = TypedStmt::Let {
+            name: result_tmp.clone(),
+            ty: unified.clone(),
+            expr: chain,
+        };
+        let drop_stmt = TypedStmt::Drop {
+            name: tmp.clone(),
+            ty: scrut_ty.clone(),
+            moved_fields: Vec::new(),
+        };
+        let result_var = TypedExpr {
+            kind: TypedExprKind::Var(result_tmp),
+            ty: unified.clone(),
+            constant: None,
+            span,
+            binding_decl_span: None,
+        };
+        return CheckedExpr::new(
+            TypedExprKind::Block {
+                stmts: vec![bind_stmt, result_stmt, drop_stmt],
+                tail: Box::new(result_var),
+            },
+            unified,
+            None,
+            span,
+        );
+    }
+    CheckedExpr::new(
+        TypedExprKind::Block {
+            stmts: vec![bind_stmt],
+            tail: Box::new(chain),
+        },
+        unified,
+        None,
+        span,
+    )
+}
+
+// Helper: unify the arm body type with the running result_ty, emitting
+// a diagnostic on mismatch. Used by check_match_slice (and mirrors the
+// inline unification in check_match_float).
+fn unify_arm_type(
+    body: &CheckedExpr,
+    result_ty: &mut Option<Type>,
+    diagnostics: &mut Vec<Diagnostic>,
+    span: Span,
+) {
+    if let Some(prev) = result_ty {
+        if body.ty() != prev {
+            diagnostics.push(Diagnostic::new(
+                span,
+                format!(
+                    "match arm body type mismatch: expected {}, got {}",
+                    prev,
+                    body.ty()
+                ),
+            ));
+        }
+    } else {
+        *result_ty = Some(body.ty().clone());
+    }
+}
+
 fn check_expr(
     expr: &Expr,
     env: &mut Env,
@@ -15821,6 +16168,19 @@ fn check_expr(
                     diagnostics,
                 );
             }
+            // L1: match on Vec<T> / [T; N] desugars into a
+            // chain of length-guarded if-expressions with
+            // inline element bindings — see check_match_slice.
+            if matches!(scrut_ty_early, Type::Vec(_) | Type::Array { .. }) {
+                return check_match_slice(
+                    &scrutinee_checked,
+                    arms,
+                    expr.span,
+                    env,
+                    signatures,
+                    diagnostics,
+                );
+            }
             // Closure #278: match on f32 / f64 desugars to a
             // nested if-expression chain via `==` on the
             // scrutinee. NaN scrutinees never match any
@@ -16163,6 +16523,17 @@ fn check_expr(
                         }
                         if arm.guard.is_none() { seen_variants.push(pat_variant); }
                         (Some(tag as u32), Some(pat_variant.clone()), None)
+                    }
+                    crate::ast::Pattern::Slice { .. } => {
+                        diagnostics.push(Diagnostic::new(
+                            arm.pattern_span,
+                            format!(
+                                "slice pattern `[…]` used in match on type `{}`; \
+                                 slice patterns require a `Vec<T>` or `[T; N]` scrutinee",
+                                scrut_ty
+                            ),
+                        ));
+                        continue;
                     }
                 };
                 // Extract the binding name + payload type for
