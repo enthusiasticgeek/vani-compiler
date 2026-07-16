@@ -35,6 +35,7 @@
 
 - [Structs and methods](intermediate/01_struct_methods.md)
 - [Enums with payloads + match arms](intermediate/02_enums_payloads.md)
+- [Match enhancements: `if let`, `while let`, or-patterns, guards](intermediate/02b_match_enhancements.md)
 - [`Box<T>` and RAII -- intuition primer](intermediate/03a_box_raii_primer.md)
 - [Affine ownership -- deeper pass](intermediate/03b_affine_deeper_primer.md)
 - [Shared ownership without `Rc`/`Arc` -- intuition primer](intermediate/03c_shared_ownership_primer.md)

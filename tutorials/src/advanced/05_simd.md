@@ -307,6 +307,107 @@ wall-clock benefit.
 
 ---
 
+## Layer 5 — `vec512<T>` and the `simd512_*` builtins
+
+`vec512<T>` is a **512-bit SIMD register value** — twice the width of
+`vec256<T>`. On x86-64 with AVX-512, this maps to a `zmm` register;
+on AArch64 with SVE-512 it is a scalable vector fixed at 512 bits;
+on RISC-V with RVV VLEN=512 it is a single vector register group.
+
+| Element type | Lanes `vec128` | Lanes `vec256` | Lanes `vec512` |
+|-------------|---------------|---------------|---------------|
+| `i8` / `u8` | 16 | 32 | 64 |
+| `i16` / `u16` | 8 | 16 | 32 |
+| `i32` / `u32` / `f32` | 4 | 8 | 16 |
+| `i64` / `u64` / `f64` | 2 | 4 | 8 |
+
+The `simd512_*` builtins mirror the `simd256_*` set exactly:
+
+| Builtin | Signature | What it does |
+|---------|-----------|-------------|
+| `simd512_splat` | `(val: T) -> vec512<T>` | Broadcast scalar to all lanes |
+| `simd512_load` | `(v: ref Vec<T>, idx: i64) -> vec512<T>` | Load N lanes from `v[idx..]` |
+| `simd512_store` | `(v: ref Vec<T>, idx: i64, d: vec512<T>) -> i64` | Store N lanes |
+| `simd512_add` | `(a: vec512<T>, b: vec512<T>) -> vec512<T>` | Lane-wise add |
+| `simd512_sub` | `(a: vec512<T>, b: vec512<T>) -> vec512<T>` | Lane-wise subtract |
+| `simd512_mul` | `(a: vec512<T>, b: vec512<T>) -> vec512<T>` | Lane-wise multiply |
+| `simd512_reduce_add` | `(v: vec512<T>) -> T` | Horizontal sum of all lanes |
+
+### Example — 16-lane f32 dot product
+
+```vani
+fn dot512(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
+    let acc: vec512<f32> = simd512_splat(0.0 as f32);
+    let i: i64 = 0;
+    while i + 16 <= n {
+        let ai: vec512<f32> = simd512_load(a, i);
+        let bi: vec512<f32> = simd512_load(b, i);
+        acc = simd512_add(acc, simd512_mul(ai, bi));
+        i = i + 16;
+    }
+    let s: f32 = simd512_reduce_add(acc);
+    // scalar tail for remaining elements
+    while i < n {
+        s = s + a[i] * b[i];
+        i = i + 1;
+    }
+    return s;
+}
+
+fn main() -> i64 {
+    let n: i64 = 32;
+    let a: Vec<f32> = vec_fill(n, 1.0 as f32);
+    let b: Vec<f32> = vec_fill(n, 2.0 as f32);
+    let result: f32 = dot512(ref a, ref b, n);
+    print result;   // 64.0  (32 × 1.0 × 2.0)
+    return 0;
+}
+```
+
+The step is 16 (sixteen `f32` lanes per iteration). On x86-64 with
+AVX-512, LLVM lowers the `<16 x float>` IR to `zmm` register operations
+(`vfmadd231ps zmm0, zmm1, zmm2`). On targets without AVX-512, LLVM
+legalises the 512-bit type into multiple narrower registers (two `ymm`
+on AVX2, four `xmm` on SSE) — the code remains correct with reduced
+throughput.
+
+### Platform mapping
+
+| Platform | `vec512<f32>` mapping | Notes |
+|----------|-----------------------|-------|
+| x86-64 + AVX-512 | Single `zmm` register, 16 f32/op | `vfmadd231ps zmm0,zmm1,zmm2` |
+| x86-64 + AVX2 (no AVX-512) | 2× `ymm` (legalised) | Correct; half the throughput of native 512 |
+| x86-64 (SSE only) | 4× `xmm` (legalised) | Correct; quarter throughput |
+| AArch64 + SVE-512 | Single scalable `z`-register | `fadd z0.s, z1.s, z2.s` |
+| AArch64 (NEON, no SVE) | 4× NEON registers | Legalised; correct |
+| RISC-V + RVV VLEN=512 | Single `vl=16` e32 group | Optimal on VisionFive 2 / T-Head C910 |
+| RISC-V + RVV VLEN=256 | Two vector-register groups | Legalised |
+| RISC-V + RVV VLEN=128 | Four vector-register groups | Legalised |
+
+### When to prefer vec512 over vec256
+
+Use `vec512<T>` when:
+- The target CPU has AVX-512 (`lscpu | grep avx512f`) — Intel Ice Lake-SP,
+  Sapphire Rapids, AMD Zen 4, AWS Graviton-3 (via SVE-512)
+- The target is AArch64 with SVE-512 (Graviton-3, Neoverse V1/V2) — one
+  scalable register per operation, no legalisation cost
+- The target is RISC-V with VLEN=512 (T-Head C910 in LicheePi 4A,
+  some SiFive cores) — maximum RVV throughput with a single vector group
+
+Use `vec256<T>` or `vec128<T>` when:
+- The CPU has AVX2 but not AVX-512 — `vec512` legalises to two `ymm`
+  registers with an extra merge step; `vec256` is usually faster
+- The AArch64 target has NEON only (Cortex-A53/A72/A78 without SVE) —
+  `vec512` legalises to four NEON registers; `vec128` processes one
+  true register per operation with lower overhead
+- Code size matters: AVX-512 encodings are larger than AVX2
+
+When in doubt, benchmark with the specific CPU and data size.
+`vec256<f32>` is the safe default for cross-platform code; reach for
+`vec512` only after confirming the target has native support.
+
+---
+
 ## AArch64 / NEON specifics
 
 On AArch64 targets the `vec128<T>` type maps directly to NEON
@@ -413,7 +514,9 @@ Is the loop already fast enough?
                             → Use vec128<T> for the hot path.
                             Still slow?
                                 → Try vec256<T> if target has AVX2 / SVE / VLEN≥256.
-                                → Use FFI shim for exotic intrinsics.
+                                Still slow?
+                                    → Try vec512<T> if target has AVX-512 / SVE-512 / VLEN=512.
+                                    → Use FFI shim for exotic intrinsics not exposed by simd512_*.
 ```
 
 ---

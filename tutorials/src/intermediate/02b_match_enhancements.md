@@ -1,0 +1,334 @@
+# Intermediate 2b — Match enhancements: `if let`, `while let`, or-patterns, guards
+
+> **Learning goal**: use the four match-extension forms — `if let`, `while let`,
+> or-patterns with `|`, and pattern guards with `if` — to write concise
+> conditional and loop code without spelling out a full `match` every time.
+
+> **Prerequisite**: [Intermediate 2 — Enums with payloads + match arms](02_enums_payloads.md)
+
+---
+
+## Why these forms exist
+
+A full `match` expression handles every variant. That is the right tool
+when you care about every case. But three everyday situations are more
+concise with a shorter form:
+
+| Situation | Without | With |
+|-----------|---------|------|
+| Act only when a variant matches, ignore otherwise | `match x { V(n) then { … }, _ then {} }` | `if let V(n) = x { … }` |
+| Loop until a variant no longer matches | `loop { match pop() { V(n) then { … } _ then break } }` | `while let V(n) = pop() { … }` |
+| Multiple variants share the same arm body | one arm per variant | `V1 \| V2 then { … }` |
+| Refine a variant match by a runtime condition | two arms, same variant | `V(n) if n > 0 then { … }` |
+
+All four forms lower to `match` internally — they are syntax sugar,
+not new semantics.
+
+---
+
+## Shared setup
+
+All examples below use this enum and a helper that returns `Option<i64>`:
+
+```vani
+intent "Match enhancements worked example.";
+
+enum Status { Active, Pending, Done, Failed }
+enum Opt    { None, Some(i64) }
+
+fn try_parse(s: Str) -> Opt {
+  // toy parser: returns Some(len) when s is non-empty
+  let n: i64 = len(s);
+  if n > 0 { return Opt.Some(n); }
+  return Opt.None;
+}
+```
+
+---
+
+## 1. `if let` — act on one variant, skip everything else
+
+```vani
+fn show_length(s: Str) -> i64 {
+  if let Opt.Some(n) = try_parse(s) {
+    print "length:", n;
+    return n;
+  }
+  // execution continues here when the variant does NOT match
+  print "empty string";
+  return 0;
+}
+```
+
+`if let Opt.Some(n) = try_parse(s)` is exactly:
+
+```vani
+match try_parse(s) {
+  Opt.Some(n) then { print "length:", n; return n; },
+  _           then {},
+}
+```
+
+The bound variable `n` is in scope only inside the `{ … }` block. The
+else path (variant did not match) falls through normally; you can add
+an `else` block:
+
+```vani
+if let Opt.Some(n) = try_parse(s) {
+  print "got", n;
+} else {
+  print "nothing";
+}
+```
+
+---
+
+## 2. `while let` — loop as long as a variant keeps matching
+
+```vani
+fn drain_all(inputs: ref Vec<Str>) -> i64 {
+  let total: i64 = 0;
+  let i: i64 = 0;
+  while let Opt.Some(n) = try_parse(inputs[i]) {
+    total = total + n;
+    i = i + 1;
+    if i >= vec_len(ref inputs) { break; }
+  }
+  return total;
+}
+```
+
+The loop body runs as long as `try_parse` returns `Opt.Some(n)`. The
+first time it returns `Opt.None`, the loop exits. The binding `n` is
+re-bound fresh on every iteration — it does not carry over.
+
+A common pattern with a mutable queue or stack:
+
+```vani
+// Drain a Vec<i64> used as a stack (pop from the back)
+fn sum_stack(stack: mut ref Vec<i64>) -> i64 {
+  let total: i64 = 0;
+  while let Opt.Some(v) = vec_pop(mut ref stack) {
+    total = total + v;
+  }
+  return total;
+}
+```
+
+---
+
+## 3. Or-patterns — multiple variants in one arm
+
+Separate patterns with `|` inside a single match arm. The arm body runs
+when ANY of the listed patterns match:
+
+```vani
+fn is_running(s: Status) -> bool {
+  return match s {
+    Status.Active | Status.Pending then true,
+    Status.Done   | Status.Failed  then false,
+  };
+}
+```
+
+Rules:
+- All patterns in a `|` group must bind the **same set of names** with
+  the **same types**. A payload bound in one alternative must be bound
+  in all of them (or use `_` to discard it).
+- The compiler expands each `|` group into separate arms before
+  type-checking, so exhaustiveness is checked correctly.
+
+Or-patterns without payloads (tag-only variants) have no binding
+constraint and are always safe to combine:
+
+```vani
+match direction {
+  Dir.North | Dir.South then print "vertical",
+  Dir.East  | Dir.West  then print "horizontal",
+}
+```
+
+Or-patterns with payloads — all alternatives must bind the same name:
+
+```vani
+enum Msg { Ping(i64), Pong(i64), Other }
+
+match msg {
+  Msg.Ping(seq) | Msg.Pong(seq) then { print "seq:", seq; },
+  Msg.Other                     then { print "other"; },
+}
+```
+
+---
+
+## 4. Pattern guards — refine a match with a runtime condition
+
+Add `if <condition>` between the pattern and `then` to add an extra
+runtime test. The arm only fires when the pattern matches AND the guard
+is true:
+
+```vani
+fn classify(v: Opt) -> Str {
+  return match v {
+    Opt.Some(n) if n > 0  then "positive",
+    Opt.Some(n) if n < 0  then "negative",
+    Opt.Some(_)            then "zero",
+    Opt.None               then "absent",
+  };
+}
+```
+
+The compiler merges guarded and unguarded arms for the same variant
+into one switch case with nested `if`/`else` — you never get duplicate
+case labels. Arm order matters for overlapping guards: the first
+matching arm wins.
+
+Guards can use the binding introduced by the pattern:
+
+```vani
+match result {
+  Result.Ok(v) if v >= threshold then handle_pass(v),
+  Result.Ok(v)                   then handle_below(v),
+  Result.Err(code)               then handle_error(code),
+}
+```
+
+Guards can also reference outer variables:
+
+```vani
+let limit: i64 = compute_limit();
+match entry {
+  Entry.Value(n) if n < limit then process_small(n),
+  Entry.Value(n)              then process_large(n),
+  Entry.Empty                 then {},
+}
+```
+
+---
+
+## Putting it all together
+
+```vani
+intent "Match enhancements — combined example.";
+
+enum Task { Ready(i64), Blocked, Done }
+
+fn run_queue(tasks: ref Vec<Task>) -> i64 {
+  let completed: i64 = 0;
+  let i: i64 = 0;
+
+  while i < vec_len(ref tasks) {
+    // if let: skip Blocked and Done silently
+    if let Task.Ready(priority) = tasks[i] {
+      // pattern guard: only process high-priority tasks in this pass
+      if priority > 5 {
+        print "running high-priority task", i;
+        completed = completed + 1;
+      }
+    }
+    i = i + 1;
+  }
+  return completed;
+}
+
+fn describe(t: Task) -> Str {
+  return match t {
+    // or-pattern: Blocked and Done share the same message
+    Task.Blocked | Task.Done           then "inactive",
+    // guard: distinguish priority tiers
+    Task.Ready(p) if p > 5            then "high-priority",
+    Task.Ready(p) if p > 0            then "normal",
+    Task.Ready(_)                      then "idle",
+  };
+}
+
+fn main() -> i64 {
+  let tasks: Vec<Task> = vec(
+    Task.Ready(8),
+    Task.Blocked,
+    Task.Ready(3),
+    Task.Done,
+    Task.Ready(6),
+  );
+  let n: i64 = run_queue(ref tasks);
+  print "completed:", n;
+  print describe(Task.Ready(8));
+  print describe(Task.Blocked);
+  print describe(Task.Ready(0 - 1));
+  return 0;
+}
+```
+
+Expected output:
+
+```
+running high-priority task 0
+running high-priority task 4
+completed: 2
+high-priority
+inactive
+idle
+```
+
+---
+
+## Summary table
+
+| Form | Syntax | Fires when |
+|------|--------|-----------|
+| `if let` | `if let Pat = expr { … }` | `expr` matches `Pat` |
+| `if let … else` | `if let Pat = expr { … } else { … }` | else when no match |
+| `while let` | `while let Pat = expr { … }` | `expr` matches `Pat`; stops on first miss |
+| Or-pattern | `Pat1 \| Pat2 then body` | either pattern matches |
+| Pattern guard | `Pat if cond then body` | pattern matches AND `cond` is true |
+
+---
+
+## Challenge
+
+Define `enum Shape { Circle(i64), Square(i64), Triangle(i64, i64) }` where
+the payload(s) are dimensions. Write:
+
+1. A `while let` loop that pops shapes from a `Vec` and accumulates their
+   perimeters (circle = `2 * 3 * r`, square = `4 * side`, triangle skip it).
+2. A `classify(s: Shape) -> Str` function that uses or-patterns to group
+   `Circle` and `Square` as `"regular"`, and a guard to label `Triangle`
+   as `"scalene"` when the two sides differ or `"isosceles"` when they're equal.
+
+<details>
+<summary>Solution</summary>
+
+```vani
+enum Shape { Circle(i64), Square(i64), Triangle(i64, i64) }
+
+fn total_perimeter(shapes: mut ref Vec<Shape>) -> i64 {
+  let total: i64 = 0;
+  while let Shape.Circle(r) = vec_pop(mut ref shapes) {
+    total = total + 2 * 3 * r;
+  }
+  // Note: this loop stops at the first non-Circle; a real
+  // drain would use a full match inside a plain while loop.
+  return total;
+}
+
+fn classify(s: Shape) -> Str {
+  return match s {
+    Shape.Circle(_) | Shape.Square(_)      then "regular",
+    Shape.Triangle(a, b) if a == b         then "isosceles",
+    Shape.Triangle(_, _)                   then "scalene",
+  };
+}
+
+fn main() -> i64 {
+  print classify(Shape.Circle(5));
+  print classify(Shape.Triangle(3, 3));
+  print classify(Shape.Triangle(3, 4));
+  return 0;
+}
+```
+
+</details>
+
+---
+
+**Next**: [Sec.3 -- Affine ownership: `ref` / `mut ref` ->](03_affine.md)
