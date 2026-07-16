@@ -420,24 +420,26 @@ no hardware, no external tokens, no grammar consultants required.
 
 ### Medium (4–8 h each)
 
-- [ ] **L1. Slice patterns** (~5 h)
+- [x] **L1. Slice patterns** ✅ done 2026-07-15 (commit `27ecb84`)
   `[first, .., last]` destructuring on `Vec<T>` / `[T; N]`. Parser extension to
   recognise `[pat, .., pat]` in match position; checker binds `first` and `last`
   to the element type; both backends emit index + length checks; `..` matches
   zero or more middle elements (no binding in v1).
 
-- [ ] **L2. `#[repr(C)]` / `#[repr(packed)]`** (~4 h)
-  Struct layout is compiler-chosen today. `#[repr(C)]` forces C-ABI field ordering
-  and natural alignment; `#[repr(packed)]` removes padding. C backend: emit
-  `__attribute__((packed))` / already C-ordered. LLVM backend: emit explicit
-  field offsets via `getelementptr` with `!tbaa` metadata; packed structs use
-  `align 1` loads/stores.
+- [x] **L2. `#[repr(C)]` / `#[repr(packed)]`** ✅ done (pre-existing; confirmed + tests 2026-07-16)
+  `ReprAttr` enum in ast.rs; parser handles `#[repr(C)]` and `#[repr(packed)]`
+  at struct declaration sites; C backend emits `__attribute__((packed))` for
+  packed; LLVM backend emits `<{ ... }>` packed-struct syntax. 4 lib tests pass
+  (`repr_c_struct_parses_and_compiles_to_c`, `repr_packed_struct_emits_packed_attr_in_c`,
+  `repr_packed_struct_emits_packed_type_in_llvm`, `repr_unknown_variant_is_rejected`).
 
-- [ ] **L3. `select!` over multiple futures** (~6 h)
-  Cannot wait on "whichever future completes first." Fix: `select { await f1 =>
-  pat { … }, await f2 => pat { … } }` syntax; compiler generates a round-robin
-  poll loop over the listed futures, breaking on the first `Ready`. Integrates
-  with the existing Arc 8 state-machine lowering.
+- [x] **L3. `select!` over multiple futures** (~6 h) — DONE 2026-07-16
+  Syntax: `select { await <poll_call> then <binding> { body } … }`.
+  Desugars in `check_one_stmt` to `TypedStmt::While { cond: true }` with nested
+  `TypedStmt::If { cond: __sel_rN != -2 }` arms (one per poll). First arm that
+  returns non-(−2) executes its body and breaks. Tests: `select_single_arm_compiles`,
+  `select_two_arms_compiles`, `select_lowers_to_while_true_in_c`,
+  `select_wildcard_binding_compiles`, `select_non_i64_poll_is_rejected`.
 
 - [ ] **L4. Runtime integer overflow guards** (~6 h)
   `i64::MAX + 1` silently wraps today — a real safety gap for `#[asil_d]` /

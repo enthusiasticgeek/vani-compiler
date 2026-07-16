@@ -2739,6 +2739,8 @@ impl Parser {
             self.parse_task_spawn_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Join)) {
             self.parse_task_join_stmt()
+        } else if self.looks_like_select_stmt() {
+            self.parse_select_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::Unsafe)) {
             self.parse_unsafe_block_stmt()
         } else if self.check(|kind| matches!(kind, TokenKind::RegionKw)) {
@@ -5899,6 +5901,65 @@ impl Parser {
             ),
             _ => false,
         }
+    }
+
+    fn looks_like_select_stmt(&self) -> bool {
+        let TokenKind::Ident(name) = &self.current().kind else { return false; };
+        name == "select"
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|t| &t.kind),
+                Some(TokenKind::LBrace)
+            )
+    }
+
+    /// Parse `select { (await <poll_call> then <binding> { <body> })* }`.
+    ///
+    /// `select` and `await` are contextual keywords (plain Idents in the
+    /// lexer); `then` is the arm separator (same as match arms); the opening
+    /// `{` distinguishes this from a `select(…)` call.
+    fn parse_select_stmt(&mut self) -> Result<Stmt, Diagnostic> {
+        let start = self.current().span;
+        self.bump(); // consume `select`
+        self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
+        let mut arms: Vec<crate::ast::SelectArm> = Vec::new();
+        while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
+            let arm_start = self.current().span;
+            // consume `await`
+            match &self.current().kind {
+                TokenKind::Ident(n) if n == "await" => { self.bump(); }
+                _ => {
+                    return Err(Diagnostic::new(
+                        self.current().span,
+                        format!("expected `await` in select arm, got {:?}", self.current().kind),
+                    ));
+                }
+            }
+            // poll call expression
+            let poll_call = self.parse_expr()?;
+            // `then` separator (same as match arms)
+            self.expect_keyword("'then'", |k| matches!(k, TokenKind::Then))?;
+            // binding name (any ident, `_` included)
+            let binding = match &self.current().kind {
+                TokenKind::Ident(n) => { let s = n.clone(); self.bump(); s }
+                _ => {
+                    return Err(Diagnostic::new(
+                        self.current().span,
+                        format!("expected binding name in select arm, got {:?}", self.current().kind),
+                    ));
+                }
+            };
+            // arm body block
+            let body = self.parse_block()?;
+            let arm_end = body.last().map(|s| s.span()).unwrap_or(arm_start);
+            arms.push(crate::ast::SelectArm {
+                poll_call,
+                binding,
+                body,
+                span: arm_start.merge(arm_end),
+            });
+        }
+        let end = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
+        Ok(Stmt::Select { arms, span: start.merge(end.span) })
     }
 
     fn check(&self, predicate: impl FnOnce(&TokenKind) -> bool) -> bool {

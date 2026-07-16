@@ -1207,6 +1207,25 @@ fn format_stmt(s: &Stmt, depth: usize, ctx: &mut FmtCtx, out: &mut String) {
             out.push_str(&pad);
             out.push_str("}\n");
         }
+        Stmt::Select { arms, .. } => {
+            out.push_str(&pad);
+            out.push_str("select {\n");
+            for arm in arms {
+                out.push_str(&pad);
+                out.push_str("    await ");
+                format_expr(&arm.poll_call, false, out);
+                out.push_str(" => ");
+                out.push_str(&arm.binding);
+                out.push_str(" {\n");
+                for s in &arm.body {
+                    format_stmt(s, depth + 2, ctx, out);
+                }
+                out.push_str(&pad);
+                out.push_str("    }\n");
+            }
+            out.push_str(&pad);
+            out.push_str("}\n");
+        }
     }
     // Single attach point covering every statement variant: if the
     // next pending comment lies on the same source line as the end
@@ -1832,6 +1851,13 @@ mod tests {
                 }
                 Stmt::WhileLet { body, span, .. } => {
                     zero_stmts(body);
+                    *span = crate::span::Span::new(0, 0);
+                }
+                Stmt::Select { arms, span, .. } => {
+                    for arm in arms {
+                        zero_stmts(&mut arm.body);
+                        arm.span = crate::span::Span::new(0, 0);
+                    }
                     *span = crate::span::Span::new(0, 0);
                 }
             }

@@ -1735,6 +1735,25 @@ pub enum Stmt {
         body: Vec<Stmt>,
         span: Span,
     },
+    /// L3: `select { await <poll_call> => <binding> { <body> } … }` —
+    /// round-robin poll loop over multiple async operations; runs the
+    /// first arm whose poll function returns a non-(-2) value.
+    Select {
+        arms: Vec<SelectArm>,
+        span: Span,
+    },
+}
+
+/// One arm of a `select` statement. `poll_call` is the expression
+/// that drives the poll (typically a `__poll_<name>(mut ref task)`
+/// call); `binding` names the result variable ("_" to discard);
+/// `body` executes when that arm is ready.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SelectArm {
+    pub poll_call: Expr,
+    pub binding: String,
+    pub body: Vec<Stmt>,
+    pub span: Span,
 }
 
 impl Stmt {
@@ -1761,7 +1780,8 @@ impl Stmt {
             | Stmt::TaskJoin { span, .. }
             | Stmt::UnsafeBlock { span, .. }
             | Stmt::IfLet { span, .. }
-            | Stmt::WhileLet { span, .. } => *span,
+            | Stmt::WhileLet { span, .. }
+            | Stmt::Select { span, .. } => *span,
         }
     }
 }

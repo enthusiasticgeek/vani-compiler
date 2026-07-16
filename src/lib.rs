@@ -48703,5 +48703,112 @@ fn main() -> i64 { return leak_check(); }
         );
     }
 
+    // ── L3: select { await <poll> then <binding> { body } … } ─────────────
+
+    /// L3 basic: single-arm select compiles on both backends.
+    #[test]
+    fn select_single_arm_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let fd: i64 = tcp_listen(8080);
+              select {
+                await tcp_recv_nb(fd, 64) then n {
+                  return n;
+                }
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("select single arm must compile on C backend");
+        compile_to_llvm(source).expect("select single arm must compile on LLVM backend");
+    }
+
+    /// L3 multi-arm: two poll arms; whichever fires first wins.
+    #[test]
+    fn select_two_arms_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let fd1: i64 = tcp_listen(8080);
+              let fd2: i64 = tcp_listen(8081);
+              select {
+                await tcp_recv_nb(fd1, 64) then a {
+                  return a;
+                }
+                await tcp_recv_nb(fd2, 64) then b {
+                  return b;
+                }
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("select two arms must compile on C backend");
+        compile_to_llvm(source).expect("select two arms must compile on LLVM backend");
+    }
+
+    /// L3 desugaring: select must lower to a while-true loop in C output.
+    #[test]
+    fn select_lowers_to_while_true_in_c() {
+        let source = r#"
+            fn main() -> i64 {
+              let fd: i64 = tcp_listen(8080);
+              select {
+                await tcp_recv_nb(fd, 64) then r {
+                  return r;
+                }
+              }
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("select must compile on C backend");
+        assert!(
+            c.contains("while (1)") || c.contains("while(1)"),
+            "select must desugar to a while-true loop in C; got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        assert!(
+            c.contains("!= -2") || c.contains("!=-2"),
+            "select must test != -2 (WOULDBLOCK sentinel) in C; got snippet:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
+    /// L3 wildcard: `_` binding discards the poll result.
+    #[test]
+    fn select_wildcard_binding_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let fd: i64 = tcp_listen(8080);
+              select {
+                await tcp_recv_nb(fd, 64) then _ {
+                  return 42;
+                }
+              }
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("select with _ binding must compile on C backend");
+    }
+
+    /// L3 type check: poll expression returning a non-i64 type is rejected.
+    #[test]
+    fn select_non_i64_poll_is_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              select {
+                await true then _ {
+                  return 1;
+                }
+              }
+              return 0;
+            }
+        "#;
+        let res = compile_to_c(source);
+        assert!(
+            res.is_err(),
+            "select with bool poll must be rejected; got C output:\n{}",
+            res.unwrap_or_default()
+        );
+    }
+
 }
 

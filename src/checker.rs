@@ -1496,6 +1496,12 @@ fn compute_indirect_locks(
                 for inv in invariants { walk_expr(inv, param_names, signatures, out); }
                 walk_stmts(body, param_names, signatures, out);
             }
+            Stmt::Select { arms, .. } => {
+                for arm in arms {
+                    walk_expr(&arm.poll_call, param_names, signatures, out);
+                    walk_stmts(&arm.body, param_names, signatures, out);
+                }
+            }
             Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
         }
     }
@@ -2130,6 +2136,13 @@ fn recurse_lift_closures_in_stmt(
                 body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
             );
         }
+        S::Select { arms, .. } => {
+            for arm in arms {
+                lift_closures_in_block(
+                    &mut arm.body, env, top_level_names, counter, hoisted, hoisted_structs, closure_handles,
+                );
+            }
+        }
         // Statements without nested blocks need no recursion here.
         _ => {}
     }
@@ -2629,6 +2642,10 @@ fn stmt_mentions_var(stmt: &crate::ast::Stmt, name: &str) -> bool {
                 || invariants.iter().any(|e| expr_mentions_var(e, name))
                 || body.iter().any(|s| stmt_mentions_var(s, name))
         }
+        S::Select { arms, .. } => arms.iter().any(|arm| {
+            expr_mentions_var(&arm.poll_call, name)
+                || arm.body.iter().any(|s| stmt_mentions_var(s, name))
+        }),
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => false,
     }
 }
@@ -2808,6 +2825,14 @@ fn walk_stmt_for_captures(
             walk_expr_for_captures(scrutinee, bound, env, top_level_names, captures, seen);
             for inv in invariants { walk_expr_for_captures(inv, bound, env, top_level_names, captures, seen); }
             for s in body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
+        }
+        S::Select { arms, .. } => {
+            for arm in arms {
+                walk_expr_for_captures(&arm.poll_call, bound, env, top_level_names, captures, seen);
+                // binding is declared here, not captured
+                bound.insert(arm.binding.clone());
+                for s in &arm.body { walk_stmt_for_captures(s, bound, env, top_level_names, captures, seen); }
+            }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
     }
@@ -3032,6 +3057,12 @@ fn rename_vars_in_stmt(
             for inv in invariants { rename_vars_in_expr(inv, rename); }
             for s in body { rename_vars_in_stmt(s, rename); }
         }
+        S::Select { arms, .. } => {
+            for arm in arms {
+                rename_vars_in_expr(&mut arm.poll_call, rename);
+                for s in &mut arm.body { rename_vars_in_stmt(s, rename); }
+            }
+        }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } | S::TaskSpawn { .. } => {}
     }
 }
@@ -3219,6 +3250,12 @@ fn rewrite_closure_calls_in_stmt(
             rewrite_closure_calls_in_expr(scrutinee, closures);
             for inv in invariants { rewrite_closure_calls_in_expr(inv, closures); }
             for s in body { rewrite_closure_calls_in_stmt(s, closures); }
+        }
+        S::Select { arms, .. } => {
+            for arm in arms {
+                rewrite_closure_calls_in_expr(&mut arm.poll_call, closures);
+                for s in &mut arm.body { rewrite_closure_calls_in_stmt(s, closures); }
+            }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
     }
@@ -3430,6 +3467,12 @@ fn lift_stmt_anon_fn(
             lift_expr_anon_fn(scrutinee, counter, hoisted);
             for inv in invariants { lift_expr_anon_fn(inv, counter, hoisted); }
             for s in body { lift_stmt_anon_fn(s, counter, hoisted); }
+        }
+        S::Select { arms, .. } => {
+            for arm in arms {
+                lift_expr_anon_fn(&mut arm.poll_call, counter, hoisted);
+                for s in &mut arm.body { lift_stmt_anon_fn(s, counter, hoisted); }
+            }
         }
         S::Break { .. } | S::Continue { .. } | S::TaskJoin { .. } => {}
     }
@@ -4700,6 +4743,12 @@ fn resolve_enum_types_in_stmt(
             for inv in invariants { resolve_enum_types_in_expr(inv, enums); }
             for s in body { resolve_enum_types_in_stmt(s, enums); }
         }
+        Stmt::Select { arms, .. } => {
+            for arm in arms {
+                resolve_enum_types_in_expr(&mut arm.poll_call, enums);
+                for s in &mut arm.body { resolve_enum_types_in_stmt(s, enums); }
+            }
+        }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
 }
@@ -5116,6 +5165,12 @@ fn sub_aliases_in_stmt(stmt: &mut Stmt, aliases: &BTreeMap<String, Type>) {
             sub_aliases_in_expr(scrutinee, aliases);
             for inv in invariants { sub_aliases_in_expr(inv, aliases); }
             for s in body { sub_aliases_in_stmt(s, aliases); }
+        }
+        Stmt::Select { arms, .. } => {
+            for arm in arms {
+                sub_aliases_in_expr(&mut arm.poll_call, aliases);
+                for s in &mut arm.body { sub_aliases_in_stmt(s, aliases); }
+            }
         }
         Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
     }
@@ -12568,6 +12623,160 @@ fn check_one_stmt(
                 label.as_deref(), pattern, *pattern_span, scrutinee, invariants, while_body, *span,
                 env, signatures, function, loops, smt_facts, body, diagnostics,
             )
+        }
+        Stmt::Select { arms, span } => {
+            // Desugar: select { await poll0() => r { body0 } await poll1() => s { body1 } }
+            // →  while true {
+            //       let __sel_r0: i64 = poll0();
+            //       if __sel_r0 != -2 { let r = __sel_r0; body0; break; }
+            //       let __sel_r1: i64 = poll1();
+            //       if __sel_r1 != -2 { let s = __sel_r1; body1; break; }
+            //    }
+            let pre_env = env.clone();
+            let pre_facts = smt_facts.clone();
+            env.push_scope();
+            let body_scope_depth = env.depth();
+            loops.push(LoopFrame {
+                pre_env: pre_env.clone(),
+                body_scope_depth,
+                value_temp: None,
+                label: None,
+            });
+
+            let mut loop_body: Vec<TypedStmt> = Vec::new();
+
+            for (i, arm) in arms.iter().enumerate() {
+                let tmp_name = format!("__sel_r{}", i);
+
+                // Check poll_call — must return i64 (WOULDBLOCK = -2 sentinel)
+                verify_call_args_in_expr(&arm.poll_call, smt_facts, env, signatures, diagnostics);
+                let poll_checked = check_expr(&arm.poll_call, env, signatures, diagnostics);
+                require_type(
+                    poll_checked.ty(),
+                    &Type::I64,
+                    arm.poll_call.span,
+                    "select arm poll expression",
+                    diagnostics,
+                );
+
+                // Emit: let __sel_rN: i64 = poll_call;
+                loop_body.push(TypedStmt::Let {
+                    name: tmp_name.clone(),
+                    ty: Type::I64,
+                    expr: poll_checked.expr.clone(),
+                });
+                // i64 is Copy so no_drop is irrelevant; insert for Var lookup
+                env.insert_current(tmp_name.clone(), VarInfo {
+                    ty: Type::I64,
+                    constant: None,
+                    moved: None,
+                    decl_span: *span,
+                    vec_literal_elements: None,
+                    array_version: 0,
+                    guarded_mutex: None,
+                    no_drop: false,
+                    is_const: false,
+                    struct_literal_fields: None,
+                    moved_fields: std::collections::BTreeMap::new(),
+                    ref_aliases: Vec::new(),
+                });
+
+                // Build cond: __sel_rN != -2
+                let tmp_var = TypedExpr {
+                    kind: TypedExprKind::Var(tmp_name.clone()),
+                    ty: Type::I64,
+                    constant: None,
+                    span: arm.span,
+                    binding_decl_span: None,
+                };
+                let neg2 = TypedExpr {
+                    kind: TypedExprKind::Int(-2),
+                    ty: Type::I64,
+                    constant: Some(TypedConst::Int(-2)),
+                    span: arm.span,
+                    binding_decl_span: None,
+                };
+                let arm_cond = TypedExpr {
+                    kind: TypedExprKind::Binary {
+                        op: BinaryOp::Ne,
+                        left: Box::new(tmp_var.clone()),
+                        right: Box::new(neg2),
+                        checked: true,
+                    },
+                    ty: Type::Bool,
+                    constant: None,
+                    span: arm.span,
+                    binding_decl_span: None,
+                };
+
+                // Build then_stmts for this arm
+                let mut then_stmts: Vec<TypedStmt> = Vec::new();
+                let arm_pre_env = env.clone();
+                env.push_scope();
+
+                if arm.binding != "_" {
+                    then_stmts.push(TypedStmt::Let {
+                        name: arm.binding.clone(),
+                        ty: Type::I64,
+                        expr: tmp_var,
+                    });
+                    env.insert_current(arm.binding.clone(), VarInfo {
+                        ty: Type::I64,
+                        constant: None,
+                        moved: None,
+                        decl_span: arm.span,
+                        vec_literal_elements: None,
+                        array_version: 0,
+                        guarded_mutex: None,
+                        no_drop: false,
+                        is_const: false,
+                        struct_literal_fields: None,
+                        moved_fields: std::collections::BTreeMap::new(),
+                        ref_aliases: Vec::new(),
+                    });
+                }
+
+                let arm_terminated = check_stmt_list(
+                    &arm.body, env, signatures, function, loops, smt_facts, &mut then_stmts, diagnostics,
+                );
+                if !arm_terminated {
+                    emit_current_scope_drops(env, &mut then_stmts, diagnostics);
+                }
+                env.pop_scope();
+                // Reset env so __sel_rN temps from this arm don't compound move state
+                *env = arm_pre_env;
+
+                // Always break after a matched arm (unless body already terminated)
+                if !arm_terminated {
+                    then_stmts.push(TypedStmt::Break { label: None });
+                }
+
+                loop_body.push(TypedStmt::If {
+                    cond: arm_cond,
+                    then_body: then_stmts,
+                    else_body: vec![],
+                });
+            }
+
+            loops.pop().unwrap();
+            emit_current_scope_drops(env, &mut loop_body, diagnostics);
+            env.pop_scope();
+            *env = pre_env;
+            *smt_facts = pre_facts;
+
+            let true_expr = TypedExpr {
+                kind: TypedExprKind::Bool(true),
+                ty: Type::Bool,
+                constant: Some(TypedConst::Bool(true)),
+                span: *span,
+                binding_decl_span: None,
+            };
+            body.push(TypedStmt::While {
+                label: None,
+                cond: true_expr,
+                body: loop_body,
+            });
+            false
         }
     }
 }
@@ -21188,6 +21397,12 @@ fn compute_locks_params(function: &Function) -> Vec<bool> {
                     walk_expr(scrutinee, param_names, locks);
                     for inv in invariants { walk_expr(inv, param_names, locks); }
                     walk(body, param_names, locks);
+                }
+                Stmt::Select { arms, .. } => {
+                    for arm in arms {
+                        walk_expr(&arm.poll_call, param_names, locks);
+                        walk(&arm.body, param_names, locks);
+                    }
                 }
                 Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::TaskJoin { .. } => {}
             }
