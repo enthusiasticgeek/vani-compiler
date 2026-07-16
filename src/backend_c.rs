@@ -10754,7 +10754,123 @@ pub(crate) fn collect_mutex_specs_in_expr(
     }
 }
 
+/// Emit the packed-bit typedef and all helpers for `Vec<bool>`.
+/// len/capacity are in BITS; data points to (capacity+63)/64 uint64_t words.
+/// This replaces the generic `emit_vec_bundle` path for the Bool element.
+fn emit_vec_bool_bundle(out: &mut String) {
+    out.push_str(
+        "typedef struct { uint64_t* __restrict__ data; uint64_t len; uint64_t capacity; } intent_vec_bool;\n\
+         /* XL1: Vec<bool> — packed bit-array; len/cap in BITS, data = (cap+63)/64 uint64_t words */\n\
+         static INTENT_UNUSED bool intent_vec_bool__get(intent_vec_bool v, uint64_t i) {\n\
+         \x20 return (bool)((v.data[i / 64] >> (i % 64)) & 1);\n\
+         }\n\
+         static INTENT_UNUSED void intent_vec_bool__set_mut(intent_vec_bool* v, uint64_t i, bool val) {\n\
+         \x20 if (val) v->data[i / 64] |= (UINT64_C(1) << (i % 64));\n\
+         \x20 else     v->data[i / 64] &= ~(UINT64_C(1) << (i % 64));\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_bool intent_vec_bool__from(uint64_t n, const bool* init) {\n\
+         \x20 intent_vec_bool v;\n\
+         \x20 uint64_t words = n == 0 ? 1 : (n + 63) / 64;\n\
+         \x20 v.data = (uint64_t*)calloc(words, sizeof(uint64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 for (uint64_t i = 0; i < n; i++) {\n\
+         \x20   if (init[i]) v.data[i / 64] |= (UINT64_C(1) << (i % 64));\n\
+         \x20 }\n\
+         \x20 v.len = n; v.capacity = n == 0 ? 64 : n; return v;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_bool intent_vec_bool__push(intent_vec_bool xs, bool v) {\n\
+         \x20 if (xs.len >= xs.capacity) {\n\
+         \x20   uint64_t nc = xs.capacity ? xs.capacity * 2 : 64;\n\
+         \x20   xs.data = (uint64_t*)realloc(xs.data, ((nc + 63) / 64) * sizeof(uint64_t));\n\
+         \x20   if (!xs.data) abort(); xs.capacity = nc;\n\
+         \x20 }\n\
+         \x20 if (v) xs.data[xs.len / 64] |= (UINT64_C(1) << (xs.len % 64));\n\
+         \x20 else   xs.data[xs.len / 64] &= ~(UINT64_C(1) << (xs.len % 64));\n\
+         \x20 xs.len++; return xs;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_bool__push_mut(intent_vec_bool* xs, bool v) {\n\
+         \x20 if (xs->len >= xs->capacity) {\n\
+         \x20   uint64_t nc = xs->capacity ? xs->capacity * 2 : 64;\n\
+         \x20   xs->data = (uint64_t*)realloc(xs->data, ((nc + 63) / 64) * sizeof(uint64_t));\n\
+         \x20   if (!xs->data) abort(); xs->capacity = nc;\n\
+         \x20 }\n\
+         \x20 if (v) xs->data[xs->len / 64] |= (UINT64_C(1) << (xs->len % 64));\n\
+         \x20 else   xs->data[xs->len / 64] &= ~(UINT64_C(1) << (xs->len % 64));\n\
+         \x20 xs->len++; return (int64_t)xs->len;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_bool__push_unchecked(intent_vec_bool* xs, bool v) {\n\
+         \x20 if (v) xs->data[xs->len / 64] |= (UINT64_C(1) << (xs->len % 64));\n\
+         \x20 else   xs->data[xs->len / 64] &= ~(UINT64_C(1) << (xs->len % 64));\n\
+         \x20 xs->len++; return (int64_t)xs->len;\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_bool__pop_mut(intent_vec_bool* xs) {\n\
+         \x20 if (xs->len == 0) { fprintf(stderr, \"pop on empty Vec<bool>\\n\"); abort(); }\n\
+         \x20 xs->len--;\n\
+         \x20 return (bool)((xs->data[xs->len / 64] >> (xs->len % 64)) & 1);\n\
+         }\n\
+         static INTENT_UNUSED bool intent_vec_bool__swap_remove(intent_vec_bool* xs, uint64_t i) {\n\
+         \x20 if (i >= xs->len) { fprintf(stderr, \"swap_remove: index out of bounds\\n\"); abort(); }\n\
+         \x20 bool tmp = (bool)((xs->data[i / 64] >> (i % 64)) & 1);\n\
+         \x20 xs->len--;\n\
+         \x20 if (i < xs->len) {\n\
+         \x20   bool last = (bool)((xs->data[xs->len / 64] >> (xs->len % 64)) & 1);\n\
+         \x20   if (last) xs->data[i / 64] |= (UINT64_C(1) << (i % 64));\n\
+         \x20   else      xs->data[i / 64] &= ~(UINT64_C(1) << (i % 64));\n\
+         \x20 }\n\
+         \x20 return tmp;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_bool__insert(intent_vec_bool* xs, uint64_t i, bool v) {\n\
+         \x20 if (i > xs->len) { fprintf(stderr, \"insert: index out of bounds\\n\"); abort(); }\n\
+         \x20 if (xs->len >= xs->capacity) {\n\
+         \x20   uint64_t nc = xs->capacity ? xs->capacity * 2 : 64;\n\
+         \x20   xs->data = (uint64_t*)realloc(xs->data, ((nc + 63) / 64) * sizeof(uint64_t));\n\
+         \x20   if (!xs->data) abort(); xs->capacity = nc;\n\
+         \x20 }\n\
+         \x20 for (uint64_t k = xs->len; k > i; k--) {\n\
+         \x20   bool prev = (bool)((xs->data[(k-1)/64] >> ((k-1)%64)) & 1);\n\
+         \x20   if (prev) xs->data[k/64] |= (UINT64_C(1) << (k%64));\n\
+         \x20   else      xs->data[k/64] &= ~(UINT64_C(1) << (k%64));\n\
+         \x20 }\n\
+         \x20 if (v) xs->data[i/64] |= (UINT64_C(1) << (i%64));\n\
+         \x20 else   xs->data[i/64] &= ~(UINT64_C(1) << (i%64));\n\
+         \x20 xs->len++; return (int64_t)xs->len;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_bool__clear(intent_vec_bool* xs) {\n\
+         \x20 xs->len = 0; return 0;\n\
+         }\n\
+         static INTENT_UNUSED int64_t intent_vec_bool__reverse(intent_vec_bool* xs) {\n\
+         \x20 uint64_t i = 0, j = xs->len;\n\
+         \x20 while (i < j) {\n\
+         \x20   j--;\n\
+         \x20   bool a = (bool)((xs->data[i/64] >> (i%64)) & 1);\n\
+         \x20   bool b = (bool)((xs->data[j/64] >> (j%64)) & 1);\n\
+         \x20   if (b) xs->data[i/64] |= (UINT64_C(1) << (i%64));\n\
+         \x20   else   xs->data[i/64] &= ~(UINT64_C(1) << (i%64));\n\
+         \x20   if (a) xs->data[j/64] |= (UINT64_C(1) << (j%64));\n\
+         \x20   else   xs->data[j/64] &= ~(UINT64_C(1) << (j%64));\n\
+         \x20   i++;\n\
+         \x20 }\n\
+         \x20 return 0;\n\
+         }\n\
+         static INTENT_UNUSED intent_vec_bool intent_vec_bool__clone(intent_vec_bool xs) {\n\
+         \x20 uint64_t words = (xs.capacity + 63) / 64;\n\
+         \x20 intent_vec_bool v;\n\
+         \x20 v.data = (uint64_t*)malloc(words * sizeof(uint64_t));\n\
+         \x20 if (!v.data) abort();\n\
+         \x20 memcpy(v.data, xs.data, words * sizeof(uint64_t));\n\
+         \x20 v.len = xs.len; v.capacity = xs.capacity; return v;\n\
+         }\n\
+         static INTENT_UNUSED void intent_vec_bool__free(intent_vec_bool xs) {\n\
+         \x20 free(xs.data);\n\
+         }\n"
+    );
+}
+
 pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
+    if *element == Type::Bool {
+        emit_vec_bool_bundle(out);
+        return;
+    }
     let struct_name = vec_c_struct(element);
     // Element's full C type spelling. For primitive scalars
     // this is `c_leaf_type` (e.g. `int64_t`). For aggregates
@@ -14214,6 +14330,18 @@ fn emit_index_assign(
             let lv = format!("{}[{}]{}", local, idx_expr, field_suffix);
             let store = format!("  {} = {};\n", lv, value_str);
             (Some(lv), store)
+        }
+        Type::Vec(element) if **element == Type::Bool => {
+            // XL1: Vec<bool> — write via __set_mut (bit-packed).
+            // field_path is always empty for bool elements (no struct fields).
+            let prefix = if through_ref { format!("(*{})", local) } else { local.clone() };
+            let idx_expr = if checked {
+                format!("(uint64_t)intent_check_bounds((int64_t)({}),(int64_t){}.len)", index_str, prefix)
+            } else {
+                format!("(uint64_t)({})", index_str)
+            };
+            let store = format!("  intent_vec_bool__set_mut(&{}, {}, (bool)({}));\n", prefix, idx_expr, value_str);
+            (None, store)
         }
         Type::Vec(_) => {
             let prefix = if through_ref {
@@ -19456,6 +19584,36 @@ fn emit_index(array: &TypedExpr, index: &TypedExpr, checked: bool) -> String {
             }
         }
         Type::Vec(element) => {
+            // XL1: Vec<bool> uses packed-bit helpers instead of direct data[] access.
+            if **element == Type::Bool {
+                let free_helper = "intent_vec_bool__free";
+                let get_helper = "intent_vec_bool__get";
+                if !is_ref && crate::ir::is_fresh_non_copy(array) {
+                    if checked {
+                        return format!(
+                            "(({{ intent_vec_bool _bv = ({arr}); bool _br = {gh}(_bv, (uint64_t)intent_check_bounds((int64_t)({idx}),(int64_t)_bv.len)); {fh}(_bv); _br; }}))",
+                            arr = array_str, idx = index_str, gh = get_helper, fh = free_helper
+                        );
+                    } else {
+                        return format!(
+                            "(({{ intent_vec_bool _bv = ({arr}); bool _br = {gh}(_bv, (uint64_t)({idx})); {fh}(_bv); _br; }}))",
+                            arr = array_str, idx = index_str, gh = get_helper, fh = free_helper
+                        );
+                    }
+                }
+                let prefix = if is_ref { format!("(*{})", array_str) } else { array_str.clone() };
+                if checked {
+                    return format!(
+                        "({gh}({prefix}, (uint64_t)intent_check_bounds((int64_t)({idx}),(int64_t){prefix}.len)))",
+                        gh = get_helper, prefix = prefix, idx = index_str
+                    );
+                } else {
+                    return format!(
+                        "({gh}({prefix}, (uint64_t)({idx})))",
+                        gh = get_helper, prefix = prefix, idx = index_str
+                    );
+                }
+            }
             // Fresh-Vec operand: bind to a brace-scoped tmp,
             // read .data[i], then free the buffer via
             // `intent_vec_<T>__free`. Without this the heap

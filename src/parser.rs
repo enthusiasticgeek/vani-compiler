@@ -3856,6 +3856,43 @@ impl Parser {
     fn parse_for_stmt_inner(&mut self, parallel: bool) -> Result<Stmt, Diagnostic> {
         let start_tok =
             self.expect_keyword("'for'", |kind| matches!(kind, TokenKind::For))?;
+
+        // XL3: `for await <var> in <expr> { body }` -- desugars at parse time
+        // to `while let Option.Some(<var>) = <expr> { body }`. No new AST node
+        // needed; the existing WhileLet/checker machinery handles it.
+        if let TokenKind::Ident(n) = &self.current().kind {
+            if n == "await" {
+                if parallel {
+                    return Err(Diagnostic::new(
+                        start_tok.span,
+                        "'parallel for await' is not supported -- use 'for await' only",
+                    ));
+                }
+                self.bump(); // consume `await`
+                let var_tok = self.expect_ident()?;
+                let var = ident_text(var_tok);
+                self.expect_keyword("'in' in 'for await'", |k| matches!(k, TokenKind::In))?;
+                let scrutinee = self.parse_expr()?;
+                let invariants = self.parse_invariants()?;
+                let body = self.parse_block()?;
+                let end_span = body.last().map(|s| s.span()).unwrap_or(start_tok.span);
+                let pat_span = start_tok.span;
+                return Ok(Stmt::WhileLet {
+                    label: None,
+                    pattern: crate::ast::Pattern::VariantWithBinding {
+                        enum_name: "Option".to_string(),
+                        variant: "Some".to_string(),
+                        binding: var,
+                    },
+                    pattern_span: pat_span,
+                    scrutinee,
+                    invariants,
+                    body,
+                    span: start_tok.span.merge(end_span),
+                });
+            }
+        }
+
         let var_tok = self.expect_ident()?;
         let var = ident_text(var_tok);
         // The two `for` shapes are now disambiguated by the

@@ -48905,6 +48905,76 @@ fn main() -> i64 { return leak_check(); }
         assert!(src.contains("fn main"), "source must contain fn main");
     }
 
+    // ── XL3: for await <var> in <expr> { body } ──────────────────────────
+
+    /// XL3 basic: for-await desugars to while-let Option.Some on both backends.
+    /// The loop runs once (the Option is Some), then breaks.
+    #[test]
+    fn for_await_basic_compiles() {
+        let source = r#"
+            fn main() -> i64 {
+              let opt: Option<i64> = Option.Some(42);
+              let result: i64 = 0;
+              for await x in opt {
+                result = x;
+                break;
+              }
+              return result;
+            }
+        "#;
+        compile(source).expect("for await basic must compile");
+    }
+
+    /// XL3: for-await over a struct-based poll fn (simulates a stream).
+    #[test]
+    fn for_await_with_user_poll_fn_compiles() {
+        let source = r#"
+            struct Counter { val: i64, limit: i64 }
+            fn poll_next(c: mut ref Counter) -> Option<i64> {
+              if c.val >= c.limit { return Option.None; }
+              c.val = c.val + 1;
+              return Option.Some(c.val);
+            }
+            fn main() -> i64 {
+              let c: Counter = Counter { val: 0, limit: 3 };
+              let sum: i64 = 0;
+              for await x in poll_next(mut ref c) {
+                sum = sum + x;
+              }
+              return sum;
+            }
+        "#;
+        compile(source).expect("for await with poll fn must compile");
+    }
+
+    /// XL3: for-await with a break in the body compiles.
+    #[test]
+    fn for_await_with_break_in_body() {
+        let source = r#"
+            fn main() -> i64 {
+              let opt: Option<i64> = Option.Some(7);
+              for await v in opt {
+                if v > 0 { break; }
+              }
+              return 0;
+            }
+        "#;
+        compile(source).expect("for await with break must compile");
+    }
+
+    /// XL3: for-await on a non-Option scrutinee is rejected by the type checker.
+    #[test]
+    fn for_await_non_option_scrutinee_is_rejected() {
+        let source = r#"
+            fn bad_poll() -> i64 { return -2; }
+            fn main() -> i64 {
+              for await x in bad_poll() { }
+              return 0;
+            }
+        "#;
+        assert!(compile(source).is_err(), "for await on non-Option must be rejected");
+    }
+
     // ── L3: select { await <poll> then <binding> { body } … } ─────────────
 
     /// L3 basic: single-arm select compiles on both backends.
