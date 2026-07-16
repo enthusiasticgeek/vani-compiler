@@ -48572,5 +48572,136 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // L5: Closure capturing non-Copy (affine) bindings.
+
+    #[test]
+    fn aff_closure_constructor_uses_malloc() {
+        // A closure capturing an OwnedStr must use heap allocation for
+        // the env struct (malloc) rather than a static __thread slot.
+        let src = r#"
+intent "aff_ctor2";
+fn make() -> i64 {
+    let s: OwnedStr = "he" + "llo";
+    let f = fn() -> i64 {
+        let _ = s;
+        return 42;
+    };
+    let r: i64 = f();
+    return r;
+}
+fn main() -> i64 { return make(); }
+"#;
+        let c = compile_to_c(src).expect("should compile with non-Copy capture");
+        assert!(c.contains("malloc(sizeof("), "affine closure ctor must use malloc");
+        assert!(!c.contains("static __thread"), "affine closure ctor must NOT use static __thread");
+    }
+
+    #[test]
+    fn aff_closure_scope_exit_drop_emitted() {
+        // When an affine closure (one with non-Copy captures) is created but
+        // NOT called, its scope-exit Drop must free the heap env struct.
+        let src = r#"
+intent "aff_drop";
+fn leak_check() -> i64 {
+    let s: OwnedStr = "wo" + "rld";
+    let f = fn() -> i64 {
+        let _ = s;
+        return 1;
+    };
+    return 0;
+}
+fn main() -> i64 { return leak_check(); }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("if (v_f.env)"),
+            "scope-exit Drop for uncalled affine closure must guard on env != 0"
+        );
+        assert!(
+            c.contains("free((void*)__aff_env"),
+            "scope-exit Drop must free the heap env struct"
+        );
+    }
+
+    #[test]
+    fn aff_closure_call_frees_env_after_call() {
+        // When an affine closure is called, the env pointer must be nulled
+        // and the heap env struct freed immediately after the call.
+        let src = r#"
+intent "aff_call";
+fn run() -> i64 {
+    let s: OwnedStr = "h" + "i";
+    let f = fn() -> i64 {
+        let _ = s;
+        return 7;
+    };
+    let r: i64 = f();
+    return r;
+}
+fn main() -> i64 { return run(); }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        assert!(
+            c.contains("v_f.env = 0;"),
+            "affine closure call must null the binding's env field"
+        );
+        assert!(
+            c.contains("free((void*)(uintptr_t)__env_sv_"),
+            "affine closure call must free the heap env struct after the call"
+        );
+    }
+
+    #[test]
+    fn aff_closure_double_call_rejected() {
+        // Calling an affine closure twice is a use-after-move error.
+        let src = r#"
+intent "aff_double_call";
+fn run() -> i64 {
+    let s: OwnedStr = "h" + "i";
+    let f = fn() -> i64 {
+        let _ = s;
+        return 7;
+    };
+    let _r1: i64 = f();
+    let _r2: i64 = f();
+    return 0;
+}
+fn main() -> i64 { return run(); }
+"#;
+        let result = compile_to_c(src);
+        assert!(
+            result.is_err(),
+            "calling an affine closure twice must produce a diagnostic"
+        );
+    }
+
+    #[test]
+    fn aff_closure_owned_str_field_freed_on_drop() {
+        // The scope-exit Drop for an uncalled affine closure must free the
+        // OwnedStr field inside the env struct before freeing the struct.
+        let src = r#"
+intent "aff_field_drop";
+fn leak_check() -> i64 {
+    let s: OwnedStr = "te" + "st";
+    let _f = fn() -> i64 {
+        let _ = s;
+        return 0;
+    };
+    return 99;
+}
+fn main() -> i64 { return leak_check(); }
+"#;
+        let c = compile_to_c(src).expect("should compile");
+        // Drop should free the OwnedStr field then the struct itself.
+        assert!(
+            c.contains("free((void*)__aff_env->s)"),
+            "Drop must free the OwnedStr field inside the heap env"
+        );
+        assert!(
+            c.contains("free((void*)__aff_env);"),
+            "Drop must free the heap env struct itself"
+        );
+    }
+
 }
 

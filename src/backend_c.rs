@@ -803,10 +803,12 @@ pub fn emit_c(program: &TypedProgram) -> String {
                 args = call_args.join(", "),
             ));
             // Magic-call constructor (used for the Let RHS).
-            // Stack-allocates the env-struct, returns the closure
-            // pair by value. Marked `static inline` so the C
-            // compiler can fold it into the caller's frame
-            // (closure env stays alive for the enclosing scope).
+            // For Copy-only captures: stack-allocates the env-struct in
+            // a `static __thread` slot so it outlives the constructor
+            // call's frame (closure env lives for the enclosing scope).
+            // For affine closures (non-Copy captures, L5): heap-allocates
+            // the env with `malloc` so the closure owns the captured
+            // values; the scope-exit Drop frees the heap block.
             let ctor_name = format!("fn_{}", magic_name);
             let mut ctor_params: Vec<String> = Vec::new();
             let mut ctor_field_inits: Vec<String> = Vec::new();
@@ -820,22 +822,44 @@ pub fn emit_c(program: &TypedProgram) -> String {
             } else {
                 ctor_params.join(", ")
             };
-            body.push_str(&format!(
-                "static inline {sname} {ctor}({params}) {{\n\
-                 \x20 static __thread {env_c} __env_slot;\n\
-                 \x20 __env_slot = ({env_c}){{ {inits} }};\n\
-                 \x20 {sname} __c;\n\
-                 \x20 __c.env = (uint64_t)(uintptr_t)&__env_slot;\n\
-                 \x20 __c.call = &{tn};\n\
-                 \x20 return __c;\n\
-                 }}\n\n",
-                sname = sname,
-                ctor = ctor_name,
-                params = params_str,
-                env_c = env_c,
-                inits = ctor_field_inits.join(", "),
-                tn = trampoline_name,
-            ));
+            let is_aff = crate::ast::CLOSURE_AFF_ENV_SET.with(|r| {
+                r.borrow().contains(env_struct_name.as_str())
+            });
+            if is_aff {
+                body.push_str(&format!(
+                    "static {sname} {ctor}({params}) {{\n\
+                     \x20 {env_c}* __env = ({env_c}*)malloc(sizeof({env_c}));\n\
+                     \x20 *__env = ({env_c}){{ {inits} }};\n\
+                     \x20 {sname} __c;\n\
+                     \x20 __c.env = (uint64_t)(uintptr_t)__env;\n\
+                     \x20 __c.call = &{tn};\n\
+                     \x20 return __c;\n\
+                     }}\n\n",
+                    sname = sname,
+                    ctor = ctor_name,
+                    params = params_str,
+                    env_c = env_c,
+                    inits = ctor_field_inits.join(", "),
+                    tn = trampoline_name,
+                ));
+            } else {
+                body.push_str(&format!(
+                    "static inline {sname} {ctor}({params}) {{\n\
+                     \x20 static __thread {env_c} __env_slot;\n\
+                     \x20 __env_slot = ({env_c}){{ {inits} }};\n\
+                     \x20 {sname} __c;\n\
+                     \x20 __c.env = (uint64_t)(uintptr_t)&__env_slot;\n\
+                     \x20 __c.call = &{tn};\n\
+                     \x20 return __c;\n\
+                     }}\n\n",
+                    sname = sname,
+                    ctor = ctor_name,
+                    params = params_str,
+                    env_c = env_c,
+                    inits = ctor_field_inits.join(", "),
+                    tn = trampoline_name,
+                ));
+            }
         }
     }
     // Emit a per-name C struct typedef for each payloaded
@@ -12491,6 +12515,40 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
             // slot is read. Recognized by name prefix so other
             // Block-RHS shapes (closure #200, etc.) still go
             // through the regular stmt-expr path.
+            // L5: affine closure call — `let r = f(args)` where f owns
+            // non-Copy captures. Emit: save env pointer, null the binding's
+            // env field (so scope-exit Drop is a no-op), perform the call
+            // via the saved env, then free the heap env struct.
+            if let TypedExprKind::CallIndirect { callee, args: call_args } = &expr.kind {
+                if let TypedExprKind::Var(callee_name) = &callee.kind {
+                    if matches!(callee.ty, Type::Closure(_, _)) {
+                        let is_aff = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                            r.borrow().contains_key(callee_name.as_str())
+                        });
+                        if is_aff {
+                            let cv = local_name(callee_name);
+                            let uid = name; // binding name is unique in this scope
+                            let arg_strs: Vec<String> = call_args.iter().map(emit_expr).collect();
+                            let mut all_args: Vec<String> =
+                                vec![format!("__env_sv_{}", uid)];
+                            all_args.extend(arg_strs);
+                            let ty_c = c_type_name(ty);
+                            out.push_str(&format!(
+                                "  uint64_t __env_sv_{uid} = {cv}.env;\n\
+                                 \x20 {cv}.env = 0;\n\
+                                 \x20 {tyc} {res} = {cv}.call({args});\n\
+                                 \x20 free((void*)(uintptr_t)__env_sv_{uid});\n",
+                                uid = uid,
+                                cv = cv,
+                                tyc = ty_c,
+                                res = local_name(name),
+                                args = all_args.join(", "),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
             if let TypedExprKind::Block { stmts, tail } = &expr.kind {
                 let all_dyn_src_prelude = !stmts.is_empty()
                     && stmts.iter().all(|s| matches!(
@@ -13199,6 +13257,48 @@ fn emit_stmt(stmt: &TypedStmt, out: &mut String) {
                         }
                     }
                 }
+            }
+            // L5: affine closure — heap-allocated env struct.
+            // Guard on env != 0: the call path sets it to 0 after
+            // freeing the heap block, so this Drop is a no-op when
+            // the closure was already called (FnOnce semantics).
+            Type::Closure(_, _) => {
+                let aff_info = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                    r.borrow().get(name).cloned()
+                });
+                if let Some((env_struct_name, non_copy_fields)) = aff_info {
+                    let env_c = struct_c_name(&env_struct_name);
+                    let local = local_name(name);
+                    out.push_str(&format!(
+                        "  if ({local}.env) {{\n\
+                         \x20   {env_c}* __aff_env = ({env_c}*)(uintptr_t){local}.env;\n",
+                        local = local, env_c = env_c
+                    ));
+                    for (field_name, field_ty) in non_copy_fields.iter().rev() {
+                        match field_ty {
+                            Type::OwnedStr => {
+                                out.push_str(&format!(
+                                    "    free((void*)__aff_env->{f});\n",
+                                    f = field_name
+                                ));
+                            }
+                            Type::Vec(element) => {
+                                out.push_str(&format!(
+                                    "    {helper}(__aff_env->{f});\n",
+                                    helper = vec_helper(element, "free"),
+                                    f = field_name
+                                ));
+                            }
+                            _ => {
+                                // Other non-Copy types (Box, Struct, etc.) —
+                                // extend here when they appear as closure captures.
+                            }
+                        }
+                    }
+                    out.push_str("    free((void*)__aff_env);\n");
+                    out.push_str("  }\n");
+                }
+                // else: Copy-only Closure — no heap env, nothing to free.
             }
             _ => {
                 // Other affine types (Task, Atomic,

@@ -1987,10 +1987,35 @@ fn lift_closures_in_block(
                         crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| {
                             r.borrow_mut().insert(
                                 magic_name.clone(),
-                                (hoist_name.clone(), env_struct_name, capture_types,
+                                (hoist_name.clone(), env_struct_name.clone(), capture_types,
                                  closure_arg_types.clone(), closure_ret.clone()),
                             );
                         });
+                        // L5: register affine closures that have non-Copy captures.
+                        {
+                            let non_copy_fields: Vec<(String, crate::ast::Type)> =
+                                capture_names_only.iter()
+                                    .filter_map(|cap| {
+                                        let ty = env.get(cap).cloned().unwrap();
+                                        if !ty.is_copy() {
+                                            Some((cap.clone(), ty))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect();
+                            if !non_copy_fields.is_empty() {
+                                crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                                    r.borrow_mut().insert(
+                                        bind_name.clone(),
+                                        (env_struct_name.clone(), non_copy_fields),
+                                    );
+                                });
+                                crate::ast::CLOSURE_AFF_ENV_SET.with(|r| {
+                                    r.borrow_mut().insert(env_struct_name.clone());
+                                });
+                            }
+                        }
                         // Build replacement Let: bind_name has type
                         // `Closure(args) -> ret`, RHS is the magic
                         // make-closure call passing the captures.
@@ -2019,10 +2044,22 @@ fn lift_closures_in_block(
                             span: *fn_span,
                         });
                     }
-                    closure_handles.insert(
-                        bind_name.clone(),
-                        (hoist_name, capture_names_only, ref_captures_clone),
-                    );
+                    // L5: affine closures (non-Copy captures) must NOT
+                    // go through the direct-call rewrite; they need
+                    // CallIndirect so the C backend can emit the
+                    // env-save / free protocol around the call.
+                    // Ref-captured names are passed as Ref<T> (Copy) even
+                    // when T is non-Copy, so exclude them from the affine check.
+                    let is_affine = capture_names_only.iter().any(|cap| {
+                        !ref_captures_clone.contains(cap) &&
+                        env.get(cap).map(|t| !t.is_copy()).unwrap_or(false)
+                    });
+                    if !is_affine {
+                        closure_handles.insert(
+                            bind_name.clone(),
+                            (hoist_name, capture_names_only, ref_captures_clone),
+                        );
+                    }
                     handled = true;
                     // If we built a replacement Let, push it.
                     if let Some(repl) = closure_replacement {
@@ -9717,6 +9754,18 @@ fn emit_current_scope_drops(
                 ty: info.ty.clone(),
                 moved_fields: info.moved_fields.keys().cloned().collect(),
             });
+        } else if matches!(info.ty, Type::Closure(_, _))
+            && info.moved.is_none()
+            && crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().contains_key(name.as_str()))
+        {
+            // L5: affine closure with non-Copy captures. Closure type is
+            // normally Copy so the branch above misses it; emit a Drop here
+            // so the C backend can free the heap-allocated env struct.
+            body.push(TypedStmt::Drop {
+                name: name.clone(),
+                ty: info.ty.clone(),
+                moved_fields: Vec::new(),
+            });
         }
     }
 }
@@ -10446,6 +10495,23 @@ fn check_one_stmt(
                     name: drop_name,
                     ty: drop_ty,
                     moved_fields,
+                });
+            }
+            // L5: drop affine closures on the return path too.
+            let aff_drops: Vec<(String, Type)> = env
+                .all_bindings()
+                .filter(|(n, info)| {
+                    matches!(info.ty, Type::Closure(_, _))
+                        && info.moved.is_none()
+                        && crate::ast::CLOSURE_AFF_REGISTRY.with(|r| r.borrow().contains_key(n.as_str()))
+                })
+                .map(|(n, info)| (n.clone(), info.ty.clone()))
+                .collect();
+            for (drop_name, drop_ty) in aff_drops {
+                body.push(TypedStmt::Drop {
+                    name: drop_name,
+                    ty: drop_ty,
+                    moved_fields: Vec::new(),
                 });
             }
 
@@ -19913,10 +19979,14 @@ fn check_call(
         if let Some((_trampoline, _env_struct, capture_types, closure_args, closure_ret)) = entry {
             // Type-check each capture arg against the recorded
             // capture type, mostly to keep the type-flow honest.
+            // L5: mark non-Copy captures as moved so the compiler
+            // knows the closure owns them (preventing double-drop
+            // of the original binding at scope exit).
             let mut typed_args: Vec<TypedExpr> = Vec::with_capacity(args.len());
             for (i, arg) in args.iter().enumerate() {
                 let _expected = capture_types.get(i);
                 let checked = check_expr(arg, env, signatures, diagnostics);
+                consume_if_moved_var(arg, &checked, env);
                 typed_args.push(checked.expr);
             }
             let closure_ty = Type::Closure(closure_args, Box::new(closure_ret));
@@ -19963,6 +20033,25 @@ fn check_call(
             // above; the backend lowers `f(args)` as
             // `f.call(f.env, args)` when f has Closure type.
             if let Type::Closure(param_types, ret) = info.ty.clone() {
+                // L5: affine closure callee move-check. Closure values
+                // are structurally Copy, but affine closures (non-Copy
+                // captures, FnOnce semantics) are consumed on first call;
+                // a second call is use-after-move.
+                if let Some(moved_at) = info.moved {
+                    let is_aff = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                        r.borrow().contains_key(name)
+                    });
+                    if is_aff {
+                        diagnostics.push(
+                            Diagnostic::new(
+                                span,
+                                format!("value '{}' was moved; cannot use after move", name),
+                            )
+                            .with_related(moved_at, format!("'{}' was moved here", name)),
+                        );
+                        return CheckedExpr::fallback_integer(span);
+                    }
+                }
                 let callee_decl_span = info.decl_span;
                 let mut typed_args = Vec::with_capacity(args.len());
                 for (idx, arg) in args.iter().enumerate() {
@@ -19978,7 +20067,18 @@ fn check_call(
                     );
                     typed_args.push(coerced.expr);
                 }
-                // Callee TypedExpr with Closure type â€” backends
+                // L5: affine closure call consumes the binding (FnOnce).
+                // Mark it moved so the scope-exit Drop is suppressed;
+                // the C backend emits env-save + call + free instead.
+                let is_aff = crate::ast::CLOSURE_AFF_REGISTRY.with(|r| {
+                    r.borrow().contains_key(name)
+                });
+                if is_aff {
+                    if let Some(info_mut) = env.lookup_mut(name) {
+                        info_mut.moved = Some(span);
+                    }
+                }
+                // Callee TypedExpr with Closure type - backends
                 // pattern-match on this to emit `c.call(c.env, args)`.
                 let callee = TypedExpr {
                     kind: TypedExprKind::Var(name.to_string()),

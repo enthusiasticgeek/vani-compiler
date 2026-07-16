@@ -208,6 +208,20 @@ thread_local! {
     /// to emit closure-struct construction.
     pub(crate) static CLOSURE_MAKE_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, String, Vec<Type>, Vec<Type>, Type)>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+    /// L5: affine closure registry — keyed by binding name; value is
+    /// (env_struct_name, non_copy_fields: Vec<(field_name, field_type)>).
+    /// Populated by the lambda-lift pass whenever any captured binding
+    /// has a non-Copy type. The C backend uses this to:
+    ///   1. Allocate the env struct on the heap (not in a static slot).
+    ///   2. Emit a scope-exit Drop that conditionally frees the env.
+    ///   3. Emit env-save + free after each indirect call.
+    pub(crate) static CLOSURE_AFF_REGISTRY: std::cell::RefCell<std::collections::HashMap<String, (String, Vec<(String, Type)>)>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// L5: set of env struct names whose closure binding has non-Copy
+    /// captures. The C constructor checks this to choose malloc vs
+    /// static __thread allocation.
+    pub(crate) static CLOSURE_AFF_ENV_SET: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
     /// Arc 8 v3.1 Phase 1 — registry of synthesized async-fn
     /// state machines. Each entry is a `(StructDecl, Function)`
     /// pair: the per-async-fn task struct + its companion
