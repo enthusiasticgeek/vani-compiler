@@ -34393,6 +34393,140 @@ fn try_elide_bounds_in_typed_expr(
                         *checked = false;
                     }
                 }
+                // L4: elide the Add/Sub/Mul runtime overflow guard when the
+                // SMT can prove the arithmetic stays within the signed range.
+                // Uses the "monotone result" property:
+                //   Add: adding a positive b never makes result smaller than a;
+                //        adding a negative b never makes it larger than a.
+                //   Sub: subtracting a negative b (= adding |b|) never makes
+                //        result smaller than a; subtracting positive never larger.
+                //   Mul: sign of product must agree with the sign implied by
+                //        the combination of operand signs (four cases).
+                // Unsigned types: left as always-checked (unsigned wrap is rarer
+                // in safety-critical contexts and the reasoning is different).
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul
+                    if left.ty.is_signed_integer() =>
+                {
+                    let a = typed_to_expr(left);
+                    let b = typed_to_expr(right);
+                    let s = expr.span;
+                    // res = a op b  (wrapping model — must match SMT encoding)
+                    let res = Expr {
+                        kind: ExprKind::Binary {
+                            op: *op,
+                            left: Box::new(a.clone()),
+                            right: Box::new(b.clone()),
+                        },
+                        span: s,
+                    };
+                    let zero = Expr { kind: ExprKind::Int(0), span: s };
+                    // Build a comparison node.
+                    let cmp = |cmp_op: BinaryOp, l: Expr, r: Expr| Expr {
+                        kind: ExprKind::Binary {
+                            op: cmp_op,
+                            left: Box::new(l),
+                            right: Box::new(r),
+                        },
+                        span: s,
+                    };
+                    // Logical OR of two boolean exprs.
+                    let or2 = |l: Expr, r: Expr| Expr {
+                        kind: ExprKind::Binary {
+                            op: BinaryOp::Or,
+                            left: Box::new(l),
+                            right: Box::new(r),
+                        },
+                        span: s,
+                    };
+                    // Logical AND of two boolean exprs.
+                    let and2 = |l: Expr, r: Expr| Expr {
+                        kind: ExprKind::Binary {
+                            op: BinaryOp::And,
+                            left: Box::new(l),
+                            right: Box::new(r),
+                        },
+                        span: s,
+                    };
+                    let goal = match op {
+                        BinaryOp::Add => {
+                            // (b <= 0 || a+b >= a) && (b >= 0 || a+b <= a)
+                            and2(
+                                or2(
+                                    cmp(BinaryOp::Le, b.clone(), zero.clone()),
+                                    cmp(BinaryOp::Ge, res.clone(), a.clone()),
+                                ),
+                                or2(
+                                    cmp(BinaryOp::Ge, b.clone(), zero.clone()),
+                                    cmp(BinaryOp::Le, res.clone(), a.clone()),
+                                ),
+                            )
+                        }
+                        BinaryOp::Sub => {
+                            // (b >= 0 || a-b >= a) && (b <= 0 || a-b <= a)
+                            // Derived from Add with second operand = -b:
+                            //   adding a positive (-b) can't make result < a;
+                            //   adding a negative (-b) can't make result > a.
+                            and2(
+                                or2(
+                                    cmp(BinaryOp::Ge, b.clone(), zero.clone()),
+                                    cmp(BinaryOp::Ge, res.clone(), a.clone()),
+                                ),
+                                or2(
+                                    cmp(BinaryOp::Le, b.clone(), zero.clone()),
+                                    cmp(BinaryOp::Le, res.clone(), a.clone()),
+                                ),
+                            )
+                        }
+                        BinaryOp::Mul => {
+                            // Four sign-consistency conditions:
+                            //   both positive → product positive
+                            //   both negative → product positive
+                            //   a+/b- → product negative
+                            //   a-/b+ → product negative
+                            and2(
+                                and2(
+                                    or2(
+                                        or2(
+                                            cmp(BinaryOp::Le, a.clone(), zero.clone()),
+                                            cmp(BinaryOp::Le, b.clone(), zero.clone()),
+                                        ),
+                                        cmp(BinaryOp::Gt, res.clone(), zero.clone()),
+                                    ),
+                                    or2(
+                                        or2(
+                                            cmp(BinaryOp::Ge, a.clone(), zero.clone()),
+                                            cmp(BinaryOp::Ge, b.clone(), zero.clone()),
+                                        ),
+                                        cmp(BinaryOp::Gt, res.clone(), zero.clone()),
+                                    ),
+                                ),
+                                and2(
+                                    or2(
+                                        or2(
+                                            cmp(BinaryOp::Le, a.clone(), zero.clone()),
+                                            cmp(BinaryOp::Ge, b.clone(), zero.clone()),
+                                        ),
+                                        cmp(BinaryOp::Lt, res.clone(), zero.clone()),
+                                    ),
+                                    or2(
+                                        or2(
+                                            cmp(BinaryOp::Ge, a.clone(), zero.clone()),
+                                            cmp(BinaryOp::Le, b.clone(), zero.clone()),
+                                        ),
+                                        cmp(BinaryOp::Lt, res.clone(), zero.clone()),
+                                    ),
+                                ),
+                            )
+                        }
+                        _ => return,
+                    };
+                    if matches!(
+                        prove_with_calls(&goal, smt_facts, env, signatures),
+                        Verdict::Proven
+                    ) {
+                        *checked = false;
+                    }
+                }
                 _ => {}
             }
         }

@@ -441,12 +441,12 @@ no hardware, no external tokens, no grammar consultants required.
   `select_two_arms_compiles`, `select_lowers_to_while_true_in_c`,
   `select_wildcard_binding_compiles`, `select_non_i64_poll_is_rejected`.
 
-- [ ] **L4. Runtime integer overflow guards** (~6 h)
-  `i64::MAX + 1` silently wraps today — a real safety gap for `#[asil_d]` /
-  `#[do178c_level_a]` code. Fix: emit an `icmp` + conditional branch to a
-  `__vani_overflow_trap` at every `+`, `-`, `*`, `<<` site; then elide via the
-  existing SMT discharge pass when the operand bounds are provably safe. The
-  elision infrastructure already exists; only guard generation is missing.
+- [x] **L4. Runtime integer overflow guards** ✅ done 2026-07-16
+  Guards (`__builtin_add/sub/mul_overflow` in C; `llvm.sadd/ssub/smul.with.overflow` in
+  LLVM) emitted for every signed `+`, `-`, `*` site via `checked: bool` in `TypedExprKind::Binary`.
+  SMT elision extended in `try_elide_bounds_in_typed_expr` with monotonicity goals for
+  Add/Sub and sign-consistency goals for Mul — elides guard when `requires` bounds prove safety.
+  4 tests: `smt_elides_add/sub/mul_overflow_*`, `overflow_guard_retained_when_operands_unbounded`.
 
 - [x] **L5. Closure capturing non-Copy (affine) bindings** (~6 h) — DONE 2026-07-15 (commit 76a9aea)
   FnOnce semantics: heap-malloc env; env-nulled after call; scope-exit Drop;

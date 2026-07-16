@@ -46029,10 +46029,9 @@ função main() -> i64 {
     #[test]
     fn runtime_i64_overflow_compiles_both_backends() {
         // Runtime i64 arithmetic that would overflow COMPILES without error —
-        // vāṇī v1 silently wraps (two's complement) at runtime.
-        // This test documents the known behaviour: no runtime guard is emitted
-        // at the arithmetic site. To prevent overflow, use `requires` clauses
-        // so the SMT pass can statically prove operands are in range.
+        // a runtime overflow guard (L4) is emitted and will trap if triggered.
+        // To elide the guard, use a `requires` clause so the SMT pass can
+        // statically prove the operands are in range.
         let source = r#"
             fn get_max() -> i64 { return 9223372036854775807; }
             fn main() -> i64 {
@@ -46130,6 +46129,93 @@ função main() -> i64 {
         "#;
         compile_to_c(source).expect("u64 max+1 must compile to C (wraps to 0)");
         compile_to_llvm(source).expect("u64 max+1 must compile to LLVM (wraps to 0)");
+    }
+
+    // ── L4 elision: SMT discharges overflow guards when safe ─────────────────
+
+    /// L4 elision: bounded-add requires clause discharges the guard.
+    #[test]
+    fn smt_elides_add_overflow_when_requires_proves_bounded() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn safe_add(a: i64, b: i64) -> i64
+              requires a >= 0 && a <= 100 && b >= 0 && b <= 100;
+            {
+              return a + b;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("bounded add must compile");
+        assert!(
+            !c.contains("__builtin_add_overflow"),
+            "SMT must elide add overflow guard when operands are bounded; C output:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        let ll = compile_to_llvm(source).expect("bounded add must compile to LLVM");
+        assert!(
+            !ll.contains("sadd.with.overflow"),
+            "SMT must elide add overflow guard in LLVM when operands are bounded"
+        );
+    }
+
+    /// L4 elision: bounded subtraction (both non-negative) discharges the guard.
+    #[test]
+    fn smt_elides_sub_overflow_when_requires_proves_bounded() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn safe_sub(a: i64, b: i64) -> i64
+              requires a >= 0 && a <= 1000 && b >= 0 && b <= a;
+            {
+              return a - b;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("bounded sub must compile");
+        assert!(
+            !c.contains("__builtin_sub_overflow"),
+            "SMT must elide sub overflow guard when a >= b >= 0; C output:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
+    /// L4 elision: small-operand multiplication discharges the guard.
+    #[test]
+    fn smt_elides_mul_overflow_when_requires_proves_small() {
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn safe_mul(a: i64, b: i64) -> i64
+              requires a >= 1 && a <= 1000 && b >= 1 && b <= 1000;
+            {
+              return a * b;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("small mul must compile");
+        assert!(
+            !c.contains("__builtin_mul_overflow"),
+            "SMT must elide mul overflow guard when operands are in [1,1000]; C output:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
+    /// L4: guard IS kept when overflow is genuinely possible.
+    #[test]
+    fn overflow_guard_retained_when_operands_unbounded() {
+        let source = r#"
+            fn risky(a: i64, b: i64) -> i64 { return a + b; }
+            fn main() -> i64 { return 0; }
+        "#;
+        let c = compile_to_c(source).expect("risky add must compile");
+        assert!(
+            c.contains("__builtin_add_overflow"),
+            "overflow guard must remain when operands are unbounded"
+        );
     }
 
     // ── Effects checker: pure fn calling non-pure ────────────────────────────
