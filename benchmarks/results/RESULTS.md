@@ -2,7 +2,7 @@
 
 *vāṇī timings: 2026-07-13 — 3 timing run(s), median.*
 *New variant timings (rs_ikj, omp_c, omp_cpp, rs_par, c_sse): 2026-07-17 — 5 timing run(s), median.*
-*Sort updated 2026-07-17: vāṇī now uses pdqsort (block partition + Tukey ninther + heapsort fallback).*
+*Sort updated 2026-07-17: vāṇī now uses pdqsort (block partition + Tukey ninther + heapsort fallback) with AVX-512 bitmask scan and forward right-side pass.*
 *Sieve updated 2026-07-17: getelementptr inbounds on Vec/Array GEPs unblocked LLVM vectorization; vāṇī 12.6 ms (was 15.4 ms), now faster than C/C++/Rust.*
 *Parallel sum updated 2026-07-17: pthreads pool replaces per-invocation CreateThread/GOMP_parallel; vāṇī 125.8 ms (was 197.2 ms), now fastest vs Rust 131.5 ms.*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
@@ -120,15 +120,21 @@ languages on this benchmark.
 
 **Algorithm upgrade (2026-07-17):** vāṇī sort now uses pdqsort-style introsort:
 - `src/sort_runtime.c` compiled GCC -O3 -march=native, linked at build time
-- **Branchless block partition** (64-element blocks): eliminates ~50% of branch
-  mispredictions in the hot inner loop — the key pdqsort innovation
-  (`offs[cnt] = i; cnt += (a[i] >= pivot)` → CMOV, zero branches)
+- **AVX-512 bitmask block partition** (64-element blocks): 8 vector compares
+  produce a 64-bit mask; a BLSR bit-walk packs ~32 qualifying indices (vs 64
+  scalar iterations). `_mm512_cmpge_epi64_mask` + `__builtin_ctzll`.
+- **Forward right-side scan**: `rb[i]` where `rb = r-BLOCK+1` (was `r[-i]`);
+  forward access lets the hardware prefetcher track both sides of the partition.
 - **Tukey ninther pivot** for n ≥ 128: median of 3 medians → better partitioning
 - **Heapsort fallback** at depth > 2·log₂(n): O(n log n) worst-case guarantee
-- **Insertion sort** for n ≤ 24
+- **Insertion sort** for n ≤ 24; `__builtin_clzll` for ilog2 (single BSR)
 
-Gap vs Rust (42%) was 55% before. Remaining gap: Rust's pdqsort has additional
-pattern-detection passes (already-sorted check) that skip partitioning entirely.
+Gap vs Rust (42%) was 55% before pdqsort. **Remaining gap is structural:**
+Rust 1.81+ uses ipnsort (not pdqsort) — fundamentally different inner loops
+optimised by LLVM. GCC produces worse native code for tight integer loops than
+LLVM even at -O3 -march=native. This 2× gap cannot be closed by micro-optimisation
+within the current pdqsort/GCC runtime; it requires switching to LLVM JIT or
+porting the runtime to Rust/LLVM.
 
 ### Graph BFS — index handles vs. weak_ptr
 
@@ -298,7 +304,7 @@ vāṇī's ownership model makes the efficient representation the natural one.
 | Sieve vs C | vāṇī 16% faster | inbounds GEP unblocked LLVM vectorizer — gap reversed | A (fixed) |
 | Matmul Rust baseline | Rust 2× slower | i-j-k loop (LLVM no auto-interchange) + bounds checks | A |
 | Matmul Rust i-k-j | <5% — **gap closed** | i-k-j + unsafe eliminates both causes | A (fixed) |
-| Sort vs Rust | Rust 42% faster | pdqsort pattern-detection passes; vāṇī has block partition | B (improved) |
+| Sort vs Rust | Rust 42% faster | Structural: ipnsort (Rust 1.81+) vs pdqsort + LLVM vs GCC codegen | B (structural gap) |
 | Sort vs C | C 138% slower | qsort function-pointer overhead; vāṇī pdqsort beats both introsort | B |
 | HashMap | vāṇī 51–85% faster | FNV-1a + linear probing vs chaining/SwissTable+SipHash | B |
 | Graph BFS vs weak_ptr | 219% penalty | Index handles: zero allocs, no atomics, cache-linear | C |

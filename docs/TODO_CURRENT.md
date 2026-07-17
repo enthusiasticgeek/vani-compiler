@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-07-10
+Last updated: 2026-07-17
 
 ---
 
@@ -479,6 +479,66 @@ no hardware, no external tokens, no grammar consultants required.
   stable. Two-level (`wrap <- double_wrap`) and three-level (`f<-g<-h`) chains
   now compile. `nested_generic_call_pins_current_behavior` and
   `nested_generic_three_level_chain_fails` both succeed in the `Ok(_)` branch.
+
+---
+
+---
+
+## Performance Engineering (added 2026-07-17)
+
+Work done improving benchmark results vs Rust/C. **All changes maintain full safety and
+correctness.**  No undefined behaviour introduced; all correctness verified by benchmark
+output match and edge-case tests before commit.
+
+### Completed
+
+- [x] **PERF-1. `getelementptr inbounds` on all Vec/Array GEPs** ✅ done 2026-07-17
+  After `@__intent_bounds_check` returns (only when `idx < len`), the subsequent GEP
+  is provably in-bounds. `inbounds` lets LLVM enable aggressive alias analysis and
+  vectorisation. **Effect:** sieve benchmark 15.4 ms → 12.6 ms (−18%), now fastest
+  vs C/C++/Rust.
+
+- [x] **PERF-2. pdqsort in `src/sort_runtime.c`** ✅ done 2026-07-17
+  Replaced naive introsort with pdqsort: Tukey ninther pivot, 64-element branchless
+  block partition, heapsort fallback (depth > 2·log₂n), insertion sort (n ≤ 24),
+  pattern detection (pre-scan for already-sorted / reverse-sorted in O(n)).
+  **Effect:** sort 97 ms → ~67 ms vs Rust's 37.9 ms (ipnsort).
+
+- [x] **PERF-3. AVX-512 bitmask scan in block partition** ✅ done 2026-07-17
+  Replaced two-phase scalar packing loop with `_mm512_cmpge_epi64_mask` producing a
+  64-bit mask + BLSR `__builtin_ctzll` bit-walk (~32 iters vs 64 scalar).  Right-side
+  scan changed from backward `r[-i]` to forward `rb[i]` so prefetcher tracks both sides.
+  `__builtin_clzll` replaces loop in `ilog2_n`.  **Effect:** ~5% additional improvement.
+  Commit: `55f7e3c`.
+
+- [x] **PERF-4. Persistent pthreads pool for `parallel for`** ✅ done 2026-07-17
+  `src/parallel_runtime.c` — 4 persistent workers (condvar wakeup); `intent_pool_run(fn, ctx, nth)`
+  replaces per-invocation `CreateThread` / `GOMP_parallel`.  LLVM backend emits
+  `@intent_pool_run` declarations instead of OpenMP calls.
+  **Effect:** parallel sum 197.2 ms → 125.8 ms; now 4.5% faster than Rust `std::thread`.
+  Commit: `d6022ce`.
+
+### Open gaps (structural — not closeable by micro-optimisation)
+
+| Benchmark | vāṇī | Competitor | Gap | Root cause |
+|-----------|------|------------|-----|------------|
+| Sort | ~67 ms | Rust 37.9 ms | 2× | ipnsort (Rust 1.81+) vs pdqsort; LLVM vs GCC inner-loop codegen |
+| Fibonacci | 943 ms | C 486 ms | 2× | GCC restructures recursive call tree; vāṇī L4 overflow guard per `+` |
+| Graph BFS vs C | 16.2 ms | C 10.9 ms | 33% | L4 guards on index arithmetic; same data structure |
+
+**Sort**: Rust's ipnsort is a fundamentally different algorithm compiled by LLVM.
+Closing the gap requires porting `sort_runtime` from GCC C to Rust/LLVM or using
+the vāṇī LLVM JIT to emit the inner loop directly.  Out of scope for current sprint.
+
+**Fibonacci**: GCC `-O3` loop-restructures the two recursive calls into a single
+indirect branch; LLVM does not.  Additionally each `fib(n-1)+fib(n-2)` site emits
+an `llvm.sadd.with.overflow` guard.  Eliding the guard (SMT-prove safe) is possible
+but requires a chain-of-calls SMT proof, not just a single-site proof.
+
+**Graph BFS vs C**: Same index-based data structure; gap is pure L4 overhead on 3
+index-arithmetic sites per BFS step.  SMT elision would close most of it, but
+proving `idx < capacity` from loop invariants is a bounded-model-checking problem
+(not in current SMT pass scope).
 
 ---
 

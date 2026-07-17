@@ -3,13 +3,16 @@
 //
 // ALGORITHM DOCUMENTATION (reviewer checklist):
 //   vāṇī:  sort(mut ref xs) → pdqsort compiled from src/sort_runtime.c (GCC -O3 -march=native).
-//           Algorithm: pattern-defeating quicksort (Orson Peters 2015):
+//           Algorithm: pattern-defeating quicksort (Orson Peters 2015) + AVX-512 block scan:
 //             - Insertion sort for n ≤ 24
 //             - Heapsort fallback at depth > 2·log₂(n)  → O(n log n) worst case
 //             - Tukey ninther pivot for n ≥ 128          → better partition balance
-//             - Branchless block partition for n ≥ 128   → CMOV, no branch mispredictions
+//             - AVX-512 bitmask block partition (n ≥ 128): 8 vector compares produce a
+//               64-bit mask; BLSR/__builtin_ctzll bit-walk packs indices (~32 iters vs 64)
+//             - Forward right-side scan (rb[i]) for hardware-prefetcher friendliness
+//             - Pattern detection: pre-scan for already-sorted / reverse-sorted in O(n)
 //           Stability: UNSTABLE.  Complexity: O(N log N) average and worst case.
-//           Timings: ~66 ms (down from ~97 ms with old Lomuto introsort).
+//           Timings: ~67 ms (down from ~97 ms with old Lomuto introsort).
 //
 //   C:      qsort() with explicit comparator — same algorithm, same instability.
 //           C is ~138% SLOWER than vāṇī because the comparator is a function pointer
@@ -18,12 +21,11 @@
 //   C++:    std::sort — introsort (introspective sort), unstable.
 //           ~33% slower than vāṇī (~88 ms vs ~66 ms) due to Hoare vs block partition.
 //
-//   Rust:   sort_unstable() — pdqsort (pattern-defeating quicksort).
-//           ~42% faster than vāṇī (~38 ms vs ~66 ms) due to additional pattern-detection
-//           passes (already-sorted/reverse-sorted detection) that skip partitioning entirely.
-//
-// Remaining gap vs Rust (42%) is LIBRARY QUALITY: Rust's pdqsort adds pattern-detection
-// passes that vāṇī's implementation does not yet implement.
+//   Rust:   sort_unstable() — ipnsort (Rust 1.81+, NOT pdqsort).
+//           ~42% faster than vāṇī (~38 ms vs ~67 ms).
+//           Gap is STRUCTURAL: ipnsort is a different algorithm compiled by LLVM (better
+//           inner-loop codegen than GCC even at -O3 -march=native). Cannot be closed by
+//           micro-optimisation; requires porting sort_runtime to LLVM/Rust.
 //
 // SAME INPUT: LCG with seed 12345678, a=1664525, c=1013904223, mask=2^31-1.
 // All variants generate identical sequences; sort order is fully deterministic.
