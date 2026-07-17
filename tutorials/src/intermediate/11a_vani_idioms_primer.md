@@ -158,4 +158,4 @@ example in the GoF tutorial.
 
 ---
 
-**Next**: [The 22 GoF design patterns ->](11_design_patterns.md)
+**Next**: [SOLID design principles ->](11b_solid_primer.md)

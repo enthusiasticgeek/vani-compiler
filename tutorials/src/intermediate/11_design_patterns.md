@@ -5,10 +5,11 @@
 > directory, understand which v1 idiom each pattern uses, and
 > know where to look when you reach for one.
 
-> **Prerequisite**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md)
-> first. It shows the idiomatic vāṇी shape (enum-as-hierarchy,
-> closure-as-strategy, arena-as-graph) before we map those shapes
-> to GoF names.
+> **Prerequisites**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md)
+> and the [SOLID primer](11b_solid_primer.md) first. The idioms page
+> shows the vāṇी-native shapes (enum-as-hierarchy, closure-as-strategy,
+> arena-as-graph); SOLID explains *why* a design is good before GoF
+> names the recurring solutions.
 
 Design patterns are named solutions to recurring problems --
 think of them as blueprints, not finished buildings. A
@@ -116,5 +117,5 @@ felt natural and where it pushed back.
 
 ---
 
-**Previous**: [vāṇी design idioms -- intuition primer](11a_vani_idioms_primer.md)  
+**Previous**: [SOLID design principles](11b_solid_primer.md)  
 **Next**: [SMT -- `requires` / `ensures` intuition primer ->](12a_smt_primer.md)
