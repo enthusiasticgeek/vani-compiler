@@ -12,6 +12,15 @@
  *     mispredictions in the hot inner loop (the key pdqsort innovation)
  *   - Hoare partition for smaller sub-arrays
  *
+ * Pattern-detection passes (these handle structured inputs in O(n)):
+ *   - Ascending-sorted check in _recurse: if [lo,hi] is already sorted,
+ *     return immediately without pivot selection or partitioning.  Costs
+ *     ~2 comparisons on random data (scan terminates at first out-of-order
+ *     pair, expected at position 1 for uniform random).
+ *   - Reverse-sorted check at entry: if the full array is non-ascending,
+ *     reverse it in O(n) and return.  Handles reverse-sorted input without
+ *     entering the sort loop at all.
+ *
  * The branchless block partition scans 64 elements at a time from each end,
  * collecting swap candidates into offset arrays WITHOUT branches:
  *   offs[cnt] = i;  cnt += (a[i] >= pivot);   // branchless conditional store
@@ -161,6 +170,14 @@ static void prefix##_recurse(T *lo, T *hi, int lim) {                     \
         if (n <= ISORT)  { prefix##_insort(lo, hi); return; }             \
         if (lim == 0)    { prefix##_heapsort(lo, n); return; }            \
         lim--;                                                              \
+        /* Pattern detection: if [lo,hi] is already ascending, done.      \
+         * On random data this scan stops at the first out-of-order pair   \
+         * (expected position 1), costing ~2 comparisons.  On a sorted     \
+         * sub-array it returns in O(n) without any pivot work. */         \
+        { T *s = lo;                                                        \
+          while (s < hi && *s <= *(s+1)) s++;                              \
+          if (s == hi) return;                                              \
+        }                                                                   \
         T pv = prefix##_pivot(lo, n);                                      \
         T *cut = (n >= 2 * BLOCK)                                          \
                  ? prefix##_block_part(lo, hi, pv)                        \
@@ -190,6 +207,19 @@ int64_t intent_vec_i64__sort(VecI64 *xs) {
     int64_t n = xs->len;
     if (n < 2) return 0;
     int64_t *a = xs->data;
+    /* Pattern detection: reverse-sorted → reverse in O(n) and return.
+     * Uses >= so that equal-element runs are treated as non-ascending
+     * (reversing a run of equal elements is a no-op, so this is safe).
+     * For random data the scan stops at the first ascending pair
+     * (expected at position 1), costing 1 comparison. */
+    { int64_t *p = a;
+      while (p + 1 < a + n && *p >= *(p+1)) p++;
+      if (p + 1 == a + n) {
+          int64_t *l = a, *r = a + n - 1;
+          while (l < r) { int64_t t = *l; *l++ = *r; *r-- = t; }
+          return 0;
+      }
+    }
     si_recurse(a, a + n - 1, 2 * ilog2_n(n));
     return 0;
 }
@@ -198,6 +228,17 @@ int64_t intent_vec_double__sort(VecF64 *xs) {
     int64_t n = xs->len;
     if (n < 2) return 0;
     double *a = xs->data;
+    /* Pattern detection: reverse-sorted → reverse in O(n) and return.
+     * NaN: *p >= *(p+1) is false when either is NaN, so the scan stops
+     * early and we fall through to the general sort (correct behavior). */
+    { double *p = a;
+      while (p + 1 < a + n && *p >= *(p+1)) p++;
+      if (p + 1 == a + n) {
+          double *l = a, *r = a + n - 1;
+          while (l < r) { double t = *l; *l++ = *r; *r-- = t; }
+          return 0;
+      }
+    }
     sd_recurse(a, a + n - 1, 2 * ilog2_n(n));
     return 0;
 }
