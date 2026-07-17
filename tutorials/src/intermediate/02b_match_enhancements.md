@@ -1,4 +1,4 @@
-# Intermediate 2b — Match enhancements: `if let`, `while let`, or-patterns, guards
+# Intermediate 2b — Match enhancements: `if let`, `while let`, or-patterns, guards, slice patterns
 
 > **Learning goal**: use the four match-extension forms — `if let`, `while let`,
 > or-patterns with `|`, and pattern guards with `if` — to write concise
@@ -206,6 +206,87 @@ match entry {
 
 ---
 
+## 5. Slice patterns — destructuring sequences (v0.5.3+)
+
+Slice patterns let you match on the **structure** of a `Vec<T>` or
+fixed-size array `[T; N]` in a `match` arm, binding elements by
+position while `..` absorbs any number of middle elements you don't
+need.
+
+```vani
+fn describe_vec(xs: ref Vec<i64>) -> Str {
+  return match ref xs {
+    []           then "empty",
+    [x]          then "singleton",
+    [first, ..]  then "starts with something",
+  };
+}
+```
+
+### Binding first and last
+
+```vani
+fn first_and_last(xs: ref Vec<i64>) -> i64 {
+  return match ref xs {
+    []                    then 0,
+    [only]                then only,
+    [first, .., last]     then first + last,
+  };
+}
+```
+
+- `[first, .., last]` binds the element at index 0 to `first` and the
+  final element to `last`. The `..` between them absorbs zero or more
+  elements that are not bound to any name.
+- `[x]` matches a one-element slice and binds that element to `x`.
+- `[]` matches an empty slice.
+
+### Fixed-length patterns
+
+When you know the exact length, you can name every element:
+
+```vani
+fn rgb_to_hex(channels: ref Vec<i64>) -> Str {
+  return match ref channels {
+    [r, g, b] then {
+      // exactly three elements
+      let hex: i64 = r * 65536 + g * 256 + b;
+      return "0x" + int_to_hex(hex);
+    },
+    _ then "invalid",
+  };
+}
+```
+
+### Slice patterns with guards
+
+Pattern guards compose with slice patterns exactly as with enum arms:
+
+```vani
+fn classify_scores(scores: ref Vec<i64>) -> Str {
+  return match ref scores {
+    []                          then "no data",
+    [s] if s >= 90              then "single A",
+    [s]                         then "single non-A",
+    [first, .., last] if first == last  then "balanced",
+    [first, .., last]           then "unbalanced",
+  };
+}
+```
+
+### What `..` can and cannot do
+
+- `..` may appear **at most once** per pattern. `[a, .., b, .., c]` is
+  rejected — the compiler can't determine which middle runs to the first
+  `..` and which to the second.
+- `..` absorbs zero or more elements, so `[first, ..]` matches any
+  Vec of length ≥ 1 and `[first, .., last]` matches length ≥ 2.
+- Slice patterns are exhaustiveness-checked like enum patterns. The
+  compiler requires a `_` or `[..]` wildcard arm (or complete coverage)
+  to avoid "non-exhaustive match" errors.
+
+---
+
 ## Putting it all together
 
 ```vani
@@ -281,6 +362,9 @@ idle
 | `while let` | `while let Pat = expr { … }` | `expr` matches `Pat`; stops on first miss |
 | Or-pattern | `Pat1 \| Pat2 then body` | either pattern matches |
 | Pattern guard | `Pat if cond then body` | pattern matches AND `cond` is true |
+| Slice pattern | `[first, .., last]` | Vec/array with ≥ 2 elements; binds endpoints |
+| Empty slice | `[]` | Vec/array with exactly 0 elements |
+| Singleton slice | `[x]` | Vec/array with exactly 1 element |
 
 ---
 

@@ -76,11 +76,14 @@ max = 5
   `fn(i64, i64) -> i64`, etc. These are first-class values you
   can store in `let` bindings, pass as parameters, and store in
   struct fields.
-- **No captured environment in v1**. The body sees only its own
-  params, top-level functions, and builtins. A reference to a
-  surrounding `let` binding produces an *"unknown variable"*
-  error. Closures with captures are queued for a later phase;
-  build today's combinators with explicit-parameter lambdas.
+- **Captured environment**: closures can capture surrounding
+  `let` bindings by value (move, for owning types such as
+  `Vec`/`OwnedStr`) or by copy (for `Copy` types such as
+  `i64`/`bool`). A closure that captures an owning value can
+  be called at most once — calling it a second time is a
+  compile error (affine / FnOnce semantics). See
+  [06a -- closures primer](06a_closures_primer.md) for the
+  full capture rules.
 - **Statement-style body only**: `fn(x) -> i64 { return x + x; }`,
   not `fn(x) => x + x`. The expression-body sugar is deferred.
 
@@ -89,7 +92,7 @@ max = 5
 | Rust | vāṇी v1 |
 |---|---|
 | `|x| x + x` | `fn(x: i64) -> i64 { return x + x; }` |
-| Closure with capture (`move \|x\|`) | Not yet -- workaround: pass captures as explicit params |
+| Closure with capture (`move \|x\|`) | Supported -- by-value for owning types (FnOnce), by-copy for `Copy` types |
 | `iter().map(f).collect()` chains | Hand-rolled `fold` / loops (this lesson) |
 
 The combinator-style chain isn't in the v1 stdlib yet -- but the

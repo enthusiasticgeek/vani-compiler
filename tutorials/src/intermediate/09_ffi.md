@@ -69,10 +69,33 @@ parse_sum("3", "4") = 7
   in front asserts that the foreign function is side-effect-
   free and deterministic -- your responsibility to verify.
 - **ABI scope in v1**: scalars (`i8..i64`, `u8..u64`, `f32` /
-  `f64`, `bool`), `Str` (NUL-terminated `i8*`), and any
-  `ref T` / `mut ref T`. **Aggregate-by-value** (struct /
-  tuple / array / enum passed by value) is rejected with a
-  `ref T` migration hint to prevent silent ABI corruption.
+  `f64`, `bool`), `Str` (NUL-terminated `i8*`), any
+  `ref T` / `mut ref T`, and `#[repr(C)]` structs passed by
+  value. Bare structs without `#[repr(C)]` are rejected with a
+  migration hint to prevent silent ABI corruption.
+
+### Passing structs across the FFI boundary
+
+Mark the struct `#[repr(C)]` to guarantee C-compatible field
+layout, then pass it by value or by `ref`:
+
+```vani
+#[repr(C)]
+struct Vec2 { x: f64, y: f64 }
+
+extern "C" fn c_length(v: Vec2) -> f64;
+
+fn main() -> i64 {
+  let v: Vec2 = Vec2 { x: 3.0, y: 4.0 };
+  let len: f64 = c_length(v);
+  return 0;
+}
+```
+
+Without `#[repr(C)]`, vāṇी may reorder or pad fields differently
+from C, causing silent data corruption across the boundary.
+See [Advanced 4c -- Attributes reference](../advanced/04c_attributes_reference.md)
+for `#[repr(packed)]` (removes padding entirely for wire protocols).
 
 ## Linking external code
 
@@ -150,22 +173,19 @@ in a C helper that returns an `OwnedStr`-compatible `i8*`.
 
 ### Stderr
 
-There's no `eprint` statement yet. Write to stderr via a shim:
-
-```c
-// helper.c
-#include <stdio.h>
-void eprint(const char *s) { fputs(s, stderr); fputs("\n", stderr); }
-```
+`eprint` ships natively since v0.1.5 -- no shim needed:
 
 ```vani
-extern "C" fn eprint(s: Str) -> i64;
-
 fn main() -> i64 {
-  eprint("fatal: something went wrong");
+  eprint "fatal: something went wrong";
   return 1;
 }
 ```
+
+If you need to write an `OwnedStr` or a formatted message, concatenate
+first: `eprint "error: " + msg;`. The C-shim approach below is
+preserved only as a historical reference for projects that cannot
+upgrade past v0.1.4.
 
 ### Linux serial device (RS232 / RS485 / UART)
 

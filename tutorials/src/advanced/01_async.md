@@ -127,6 +127,50 @@ async fn maybe_fetch(use_cache: bool, key: i64) -> i64 {
 }
 ```
 
+## Selecting over multiple futures: `select { await }`
+
+When you have two or more async operations and want to proceed
+with whichever finishes first, use `select`:
+
+```vani
+async fn fast(n: i64) -> i64 { return n + 1; }
+async fn slow(n: i64) -> i64 { return n + 100; }
+
+fn main() -> i64 {
+  select {
+    await fast(10) then r1 {
+      print "fast finished:", r1;
+    }
+    await slow(10) then r2 {
+      print "slow finished:", r2;
+    }
+  }
+  return 0;
+}
+```
+
+`select` desugars to a `while true` loop with one
+`if poll_rN != -2` arm per branch. Each branch polls its
+future; the first one that is `Ready` (not the `-2` sentinel
+for `Pending`) runs its body and exits the loop. Remaining
+branches are abandoned -- their futures are not driven to
+completion.
+
+**Key constraints in v1**:
+- All `await` expressions inside `select` must call `async fn`s
+  that return the same type.
+- Branches are polled in source order; there is no randomized
+  fairness. If the first branch is always ready, the others
+  never run.
+- `select` may only appear inside a function body, not inside
+  a `parallel for` body.
+
+**Use `select` for**:
+- Racing two fetch paths (cache vs network).
+- Implementing a timeout: one branch awaits the real operation,
+  another awaits a `sleep`-style timer.
+- Processing whichever of several channels has data first.
+
 ## Challenge
 
 Write an `async fn batch(xs: ref Vec<i64>) -> i64` that calls

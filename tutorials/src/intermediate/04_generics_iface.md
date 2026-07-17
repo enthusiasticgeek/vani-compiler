@@ -87,7 +87,16 @@ area = 16
   uses one of the concrete types as the "anchor" (here
   `Circle`); each `implement` block writes its own.
 - **`where T is Iface`** is the interface bound on a generic.
-  Static dispatch: the compiler emits one specialization per
+  Since v0.5.3 you can also write the bound inline as
+  **`<T: Iface>`** -- the two forms produce identical AST:
+  ```vani
+  fn print_area<T: Drawable>(s: T) -> i64 {  // inline form (v0.5.3+)
+    return s.area();
+  }
+  ```
+  The inline form is preferred for single-bound generics;
+  `where` is clearer when multiple bounds appear.
+- Static dispatch: the compiler emits one specialization per
   concrete T, so the call `s.area()` has zero runtime
   overhead.
 - **Dynamic dispatch** (`dyn Iface`) is a separate path --

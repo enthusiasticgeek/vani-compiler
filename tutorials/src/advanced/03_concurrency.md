@@ -67,7 +67,9 @@ let _ = atomic_store(ref counter, 0);
 let _ = atomic_compare_exchange(ref counter, 0, 1);
 ```
 
-- `T` ranges over `i8..i64`, `u8..u64`, and `bool`.
+- `T` ranges over `i8..i64`, `u8..u64`, `bool`, and `f64`.
+- `atomic_fetch_add` is supported for integer types only; use a
+  `Mutex<f64>` for floating-point accumulation.
 - All operations are sequentially consistent (`seq_cst`) -- no
   weaker memory orderings in v1.
 - Best for hot counters, flags, and single-cell lock-free

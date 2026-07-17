@@ -71,7 +71,7 @@ shapes. The most important to internalize:
 
 | Pattern | v1 idiom | Why |
 |---|---|---|
-| **Composite** | Tagged-struct (Leaf vs Branch flag + child indices into an arena `Vec<Composite>`) | No `Box<T>` (L2) → no recursive enums; use index-based arena instead |
+| **Composite** | Tagged-struct (Leaf vs Branch flag + child indices into an arena `Vec<Composite>`) | Arena index pattern is idiomatic even though `Box<T>` is available — it avoids deep recursive drop and keeps the tree cache-friendly |
 | **Bridge** | Integer discriminator + per-impl free fn | Cleanest decoupling without a shared vtable field |
 | **Decorator** | Flag-bag struct + a single `apply()` function that conditionally enables features | Avoids chained dyn-wrapper objects |
 | **Observer** | `Vec<fn(i64) -> i64>` + index-based dispatch | Zero-overhead when all subscribers share one signature; use `Vec<dyn Iface>` for heterogeneous subscribers |

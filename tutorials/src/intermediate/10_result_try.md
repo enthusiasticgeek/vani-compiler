@@ -105,8 +105,9 @@ composing across multiple error types.
 - **No generic `Result<T, E>`**. v1's enums don't carry type
   parameters yet, so each fallible API declares its own
   Result-shaped enum with concrete payload types.
-- **No enum-destructure in `let`** ([L1 in v1_limitations.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md))
-  -- every extraction goes through `match`.
+- **Enum payload extraction goes through `match`**. There is
+  no `let Ok(v) = r;` destructuring syntax for enum payloads
+  in v1; use a `match` arm to bind the inner value.
 
 ## Challenge
 

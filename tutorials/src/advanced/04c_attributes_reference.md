@@ -1,9 +1,51 @@
-# Advanced 4c -- Function attributes reference
+# Advanced 4c -- Attributes reference
 
 > A one-page reference for every `#[attribute]` vāṇी supports
-> on `fn` declarations. Attributes are the primary way to
-> add safety requirements, linker directives, and verification
-> constraints at the function level.
+> on `fn` and `struct` declarations. Attributes add safety
+> requirements, linker directives, FFI layout control, and
+> verification constraints.
+
+## Struct attributes
+
+### `#[repr(C)]`
+
+Force C-compatible field layout and padding on a struct so it
+can be passed to and from `extern "C"` functions by value:
+
+```vani
+#[repr(C)]
+struct Point { x: i64, y: i64 }
+
+extern "C" fn c_translate(p: Point, dx: i64, dy: i64) -> Point;
+```
+
+Without `#[repr(C)]`, vāṇी is free to reorder or pad fields for
+its own purposes; with it, the in-memory layout is identical to
+what a C compiler would produce for the equivalent `struct`.
+
+**Required when**: passing structs by value across an FFI
+boundary, or when the struct must match a hardware register map.
+
+---
+
+### `#[repr(packed)]`
+
+Like `#[repr(C)]` but also removes all padding between fields.
+Fields may be unaligned; access can be slower on platforms that
+trap on unaligned loads.
+
+```vani
+#[repr(packed)]
+struct UartPacket { header: i64, payload: i64, crc: i64 }
+```
+
+**Use for**: wire protocols, file formats, and register maps
+where byte layout is specified by an external standard and
+padding must be absent.
+
+---
+
+## Function attributes
 
 ---
 

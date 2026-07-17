@@ -113,7 +113,44 @@ vanic fmt --check src/          # CI-style check for entire tree
 
 ### `vanic test <file.vani | directory>`
 
-Run `vanic test` files -- each file's `main` is expected to return 0 for pass, non-zero for fail.
+`vanic test` supports two modes:
+
+**`#[test]` attribute mode (v0.1.5+, recommended)**
+
+Mark individual functions with `#[test]`. `vanic test` collects
+them, synthesises a harness `main`, compiles and runs it:
+
+```vani
+#[test]
+fn addition_works() -> i64 {
+  assert 1 + 1 == 2;
+  return 0;
+}
+
+#[test]
+fn subtraction_works() -> i64 {
+  assert 5 - 3 == 2;
+  return 0;
+}
+```
+
+```bash
+vanic test math_test.vani
+# running 2 tests
+# test addition_works ... ok
+# test subtraction_works ... ok
+# test result: ok. 2 passed; 0 failed
+```
+
+Each test function must return `i64`. Passing is `return 0;`
+(or any code path that doesn't abort). A failing `assert` inside
+the test body aborts with a named diagnostic and counts as a
+failure.
+
+**Legacy mode (pre-v0.1.5)**
+
+Each file's `main` is expected to return 0 for pass, non-zero
+for fail. Still works; prefer `#[test]` for new code.
 
 ```bash
 vanic test tests/

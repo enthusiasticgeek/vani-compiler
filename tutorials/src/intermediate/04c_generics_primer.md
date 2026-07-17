@@ -56,6 +56,21 @@ supporting `>` (the Comparable interface) can use this cookie
 cutter. Without the bound, the compiler couldn't be sure the
 `if a > b` step would work for arbitrary T.
 
+Since v0.5.3 you can also write the bound inline, directly in
+the angle brackets:
+
+```vani
+fn max<T: Comparable>(a: T, b: T) -> T {   // inline bound
+  if a > b { return a; }
+  return b;
+}
+```
+
+`<T: Comparable>` and `<T> where T is Comparable` produce
+identical code -- pick whichever reads more naturally. Inline
+bounds are shorter for single-constraint generics; `where` is
+clearer when several constraints appear on different type params.
+
 ## What the compiler ACTUALLY does
 
 This is the load-bearing concept: the compiler doesn't keep
