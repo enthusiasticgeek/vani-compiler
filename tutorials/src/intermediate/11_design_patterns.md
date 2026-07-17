@@ -5,6 +5,11 @@
 > directory, understand which v1 idiom each pattern uses, and
 > know where to look when you reach for one.
 
+> **Prerequisite**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md)
+> first. It shows the idiomatic vāṇी shape (enum-as-hierarchy,
+> closure-as-strategy, arena-as-graph) before we map those shapes
+> to GoF names.
+
 Design patterns are named solutions to recurring problems --
 think of them as blueprints, not finished buildings. A
 "Factory" pattern is not a specific piece of code; it's the
@@ -13,8 +18,9 @@ create, so callers don't need to know." The GoF ("Gang of Four")
 catalogue named 23 such patterns in 1994 and every major
 language community has since translated them into idiomatic
 examples. This chapter is a guided tour of the vāṇी versions --
-it assumes you've read through Intermediate 1-6 so the idioms
-feel familiar.
+it assumes you've read through Intermediate 1-13 (structs,
+enums, ownership, generics, closures, collections) so the
+idioms feel familiar.
 
 ## The directory layout
 
@@ -63,18 +69,21 @@ shapes. The most important to internalize:
 
 | Pattern | v1 idiom | Why |
 |---|---|---|
-| **Composite** | Tagged-struct (Leaf vs Branch flag + child indices into an arena `Vec<Composite>`) | No `Box<T>` (L2) -> no recursive enums |
-| **Bridge** | Integer discriminator + per-impl free fn | No `Vec<dyn Iface>` as a struct field across multiple Ifaces (L8, *now fixed*) -- original example pre-dated the fix |
-| **Decorator** | Flag-bag struct + a single `apply()` function that conditionally enables features | Same dyn-vec caveat |
-| **Observer** | Free-fn `Vec<fn(...) -> i64>` + index-based dispatch | Vec of dyn-fn-with-different-Iface bundles is the same shape |
-| **Singleton** | `Atomic<i64>` global counter wrapped in helpers | No `static mut` |
-| **Visitor** | Match on a tagged-struct discriminator + per-arm free fn | Closest fit without dyn-double-dispatch |
-| **Iterator** | Both forms shown -- manual `while idx < len` loops AND `for x in xs` (the latter for `Vec<T>` only in v1) | The Rust-style `Iterator` trait isn't in v1 stdlib |
+| **Composite** | Tagged-struct (Leaf vs Branch flag + child indices into an arena `Vec<Composite>`) | No `Box<T>` (L2) → no recursive enums; use index-based arena instead |
+| **Bridge** | Integer discriminator + per-impl free fn | Cleanest decoupling without a shared vtable field |
+| **Decorator** | Flag-bag struct + a single `apply()` function that conditionally enables features | Avoids chained dyn-wrapper objects |
+| **Observer** | `Vec<fn(i64) -> i64>` + index-based dispatch | Zero-overhead when all subscribers share one signature; use `Vec<dyn Iface>` for heterogeneous subscribers |
+| **Singleton** | `Atomic<i64>` (or `Atomic<f64>` for float state) passed by `ref` from `main()` | No `static mut`; affine borrow prevents aliasing bugs |
+| **Visitor** | Match on a tagged-struct discriminator + per-arm free fn | Closest fit without dyn double-dispatch |
+| **Iterator** | Both forms shown -- manual `while idx < len` AND `for x in xs` (the latter for `Vec<T>` only in v1) | Rust-style `Iterator` trait is not in v1 stdlib |
+| **Strategy** | `fn` pointer for stateless; `<T: Iface>` inline bound for stateful (v0.5.3+) | `<T: Sorter>` replaces verbose `where T is Sorter` and monomorphizes at zero cost |
+| **Template Method** | Default methods on an `interface` | Overrideable steps without inheritance |
 
-The remaining 15 patterns are more direct ports -- `Adapter`,
-`Facade`, `Proxy`, `Strategy`, `State`, etc. follow standard
-shapes with minor surface differences (`then` instead of `=>`
-in `match`, no `Box`).
+The remaining patterns (`Adapter`, `Facade`, `Proxy`, `State`,
+`Builder`, `Factory Method`, `Abstract Factory`, `Prototype`,
+`Memento`, `Chain of Responsibility`, `Command`, `Mediator`)
+are more direct ports that follow standard shapes with minor
+surface differences (`then` instead of `=>` in `match`, no `Box`).
 
 ## Sample workflow
 
@@ -107,4 +116,5 @@ felt natural and where it pushed back.
 
 ---
 
-**Next**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
+**Previous**: [vāṇी design idioms -- intuition primer](11a_vani_idioms_primer.md)  
+**Next**: [SMT -- `requires` / `ensures` intuition primer ->](12a_smt_primer.md)
