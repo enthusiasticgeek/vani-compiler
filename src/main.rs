@@ -3142,6 +3142,8 @@ fn build_program_llvm(
     let obj_path      = env::temp_dir().join(format!("vanic-{}-{}-{}.o",      stem, pid, nanos));
     let sort_c_path   = env::temp_dir().join(format!("vanic-{}-{}-{}-sort.c", stem, pid, nanos));
     let sort_obj_path = env::temp_dir().join(format!("vanic-{}-{}-{}-sort.o", stem, pid, nanos));
+    let par_c_path    = env::temp_dir().join(format!("vanic-{}-{}-{}-par.c",  stem, pid, nanos));
+    let par_obj_path  = env::temp_dir().join(format!("vanic-{}-{}-{}-par.o",  stem, pid, nanos));
     fs::write(&ll_path, ll)
         .map_err(|error| format!("failed to write '{}': {}", ll_path.display(), error))?;
     if let Ok(keep) = env::var("VANIC_KEEP_IR") {
@@ -3180,6 +3182,39 @@ fn build_program_llvm(
                 Ok(o) => {
                     eprintln!(
                         "warning: sort runtime compilation failed (sort may be unresolved):\n{}",
+                        String::from_utf8_lossy(&o.stderr).trim_end()
+                    );
+                    false
+                }
+                Err(_) => false,
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // Compile the parallel-for runtime (pthreads thread pool).
+    // The LLVM IR emits `declare void @intent_pool_run(...)`;
+    // the definition lives in src/parallel_runtime.c.
+    // Skip for bare-metal (no pthreads) and cross (non-trivial path).
+    let par_compiled = if !is_bare_metal_triple(target.unwrap_or("")) && target.is_none() {
+        let par_c_src = include_str!("parallel_runtime.c");
+        let write_ok = fs::write(&par_c_path, par_c_src).is_ok();
+        if write_ok {
+            let cc_for_par = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+            let par_cc_out = Command::new(&cc_for_par)
+                .args(["-O2", "-c", "-march=native"])
+                .arg(&par_c_path)
+                .arg("-o").arg(&par_obj_path)
+                .output();
+            let _ = fs::remove_file(&par_c_path);
+            match par_cc_out {
+                Ok(o) if o.status.success() => true,
+                Ok(o) => {
+                    eprintln!(
+                        "warning: parallel runtime compilation failed (parallel-for may be unresolved):\n{}",
                         String::from_utf8_lossy(&o.stderr).trim_end()
                     );
                     false
@@ -3330,8 +3365,8 @@ fn build_program_llvm(
         link_cmd.arg("-lsynchronization");
         link_cmd.arg("-lws2_32");
     } else {
-        // Host POSIX build
-        link_cmd.arg("-fopenmp");
+        // Host POSIX build — intent_pool_run uses pthreads; no OpenMP needed.
+        link_cmd.arg("-lpthread");
     }
     // Layer 4.1 of `unsafe.md` — same toolchain hardening on
     // the LLVM-backend link path. See `apply_embedded_cc_hardening`.
@@ -3341,6 +3376,10 @@ fn build_program_llvm(
     // Sort runtime object (compiled above from src/sort_runtime.c).
     if sort_compiled {
         link_cmd.arg(&sort_obj_path);
+    }
+    // Parallel-for runtime object (compiled above from src/parallel_runtime.c).
+    if par_compiled {
+        link_cmd.arg(&par_obj_path);
     }
     // FFI follow-up: user-supplied link inputs follow the vāṇī
     // object so symbol resolution sees vāṇī's `extern "C" fn` call
@@ -3357,6 +3396,7 @@ fn build_program_llvm(
     let _ = fs::remove_file(&opt_path);
     let _ = fs::remove_file(&obj_path);
     let _ = fs::remove_file(&sort_obj_path);
+    let _ = fs::remove_file(&par_obj_path);
     if !link_out.status.success() {
         return Err(format!(
             "{} failed while linking:\n{}",

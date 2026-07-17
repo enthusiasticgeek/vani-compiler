@@ -349,17 +349,12 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // Phase 12.4 (2026-06-07): Persian / Pashto — 2-byte
     // Persian Arabic-Indic digits at U+06F0..06F9 (DB B0+d).
     emit_brahmi_print_helper_ssa_ll(&mut out, "per", &[219], 176);
-    // Parallel-for runtime. Linux/macOS use libgomp;
-    // Windows open-codes a `@CreateThread` fan-out (the
-    // outlined fn reads tid/nt from a per-thread arg struct
-    // instead of calling `omp_get_*`). Gated by the same
-    // `host_uses_win32_threading()` switch as tree-LLVM so
-    // both backends pick the same flavor.
-    if !host_uses_win32_threading() {
-        out.push_str("declare void @GOMP_parallel(void (i8*)*, i8*, i32, i32)\n");
-        out.push_str("declare i32 @omp_get_thread_num()\n");
-        out.push_str("declare i32 @omp_get_num_threads()\n");
-    }
+    // Parallel-for runtime: persistent thread pool (parallel_runtime.c).
+    // Both Windows and POSIX use the same @intent_pool_run ABI; the
+    // outlined function signature is `void (i8*, i64, i64)` where the
+    // extra args are tid and nth passed directly by the pool, removing
+    // per-call thread-spawn overhead and the omp_get_*/WinParArg dance.
+    out.push_str("declare void @intent_pool_run(void (i8*, i64, i64)*, i8*, i64)\n");
     // Threading runtime used by `task` outlining. POSIX
     // (`@pthread_create`, `@pthread_join`) on Linux/macOS;
     // Win32 (`@CreateThread`, `@WaitForSingleObject`,
@@ -2049,120 +2044,12 @@ fn emit_parallel_for_region_llvm(
         "  {} = bitcast {}* {} to i8*\n",
         ctx_raw, ctx_struct_ty, ctx_ptr
     ));
-    if host_uses_win32_threading() {
-        // Win32 fan-out: see tree-LLVM's `emit_parallel_for_via_gomp`
-        // for the matching shape. N=4 hardcoded worker threads; tid 0
-        // runs in the calling thread. Each thread receives a
-        // `WinParArg { i8* ctx, i64 tid, i64 nt }` whose layout the
-        // outlined fn unpacks at entry.
-        const N: u64 = 4;
-        let warr = format!("%v_par{}.warr", id);
-        out.push_str(&format!(
-            "  {} = alloca [{} x {{ i8*, i64, i64 }}]\n",
-            warr, N
-        ));
-        let mut wp_names: Vec<String> = Vec::with_capacity(N as usize);
-        for i in 0..N {
-            let wpi = format!("%v_par{}.wp{}", id, i);
-            out.push_str(&format!(
-                "  {} = getelementptr [{} x {{ i8*, i64, i64 }}], [{} x {{ i8*, i64, i64 }}]* {}, i64 0, i64 {}\n",
-                wpi, N, N, warr, i
-            ));
-            let cf = format!("%v_par{}.wp{}.c", id, i);
-            out.push_str(&format!(
-                "  {} = getelementptr {{ i8*, i64, i64 }}, {{ i8*, i64, i64 }}* {}, i32 0, i32 0\n",
-                cf, wpi
-            ));
-            out.push_str(&format!(
-                "  store i8* {}, i8** {}\n",
-                ctx_raw, cf
-            ));
-            let tf = format!("%v_par{}.wp{}.t", id, i);
-            out.push_str(&format!(
-                "  {} = getelementptr {{ i8*, i64, i64 }}, {{ i8*, i64, i64 }}* {}, i32 0, i32 1\n",
-                tf, wpi
-            ));
-            out.push_str(&format!(
-                "  store i64 {}, i64* {}\n",
-                i, tf
-            ));
-            let nf = format!("%v_par{}.wp{}.n", id, i);
-            out.push_str(&format!(
-                "  {} = getelementptr {{ i8*, i64, i64 }}, {{ i8*, i64, i64 }}* {}, i32 0, i32 2\n",
-                nf, wpi
-            ));
-            out.push_str(&format!(
-                "  store i64 {}, i64* {}\n",
-                N, nf
-            ));
-            wp_names.push(wpi);
-        }
-        let hs = format!("%v_par{}.hs", id);
-        out.push_str(&format!(
-            "  {} = alloca [{} x i8*]\n",
-            hs,
-            N - 1
-        ));
-        let mut handle_ps: Vec<String> = Vec::with_capacity((N - 1) as usize);
-        for i in 1..N {
-            let raw = format!("%v_par{}.argraw{}", id, i);
-            out.push_str(&format!(
-                "  {} = bitcast {{ i8*, i64, i64 }}* {} to i8*\n",
-                raw, wp_names[i as usize]
-            ));
-            let h = format!("%v_par{}.h{}", id, i);
-            out.push_str(&format!(
-                "  {} = call i8* @CreateThread(i8* null, i64 0, i8* (i8*)* @{}, i8* {}, i32 0, i32* null)\n",
-                h, fn_name, raw
-            ));
-            let hp = format!("%v_par{}.hp{}", id, i);
-            out.push_str(&format!(
-                "  {} = getelementptr [{} x i8*], [{} x i8*]* {}, i64 0, i64 {}\n",
-                hp,
-                N - 1,
-                N - 1,
-                hs,
-                i - 1
-            ));
-            out.push_str(&format!(
-                "  store i8* {}, i8** {}\n",
-                h, hp
-            ));
-            handle_ps.push(hp);
-        }
-        let raw0 = format!("%v_par{}.argraw0", id);
-        out.push_str(&format!(
-            "  {} = bitcast {{ i8*, i64, i64 }}* {} to i8*\n",
-            raw0, wp_names[0]
-        ));
-        let ret0 = format!("%v_par{}.ret0", id);
-        out.push_str(&format!(
-            "  {} = call i8* @{}(i8* {})\n",
-            ret0, fn_name, raw0
-        ));
-        for (j, hp) in handle_ps.iter().enumerate() {
-            let hl = format!("%v_par{}.hl{}", id, j);
-            out.push_str(&format!(
-                "  {} = load i8*, i8** {}\n",
-                hl, hp
-            ));
-            let wait = format!("%v_par{}.w{}", id, j);
-            out.push_str(&format!(
-                "  {} = call i32 @WaitForSingleObject(i8* {}, i32 -1)\n",
-                wait, hl
-            ));
-            let close = format!("%v_par{}.c{}", id, j);
-            out.push_str(&format!(
-                "  {} = call i32 @CloseHandle(i8* {})\n",
-                close, hl
-            ));
-        }
-    } else {
-        out.push_str(&format!(
-            "  call void @GOMP_parallel(void (i8*)* @{}, i8* {}, i32 0, i32 0)\n",
-            fn_name, ctx_raw
-        ));
-    }
+    // Dispatch to the thread pool: intent_pool_run blocks until all
+    // INTENT_POOL_THREADS (= 4) workers finish their slice.
+    out.push_str(&format!(
+        "  call void @intent_pool_run(void (i8*, i64, i64)* @{}, i8* {}, i64 4)\n",
+        fn_name, ctx_raw
+    ));
     // Now transition to the exit block. The header's
     // terminator is `Branch(cond, body, [], exit, exit_args)`;
     // we want the exit-args side. After GOMP_parallel the
@@ -2422,48 +2309,19 @@ fn emit_outlined_parallel_for(
 ) -> Result<(), EmitError> {
     let mut out = String::new();
     let counter_ty_str = llvm_type(&region.shape.counter_ty)?;
-    let use_win32 = host_uses_win32_threading();
+    let _use_win32 = host_uses_win32_threading();
 
-    // On Win32 the outlined fn matches `@CreateThread`'s
-    // start-routine ABI (`i8* (i8*)`) and unpacks tid/nt from
-    // a `WinParArg { i8* ctx, i64 tid, i64 nt }` instead of
-    // calling `omp_get_*`. On Linux/macOS the GOMP-compatible
-    // `void (i8*)` signature is preserved and tid/nt come
-    // from `omp_get_thread_num` / `omp_get_num_threads`.
-    if use_win32 {
-        out.push_str(&format!(
-            "define internal i8* @{}(i8* %_ctx) {{\n",
-            fn_name
-        ));
-    } else {
-        out.push_str(&format!(
-            "define internal void @{}(i8* %_ctx) {{\n",
-            fn_name
-        ));
-    }
+    // The outlined function receives %tid and %nth directly from the
+    // thread pool — no WinParArg struct, no omp_get_* calls needed.
+    out.push_str(&format!(
+        "define internal void @{}(i8* %_ctx, i64 %tid, i64 %nth) {{\n",
+        fn_name
+    ));
     out.push_str("entry:\n");
-    if use_win32 {
-        // _ctx is actually a WinParArg*; unpack ctx_raw, tid, nt.
-        out.push_str(
-            "  %winarg_p = bitcast i8* %_ctx to { i8*, i64, i64 }*\n",
-        );
-        out.push_str(
-            "  %ctx_raw_p = getelementptr { i8*, i64, i64 }, { i8*, i64, i64 }* %winarg_p, i32 0, i32 0\n",
-        );
-        out.push_str(
-            "  %ctx_raw = load i8*, i8** %ctx_raw_p\n",
-        );
-        out.push_str(&format!(
-            "  %ctx = bitcast i8* %ctx_raw to {}*\n",
-            ctx_struct_ty
-        ));
-    } else {
-        // Unmarshal ctx → start, end (as i64; narrow at use sites).
-        out.push_str(&format!(
-            "  %ctx = bitcast i8* %_ctx to {}*\n",
-            ctx_struct_ty
-        ));
-    }
+    out.push_str(&format!(
+        "  %ctx = bitcast i8* %_ctx to {}*\n",
+        ctx_struct_ty
+    ));
     out.push_str(&format!(
         "  %start_p = getelementptr {}, {}* %ctx, i32 0, i32 0\n",
         ctx_struct_ty, ctx_struct_ty
@@ -2589,23 +2447,7 @@ fn emit_outlined_parallel_for(
         local_acc_names.push(Some(name));
     }
 
-    // Work distribution: OMP on Linux/macOS, Win32-arg loads
-    // on Windows.
-    if use_win32 {
-        out.push_str(
-            "  %tid_p = getelementptr { i8*, i64, i64 }, { i8*, i64, i64 }* %winarg_p, i32 0, i32 1\n",
-        );
-        out.push_str("  %tid = load i64, i64* %tid_p\n");
-        out.push_str(
-            "  %nth_p = getelementptr { i8*, i64, i64 }, { i8*, i64, i64 }* %winarg_p, i32 0, i32 2\n",
-        );
-        out.push_str("  %nth = load i64, i64* %nth_p\n");
-    } else {
-        out.push_str("  %tid32 = call i32 @omp_get_thread_num()\n");
-        out.push_str("  %nth32 = call i32 @omp_get_num_threads()\n");
-        out.push_str("  %tid = sext i32 %tid32 to i64\n");
-        out.push_str("  %nth = sext i32 %nth32 to i64\n");
-    }
+    // %tid and %nth are direct function parameters — no extraction needed.
     // span = end - start
     out.push_str("  %span = sub i64 %end, %start\n");
     // chunk = (span + nth - 1) / nth  (ceil division)
@@ -2957,11 +2799,7 @@ fn emit_outlined_parallel_for(
         })
         .collect();
     if mul_reds.is_empty() {
-        if use_win32 {
-            out.push_str("  ret i8* null\n");
-        } else {
-            out.push_str("  ret void\n");
-        }
+        out.push_str("  ret void\n");
     } else {
         // Bridge done: → first Mul CAS block.
         out.push_str(&format!(
@@ -3008,11 +2846,7 @@ fn emit_outlined_parallel_for(
             ));
         }
         out.push_str("mul_done_ret:\n");
-        if use_win32 {
-            out.push_str("  ret i8* null\n");
-        } else {
-            out.push_str("  ret void\n");
-        }
+        out.push_str("  ret void\n");
     }
     out.push_str("}\n\n");
 
@@ -5927,15 +5761,13 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "windows")]
     #[test]
-    fn parallel_for_uses_create_thread_fanout_on_windows() {
-        // SSA-LLVM mirror of the tree-LLVM Win32 parallel-for
-        // test: libgomp isn't available on Windows, so the
-        // call site fans out via `@CreateThread` (N=4) and the
-        // outlined fn reads tid/nt from a WinParArg struct
-        // instead of via `omp_get_*`. Returns `i8*` to match
-        // the CreateThread start-routine ABI.
+    fn parallel_for_uses_pool_on_all_platforms() {
+        // SSA-LLVM parallel-for now uses @intent_pool_run on all
+        // platforms (Windows and POSIX). The outlined function has
+        // signature `void (i8*, i64, i64)` where the extra args are
+        // tid and nth passed directly by the pool — no WinParArg
+        // struct, no omp_get_* calls, no CreateThread fan-out.
         let src = r#"
             pure fn square(x: i64) -> i64 { return x * x; }
             fn main() -> i64 {
@@ -5949,22 +5781,23 @@ mod tests {
         let ll = emit(&module).expect("emit succeeds");
         assert!(
             !ll.contains("@GOMP_parallel") && !ll.contains("@omp_get_thread_num"),
-            "expected GOMP/omp_get_* to be absent on Windows:\n{ll}"
+            "GOMP/omp_get_* must be absent (pool replaces libgomp):\n{ll}"
         );
         assert!(
-            ll.contains("define internal i8* @__intent_par_"),
-            "expected outlined fn to use i8* (i8*) ABI:\n{ll}"
+            !ll.contains("@CreateThread") || !ll.contains("WinParArg"),
+            "WinParArg/CreateThread fan-out must be absent:\n{ll}"
         );
         assert!(
-            ll.contains("alloca [4 x { i8*, i64, i64 }]"),
-            "expected per-thread WinParArg array (N=4):\n{ll}"
+            ll.contains("declare void @intent_pool_run(void (i8*, i64, i64)*, i8*, i64)"),
+            "expected @intent_pool_run declaration:\n{ll}"
         );
-        let create_calls = ll
-            .matches("call i8* @CreateThread(i8* null, i64 0, i8* (i8*)* @__intent_par_")
-            .count();
-        assert_eq!(
-            create_calls, 3,
-            "expected 3 CreateThread calls (N-1 workers):\n{ll}"
+        assert!(
+            ll.contains("call void @intent_pool_run(void (i8*, i64, i64)* @__intent_par_"),
+            "expected @intent_pool_run call site:\n{ll}"
+        );
+        assert!(
+            ll.contains("define internal void @__intent_par_"),
+            "expected outlined fn with void (i8*, i64, i64) signature:\n{ll}"
         );
     }
 }

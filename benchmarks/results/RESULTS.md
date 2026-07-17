@@ -4,6 +4,7 @@
 *New variant timings (rs_ikj, omp_c, omp_cpp, rs_par, c_sse): 2026-07-17 — 5 timing run(s), median.*
 *Sort updated 2026-07-17: vāṇī now uses pdqsort (block partition + Tukey ninther + heapsort fallback).*
 *Sieve updated 2026-07-17: getelementptr inbounds on Vec/Array GEPs unblocked LLVM vectorization; vāṇī 12.6 ms (was 15.4 ms), now faster than C/C++/Rust.*
+*Parallel sum updated 2026-07-17: pthreads pool replaces per-invocation CreateThread/GOMP_parallel; vāṇī 125.8 ms (was 197.2 ms), now fastest vs Rust 131.5 ms.*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*
 *See `benchmarks/results/SYSTEM.md` for full hardware and software details.*
@@ -31,7 +32,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE  (1.96.0)
 | Matrix mul 256×256 (rs i-k-j) | — | — | — | **14.6 ms** | Loop fix closes gap; matches C/vāṇī |
 | **Sort 1 000 000 integers** | **65.9 ms** | **156.9 ms** | **87.5 ms** | **37.9 ms** | **vāṇī now pdqsort; Rust 42% faster** |
 | Graph BFS — index handles | 16.2 ms | 10.9 ms | 19.2 ms† | 18.6 ms | †C++ index; C++ weak_ptr: 51.7 ms |
-| Parallel sum 50M elements | 197.2 ms | 193.1 ms | 198.3 ms | 151.1 ms | All parallel; Rust thread < OpenMP overhead |
+| Parallel sum 50M elements | **125.8 ms** | 228.7 ms | 227.0 ms | 131.5 ms | **vāṇī fastest**; pthreads pool vs OpenMP/std::thread |
 | HashMap 500K ins + lookup | 39.7 ms | 60.0 ms | 60.9 ms | 73.5 ms | FNV-1a + linear probing beats SwissTable |
 | Linked list 1M nodes | 13.7 ms | 15.4 ms | 17.5 ms | 21.3 ms | Index vs pointer-linked (different DS) |
 | Alloc stress 500K structs | 10.8 ms | 10.3 ms | 16.0 ms | 14.7 ms | Same allocator; gap within noise |
@@ -150,14 +151,16 @@ Residual vāṇī vs C (33%): L4 overflow guards on index arithmetic; same data 
 *All variants parallel. vāṇī: `parallel for … reduce`. C/C++: OpenMP. Rust: std::thread.*
 
 ```
-  vani           ████████████████████████████████████    197.2 ms    baseline
-  c              ███████████████████████████████████░    193.1 ms    2.1% faster
-  cpp            ████████████████████████████████████    198.3 ms    0.6% slower
-  rs             ███████████████████████████░░░░░░░░░    151.1 ms   23.3% faster
+  vani           ██████████████████████░░░░░░░░░░░░░░    125.8 ms    baseline (fastest)
+  rs             ████████████████████████░░░░░░░░░░░░    131.5 ms    4.5% slower
+  c              ████████████████████████████████████    228.7 ms   81.6% slower
+  cpp            ████████████████████████████████████    227.0 ms   80.4% slower
 ```
 
-Rust 23% faster: `thread::scope` spawn+join has less overhead than OpenMP's
-reduction barrier. vāṇī and C/C++ all use OpenMP and cluster tightly.
+Thread pool eliminated per-invocation thread-creation overhead. vāṇī's pthreads pool
+(persistent workers, condvar wakeup) beats Rust's std::thread spawn+join by 4.5% and
+C/C++ OpenMP by ~81%. OpenMP overhead on Windows (MSYS2 libgomp) is high; native
+pthreads condvar signaling is cheaper.
 
 ### HashMap — 500 000 insert + 500 000 lookup
 
@@ -302,7 +305,7 @@ vāṇī's ownership model makes the efficient representation the natural one.
 | Graph BFS vs C index | C 33% faster | L4 guards on index arithmetic; same data structure | A + L4 |
 | Linked list | Rust 55% slower | Pointer-linked nodes vs flat arrays — different DS | C |
 | Alloc stress | <5% | Same allocator; gap within noise | A |
-| Parallel sum Rust | Rust 23% faster | std::thread < OpenMP synchronization overhead | A |
+| Parallel sum vs Rust | vāṇī 4.5% faster | pthreads pool (persistent workers) vs std::thread spawn | A (fixed) |
 | Array stats (old) | — | **INVALID**: parallel vs sequential comparison | — |
 | Array stats (fair) | <14% — **gap closed** | All parallel: vāṇī ≈ Rust; C OpenMP 14% slower | A |
 | SIMD dot (old) | — | **MISLEADING**: explicit vs auto-vectorized | — |
