@@ -79,10 +79,11 @@ BENCHMARKS: List[Dict] = [
         "description": "Naïve triple-loop matmul. Tests arithmetic-dense nested loops.",
         "expected": None,   # checksum varies; runner just checks exit 0
         "variants": [
-            {"tag": "vani", "file": "matmul.vani"},
-            {"tag": "c",    "file": "matmul.c"},
-            {"tag": "cpp",  "file": "matmul.cpp"},
-            {"tag": "rs",   "file": "matmul.rs"},
+            {"tag": "vani",   "file": "matmul.vani"},
+            {"tag": "c",      "file": "matmul.c"},
+            {"tag": "cpp",    "file": "matmul.cpp"},
+            {"tag": "rs",     "file": "matmul.rs",     "label": "rs (i-j-k)"},
+            {"tag": "rs_ikj", "file": "matmul_ikj.rs", "label": "rs (i-k-j)"},
         ],
     },
     {
@@ -172,25 +173,39 @@ BENCHMARKS: List[Dict] = [
     {
         "id": "10_array_stats",
         "name": "Array statistics — mean + variance of 10 000 000 values",
-        "description": "vāṇī: two `parallel for … reduce` passes. C/C++/Rust: sequential passes. Tests loop throughput and parallelism.",
+        "description": (
+            "vāṇī: two `parallel for … reduce` passes (OpenMP-backed).\n"
+            "Sequential baselines: C/C++/Rust stats.{c,cpp,rs}.\n"
+            "Fair parallel baselines: stats_omp.{c,cpp} + stats_threads.rs."
+        ),
         "expected": None,
         "variants": [
-            {"tag": "vani", "file": "stats.vani"},
-            {"tag": "c",    "file": "stats.c"},
-            {"tag": "cpp",  "file": "stats.cpp"},
-            {"tag": "rs",   "file": "stats.rs"},
+            {"tag": "vani",    "file": "stats.vani"},
+            {"tag": "c",       "file": "stats.c",         "label": "c (seq)"},
+            {"tag": "cpp",     "file": "stats.cpp",        "label": "cpp (seq)"},
+            {"tag": "rs",      "file": "stats.rs",         "label": "rs (seq)"},
+            {"tag": "omp_c",   "file": "stats_omp.c",      "label": "c (OpenMP)",
+             "extra_flags": ["-fopenmp"]},
+            {"tag": "omp_cpp", "file": "stats_omp.cpp",    "label": "cpp (OpenMP)",
+             "extra_flags": ["-fopenmp"]},
+            {"tag": "rs_par",  "file": "stats_threads.rs", "label": "rs (threads)"},
         ],
     },
     {
         "id": "11_simd_dot",
         "name": "SIMD dot product — explicit vec128<f32> vs auto-vectorized (4 M elements)",
-        "description": "vāṇī: explicit vec128<f32> simd_mul + simd_reduce_add. C/C++/Rust: scalar loop auto-vectorized by compiler. Compares explicit SIMD vs optimizer output.",
+        "description": (
+            "vāṇī: explicit vec128<f32> simd_mul + simd_reduce_add.\n"
+            "C/C++/Rust: scalar loop auto-vectorized by compiler.\n"
+            "c_sse: explicit __m128 SSE intrinsics — fair explicit-vs-explicit comparison."
+        ),
         "expected": None,   # two equal integers; runner checks they match
         "variants": [
-            {"tag": "vani", "file": "dot_simd.vani"},
-            {"tag": "c",    "file": "dot.c"},
-            {"tag": "cpp",  "file": "dot.cpp"},
-            {"tag": "rs",   "file": "dot.rs"},
+            {"tag": "vani",  "file": "dot_simd.vani"},
+            {"tag": "c",     "file": "dot.c",          "label": "c (auto-vec)"},
+            {"tag": "c_sse", "file": "dot_simd_sse.c", "label": "c (SSE expl)"},
+            {"tag": "cpp",   "file": "dot.cpp",         "label": "cpp (auto-vec)"},
+            {"tag": "rs",    "file": "dot.rs",          "label": "rs (auto-vec)"},
         ],
     },
     {
@@ -395,15 +410,18 @@ def run_benchmark(bench: Dict, bench_path: Path, compilers: Dict,
         exe = tmp_dir / f"bench_{bench['id']}_{tag}{EXE_EXT}"
 
         # Compile
+        extra_flags = list(variant.get("extra_flags", []))
         if tag == "vani":
             ok, msg = compile_vani(src, exe, compilers)
-        elif tag == "c":
-            extra = ["-fopenmp"] if "parsum" in variant["file"] else []
-            ok, msg = compile_c(src, exe, compilers, extra)
-        elif tag.startswith("cpp"):
-            extra = ["-fopenmp"] if "parsum" in variant["file"] else []
-            ok, msg = compile_cpp(src, exe, compilers, extra)
-        elif tag == "rs":
+        elif tag in ("c", "c_sse", "omp_c"):
+            if not extra_flags and "parsum" in variant["file"]:
+                extra_flags = ["-fopenmp"]
+            ok, msg = compile_c(src, exe, compilers, extra_flags)
+        elif tag.startswith("cpp") or tag in ("omp_cpp",):
+            if not extra_flags and "parsum" in variant["file"]:
+                extra_flags = ["-fopenmp"]
+            ok, msg = compile_cpp(src, exe, compilers, extra_flags)
+        elif tag.startswith("rs"):
             ok, msg = compile_rust(src, exe, compilers)
         else:
             ok, msg = False, f"unknown tag {tag}"
