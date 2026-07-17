@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   # ── x86-64: full test suite including integration tests ──────────────────
   test-x86:
