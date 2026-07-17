@@ -2,7 +2,7 @@
 
 > Audience: experienced systems programmers asking "does
 > vāṇी have X?" and what to do when the honest answer is no.
-> Updated 2026-06-20 (HashMap + Mutex entries corrected for v0.1.1/Arc-4 fixes).
+> Updated 2026-07-17 — marked 11 features shipped since 2026-06-20.
 
 vāṇी ships with a deliberately small feature surface — the
 goal is everything that's there is fully verified and
@@ -118,10 +118,9 @@ fn main() -> i64 { return double_wrap(42); }
 
 Or inline the inner generic call at each specialized call site.
 
-**When it will be fixed:** when the monomorphizer becomes multi-pass
-(iterates over newly-generated specializations until the `needed` set
-is stable).  Tracked via the `nested_generic_call_pins_current_behavior`
-regression test in `src/lib.rs`.
+✅ **Shipped (XL4, 2026-07-15)** — see commit history. The monomorphizer is now
+worklist-based multi-pass: each new specialization is scanned for further generic
+calls until the needed-set is stable. Two-level and three-level chains now compile.
 
 ### Type-state via phantom types
 
@@ -238,22 +237,9 @@ async fn process_stream() -> i64 {
 
 ### `select!` over multiple futures
 
-**Not in vāṇी.** Cannot wait on "whichever future completes
-first."
-
-**Workaround:** explicit polling. Call each future's poll fn
-in a round-robin loop and check for `Ready`:
-
-```rust
-let task_a: Task__A = a();
-let task_b: Task__B = b();
-loop {
-  if let Ready(v) = __poll_a(mut ref task_a) { return v; }
-  if let Ready(v) = __poll_b(mut ref task_b) { return v; }
-}
-```
-
-Less ergonomic than `select!` but explicit.
+✅ **Shipped 2026-07-16 (L3).** `select { await <poll_call> then <binding> { body } … }`
+desugars to a `while true` loop with one `if poll_rN != -2` arm per branch; first
+ready arm executes and breaks.
 
 ### Async with `Pin<&mut Self>` self-references
 
@@ -340,16 +326,9 @@ everywhere. The "leak" becomes "long-lived owner."
 
 ### Memory layout control (`#[repr(C)]`, `#[repr(packed)]`)
 
-**Not in vāṇी.** Struct layout is compiler-chosen (field
-order in source = field order in memory; padding follows the
-backend's ABI). No layout pragmas.
-
-**Workaround:** for FFI with C, define the struct in vāṇी
-in the same field order as the C declaration. For bit-packed
-representations (network protocols, hardware registers), use
-explicit `u32` / `u64` bit-manipulation helpers
-(`i64_set_bit`, `i64_test_bit`, etc.) rather than struct
-fields.
+✅ **Shipped 2026-07-16 (L2).** `#[repr(C)]` and `#[repr(packed)]` at struct
+declaration sites. C backend emits `__attribute__((packed))` for packed; LLVM
+backend emits `<{ ... }>` packed-struct syntax.
 
 ---
 
@@ -357,46 +336,31 @@ fields.
 
 ### Or-patterns (`Some(1) | Some(2) then ...`)
 
-**Not in vāṇी.** Each variant gets its own arm.
-
-**Workaround:** duplicate the body, or extract into a helper
-fn.
+✅ **Shipped 2026-07-15 (M2).** `|`-separated patterns in a single arm; expands
+to synthetic arms sharing the same body before type-checking.
 
 ### Pattern guards (`Some(n) then n > 0 ...`)
 
-**Not in vāṇी.** Match arms are pattern-only; conditions go
-inside the arm body.
-
-**Workaround:** match on the variant, then if/else in the
-arm body.
+✅ **Shipped 2026-07-15 (M3).** Optional `if <expr>` after the pattern in a match
+arm; guarded + unguarded arms for the same variant merge into one switch case with
+if/else inside.
 
 ### Slice patterns (`[first, .., last]`)
 
-**Not in vāṇी.** Vec/array indexing is positional.
-
-**Workaround:** explicit indexing — `xs[0]` and `xs[len-1]`
-with the appropriate `requires len(xs) >= 2`.
+✅ **Shipped 2026-07-15 (L1).** `[first, .., last]` destructuring on `Vec<T>` /
+`[T; N]` in match position; `..` matches zero or more middle elements (no binding
+in v1). Both backends emit index + length checks.
 
 ### `if let` / `while let`
 
-**Not in vāṇी.** Pattern binding is `match`-only.
-
-**Workaround:** use `match` with one named arm + a wildcard:
-
-```rust
-match opt {
-  Some(v) then { use(v); }
-  None then {},
-}
-```
+✅ **Shipped 2026-07-15 (M1).** Both forms desugar to `match expr { Opt.Some(v)
+then { … } _ then {} }`; the checker handles the resulting match arms.
 
 ### Labeled break / continue
 
-**Not in vāṇी.** `break` / `continue` only target the
-nearest enclosing loop.
-
-**Workaround:** extract the inner loop into a helper fn that
-returns early.
+✅ **Shipped 2026-06-23 (item 25).** `break inner` / `break middle` / `break outer`
+exit a specific enclosing loop by position. Parser uses 2-token lookahead; checker
+assigns synthetic `__vani_pos_N` labels; LLVM backend searches by label.
 
 ### Try-block / `try { ... }`
 
@@ -413,10 +377,10 @@ that returns `Result<T, E>` and `try` / `?` propagates.
 ### Bigint / arbitrary-precision
 
 **Not in vāṇी.** Integers are `i64` / `u64` / smaller.
-Constant-time overflow is caught at compile time; runtime
-arithmetic silently wraps (two's complement) — no guards
-are emitted at arithmetic op sites. See the **Integer
-overflow runtime guards** row in Mixed-feature gaps below.
+Runtime overflow guards are now emitted (L4, 2026-07-16) — every signed `+`, `-`,
+`*` site gets a guard; the SMT pass elides guards it can prove safe from `requires`
+bounds. See the **Integer overflow runtime guards** row in Mixed-feature gaps below
+(now marked fixed).
 
 **Workaround:** for cryptographic / arbitrary-precision
 work, use C bigint via FFI (`extern "C"` declarations to
@@ -434,14 +398,14 @@ shipped; works for the common cases.
 
 ### SIMD intrinsics
 
-**Partially supported.** vāṇी has two explicit SIMD register types:
+**Partially supported.** vāṇī has three explicit SIMD register types (all shipped):
 
-- `vec128<T>` — 128-bit, 7 builtins (`simd_splat`, `simd_load`, `simd_store`,
-  `simd_add`, `simd_sub`, `simd_mul`, `simd_reduce_add`). Maps to NEON on
-  AArch64, SSE/AVX on x86-64, RVV on RISC-V.
-- `vec256<T>` — 256-bit, 7 builtins (`simd256_*`). Maps to AVX2 `ymm` on
-  x86-64; legalised as 2×NEON on AArch64 without SVE; single SVE register
-  with `--sve`; RVV with `vsetvli vl=8`.
+- `vec128<T>` — 128-bit, 7 builtins (`simd_splat/load/store/add/sub/mul/reduce_add`).
+  Maps to NEON on AArch64, SSE on x86-64, RVV on RISC-V.
+- `vec256<T>` — 256-bit, 7 builtins (`simd256_*`). ✅ Shipped SIMD-9 (2026-07-10).
+  Maps to AVX2 `ymm`; 2×NEON on AArch64 without SVE; RVV with `vsetvli vl=8`.
+- `vec512<T>` — 512-bit, 7 builtins (`simd512_*`). ✅ Shipped M4 (2026-07-15).
+  Targets AVX-512 zmm / SVE-512 / RVV VLEN=512.
 
 **Still not available:** platform-specific intrinsics (`__m256i`, `vaddq_s64`,
 `_mm_aesenc_si128`, etc.). For these, use an `extern "C"` FFI shim compiled
@@ -453,11 +417,8 @@ with the target's intrinsic headers. See `docs/simd_ffi_shims.md`.
 
 ### Re-export with rename
 
-**Partial.** `pub use foo::bar;` works; `pub use foo::bar
-as baz;` is not yet supported.
-
-**Workaround:** define a wrapper fn `pub fn baz(...) -> ...
-{ return bar(...); }`.
+✅ **Shipped 2026-07-14 (B2).** `pub use foo::bar as baz;` is supported; the
+regression test `top_level_use_of_pub_use_as_rename` locks the interaction.
 
 ### Visibility modifiers beyond `pub` / `pub(kosh)`
 
@@ -480,14 +441,9 @@ decision) will lift this.
 
 ### Built-in test runner (`#[test]`)
 
-**Not in vāṇी.** Tests are written in the host language
-(Rust, for the compiler itself); vāṇी programs invoke
-external test runners or assert-based smoke tests.
-
-**Workaround:** assert-based smoke tests in `examples/`
-serve as the de-facto test runner. The cross-backend parity
-test (`run_end_to_end.rs`) runs every example through both
-C and LLVM.
+✅ **Shipped 2026-07-16 (XL2).** `#[test]` attribute on functions; `vanic test
+file.vani` collects test fns, synthesises a harness main (each fn called; pass =
+print "ok", fail = assert aborts with message), compiles+runs via CC.
 
 ---
 
@@ -496,7 +452,7 @@ C and LLVM.
 | Feature | Status | Workaround |
 |---|---|---|
 | Generic trait bounds | indirect | iface dispatch as `dyn Iface` param |
-| Generic fn calling generic fn (nested mono) | single-pass gap | flatten: make the inner generic call from a non-generic wrapper |
+| Generic fn calling generic fn (nested mono) | ✅ SHIPPED XL4 2026-07-15 | — |
 | Higher-rank polymorphism | absent | not needed in practice |
 | GATs | absent | not needed in practice |
 | Const generics | partial | `Vec<T>` for dynamic; per-shape fns for static |
@@ -508,32 +464,31 @@ C and LLVM.
 | Drop ordering | reverse-decl only | explicit consumption order |
 | `async` with `impl Future` | named Task__X | use the synthesized name |
 | `Stream<T>` async iterator | absent | hand-rolled poll loop |
-| `select!` | absent | explicit poll round-robin |
+| `select!` | ✅ SHIPPED L3 2026-07-16 | — |
 | Pin<&mut Self> | NOT planned | restructure to avoid self-refs |
-| Mutex<Vec<T>> | ✅ SHIPPED v0.1.1 — `Mutex<T>` is parametric over any T | — |
+| Mutex<Vec<T>> | ✅ SHIPPED v0.1.1 | — |
 | Proc macros | absent | external build-time codegen script |
 | `macro_rules!` | absent | generic fns + per-call codegen |
 | Reflection | absent | `dyn Iface` / explicit enum dispatch |
-| Custom layout (`#[repr(C)]`) | absent | match field order to C declaration |
-| Or-patterns | absent | duplicate arms or extract helper fn |
-| Pattern guards | absent | match → if/else in body |
-| Slice patterns | absent | positional indexing + `requires` |
-| `if let` / `while let` | absent | `match` with named + wildcard arm |
-| Labeled break/continue | absent | extract inner loop into helper |
+| Custom layout (`#[repr(C)]`, `#[repr(packed)]`) | ✅ SHIPPED L2 2026-07-16 | — |
+| Or-patterns | ✅ SHIPPED M2 2026-07-15 | — |
+| Pattern guards | ✅ SHIPPED M3 2026-07-15 | — |
+| Slice patterns | ✅ SHIPPED L1 2026-07-15 | — |
+| `if let` / `while let` | ✅ SHIPPED M1 2026-07-15 | — |
+| Labeled break/continue | ✅ SHIPPED item-25 2026-06-23 | — |
 | Bigint | absent | C FFI (GMP) |
-| Runtime integer overflow guards | absent (wraps) | `requires` on operand bounds; const-time overflow IS caught |
+| Runtime integer overflow guards | ✅ SHIPPED L4 2026-07-16 | — |
 | Decimal / fixed-point | absent | scaled integers |
-| SIMD intrinsics | absent | parallel for + auto-vectorize / FFI |
-| `pub use foo::bar as baz` | partial | wrapper fn |
+| SIMD intrinsics (vec128/256/512) | partial — explicit types shipped; platform intrinsics absent | `extern "C"` FFI shim |
+| `pub use foo::bar as baz` | ✅ SHIPPED B2 2026-07-14 | — |
 | Workspaces | absent | monorepo or `--link-with` |
-| `#[test]` runner | absent | `examples/` + cross-backend parity test |
+| `#[test]` runner | ✅ SHIPPED XL2 2026-07-16 | — |
 
 The deliberate omissions (Rc, multi-lifetime, Pin) are
-philosophical — vāṇी picks structural prevention over
-flexibility. The accidental omissions (or-patterns, slice
-patterns, `if let`, `pub use ... as ...`, workspaces) are
-v1 gaps; some will land in follow-up releases once a real
-use case surfaces.
+philosophical — vāṇী picks structural prevention over
+flexibility. Of the original accidental omissions, 11 have
+shipped since 2026-06-20. Remaining gaps: Bigint, Decimal,
+Workspaces, generic trait-bound syntax, Stream<T>, proc macros.
 
 ---
 
@@ -554,20 +509,20 @@ checking these as the compiler evolves.
 | `Vec<(i64, OwnedStr)>` etc. with non-Copy tuple element | Tuples themselves now allow non-Copy elements (v0.1.4), but `Vec<non-Copy-tuple>` has not been verified end-to-end yet. | If you hit issues, wrap the tuple in a named struct (structs with non-Copy fields in Vecs are well-tested). |
 | `HashMap<K, V>` with non-scalar V | ✅ **Fixed (Arc 4)** — `hashmap_insert` now accepts `OwnedStr`, `Vec<i64>`, tuple, `f64`, and `Vec`-typed values. Full K-V matrix shipped. | No workaround needed. |
 | `Mutex<Vec<T>>`, `Atomic<Vec<T>>` | `Mutex<T>` is now parametric over any T (v0.1.1) — `Mutex<Vec<i64>>` works. `Atomic<T>` payload is still i64-width–shaped only. | For Atomic, use a `Mutex<Vec<T>>` instead; or channel-transfer ownership. |
-| Closure capturing non-Copy binding | Closures + tasks reject affine captures (rejected with `closure_captures_affine` elaboration). | Pre-extract scalar fields from the affine value, or pass it as a closure-fn argument rather than capturing. |
+| Closure capturing non-Copy binding | ✅ **Fixed 2026-07-15 (L5)** — FnOnce semantics: heap-malloc env, env-nulled after call, scope-exit Drop, double-call guard. Tests: `aff_closure_*` in lib.rs. | No workaround needed. |
 | `box(X { ... } as dyn Iface)` inline | **Was a compiler panic; fixed 2026-06-09.** Now works on both backends. | Pinned by a lib regression test; previously the workaround was `let v = X { ... }; box(v as dyn Iface);` — the let-bind form was always safe. |
 | `enum Outer { Wrap(Inner) }` where Inner is also an enum | **Was a rejection ("payload must be assignable to Inner, got Inner"); fixed 2026-06-09.** | Pinned by `nested_enum_payload_accepts_enum_construction`; the parser-stamped `Type::Struct(Inner)` is now resolved to `Type::Enum(Inner)` for enum variant payloads (the resolve pass missed them before). |
 | Inline closure inside `implement Iface for T { fn m { ... } }` | **Was a compiler panic ("anonymous fn survived lambda-lift"); fixed 2026-06-09.** | The lambda-lift pass now walks impl + methods-block bodies BEFORE they're hoisted. Pinned by two regression tests. |
-| Anonymous fn called inline from a Vec slot (`fs[0](10)`) | Rejected — "only named functions can be called". | Assign to a `let` first, then call. |
+| Anonymous fn called inline from a Vec slot (`fs[0](10)`) | ✅ **Fixed 2026-07-14 (B3)** — `ExprKind::IndirectCall` AST node added; parser emits it for non-Var callees; checker type-checks callee as `FnPtr`/`Closure`. | No workaround needed. |
 | Generic fn `<T>` inferred from complex argument types (e.g. `Vec<T>` with Vec-typed arg) | Rejected — v1 inference supports literal / Var / (v3.1 only) Ref(Var) at the T-position. | Pre-extract the arg into a Var, or restructure the fn to not be generic over composite types. |
 | Turbofish syntax (`f::<i64>(arg)`) | Not supported in v1. | Rely on inference (which is limited; see above). |
-| OwnedStr payload bound in match arm returned as OwnedStr | Match-arm binding exposes the payload as `Str` (read-only view), not the owned form. Returning the binding produces a Str-typed arm body. | Wrap the bound arm as `s + ""` to clone into OwnedStr, AND use `"" + ""` for all other literal-string arms so every arm produces OwnedStr (arm types must agree). |
-| **Integer overflow runtime guards** | **NOT emitted in v1** despite the README's aspirational claim. `i64::MAX + 1` silently wraps to `i64::MIN` on both backends. This is a real safety gap — the elision pass aspires to keep guards by default and elide via SMT discharge, but the guards aren't actually generated at the arithmetic op sites today. | Reach for `requires` clauses to constrain operand ranges; the SMT pass at least flags overflows when both bounds are known. Treat unbounded i64 arithmetic as wrapping for now. |
+| OwnedStr payload bound in match arm returned as OwnedStr | ✅ **Fixed 2026-07-15 (M5)** — scrutinee Drop suppressed only on direct move-out (arm body = Var(binding)); view-only / no-binding arms retain the Drop. Fixes double-free exit-116 crash. | No workaround needed. |
+| **Integer overflow runtime guards** | ✅ **Fixed 2026-07-16 (L4)** — `llvm.sadd/ssub/smul.with.overflow` in LLVM; `__builtin_add/sub/mul_overflow` in C. SMT elision extended to discharge guards when `requires` bounds prove safety. | No workaround needed. |
 | Two refs to the same Vec at once (read + write) | Aliasing rule: many shared XOR one mut. | End one borrow before taking the other; or split the operation into two passes. |
 | Generic fn with multiple lifetime-distinct ref params returning a ref | Path-D territory; v1 only does single-ref-param elision. | Split into two narrower fns, each with one ref param. |
 | `async fn` containing a `dyn Iface` method call across an `await` | `dyn`-method receivers can't be held across suspend points (Pin-like restriction would be needed). | Resolve the dyn before the await; pre-compute, then await, then use the result. |
 | Recursive `Drop` impl that calls another `Drop` impl on a borrowed field | Borrow-checker rule: `mut ref Self` during drop can't pass to another `Drop` taking `mut ref Self`. | Implement Drop only at the outermost level; let the compiler chain field-by-field drops automatically. |
-| `ref Vec<T>` parameter + loop-bound bounds check (C backend) | The C backend emits `.len` instead of `->len` in the auto-inserted bounds-check guard when the Vec is a `ref` (pointer) parameter. gcc rejects the generated C with "is a pointer; did you mean `→`?". Affects any fn that takes `ref Vec<T>` and whose loop bound triggers the guard (e.g. `simd_load`/`simd256_load` with a non-trivially-bounded index). LLVM backend is unaffected. | Use `--backend=llvm` (the default) for functions with `ref Vec<T>` parameters and SIMD loads. Alternatively restructure the fn to take `Vec<T>` by value (copy the Vec reference at the call site via a local let). Pre-existing bug; tracked for fix in a future C-backend bounds-check pass. |
+| `ref Vec<T>` parameter + loop-bound bounds check (C backend) | ✅ **Fixed 2026-07-14 (B1)** — `while_bounds_hints` now tracks `is_ref` per vec name; emits `xs->len` for `ref Vec<T>` params (C pointer) instead of `xs.len`. | No workaround needed. |
 
 The pattern: when two features both reach for "non-Copy
 data", the combination often hits a v1 gap because the

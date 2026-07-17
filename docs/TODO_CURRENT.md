@@ -542,6 +542,30 @@ proving `idx < capacity` from loop invariants is a bounded-model-checking proble
 
 ---
 
+---
+
+## Implementable gaps (from missing_features.md audit, added 2026-07-17)
+
+Features still absent or partial that are within our control — no hardware, no
+external tokens, no grammar consultants required.
+
+- [ ] **G1. Generic trait bounds direct syntax** (`fn f<T: Iface>(x: T)`) (~4 h · P1)
+  Currently the compiler silently ignores bounds; iface methods called on `T` surface
+  at instantiation but there's no syntactic bound expression.
+  Add `T: Iface` parse in generic param lists; check that every instantiation site
+  has a `implement Iface for ConcreteType` in scope (or fail with a clear diagnostic).
+  **Impact:** makes generic APIs self-documenting and catches missing impl at call site.
+
+- [ ] **G2. `Vec<non-Copy-tuple>` end-to-end verification** (~1 h · P2)
+  Tuples with non-Copy elements compile since v0.1.4, but `Vec<(i64, OwnedStr)>`
+  has not been verified end-to-end (push, index, drop). Add an edge-case test and
+  fix any issue found.
+
+- [ ] **G3. `Atomic<T>` for non-i64 payloads** (~3 h · P3)
+  `Atomic<T>` today is i64-width only. Extend to `f64`, `bool`, and pointer-sized
+  types. Use `__atomic_load` / `__atomic_store` with appropriate type casts in C;
+  LLVM `atomic load` / `atomic store` with `ptr` type.
+
 ## Blocked (not in our control)
 
 | Item | Blocker |
