@@ -1,6 +1,6 @@
 [package]
 name = "vani"
-version = "0.5.2-dev"
+version = "0.5.2"
 edition = "2021"
 description = "VANI (वाणी) — Verbose Alternative Natural Interface: a verifiable language designed to read like speech, not punctuation."
 license = "MIT"

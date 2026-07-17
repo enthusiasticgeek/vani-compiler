@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.5.2] — YYYY-MM-DD
+
+### Added
+
+- TODO
+
+### Fixed
+
+- TODO
+
+---
+
 ## [v0.5.1] — YYYY-MM-DD
 
 ### Added
