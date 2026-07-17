@@ -21,15 +21,27 @@
  *     reverse it in O(n) and return.  Handles reverse-sorted input without
  *     entering the sort loop at all.
  *
- * The branchless block partition scans 64 elements at a time from each end,
- * collecting swap candidates into offset arrays WITHOUT branches:
- *   offs[cnt] = i;  cnt += (a[i] >= pivot);   // branchless conditional store
- * GCC -O3 lowers this to CMOV / SETCC instructions, eliminating ~50% of
- * branch mispredictions that dominate the cost of classic Hoare partition
- * on random data.
+ * Block partition scan (hot path):
+ *   The comparison phase (l[i] >= pivot for 64 elements) is separated from
+ *   the packing phase so GCC can auto-vectorise comparisons with AVX-512
+ *   (8 x i64 per 512-bit register → 8 vector ops vs 64 scalar).  The packing
+ *   phase remains scalar (dependent store on lc), but operates on 8-bit
+ *   booleans rather than 64-bit values.
+ *
+ * Compiler hints applied:
+ *   - #pragma GCC target: avx512f/vl/bw/dq (Ice Lake), avx2, bmi2, popcnt
+ *   - __attribute__((always_inline)) on block_part and hoare to prevent
+ *     call overhead inside the hot recursive loop
+ *   - __builtin_clzll for ilog2 (single BSR instruction)
+ *   - __builtin_prefetch in the block loop to preload the next 512B
  */
+
+#pragma GCC optimize("O3,unroll-loops,prefetch-loop-arrays")
+#pragma GCC target("avx512f,avx512bw,avx512dq,avx512vl,avx2,bmi2,popcnt")
+
 #include <stdint.h>
 #include <stddef.h>
+#include <immintrin.h>
 
 typedef struct { int64_t *data; int64_t len; int64_t cap; } VecI64;
 typedef struct { double  *data; int64_t len; int64_t cap; } VecF64;
@@ -96,50 +108,89 @@ static inline T prefix##_pivot(T *lo, ptrdiff_t n) {                      \
     return *mid;                                                            \
 }                                                                           \
                                                                             \
-/* Branchless block partition [lo, hi] around pivot.                       \
- * Fills offset arrays without conditional branches:                        \
- *   offs[cnt] = i;  cnt += (a[i] >= pivot);                               \
- * GCC -O3 emits CMOV/SETCC for the += expression — zero branches.         \
+/* Block partition [lo, hi] around pivot.                                  \
+ *                                                                          \
+ * Scan phase: separated into comparison (auto-vectorised with AVX-512)    \
+ * and packing (sequential, but on 8-bit booleans rather than 64-bit       \
+ * values). On random data ~32 of 64 elements qualify per block; the       \
+ * packing loop runs 64 iterations regardless.                              \
+ *                                                                          \
+ * The lbuf/rbuf arrays have BLOCK+4 bytes to absorb potential 4-byte      \
+ * over-writes in vectorised variants without overflowing.                  \
+ *                                                                          \
  * Returns pointer to first element of right partition (>= pivot). */      \
-static T* prefix##_block_part(T *lo, T *hi, T pivot) {                    \
-    uint8_t lbuf[BLOCK], rbuf[BLOCK];                                      \
+static inline __attribute__((always_inline))                                \
+T* prefix##_block_part(T *lo, T *hi, T pivot) {                           \
+    uint8_t lbuf[BLOCK + 4], rbuf[BLOCK + 4];                             \
     int lc = 0, ls = 0, rc = 0, rs = 0;                                   \
     T *l = lo, *r = hi;                                                    \
                                                                             \
     while (r - l + 1 >= 2 * BLOCK) {                                       \
+        /* Prefetch next BLOCK-sized chunks to hide memory latency. */     \
+        __builtin_prefetch(l + 2*BLOCK, 0, 1);                            \
+        __builtin_prefetch(r - 2*BLOCK, 0, 1);                            \
         if (!lc) {                                                          \
-            ls = 0; lc = 0;                                                 \
-            for (int i = 0; i < BLOCK; i++) {                              \
-                lbuf[lc] = (uint8_t)i;                                     \
-                lc += (l[i] >= pivot);   /* branchless */                  \
+            /* AVX-512: compare 8 i64 at a time, build 64-bit bitmask,   \
+             * then walk bits to pack qualifying indices.  Replaces a     \
+             * 64-iteration scalar packing loop with 8 vector compares    \
+             * + ~32 bit-walk iterations (50% qualifying for random data). */ \
+            __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));     \
+            uint64_t mask_l = 0;                                           \
+            for (int bi = 0; bi < BLOCK; bi += 8) {                       \
+                __m512i vals = _mm512_loadu_si512(                         \
+                    (const __m512i *)(l + bi));                            \
+                __mmask8 k = _mm512_cmpge_epi64_mask(vals, vpivot_v);     \
+                mask_l |= (uint64_t)(unsigned)k << bi;                    \
             }                                                               \
+            lc = 0;                                                        \
+            uint64_t m = mask_l;                                           \
+            while (m) {                                                    \
+                lbuf[lc++] = (uint8_t)__builtin_ctzll(m);                 \
+                m &= m - 1;                                                \
+            }                                                               \
+            ls = 0;                                                        \
         }                                                                   \
         if (!rc) {                                                          \
-            rs = 0; rc = 0;                                                 \
-            for (int i = 0; i < BLOCK; i++) {                              \
-                rbuf[rc] = (uint8_t)i;                                     \
-                rc += (r[-i] < pivot);   /* branchless */                  \
+            T *rb = r - BLOCK + 1;                                         \
+            __m512i vpivot_v = _mm512_set1_epi64((long long)(pivot));     \
+            uint64_t mask_r = 0;                                           \
+            for (int bi = 0; bi < BLOCK; bi += 8) {                       \
+                __m512i vals = _mm512_loadu_si512(                         \
+                    (const __m512i *)(rb + bi));                           \
+                __mmask8 k = _mm512_cmplt_epi64_mask(vals, vpivot_v);     \
+                mask_r |= (uint64_t)(unsigned)k << bi;                    \
             }                                                               \
+            rc = 0;                                                        \
+            uint64_t m = mask_r;                                           \
+            while (m) {                                                    \
+                rbuf[rc++] = (uint8_t)__builtin_ctzll(m);                 \
+                m &= m - 1;                                                \
+            }                                                               \
+            rs = 0;                                                        \
+        }\
+        /* Swap min(lc,rc) pairs. */                                       \
+        {   int n = lc < rc ? lc : rc;                                     \
+            T *rb = r - BLOCK + 1;                                         \
+            for (int i = 0; i < n; i++) {                                  \
+                T t = l[lbuf[ls+i]];                                       \
+                l[lbuf[ls+i]] = rb[rbuf[rs+i]];                           \
+                rb[rbuf[rs+i]] = t;                                        \
+            }                                                               \
+            lc -= n; ls += n;                                               \
+            rc -= n; rs += n;                                               \
+            if (!lc) l += BLOCK;                                           \
+            if (!rc) r -= BLOCK;                                           \
         }                                                                   \
-        int n = lc < rc ? lc : rc;                                         \
-        for (int i = 0; i < n; i++) {                                      \
-            T t = l[lbuf[ls+i]];                                           \
-            l[lbuf[ls+i]] = r[-rbuf[rs+i]];                               \
-            r[-rbuf[rs+i]] = t;                                            \
-        }                                                                   \
-        lc -= n; ls += n;                                                   \
-        rc -= n; rs += n;                                                   \
-        if (!lc) l += BLOCK;                                               \
-        if (!rc) r -= BLOCK;                                               \
     }                                                                       \
                                                                             \
     /* Swap remaining buffered pairs from partial last blocks. */           \
-    { int n = lc < rc ? lc : rc;                                           \
-      for (int i = 0; i < n; i++) {                                        \
-          T t = l[lbuf[ls+i]];                                             \
-          l[lbuf[ls+i]] = r[-rbuf[rs+i]];                                 \
-          r[-rbuf[rs+i]] = t;                                              \
-      }                                                                     \
+    {   int n = lc < rc ? lc : rc;                                         \
+        T *rb = r - BLOCK + 1;                                             \
+        for (int i = 0; i < n; i++) {                                      \
+            T t = l[lbuf[ls+i]];                                           \
+            l[lbuf[ls+i]] = rb[rbuf[rs+i]];                               \
+            rb[rbuf[rs+i]] = t;                                            \
+        }                                                                   \
     }                                                                       \
                                                                             \
     /* Hoare tail sweep on remaining [l, r]. */                            \
@@ -154,7 +205,8 @@ static T* prefix##_block_part(T *lo, T *hi, T pivot) {                    \
 }                                                                           \
                                                                             \
 /* Hoare partition for sub-arrays smaller than 2*BLOCK. */                 \
-static T* prefix##_hoare(T *lo, T *hi, T pivot) {                         \
+static inline __attribute__((always_inline))                                \
+T* prefix##_hoare(T *lo, T *hi, T pivot) {                                \
     T *i = lo - 1, *j = hi + 1;                                           \
     for (;;) {                                                              \
         do { i++; } while (*i < pivot);                                    \
@@ -198,7 +250,8 @@ DEFINE_SORT(int64_t, si)
 DEFINE_SORT(double,  sd)
 
 static int ilog2_n(int64_t n) {
-    int k = 0; while (n > 1) { n >>= 1; k++; } return k;
+    /* BSR instruction: 63 - clzll(n) for n > 0. */
+    return n > 1 ? (int)(63 - __builtin_clzll((uint64_t)n)) : 0;
 }
 
 /* Public entry points — names match `declare` in backend_llvm.rs. */
