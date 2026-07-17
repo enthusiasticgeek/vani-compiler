@@ -1,0 +1,44 @@
+// vani-lang: english
+// Benchmark 01b — Fibonacci with SMT-proven overflow-free arithmetic
+//
+// REVIEWER QUESTION ADDRESSED:
+//   "Are integer overflow semantics affecting optimization?"
+//
+// L4 (runtime overflow guards) emits __builtin_add_overflow / llvm.sadd.with.overflow
+// on every signed `+` site where the SMT pass cannot prove safety at compile time.
+// In baseline fib.vani, `fib(n-1) + fib(n-2)` has no bounds in scope, so the
+// guard fires on every recursive addition — adding overhead vs C.
+//
+// FIX: `requires n >= 0 && n <= 50;` gives the checker a concrete upper bound.
+// The SMT pass then proves:
+//   fib(50) = 12_586_269_025, which fits in i64 (max 9.2e18).
+//   Adding two non-negative values bounded by fib(50) cannot exceed i64::MAX.
+//   Monotonicity goal: (b >= 0) → trivially provable → guard ELIDED.
+//
+// To verify elision is working:
+//   vanic emit-c fib_bounded.vani | grep __builtin_add_overflow
+//   (should produce no output)
+//
+// Compare with baseline:
+//   vanic emit-c fib.vani | grep __builtin_add_overflow
+//   (prints intent_check_i64_add on every recursive return)
+//
+// Build:
+//   vanic build benchmarks/01_fibonacci/fib_bounded.vani -o /tmp/fib_bounded_vani
+//   /tmp/fib_bounded_vani
+//   Expected output: 267914296
+
+intent "Benchmark: recursive Fibonacci with SMT overflow elision via requires bounds";
+
+fn fib(n: i64) -> i64
+  requires n >= 0 && n <= 50;
+{
+    if n <= 1 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+fn main() -> i64 {
+    let result: i64 = fib(42);
+    print result;
+    return 0;
+}

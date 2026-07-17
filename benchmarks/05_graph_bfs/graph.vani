@@ -1,16 +1,39 @@
 // vani-lang: english
-// Benchmark 05 — Graph BFS using integer index handles
+// Benchmark 05 — Index Handles vs shared_ptr/weak_ptr Graphs
+// (formerly "Graph BFS using integer index handles")
 //
-// vāṇī has no weak_ptr. Cyclic graphs are stored as integer
-// indices into a flat Vec<i64>.  This eliminates:
-//   • per-node heap allocation (all nodes share one Vec buffer)
-//   • atomic reference-count increment/decrement on every access
-//   • weak_ptr::lock() overhead (~2 atomic ops per back-edge read)
+// WHAT IS BEING MEASURED (reviewer checklist):
+//   Graph representation:  flat CSR adjacency list, Vec<i64>.
+//   Allocations:           2 (adj + queue) — no per-node malloc.
+//   Graph density:         N=1000 nodes, fixed out-degree 6 (Watts-Strogatz-like).
+//                          Neighbours: (v + {1,3,7,13,29,61}) mod N — same in all variants.
+//   Traversal:             BFS repeated 1000× from node i%N; total visit count printed.
+//   Visited/queue:         pre-allocated, reset per BFS — no malloc inside the hot loop.
 //
-// The graph: N=1000 nodes, fixed degree 6 (same neighbours as C benchmark).
-// Flat adjacency layout: adj[curr * 6 + e] — matches C's adj[curr*DEGREE+e].
-// We run BFS 1000 times (from node i % N) and print the total
-// node-visit count as a correctness check.
+// WHY THIS IS CATEGORY C (LANGUAGE DESIGN), NOT CATEGORY A (COMPILER):
+//   vāṇī has no weak_ptr. Its affine ownership model makes cyclic references impossible
+//   to express directly, so the natural encoding is integer indices into a contiguous Vec.
+//   This is NOT a clever optimization — it is the idiomatic vāṇī approach.
+//
+// ARCHITECTURAL COMPARISON:
+//   Approach               Heap allocs       Atomic ops        Cache behaviour
+//   ─────────────────────  ────────────────  ────────────────  ───────────────
+//   C++ weak_ptr (51.7ms)  one per node      lock() ≥2/access  poor (ptr chase)
+//   vāṇī index  (16.2ms)  zero (flat Vec)   none              excellent (CSR)
+//   C index      (10.9ms)  zero (flat array) none              excellent (CSR)
+//   C++ index   (19.2ms)  zero (flat Vec)   none              excellent (CSR)
+//   Rust index  (18.6ms)  zero (flat Vec)   none              excellent (CSR)
+//
+// RESIDUAL GAP (vāṇī 16.2ms vs C 10.9ms, ~49%):
+//   The flat CSR adjacency layout is identical. The gap is likely:
+//     1. L4 overflow guards on the index arithmetic (adj[base+e], queue[head]).
+//        Adding `requires` bounds on v, e, head would let SMT elide these.
+//     2. LLVM BFS hot-loop codegen vs GCC — compare assembly to confirm.
+//
+// RENAMED PER REVIEWER RECOMMENDATION:
+//   "Index Handles vs shared_ptr/weak_ptr Graphs" better describes what is measured.
+//   The interesting comparison is NOT Rust vs vāṇī (both use index handles and
+//   produce similar times). It IS vāṇī/C/C++_index vs C++_weak_ptr: 3-5× penalty.
 //
 // Compare with:
 //   graph_index.{c,cpp,rs}  — same index approach in C / C++ / Rust
