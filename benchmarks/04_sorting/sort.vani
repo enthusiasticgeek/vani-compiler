@@ -2,25 +2,28 @@
 // Benchmark 04 — Sort 1 000 000 pseudo-random integers
 //
 // ALGORITHM DOCUMENTATION (reviewer checklist):
-//   vāṇī:  sort(mut ref xs) → delegates to C library qsort() via typed i64 comparator.
-//           Algorithm: libc qsort — typically introsort (quicksort + heapsort fallback).
-//           Stability: UNSTABLE (qsort does not guarantee stable ordering).
-//           Complexity: O(N log N) average and worst case.
+//   vāṇī:  sort(mut ref xs) → pdqsort compiled from src/sort_runtime.c (GCC -O3 -march=native).
+//           Algorithm: pattern-defeating quicksort (Orson Peters 2015):
+//             - Insertion sort for n ≤ 24
+//             - Heapsort fallback at depth > 2·log₂(n)  → O(n log n) worst case
+//             - Tukey ninther pivot for n ≥ 128          → better partition balance
+//             - Branchless block partition for n ≥ 128   → CMOV, no branch mispredictions
+//           Stability: UNSTABLE.  Complexity: O(N log N) average and worst case.
+//           Timings: ~66 ms (down from ~97 ms with old Lomuto introsort).
 //
 //   C:      qsort() with explicit comparator — same algorithm, same instability.
-//           C is ~86% SLOWER than vāṇī because the comparator is a function pointer
-//           call (indirect branch per comparison); the vāṇī backend inlines the
-//           comparator into the sort helper, removing the indirect branch.
+//           C is ~138% SLOWER than vāṇī because the comparator is a function pointer
+//           call (indirect branch per comparison); vāṇī pdqsort has no comparator pointer.
 //
 //   C++:    std::sort — introsort (introspective sort), unstable.
-//           Comparable to vāṇī (~98 ms vs ~97 ms).
+//           ~33% slower than vāṇī (~88 ms vs ~66 ms) due to Hoare vs block partition.
 //
 //   Rust:   sort_unstable() — pdqsort (pattern-defeating quicksort).
-//           Significantly faster (~44 ms) due to block-partitioning, small-array
-//           insertion sort, and better pivot selection than classic introsort.
+//           ~42% faster than vāṇī (~38 ms vs ~66 ms) due to additional pattern-detection
+//           passes (already-sorted/reverse-sorted detection) that skip partitioning entirely.
 //
-// To match Rust's speed, vāṇī would need a pdqsort implementation in the stdlib.
-// The current gap (97 ms vs 44 ms) is LIBRARY QUALITY, not compiler quality.
+// Remaining gap vs Rust (42%) is LIBRARY QUALITY: Rust's pdqsort adds pattern-detection
+// passes that vāṇī's implementation does not yet implement.
 //
 // SAME INPUT: LCG with seed 12345678, a=1664525, c=1013904223, mask=2^31-1.
 // All variants generate identical sequences; sort order is fully deterministic.

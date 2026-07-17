@@ -3137,14 +3137,61 @@ fn build_program_llvm(
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let ll_path = env::temp_dir().join(format!("vanic-{}-{}-{}.ll", stem, pid, nanos));
-    let opt_path = env::temp_dir().join(format!("vanic-{}-{}-{}.opt.ll", stem, pid, nanos));
-    let obj_path = env::temp_dir().join(format!("vanic-{}-{}-{}.o", stem, pid, nanos));
+    let ll_path       = env::temp_dir().join(format!("vanic-{}-{}-{}.ll",     stem, pid, nanos));
+    let opt_path      = env::temp_dir().join(format!("vanic-{}-{}-{}.opt.ll", stem, pid, nanos));
+    let obj_path      = env::temp_dir().join(format!("vanic-{}-{}-{}.o",      stem, pid, nanos));
+    let sort_c_path   = env::temp_dir().join(format!("vanic-{}-{}-{}-sort.c", stem, pid, nanos));
+    let sort_obj_path = env::temp_dir().join(format!("vanic-{}-{}-{}-sort.o", stem, pid, nanos));
     fs::write(&ll_path, ll)
         .map_err(|error| format!("failed to write '{}': {}", ll_path.display(), error))?;
     if let Ok(keep) = env::var("VANIC_KEEP_IR") {
         let _ = fs::copy(&ll_path, &keep);
     }
+
+    // Compile the sort runtime C helper (introsort for Vec<i64> / Vec<f64>).
+    // The LLVM IR emits `declare` for @intent_vec_{i64,double}__sort; the
+    // definitions live in src/sort_runtime.c and are included here as a
+    // compile-time string so the binary remains self-contained.
+    // Skip for bare-metal targets (no libc / stdint.h) — those binaries will
+    // get a linker error if sort() is called, which is the correct signal.
+    let sort_compiled = if !is_bare_metal_triple(target.unwrap_or("")) {
+        let sort_c_src = include_str!("sort_runtime.c");
+        let write_ok = fs::write(&sort_c_path, sort_c_src).is_ok();
+        if write_ok {
+            // Use the cross compiler for cross targets; host CC otherwise.
+            let cc_for_sort = if let Some(triple) = target {
+                cross_cc_for_triple(triple)
+            } else {
+                env::var("CC").unwrap_or_else(|_| "gcc".to_string())
+            };
+            // -march=native only makes sense for host builds.
+            let mut sort_cmd = Command::new(&cc_for_sort);
+            sort_cmd.args(["-O3", "-c"]);
+            if target.is_none() {
+                sort_cmd.arg("-march=native");
+            }
+            let sort_cc_out = sort_cmd
+                .arg(&sort_c_path)
+                .arg("-o").arg(&sort_obj_path)
+                .output();
+            let _ = fs::remove_file(&sort_c_path);
+            match sort_cc_out {
+                Ok(o) if o.status.success() => true,
+                Ok(o) => {
+                    eprintln!(
+                        "warning: sort runtime compilation failed (sort may be unresolved):\n{}",
+                        String::from_utf8_lossy(&o.stderr).trim_end()
+                    );
+                    false
+                }
+                Err(_) => false,
+            }
+        } else {
+            false
+        }
+    } else {
+        false
+    };
 
     // Optional opt(1) pass: promotes our alloca-heavy locals into
     // SSA values (mem2reg), inlines small functions, and folds
@@ -3291,6 +3338,10 @@ fn build_program_llvm(
     if !bare_metal {
         apply_embedded_cc_hardening(&mut link_cmd);
     }
+    // Sort runtime object (compiled above from src/sort_runtime.c).
+    if sort_compiled {
+        link_cmd.arg(&sort_obj_path);
+    }
     // FFI follow-up: user-supplied link inputs follow the vāṇī
     // object so symbol resolution sees vāṇī's `extern "C" fn` call
     // sites first and then the providing object/library.
@@ -3305,6 +3356,7 @@ fn build_program_llvm(
     let _ = fs::remove_file(&ll_path);
     let _ = fs::remove_file(&opt_path);
     let _ = fs::remove_file(&obj_path);
+    let _ = fs::remove_file(&sort_obj_path);
     if !link_out.status.success() {
         return Err(format!(
             "{} failed while linking:\n{}",

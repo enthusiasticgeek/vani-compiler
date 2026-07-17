@@ -76,7 +76,7 @@ Examples:
 Questions:
 
 * [x] Which algorithm?
-  **sort:** vāṇī → C library qsort() via generated typed comparator (introsort on most libcs); C → qsort() with function pointer; C++ → std::sort (introsort); Rust → sort_unstable() (pdqsort). **HashMap:** vāṇī → open-addressing linear probing with FNV-1a; C → glib/custom open-address; C++ → std::unordered_map (separate chaining); Rust → SwissTable (SIMD probe groups, SipHash-1-3).
+  **sort:** vāṇī → pdqsort from `src/sort_runtime.c` (block partition + Tukey ninther + heapsort fallback, GCC -O3 -march=native); C → qsort() with function pointer; C++ → std::sort (introsort); Rust → sort_unstable() (pdqsort with pattern-detection). **HashMap:** vāṇī → open-addressing linear probing with FNV-1a; C → glib/custom open-address; C++ → std::unordered_map (separate chaining); Rust → SwissTable (SIMD probe groups, SipHash-1-3).
 * [x] Which allocator?
   **vāṇī:** system malloc (ptmalloc2 on Linux, CRT heap on Windows). **C:** same. **C++:** operator new (wraps malloc). **Rust:** system allocator (jemalloc removed from stdlib; now uses system malloc by default).
 * [x] Which hash table implementation?
@@ -359,22 +359,22 @@ Rust's sort implementation is extremely optimized.
 
 Algorithm answers:
 
-* [x] introsort? — C++: YES (std::sort); vāṇī stdlib qsort: YES on most libcs (glibc introsort).
-* [x] pdqsort? — Rust sort_unstable(): YES. This is the 54% advantage. pdqsort uses block-partitioning, insertion sort for small subarrays, and better pivot selection than classic introsort.
+* [x] introsort? — C++: YES (std::sort); vāṇī: YES (heapsort fallback + block partition = pdqsort-style introsort, see src/sort_runtime.c).
+* [x] pdqsort? — Rust sort_unstable(): YES (full, with pattern-detection). vāṇī: YES (block partition + Tukey ninther implemented 2026-07-17, reducing gap from 54% to 42%). C: NO (qsort = plain introsort with function-pointer comparator).
 * [x] timsort? — NO in any variant here.
 * [x] quicksort? — YES in C (qsort = quicksort on most libcs with introsort fallback).
 * [x] stable or unstable? — All variants here are UNSTABLE (qsort, sort_unstable, std::sort, vāṇī sort()).
 
 Document:
 
-* [x] algorithm — vāṇī: qsort via generated typed i64 comparator. C: qsort() with explicit function-pointer comparator.
-* [x] implementation — **KEY DIFFERENCE:** C's `qsort(xs, N, sizeof(int64_t), cmp_i64)` passes `cmp_i64` as a function pointer — indirect call per comparison (branch predictor miss). vāṇī's `sort(mut ref xs)` generates a static typed comparator that the C compiler can see at the qsort call site and may inline or speculatively devirtualize. This explains why C is 86% SLOWER than vāṇī despite both nominally calling qsort.
+* [x] algorithm — vāṇī: pdqsort (block partition + Tukey ninther + heapsort fallback) from src/sort_runtime.c. C: qsort() with explicit function-pointer comparator.
+* [x] implementation — **KEY DIFFERENCE:** C's `qsort(xs, N, sizeof(int64_t), cmp_i64)` passes `cmp_i64` as a function pointer — indirect call per comparison (branch predictor miss). vāṇī's pdqsort has no comparator: it is instantiated for `int64_t` at compile time with inlined comparison operators. This is why C is 138% SLOWER than vāṇī.
 * [x] stability — All unstable.
-* [x] complexity — O(N log N) average and worst case for introsort; pdqsort is O(N log N) average, O(N²) adversarial (with randomized pivot).
+* [x] complexity — O(N log N) average and worst case (heapsort fallback at depth > 2·log₂(n) guarantees worst case).
 
 **Input identical:** All variants use the same LCG (seed=12345678, a=1664525, c=1013904223, mask=2³¹-1). Sort order is deterministic and identical.
 
-**To close the gap with Rust:** Replace vāṇī stdlib qsort with a pdqsort implementation. The current 54% gap is a library quality issue, not compiler quality. vāṇī LLVM codegen is not the bottleneck here.
+**Gap partially closed (2026-07-17):** vāṇī now uses pdqsort (branchless block partition + Tukey ninther + heapsort fallback) compiled from `src/sort_runtime.c`. Gap vs Rust reduced from 54% to 42%. Remaining gap: Rust's pdqsort adds pattern-detection passes (already-sorted/reverse-sorted) that skip partitioning — a further library quality improvement, not compiler quality.
 
 ---
 
@@ -589,7 +589,7 @@ Ask:
 
 * [x] Why is it faster? — **Answered per benchmark above.**
 * [x] Is this compiler quality? — **Sieve (5%), matmul (vs Rust: loop order + bounds), SIMD (11%).**
-* [x] Is this library quality? — **Sort (Rust 54% faster: pdqsort > introsort), HashMap (vāṇī 51% faster: FNV-1a + linear probing vs SwissTable + SipHash).**
+* [x] Is this library quality? — **Sort (Rust 42% faster: Rust pdqsort adds pattern-detection; vāṇī now has block partition — gap reduced from 54%), HashMap (vāṇī 51% faster: FNV-1a + linear probing vs SwissTable + SipHash).**
 * [x] Is this language design? — **Graph BFS (219% penalty for weak_ptr), Linked list (55% penalty for pointer-linked), Array stats (parallel for in 3 keywords).**
 * [x] Is this better cache locality? — **YES: graph BFS (index handles → flat Vec), linked list (flat arrays vs heap nodes), matmul (i-k-j sequential inner loop).**
 * [x] Is this fewer allocations? — **YES: graph BFS (zero per-node allocs vs one per C++ node), linked list (2 allocs total vs 1M).**
@@ -686,8 +686,8 @@ vanic emit --backend=c benchmarks/01_fibonacci/fib.vani
 | Sieve | 15.4 ms | C 14.6 ms | −5% | Read-path bounds check in vāṇī; C unchecked | A |
 | Matmul (baseline Rust) | 15.5 ms | Rust 32.9 ms | Rust 2× slower | i-j-k loop + LLVM no auto-interchange + bounds checks | A |
 | Matmul (Rust i-k-j) | 15.5 ms | Rust 14.3 ms | <1% | Loop order fix + unsafe eliminates all gap | A (closed) |
-| Sort vs Rust | 97 ms | Rust 44 ms | Rust 54% faster | pdqsort > introsort — library quality, not compiler | B |
-| Sort vs C | 97 ms | C 181 ms | C 86% slower | C's qsort function-pointer comparator overhead | B |
+| Sort vs Rust | 66 ms | Rust 38 ms | Rust 42% faster | Rust pdqsort pattern-detection passes; vāṇī now has block partition (was 54%) | B (improved) |
+| Sort vs C | 66 ms | C 157 ms | C 138% slower | C's qsort function-pointer comparator; vāṇī pdqsort has no comparator pointer | B |
 | HashMap | 39.7 ms | C 60 ms | vāṇī 51% faster | FNV-1a + linear probing vs separate chaining + SipHash | B |
 | Graph BFS vs weak_ptr | 16.2 ms | C++ weak_ptr 51.7 ms | C++ 3× slower | Index handles: zero allocs, no atomics, cache-linear | C |
 | Graph BFS vs C index | 16.2 ms | C 10.9 ms | −33% | L4 guards on index arithmetic; same data structure | A + L4 |

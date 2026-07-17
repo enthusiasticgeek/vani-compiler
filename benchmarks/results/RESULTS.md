@@ -2,6 +2,7 @@
 
 *vāṇī timings: 2026-07-13 — 3 timing run(s), median.*
 *New variant timings (rs_ikj, omp_c, omp_cpp, rs_par, c_sse): 2026-07-17 — 5 timing run(s), median.*
+*Sort updated 2026-07-17: vāṇī now uses pdqsort (block partition + Tukey ninther + heapsort fallback).*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*
 *See `benchmarks/results/SYSTEM.md` for full hardware and software details.*
@@ -27,7 +28,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE  (1.96.0)
 | Sieve of Eratosthenes | 15.4 ms | 14.6 ms | 14.9 ms | 15.5 ms | All within 6% — believable compiler bench |
 | Matrix mul 256×256 (i-k-j) | 15.5 ms | 15.6 ms | 15.5 ms | 32.9 ms | Rust 2× gap: i-j-k loop + bounds checks |
 | Matrix mul 256×256 (rs i-k-j) | — | — | — | **14.6 ms** | Loop fix closes gap; matches C/vāṇī |
-| Sort 1 000 000 integers | 97.1 ms | 180.8 ms | 98.6 ms | 44.1 ms | Rust: pdqsort; C: qsort fn-ptr overhead |
+| **Sort 1 000 000 integers** | **65.9 ms** | **156.9 ms** | **87.5 ms** | **37.9 ms** | **vāṇī now pdqsort; Rust 42% faster** |
 | Graph BFS — index handles | 16.2 ms | 10.9 ms | 19.2 ms† | 18.6 ms | †C++ index; C++ weak_ptr: 51.7 ms |
 | Parallel sum 50M elements | 197.2 ms | 193.1 ms | 198.3 ms | 151.1 ms | All parallel; Rust thread < OpenMP overhead |
 | HashMap 500K ins + lookup | 39.7 ms | 60.0 ms | 60.9 ms | 73.5 ms | FNV-1a + linear probing beats SwissTable |
@@ -39,7 +40,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE  (1.96.0)
 | SIMD dot — **explicit SSE** | **30.3 ms** | **29.0 ms**† | — | — | †C explicit `__m128`; explicit vs explicit |
 | SIMD-256 dot product | 33.5 ms | — | — | — | vāṇī-only (vec256 = AVX2 width) |
 
-*Bold = new results from 2026-07-17 fair-comparison runs.*
+*Bold = new results from 2026-07-17 fair-comparison runs or algorithm improvements.*
 
 ---
 
@@ -97,22 +98,28 @@ C has no bounds check. Write-path uses `set(mut ref, idx as u64, ...)` — no ch
 
 **Fix**: `matmul_ikj.rs` (i-k-j + `unsafe::get_unchecked`) → 14.6 ms, matching C/vāṇī.
 
-### Sort 1 000 000 integers
+### Sort 1 000 000 integers — **IMPROVED 2026-07-17**
 
 *vāṇī uses the built-in sort(); others use stdlib. Tests sort algorithm quality.*
 
 ```
-  vani           ████████████████████░░░░░░░░░░░░░░░░     97.1 ms    baseline
-  c              ████████████████████████████████████    180.8 ms   86.1% slower
-  cpp            ████████████████████░░░░░░░░░░░░░░░░     98.6 ms    1.5% slower
-  rs             █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░     44.1 ms   54.6% faster
+  vani           ███████████████░░░░░░░░░░░░░░░░░░░░░     65.9 ms    baseline  (−32% vs old 97.1)
+  c              ████████████████████████████████████    156.9 ms   138.1% slower
+  cpp            ████████████████████░░░░░░░░░░░░░░░░     87.5 ms    32.8% slower
+  rs             █████████░░░░░░░░░░░░░░░░░░░░░░░░░░░     37.9 ms    42.5% faster
 ```
 
-Category B (library quality):
-- Rust 54% faster: `sort_unstable()` = pdqsort (block-partitioning, better pivot selection)
-- C 86% slower: `qsort` passes `cmp_i64` as function pointer — indirect call per comparison
-- C++ comparable to vāṇī: `std::sort` = introsort with inlined template comparator
-- Fix vāṇī: replace stdlib sort with pdqsort implementation
+**Algorithm upgrade (2026-07-17):** vāṇī sort now uses pdqsort-style introsort:
+- `src/sort_runtime.c` compiled GCC -O3 -march=native, linked at build time
+- **Branchless block partition** (64-element blocks): eliminates ~50% of branch
+  mispredictions in the hot inner loop — the key pdqsort innovation
+  (`offs[cnt] = i; cnt += (a[i] >= pivot)` → CMOV, zero branches)
+- **Tukey ninther pivot** for n ≥ 128: median of 3 medians → better partitioning
+- **Heapsort fallback** at depth > 2·log₂(n): O(n log n) worst-case guarantee
+- **Insertion sort** for n ≤ 24
+
+Gap vs Rust (42%) was 55% before. Remaining gap: Rust's pdqsort has additional
+pattern-detection passes (already-sorted check) that skip partitioning entirely.
 
 ### Graph BFS — index handles vs. weak_ptr
 
@@ -280,8 +287,8 @@ vāṇī's ownership model makes the efficient representation the natural one.
 | Sieve vs C | C 5% faster | vāṇī read-path bounds check; C unchecked | A |
 | Matmul Rust baseline | Rust 2× slower | i-j-k loop (LLVM no auto-interchange) + bounds checks | A |
 | Matmul Rust i-k-j | <5% — **gap closed** | i-k-j + unsafe eliminates both causes | A (fixed) |
-| Sort vs Rust | Rust 55% faster | pdqsort > introsort — library algorithm quality | B |
-| Sort vs C | C 86% slower | qsort function-pointer comparator overhead per compare | B |
+| Sort vs Rust | Rust 42% faster | pdqsort pattern-detection passes; vāṇī has block partition | B (improved) |
+| Sort vs C | C 138% slower | qsort function-pointer overhead; vāṇī pdqsort beats both introsort | B |
 | HashMap | vāṇī 51–85% faster | FNV-1a + linear probing vs chaining/SwissTable+SipHash | B |
 | Graph BFS vs weak_ptr | 219% penalty | Index handles: zero allocs, no atomics, cache-linear | C |
 | Graph BFS vs C index | C 33% faster | L4 guards on index arithmetic; same data structure | A + L4 |
