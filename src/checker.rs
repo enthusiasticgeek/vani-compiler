@@ -6821,8 +6821,12 @@ fn infer_concrete_type_for_call(
                 ).with_elaboration(crate::diagnostic_elaborations::generic_infer_failure()));
                 None
             }),
-            // Phase 4c-broad blocker 3: peel expr-level Ref/RefMut.
-            ExprKind::Ref { inner } | ExprKind::RefMut { inner } if is_v31_poll => {
+            // Peel expr-level Ref/RefMut so `show(ref d)` where d: Dog
+            // resolves the T-bearing slot to Dog, then structural
+            // unification of `ref T` vs Dog gives T = Dog.
+            // Previously gated to is_v31_poll only; now enabled for all
+            // generic calls so `<T: Iface>` bounds work with ref params.
+            ExprKind::Ref { inner } | ExprKind::RefMut { inner } => {
                 if let ExprKind::Var(name) = &inner.kind {
                     scope.get(name).cloned().or_else(|| {
                         diagnostics.push(Diagnostic::new(

@@ -1397,10 +1397,24 @@ impl Parser {
         // inside the signature / body. T1.4 phase 1: syntax
         // accepted; full monomorphization lands in phase 2.
         let mut type_params: Vec<String> = Vec::new();
+        // Inline bounds collected here; merged into where_clauses below.
+        let mut inline_bounds: Vec<WhereClause> = Vec::new();
         if self.match_token(|k| matches!(k, TokenKind::Less)).is_some() {
             loop {
                 let tp_tok = self.expect_ident()?;
+                let tp_span = tp_tok.span;
                 let tp_name = ident_text(tp_tok);
+                // G1: optional `T: Iface` inline bound — sugar for `where T is Iface`.
+                if self.match_token(|k| matches!(k, TokenKind::Colon)).is_some() {
+                    let iface_tok = self.expect_ident()?;
+                    let iface_span = iface_tok.span;
+                    let iface_name = ident_text(iface_tok);
+                    inline_bounds.push(WhereClause {
+                        type_param: tp_name.clone(),
+                        interface_name: iface_name,
+                        span: tp_span.merge(iface_span),
+                    });
+                }
                 type_params.push(tp_name);
                 if self.match_token(|k| matches!(k, TokenKind::Comma)).is_none() {
                     break;
@@ -1479,7 +1493,8 @@ impl Parser {
         // T1.5 phase 1: syntax accepted; checker emits a WIP
         // gate if any program declares interfaces or impls,
         // since dispatch + bounded generics land in phase 2.
-        let mut where_clauses: Vec<WhereClause> = Vec::new();
+        // Inline `<T: Iface>` bounds collected above are prepended.
+        let mut where_clauses: Vec<WhereClause> = inline_bounds;
         if self
             .match_token(|k| matches!(k, TokenKind::Where))
             .is_some()

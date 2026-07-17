@@ -1963,6 +1963,48 @@ mod tests {
     }
 
     #[test]
+    fn inline_bound_syntax_accepted() {
+        // G1: `fn f<T: Iface>` is sugar for `fn f<T> where T is Iface`.
+        // Parser converts `T: Iface` to a WhereClause in inline_bounds
+        // which is prepended to where_clauses. Checker enforces it at the
+        // monomorphization call site.
+        let source = r#"
+            interface Describe { fn describe(self: ref Self) -> i64; }
+            struct Dog { size: i64 }
+            implement Describe for Dog {
+              fn describe(self: ref Dog) -> i64 { return self.size; }
+            }
+            fn show<T: Describe>(x: T) -> i64 { return x.describe(); }
+            fn main() -> i64 {
+              let d: Dog = Dog { size: 42 };
+              return show(d);
+            }
+        "#;
+        compile(source).expect("inline bound <T: Iface> should compile");
+    }
+
+    #[test]
+    fn inline_bound_missing_impl_rejected() {
+        // G1: when the concrete type has no `implement Iface for T` in scope,
+        // the monomorphizer emits the same "requires T is Iface" diagnostic
+        // for inline bounds as it does for `where T is Iface`.
+        let source = r#"
+            interface Describe { fn describe(self: ref Self) -> i64; }
+            struct Cat { weight: i64 }
+            fn show<T: Describe>(x: T) -> i64 { return x.describe(); }
+            fn main() -> i64 {
+              let c: Cat = Cat { weight: 5 };
+              return show(c);
+            }
+        "#;
+        let errs = compile(source).expect_err("missing impl should fail inline bound");
+        assert!(
+            errs.iter().any(|e| e.message.contains("requires `T is Describe`")),
+            "expected bound-violation diagnostic, got: {:?}", errs
+        );
+    }
+
+    #[test]
     fn struct_name_clashing_with_builtin_rejected() {
         // `Task` lexes as an identifier but `parse_type`
         // promotes it to the built-in `Type::Task`. Without
