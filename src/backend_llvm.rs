@@ -9401,6 +9401,51 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                             dest, e_ty, tag_v
                         ));
                     }
+                } else if let Type::Tuple(elements) = &element_ty {
+                    // Tuple element: load the slot as an anonymous LLVM struct,
+                    // deep-clone each non-Copy field (OwnedStr → intent_str_concat),
+                    // reassemble with insertvalue chain into `dest`.
+                    let t_ty = llvm_type_string(&element_ty);
+                    let slot_v = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        slot_v, t_ty, t_ty, slot_p
+                    ));
+                    let mut acc = "undef".to_string();
+                    for (idx, fty) in elements.iter().enumerate() {
+                        let f_src = ctx.fresh_tmp();
+                        let f_lty = llvm_type_string(fty);
+                        out.push_str(&format!(
+                            "  {} = extractvalue {} {}, {}\n",
+                            f_src, t_ty, slot_v, idx
+                        ));
+                        let f_cloned = match fty {
+                            Type::OwnedStr => {
+                                let empty_p = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = getelementptr [1 x i8], [1 x i8]* @.empty_str_clone, i64 0, i64 0\n",
+                                    empty_p
+                                ));
+                                let cloned = ctx.fresh_tmp();
+                                out.push_str(&format!(
+                                    "  {} = call i8* @intent_str_concat(i8* {}, i32 0, i8* {}, i32 0)\n",
+                                    cloned, f_src, empty_p
+                                ));
+                                cloned
+                            }
+                            _ => f_src.clone(),
+                        };
+                        let next_acc = if idx + 1 == elements.len() {
+                            dest.clone()
+                        } else {
+                            ctx.fresh_tmp()
+                        };
+                        out.push_str(&format!(
+                            "  {} = insertvalue {} {}, {} {}, {}\n",
+                            next_acc, t_ty, acc, f_lty, f_cloned, idx
+                        ));
+                        acc = next_acc;
+                    }
                 } else {
                     unreachable!(
                         "clone_at on element type {:?} not yet supported in tree-LLVM",
@@ -45138,7 +45183,7 @@ fn llvm_closure_tag(ty: &Type) -> String {
     }
 }
 
-fn llvm_type_string(ty: &Type) -> String {
+pub fn llvm_type_string(ty: &Type) -> String {
     match ty {
         Type::Array { element, length } => {
             // Recurse via `llvm_type_string` so the element

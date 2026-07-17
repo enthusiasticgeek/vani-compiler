@@ -3757,6 +3757,26 @@ mod tests {
     }
 
     #[test]
+    fn clone_at_tuple_with_owned_str_works() {
+        // G2: `clone_at(ref Vec<(i64, OwnedStr)>, i)` — tuple element with
+        // a non-Copy field. tree-LLVM was panicking with "not yet supported".
+        // Now: load slot as anonymous struct, extractvalue each field,
+        // deep-clone OwnedStr fields via intent_str_concat, reassemble with
+        // insertvalue chain. SSA-LLVM also fixed (OwnedStr + Tuple arms added).
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<(i64, OwnedStr)> = vec_with_capacity(2);
+              xs = push(xs, (1, "hello" + ""));
+              xs = push(xs, (2, "world" + ""));
+              let p: (i64, OwnedStr) = clone_at(ref xs, 0);
+              let (n, s): (i64, OwnedStr) = p;
+              return n;
+            }
+        "#;
+        compile(source).expect("Vec<(i64, OwnedStr)> clone_at should compile");
+    }
+
+    #[test]
     fn clone_at_owned_str_vec_works() {
         // Closure #154: `clone_at(ref xs, i)` for
         // `Vec<OwnedStr>` was broken in two places:

@@ -4298,6 +4298,63 @@ fn emit_instr(
                         "  %v_{} = call {} {}({} {})\n",
                         result.0, elt_ty, clone_name, elt_ty, slot_v
                     ));
+                } else if matches!(element_ty, Type::OwnedStr) {
+                    let slot_v = format!("%v_{}.cat_sv", result.0);
+                    out.push_str(&format!(
+                        "  {} = load i8*, i8** {}\n",
+                        slot_v, slot_p
+                    ));
+                    let empty_p = format!("%v_{}.cat_ep", result.0);
+                    out.push_str(&format!(
+                        "  {} = getelementptr [1 x i8], [1 x i8]* @.empty_str_clone, i64 0, i64 0\n",
+                        empty_p
+                    ));
+                    out.push_str(&format!(
+                        "  %v_{} = call i8* @intent_str_concat(i8* {}, i32 0, i8* {}, i32 0)\n",
+                        result.0, slot_v, empty_p
+                    ));
+                } else if let Type::Tuple(elements) = &element_ty.clone() {
+                    let t_ty = crate::backend_llvm::llvm_type_string(&element_ty);
+                    let slot_v = format!("%v_{}.cat_sv", result.0);
+                    out.push_str(&format!(
+                        "  {} = load {}, {}* {}\n",
+                        slot_v, t_ty, t_ty, slot_p
+                    ));
+                    let mut acc = "undef".to_string();
+                    for (idx, fty) in elements.iter().enumerate() {
+                        let f_src = format!("%v_{}.cat_f{}", result.0, idx);
+                        let f_lty = crate::backend_llvm::llvm_type_string(fty);
+                        out.push_str(&format!(
+                            "  {} = extractvalue {} {}, {}\n",
+                            f_src, t_ty, slot_v, idx
+                        ));
+                        let f_cloned = match fty {
+                            Type::OwnedStr => {
+                                let empty_p = format!("%v_{}.cat_ep{}", result.0, idx);
+                                out.push_str(&format!(
+                                    "  {} = getelementptr [1 x i8], [1 x i8]* @.empty_str_clone, i64 0, i64 0\n",
+                                    empty_p
+                                ));
+                                let cloned = format!("%v_{}.cat_cl{}", result.0, idx);
+                                out.push_str(&format!(
+                                    "  {} = call i8* @intent_str_concat(i8* {}, i32 0, i8* {}, i32 0)\n",
+                                    cloned, f_src, empty_p
+                                ));
+                                cloned
+                            }
+                            _ => f_src.clone(),
+                        };
+                        let next_acc = if idx + 1 == elements.len() {
+                            format!("%v_{}", result.0)
+                        } else {
+                            format!("%v_{}.cat_a{}", result.0, idx)
+                        };
+                        out.push_str(&format!(
+                            "  {} = insertvalue {} {}, {} {}, {}\n",
+                            next_acc, t_ty, acc, f_lty, f_cloned, idx
+                        ));
+                        acc = next_acc;
+                    }
                 } else {
                     return Err(EmitError {
                         message: format!(
