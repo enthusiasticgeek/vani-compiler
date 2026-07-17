@@ -25102,17 +25102,17 @@ fn main() -> i64 {
 
     #[test]
     fn atomic_new_rejects_unsupported_element_type() {
-        // Floating point isn't a supported atomic element
-        // (neither C11 nor LLVM expose hardware float atomics
-        // portably). The checker rejects with a clear error.
+        // Heap-allocated / composite types (OwnedStr, structs, …) are not
+        // lock-free and cannot be atomic elements. The checker rejects them
+        // with a clear error. (f64 IS now a supported element type.)
         let source = r#"
             fn main() -> i64 {
-              let a: Atomic<f64> = atomic_new(3.14);
+              let a: Atomic<OwnedStr> = atomic_new("hello" + "");
               let _ = atomic_load(ref a);
               return 0;
             }
         "#;
-        let errors = compile(source).expect_err("f64 atomic must be rejected");
+        let errors = compile(source).expect_err("OwnedStr atomic must be rejected");
         assert!(
             errors
                 .iter()
