@@ -85,29 +85,20 @@ pipeline(-3)  = -999
   helper -- return the inner value on `Ok`, the default on
   `Err`.
 
-## The `try` keyword (queued sugar)
+## The `try` keyword and `?` (not yet active in sync code)
 
-vāṇी reserves the `try` keyword for the standard Rust-style
-short-circuit:
+vāṇी reserves `try EXPR` and the postfix `?` for the standard
+short-circuit propagation -- they parse without error, but the
+desugar to match-with-early-return **is not yet implemented for
+synchronous functions** (T2.6 Phase 2). Using either in a sync
+body produces a diagnostic directing you to write the manual
+`match` form shown above.
 
-```vani
-let v: i64 = try parse_pos(n);   // queued sugar
-```
-
-...desugars to roughly:
-
-```vani
-let __t = parse_pos(n);
-if /* __t is Err */ { return __t; }
-let v: i64 = /* the Ok payload */;
-```
-
-In v1 the desugar is enabled **only inside async fn bodies**
-(Arc 8 v3.1 Phase 2.4). For ordinary synchronous code you write
-the manual `match` shown above; the `try` sugar for sync
-contexts is a future-track item. See
+Until T2.6 Phase 2 lands, the manual pattern IS the idiom. See
 `examples/language/english/option_error_propagation.vani` for
-the long-form manual style on `Opt`-shaped enums.
+the long-form manual style on `Opt`-shaped enums, and
+[10c -- multi-error patterns](10c_error_patterns_primer.md) for
+composing across multiple error types.
 
 ## v1 limitations to keep in mind
 
@@ -126,4 +117,4 @@ Chain it into `pipeline` so the full sequence
 
 ---
 
-**Next**: [Sec.13 -- `Option<T>` and the option builtins ->](13_option.md)
+**Next**: [10c -- Error patterns: nested errors, context, and FFI translation ->](10c_error_patterns_primer.md)

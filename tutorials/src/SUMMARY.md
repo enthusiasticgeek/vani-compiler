@@ -62,6 +62,7 @@
 - [Result, `try`, and `?` -- intuition primer](intermediate/10a_result_try_primer.md)
 - [Runtime errors, panic-free design, the segfault-free guarantee -- intuition primer](intermediate/10b_runtime_errors_primer.md)
 - [Error handling: `Result<T, E>` + `try`](intermediate/10_result_try.md)
+- [Error patterns: nested errors, context, and FFI translation](intermediate/10c_error_patterns_primer.md)
 - [`Option<T>` and the option builtins](intermediate/13_option.md)
 - [`HashMap<K,V>` and `HashSet<T>`](intermediate/14_collections.md)
 - [Math, random numbers, and clone](intermediate/15_math_rng.md)

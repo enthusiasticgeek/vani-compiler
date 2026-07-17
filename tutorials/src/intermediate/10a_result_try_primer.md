@@ -111,42 +111,35 @@ This works but is repetitive. Every fallible call has the same
 pattern: "if Ok, continue; if Err, bail out propagating the
 error."
 
-## The `try` keyword -- sugar for the same pattern
+## The `try` keyword and `?` operator -- intended sugar
 
-vāṇी's `try EXPR` does exactly what that match does, but
-written once at the call site:
+vāṇी reserves `try EXPR` and the postfix `?` operator for
+exactly this pattern:
 
 ```vani
+// INTENDED future syntax (T2.6 Phase 2 -- not yet active in v1)
 fn pipeline(s: Str) -> Result<i64, ParseError> {
-  let n: i64 = try parse_int(s);       // if Err, return it
-  let v: i64 = try validate(n);        // if Err, return it
+  let n: i64 = try parse_int(s);   // if Err, return it
+  let v: i64 = validate(n)?;       // postfix form -- same meaning
   return Result.Ok(v * 2);
 }
 ```
 
-`try parse_int(s)` reads: "call parse_int. If it returned
-`Ok(value)`, give me the value. If it returned `Err(e)`,
-return `Err(e)` from the enclosing function immediately."
+Both forms parse without error, but **in v1 the desugar for
+synchronous functions is not yet implemented** (tracked as
+T2.6 Phase 2). Using `try` or `?` in a sync function body
+currently produces a clear diagnostic:
 
-You can chain `try` over as many fallible calls as you like.
-The code reads as if it were synchronous + success-only --
-because the error path is the same at every step (bail with
-the error).
-
-## The postfix `?` operator
-
-Same meaning as `try`, written as a suffix:
-
-```vani
-fn pipeline(s: Str) -> Result<i64, ParseError> {
-  let n: i64 = parse_int(s)?;          // same as `try parse_int(s)`
-  let v: i64 = validate(n)?;           // same as `try validate(n)`
-  return Result.Ok(v * 2);
-}
+```
+`try EXPR` is reserved as a keyword but the desugar to
+match-with-early-return is still in progress (T2.6 Phase 2).
+Write the pattern manually: `match opt { Opt.Some(v) then v,
+Opt.None then return Opt.None };`
 ```
 
-`?` is a thin sugar over `try`. Both forms produce identical
-AST. Pick whichever reads better at the call site.
+**Until T2.6 Phase 2 lands, write propagation by hand** using
+the match-then-bail pattern from the previous section. The
+manual form is what [Intermediate 10](10_result_try.md) shows.
 
 ## "Option<T>" -- for "absent" rather than "failed"
 
