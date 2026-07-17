@@ -549,22 +549,24 @@ proving `idx < capacity` from loop invariants is a bounded-model-checking proble
 Features still absent or partial that are within our control — no hardware, no
 external tokens, no grammar consultants required.
 
-- [ ] **G1. Generic trait bounds direct syntax** (`fn f<T: Iface>(x: T)`) (~4 h · P1)
+- [x] **G1. Generic trait bounds direct syntax** (`fn f<T: Iface>(x: T)`) ✅ done 2026-07-17
   Currently the compiler silently ignores bounds; iface methods called on `T` surface
   at instantiation but there's no syntactic bound expression.
   Add `T: Iface` parse in generic param lists; check that every instantiation site
   has a `implement Iface for ConcreteType` in scope (or fail with a clear diagnostic).
   **Impact:** makes generic APIs self-documenting and catches missing impl at call site.
 
-- [ ] **G2. `Vec<non-Copy-tuple>` end-to-end verification** (~1 h · P2)
+- [x] **G2. `Vec<non-Copy-tuple>` end-to-end verification** ✅ done 2026-07-17
   Tuples with non-Copy elements compile since v0.1.4, but `Vec<(i64, OwnedStr)>`
   has not been verified end-to-end (push, index, drop). Add an edge-case test and
   fix any issue found.
 
-- [ ] **G3. `Atomic<T>` for non-i64 payloads** (~3 h · P3)
-  `Atomic<T>` today is i64-width only. Extend to `f64`, `bool`, and pointer-sized
-  types. Use `__atomic_load` / `__atomic_store` with appropriate type casts in C;
-  LLVM `atomic load` / `atomic store` with `ptr` type.
+- [x] **G3. `Atomic<T>` for non-i64 payloads** — done (2026-07-17)
+  Added `f64` to `is_supported_atomic_element`; `atomic_storage_llvm` maps to
+  `"double"`, `atomic_align` returns 8. `atomic_fetch_add` on `f64` is rejected
+  with a clear diagnostic (hardware CAS loop not emitted; use a mutex). Bool and
+  all integer widths (I8–U64) were already supported. Tests: `atomic_f64_new_load_store_work`,
+  `atomic_fetch_add_rejects_f64_element`.
 
 ## Blocked (not in our control)
 

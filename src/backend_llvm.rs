@@ -45140,6 +45140,7 @@ pub(crate) fn atomic_storage_llvm(element: &Type) -> &'static str {
         Type::I16 | Type::U16 => "i16",
         Type::I32 | Type::U32 => "i32",
         Type::I64 | Type::U64 => "i64",
+        Type::F64 => "double",
         other => unreachable!("unsupported Atomic element type {:?}", other),
     }
 }
@@ -45154,7 +45155,7 @@ pub(crate) fn atomic_align(element: &Type) -> u32 {
         Type::Bool | Type::I8 | Type::U8 => 1,
         Type::I16 | Type::U16 => 2,
         Type::I32 | Type::U32 => 4,
-        Type::I64 | Type::U64 => 8,
+        Type::I64 | Type::U64 | Type::F64 => 8,
         other => unreachable!("unsupported Atomic element type {:?}", other),
     }
 }

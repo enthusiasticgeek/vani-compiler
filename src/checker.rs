@@ -20765,6 +20765,7 @@ fn is_supported_atomic_element(ty: &Type) -> bool {
             | Type::U32
             | Type::U64
             | Type::Bool
+            | Type::F64
     )
 }
 
@@ -20922,6 +20923,13 @@ fn check_atomic_binary_ref(
         diagnostics.push(Diagnostic::new(
             args[0].span,
             "'atomic_fetch_add' requires an integer element; bool atomics have no addition"
+                .to_string(),
+        ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
+    }
+    if name == "atomic_fetch_add" && matches!(element, Type::F64) {
+        diagnostics.push(Diagnostic::new(
+            args[0].span,
+            "'atomic_fetch_add' requires an integer element; use a mutex for floating-point accumulation"
                 .to_string(),
         ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
     }

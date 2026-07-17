@@ -25015,6 +25015,44 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn atomic_f64_new_load_store_work() {
+        // G3: Atomic<f64> — new/load/store must compile end-to-end.
+        // fetch_add is intentionally not tested here (it is rejected by
+        // the checker; see atomic_fetch_add_rejects_f64_element below).
+        let source = r#"
+            fn main() -> i64 {
+              let cell: Atomic<f64> = atomic_new(1.5);
+              let _ = atomic_store(ref cell, 3.14);
+              let v: f64 = atomic_load(ref cell);
+              if v > 3.0 { return 1; }
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("Atomic<f64> new/load/store must compile");
+    }
+
+    #[test]
+    fn atomic_fetch_add_rejects_f64_element() {
+        // f64 atomics have no hardware fetch_add on all ISAs; the checker
+        // rejects it with a clear message pointing users to a mutex.
+        let source = r#"
+            fn main() -> i64 {
+              let cell: Atomic<f64> = atomic_new(0.0);
+              let _ = atomic_fetch_add(ref cell, 1.0);
+              return 0;
+            }
+        "#;
+        let errors = compile(source).expect_err("atomic_fetch_add on f64 must fail");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("floating-point accumulation")),
+            "expected f64-no-fetch-add diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn atomic_ref_captures_across_parallel_for_compile_and_run_correctly() {
         // `&Atomic<T>` is the canonical escape hatch for
         // sharing mutable state across `parallel for` bodies.
