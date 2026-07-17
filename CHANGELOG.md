@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.5.1] — YYYY-MM-DD
+
+### Added
+
+- TODO
+
+### Fixed
+
+- TODO
+
+---
+
 All notable changes to vāṇी (vanic) are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Versions follow [Semantic Versioning](https://semver.org/).
