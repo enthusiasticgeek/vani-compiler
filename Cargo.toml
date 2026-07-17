@@ -45,12 +45,8 @@ path = "src/bin/lsp.rs"
 # Both crates come from the rust-analyzer organization and have no
 # heavy transitive dependencies (no tokio).
 #
-# `lsp-types` transitively depends on `url`; pin to a version that
-# pulls in `idna < 1.0` so the build works on cargo 1.75 (later
-# idna versions require the unstable edition2024 feature).
 lsp-server = "=0.7.6"
-lsp-types = "=0.94.0"
-url = "=2.4.1"
+lsp-types = "=0.97.0"
 serde = "1"
 serde_json = "1"
 

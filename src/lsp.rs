@@ -31,7 +31,7 @@ use lsp_types::{
     Diagnostic, DiagnosticSeverity, Hover, HoverContents, HoverProviderCapability,
     InitializeParams, MarkupContent, MarkupKind, OneOf, Position,
     PublishDiagnosticsParams, Range, ServerCapabilities, TextDocumentSyncCapability,
-    TextDocumentSyncKind, Url,
+    TextDocumentSyncKind, Uri as Url,
 };
 
 use crate::ir::{TypedExpr, TypedExprKind, TypedPrintItem, TypedStmt};
