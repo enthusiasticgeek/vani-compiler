@@ -258,4 +258,4 @@ a bug found at runtime.
 ---
 
 **Previous**: [vāṇी design idioms -- intuition primer](11a_vani_idioms_primer.md)  
-**Next**: [The 22 GoF design patterns ->](11_design_patterns.md)
+**Next**: [Architectural patterns: Hexagonal and Pipeline ->](11c_architecture_primer.md)

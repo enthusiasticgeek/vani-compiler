@@ -69,6 +69,7 @@
 - [Vec statistics and combinators](intermediate/15b_vec_stats.md)
 - [vāṇी design idioms -- intuition primer](intermediate/11a_vani_idioms_primer.md)
 - [SOLID design principles](intermediate/11b_solid_primer.md)
+- [Architectural patterns: Hexagonal and Pipeline](intermediate/11c_architecture_primer.md)
 - [The 22 GoF design patterns](intermediate/11_design_patterns.md)
 - [SMT -- `requires` / `ensures` intuition primer](intermediate/12a_smt_primer.md)
 - [Compile time vs runtime -- intuition primer](intermediate/12b_compile_time_vs_runtime_primer.md)

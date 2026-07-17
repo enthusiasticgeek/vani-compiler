@@ -5,11 +5,12 @@
 > directory, understand which v1 idiom each pattern uses, and
 > know where to look when you reach for one.
 
-> **Prerequisites**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md)
-> and the [SOLID primer](11b_solid_primer.md) first. The idioms page
-> shows the vāṇी-native shapes (enum-as-hierarchy, closure-as-strategy,
-> arena-as-graph); SOLID explains *why* a design is good before GoF
-> names the recurring solutions.
+> **Prerequisites**: read the [vāṇी design idioms primer](11a_vani_idioms_primer.md),
+> the [SOLID primer](11b_solid_primer.md), and the
+> [architectural patterns primer](11c_architecture_primer.md) first.
+> The idioms page shows vāṇी-native shapes; SOLID explains *why* a design
+> is good; architecture shows how major parts connect. GoF then names
+> the recurring solutions you'll meet inside each layer.
 
 Design patterns are named solutions to recurring problems --
 think of them as blueprints, not finished buildings. A
@@ -117,5 +118,5 @@ felt natural and where it pushed back.
 
 ---
 
-**Previous**: [SOLID design principles](11b_solid_primer.md)  
+**Previous**: [Architectural patterns: Hexagonal and Pipeline](11c_architecture_primer.md)  
 **Next**: [SMT -- `requires` / `ensures` intuition primer ->](12a_smt_primer.md)
