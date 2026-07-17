@@ -3,6 +3,7 @@
 *vāṇī timings: 2026-07-13 — 3 timing run(s), median.*
 *New variant timings (rs_ikj, omp_c, omp_cpp, rs_par, c_sse): 2026-07-17 — 5 timing run(s), median.*
 *Sort updated 2026-07-17: vāṇī now uses pdqsort (block partition + Tukey ninther + heapsort fallback).*
+*Sieve updated 2026-07-17: getelementptr inbounds on Vec/Array GEPs unblocked LLVM vectorization; vāṇī 12.6 ms (was 15.4 ms), now faster than C/C++/Rust.*
 *C/C++ flags: `-O3 -march=native`. Rust flags: `-C opt-level=3 -C target-cpu=native`.*
 *vāṇī uses LLVM backend with `opt -O3 --mcpu=native` + `llc -O3 -mcpu=native`.*
 *See `benchmarks/results/SYSTEM.md` for full hardware and software details.*
@@ -25,7 +26,7 @@ rustc    : C:\Users\upaas\.cargo\bin\rustc.EXE  (1.96.0)
 | Benchmark | vani | c | cpp | rs | Notes |
 |--------------------|--------|--------|--------|--------|-------|
 | Fibonacci(42) — recursive | 943.1 ms | 486.2 ms | 488.6 ms | 930.7 ms | C 2× faster: GCC restructures recursion |
-| Sieve of Eratosthenes | 15.4 ms | 14.6 ms | 14.9 ms | 15.5 ms | All within 6% — believable compiler bench |
+| **Sieve of Eratosthenes** | **12.6 ms** | 14.6 ms | 14.9 ms | 15.5 ms | **vāṇī fastest: inbounds GEP unblocked LLVM vectorizer** |
 | Matrix mul 256×256 (i-k-j) | 15.5 ms | 15.6 ms | 15.5 ms | 32.9 ms | Rust 2× gap: i-j-k loop + bounds checks |
 | Matrix mul 256×256 (rs i-k-j) | — | — | — | **14.6 ms** | Loop fix closes gap; matches C/vāṇī |
 | **Sort 1 000 000 integers** | **65.9 ms** | **156.9 ms** | **87.5 ms** | **37.9 ms** | **vāṇī now pdqsort; Rust 42% faster** |
@@ -64,20 +65,27 @@ Root cause: GCC -O3 restructures the recursive call tree more aggressively than 
 Rust and vāṇī are nearly identical because both use LLVM. The 1.3% Rust advantage
 is consistent with vāṇī emitting an overflow guard on `fib(n-1)+fib(n-2)`.
 
-### Sieve of Eratosthenes — primes ≤ 2 000 000
+### Sieve of Eratosthenes — primes ≤ 2 000 000 — **IMPROVED 2026-07-17**
 
 *Boolean sieve with Vec-set inner loop. Tests dense random-access array writes.*
 *Vec<i8> (1 byte/element): 2 MB sieve fits in L2.*
 
 ```
-  vani           ████████████████████████████████████     15.4 ms    baseline
-  c              ██████████████████████████████████░░     14.6 ms    5.6% faster
-  cpp            ██████████████████████████████████░░     14.9 ms    3.5% faster
-  rs             ████████████████████████████████████     15.5 ms    0.8% slower
+  vani           █████████████████████████████░░░░░░░     12.6 ms    baseline  (−18% vs old 15.4)
+  c              ██████████████████████████████████░░     14.6 ms   16.0% slower
+  cpp            ███████████████████████████████████░     14.9 ms   18.3% slower
+  rs             ████████████████████████████████████     15.5 ms   23.0% slower
 ```
 
-5% C advantage: vāṇī read-path still emits a bounds check (`sieve[i]`, `sieve[m]`);
-C has no bounds check. Write-path uses `set(mut ref, idx as u64, ...)` — no check.
+**Algorithm change (2026-07-17):** `getelementptr inbounds` added to all Vec and
+fixed-array GEPs in the SSA LLVM backend. After `@__intent_bounds_check` (which
+`abort()`s on OOB and returns only when `idx < len`), the subsequent GEP is
+provably within the allocation — `inbounds` makes this explicit in the IR.
+
+LLVM uses `inbounds` to enable aggressive alias analysis and vectorization.
+For the sieve, the `sieve[i]` reads in the outer loop are now auto-vectorized
+by LLVM, reducing vāṇī from 15.4 ms to 12.6 ms — now the fastest of all four
+languages on this benchmark.
 
 ### Matrix multiplication 256×256 (i64)
 
@@ -284,7 +292,7 @@ vāṇī's ownership model makes the efficient representation the natural one.
 |-----------|-----|------------|----------|
 | Fibonacci vs C | C 2× faster | GCC recursion restructuring + L4 overflow guard per add | A + L4 |
 | Fibonacci vs Rust | <2% | Both LLVM; Rust lacks L4 guard → tiny Rust advantage | A |
-| Sieve vs C | C 5% faster | vāṇī read-path bounds check; C unchecked | A |
+| Sieve vs C | vāṇī 16% faster | inbounds GEP unblocked LLVM vectorizer — gap reversed | A (fixed) |
 | Matmul Rust baseline | Rust 2× slower | i-j-k loop (LLVM no auto-interchange) + bounds checks | A |
 | Matmul Rust i-k-j | <5% — **gap closed** | i-k-j + unsafe eliminates both causes | A (fixed) |
 | Sort vs Rust | Rust 42% faster | pdqsort pattern-detection passes; vāṇī has block partition | B (improved) |

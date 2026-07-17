@@ -4755,7 +4755,7 @@ fn emit_instr(
                     ));
                     let p = format!("%v_{}.p", instr.result.0);
                     out.push_str(&format!(
-                        "  {} = getelementptr {}, {}* {}, {}\n",
+                        "  {} = getelementptr inbounds {}, {}* {}, {}\n",
                         p,
                         elt_llvm,
                         elt_llvm,
@@ -4795,7 +4795,7 @@ fn emit_instr(
                     );
                     let p = format!("%v_{}.p", instr.result.0);
                     out.push_str(&format!(
-                        "  {} = getelementptr {}, {}* {}, i64 0, {}\n",
+                        "  {} = getelementptr inbounds {}, {}* {}, i64 0, {}\n",
                         p,
                         array_ty_str,
                         array_ty_str,
@@ -4864,7 +4864,7 @@ fn emit_instr(
             );
             let p = format!("%v_{}.p", instr.result.0);
             out.push_str(&format!(
-                "  {} = getelementptr {}, {}* {}, i64 0, {}\n",
+                "  {} = getelementptr inbounds {}, {}* {}, i64 0, {}\n",
                 p,
                 array_ty_str,
                 array_ty_str,
