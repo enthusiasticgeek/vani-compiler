@@ -112,7 +112,7 @@ A loose `if`/`else` chain might handle 4 cases and forget the
 behavior. With `match`, the compiler **checks that every
 possible value is covered**.
 
-<img class="maanas" src="../images/mascot/maanas_mascot_error.png" title="this code does not compile!"/>
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 enum Color { Red, Green, Blue }

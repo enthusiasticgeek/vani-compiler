@@ -23,7 +23,7 @@ which code needs extra scrutiny.
 
 ## The `unsafe` block
 
-<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 intent "Advanced 4 -- raw pointer + region-scoped arena.";
@@ -50,7 +50,7 @@ fn poke(addr: *mut i32, val: i32) -> i64 {
 For interop with hardware MMIO, FFI buffers, or hand-written
 allocators:
 
-<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {

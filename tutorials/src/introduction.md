@@ -61,34 +61,34 @@ You'll want vāṇी installed locally. See the
 **[Installation page](installation.md)**
 for step-by-step instructions (Linux / macOS / Windows + WSL2).
 
-## Meet maanas
+## Meet manas
 
-<img class="maanas-large" src="images/mascot/maanas_mascot.png" alt="maanas, the vāṇी mascot"/>
+<img class="manas-large" src="images/mascot/manas_mascot.png" alt="manas, the vāṇी mascot"/>
 
-This is **maanas** (मनस्, Sanskrit for *"mind"*) -- the vāṇी mascot.
-Throughout these tutorials, a small version of maanas shows up next
+This is **manas** (मनस्, Sanskrit for *"mind"*) -- the vāṇी mascot.
+Throughout these tutorials, a small version of manas shows up next
 to a code block to tell you what to expect *before* you compile it,
 the same way the Rust book uses Ferris the crab:
 
-<img class="maanas" src="images/mascot/maanas_mascot_error.png" title="this code does not compile!"/> **Does not compile** --
+<img class="manas" src="images/mascot/manas_mascot_error.png" title="this code does not compile!"/> **Does not compile** --
 the example is intentionally broken to illustrate a compiler error.
 
-<img class="maanas" src="images/mascot/maanas_mascot_warning.png" title="this code produces a compiler warning"/> **Compiles with a warning** --
+<img class="manas" src="images/mascot/manas_mascot_warning.png" title="this code produces a compiler warning"/> **Compiles with a warning** --
 the code builds, but `vanic` will flag something worth fixing.
 
-<img class="maanas" src="images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/> **Needs care** --
+<img class="manas" src="images/mascot/manas_mascot_caution.png" title="this code needs extra care"/> **Needs care** --
 `unsafe`, a subtle ownership rule, or behavior that's easy to get
 wrong even though it compiles cleanly.
 
-<img class="maanas" src="images/mascot/maanas_mascot_success.png" title="this is the correct, working version"/> **Correct and idiomatic** --
+<img class="manas" src="images/mascot/manas_mascot_success.png" title="this is the correct, working version"/> **Correct and idiomatic** --
 often shown right after a "does not compile" example, to contrast
 the broken version with the fix.
 
-<img class="maanas" src="images/mascot/maanas_mascot_awesome.png" title="a good habit worth adopting"/> **Pro tip** --
+<img class="manas" src="images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/> **Pro tip** --
 a best practice or idiom worth adopting, not required for
 correctness.
 
-<img class="maanas" src="images/mascot/maanas_mascot_waiting.png" title="work in progress / not yet implemented"/> **Work in progress** --
+<img class="manas" src="images/mascot/manas_mascot_waiting.png" title="work in progress / not yet implemented"/> **Work in progress** --
 a feature that's planned but not implemented in v1 yet; see
 [TODO.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md).
 
