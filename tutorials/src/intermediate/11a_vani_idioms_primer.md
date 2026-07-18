@@ -158,4 +158,5 @@ example in the GoF tutorial.
 
 ---
 
+**Previous**: [Sec.15b -- Vec statistics and combinators ->](15b_vec_stats.md)
 **Next**: [SOLID design principles ->](11b_solid_primer.md)

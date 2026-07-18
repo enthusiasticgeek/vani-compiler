@@ -543,3 +543,10 @@ impossible or named at a contract.
 - [Advanced 4 -- Embedded + `unsafe` + regions](../advanced/04_embedded.md)
   -- the only place the safe-by-construction surface opens,
   and how Layer 1-3 keep it bounded
+
+
+---
+
+**Previous**: [Sec.10a -- Result / try / ? primer ->](10a_result_try_primer.md)
+**Next**: [Sec.10 -- Error handling: Result<T, E> + try ->](10_result_try.md)
+

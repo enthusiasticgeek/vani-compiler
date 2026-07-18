@@ -125,4 +125,5 @@ another `use` and call it.
 
 ---
 
-**Next**: [Sec.9 -- FFI: `extern "C"` + `--link-with` ->](09_ffi.md)
+**Previous**: [Sec.7 -- Tuples and tuple destructure ->](07_tuples.md)
+**Next**: [Sec.9a -- FFI intuition primer ->](09a_ffi_primer.md)

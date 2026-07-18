@@ -161,3 +161,10 @@ implement<T> TargetIface for Container<T> where T is SourceBound {
   -- type parameters, `where` bounds, and monomorphization
 - [Intermediate 4 -- Generics and interfaces](04_generics_iface.md)
   -- worked code examples including default methods and blanket impls
+
+
+---
+
+**Previous**: [Sec.4c -- Generics and monomorphization primer ->](04c_generics_primer.md)
+**Next**: [Sec.4 -- Generics and interfaces ->](04_generics_iface.md)
+

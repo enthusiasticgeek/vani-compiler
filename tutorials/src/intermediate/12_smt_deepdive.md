@@ -173,3 +173,10 @@ Next steps:
 - Build something. Pick a small CLI or library, ship it, file
   issues for anything that pushed back. The compiler's most
   honest design feedback is from real programs.
+
+
+---
+
+**Previous**: [Sec.12b -- Compile time vs runtime primer ->](12b_compile_time_vs_runtime_primer.md)
+**Next**: [Sec.16 -- Packages with Kosh ->](16_packages.md)
+

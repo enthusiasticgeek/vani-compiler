@@ -286,3 +286,10 @@ Rc's expressiveness without the cost.
   -- channels + mutex as the cross-thread sharing primitives
 - [Advanced 4a -- Embedded primer](../advanced/04a_embedded_primer.md)
   -- region typing details
+
+
+---
+
+**Previous**: [Sec.3b -- Affine ownership deeper pass primer ->](03b_affine_deeper_primer.md)
+**Next**: [Sec.3d -- Cyclic references primer ->](03d_cyclic_references_primer.md)
+

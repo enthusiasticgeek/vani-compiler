@@ -212,3 +212,10 @@ shows the dynamic-dispatch variant.
   -- the dynamic-dispatch counterpart
 - [Intermediate 5 -- Dynamic dispatch](05_dyn.md) -- `Vec<dyn Shape>`
   worked example
+
+
+---
+
+**Previous**: [Sec.4a -- What's a dyn Iface? primer ->](04a_dyn_iface_primer.md)
+**Next**: [Sec.4c -- Generics and monomorphization primer ->](04c_generics_primer.md)
+

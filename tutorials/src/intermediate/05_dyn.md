@@ -129,4 +129,5 @@ and print each one's area in a loop.
 
 ---
 
-**Next**: [Sec.6 -- Closures and iterator combinators ->](06_closures.md)
+**Previous**: [Sec.4 -- Generics and interfaces ->](04_generics_iface.md)
+**Next**: [Sec.6a -- Closures and lambda lifting primer ->](06a_closures_primer.md)

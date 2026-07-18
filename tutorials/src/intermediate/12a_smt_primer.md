@@ -293,3 +293,10 @@ the productivity gains compound.
 - [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
   -- the OTHER compile-time-bug-prevention story (memory
   safety via ownership; SMT for arithmetic/logic safety).
+
+
+---
+
+**Previous**: [The 22 GoF design patterns ->](11_design_patterns.md)
+**Next**: [Sec.12b -- Compile time vs runtime primer ->](12b_compile_time_vs_runtime_primer.md)
+

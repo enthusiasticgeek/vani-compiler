@@ -490,3 +490,10 @@ and the language's affine guarantees cover the rest.
 - [Advanced 4a -- Embedded primer](../advanced/04a_embedded_primer.md) --
   region typing (v2 future) for cycles with compile-time
   lifetimes
+
+
+---
+
+**Previous**: [Sec.3c -- Shared ownership primer ->](03c_shared_ownership_primer.md)
+**Next**: [Sec.3e -- Lifetimes and reference returns primer ->](03e_lifetimes_primer.md)
+

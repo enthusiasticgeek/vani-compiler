@@ -224,3 +224,10 @@ callbacks.
   and embedded use cases
 - [Beginner 6c -- Ownership primer](../beginner/06c_ownership_primer.md)
   -- why ownership is the gnarliest cross-boundary issue
+
+
+---
+
+**Previous**: [Sec.8 -- Multi-file projects + vani.toml ->](08_manifest.md)
+**Next**: [Sec.9 -- FFI: extern C + --link-with ->](09_ffi.md)
+

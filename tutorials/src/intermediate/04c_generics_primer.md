@@ -226,3 +226,10 @@ shows the syntax + a worked example with both pieces together.
 - [Beginner 6a -- Pointers and references](../beginner/06a_pointers_refs_primer.md)
   -- generics over reference types (`<T>` and `<ref T>`) compose
   cleanly
+
+
+---
+
+**Previous**: [Sec.4b -- Interfaces and static dispatch primer ->](04b_interfaces_primer.md)
+**Next**: [Sec.4d -- Default methods and blanket implementations primer ->](04d_default_methods_primer.md)
+

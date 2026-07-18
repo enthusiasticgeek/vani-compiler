@@ -198,3 +198,9 @@ ownership, you'll know what's being tracked and why.
   -- first compiler code using the handle/data split.
 - [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md)
   -- the formal rule the compiler uses to free heap items.
+
+
+---
+
+**Previous**: [Sec.6a -- Pointers and references primer ->](06a_pointers_refs_primer.md)
+**Next**: [Sec.6c -- Ownership and move primer ->](06c_ownership_primer.md)

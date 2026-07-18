@@ -153,4 +153,5 @@ action.
 
 ---
 
-**Next**: [Sec.10 -- Modules and `pub` ->](10_modules.md)
+**Previous**: [Sec.8b -- Errors as values primer ->](08b_errors_primer.md)
+**Next**: [Sec.9a -- Modules and namespaces primer ->](09a_modules_primer.md)

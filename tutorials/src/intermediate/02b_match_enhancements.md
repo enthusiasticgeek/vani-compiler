@@ -415,4 +415,5 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [Sec.3 -- Affine ownership: `ref` / `mut ref` ->](03_affine.md)
+**Previous**: [Sec.2 -- Enums with payloads ->](02_enums_payloads.md)
+**Next**: [Sec.3a -- `Box<T>` and RAII primer ->](03a_box_raii_primer.md)

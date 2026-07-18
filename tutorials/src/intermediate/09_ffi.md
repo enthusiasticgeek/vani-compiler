@@ -262,4 +262,5 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [Sec.10 -- Error handling: `Result<T, E>` + `try` ->](10_result_try.md)
+**Previous**: [Sec.9a -- FFI intuition primer ->](09a_ffi_primer.md)
+**Next**: [Sec.9b -- Native file I/O primer ->](09b_file_io_primer.md)

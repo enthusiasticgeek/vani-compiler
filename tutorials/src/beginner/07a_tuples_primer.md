@@ -338,3 +338,9 @@ covers the actual syntax + a few worked examples.
 - [Beginner 6c -- Ownership primer](06c_ownership_primer.md)
   -- tuples follow the same move-vs-copy rules as other
   types; partial moves apply field-by-field
+
+
+---
+
+**Previous**: [Sec.6 -- Strings (Str vs OwnedStr) ->](06_strings.md)
+**Next**: [Sec.7 -- Arrays and Vec<T> basics ->](07_vec_arrays.md)

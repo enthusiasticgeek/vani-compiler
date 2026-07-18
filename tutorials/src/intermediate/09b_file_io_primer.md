@@ -98,3 +98,10 @@ vanic run my_prog.vani > output.txt   # stdout -> file
 - [Intermediate 9 FFI Sec. File I/O section](09_ffi.md) -- updated to show the boundary between native and FFI I/O
 - [Advanced 4 -- Embedded targets](../advanced/04_embedded.md) -- where `eprint` and `FileHandle` fit in firmware work
 - [`examples/language/english/file_io.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/file_io.vani) -- runnable worked example
+
+
+---
+
+**Previous**: [Sec.9 -- FFI: extern C + --link-with ->](09_ffi.md)
+**Next**: [Sec.9c -- Native file I/O: FileHandle + eprint ->](09c_file_io.md)
+

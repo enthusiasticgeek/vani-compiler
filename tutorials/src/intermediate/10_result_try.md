@@ -118,4 +118,5 @@ Chain it into `pipeline` so the full sequence
 
 ---
 
-**Next**: [10c -- Error patterns: nested errors, context, and FFI translation ->](10c_error_patterns_primer.md)
+**Previous**: [Sec.10b -- Runtime errors and panic-free design primer ->](10b_runtime_errors_primer.md)
+**Next**: [Sec.10c -- Error patterns: nested errors, context, and FFI translation ->](10c_error_patterns_primer.md)

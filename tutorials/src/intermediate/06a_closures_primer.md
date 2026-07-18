@@ -282,3 +282,10 @@ syntax + `vec_map` / `vec_fold` worked examples.
 - [Intermediate 4c -- Generics + monomorphization](04c_generics_primer.md)
   -- closures interact with generics: `vec_map<T, R>` takes a
   closure `T -> R` and monomorphizes per (T, R) pair
+
+
+---
+
+**Previous**: [Sec.5 -- Dynamic dispatch: dyn Iface ->](05_dyn.md)
+**Next**: [Sec.6b -- Iterators and combinators primer ->](06b_iterators_primer.md)
+

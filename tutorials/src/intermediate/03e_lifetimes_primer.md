@@ -329,3 +329,10 @@ explicitly rejected with workarounds.
 - [Beginner 9 -- First contract](../beginner/09_smt_intro.md)
   -- `requires` clauses can complement lifetime rules (e.g.
   `requires i < len(xs)` for the index-lookup pattern)
+
+
+---
+
+**Previous**: [Sec.3d -- Cyclic references primer ->](03d_cyclic_references_primer.md)
+**Next**: [Sec.3 -- Affine ownership: ref / mut ref ->](03_affine.md)
+

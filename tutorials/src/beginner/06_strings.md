@@ -1,28 +1,37 @@
 # Beginner 6 -- Strings (`Str` vs `OwnedStr`)
 
-> **Learning goal**: declare and compare `Str` literals, get
-> their length, and understand the difference between `Str`
-> (borrowed) and `OwnedStr` (heap-allocated).
+> **Learning goal**: use `Str` for compile-time string literals,
+> construct and concatenate `OwnedStr` values at runtime, and
+> understand the ownership difference between the two types.
 
 > **New to this?** Read [Beginner 6a -- Pointers and references primer](06a_pointers_refs_primer.md)
-> for the address/value analogy first.
+> for the address/value analogy first, then
+> [Beginner 6c -- Ownership and move primer](06c_ownership_primer.md)
+> to understand why heap-owning types like `OwnedStr` follow move semantics.
 
 Think of a `Str` like a sticky note with directions to a book
-on a library shelf: it POINTS at some text that lives elsewhere
-in the program (usually hardcoded in the compiled binary), but
-it doesn't OWN that text. An `OwnedStr` is like buying your
-own copy of the book -- the heap memory is yours, you can
-modify it, and when you're done it gets freed. Most programs
-only need to READ string literals (`Str` is enough); you need
-`OwnedStr` when you CONSTRUCT strings at runtime by combining
-or modifying parts.
+on a library shelf: it POINTS at text that lives in the compiled
+binary's read-only section (`.rodata`). It doesn't own the
+bytes, can't modify them, and the pointer costs only 8 bytes.
+An `OwnedStr` is like buying your own copy of the book: the
+bytes live on the heap, you own them (and free them at scope
+exit), and you can build them dynamically at runtime.
 
-## The program
+Most programs start with `Str` literals; they graduate to
+`OwnedStr` when they need to **build** strings at runtime by
+concatenating, trimming, converting numbers, or composing
+parts.
 
-Save this in `~/lesson6.vani`:
+---
+
+## Part 1 — `Str`: borrowed string literals
+
+### The program
+
+Save this in `~/lesson6a.vani`:
 
 ```vani
-intent "Lesson 6 worked example -- Str borrowed literals.";
+intent "Lesson 6a -- Str borrowed literals.";
 
 fn role(who: Str) -> Str {
   if who == "admin" {
@@ -61,10 +70,8 @@ fn main() -> i64 {
 }
 ```
 
-## Compile + run
-
 ```bash
-vanic run ~/lesson6.vani
+vanic run ~/lesson6a.vani
 ```
 
 Expected output:
@@ -80,34 +87,175 @@ same = true
 diff = true
 ```
 
-## Why it works that way
+### How `Str` works
 
-- **`Str` is borrowed**. It's the type of compile-time string
-  literals (`"hello"`, `"alice"`, ...). Under the hood it's a
-  pointer to a NUL-terminated byte buffer in the program's
-  `.rodata` section. You can pass `Str` values around freely;
-  they copy a pointer, not the bytes.
-- **`OwnedStr` is heap-allocated**. You get it from concatenation
-  (`"foo" + bar` returns `OwnedStr`) and from a few stdlib
-  helpers. v1 frees it automatically at scope exit (affine
-  ownership). For this lesson we stick to `Str` -- owned strings
-  are a Intermediate-track topic.
-- **`==` / `!=` use byte equality**. `"abc" == "abc"` is true.
-  vāṇी uses `strcmp` under the hood -- no surprises.
-- **`len(s)` returns a `u64`**. Note the unsigned width:
-  lengths are non-negative by definition, and the SMT verifier
-  uses that to prove invariants in Sec.9.
-- **No string interpolation in v1**. Compose with `print "x =", x`
-  which the runtime spaces out, or build an `OwnedStr` via `+`.
-- **`<`, `<=`, `>`, `>=` on strings are NOT supported in v1**.
-  Use `==` / `!=` only. Ordering comparisons are tracked as a
-  follow-up; see `examples/language/english/string_ops.vani`
-  for what's available today.
+- **`Str` is a pointer to a NUL-terminated byte buffer** in the
+  program's `.rodata` section. Passing `Str` copies the pointer
+  (8 bytes), not the underlying bytes.
+- **`==` / `!=` use byte equality** via `strcmp`. No surprises.
+- **`<`, `<=`, `>`, `>=` also work** via lexicographic strcmp.
+  `"apple" < "banana"` is `true`.
+- **`len(s)` returns `u64`** (non-negative by definition).
+
+---
+
+## Part 2 — `OwnedStr`: heap-allocated strings you build at runtime
+
+You need `OwnedStr` whenever you construct a string at runtime:
+concatenating two pieces, converting a number, trimming
+whitespace, or any other operation that returns new bytes.
+
+### Concatenation: `+` returns `OwnedStr`
+
+Adding two strings (or any string-like values) with `+` always
+returns an `OwnedStr`:
+
+```vani
+intent "Lesson 6b -- OwnedStr concatenation.";
+
+fn full_name(first: Str, last: Str) -> OwnedStr {
+  return first + " " + last;
+}
+
+fn numbered_item(label: Str, n: i64) -> OwnedStr {
+  let n_str: OwnedStr = i64_to_str(n);
+  return label + n_str;
+}
+
+fn main() -> i64 {
+  let name: OwnedStr = full_name("Alice", "Smith");
+  print name;
+
+  let item: OwnedStr = numbered_item("item-", 42);
+  print item;
+
+  // Concatenating Str + Str -> OwnedStr
+  let a: Str = "foo";
+  let b: Str = "bar";
+  let ab: OwnedStr = a + b;
+  print ab;
+
+  return 0;
+}
+```
+
+```bash
+vanic run ~/lesson6b.vani
+```
+
+Expected output:
+
+```
+Alice Smith
+item-42
+foobar
+```
+
+All combinations work: `Str + Str`, `Str + OwnedStr`,
+`OwnedStr + Str`, and `OwnedStr + OwnedStr` all return a new
+`OwnedStr`. The left operand's bytes plus the right operand's
+bytes are concatenated into a fresh heap allocation.
+
+### Converting numbers to strings
+
+```vani
+let n: i64 = 42;
+let s: OwnedStr = i64_to_str(n);       // "42"
+
+let pi: f64 = 3.14;
+let ps: OwnedStr = f64_to_str(pi);     // "3.14" (or similar)
+
+let b: bool = true;
+let bs: OwnedStr = bool_to_str(b);     // "true"
+```
+
+### `OwnedStr` auto-coerces to `Str` in read-only positions
+
+Wherever a function expects a `Str` argument, you can pass an
+`OwnedStr`. The compiler auto-borrows it (no allocation, no copy):
+
+```vani
+fn greet(name: Str) -> i64 {
+  print "hello,", name;
+  return 0;
+}
+
+fn main() -> i64 {
+  let owned: OwnedStr = "Alice" + " Smith";
+  greet(owned);     // OwnedStr used where Str expected -- fine
+  print len(owned); // len() also accepts OwnedStr
+  return 0;
+}
+```
+
+The `owned` binding stays alive; only a read-only pointer is
+passed. `owned` is freed at end of `main`.
+
+### Copying a `Str` literal into an `OwnedStr`
+
+To get an owned copy of a literal, concatenate with an empty
+string:
+
+```vani
+let literal: Str    = "hello";
+let owned:   OwnedStr = literal + "";   // copies bytes to heap
+```
+
+This is the idiomatic conversion when you need to store a
+`Str` literal in a structure that requires `OwnedStr`.
+
+---
+
+## Part 3 — What the compiler catches
+
+### Assigning a `Str` literal to an `OwnedStr` variable
+
+`Str` does NOT automatically become `OwnedStr`. The directions
+(pointer) don't become the book (heap copy) without work.
+
+```vani
+// WRONG
+let s: OwnedStr = "hello";
+```
+
+```
+error: let initializer must be assignable to OwnedStr, got Str
+  let s: OwnedStr = "hello";
+                    ^^^^^^^
+  help: use `s + ""` to copy a Str into an OwnedStr
+```
+
+**Fix**: concatenate with `""` to heap-copy: `let s: OwnedStr = "hello" + "";`
+
+### Passing `Str` where `OwnedStr` is expected
+
+`OwnedStr` auto-coerces **down** to `Str` (borrowed read). The
+reverse — `Str` to `OwnedStr` — requires an explicit copy:
+
+```vani
+fn needs_owned(s: OwnedStr) -> i64 { print s; return 0; }
+
+fn main() -> i64 {
+  let s: Str = "hello";
+  needs_owned(s);    // error: Str does not auto-coerce to OwnedStr
+  return 0;
+}
+```
+
+```
+error: argument 1 to 'needs_owned' must be assignable to OwnedStr, got Str
+  needs_owned(s);
+              ^
+  help: use `s + ""` to copy a Str into an OwnedStr
+```
+
+**Fix**: pass `s + ""` to heap-copy the literal first.
+
+---
 
 ## String builtins reference
 
-vāṇī ships a rich set of string builtins. These all accept `Str`
-arguments and return the type shown.
+vāṇी ships a rich set of string builtins.
 
 | Builtin | Signature | Returns |
 |---|---|---|
@@ -129,7 +277,12 @@ arguments and return the type shown.
 | `str_lines(s)` | `Str -> Vec<OwnedStr>` | split on newlines |
 | `parse_int(s)` | `Str -> Option<i64>` | parse decimal integer |
 | `i64_to_str(n)` | `i64 -> OwnedStr` | integer to string |
+| `f64_to_str(n)` | `f64 -> OwnedStr` | float to string |
 | `bool_to_str(b)` | `bool -> OwnedStr` | `"true"` or `"false"` |
+
+All builtins that return `OwnedStr` allocate a new heap buffer.
+All builtins accept either `Str` or `OwnedStr` as input (the
+`OwnedStr` auto-coercion handles it).
 
 Quick example:
 
@@ -139,13 +292,27 @@ intent "Lesson 6 -- string builtins sampler.";
 fn main() -> i64 {
   let s: Str = "  Hello, World!  ";
 
-  print "trimmed:", str_trim(s);
-  print "upper:", str_to_upper("hello");
-  print "lower:", str_to_lower("WORLD");
+  // Builtins that return OwnedStr
+  let trimmed: OwnedStr = str_trim(s);
+  let upper:   OwnedStr = str_to_upper("hello");
+  let lower:   OwnedStr = str_to_lower("WORLD");
+  let rpt:     OwnedStr = str_repeat("ab", 3);
+
+  print "trimmed:", trimmed;
+  print "upper:", upper;
+  print "lower:", lower;
   print "contains 'World':", str_contains(s, "World");
   print "starts with spaces:", str_starts_with(s, "  ");
   print "replace:", str_replace("foo bar foo", "foo", "baz");
-  print "repeated:", str_repeat("ab", 3);
+  print "repeated:", rpt;
+
+  // OwnedStr auto-coerces where Str expected
+  print "len of upper:", len(upper);
+  print "trimmed contains 'World':", str_contains(trimmed, "World");
+
+  // Lexicographic ordering: < / <= / > / >= work on both Str and OwnedStr
+  print "apple < banana:", "apple" < "banana";
+  print "upper > lower:", upper > lower;
 
   let parsed: Option<i64> = parse_int("42");
   print "parsed 42:", option_unwrap_or(parsed, -1);
@@ -164,8 +331,29 @@ contains 'World': true
 starts with spaces: true
 replace: baz bar baz
 repeated: ababab
+len of upper: 5
+trimmed contains 'World': true
+apple < banana: true
+upper > lower: true
 parsed 42: 42
 ```
+
+---
+
+## Summary: `Str` vs `OwnedStr`
+
+| | `Str` | `OwnedStr` |
+|---|---|---|
+| Storage | Pointer into `.rodata` (8 bytes) | Heap-allocated byte buffer |
+| Created by | String literals `"..."` | Concatenation `+`, builtins, conversions |
+| Ownership | Borrowed (no destructor) | Owned (freed at scope exit) |
+| Modify | No | Yes (via builtins) |
+| Pass to `Str` param | Directly | Auto-coerces (no copy) |
+| Pass to `OwnedStr` param | `s + ""` (explicit heap copy) | Directly |
+| `==` / `!=` | ✓ (byte equality via strcmp) | ✓ |
+| `<` / `<=` / `>` / `>=` | ✓ (lexicographic via strcmp) | ✓ |
+
+---
 
 ## Challenge
 
@@ -178,18 +366,10 @@ otherwise. Test it on a handful of inputs in `main`.
 
 ```vani
 fn is_yes(s: Str) -> bool {
-  if s == "y" {
-    return true;
-  }
-  if s == "yes" {
-    return true;
-  }
-  if s == "Y" {
-    return true;
-  }
-  if s == "YES" {
-    return true;
-  }
+  if s == "y" { return true; }
+  if s == "yes" { return true; }
+  if s == "Y" { return true; }
+  if s == "YES" { return true; }
   return false;
 }
 ```
@@ -200,4 +380,5 @@ A cleaner version using `match` will appear in Sec.8.
 
 ---
 
-**Next**: [Sec.7 -- Arrays and `Vec<T>` basics ->](07_vec_arrays.md)
+**Previous**: [Sec.6c -- Ownership and move ->](06c_ownership_primer.md)
+**Next**: [Sec.7a -- Tuples and destructuring primer ->](07a_tuples_primer.md)

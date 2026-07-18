@@ -121,4 +121,4 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [Sec.3 -- Affine ownership ->](03_affine.md)
+**Next**: [Sec.2b -- Match enhancements ->](02b_match_enhancements.md)

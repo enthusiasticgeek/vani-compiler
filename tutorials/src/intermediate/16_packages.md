@@ -379,3 +379,10 @@ Whether to commit `vendor/` is up to you:
   `vanic apply-publisher --accept-agreement` -> wait for operator approval.
 
 In the next chapter we look at interfaces and trait-style polymorphism.
+
+
+---
+
+**Previous**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
+**Next**: [Advanced track: Async / await and the Task transform ->](../advanced/01_async.md)
+

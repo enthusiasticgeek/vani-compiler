@@ -266,3 +266,10 @@ larger projects refactor-able without breaking the world.
 - [Intermediate 4b -- Interfaces primer](../intermediate/04b_interfaces_primer.md)
   -- modules + interfaces compose: a module can export an
   interface that several types in different modules implement
+
+
+---
+
+**Previous**: [Sec.9 -- First contract: assert / prove / requires ->](09_smt_intro.md)
+**Next**: [Sec.10 -- Modules and pub ->](10_modules.md)
+

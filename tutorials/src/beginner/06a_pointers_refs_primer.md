@@ -169,3 +169,139 @@ right cleanup automatically.
 
 You'll see this work in practice once you start writing code
 with `Vec`, `OwnedStr`, and structs.
+
+---
+
+## Does vāṇी have pointers?
+
+**Short answer: No. vāṇी has references, not raw pointers.**
+
+This is one of the most important differences from C and C++.
+
+### What a raw pointer is (in C)
+
+In C, a pointer is just a number -- the memory address of some
+data. The language lets you do whatever you like with it:
+
+```c
+// C -- what vāṇी deliberately does NOT expose:
+int x = 42;
+int *ptr = &x;       // take address of x
+*ptr = 99;           // write through pointer
+ptr = ptr + 1;       // pointer arithmetic -- step to next int
+ptr = NULL;          // can be null at any time
+ptr = (int*)0xDEAD;  // cast any integer to a pointer
+```
+
+Raw pointers in C can be:
+- **Null** (`NULL` / `nullptr`) -- dereferencing crashes.
+- **Stale / dangling** -- pointing to memory that was freed.
+- **Aliased** -- two `int*` can point to the same location,
+  creating data races in multi-threaded code.
+- **Arithmetic-shifted** -- you can walk off the end of an
+  array and access adjacent memory.
+
+These are the source of the most common C security
+vulnerabilities: null pointer dereferences, use-after-free,
+buffer overflows, and data races.
+
+### What vāṇी has instead: `ref T` and `mut ref T`
+
+vāṇी does NOT let you take the raw address of a variable, do
+pointer arithmetic, cast integers to pointers, or hold a
+null/dangling reference. Instead it gives you two kinds of
+**checked references**:
+
+| Keyword | Access | Can be null? | Arithmetic? |
+|---|---|---|---|
+| `ref T` | Read-only borrow | Never | No |
+| `mut ref T` | Exclusive read-write borrow | Never | No |
+
+A `ref T` is a compiler-checked alias: it points at a live
+value, is never null, and cannot outlive the value it
+references. The compiler verifies these properties at compile
+time. There is no runtime null check, no crash, no dangling
+pointer.
+
+```vani
+struct Point { x: i64, y: i64 }
+
+// `ref Point` is a read-only borrow -- NOT a raw pointer.
+// It can never be null. It cannot be used after `p` goes out of scope.
+fn print_point(p: ref Point) -> i64 {
+  print "x =", p.x, "y =", p.y;
+  return 0;
+}
+
+// `mut ref Point` is an exclusive read-write borrow.
+// Again: never null, never stale, compiler-tracked.
+fn translate(p: mut ref Point, dx: i64, dy: i64) -> i64 {
+  p.x = p.x + dx;
+  p.y = p.y + dy;
+  return 0;
+}
+
+fn main() -> i64 {
+  let pt: Point = Point { x: 3, y: 4 };
+  print_point(ref pt);          // read-only borrow
+  translate(mut ref pt, 1, 2);  // exclusive write borrow
+  print_point(ref pt);          // pt.x = 4, pt.y = 6
+  return 0;
+}
+```
+
+You cannot write `&pt` (address-of) or `*ptr` (dereference) in
+vāṇी. References are created at the **call site** using the
+`ref` and `mut ref` keywords and are verified by the compiler.
+
+### Why the restriction matters
+
+| Property | C pointer | vāṇī reference |
+|---|---|---|
+| Can be null | Yes (instant crash if deref'd) | **Never** |
+| Can be stale / dangling | Yes (use-after-free) | **Never** (compiler forbids it) |
+| Pointer arithmetic | Yes (buffer overflows) | **No** |
+| Can alias freely | Yes (data races) | **No** (`mut ref` is exclusive) |
+| Checked by compiler | No (runtime crashes) | **Yes** (compile-time errors) |
+
+vāṇी trades the flexibility of raw pointers for a guarantee:
+if the program compiles, none of those classes of bugs exist.
+
+### When do you actually need `unsafe` (raw memory access)?
+
+In the rare case you need to interact with a hardware register
+map, FFI with a C library that passes raw pointers, or write a
+custom allocator, vāṇī has an `unsafe(reason = "...")` escape
+hatch. This is an explicit, audited opt-out that shows up in
+the `vanic deviations` audit report. Normal application code
+never needs it.
+
+---
+
+## What about ownership? Affinity? "Drop"?
+
+You'll meet those names in the intermediate track. For now,
+just remember:
+
+- **Ownership** is the language's rule that says "this value
+  has exactly one place responsible for cleaning it up". When
+  the owning binding goes out of scope, the value is freed.
+- **Affinity** is the formal name for "every value has at most
+  one owner at a time" (it's affine -- used at most once). It's
+  the property that lets the compiler track moves cleanly.
+- **Drop** is the act of cleanup -- running the value's
+  destructor + freeing its heap memory. It happens automatically
+  at scope-exit; you don't write it yourself.
+
+These three together explain why vāṇी doesn't have a garbage
+collector AND doesn't make you remember to `free()` anything.
+The compiler tracks ownership at compile time and inserts the
+right cleanup automatically.
+
+You'll see this work in practice once you start writing code
+with `Vec`, `OwnedStr`, and structs.
+
+---
+
+**Previous**: [Sec.5c -- Named loop labels ->](05c_loop_labels_primer.md)
+**Next**: [Sec.6b -- Heap and stack primer ->](06b_heap_vs_stack_primer.md)

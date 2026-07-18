@@ -134,4 +134,5 @@ converges as N grows.
 
 ---
 
-**Next**: [Advanced track ->](../advanced/01_async.md)
+**Previous**: [Sec.14 -- `HashMap<K,V>` and `HashSet<T>` ->](14_collections.md)
+**Next**: [Sec.15a -- Math library deep-dive ->](15a_math_deep.md)

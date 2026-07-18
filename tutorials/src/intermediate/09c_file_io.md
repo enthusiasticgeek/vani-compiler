@@ -178,4 +178,5 @@ fn main() -> i64 {
 
 ---
 
-**Next**: [Sec.10a -- Result / try primer ->](10a_result_try_primer.md)
+**Previous**: [Sec.9b -- Native file I/O primer ->](09b_file_io_primer.md)
+**Next**: [Sec.9d -- Build-system integration ->](09d_build_systems.md)

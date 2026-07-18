@@ -261,3 +261,9 @@ covers enum-with-payload destructuring in depth.
 - [Intermediate 10a -- Result and try primer](../intermediate/10a_result_try_primer.md)
   -- Result/Option destructuring is half "match", half
   `try`/`?` sugar
+
+
+---
+
+**Previous**: [Sec.7 -- Arrays and Vec<T> basics ->](07_vec_arrays.md)
+**Next**: [Sec.8 -- Pattern match on integers + booleans ->](08_match.md)

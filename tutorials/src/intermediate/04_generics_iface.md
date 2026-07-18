@@ -186,4 +186,5 @@ if you get stuck.
 
 ---
 
+**Previous**: [Sec.4d -- Default methods and blanket implementations primer ->](04d_default_methods_primer.md)
 **Next**: [Sec.5 -- Dynamic dispatch ->](05_dyn.md)

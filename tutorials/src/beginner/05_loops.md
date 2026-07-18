@@ -127,4 +127,4 @@ For negatives, you'd flip the sign first; the language has no
 
 ---
 
-**Next**: [Sec.6 -- Strings (`Str` vs `OwnedStr`) ->](06_strings.md)
+**Next**: [Sec.5a -- Recursion intuition primer ->](05a_recursion_primer.md)

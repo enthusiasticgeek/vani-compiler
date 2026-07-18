@@ -241,3 +241,10 @@ work to expect.
 - [Advanced 10 -- Compiler internals tour](../advanced/10_internals.md)
   -- the static-analysis pass that builds the annotation lives
   in `src/big_o.rs`
+
+
+---
+
+**Previous**: [Sec.12 -- Devanagari surface -- optional intro ->](12_devanagari.md)
+**Next**: [Intermediate track: Structs and methods ->](../intermediate/01_struct_methods.md)
+

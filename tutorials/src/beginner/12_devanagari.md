@@ -170,3 +170,10 @@ Next steps:
   each show a v1 idiom (tagged-struct Composite, int-disc
   Bridge, ...) that's worth knowing even if you're not writing
   enterprise code.
+
+
+---
+
+**Previous**: [Sec.11 -- Challenges ->](11_challenges.md)
+**Next**: [Sec.13a -- Big-O notation primer ->](13a_big_o_primer.md)
+

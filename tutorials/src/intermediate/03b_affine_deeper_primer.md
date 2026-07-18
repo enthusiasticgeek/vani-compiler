@@ -246,3 +246,10 @@ sensibly.
   -- affine + the shared-XOR-mutable rule is what eliminates
   data races; this chapter explains the rule, that one applies
   it to concurrency
+
+
+---
+
+**Previous**: [Sec.3a -- Box<T> and RAII primer ->](03a_box_raii_primer.md)
+**Next**: [Sec.3c -- Shared ownership primer ->](03c_shared_ownership_primer.md)
+

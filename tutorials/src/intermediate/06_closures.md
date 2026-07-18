@@ -158,4 +158,5 @@ then `fold` it to get the sum-of-squares.
 
 ---
 
-**Next**: [Sec.7 -- Tuples and tuple destructure ->](07_tuples.md)
+**Previous**: [Sec.6b -- Iterators and combinators primer ->](06b_iterators_primer.md)
+**Next**: [Sec.6c -- Function pointers primer ->](06c_fnptr_primer.md)

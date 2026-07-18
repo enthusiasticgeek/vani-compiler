@@ -136,4 +136,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.9a -- Modules and namespaces primer ->](09a_modules_primer.md)
 **Next**: [Sec.11 -- Challenges ->](11_challenges.md)

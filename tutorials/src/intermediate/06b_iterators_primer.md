@@ -234,3 +234,10 @@ examples.
 - [Advanced 2a -- Parallelism primer](../advanced/02a_parallelism_primer.md)
   -- `parallel for` shares the per-element-independent-iteration
   insight that makes both iterators and parallelism work
+
+
+---
+
+**Previous**: [Sec.6a -- Closures and lambda lifting primer ->](06a_closures_primer.md)
+**Next**: [Sec.6 -- Closures and iterator combinators ->](06_closures.md)
+

@@ -209,3 +209,10 @@ shows you the actual syntax.
   the type.
 - [Intermediate 5 -- Dynamic dispatch](05_dyn.md) -- the actual
   code with `Vec<dyn Shape>` etc.
+
+
+---
+
+**Previous**: [Sec.3 -- Affine ownership: ref / mut ref ->](03_affine.md)
+**Next**: [Sec.4b -- Interfaces and static dispatch primer ->](04b_interfaces_primer.md)
+

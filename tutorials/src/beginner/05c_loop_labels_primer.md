@@ -254,5 +254,5 @@ Output: `found: 6 * 7 = 42`
 
 ---
 
-**Previous**: [Sec.5b -- Print blocks ->](05b_print_block_primer.md)  
-**Next**: [Sec.6 -- Strings ->](06_strings.md)
+**Previous**: [Sec.5b -- Print blocks ->](05b_print_block_primer.md)
+**Next**: [Sec.6a -- Pointers and references primer ->](06a_pointers_refs_primer.md)

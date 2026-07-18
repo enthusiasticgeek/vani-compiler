@@ -139,5 +139,6 @@ fn is_yes(s: Str) -> bool {
 
 ---
 
+**Previous**: [Sec.8a -- Pattern matching primer ->](08a_pattern_match_primer.md)
 **Next**: [Sec.8b -- Errors as values ->](08b_errors_primer.md)
 **Or skip to**: [Sec.9 -- First contract: `assert` / `prove` ->](09_smt_intro.md)

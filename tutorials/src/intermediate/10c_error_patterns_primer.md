@@ -273,5 +273,5 @@ incomplete -- a programmer bug, not a recoverable condition.
 
 ---
 
-**Previous**: [10b -- Runtime errors and abort](10b_runtime_errors_primer.md)  
-**Next**: [`Option<T>` and the option builtins ->](13_option.md)
+**Previous**: [Sec.10 -- Error handling: `Result<T, E>` + `try` ->](10_result_try.md)
+**Next**: [Sec.13 -- `Option<T>` and the option builtins ->](13_option.md)

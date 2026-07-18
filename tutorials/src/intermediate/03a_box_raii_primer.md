@@ -351,3 +351,10 @@ are the worked examples.
   with that chapter's dynamic dispatch.
 - [Intermediate 5 -- Dynamic dispatch](05_dyn.md) -- the actual
   code.
+
+
+---
+
+**Previous**: [Sec.2b -- Match enhancements ->](02b_match_enhancements.md)
+**Next**: [Sec.3b -- Affine ownership deeper pass primer ->](03b_affine_deeper_primer.md)
+

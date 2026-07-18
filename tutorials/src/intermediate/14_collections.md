@@ -214,4 +214,5 @@ an O(n) solution.
 
 ---
 
-**Next**: [Sec.15 -- Compiler internals (advanced track preview) ->](../advanced/10_internals.md)
+**Previous**: [Sec.13 -- `Option<T>` and the option builtins ->](13_option.md)
+**Next**: [Sec.15 -- Math, random numbers, and clone ->](15_math_rng.md)

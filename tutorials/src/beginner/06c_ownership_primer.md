@@ -237,3 +237,9 @@ the formal vocabulary the docs use.
 - [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md)
   -- formal syntax + compiler errors + worked examples
 - [Intermediate 4a -- `dyn Iface` primer](../intermediate/04a_dyn_iface_primer.md)
+
+
+---
+
+**Previous**: [Sec.6b -- Heap and stack primer ->](06b_heap_vs_stack_primer.md)
+**Next**: [Sec.6 -- Strings (Str vs OwnedStr) ->](06_strings.md)

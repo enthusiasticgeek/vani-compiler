@@ -254,3 +254,10 @@ the full syntax + worked examples.
   -- when to reach for Result/? vs. `assert` / contracts;
   the segfault-free guarantee; what hits `abort` and what
   doesn't
+
+
+---
+
+**Previous**: [Sec.9d -- Build-system integration ->](09d_build_systems.md)
+**Next**: [Sec.10b -- Runtime errors and panic-free design primer ->](10b_runtime_errors_primer.md)
+

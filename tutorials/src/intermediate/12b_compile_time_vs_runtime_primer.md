@@ -264,3 +264,10 @@ in vāṇी.
   -- the `--big-o` flag is also a compile-time analysis;
   the annotation is part of the same "prove it statically"
   story
+
+
+---
+
+**Previous**: [Sec.12a -- SMT requires / ensures primer ->](12a_smt_primer.md)
+**Next**: [Sec.12 -- SMT verification deep-dive ->](12_smt_deepdive.md)
+

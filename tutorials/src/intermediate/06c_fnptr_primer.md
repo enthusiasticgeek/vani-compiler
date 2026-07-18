@@ -176,4 +176,5 @@ that returns a new function equal to `f(g(x))`. Use it to compose
 
 ---
 
+**Previous**: [Sec.6 -- Closures and iterator combinators ->](06_closures.md)
 **Next**: [Sec.7 -- Tuples and tuple destructure ->](07_tuples.md)

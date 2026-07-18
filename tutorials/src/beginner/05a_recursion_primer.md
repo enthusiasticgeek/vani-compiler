@@ -256,3 +256,9 @@ code unusually clear.
 - [Beginner 13a -- Big-O primer](13a_big_o_primer.md) -- the
   `O(recursive)` annotation the compiler emits for self-
   recursive functions
+
+
+---
+
+**Previous**: [Sec.5 -- while and or loops ->](05_loops.md)
+**Next**: [Sec.5b -- Print blocks primer ->](05b_print_block_primer.md)
