@@ -106,4 +106,5 @@ print "Hello,", "vāṇी!";
 
 ---
 
-**Next**: [Sec.2 -- Variables, types, operators ->](02_variables.md)
+**Previous**: [Sec.0 -- CLI reference ->](00_cli_reference.md)
+**Next**: [Sec.1b -- Block comments primer ->](01b_block_comments_primer.md)

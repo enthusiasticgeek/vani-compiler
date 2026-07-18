@@ -250,3 +250,10 @@ covers atomics / mutexes / channels in detail.
   -- syntax + worked examples
 - [Advanced 3 -- task / join / atomics / mutexes / channels](03_concurrency.md)
   -- coarse-grained parallelism
+
+
+---
+
+**Previous**: [Sec.1 -- Async / await and the Task transform ->](01_async.md)
+**Next**: [Sec.2b -- Barrier: rendezvous synchronization primer ->](02b_barrier_primer.md)
+

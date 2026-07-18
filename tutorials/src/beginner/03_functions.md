@@ -123,4 +123,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.2 -- Variables, types, operators ->](02_variables.md)
 **Next**: [Sec.4 -- `if` / `else` ->](04_if_else.md)

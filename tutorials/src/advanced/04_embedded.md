@@ -259,4 +259,5 @@ Return a sentinel from `pop` when empty.
 
 ---
 
-**Next**: [Sec.5 -- The `dyn` vtable layout + safety boundary ->](05_vtables.md)
+**Previous**: [Sec.4b -- Cross-compilation and bare-metal targets primer ->](04b_cross_compile_primer.md)
+**Next**: [Sec.4c -- Attributes reference ->](04c_attributes_reference.md)

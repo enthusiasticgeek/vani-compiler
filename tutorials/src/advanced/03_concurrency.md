@@ -239,4 +239,5 @@ final total. Use `Atomic<i64>` for the running total.
 
 ---
 
-**Next**: [Sec.4 -- Embedded targets + `unsafe` + region typing ->](04_embedded.md)
+**Previous**: [Sec.2 -- `parallel for` + reductions + race-freedom ->](02_parallel.md)
+**Next**: [Sec.3b -- Condition variables primer ->](03b_condvar_primer.md)

@@ -173,4 +173,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.10 -- Modules and `pub` ->](10_modules.md)
 **Next**: [Sec.12 -- Devanagari surface -- optional intro ->](12_devanagari.md)

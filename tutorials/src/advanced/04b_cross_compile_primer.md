@@ -340,3 +340,10 @@ under QEMU is not yet automated (tracked as TODO SIMD-7 in
 - [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md) -- worked examples using these features together
 - [Intermediate 9 -- FFI](../intermediate/09_ffi.md) -- device I/O (UART/SPI/I2C) still needs FFI + C shims
 - [`examples/language/english/bare_metal.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/bare_metal.vani) -- runnable bare-metal example
+
+
+---
+
+**Previous**: [Sec.4a -- Embedded, unsafe, and regions primer ->](04a_embedded_primer.md)
+**Next**: [Sec.4 -- Embedded targets + unsafe + region typing ->](04_embedded.md)
+

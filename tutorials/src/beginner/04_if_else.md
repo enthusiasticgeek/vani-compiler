@@ -145,4 +145,5 @@ fn min3(a: i64, b: i64, c: i64) -> i64 {
 
 ---
 
+**Previous**: [Sec.3 -- Functions and the four return aliases ->](03_functions.md)
 **Next**: [Sec.5 -- `while` and `for` loops ->](05_loops.md)

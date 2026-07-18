@@ -1,4 +1,4 @@
-# Advanced 7 -- Devanagari purity arc
+﻿# Advanced 7 -- Devanagari purity arc
 
 > **Learning goal**: understand the `// vani-lang:` pragma's
 > purity gate, how the lexer enforces per-file dialect choice,
@@ -178,4 +178,5 @@ on both backends.
 
 ---
 
+**Previous**: [Sec.6 -- SMT trace debugging ->](06_smt_debug.md)
 **Next**: [Sec.8 -- Cross-language translator extension ->](08_translator.md)

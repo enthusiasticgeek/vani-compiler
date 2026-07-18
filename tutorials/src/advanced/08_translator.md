@@ -1,4 +1,4 @@
-# Advanced 8 -- The cross-language translator
+﻿# Advanced 8 -- The cross-language translator
 
 > **Learning goal**: understand how `vani_translate.py` works, use it to
 > move a program between two of its 57 supported languages, add an LLM
@@ -402,4 +402,5 @@ print(msg)
 
 ---
 
+**Previous**: [Sec.7 -- Devanagari purity arc ->](07_devanagari_purity.md)
 **Next**: [Sec.9 -- Adding a new dialect (compiler-level) →](09_new_dialect.md)

@@ -1,4 +1,4 @@
-# Advanced 6 -- SMT trace debugging
+﻿# Advanced 6 -- SMT trace debugging
 
 > **Learning goal**: when a `prove` / `assert` / loop
 > `invariant` fails, get the SMT solver to show its work and
@@ -166,4 +166,5 @@ counterexample narrows.
 
 ---
 
+**Previous**: [Sec.5b -- Advanced collections ->](05b_advanced_collections.md)
 **Next**: [Sec.7 -- Devanagari purity arc ->](07_devanagari_purity.md)

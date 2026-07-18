@@ -135,4 +135,5 @@ let x: i64 = /* inline */ 42;
 
 ---
 
+**Previous**: [Sec.1 -- Hello, World ->](01_hello_world.md)
 **Next**: [Sec.2 -- Variables, types, and operators ->](02_variables.md)

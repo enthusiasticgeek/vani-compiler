@@ -120,4 +120,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.6c -- Function pointers primer ->](06c_fnptr_primer.md)
 **Next**: [Sec.8 -- Multi-file projects + `vani.toml` ->](08_manifest.md)

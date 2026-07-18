@@ -276,3 +276,9 @@ Report which functions carry which safety attributes (`#[no_heap]`, `#[no_float]
 | `VANIC_SMT_DEBUG=1` | Dump Z3 queries; equivalent to `--smt-debug`. |
 | `INTENT_TARGET_EMBEDDED=1` | Enable stack-protector hardening on the link line. |
 | `INTENT_LIBGOMP` | Non-standard libgomp path for LLVM JIT. |
+
+
+---
+
+**Next**: [Sec.1 -- Hello, World ->](01_hello_world.md)
+

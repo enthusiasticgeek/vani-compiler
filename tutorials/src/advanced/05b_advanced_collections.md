@@ -1,4 +1,4 @@
-# Advanced 5b -- Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque
+﻿# Advanced 5b -- Advanced collections: Graph, BST, Trie, SkipList, UnionFind, BloomFilter, Deque
 
 > **Learning goal**: reach for the right built-in data structure
 > for graph problems, prefix matching, ordered sets, disjoint
@@ -298,4 +298,5 @@ O(1) amortized at both ends. Ring buffer grows by doubling. Scope-exit Drop free
 
 ---
 
+**Previous**: [Sec.5 -- The dyn vtable layout + safety boundary ->](05_vtables.md)
 **Next**: [Advanced 6 -- SMT trace debugging](06_smt_debug.md)

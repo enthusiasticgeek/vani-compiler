@@ -1,4 +1,4 @@
-# Advanced 9 -- Adding a new dialect
+﻿# Advanced 9 -- Adding a new dialect
 
 > **Learning goal**: walk through the exact steps to add a new
 > dialect to vāṇी, using the per-script abstraction set up in
@@ -202,4 +202,5 @@ abstraction boundaries.
 
 ---
 
+**Previous**: [Sec.8 -- Writing a cross-language translator extension ->](08_translator.md)
 **Next**: [Sec.10 -- Compiler internals tour ->](10_internals.md)

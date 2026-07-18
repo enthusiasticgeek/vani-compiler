@@ -184,4 +184,5 @@ use it only when linking against a hosted OS.
 
 ---
 
+**Previous**: [Sec.2c -- RwLock: shared reads, exclusive writes primer ->](02c_rwlock_primer.md)
 **Next**: [Sec.3 -- `task` / `join` + atomics / mutexes / channels ->](03_concurrency.md)

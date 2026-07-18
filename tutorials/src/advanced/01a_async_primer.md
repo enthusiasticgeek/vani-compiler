@@ -249,3 +249,10 @@ loop, with full state-machine examples.
 - [Advanced 1 -- Async / await / Task transform](01_async.md)
   -- the formal chapter with full syntax and state-machine
   decomposition
+
+
+---
+
+**Previous**: [Sec.16 -- Packages with Kosh ->](../intermediate/16_packages.md)
+**Next**: [Sec.1 -- Async / await and the Task transform ->](01_async.md)
+

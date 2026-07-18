@@ -389,3 +389,9 @@ Recommended `.github/workflows/safety.yml` gates:
     vanic deviations src/firmware.vani --strict
     vanic coverage src/firmware.vani --format=json --out=mcdc_map.json
 ```
+
+
+---
+
+**Previous**: [Sec.11 -- Using vani with an LLM ->](11_llm_workflows.md)
+

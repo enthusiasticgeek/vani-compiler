@@ -311,3 +311,9 @@ young.
 - [Intermediate 12a -- SMT primer](../intermediate/12a_smt_primer.md)
   -- the compile-time prove-it-correct layer that gives the
   agent its oracle
+
+
+---
+
+**Previous**: [Sec.10 -- Compiler internals tour ->](10_internals.md)
+**Next**: [Sec.12 -- Safety-critical standards ->](12_safety_standards.md)

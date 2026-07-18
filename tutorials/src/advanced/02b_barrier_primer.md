@@ -173,3 +173,10 @@ for `Channel` or `Condvar` instead.
   -- full API reference for all six primitives including Barrier
 - [Advanced 2 -- `parallel for` + reductions](02_parallel.md)
   -- data-parallel alternative (no explicit synchronization needed)
+
+
+---
+
+**Previous**: [Sec.2a -- Parallelism and race-freedom primer ->](02a_parallelism_primer.md)
+**Next**: [Sec.2c -- RwLock: shared reads, exclusive writes primer ->](02c_rwlock_primer.md)
+

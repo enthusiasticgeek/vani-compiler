@@ -228,3 +228,10 @@ the safety story. The next two chapters cover the rest:
   -- `--target`, `--no-std`, `#[no_mangle]`, `#[link_section]`, MMIO u8/u16
 - [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md)
   -- the actual syntax + worked examples
+
+
+---
+
+**Previous**: [Sec.3b -- Condition variables primer ->](03b_condvar_primer.md)
+**Next**: [Sec.4b -- Cross-compilation and bare-metal targets primer ->](04b_cross_compile_primer.md)
+

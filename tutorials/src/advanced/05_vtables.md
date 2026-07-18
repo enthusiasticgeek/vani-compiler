@@ -134,4 +134,5 @@ the underlying `intent_fn_Circle_area_thunk` body.
 
 ---
 
-**Next**: [Sec.6 -- SMT trace debugging ->](06_smt_debug.md)
+**Previous**: [Sec.5 -- SIMD and NEON vectorization ->](05_simd.md)
+**Next**: [Sec.5b -- Advanced collections ->](05b_advanced_collections.md)

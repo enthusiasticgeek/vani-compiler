@@ -121,4 +121,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.1 -- Structs and methods ->](01_struct_methods.md)
 **Next**: [Sec.2b -- Match enhancements ->](02b_match_enhancements.md)

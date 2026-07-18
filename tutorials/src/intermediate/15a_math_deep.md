@@ -247,4 +247,5 @@ fn main() -> i64 {
 
 ---
 
+**Previous**: [Sec.15 -- Math, random numbers, and clone ->](15_math_rng.md)
 **Next**: [Sec.15b -- Vec statistics and combinators ->](15b_vec_stats.md)

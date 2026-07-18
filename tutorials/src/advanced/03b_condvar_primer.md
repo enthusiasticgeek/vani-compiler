@@ -187,3 +187,10 @@ Use `Condvar` when: the predicate is complex (multiple fields), the waiting thre
 - [Advanced 3 -- `task`/`join` + atomics/mutexes/channels](03_concurrency.md) -- the full concurrency worked-example chapter
 - [Advanced 2a -- Parallelism primer](02a_parallelism_primer.md) -- race-freedom model
 - [`examples/language/english/condvar.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/condvar.vani) -- runnable condvar example
+
+
+---
+
+**Previous**: [Sec.3 -- task / join + atomics / mutexes / channels ->](03_concurrency.md)
+**Next**: [Sec.4a -- Embedded, unsafe, and regions primer ->](04a_embedded_primer.md)
+

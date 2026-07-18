@@ -419,3 +419,9 @@ named in the diagnostic.
 - [Advanced 4b -- Cross-compilation primer](04b_cross_compile_primer.md) -- `--target`, `--no-std`, bare-metal workflow
 - [Advanced 4 -- Embedded targets + `unsafe`](04_embedded.md) -- worked examples with `#[no_heap]` + `#[bounded_stack]`
 - [CLI Reference](../beginner/00_cli_reference.md) -- `vanic stack-depth`, `vanic acyclicity`, `vanic safety-attrs`
+
+
+---
+
+**Previous**: [Sec.4 -- Embedded targets + unsafe + region typing ->](04_embedded.md)
+**Next**: [Sec.5 -- SIMD and NEON vectorization ->](05_simd.md)

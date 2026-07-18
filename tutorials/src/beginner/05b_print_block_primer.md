@@ -163,5 +163,5 @@ Expected output:
 
 ---
 
-**Next**: [Sec.5c -- Named loop labels ->](05c_loop_labels_primer.md)  
-**Or**: [Sec.5 -- `while` and `for` loops ->](05_loops.md)
+**Previous**: [Sec.5a -- Recursion intuition primer ->](05a_recursion_primer.md)
+**Next**: [Sec.5c -- Named loop labels ->](05c_loop_labels_primer.md)

@@ -162,3 +162,10 @@ fn main() -> i64 {
 - [Advanced 2b -- Barrier primer](02b_barrier_primer.md)
   -- the phase-rendezvous primitive: when you need all threads
   to reach the same point before any proceed
+
+
+---
+
+**Previous**: [Sec.2b -- Barrier: rendezvous synchronization primer ->](02b_barrier_primer.md)
+**Next**: [Sec.2 -- parallel for + reductions + race-freedom ->](02_parallel.md)
+

@@ -127,4 +127,5 @@ For negatives, you'd flip the sign first; the language has no
 
 ---
 
+**Previous**: [Sec.4 -- `if` / `else` ->](04_if_else.md)
 **Next**: [Sec.5a -- Recursion intuition primer ->](05a_recursion_primer.md)

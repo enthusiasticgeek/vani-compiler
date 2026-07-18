@@ -1,4 +1,4 @@
-# Advanced 10 -- Compiler internals tour
+﻿# Advanced 10 -- Compiler internals tour
 
 > **Learning goal**: orient yourself in the vāṇी compiler
 > source tree so you can read a diagnostic, find the
@@ -183,3 +183,10 @@ Advanced -- 34 lessons). The next-best thing is to:
 - Contribute a fix or a dialect. The execution plan in
   [`TODO.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/TODO.md)
   has phase-by-phase queued work; pick whatever calls to you.
+
+
+---
+
+**Previous**: [Sec.9 -- Adding a new dialect ->](09_new_dialect.md)
+
+**Next**: [Sec.11 -- Using vani with an LLM ->](11_llm_workflows.md)

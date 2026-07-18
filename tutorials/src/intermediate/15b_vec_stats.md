@@ -5,7 +5,7 @@
 > running sums, set operations, and statistical aggregates --
 > without writing loops by hand.
 
-> **Prerequisites**: [Intermediate 7 -- Arrays and Vec<T>](07_vec_arrays.md)
+> **Prerequisites**: [Beginner 7 -- Arrays and Vec<T>](../beginner/07_vec_arrays.md)
 > and [Intermediate 15 -- Math, random numbers, and clone](15_math_rng.md).
 
 ---

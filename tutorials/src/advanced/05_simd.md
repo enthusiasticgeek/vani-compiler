@@ -529,3 +529,10 @@ Is the loop already fast enough?
 - [docs/simd_ffi_shims.md](../../../docs/simd_ffi_shims.md) — NEON / AVX2 FFI shim cookbook
 - [Benchmark 11 — SIMD dot product](../../../benchmarks/11_simd_dot/README.md) — vec128 explicit vs. auto-vectorized timings
 - [Benchmark 12 — SIMD-256 dot product](../../../benchmarks/12_simd256_dot/README.md) — vec256 vs vec128 vs auto-vectorized on x86-64 AVX2
+
+
+---
+
+**Previous**: [Sec.4c -- Attributes reference ->](04c_attributes_reference.md)
+**Next**: [Sec.5 -- The dyn vtable layout + safety boundary ->](05_vtables.md)
+

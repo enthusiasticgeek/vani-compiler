@@ -148,4 +148,5 @@ advanced cases: `i64_set_bit(n, pos)`, `i64_clear_bit(n, pos)`,
 
 ---
 
+**Previous**: [Sec.1b -- Block comments primer ->](01b_block_comments_primer.md)
 **Next**: [Sec.3 -- Functions and the four return aliases ->](03_functions.md)

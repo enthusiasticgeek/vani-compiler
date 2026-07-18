@@ -180,4 +180,5 @@ if `cancelled`.
 
 ---
 
-**Next**: [Sec.2 -- `parallel for` + race-freedom ->](02_parallel.md)
+**Previous**: [Sec.1a -- Async / await primer ->](01a_async_primer.md)
+**Next**: [Sec.2a -- Parallelism and race-freedom primer ->](02a_parallelism_primer.md)
