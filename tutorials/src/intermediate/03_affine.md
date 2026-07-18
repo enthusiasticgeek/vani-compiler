@@ -102,6 +102,8 @@ If you forget the `ref` keyword at the call site, the compiler
 rejects the call because you're trying to move a value into a
 parameter slot that expects only a borrow:
 
+<img class="maanas" src="../images/mascot/maanas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 fn sum_pair(p: ref Pair) -> i64 { return p.a + p.b; }
 
@@ -127,6 +129,8 @@ Structs that contain heap-owning fields (like `OwnedStr`,
 `Vec<T>`, or another struct with such fields) are **affine**:
 ownership transfers on each pass-by-value. Using the binding
 after the move is a compile error:
+
+<img class="maanas" src="../images/mascot/maanas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 struct Named { name: OwnedStr, val: i64 }

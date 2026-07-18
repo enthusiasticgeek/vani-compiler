@@ -16,6 +16,9 @@ preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/enthusiasticgeek/vani-compiler"
 edit-url-template = "https://github.com/enthusiasticgeek/vani-compiler/edit/main/tutorials/{path}"
 no-section-label = false
+# maanas -- the vāṇी mascot. Small inline emotion icons next to code
+# blocks, styled the same way the Rust book uses Ferris.
+additional-css = ["theme/maanas.css"]
 # Search is built-in for mdBook; surface it prominently.
 [output.html.search]
 enable = true

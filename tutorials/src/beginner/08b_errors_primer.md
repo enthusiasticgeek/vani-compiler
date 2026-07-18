@@ -88,6 +88,8 @@ Output: `division by zero`
 `match` is *exhaustive* -- the compiler rejects code that omits a
 variant. You cannot accidentally forget the error case:
 
+<img class="maanas" src="../images/mascot/maanas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 /* compile error: match is not exhaustive -- Option.None not covered */
 match result {
@@ -104,6 +106,8 @@ error is a *compile-time* mistake, not a silent runtime surprise.
 
 Sometimes a condition must be true and if it isn't the program has a
 bug. `assert` is for that:
+
+<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 assert len(xs) > 0, "list must not be empty";

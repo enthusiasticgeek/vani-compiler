@@ -89,6 +89,8 @@ fn dose_clamp(dose: i64, max: i64) -> i64 {
 
 Every `unsafe` block must carry a reason string:
 
+<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 unsafe(reason = "MMIO: direct peripheral register write per HAL spec §3.2") {
   mmio_write_u32(0x4001_0000, value);

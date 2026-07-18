@@ -1,0 +1,32 @@
+/* maanas -- the vāṇी mascot.
+ *
+ * Small inline emotion icons that sit next to a code block, the same
+ * way the Rust book uses Ferris. Usage:
+ *
+ *   <img class="maanas" src="images/mascot/maanas_mascot_error.png"
+ *        title="this code does not compile!"/>
+ *
+ * Use a relative path from the current page to `images/mascot/`.
+ */
+
+img.maanas {
+  height: 2em;
+  vertical-align: middle;
+  position: relative;
+  top: -0.1em;
+  margin: 0 0.2em;
+}
+
+/* Larger, standalone use (introduction page, glossary entry). */
+img.maanas-large {
+  height: 6em;
+  vertical-align: middle;
+  margin: 0.5em 1em 0.5em 0;
+}
+
+.maanas-caption {
+  display: inline-block;
+  font-style: italic;
+  opacity: 0.8;
+  margin-left: 0.3em;
+}

@@ -79,6 +79,8 @@ safety-critical paths where allocation must be absent.
 Reject any use of floating-point types (`f32`, `f64`) in this
 function's signature, local bindings, or transitive calls.
 
+<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 #[no_float]
 fn pid_integer(err: i64, integral: i64) -> i64 {
@@ -161,6 +163,8 @@ Required alongside `#[bounded_stack]` when using `#[asil_d]` or
 
 Assert that the function's total stack usage (frame size + all
 transitive calls) does not exceed `N` bytes.
+
+<img class="maanas" src="../images/mascot/maanas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 #[bounded_stack(512)]
