@@ -282,30 +282,5 @@ never needs it.
 
 ---
 
-## What about ownership? Affinity? "Drop"?
-
-You'll meet those names in the intermediate track. For now,
-just remember:
-
-- **Ownership** is the language's rule that says "this value
-  has exactly one place responsible for cleaning it up". When
-  the owning binding goes out of scope, the value is freed.
-- **Affinity** is the formal name for "every value has at most
-  one owner at a time" (it's affine -- used at most once). It's
-  the property that lets the compiler track moves cleanly.
-- **Drop** is the act of cleanup -- running the value's
-  destructor + freeing its heap memory. It happens automatically
-  at scope-exit; you don't write it yourself.
-
-These three together explain why vāṇी doesn't have a garbage
-collector AND doesn't make you remember to `free()` anything.
-The compiler tracks ownership at compile time and inserts the
-right cleanup automatically.
-
-You'll see this work in practice once you start writing code
-with `Vec`, `OwnedStr`, and structs.
-
----
-
 **Previous**: [Sec.5c -- Named loop labels ->](05c_loop_labels_primer.md)
 **Next**: [Sec.6b -- Heap and stack primer ->](06b_heap_vs_stack_primer.md)
