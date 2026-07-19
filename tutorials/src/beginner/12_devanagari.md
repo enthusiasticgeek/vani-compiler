@@ -29,24 +29,24 @@ practice.
 Save this in `~/lesson12.vani`:
 
 ```vani
-// शरी।
+// श्री।
 // vani-lang: sanskrit
-उददेशय "Lesson 12 -- first program with a Sanskrit pragma.";
+उद्देश्य "Lesson 12 -- first program with a Sanskrit pragma.";
 
-कारय add(a: i64, b: i64) -> i64
-अपेकषित a >= 0;
-अपेकषित b >= 0;
+कार्य add(a: i64, b: i64) -> i64
+अपेक्षित a >= 0;
+अपेक्षित b >= 0;
 {
-  पनरागम a + b;
+  पुनरागम a + b;
 }
 
-कारय main() -> i64 {
+कार्य main() -> i64 {
   माना x: i64 = 5;
   माना y: i64 = 7;
   माना sum: i64 = add(x, y);
-  सिदधम sum == 12;
+  सिद्धम् sum == 12;
   लिख sum;
-  पनरागम 0;
+  पुनरागम 0;
 }
 ```
 
@@ -73,12 +73,12 @@ Side-by-side, mapping by row:
 
 | English | Sanskrit (`vani-lang: sanskrit`) |
 |---|---|
-| `intent "...";` | `उददेशय "...";` |
-| `fn add(...)` | `कारय add(...)` |
-| `requires a >= 0;` | `अपेकषित a >= 0;` |
-| `return a + b;` | `पनरागम a + b;` |
+| `intent "...";` | `उद्देश्य "...";` |
+| `fn add(...)` | `कार्य add(...)` |
+| `requires a >= 0;` | `अपेक्षित a >= 0;` |
+| `return a + b;` | `पुनरागम a + b;` |
 | `let x: i64 = 5;` | `माना x: i64 = 5;` |
-| `assert sum == 12;` | `सिदधम sum == 12;` |
+| `assert sum == 12;` | `सिद्धम् sum == 12;` |
 | `print sum;` | `लिख sum;` |
 
 Identifier names (`add`, `x`, `y`, `sum`, `main`) and the
@@ -93,7 +93,7 @@ but they're a stylistic choice, not a requirement.
   Marathi / Nepali / Maithili / Konkani -- the last three were
   added in Phase 2). Mixing English keywords mid-file is a
   compile error: "language mismatch."
-- **The `// शरी।` header** is decorative -- a conventional
+- **The `// श्री।` header** is decorative -- a conventional
   Sanskrit *auspicious-beginning* mark. The compiler ignores it.
   It's a recognizable cue that the file uses the dialect surface.
 - **`परति` / `यदि` / `यावत्`** (and their Hindi/Marathi
