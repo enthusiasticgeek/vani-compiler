@@ -213,6 +213,8 @@ This is the idiomatic conversion when you need to store a
 `Str` does NOT automatically become `OwnedStr`. The directions
 (pointer) don't become the book (heap copy) without work.
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 // WRONG
 let s: OwnedStr = "hello";
@@ -231,6 +233,8 @@ error: let initializer must be assignable to OwnedStr, got Str
 
 `OwnedStr` auto-coerces **down** to `Str` (borrowed read). The
 reverse — `Str` to `OwnedStr` — requires an explicit copy:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 fn needs_owned(s: OwnedStr) -> i64 { print s; return 0; }

@@ -110,6 +110,8 @@ Sometimes you genuinely need to:
 
 For these, you write:
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 unsafe(reason = "GPIO pin 13 toggle -- hardware-defined memory address") {
   let gpio_pin_13: *mut u32 = 0x40020000 as *mut u32;

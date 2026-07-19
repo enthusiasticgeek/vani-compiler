@@ -183,6 +183,8 @@ This is one of the most important differences from C and C++.
 In C, a pointer is just a number -- the memory address of some
 data. The language lets you do whatever you like with it:
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```c
 // C -- what vāṇी deliberately does NOT expose:
 int x = 42;
@@ -222,6 +224,8 @@ value, is never null, and cannot outlive the value it
 references. The compiler verifies these properties at compile
 time. There is no runtime null check, no crash, no dangling
 pointer.
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 struct Point { x: i64, y: i64 }

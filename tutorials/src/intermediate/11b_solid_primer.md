@@ -37,6 +37,8 @@ fn process(data: ref Vec<i64>, mode: i64) -> i64 {
 
 **Fixed** -- two functions, each with one reason to change:
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```
 fn validate(data: ref Vec<i64>) -> i64 { /* ... */ return 0; }
 fn format(data: ref Vec<i64>)   -> i64 { /* ... */ return 0; }

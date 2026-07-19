@@ -460,6 +460,8 @@ program -- I can't recover." Two paths:
 
 ### 1. `assert` for invariants you've verified
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 fn process(xs: ref Vec<i64>) -> i64 {
   // The caller has already validated this; if it's wrong,
@@ -475,6 +477,8 @@ message instead of corrupting state."
 
 ### 2. `prove` for "I'm asserting this is mathematically
    true and want SMT to verify it now"
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 fn next_power_of_two(n: i64) -> i64 {

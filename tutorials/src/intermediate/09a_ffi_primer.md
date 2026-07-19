@@ -136,6 +136,8 @@ section where the type system isn't tracking ownership.
 The reverse direction also works. vAṇी functions can be passed
 as callbacks to C functions:
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 extern "C" fn qsort(
   base: *mut i64, n: u64, size: u64,

@@ -102,6 +102,8 @@ let y: i64 = /**/ 0;   /* same as: let y: i64 = 0; */
 
 Forgetting the closing `*/` is caught cleanly at compile time:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 /* this comment is never closed
 fn main() -> i64 { return 0; }

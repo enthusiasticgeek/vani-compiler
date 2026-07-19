@@ -139,6 +139,8 @@ fn main() -> i64 {
 | Wrong arity or param type | **Compile error** -- the signatures must match exactly |
 | `fn(i64) -> i64` != `fn(i64, i64) -> i64` | **Compile error** |
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 // This is a compile error -- wrong arity:
 fn add(a: i64, b: i64) -> i64 { return a + b; }

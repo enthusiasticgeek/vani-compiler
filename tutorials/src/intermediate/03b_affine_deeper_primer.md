@@ -70,6 +70,8 @@ destructors.
 
 ### What the error looks like
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```
 error: field 'name' of 'b' was moved at byte 47,
        cannot read after move

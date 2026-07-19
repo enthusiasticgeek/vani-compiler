@@ -109,6 +109,8 @@ vanic run   /tmp/out.vani
 Compiler diagnostics + the bundle's Sec.7 limitations catalog
 together give the model exactly the feedback it needs:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```
 /tmp/out.vani:5:14: error: value 'n' was moved; cannot use after move
   return n * factorial(n - 1);

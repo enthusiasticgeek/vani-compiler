@@ -190,6 +190,8 @@ fn sum_first_three(xs: ref Vec<i64>) -> i64 {
 The compiler can't prove `len(xs) >= 3` from this code alone.
 Add a contract:
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 fn sum_first_three(xs: ref Vec<i64>) -> i64
   requires len(xs) >= 3

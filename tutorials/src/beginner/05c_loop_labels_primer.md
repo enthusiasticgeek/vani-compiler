@@ -169,6 +169,8 @@ fn main() -> i64 {
 Using a label that doesn't exist on any enclosing loop is caught at
 compile time -- no runtime surprise:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 outer: for i from 0 to 3 {
   break nowhere;   /* error: no enclosing loop is labeled 'nowhere' */

@@ -38,6 +38,8 @@ compiling for long files.
 
 A typical failing assert looks like:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```
 src/foo.vani:42:5: error: proof failed: SMT counterexample [x = 9223372036854775807, b = -9223372036854775808]
   assert x - b >= 0;
@@ -51,6 +53,8 @@ false. Read it as "if `x = i64::MAX` and `b = i64::MIN`, then
 
 The fix is usually a tightened `requires` clause. From
 Intermediate Sec.12:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 fn checked_sub(a: i64, b: i64) -> i64
