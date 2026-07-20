@@ -810,6 +810,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
+    out.push_str("declare void @exit(i32) noreturn\n");
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @calloc(i64, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -3613,7 +3614,11 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     ));
                 }
             }
-            out.push_str("  call void @abort()\n");
+            // exit(3) rather than abort(): see the matching comment in
+            // ssa_backend_llvm.rs's `intent_assert_fail` lowering (MATH-3) --
+            // abort()'s SIGABRT can make `vanic run`/lli misreport a clean
+            // assertion failure as an apparent native stack overflow.
+            out.push_str("  call void @exit(i32 3)\n");
             out.push_str("  unreachable\n");
             out.push_str(&format!("{}:\n", ok));
         }

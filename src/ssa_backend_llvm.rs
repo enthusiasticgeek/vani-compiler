@@ -287,6 +287,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     }
     out.push_str("declare i32 @putchar(i32)\n");
     out.push_str("declare void @abort() noreturn\n");
+    out.push_str("declare void @exit(i32) noreturn\n");
     out.push_str("declare noalias i8* @malloc(i64)\n");
     out.push_str("declare noalias i8* @realloc(i8*, i64)\n");
     out.push_str("declare void @free(i8*)\n");
@@ -3328,7 +3329,16 @@ fn emit_instr(
                         operand_str(arg)
                     ));
                 }
-                out.push_str("  call void @abort()\n");
+                // Use exit(3) rather than abort(): under `vanic run`
+                // (lli), abort()'s SIGABRT triggers LLVM's own crash/
+                // backtrace signal handler, which can misreport a clean
+                // assertion failure as an apparent native stack overflow
+                // (observed on Windows once any `mut ref` Vec operation
+                // is live in the caller). exit(3) matches the exit code
+                // `vanic build`'s AOT binary already produces for the
+                // same failure (the MSVC/MinGW CRT's abort() itself calls
+                // _exit(3)), without going through a signal handler at all.
+                out.push_str("  call void @exit(i32 3)\n");
                 out.push_str("  unreachable\n");
                 return Ok(());
             }
