@@ -659,8 +659,16 @@ fn sha256_file(path: &Path) -> Result<String, String> {
     if let Ok(out) = std::process::Command::new("sha256sum").arg(&p).output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
-            if let Some(h) = s.split_whitespace().next() {
-                return Ok(h.to_string());
+            // GNU coreutils prefixes the whole line with `\` when the filename
+            // contains a backslash or newline (common on Windows paths), which
+            // glues onto the hash since there's no space before it. Strip it
+            // before validating, or the checksum comes out corrupted with a
+            // stray leading backslash.
+            if let Some(tok) = s.split_whitespace().next() {
+                let h = tok.strip_prefix('\\').unwrap_or(tok);
+                if h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Ok(h.to_lowercase());
+                }
             }
         }
     }
