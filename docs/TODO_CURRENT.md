@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-07-17
+Last updated: 2026-07-20
 
 ---
 
@@ -609,3 +609,28 @@ Full design rationale in conversation 2026-07-18.
 **Out of scope (not statically decidable):**
 - Static heap *upper* bound — requires abstract interpretation / user-supplied loop bounds
 - Runtime heap tracing — needs malloc wrapper injection in C backend (~2–3 week separate effort)
+
+---
+
+## Kosh math-library ecosystem (added 2026-07-20)
+
+Package-level roadmap (which new Kosh packages should exist for broad math library
+coverage -- vani-complex, vani-optimize, vani-geometry, vani-signal, vani-tensor,
+vani-pde, a matrix v0.2 eigen/QR/SVD extension, and an optional symbolic tier) lives in
+[kosh-index/ROADMAP.md](https://github.com/enthusiasticgeek/kosh-index/blob/main/ROADMAP.md).
+Most of it needs zero compiler changes: structs and `Vec<struct>` already work (confirmed
+via `echo_p3d_vec_struct.vani` and friends), so Complex/Tensor packages can use them
+directly, and the flat-`Vec<f64>`-plus-shape encoding vani-matrix already established
+generalizes to N-D tensors without new type-system support. Arbitrary-precision
+arithmetic (vani-bignum, for the symbolic tier) is likewise implementable in pure
+vāṇी via digit-array carry/borrow arithmetic -- no native bignum type needed.
+
+Two narrow compiler items surfaced during that planning pass:
+
+| ID | Task | Effort | Depends on |
+|----|------|--------|-----------|
+| MATH-1 | Fix `vanic run`'s JIT session missing `intent_vec_double__sort`. Plain `sort()` on `Vec<f64>` crashes under `vanic run` ("Symbols not found: intent_vec_double__sort") but works correctly under `vanic build` (AOT). Root cause: `sort_runtime.c` defines `intent_vec_double__sort` correctly (confirmed by reading it) -- the JIT's runtime-symbol registration list is missing it even though `intent_vec_i64__sort` is present. Every published package currently works around this by using `sort_by` (which links fine under both `run` and `build`), so it isn't blocking anything, but it's worth fixing since `vanic run` is the natural first thing anyone reaches for. | ~1-2 h | nothing |
+| MATH-2 | Generalize `sort`/`sort_by` beyond `Vec<i64>`/`Vec<f64>` to arbitrary `Vec<T>` via a `fn(T,T)->i64` comparator (mirrors the F64-1 pattern, widened past numeric element types). Not blocking anything in the current roadmap, but vani-geometry (sorting points by a key) and the symbolic tier (sorting terms in a canonical form) would both benefit from not needing an O(n²) insertion-sort workaround. | ~1 day | nothing |
+
+**Out of scope for the compiler**: everything else in the math roadmap is pure
+kosh-package work using language features that already exist.
