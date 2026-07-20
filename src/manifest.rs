@@ -255,8 +255,15 @@ fn copy_dir_vani(src: &Path, dst: &Path) -> Result<(), String> {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if path.is_dir() {
-            // Skip hidden dirs and the vendor dir itself to avoid cycles.
-            if name_str.starts_with('.') || name_str == "vendor" || name_str == "target" {
+            // Skip hidden dirs and build output. `vendor/` is deliberately
+            // NOT skipped: both `vanic vendor` and `vanic publish`'s tarball
+            // builder need to carry a path-dependency's already-vendored
+            // source along with it so multi-level dependencies (and
+            // published packages that depend on other packages) are
+            // self-contained. `vanic add`/`vanic vendor` only ever populate
+            // vendor/ via tar extraction or a plain directory copy -- never
+            // symlinks -- so there is no cycle risk in practice.
+            if name_str.starts_with('.') || name_str == "target" {
                 continue;
             }
             copy_dir_vani(&path, &dst.join(&name))?;
