@@ -11,6 +11,8 @@
   &nbsp;•&nbsp;
   <a href="docs/languages.md"><strong>Language Coverage</strong></a>
   &nbsp;•&nbsp;
+  <a href="docs/kosh_design.md"><strong>Kosh Package Manager</strong></a>
+  &nbsp;•&nbsp;
   <a href="https://github.com/enthusiasticgeek/vani-compiler/releases"><strong>Releases</strong></a>
 </p>
 
