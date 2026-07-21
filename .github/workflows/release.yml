@@ -92,9 +92,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist/
-
-      - name: Flatten artifact directory
-        run: find dist/ -type f | xargs -I{} mv {} dist/ 2>/dev/null || true
+          merge-multiple: true
 
       - name: Resolve release notes
         id: notes
