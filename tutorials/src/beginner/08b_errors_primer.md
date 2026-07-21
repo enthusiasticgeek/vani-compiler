@@ -1,6 +1,6 @@
-﻿# Beginner 8b -- Errors as values (intuition primer)
+# Beginner 8b -- Errors as values (intuition primer)
 
-> **Learning goal**: understand why vÄá¹‡Ä« represents failure as an
+> **Learning goal**: understand why vāṇī represents failure as an
 > ordinary value rather than throwing an exception. Build a first
 > mental model of `Option` so you recognise the pattern before the
 > full intermediate treatment.
@@ -23,7 +23,7 @@ Problems:
 - The compiler can't verify you handled every failure mode.
 - Stack unwinding has hidden cost and hidden control flow.
 
-### Errors as values (vÄá¹‡Ä«, Rust, Go)
+### Errors as values (vāṇī, Rust, Go)
 
 A failing function returns a *value* that says either "here's the
 result" or "here's what went wrong". The caller receives it like any
