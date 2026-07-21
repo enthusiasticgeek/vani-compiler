@@ -42,7 +42,7 @@ This is the same pattern `OwnedStr` uses for heap strings and
 
 | Builtin | What it does |
 |---------|--------------|
-| `file_open(path, mode)` | Opens `path` in `mode` (`"r"`, `"w"`, `"a"`, `"r+"`, ...). Returns a `FileHandle`. |
+| `file_open(path, mode, buffered)` | Opens `path` in `mode` (`"r"`, `"w"`, `"a"`, `"r+"`, ...). `buffered: bool` -- `true` for normal libc buffering, `false` for `setvbuf(..., _IONBF, ...)` (every write hits the OS immediately). Returns a `FileHandle`. |
 | `file_is_ok(ref fh)` | Returns `true` if the handle is valid (fopen succeeded). Always check before reading/writing. |
 | `file_read_line(mut ref fh)` | Reads one line (up to `\n`) into a fresh `OwnedStr`. Returns empty string at EOF. |
 | `file_write(mut ref fh, s)` | Writes `s` (a `Str`) to the file. Returns bytes written or -1. |

@@ -13,7 +13,7 @@ intent "Intermediate 9c -- native file I/O.";
 
 fn main() -> i64 {
   // -- write ------------------------------------------------
-  let fw: FileHandle = file_open("/tmp/vani_hello.txt", "w");
+  let fw: FileHandle = file_open("/tmp/vani_hello.txt", "w", true);
   if !file_is_ok(ref fw) {
     eprint "error: could not open file for writing";
     return 1;
@@ -24,7 +24,7 @@ fn main() -> i64 {
   let _ = file_close(fw);           // explicit close; could omit (scope-exit does it)
 
   // -- read back --------------------------------------------
-  let fr: FileHandle = file_open("/tmp/vani_hello.txt", "r");
+  let fr: FileHandle = file_open("/tmp/vani_hello.txt", "r", true);
   if !file_is_ok(ref fr) {
     eprint "error: could not open file for reading";
     return 1;
@@ -54,9 +54,15 @@ line 2: second line
 
 ## Why it works that way
 
-- **`file_open(path, mode)`** calls `fopen` internally and
+- **`file_open(path, mode, buffered)`** calls `fopen` internally and
   stores the `FILE*` inside a `FileHandle`. The handle is
-  affine -- the compiler tracks it like an `OwnedStr`.
+  affine -- the compiler tracks it like an `OwnedStr`. `buffered:
+  bool` controls libc's default stream buffering: `true` (the
+  common case) leaves it on; `false` calls `setvbuf(f, NULL,
+  _IONBF, 0)` so every `file_write` reaches the OS immediately,
+  without needing an explicit `file_flush` -- useful for a log
+  file another process is tailing, or right before a crash you
+  want the last line to have actually landed on disk.
 - **`file_is_ok(ref fh)`** checks that `fopen` succeeded
   (returned a non-null pointer). Always test before reading
   or writing; if the check fails, any use of the handle is
@@ -111,7 +117,7 @@ adds a newline at the end.
 ## Append mode
 
 ```vani
-let fa: FileHandle = file_open("/var/log/app.log", "a");
+let fa: FileHandle = file_open("/var/log/app.log", "a", true);
 if file_is_ok(ref fa) {
   let _ = file_write(mut ref fa, "2026-06-21: started\n");
   let _ = file_close(fa);
@@ -131,7 +137,7 @@ file on every write. Existing content is preserved.
   Loop until you get an empty string to read a whole file:
 
   ```vani
-  let fr: FileHandle = file_open("data.txt", "r");
+  let fr: FileHandle = file_open("data.txt", "r", true);
   let line: OwnedStr = file_read_line(mut ref fr);
   while line != "" {
     print line;
@@ -141,6 +147,13 @@ file on every write. Existing content is preserved.
 
 - **Binary I/O** is not yet native. Use FFI for `fread`/`fwrite`.
 - **Random access** (`fseek`/`ftell`) is not yet native. Use FFI.
+- **`buffered: false` isn't free.** Every `file_write` becomes its
+  own syscall instead of an in-memory buffer append, which is
+  noticeably slower under a tight write loop. Reach for it only
+  when you specifically need writes to land immediately (a log
+  another process tails live, or the last line before a crash) --
+  `true` plus an explicit `file_flush` at the points that matter
+  is usually the better trade-off.
 
 ## Challenge
 
@@ -158,7 +171,7 @@ fn main() -> i64 {
   print "filename:";
   let _ = flush_stdout();
   let name: OwnedStr = stdin_read_line();
-  let fh: FileHandle = file_open(name, "r");
+  let fh: FileHandle = file_open(name, "r", true);
   if !file_is_ok(ref fh) {
     eprint "error: cannot open", name;
     return 1;

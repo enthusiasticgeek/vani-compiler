@@ -775,8 +775,23 @@ as a missing feature in STATUS.md rather than a listed limitation here.
 `flush_stdout`, and the `eprint` statement all ship in v0.1.5 on both
 C and LLVM backends.
 
+**IO-1 update (2026-07-21, v0.5.4-dev)**: `file_open` grew a required
+third `buffered: bool` argument — `true` for normal libc buffering
+(the old default and behavior), `false` to call `setvbuf(f, NULL,
+_IONBF, 0)` so every `file_write` reaches the OS immediately without
+an explicit `file_flush`. This is a **breaking change** to `file_open`'s
+arity — the old 2-arg call is now a compile error. C backend: routes
+through a new `intent_file_open` runtime helper. LLVM backend: inlined
+directly as `@fopen` + a conditional branch to a block calling
+`@setvbuf` (no custom `@intent_*` symbol — see the note below about why
+that path is a linking trap). `_IONBF`'s value is hardcoded per libc
+family (glibc/BSD `_IONBF=2`, MSVC/MinGW `_IONBF=4`) since the LLVM path
+calls `setvbuf` directly rather than through C headers; gated by the
+same host-only `cfg!(target_os = ...)` limitation as `host_is_windows`
+et al. (not yet cross-compilation-target-aware).
+
 ```vani
-let f: FileHandle = file_open("/tmp/log.txt", "w");
+let f: FileHandle = file_open("/tmp/log.txt", "w", true);
 if file_is_ok(ref f) {
   let _ = file_write(mut ref f, "hello\n");
   let _ = file_flush(mut ref f);
@@ -790,6 +805,20 @@ eprint "fatal:", 42;
 
 See [`examples/language/english/file_io.vani`](../examples/language/english/file_io.vani)
 for the full worked example.
+
+**Newly discovered bug (2026-07-21), NOT part of IO-1**: `file_read_line`
+and `stdin_read_line` are completely broken on the LLVM backend, both
+`vanic run` (JIT) and `vanic build` (AOT) — confirmed by running
+`examples/language/english/file_io.vani` on the default backend:
+`lli`/`llc` both fail with `use of undefined value '@intent_file_read_line'`.
+`backend_llvm.rs` emits `call i8* @intent_file_read_line(...)` but there
+is no corresponding `declare`, and no C definition anywhere provides that
+symbol for the LLVM path (unlike the C backend, which has its own
+self-contained `intent_file_read_line` string-emitted helper — that one
+works fine). `--backend=c` is unaffected and fully functional; this is
+LLVM-only. Tracked as **BUG-1** in `docs/TODO_CURRENT.md` — not fixed as
+part of this pass since it's a pre-existing, unrelated regression
+surfaced while auditing `file_open`, not something IO-1 touched.
 
 **Remaining scope** (device I/O — UART / I2C / SPI / RS485 / CAN):
 these are kernel-ioctl-specific and remain a C-shim + FFI pattern by

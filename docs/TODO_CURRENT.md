@@ -688,12 +688,42 @@ already a made decision, not an open gap, so "implement raw device I/O
 support" was the wrong framing. The one genuinely open, narrowly-scoped
 candidate feature surfaced by this audit:
 
-- [ ] **IO-1. Unbuffered / raw flat-file I/O mode** (~2-4 h if wanted) —
-  `file_open` has no way to disable libc's default buffering (no
-  `setvbuf(f, NULL, _IONBF, 0)` equivalent, no `O_DIRECT`-style open flag).
-  Candidate surface: either a third `file_open(path, mode, buffered: bool)`
-  argument, or a separate `file_open_unbuffered(path, mode)` builtin, wired
-  to `setvbuf`/`fcntl` in the C backend and the LLVM backend's libc calls.
-  **Not started — confirm this is actually wanted and which surface before
-  starting**; nothing in the kosh ecosystem or the user's stated use case
-  currently needs it, this only came up as an audit finding.
+- [x] **IO-1. Unbuffered / raw flat-file I/O mode** ✅ done 2026-07-21 —
+  `file_open(path: Str, mode: Str, buffered: bool)`, third arg now
+  **required** (breaking change to arity — old 2-arg calls are a compile
+  error). `buffered: false` calls `setvbuf(f, NULL, _IONBF, 0)` right
+  after `fopen` so writes reach the OS immediately. C backend: new
+  `intent_file_open` runtime helper (gated into `emit_intent_file_io_helpers_c`
+  alongside the existing `intent_file_read_line`/`intent_stdin_read_line`
+  helpers). LLVM backend: inlined as `@fopen` + a conditional branch to a
+  block calling a newly-`declare`d `@setvbuf` — deliberately NOT a custom
+  `@intent_file_open` symbol, since that shape (call a custom `@intent_*`
+  function with no `declare`/runtime linkage) is exactly what's broken for
+  `@intent_file_read_line` (see BUG-1 below); inlining raw libc calls
+  avoids the same trap. `_IONBF`'s value is host-only-gated
+  (`host_ionbf_value()` in `backend_llvm.rs`), same limitation as
+  `host_is_windows()` et al. Updated: `examples/language/english/file_io.vani`,
+  3 existing `src/lib.rs` tests, 2 new `src/lib.rs` tests (arity rejection +
+  LLVM `@setvbuf` emission), `docs/language_manual.md`,
+  `docs/v1_limitations.md` L18, `tutorials/src/intermediate/09b_file_io_primer.md`
+  + `09c_file_io.md`. Verified end-to-end (not just type-checked): a
+  program that writes unbuffered and reads back *without ever calling
+  `file_flush`* got the correct content, on both C and LLVM backends,
+  both `vanic run` and `vanic build`.
+
+- [ ] **BUG-1. `file_read_line`/`stdin_read_line` completely broken on the
+  LLVM backend** (both `vanic run` and `vanic build`) — discovered while
+  verifying IO-1, NOT part of IO-1's scope, not fixed here. `backend_llvm.rs`
+  emits `call i8* @intent_file_read_line(...)` / `@intent_stdin_read_line()`
+  but neither has a `declare` nor any C definition reachable from the LLVM
+  path (the C backend's own self-contained string-emitted helper of the
+  same name is a *different, unrelated* implementation that works fine —
+  it's LLVM specifically that has nothing). Reproduces immediately:
+  `vanic run examples/language/english/file_io.vani` (no flags — LLVM is
+  the default backend) fails with `use of undefined value
+  '@intent_file_read_line'` from `lli`/`llc`. `--backend=c` is unaffected.
+  Likely fix shape: inline the read-line loop directly in LLVM IR (malloc/
+  realloc/fgetc, all already-declared libc externs) rather than a custom
+  `@intent_*` symbol — same approach IO-1 used for `file_open`'s
+  `setvbuf` call, which avoids needing build-vs-JIT-vs-cross-compile
+  linkage for a new runtime symbol. **Not started.** ~2-4 h estimate.

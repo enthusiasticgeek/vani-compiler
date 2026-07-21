@@ -501,7 +501,7 @@ fn dot(a: ref Vec<f32>, b: ref Vec<f32>, n: i64) -> f32 {
 ## File I/O
 
 ```vani
-let fh: FileHandle = file_open("data.txt");
+let fh: FileHandle = file_open("data.txt", "r", true);
 if file_is_ok(ref fh) {
     let line: OwnedStr = file_read_line(mut ref fh);
     file_write(mut ref fh, "written\n");

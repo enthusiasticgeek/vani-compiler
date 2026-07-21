@@ -7,7 +7,7 @@
 fn main() -> i64 {
     // --- write a temporary file ---
     let path = "/tmp/vani_file_io_test.txt";
-    let f: FileHandle = file_open(path, "w");
+    let f: FileHandle = file_open(path, "w", true);
     if file_is_ok(ref f) {
         let _w: i64 = file_write(ref f, "hello, file I/O\n");
         let _fl: i64 = file_flush(ref f);
@@ -15,7 +15,7 @@ fn main() -> i64 {
     }
 
     // --- read back the file ---
-    let f2: FileHandle = file_open(path, "r");
+    let f2: FileHandle = file_open(path, "r", true);
     if file_is_ok(ref f2) {
         let line = file_read_line(ref f2);
         print line;

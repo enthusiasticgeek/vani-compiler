@@ -2020,6 +2020,21 @@ fn emit_intent_sleep_ms_helper_c(out: &mut String, body: &str) {
 }
 
 fn emit_intent_file_io_helpers_c(out: &mut String, body: &str) {
+    let needs_open = body.contains("intent_file_open");
+    if !body.contains("intent_file_read_line") && !body.contains("intent_stdin_read_line") && !needs_open {
+        return;
+    }
+    if needs_open {
+        out.push_str(
+            "/* file I/O helpers */\n\
+             static FILE* intent_file_open(const char* path, const char* mode, int64_t buffered) INTENT_UNUSED;\n\
+             static FILE* intent_file_open(const char* path, const char* mode, int64_t buffered) {\n\
+             \x20 FILE* f = fopen(path, mode);\n\
+             \x20 if (f && !buffered) { setvbuf(f, NULL, _IONBF, 0); }\n\
+             \x20 return f;\n\
+             }\n\n",
+        );
+    }
     if !body.contains("intent_file_read_line") && !body.contains("intent_stdin_read_line") {
         return;
     }
@@ -15886,7 +15901,10 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         }
         // File I/O builtins — FILE* wrapped as int64_t.
         "file_open" => {
-            return format!("(int64_t)fopen({}, {})", emit_expr(&args[0]), emit_expr(&args[1]));
+            return format!(
+                "(int64_t)intent_file_open({}, {}, {})",
+                emit_expr(&args[0]), emit_expr(&args[1]), emit_expr(&args[2])
+            );
         }
         "file_is_ok" => {
             return format!("(*(int64_t*){} != 0)", emit_expr(&args[0]));

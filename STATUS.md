@@ -10,6 +10,26 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-07-21 (file_open buffered arg + Big-O/device-I/O doc audit)
+
+**State**: `file_open` gained a required third `buffered: bool` argument (breaking arity change) with a working unbuffered path on both backends; a stale Big-O doc comment was fixed; device-I/O docs extended past UART-only; one new bug discovered (not fixed) on the LLVM backend. Compiler version `v0.5.4-dev` (Cargo.toml).
+
+### Shipped this session (2026-07-21)
+
+| Item | What shipped |
+|------|-------------|
+| DOC-1 | Fixed stale `big_o.rs` module comment claiming no cross-fn analysis — `annotate_program` (what the CLI actually calls) already does it; confirmed via direct test (loop calling an O(n) helper correctly reports O(n²)) |
+| DOC-2 | `docs/v1_limitations.md` L18 extended with I2C/SPI worked FFI-shim examples (previously UART-only) + PCIe/NVMe clarification (same FFI/MMIO pattern, no protocol-specific surface planned) |
+| DOC-3 / kosh_design.md | Documented that `[deps]`-declared packages don't need an explicit `use "path";` — `compile_path`/`resolve_uses` already auto-include them via the manifest |
+| **IO-1** | `file_open(path, mode, buffered: bool)` — see `docs/v1_limitations.md` L18 for the full writeup. C backend: new `intent_file_open` helper. LLVM backend: inlined `@fopen` + conditional `@setvbuf` branch (deliberately not a custom linked symbol). 5 lib tests (2 new), example + 2 tutorials updated. Verified end-to-end on both backends, both `run` and `build`. |
+| BUG-1 (found, not fixed) | `file_read_line`/`stdin_read_line` completely broken on the LLVM backend (both `run` and `build`) — `@intent_file_read_line` has no `declare` or definition anywhere reachable from that path. `--backend=c` unaffected. Tracked in `docs/TODO_CURRENT.md`. |
+
+### Key numbers (2026-07-21)
+- **Compiler version**: `v0.5.4-dev`
+- **Commits this session**: 3 (`41cca6d`, `c5695d1`, `0e236c8`) + IO-1 (pending commit)
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-07-13 (Vec<f64> parity + #[no_nan] + benchmark 12)
 
 **State**: Vec<f64> builtin parity complete (F64-2–F64-5), #[no_nan] safety attribute added (T2.4), benchmark 12 SIMD-256 f32 dot product running, pub(kosh) tutorial example added. Released as **v0.4.1**. Compiler version `v0.4.1` (Cargo.toml).

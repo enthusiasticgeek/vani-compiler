@@ -47603,7 +47603,7 @@ fn main() -> i64 { return 0; }
         // be rejected (the first binding no longer holds the resource).
         let source = r#"
             fn main() -> i64 {
-                let f: FileHandle = file_open("/dev/null", "r");
+                let f: FileHandle = file_open("/dev/null", "r", true);
                 let g: FileHandle = f;
                 let _: i64 = file_close(f);
                 let _: i64 = file_close(g);
@@ -47623,12 +47623,12 @@ fn main() -> i64 { return 0; }
         // must lower to valid C that calls fopen/fputs/fclose.
         let source = r#"
             fn main() -> i64 {
-                let f: FileHandle = file_open("/tmp/vani_test_io.txt", "w");
+                let f: FileHandle = file_open("/tmp/vani_test_io.txt", "w", true);
                 if file_is_ok(ref f) {
                     let _w: i64 = file_write(ref f, "hello\n");
                     let _c: i64 = file_close(f);
                 }
-                let f2: FileHandle = file_open("/tmp/vani_test_io.txt", "r");
+                let f2: FileHandle = file_open("/tmp/vani_test_io.txt", "r", true);
                 if file_is_ok(ref f2) {
                     let line = file_read_line(ref f2);
                     print line;
@@ -47641,6 +47641,58 @@ fn main() -> i64 { return 0; }
         assert!(c.contains("fopen"), "expected fopen() in C output:\n{c}");
         assert!(c.contains("fputs"), "expected fputs() in C output:\n{c}");
         assert!(c.contains("fclose"), "expected fclose() in C output:\n{c}");
+    }
+
+    #[test]
+    fn file_open_rejects_two_argument_call() {
+        // IO-1 (2026-07-21): file_open grew a required third `buffered:
+        // bool` argument. The old 2-arg call must now be a clear arity
+        // error, not silently accepted.
+        let source = r#"
+            fn main() -> i64 {
+                let f: FileHandle = file_open("/tmp/x.txt", "w");
+                let _: i64 = file_close(f);
+                return 0;
+            }
+        "#;
+        let result = compile(source);
+        assert!(result.is_err(), "2-arg file_open must be rejected post-IO-1");
+    }
+
+    #[test]
+    fn file_open_unbuffered_emits_setvbuf_in_c() {
+        // IO-1: buffered=false must route through the intent_file_open
+        // helper, which conditionally calls setvbuf(f, NULL, _IONBF, 0).
+        let source = r#"
+            fn main() -> i64 {
+                let f: FileHandle = file_open("/tmp/vani_test_unbuf.txt", "w", false);
+                let _c: i64 = file_close(f);
+                return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("unbuffered file_open must compile to C");
+        assert!(c.contains("intent_file_open"), "expected intent_file_open helper call in C output:\n{c}");
+        assert!(c.contains("setvbuf"), "expected setvbuf() in C output:\n{c}");
+    }
+
+    #[test]
+    fn file_open_unbuffered_emits_setvbuf_in_llvm() {
+        // Same as file_open_unbuffered_emits_setvbuf_in_c but for the
+        // LLVM backend: fopen + a conditional branch to a block calling
+        // @setvbuf, not a hidden C helper (LLVM IR has no equivalent of
+        // a GNU statement-expression, so this is inlined directly).
+        let source = r#"
+            fn main() -> i64 {
+                let f: FileHandle = file_open("/tmp/vani_test_unbuf.txt", "w", false);
+                let _c: i64 = file_close(f);
+                return 0;
+            }
+        "#;
+        let checked = compile(source).expect("unbuffered file_open must type-check");
+        let ll = crate::backend_llvm::LlvmBackend.emit(&checked.ir);
+        assert!(ll.contains("@fopen"), "expected @fopen call in LLVM IR:\n{ll}");
+        assert!(ll.contains("declare i32 @setvbuf"), "expected @setvbuf declare in LLVM IR:\n{ll}");
+        assert!(ll.contains("call i32 @setvbuf"), "expected @setvbuf call in LLVM IR:\n{ll}");
     }
 
     #[test]

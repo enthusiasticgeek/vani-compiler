@@ -21792,7 +21792,7 @@ fn check_barrier_builtin(
 
 /// Type-check the file I/O builtins.
 ///
-///   file_open(path: Str, mode: Str) -> FileHandle
+///   file_open(path: Str, mode: Str, buffered: bool) -> FileHandle
 ///   file_is_ok(f: ref FileHandle) -> bool
 ///   file_read_line(f: mut ref FileHandle) -> OwnedStr
 ///   file_write(f: mut ref FileHandle, s: Str) -> i64
@@ -21813,20 +21813,21 @@ fn check_file_builtin(
 ) -> CheckedExpr {
     match name {
         "file_open" => {
-            if args.len() != 2 {
+            if args.len() != 3 {
                 diagnostics.push(Diagnostic::new(
                     span,
-                    format!("'file_open' takes 2 arguments (path: Str, mode: Str), got {}", args.len()),
+                    format!("'file_open' takes 3 arguments (path: Str, mode: Str, buffered: bool), got {}", args.len()),
                 ));
                 return CheckedExpr::fallback(Type::FileHandle, span);
             }
             let path = check_expr(&args[0], env, signatures, diagnostics);
             let mode = check_expr(&args[1], env, signatures, diagnostics);
+            let buffered = check_expr(&args[2], env, signatures, diagnostics);
             CheckedExpr::new(
                 TypedExprKind::Call {
                     name: "file_open".to_string(),
                     name_span: span,
-                    args: vec![path.expr, mode.expr],
+                    args: vec![path.expr, mode.expr, buffered.expr],
                 },
                 Type::FileHandle,
                 None,

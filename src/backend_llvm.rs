@@ -242,6 +242,18 @@ pub(crate) fn host_supports_arc8_io() -> bool {
     host_is_linux() || host_is_darwin() || host_is_windows()
 }
 
+/// `_IONBF` from `<stdio.h>`, needed by `file_open`'s unbuffered
+/// path (`setvbuf` is called directly against the raw LLVM
+/// declare, not through C headers, so the constant has to be
+/// hardcoded per libc family). glibc and BSD/Darwin libc agree:
+/// `_IOFBF=0, _IOLBF=1, _IONBF=2`. MSVC and MinGW's UCRT/MSVCRT
+/// both use `_IOFBF=0, _IOLBF=0x40, _IONBF=0x04`. Same host-only
+/// gating limitation as `host_is_windows` et al. above — not
+/// cross-compilation-target-aware yet.
+pub(crate) fn host_ionbf_value() -> i32 {
+    if host_is_windows() { 4 } else { 2 }
+}
+
 /// LLVM IR bare identifiers are restricted to printable ASCII.
 /// Devanagari-script vāṇी identifiers (e.g. `द्विपदगुणक`) fail to
 /// emit with the raw byte sequence. Mangle each non-ASCII char to
@@ -822,6 +834,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i32 @fputs(i8*, i8*)\n");
     out.push_str("declare i32 @fflush(i8*)\n");
     out.push_str("declare i32 @fgetc(i8*)\n");
+    out.push_str("declare i32 @setvbuf(i8*, i8*, i32, i64)\n");
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memset(i8*, i32, i64)\n");
@@ -6575,14 +6588,40 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             }
             // File I/O builtins — FileHandle backed by i64 storing FILE*.
             if name == "file_open" {
-                // file_open(path: str, mode: str) -> FileHandle (i64)
+                // file_open(path: str, mode: str, buffered: bool) -> FileHandle (i64)
                 let path = emit_expr(&args[0], ctx, out);
                 let mode = emit_expr(&args[1], ctx, out);
+                let buffered = emit_expr(&args[2], ctx, out);
                 let fp = ctx.fresh_tmp();
                 out.push_str(&format!(
                     "  {} = call i8* @fopen(i8* {}, i8* {})\n",
                     fp, path, mode
                 ));
+                // buffered=false -> setvbuf(fp, NULL, _IONBF, 0), only when
+                // fopen actually succeeded (fp != null).
+                let notnull = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = icmp ne i8* {}, null\n", notnull, fp));
+                let notbuf = ctx.fresh_tmp();
+                out.push_str(&format!("  {} = xor i1 {}, true\n", notbuf, buffered));
+                let do_unbuf = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = and i1 {}, {}\n",
+                    do_unbuf, notnull, notbuf
+                ));
+                let unbuf_then = ctx.fresh_label("file_open_unbuf");
+                let unbuf_cont = ctx.fresh_label("file_open_cont");
+                out.push_str(&format!(
+                    "  br i1 {}, label %{}, label %{}\n",
+                    do_unbuf, unbuf_then, unbuf_cont
+                ));
+                out.push_str(&format!("{}:\n", unbuf_then));
+                out.push_str(&format!(
+                    "  call i32 @setvbuf(i8* {}, i8* null, i32 {}, i64 0)\n",
+                    fp, host_ionbf_value()
+                ));
+                out.push_str(&format!("  br label %{}\n", unbuf_cont));
+                out.push_str(&format!("{}:\n", unbuf_cont));
+                ctx.current_block = unbuf_cont;
                 let result = ctx.fresh_tmp();
                 out.push_str(&format!("  {} = ptrtoint i8* {} to i64\n", result, fp));
                 return result;
