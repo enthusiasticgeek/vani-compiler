@@ -97,7 +97,7 @@ Pre-built `vanic` binaries ship for all five targets on every [GitHub release](h
 | `vec256<T>` | 256-bit | AVX-256 `ymm` | SVE-256 | RVV VLEN=256 |
 | `vec512<T>` | 512-bit | AVX-512 `zmm` | SVE-512 | RVV VLEN=512 |
 
-All three widths are ordinary generic types with consistent builtin names (`simd128_add`, `simd256_add`, `simd512_add`, etc.) — no architecture-specific intrinsic headers required.
+All three widths are ordinary generic types with a consistent builtin shape per width (`simd_add`/`simd256_add`/`simd512_add`, etc. — vec128's prefix has no width number) — no architecture-specific intrinsic headers required.
 
 ---
 

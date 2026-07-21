@@ -148,7 +148,7 @@ vanic build sum.vani --link-with=avx2_shim.o -o sum
 |-----------|---------------------|
 | Loop over array, LLVM can prove no aliasing | Auto-vectorization (already on by default) |
 | Latency-bound loop, want software pipelining | `#[vectorize]` attribute on the function |
-| Portable SIMD: splat / add / mul / reduce on f32 or i32 | `vec128<T>` builtins (v0.2.4+) |
+| Portable SIMD: splat / add / mul / reduce on f32 or i32 | `vec128<T>` / `vec256<T>` / `vec512<T>` builtins |
 | Need a specific NEON intrinsic (e.g. `vsqrtq_f64`, `vrsqrteq_f32`) | FFI shim |
 | Need a specific RVV intrinsic (e.g. `vfmacc_vv_f32m8`) | FFI shim with `<riscv_vector.h>` |
 | AES-NI, SHA extensions, SVE gather-scatter | FFI shim |
@@ -183,12 +183,16 @@ fn prepare_and_multiply(a: ref Vec<i64>, b: ref Vec<i64>,
 
 ---
 
-## Native SIMD types (shipped v0.2.4)
+## Native SIMD types (`vec128<T>` v0.2.4, `vec256<T>` 2026-07-10, `vec512<T>` v0.5.0)
 
-`vec128<T>` and seven SIMD builtins are live as of v0.2.4. FFI shims are now
-the **exotic intrinsics escape hatch** rather than the primary mechanism.
+`vec128<T>` (128-bit), `vec256<T>` (256-bit), and `vec512<T>` (512-bit) are
+all live, each with the same seven-builtin set (`simd<N>_splat`, `_load`,
+`_store`, `_add`, `_sub`, `_mul`, `_reduce_add` -- `simd_*` for vec128,
+`simd256_*`/`simd512_*` for the wider types). FFI shims are now the
+**exotic intrinsics escape hatch** rather than the primary mechanism, at
+every width.
 
-| Builtin | x86-64 (i32 example) | AArch64 (i32) | RISC-V (i32, LLVM-lowered) |
+| Builtin (vec128 shown; vec256/vec512 identical shape) | x86-64 (i32 example) | AArch64 (i32) | RISC-V (i32, LLVM-lowered) |
 |---------|----------------------|--------------|---------------------------|
 | `simd_splat(x)` | `_mm_set1_epi32` | `dup v0.4s, w0` | `vmv.v.x` |
 | `simd_add(a, b)` | `_mm_add_epi32` | `add v0.4s, v1.4s, v2.4s` | `vadd.vv` |
@@ -198,9 +202,21 @@ the **exotic intrinsics escape hatch** rather than the primary mechanism.
 | `simd_load(vec, i)` | GEP + load | `ldr q0, [x0, x1, lsl #2]` | `vle32.v` |
 | `simd_store(vec, i, d)` | GEP + store | `str q0, [x0, x1, lsl #2]` | `vse32.v` |
 
+`vec256<T>`/`vec512<T>` lower to the same LLVM `<N x T>` shape with N
+doubled/quadrupled -- on hardware narrower than the type (e.g. `vec512` on
+plain NEON, or `vec256` on RVV with VLEN=128), LLVM legalises it into
+multiple registers/vector-register-groups automatically; on hardware that
+matches or exceeds the type's width (AVX-512 zmm, SVE-512, RVV VLEN>=512),
+it's a single instruction. See `docs/arm_neon_status.md` and
+`tutorials/src/advanced/05_simd.md` (Layer 5) for the full per-target
+lowering tables.
+
 Shims remain the escape hatch for: AES-NI, SHA extensions, Poly1305
 acceleration, SVE scatter-gather, RVV widening multiply (`vwmul.vv`),
-AVX-512 masking, and any intrinsic not yet in the builtin set.
+AVX-512 masking, and any intrinsic not yet in the builtin set -- this is
+true at every width; `vec512<T>` does not add AVX-512 masking or SVE
+gather-scatter support, only the four arithmetic ops + splat/load/store/
+reduce.
 
 For QEMU setup to test these on AArch64 and RISC-V targets without real
 hardware, see `docs/qemu_testing.md`.

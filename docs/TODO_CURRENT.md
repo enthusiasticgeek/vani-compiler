@@ -299,7 +299,12 @@ Full context: `STATUS.md` handoff "2026-07-10 (SIMD hardening)".
   `simd256_load`, `simd256_store`, `simd256_add`, `simd256_sub`, `simd256_mul`,
   `simd256_reduce_add`. LLVM: `<N x T>` where N = 256/bits(T), align 32.
   C: `T __attribute__((vector_size(32)))`. 2 lib tests + 3 edge-case files.
-  Stretch: `vec512<T>` for AVX-512 / future SVE-512 (same pattern, N×2).
+  Stretch (`vec512<T>` for AVX-512 / SVE-512 / RVV VLEN=512, same pattern
+  N×2) ✅ **done as M4, v0.5.0, 2026-07-15** — see `CHANGELOG.md` /
+  `RELEASE_NOTES/v0.5.0.md`. Docs updated 2026-07-21: `docs/arm_neon_status.md`
+  (new §4), `docs/simd_ffi_shims.md` (Native SIMD types section).
+  `tutorials/src/advanced/05_simd.md` already had a vec512 section (Layer 5)
+  from the M4 release itself, so no tutorial gap there.
 
 - [x] **SIMD-10. QEMU system-mode bare-metal integration** ✅ done 2026-07-10
   `vanic run --target=arm-none-eabi --qemu-machine=lm3s6965evb` now works.
@@ -747,3 +752,54 @@ candidate feature surfaced by this audit:
   `ArrayLit`'s existing arm just above the catch-all, which already does
   exactly this pattern for array elements). **Not started.** ~1-2 h
   estimate (small, well-isolated fix; the hard part was finding it).
+
+---
+
+## Kosh publish safety-coverage gate (added 2026-07-21)
+
+Sourced from a direct user question: "is there a sanity check to ensure
+things like wcet, bounded stack for all functions before even accepting a
+package in kosh-index?" — there wasn't. MAINT-1 (`kosh-index/ROADMAP.md`)
+audited the 12 existing math packages by hand, but nothing stopped the next
+`vanic publish` from skipping that step.
+
+- [x] **GATE-1. `vanic audit-safety` + `vanic publish` hard gate** ✅ done
+  2026-07-21 (`vani-compiler` commit `d845cc9`). New `vanic audit-safety
+  <path> [--format=text|json]` reuses the existing `wcet_body`/
+  `compute_stack_depths` analyses (`src/safety.rs`) **unconditionally** —
+  not gated on the attribute already being declared — to determine
+  per-function whether `#[bounded_stack]`/`#[wcet]` is *computable*, then
+  flags any eligible-but-missing case. Coverage means "declared wherever
+  computable", not blanket 100% attribute presence: a fn-pointer parameter
+  makes `#[bounded_stack]` uncomputable (indirect calls' frame cost is
+  unknowable), and an unbounded loop or unannotated recursion makes
+  `#[wcet]` uncomputable, so both are legitimately exempt and never
+  flagged. Vendored `[deps]` functions are excluded via `FileMap` path
+  lookup. `vanic publish` now runs this audit before building the tarball
+  and refuses to publish on any gap, with `--allow-partial-safety-coverage`
+  as an explicit escape hatch.
+
+  Package entries (`src/lib.vani`) have no `fn main()`, which the existing
+  `compile_path`/`compile` unconditionally required (`validate_main` in
+  `checker.rs`) — added `checker::check_library` (skips `validate_main`,
+  otherwise identical to `check`) and `compile_library`/
+  `compile_library_path` (`src/lib.rs`) so the audit can run directly
+  against a package's entry file. These are strict supersets of the
+  existing `compile`/`compile_path` (same checks, main just isn't
+  required), so they're safe to use for auditing an ordinary program too.
+
+  Running the new tool against all 12 already-published MAINT-1 packages
+  validated the manual audit — and found 4 real gaps it missed:
+  vani-discrete's `_disc_has_edge`/`_disc_transpose` (missing
+  `#[bounded_stack]`), vani-optimize's `penalty_value` (fn-pointer params
+  make it correctly `#[bounded_stack]`-exempt, but indirect calls get a
+  flat 10-cycle WCET charge — NOT unbounded like bounded_stack — so it's
+  still `#[wcet]`-eligible), and vani-probability's
+  `markov_is_absorbing_state` (1 of 106 functions). All four fixed and
+  republished (discrete 0.1.2, optimize 0.1.3, probability 0.4.5); see
+  `kosh-index/ROADMAP.md` MAINT-4 for the full writeup. Documented in
+  `docs/kosh_design.md` (new "Safety-coverage gate" section),
+  `tutorials/src/advanced/12_safety_standards.md` (new "Safety-attribute
+  coverage gate" section + CI example + compliance matrix row),
+  `tutorials/src/intermediate/16_packages.md` (publish walkthrough +
+  command table), and `tutorials/src/beginner/00_cli_reference.md`.

@@ -121,7 +121,8 @@ statement is needed to bring a dependency's functions into scope**, only
 | `vanic build` / `run` / `check` | existing driver | ✅ |
 | `vanic vendor` | copies path-dep source trees to `vendor/` | ✅ |
 | `vanic add <name>[@constraint]` | fetches from registry → `vendor/` → updates `vani.toml` + `vani.lock` | ✅ |
-| `vanic publish` | build tarball → auth gate → GH Release → index append | ✅ |
+| `vanic publish [--allow-partial-safety-coverage]` | audit-safety gate → build tarball → auth gate → GH Release → index append | ✅ |
+| `vanic audit-safety <path> [--format=json\|text]` | verify `#[bounded_stack]`/`#[wcet]` coverage wherever a function is eligible (standalone; also runs automatically inside `vanic publish`) | ✅ |
 | `vanic apply-publisher [--accept-agreement]` | fetch + display publisher agreement; with flag: submit GitHub issue to apply | ✅ |
 | `vanic registry-approve <username>` | operator: approve a pending publisher (adds to `allowed_publishers`) | ✅ |
 | `vanic registry-blacklist <username> --reason=<text>` | operator: blacklist a publisher (removes from allowed + blocks future publish) | ✅ |
@@ -176,6 +177,39 @@ checks three states in order:
 
 The blacklist is checked **before** the allowlist — a revoked publisher cannot
 slip through a race window.
+
+### Safety-coverage gate (2026-07-21)
+
+Passing the publisher check isn't enough to publish -- `vanic publish` also
+runs the equivalent of `vanic audit-safety <entry>` against the package's
+entry file (`compile_library_path`, since a package entry has no `fn main()`)
+and refuses to build the tarball if any function is eligible for
+`#[bounded_stack]`/`#[wcet]` but doesn't declare it. "Eligible" is not
+"100% attribute presence": a function with a fn-pointer parameter can't have
+a computable `#[bounded_stack]` (indirect calls' frame cost is unknowable),
+and a function with an unbounded loop or unannotated recursion can't have a
+computable `#[wcet]` -- both are legitimately exempt, and the gate only
+flags cases where the compiler *can* compute the missing number.
+
+```
+$ vanic publish
+  checking publish authorization...
+  running audit-safety (#[bounded_stack]/#[wcet] coverage)...
+audit-safety: 1 of 23 function(s) missing an attribute they're eligible for (0 vendored fn(s) excluded):
+
+  penalty_value (src/lib.vani:490:1)
+    missing #[wcet(cycles = 52)] -- static estimate is 52 cycles
+
+Refusing to publish with incomplete safety-attribute coverage. Add the
+attributes shown above, or re-run with --allow-partial-safety-coverage
+if this is intentional.
+```
+
+The reported value is exact -- copy it into the source verbatim and
+`vanic check`/`vanic audit-safety` will re-verify it on the next run, same
+workflow as fixing any other `#[bounded_stack]`/`#[wcet]` violation. To
+publish anyway (e.g. a deliberately-unaudited internal package), pass
+`--allow-partial-safety-coverage` to skip the check entirely.
 
 All publisher state lives **entirely in `governance.json`** in the registry
 repo. When governance transfers to a committee, or the registry moves to a new

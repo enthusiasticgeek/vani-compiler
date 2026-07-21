@@ -1,6 +1,6 @@
 # ARM / AArch64 / NEON status in vāṇī (v0.2.4+)
 
-> Written 2026-07-06. Updated 2026-07-10.
+> Written 2026-07-06. Updated 2026-07-21 (vec512 / SVE-512 section added).
 
 ---
 
@@ -110,25 +110,54 @@ QEMU_CPU=max qemu-aarch64-static ./program
 
 ---
 
-### 4. `parallel for` unavailable on bare-metal ARM
+### 4. `vec512<T>` on AArch64 ✅ shipped (M4, v0.5.0, 2026-07-15)
+
+`vec512<T>` is a 512-bit SIMD type with the same 7 builtins as `vec256<T>`
+(`simd512_splat`, `simd512_load`, `simd512_store`, `simd512_add`,
+`simd512_sub`, `simd512_mul`, `simd512_reduce_add`). The LLVM lowering is
+architecture-generic (`<N x T>` where N = 512/bits(T), align 64) — the same
+`vec128`/`vec256` pattern extended one step further, so no AArch64-specific
+codegen was needed.
+
+**AArch64 without SVE:** LLVM legalises `<16 x float>` as four 128-bit NEON
+registers. Functional, no throughput gain vs four `vec128` calls.
+
+**AArch64 + SVE-512 (`--sve` / `--sve2`, VLEN=512 hardware or `-cpu max`
+under QEMU):** a single scalable `z`-register holds the full 512 bits —
+one `fadd z0.s, z1.s, z2.s` per op, same story as `vec256` + SVE-256 above.
+
+| Target | vec512<f32> LLVM output |
+|--------|------------------------|
+| AArch64, no SVE | 4× `fadd v0.4s, v1.4s, v2.4s` |
+| AArch64 + SVE, 512-bit | 1× `fadd z0.s, z1.s, z2.s` |
+
+See `tutorials/src/advanced/05_simd.md` (Layer 5) for the full builtin
+reference and worked dot-product example, and `docs/simd_ffi_shims.md` for
+the exotic-intrinsics escape hatch (AVX-512 masking, SVE gather-scatter,
+etc. still require an FFI shim -- `vec512<T>` only covers
+splat/load/store/add/sub/mul/reduce_add).
+
+---
+
+### 5. `parallel for` unavailable on bare-metal ARM
 
 `parallel for … reduce` emits `CreateThread` (Windows) or `pthread_create`
 (POSIX). Neither exists on bare-metal (`--no-std` + `arm-none-eabi`).
 Workaround: manual work-splitting via interrupt-driven tasks or an RTOS
 (FreeRTOS task API via FFI).
 
-### 4. Thumb-16 / Cortex-M0 not supported
+### 6. Thumb-16 / Cortex-M0 not supported
 
 Only Thumb-2 (ARMv7-M and later) is exercised. Cortex-M0/M0+ are Thumb-16
 only; the `arm-none-eabi` triple will technically target them but the
 generated code may include Thumb-2 instructions unsupported on M0.
 
-### 5. No ARM benchmark results
+### 7. No ARM benchmark results
 
 All numbers in `benchmarks/results/RESULTS.md` were collected on x86-64
 (Windows 11 AMD64). There are no AArch64 or Graviton reference runs yet.
 
-### 6. AArch64 CI via QEMU ✅ shipped (SIMD-7, 2026-07-10)
+### 8. AArch64 CI via QEMU ✅ shipped (SIMD-7, 2026-07-10)
 
 `.github/workflows/ci.yml` includes `test-aarch64-qemu`, which runs
 `cargo test --lib --target aarch64-unknown-linux-gnu` under
@@ -141,7 +170,7 @@ run — those spawn the vanic binary which forks `cc`/`lli` (x86-64 host
 binaries). Full integration tests on real AArch64 hardware are tracked as
 ARM-3.
 
-### 7. SVE / SVE2 — opt-in via `--sve` / `--sve2` ✅ shipped v0.2.4+
+### 9. SVE / SVE2 — opt-in via `--sve` / `--sve2` ✅ shipped v0.2.4+
 
 ```
 vanic build server.vani --target=aarch64-unknown-linux-gnu --cpu=neoverse-n2 --sve2
@@ -208,6 +237,7 @@ vanic run hello.vani --target=riscv64-unknown-linux-gnu
 |---------|--------|
 | LLVM auto-vectorization → RVV | ✓ works when `--cpu=<v-capable>` e.g. `sifive-x280` |
 | `vec128<T>` builtins → RVV | ✓ LLVM lowers 128-bit vector IR to `vsetvli` + `vadd.vv` etc. |
+| `vec256<T>` / `vec512<T>` builtins → RVV | ✓ same lowering, legalised into 1-4 vector-register groups depending on hardware VLEN (see table below) |
 | Explicit RVV intrinsics | Via FFI shim with `<riscv_vector.h>` (see `docs/simd_ffi_shims.md`) |
 | RVV CI | ✗ not yet (RISC-V QEMU CI is a documented gap in ARM-6 follow-up) |
 | RVV benchmarks | ✗ real hardware needed |
@@ -227,6 +257,15 @@ QEMU_RISCV64="qemu-riscv64-static -cpu rv64,v=true,vlen=256" \
 
 For a complete RVV FFI shim example (explicit `vsetvli`/`vadd.vv` via
 `<riscv_vector.h>`) and detailed QEMU CPU flags, see **`docs/qemu_testing.md`**.
+
+`vec256<T>`/`vec512<T>` legalise the same way `vec128<T>` does, just across
+more vector-register groups on narrower hardware:
+
+| Hardware VLEN | `vec512<f32>` lowering |
+|---|---|
+| 512 | 1 group (`vl=16` e32) — optimal |
+| 256 | 2 groups |
+| 128 | 4 groups — correct, no throughput gain over four `vec128` calls |
 
 ### Known gaps
 

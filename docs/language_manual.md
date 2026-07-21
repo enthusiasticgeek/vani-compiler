@@ -552,7 +552,8 @@ vanic remove foo                         # remove dep + vendor dir
 vanic vendor                             # copy all deps into vendor/
 vanic search query                       # search registry by name
 vanic update                             # re-resolve deps to latest compatible
-vanic publish                            # build tarball + create GitHub Release
+vanic audit-safety prog.vani             # #[bounded_stack]/#[wcet] coverage where eligible
+vanic publish                            # audit-safety gate + build tarball + create GitHub Release
 ```
 
 **Editor integration:** Build `intent-lsp` (`cargo build --release --bin intent-lsp`)

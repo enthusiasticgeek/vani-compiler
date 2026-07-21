@@ -213,6 +213,51 @@ vanic safety-attrs src/firmware.vani --format=json
 
 ---
 
+## Safety-attribute coverage gate
+
+Every check above trusts that `#[bounded_stack]`/`#[wcet]` were declared in
+the first place -- nothing stopped a function that *could* carry one from
+shipping without it. `vanic audit-safety` closes that gap: it reuses the
+same stack-depth/WCET estimators the enforcement passes use, but runs them
+**unconditionally** (not gated on the attribute already being present) to
+determine whether each function is *eligible*, then flags any
+eligible-but-missing case.
+
+```sh
+vanic audit-safety src/firmware.vani
+
+# Machine-readable, for CI dashboards
+vanic audit-safety src/firmware.vani --format=json
+```
+
+Coverage means "the attribute exists wherever it's computable" -- not
+blanket 100% attribute presence. A function with a fn-pointer parameter
+can't have a computable `#[bounded_stack]` (an indirect call's frame cost
+is unknowable to the checker), and a function with an unbounded loop or
+unannotated recursion can't have a computable `#[wcet]`. Both are
+legitimately exempt and never flagged.
+
+```
+$ vanic audit-safety src/firmware.vani
+audit-safety: 1 of 12 function(s) missing an attribute they're eligible for (0 vendored fn(s) excluded):
+
+  clamp_score (src/firmware.vani:41:1)
+    missing #[bounded_stack(bytes = 32)] -- computed worst-case is 32 bytes
+
+Add the attribute with the exact value shown (vanic will re-verify it), or
+if this function genuinely shouldn't carry one, that's a bug in this
+checker's eligibility rules -- please report it.
+```
+
+The reported value is exact -- copy it in verbatim and the normal
+`#[bounded_stack]`/`#[wcet]` enforcement (already covered above) re-verifies
+it on the next `vanic check`. Kosh package publishing (`vanic publish`)
+runs this same check against the package entry and hard-blocks on any gap,
+with `--allow-partial-safety-coverage` as an explicit escape hatch -- see
+[Sec.16 -- Kosh Packages](../intermediate/16_packages.md#safety-coverage-gate).
+
+---
+
 ## Cyclomatic complexity
 
 ```sh
@@ -371,6 +416,7 @@ All previously partial checks are now complete. The full compliance matrix:
 | Lock-order deadlocks | S-19 held-set transitive analysis — **complete** |
 | ISR priority inversion | S-20 transitive mutex collection — **complete** |
 | MISRA eval order | Rule 13.2 any-distance duplicate detection — **complete** |
+| Bounded_stack/WCET coverage | `vanic audit-safety` (eligible-but-missing detection) + `vanic publish` hard gate — **complete** |
 
 Safety standards (ISO 26262, DO-178C, IEC 62304) still require Tool
 Qualification Documentation (TQD) describing the analysis scope, but no
@@ -389,6 +435,7 @@ Recommended `.github/workflows/safety.yml` gates:
     vanic stack-depth src/firmware.vani --max=16384
     vanic complexity src/firmware.vani --max=15
     vanic deviations src/firmware.vani --strict
+    vanic audit-safety src/firmware.vani
     vanic coverage src/firmware.vani --format=json --out=mcdc_map.json
 ```
 

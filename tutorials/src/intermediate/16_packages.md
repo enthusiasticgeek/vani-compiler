@@ -213,6 +213,8 @@ vanic publish
 Output:
 ```
   checking publish authorization...
+  running audit-safety (#[bounded_stack]/#[wcet] coverage)...
+  audit-safety: OK (23 function(s) checked).
   building tarball for my-library v1.0.0...
   computing SHA-256...
   cksum: 3f4a...
@@ -227,11 +229,50 @@ publish: my-library v1.0.0 -> https://github.com/.../releases/tag/my-library-v1.
 1. Reads `[package].name` and `[package].version` from `vani.toml`.
 2. Verifies the authenticated `gh` user against `governance.json`
    (`allowed_publishers`).
-3. Builds a `<name>-<version>.tar.gz` (only `*.vani` + `vani.toml`; skips
+3. Runs `vanic audit-safety` against the package entry and refuses to
+   continue if any function is eligible for `#[bounded_stack]`/`#[wcet]`
+   but doesn't declare it (see below).
+4. Builds a `<name>-<version>.tar.gz` (only `*.vani` + `vani.toml`; skips
    `vendor/`, `target/`, hidden dirs).
-4. Computes SHA-256.
-5. Creates a GitHub Release in `kosh-index` with the tarball as an asset.
-6. Appends a line to `index/<name>.json` in the registry.
+5. Computes SHA-256.
+6. Creates a GitHub Release in `kosh-index` with the tarball as an asset.
+7. Appends a line to `index/<name>.json` in the registry.
+
+### Safety-coverage gate
+
+If any function could carry `#[bounded_stack]`/`#[wcet]` but doesn't,
+`vanic publish` stops before building the tarball:
+
+```
+  running audit-safety (#[bounded_stack]/#[wcet] coverage)...
+audit-safety: 1 of 12 function(s) missing an attribute they're eligible for (0 vendored fn(s) excluded):
+
+  clamp_score (src/lib.vani:41:1)
+    missing #[bounded_stack(bytes = 32)] -- computed worst-case is 32 bytes
+
+Refusing to publish with incomplete safety-attribute coverage. Add the
+attributes shown above, or re-run with --allow-partial-safety-coverage
+if this is intentional.
+```
+
+Fix it by copying the reported value into the source verbatim -- `vanic
+check` re-verifies the exact number on the next run, same workflow as any
+other `#[bounded_stack]`/`#[wcet]` violation. A function is only flagged
+when the number is actually computable: a fn-pointer parameter makes
+`#[bounded_stack]` uncomputable, and an unbounded loop or unannotated
+recursion makes `#[wcet]` uncomputable, so both are legitimately exempt.
+
+To publish anyway (e.g. a package you're not ready to fully annotate yet):
+
+```
+vanic publish --allow-partial-safety-coverage
+```
+
+You can also run the check standalone, any time, without publishing:
+
+```
+vanic audit-safety src/lib.vani
+```
 
 The publisher list lives in the registry's
 [`governance.json`](https://enthusiasticgeek.github.io/kosh-index/governance.json)
@@ -361,7 +402,8 @@ Whether to commit `vendor/` is up to you:
 | `vanic update` | Re-download all registry deps to latest compatible version |
 | `vanic apply-publisher` | Fetch and display the Publisher Agreement |
 | `vanic apply-publisher --accept-agreement` | Submit a publisher application (GitHub issue) |
-| `vanic publish` | Build + upload tarball + update index (approved publishers only) |
+| `vanic audit-safety <path>` | Check `#[bounded_stack]`/`#[wcet]` coverage wherever eligible |
+| `vanic publish [--allow-partial-safety-coverage]` | Audit-safety gate + build + upload tarball + update index (approved publishers only) |
 | `vanic registry-approve <user>` | (Operator) Approve a publisher application |
 | `vanic registry-blacklist <user> --reason=...` | (Operator) Blacklist a publisher |
 

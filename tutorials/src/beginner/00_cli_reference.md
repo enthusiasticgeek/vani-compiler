@@ -237,6 +237,23 @@ Report which functions carry which safety attributes (`#[no_heap]`, `#[no_float]
 
 ---
 
+### `vanic audit-safety <file.vani>`
+
+Verify `#[bounded_stack]`/`#[wcet]` coverage is complete wherever a function
+is actually *eligible* for it -- not blanket 100% attribute presence:
+fn-pointer params make `#[bounded_stack]` uncomputable, and unbounded
+loops/unannotated recursion make `#[wcet]` uncomputable, so both are
+legitimately exempt. Vendored `[deps]` functions are excluded. Exit 1 on
+any gap. This is what `vanic publish` runs before building the tarball;
+also usable standalone against a package or an ordinary program.
+
+```bash
+vanic audit-safety src/lib.vani
+vanic audit-safety src/lib.vani --format=json
+```
+
+---
+
 ### Kosh package manager subcommands
 
 | Command | Description |
@@ -246,7 +263,7 @@ Report which functions carry which safety attributes (`#[no_heap]`, `#[no_float]
 | `vanic update` | Re-resolve all deps to latest compatible versions |
 | `vanic vendor` | Download all deps into `vendor/` |
 | `vanic search <query>` | Search the Kosh registry |
-| `vanic publish` | Build tarball + create GitHub Release + append registry entry |
+| `vanic publish [--allow-partial-safety-coverage]` | Run `audit-safety` (hard-blocks on any gap unless the flag is passed) + build tarball + create GitHub Release + append registry entry |
 
 ---
 
