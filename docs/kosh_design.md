@@ -104,6 +104,14 @@ utils   = { path = "../utils", version = "^1.0" }
 parser  = { path = "./vendor/parser", version = "^2.1" }
 ```
 
+Every `[deps]` entry's own entry source is auto-discovered and prepended
+before compiling (`vanic check`/`build`/`run`/`test` all walk the manifest
+via `resolve_uses`/`compile_path` in `src/lib.rs`) -- **no `use "path";`
+statement is needed to bring a dependency's functions into scope**, only
+`vani.toml`. `use "...";` is still how you pull in your own package's
+*other* files (e.g. a test importing `../src/lib.vani`), which aren't
+`[deps]` entries.
+
 ---
 
 ## CLI surface
