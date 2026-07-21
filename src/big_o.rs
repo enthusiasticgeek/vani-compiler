@@ -27,15 +27,27 @@
 //!   * Builtin asymptotics for the most common ops: sort,
 //!     sort_by, binary_search, reverse, dedup, contains, find,
 //!     push, pop, swap_remove, insert, clear, len.
+//!   * Cross-fn analysis: `annotate_program` (what every CLI
+//!     entry point actually calls — see `main.rs`) walks the
+//!     whole program's call graph in topological order and
+//!     threads each callee's already-computed complexity into
+//!     its caller at the call's loop depth. This applies across
+//!     `use`-merged files too, since the checker's input is
+//!     already the fully-combined source by the time this pass
+//!     runs — a fn that calls an O(n) library helper inside a
+//!     loop is correctly reported as O(n²), not O(n). Only
+//!     `analyze_function` (single-fn, no `callees` map) treats
+//!     every call as O(1); nothing in the CLI uses it directly.
 //!   * Unable-to-prove cases → `O(?)` with the unprovable
 //!     construct flagged.
 //!
 //! Out of scope (future):
 //!   * Inferring "n" from a specific parameter (currently the
 //!     bound is just "input size" without naming the parameter).
-//!   * Cross-fn analysis (a fn that calls another fn picks up
-//!     the callee's complexity — v1 ignores call-site costs
-//!     beyond builtins).
+//!   * Solving closed-form recurrences — a fn in a call cycle
+//!     (recursive, directly or through `annotate_program`'s
+//!     topological walk) reports `O(recursive)` rather than a
+//!     solved bound (e.g. naive fibonacci doesn't become O(2^n)).
 //!   * Bounds derived from `requires`/`ensures` clauses (SMT
 //!     could prove tighter bounds; v1 only uses syntactic
 //!     evidence).
