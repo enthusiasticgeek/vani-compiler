@@ -122,3 +122,31 @@ jobs:
             dist/vanic-windows-x86_64.zip
             dist/vanic-macos-x86_64.tar.gz
             dist/vanic-macos-aarch64.tar.gz
+
+      # Binaries are rebuildable from any git tag, so pruning is safe --
+      # only the 3 most recent releases keep their (multi-hundred-MB
+      # combined) binary assets attached. The release page itself (tag,
+      # title, notes) is untouched for every version; only the large
+      # files are removed from older ones, to bound storage growth.
+      - name: Prune binary assets from older releases (keep newest 3)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mapfile -t tags < <(gh release list --limit 100 --json tagName --jq '.[].tagName')
+          keep=3
+          for i in "${!tags[@]}"; do
+            if [ "$i" -lt "$keep" ]; then
+              continue
+            fi
+            tag="${tags[$i]}"
+            assets=$(gh release view "$tag" --json assets --jq '.assets[].name')
+            if [ -z "$assets" ]; then
+              continue
+            fi
+            echo "Pruning assets from $tag (rank $((i+1)), older than the newest $keep):"
+            while IFS= read -r asset; do
+              echo "  deleting $asset"
+              gh release delete-asset "$tag" "$asset" -y
+            done <<< "$assets"
+          done
