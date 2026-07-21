@@ -791,10 +791,24 @@ eprint "fatal:", 42;
 See [`examples/language/english/file_io.vani`](../examples/language/english/file_io.vani)
 for the full worked example.
 
-**Remaining scope** (device I/O — UART / I2C / SPI / RS485): these
-are kernel-ioctl-specific and remain a C-shim + FFI pattern by
-design. The `struct termios` ABI is aggregate-by-value (rejected at
-the v1 FFI boundary), so write a thin C shim and use `--link-with`.
+**Remaining scope** (device I/O — UART / I2C / SPI / RS485 / CAN):
+these are kernel-ioctl-specific and remain a C-shim + FFI pattern by
+design, not a gap being tracked toward native support. The relevant
+kernel structs (`termios`, `i2c_msg`, `spi_ioc_transfer`, `can_frame`)
+are all aggregate-by-value, which v1 rejects at the FFI boundary —
+same reason as `termios` below. Write a thin C shim exposing
+scalar-only functions and compile with `--link-with`. On bare-metal
+targets (no OS, no ioctl) the equivalent path is `volatile_read`/
+`volatile_write` directly against the peripheral's memory-mapped
+registers instead of an FFI shim — see the embedded tutorial.
+**PCIe / NVMe**: no native or shim pattern beyond what's already
+here — PCIe config-space and NVMe are either accessed through an OS
+driver (same `extern "C"` FFI pattern as UART below, against
+`libpciaccess`/`libnvme` or a vendor SDK) or, for bare-metal driver
+code talking to a memory-mapped BAR directly, the same
+`volatile_read`/`volatile_write` MMIO primitives — there's no
+protocol-specific language surface for either, by the same design
+call as UART/I2C/SPI.
 
 ---
 
@@ -882,6 +896,67 @@ extern "C" fn uart_close(fd: i32) -> i32;
 ```bash
 vanic build my_uart.vani -o my_uart --link-with uart_helper.c
 ```
+
+The same shape covers **I2C** and **SPI** on Linux — `i2c_msg` /
+`spi_ioc_transfer` are just as aggregate-by-value as `termios`, so
+the shim's job is the same: take scalars in, do the ioctl internally,
+return scalars out.
+
+```c
+// i2c_helper.c
+#include <linux/i2c-dev.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int i2c_open(const char *path, int addr) {
+    int fd = open(path, O_RDWR);
+    if (fd >= 0) ioctl(fd, I2C_SLAVE, addr);
+    return fd;
+}
+int i2c_write(int fd, const unsigned char *buf, int n) { return write(fd, buf, n); }
+int i2c_read(int fd, unsigned char *buf, int n)        { return read(fd, buf, n); }
+int i2c_close(int fd)                                  { return close(fd); }
+```
+
+```vani
+extern "C" fn i2c_open(path: Str, addr: i32) -> i32;
+extern "C" fn i2c_write(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn i2c_read(fd: i32, buf: Str, n: i32) -> i32;
+extern "C" fn i2c_close(fd: i32) -> i32;
+```
+
+```c
+// spi_helper.c
+#include <linux/spi/spidev.h>
+#include <sys/ioctl.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+int spi_open(const char *path, int mode, int speed_hz) {
+    int fd = open(path, O_RDWR);
+    if (fd >= 0) {
+        ioctl(fd, SPI_IOC_WR_MODE, &mode);
+        ioctl(fd, SPI_IOC_WR_MAX_SPEED_HZ, &speed_hz);
+    }
+    return fd;
+}
+int spi_transfer(int fd, unsigned char *tx, unsigned char *rx, int n) {
+    struct spi_ioc_transfer t = { .tx_buf = (unsigned long)tx, .rx_buf = (unsigned long)rx, .len = n };
+    return ioctl(fd, SPI_IOC_MESSAGE(1), &t);
+}
+int spi_close(int fd) { return close(fd); }
+```
+
+```vani
+extern "C" fn spi_open(path: Str, mode: i32, speed_hz: i32) -> i32;
+extern "C" fn spi_transfer(fd: i32, tx: Str, rx: Str, n: i32) -> i32;
+extern "C" fn spi_close(fd: i32) -> i32;
+```
+
+**CAN** (SocketCAN on Linux) follows the same shim pattern against
+`can_frame`; omitted here since it's a direct copy of the I2C/SPI
+shape with different ioctl calls.
 
 **Multi-line print**: `print` always emits exactly one trailing
 newline. To print multiple lines use multiple `print` statements, or

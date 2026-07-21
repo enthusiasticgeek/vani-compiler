@@ -635,3 +635,65 @@ Two narrow compiler items surfaced during that planning pass:
 
 **Out of scope for the compiler**: everything else in the math roadmap is pure
 kosh-package work using language features that already exist.
+
+---
+
+## Device I/O + Big-O doc audit (added 2026-07-21)
+
+Sourced from user questions about hardware I/O (PCIe/NVMe/I2C/SPI/UART/CAN/
+RS485/Ethernet), Big-O cross-function propagation, and whether `use "path";`
+is still required for `[deps]`-declared packages. Findings, in order:
+
+- [x] **DOC-1. Fix stale `big_o.rs` module comment** ✅ done 2026-07-21 (commit
+  `41cca6d`). The comment claimed cross-fn analysis was "out of scope
+  (future)" — false. `annotate_program` (what every `--big-o` CLI entry
+  point actually calls) already walks the whole program's call graph in
+  topological order and threads callee complexity into the caller,
+  including across `use`-merged files. Confirmed by direct test: a fn
+  calling an `O(n)` helper inside a 10-iteration loop correctly reports
+  `O(n²)`. Only the unused `analyze_function`/`walk_body`/`walk_stmt` path
+  (dead code per the compiler's own warnings) treats calls as O(1).
+
+- [x] **DOC-2. Extend `v1_limitations.md` L18 device-I/O note past UART** ✅
+  done 2026-07-21. Added worked `extern "C"` + C-shim examples for I2C and
+  SPI (previously only UART had one) plus a PCIe/NVMe clarification: no
+  native or shim-specific surface exists or is planned for either — PCIe
+  config-space / NVMe go through the same `extern "C"` FFI pattern against
+  an OS driver or vendor SDK (hosted), or `volatile_read`/`volatile_write`
+  against a memory-mapped BAR (bare-metal), same design call as UART/I2C/SPI.
+  This was a documentation gap, not a compiler gap.
+
+- [x] **DOC-3. `use "path";` redundant for `[deps]` entries — already true,
+  no compiler change** ✅ confirmed 2026-07-21, no code change needed.
+  `compile_path`/`resolve_combined_source` (`src/lib.rs`) already walk
+  `vani.toml`'s `[deps]` and prepend every dependency's entry source
+  automatically (`manifest::load_manifest` + `resolve_uses` per dep),
+  independent of whatever `use` statements the entry file has. Verified
+  directly: a `[deps]`-declared package's functions were callable with
+  *zero* `use` statement anywhere. This means every existing kosh package's
+  `use "../vendor/<dep>/src/lib.vani";` line is already redundant — see the
+  kosh-index-side cleanup tracked in `kosh-index/ROADMAP.md`. Not a
+  compiler-level TODO; no change needed here.
+
+**Correction on device I/O** (was asked as "does file I/O support raw/
+unbuffered access to PCIe/NVMe/I2C/SPI/UART/CAN/RS485/Ethernet"): `file_open`
+is always buffered libc `fopen`/`fwrite`/`fread` — confirmed via
+`src/backend_c.rs`. TCP/UDP networking (the Ethernet/application-layer case)
+is a real native builtin already (`tcp_listen`/`tcp_connect_local`/
+`tcp_send_str`/`tcp_recv`/... plus non-blocking `epoll`-backed variants) —
+not a gap. Everything else (I2C/SPI/UART/CAN/RS485/PCIe/NVMe) is device- or
+kernel-level and stays FFI + C-shim (hosted) or `volatile_read`/
+`volatile_write` MMIO (bare-metal) **by design**, per L18 above — this was
+already a made decision, not an open gap, so "implement raw device I/O
+support" was the wrong framing. The one genuinely open, narrowly-scoped
+candidate feature surfaced by this audit:
+
+- [ ] **IO-1. Unbuffered / raw flat-file I/O mode** (~2-4 h if wanted) —
+  `file_open` has no way to disable libc's default buffering (no
+  `setvbuf(f, NULL, _IONBF, 0)` equivalent, no `O_DIRECT`-style open flag).
+  Candidate surface: either a third `file_open(path, mode, buffered: bool)`
+  argument, or a separate `file_open_unbuffered(path, mode)` builtin, wired
+  to `setvbuf`/`fcntl` in the C backend and the LLVM backend's libc calls.
+  **Not started — confirm this is actually wanted and which surface before
+  starting**; nothing in the kosh ecosystem or the user's stated use case
+  currently needs it, this only came up as an audit finding.
