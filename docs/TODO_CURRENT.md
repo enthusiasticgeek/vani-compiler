@@ -727,3 +727,23 @@ candidate feature surfaced by this audit:
   `@intent_*` symbol — same approach IO-1 used for `file_open`'s
   `setvbuf` call, which avoids needing build-vs-JIT-vs-cross-compile
   linkage for a new runtime symbol. **Not started.** ~2-4 h estimate.
+
+- [ ] **BUG-2. `#[wcet]` estimator doesn't recurse into struct-literal field
+  expressions** — discovered 2026-07-21 while backfilling `#[wcet]` across
+  kosh-index packages (see `kosh-index/ROADMAP.md` MAINT-1). `wcet_expr` in
+  `src/safety.rs` has explicit arms for `Binary`/`Call`/`Index`/etc. but
+  `StructLit` falls into the catch-all `_ => Some(5)` — a flat cost
+  regardless of how expensive the field expressions actually are.
+  Reproduces: a fn `fn f(z: Complex) -> Complex { return Complex { re:
+  log(complex_abs(z)), im: complex_arg(z) }; }` gets a real enforced
+  `#[wcet]` budget of only 10 cycles despite calling three real functions
+  (`log`, `complex_abs`, `complex_arg`) inside the literal — `vanic check`
+  happily accepts `#[wcet(cycles=10)]` on it. This means every
+  `#[wcet]`-annotated function anywhere that returns a struct literal
+  directly is under-counted by the checker itself, not just by whoever
+  wrote the annotation — the enforcement gives a false sense of rigor.
+  Likely fix: give `StructLit { fields, .. }` its own arm in `wcet_expr`
+  that sums `wcet_expr` over every field's value expression (mirroring
+  `ArrayLit`'s existing arm just above the catch-all, which already does
+  exactly this pattern for array elements). **Not started.** ~1-2 h
+  estimate (small, well-isolated fix; the hard part was finding it).
