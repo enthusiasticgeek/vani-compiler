@@ -440,6 +440,17 @@ impl CheckedExpr {
 }
 
 pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    check_impl(program, true)
+}
+
+/// Like `check`, but does not require a `fn main() -> i64` entry point.
+/// Used for auditing kosh library packages (`src/lib.vani` has no main),
+/// e.g. `vanic audit-safety` / the `vanic publish` coverage gate.
+pub fn check_library(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    check_impl(program, false)
+}
+
+fn check_impl(program: Program, require_main: bool) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut program = program;
 
@@ -568,7 +579,9 @@ pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
     }
 
     let signatures = collect_signatures(&program, &mut diagnostics);
-    validate_main(&program, &signatures, &mut diagnostics);
+    if require_main {
+        validate_main(&program, &signatures, &mut diagnostics);
+    }
 
     // Reject struct/enum/alias declarations whose name
     // collides with a reserved built-in type. Lexer

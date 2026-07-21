@@ -3862,3 +3862,218 @@ fn span_to_location(
         format!("byte {}", span.start)
     }
 }
+
+// ── `vanic audit-safety` — #[bounded_stack]/#[wcet] coverage gate ────────────
+//
+// Added 2026-07-21 (kosh-index MAINT-1 follow-up): a package can now have
+// full #[bounded_stack]/#[wcet] discipline on every function that's
+// actually eligible for it, but there was no automated way to VERIFY
+// that before `vanic publish` — only the honor system. This pass answers
+// "for every function in the package's own source (not a vendored
+// dependency), COULD it have a #[bounded_stack]/#[wcet] attribute, and
+// if so, does it?" It reuses the exact same analysis `enforce_bounded_stack`
+// / `enforce_wcet` already run — `compute_stack_depths` and `wcet_body`
+// below — just applied UNCONDITIONALLY (to every function, not only ones
+// that already declare a budget) so a real bytes/cycles number is
+// available to report even for functions with no attribute yet.
+//
+// Eligibility rules (deliberately NOT "100% attribute coverage" — see
+// kosh-index/ROADMAP.md's MAINT-1 for why most of this ecosystem's
+// functions genuinely can't be annotated):
+//   - #[bounded_stack]: required whenever `compute_stack_depths` returns
+//     a finite depth AND the function has no function-pointer-typed
+//     parameter. A function-pointer parameter makes the TRUE depth
+//     unknowable (the analysis can't see through an indirect call), so a
+//     declared number there would be silently incomplete rather than
+//     genuinely bounded — same reasoning `vani-calculus`'s `bisect` and
+//     every fn-pointer-taking function audited under MAINT-1 already
+//     follows (bound documented in a comment instead).
+//   - #[wcet]: required whenever the WCET estimator (`wcet_body`) returns
+//     `Some(cycles)` for the function's body. Unlike bounded_stack, a
+//     function-pointer parameter does NOT block this — `wcet_expr`'s
+//     `CallIndirect` arm already gives every indirect call a flat 10-cycle
+//     charge, so plenty of fn-pointer-taking functions (e.g.
+//     vani-vectorcalc's differential operators) are genuinely WCET-eligible
+//     even though they can never get #[bounded_stack].
+//   - Functions defined in a vendored `[deps]` package (any origin path
+//     containing a `vendor` path component) are excluded — they're a
+//     separately-published, separately-audited package; re-flagging their
+//     gaps while checking a downstream package would be both wrong (not
+//     this package's responsibility) and impossible to fix from here.
+//   - `extern` functions are excluded (no body to analyze).
+
+/// One function that could carry a #[bounded_stack]/#[wcet] attribute
+/// but doesn't yet.
+#[derive(Clone, Debug)]
+pub struct CoverageViolation {
+    pub name: String,
+    pub span: crate::span::Span,
+    /// `Some(bytes)` if missing #[bounded_stack] with that computed depth.
+    pub missing_bounded_stack: Option<u64>,
+    /// `Some(cycles)` if missing #[wcet] with that computed estimate.
+    pub missing_wcet: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CoverageReport {
+    pub checked: usize,
+    pub excluded_vendor: usize,
+    pub violations: Vec<CoverageViolation>,
+}
+
+impl CoverageReport {
+    pub fn passed(&self) -> bool {
+        self.violations.is_empty()
+    }
+}
+
+fn has_fn_ptr_param(f: &crate::ir::TypedFunction) -> bool {
+    f.params
+        .iter()
+        .any(|p| matches!(p.ty, crate::ast::Type::FnPtr(_, _)))
+}
+
+/// `file_map` is optional so this can run standalone (`vanic audit-safety`
+/// on a single file with no manifest) as well as vendor-aware (from
+/// `vanic publish`, which always has one). Without it every function in
+/// the merged program is checked — including any pulled in via `use`.
+pub fn audit_safety_coverage(
+    program: &TypedProgram,
+    file_map: Option<&crate::diagnostic::FileMap>,
+) -> CoverageReport {
+    let mut fn_map: HashMap<String, &crate::ir::TypedFunction> = HashMap::new();
+    for f in &program.functions {
+        fn_map.insert(f.name.clone(), f);
+    }
+    let stack_report = crate::stack_depth::compute_stack_depths(program, None);
+    let stack_by_name: HashMap<&str, Option<u64>> = stack_report
+        .entries
+        .iter()
+        .map(|e| (e.name.as_str(), e.max_depth_bytes))
+        .collect();
+
+    let mut violations = Vec::new();
+    let mut checked = 0usize;
+    let mut excluded_vendor = 0usize;
+    for f in &program.functions {
+        if f.is_extern {
+            continue;
+        }
+        if let Some(fm) = file_map {
+            if let Some((entry, _)) = fm.lookup(f.span.start) {
+                let normalized = entry.path.replace('\\', "/");
+                if normalized.split('/').any(|seg| seg == "vendor") {
+                    excluded_vendor += 1;
+                    continue;
+                }
+            }
+        }
+        checked += 1;
+
+        let mut missing_bounded_stack = None;
+        if f.bounded_stack.is_none() && !has_fn_ptr_param(f) {
+            if let Some(Some(bytes)) = stack_by_name.get(f.name.as_str()) {
+                missing_bounded_stack = Some(*bytes);
+            }
+        }
+
+        let mut missing_wcet = None;
+        if f.wcet_cycles.is_none() {
+            let mut visiting: std::collections::HashSet<String> = std::collections::HashSet::new();
+            visiting.insert(f.name.clone());
+            if let Some(cycles) = wcet_body(&f.body, &fn_map, &mut visiting, f.recursion_bound) {
+                missing_wcet = Some(cycles);
+            }
+        }
+
+        if missing_bounded_stack.is_some() || missing_wcet.is_some() {
+            violations.push(CoverageViolation {
+                name: f.name.clone(),
+                span: f.span,
+                missing_bounded_stack,
+                missing_wcet,
+            });
+        }
+    }
+    CoverageReport {
+        checked,
+        excluded_vendor,
+        violations,
+    }
+}
+
+pub fn format_coverage_text(report: &CoverageReport, file_map: &crate::diagnostic::FileMap) -> String {
+    let mut out = String::new();
+    if report.violations.is_empty() {
+        out.push_str(&format!(
+            "audit-safety: OK — {} function(s) checked ({} vendored fn(s) excluded), full #[bounded_stack]/#[wcet] coverage where eligible.\n",
+            report.checked, report.excluded_vendor
+        ));
+        return out;
+    }
+    out.push_str(&format!(
+        "audit-safety: {} of {} function(s) missing an attribute they're eligible for ({} vendored fn(s) excluded):\n\n",
+        report.violations.len(), report.checked, report.excluded_vendor
+    ));
+    for v in &report.violations {
+        let loc = span_to_location(v.span, file_map);
+        out.push_str(&format!("  {} ({})\n", v.name, loc));
+        if let Some(bytes) = v.missing_bounded_stack {
+            out.push_str(&format!(
+                "    missing #[bounded_stack(bytes = {})] -- computed worst-case is {} bytes\n",
+                bytes, bytes
+            ));
+        }
+        if let Some(cycles) = v.missing_wcet {
+            out.push_str(&format!(
+                "    missing #[wcet(cycles = {})] -- static estimate is {} cycles\n",
+                cycles, cycles
+            ));
+        }
+    }
+    out.push_str(
+        "\nAdd the attribute with the exact value shown (vanic will re-verify it), \
+         or if this function genuinely shouldn't carry one, that's a bug in this \
+         checker's eligibility rules -- please report it.\n",
+    );
+    out
+}
+
+fn coverage_json_escape(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+pub fn format_coverage_json(report: &CoverageReport, file_map: &crate::diagnostic::FileMap) -> String {
+    let mut out = String::from("{\"checked\":");
+    out.push_str(&report.checked.to_string());
+    out.push_str(",\"excluded_vendor\":");
+    out.push_str(&report.excluded_vendor.to_string());
+    out.push_str(",\"passed\":");
+    out.push_str(if report.passed() { "true" } else { "false" });
+    out.push_str(",\"violations\":[");
+    for (i, v) in report.violations.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        let loc = span_to_location(v.span, file_map);
+        out.push_str(&format!(
+            "{{\"name\":{},\"location\":{},\"missing_bounded_stack_bytes\":{},\"missing_wcet_cycles\":{}}}",
+            coverage_json_escape(&v.name),
+            coverage_json_escape(&loc),
+            v.missing_bounded_stack.map(|b| b.to_string()).unwrap_or_else(|| "null".to_string()),
+            v.missing_wcet.map(|c| c.to_string()).unwrap_or_else(|| "null".to_string()),
+        ));
+    }
+    out.push_str("]}");
+    out
+}

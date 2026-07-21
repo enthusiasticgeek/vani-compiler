@@ -63,6 +63,20 @@ fn inject_prelude(program: &mut ast::Program) {
 }
 
 pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    compile_with(source, checker::check)
+}
+
+/// Like `compile`, but does not require `fn main() -> i64`. Used for
+/// auditing kosh library packages (`src/lib.vani` has no main), e.g.
+/// `vanic audit-safety` / the `vanic publish` coverage gate.
+pub fn compile_library(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    compile_with(source, checker::check_library)
+}
+
+fn compile_with(
+    source: &str,
+    checker_fn: fn(ast::Program) -> Result<CheckedProgram, Vec<Diagnostic>>,
+) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let tokens = lexer::lex(source).map_err(|diagnostic| vec![diagnostic])?;
     // Phase 1.1 (2026-06-07): `inject_prelude` will lex the
     // pragma-free PRELUDE source next, which would overwrite
@@ -72,7 +86,7 @@ pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let (mut program, parse_errors) = parser::parse(tokens);
     inject_prelude(&mut program);
     lexer::set_current_print_lang_mode(saved_mode);
-    match checker::check(program) {
+    match checker_fn(program) {
         Ok(checked) if parse_errors.is_empty() => Ok(checked),
         Ok(_) => Err(parse_errors),
         Err(mut check_errors) => {
@@ -132,6 +146,44 @@ pub fn compile_path(
         ));
     }
     match compile(&combined) {
+        Ok(checked) => Ok((checked, file_map)),
+        Err(diagnostics) => Err((file_map, diagnostics)),
+    }
+}
+
+/// Like `compile_path`, but does not require `fn main() -> i64` at the
+/// entry. Used for auditing kosh library packages (`src/lib.vani` has no
+/// main), e.g. `vanic audit-safety` / the `vanic publish` coverage gate.
+pub fn compile_library_path(
+    entry: &std::path::Path,
+) -> Result<(CheckedProgram, diagnostic::FileMap), (diagnostic::FileMap, Vec<Diagnostic>)> {
+    let mut visited: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    let mut combined = String::new();
+    let mut file_map = diagnostic::FileMap::new();
+    if let Some(manifest_path) = manifest::find_manifest(
+        entry.parent().unwrap_or(entry),
+    ) {
+        if let Ok(m) = manifest::load_manifest(&manifest_path) {
+            for dep in &m.deps {
+                if let Err(err) = resolve_uses(
+                    &dep.entry_path, &mut visited, &mut combined, &mut file_map,
+                ) {
+                    return Err((
+                        file_map,
+                        vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+                    ));
+                }
+            }
+        }
+    }
+    if let Err(err) = resolve_uses(entry, &mut visited, &mut combined, &mut file_map) {
+        return Err((
+            file_map,
+            vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+        ));
+    }
+    match compile_library(&combined) {
         Ok(checked) => Ok((checked, file_map)),
         Err(diagnostics) => Err((file_map, diagnostics)),
     }

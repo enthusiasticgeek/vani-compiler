@@ -873,6 +873,17 @@ COMMANDS:
                                           if any fn exceeds N. MISRA / ISO
                                           26262 / DO-178C reviews use this as
                                           the standard branch-depth ceiling.
+    audit-safety <file.vani> [--format=<json|text>]
+                                          Verifies #[bounded_stack]/#[wcet]
+                                          coverage is complete wherever a fn is
+                                          actually eligible for it (not 100%
+                                          attribute presence -- fn-pointer
+                                          params and unbounded loops/recursion
+                                          are legitimately exempt). Exit 1 on
+                                          any gap. Vendored [deps] functions
+                                          are excluded. This is what `vanic
+                                          publish` runs before building the
+                                          tarball; also usable standalone.
     hashmap-usage <file.vani> [--format=<csv|json|text>]
                                           Surface every HashMap<K, V> pair the
                                           program uses, with the mangled bundle
@@ -928,14 +939,20 @@ COMMANDS:
                                           reason. Default reason: policy
                                           violation.
 
-    publish                                Publish the current package to the
+    publish [--allow-partial-safety-coverage]
+                                          Publish the current package to the
                                           Kosh registry. Reads [package].name
                                           and [package].version from vani.toml,
-                                          builds a tarball, creates a GitHub
-                                          Release in kosh-index, and appends a
-                                          line to the sparse index. Requires
-                                          the GitHub CLI (`gh`) to be installed
-                                          and authenticated.
+                                          runs the same check as `vanic
+                                          audit-safety` and refuses to publish
+                                          on a #[bounded_stack]/#[wcet] gap
+                                          (pass --allow-partial-safety-coverage
+                                          to publish anyway), builds a tarball,
+                                          creates a GitHub Release in
+                                          kosh-index, and appends a line to the
+                                          sparse index. Requires the GitHub CLI
+                                          (`gh`) to be installed and
+                                          authenticated.
 
     add <name>[@<version>]                 Add a package from the Kosh registry.
                                           Fetches the best matching version,
@@ -1760,6 +1777,65 @@ fn run() -> Result<ExitCode, String> {
             }
             Ok(ExitCode::SUCCESS)
         }
+        "audit-safety" => {
+            // MAINT-1 follow-up (2026-07-21): verify #[bounded_stack]/
+            // #[wcet] coverage is complete wherever a function is
+            // actually eligible for it (not "100% attribute presence" --
+            // see safety::audit_safety_coverage's doc comment for the
+            // eligibility rules). This is what `vanic publish` runs
+            // before building the tarball; also usable standalone.
+            //
+            // Usage: vanic audit-safety <path> [--format=text|json]
+            let mut format = "text";
+            let mut path_arg: Option<String> = None;
+            let mut idx = 2;
+            while idx < args.len() {
+                let arg = &args[idx];
+                if let Some(value) = arg.strip_prefix("--format=") {
+                    format = match value {
+                        "json" => "json",
+                        "text" => "text",
+                        other => {
+                            return Err(format!(
+                                "unsupported --format='{}'; choose json | text",
+                                other
+                            ));
+                        }
+                    };
+                } else if arg.starts_with('-') {
+                    return Err(format!("unexpected argument '{}'", arg));
+                } else if path_arg.is_none() {
+                    path_arg = Some(arg.clone());
+                } else {
+                    return Err("'audit-safety' takes one path argument".into());
+                }
+                idx += 1;
+            }
+            let path = path_arg.ok_or_else(|| {
+                "'audit-safety' requires a path argument".to_string()
+            })?;
+            let path = std::path::PathBuf::from(path);
+            // Library mode (no `fn main()` required): most audit targets
+            // are kosh packages whose entry is `src/lib.vani`, but this
+            // also accepts an ordinary program with `main()` fine -- the
+            // only difference from `compile_path` is that a missing main
+            // isn't an error.
+            let (checked, file_map) = vani::compile_library_path(&path)
+                .map_err(|(map, diagnostics)| {
+                    vani::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+                })?;
+            let report = vani::safety::audit_safety_coverage(&checked.ir, Some(&file_map));
+            let passed = report.passed();
+            match format {
+                "json" => print!("{}", vani::safety::format_coverage_json(&report, &file_map)),
+                _ => print!("{}", vani::safety::format_coverage_text(&report, &file_map)),
+            }
+            if passed {
+                Ok(ExitCode::SUCCESS)
+            } else {
+                Ok(ExitCode::from(1))
+            }
+        }
         "complexity" => {
             // T2.4 follow-up: surface McCabe cyclomatic complexity
             // per function as an audit artifact. The same
@@ -2290,9 +2366,19 @@ fn run() -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
 
-        // vanic publish
+        // vanic publish [--allow-partial-safety-coverage]
         // Build tarball, create GH Release in kosh-index, push NDJSON index line.
+        // Runs `audit-safety` first and refuses to publish on a gap unless
+        // --allow-partial-safety-coverage is passed (added with MAINT-1's
+        // audit-safety gate, 2026-07-21).
         "publish" => {
+            let allow_partial_coverage = args.iter().skip(2)
+                .any(|a| a == "--allow-partial-safety-coverage");
+            for a in args.iter().skip(2) {
+                if a != "--allow-partial-safety-coverage" {
+                    return Err(format!("unexpected argument '{}'", a));
+                }
+            }
             let cwd = std::env::current_dir()
                 .map_err(|e| format!("failed to read cwd: {}", e))?;
             let manifest_path = vani::manifest::find_manifest(&cwd)
@@ -2301,6 +2387,7 @@ fn run() -> Result<ExitCode, String> {
                 })?;
             let result = vani::manifest::publish_package(
                 &manifest_path,
+                allow_partial_coverage,
                 |msg| eprintln!("{}", msg),
             )?;
             eprintln!(

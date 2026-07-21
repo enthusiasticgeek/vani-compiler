@@ -1096,12 +1096,15 @@ pub fn registry_blacklist(
 /// Publish the current package to the Kosh registry.
 ///
 /// 1. Checks `governance.allowed_publishers` in registry `config.json`.
-/// 2. Builds a `<name>-<version>.tar.gz` tarball (*.vani + vani.toml only).
-/// 3. Computes its SHA-256.
-/// 4. Creates a GitHub Release in `kosh-index` with the tarball as asset.
-/// 5. Appends a NDJSON line to `index/<name>.json` in `kosh-index`.
+/// 2. Runs the `audit-safety` #[bounded_stack]/#[wcet] coverage gate
+///    (skippable with `allow_partial_coverage`, added 2026-07-21).
+/// 3. Builds a `<name>-<version>.tar.gz` tarball (*.vani + vani.toml only).
+/// 4. Computes its SHA-256.
+/// 5. Creates a GitHub Release in `kosh-index` with the tarball as asset.
+/// 6. Appends a NDJSON line to `index/<name>.json` in `kosh-index`.
 pub fn publish_package<F: Fn(&str)>(
     manifest_path: &Path,
+    allow_partial_coverage: bool,
     on_status: F,
 ) -> Result<PublishResult, String> {
     // Set cafile before any HTTP calls (auth check fetches governance.json).
@@ -1116,6 +1119,32 @@ pub fn publish_package<F: Fn(&str)>(
         "vani.toml: [package].version is required for `vanic publish`".to_string()
     })?;
     let name = manifest.package_name.clone();
+
+    if allow_partial_coverage {
+        on_status("  audit-safety: skipped (--allow-partial-safety-coverage).");
+    } else {
+        on_status("  running audit-safety (#[bounded_stack]/#[wcet] coverage)...");
+        // Library mode: package entries (`src/lib.vani`) have no `fn main()`.
+        let (checked, file_map) = crate::compile_library_path(&manifest.entry_path).map_err(
+            |(map, diagnostics)| {
+                crate::diagnostic::format_diagnostics_with_files(&map, &diagnostics)
+            },
+        )?;
+        let report = crate::safety::audit_safety_coverage(&checked.ir, Some(&file_map));
+        if !report.passed() {
+            let text = crate::safety::format_coverage_text(&report, &file_map);
+            return Err(format!(
+                "{}\nRefusing to publish with incomplete safety-attribute coverage. \
+                 Add the attributes shown above, or re-run with \
+                 --allow-partial-safety-coverage if this is intentional.",
+                text
+            ));
+        }
+        on_status(&format!(
+            "  audit-safety: OK ({} function(s) checked).",
+            report.checked
+        ));
+    }
 
     on_status(&format!("  building tarball for {} v{}...", name, version));
     let tmp = std::env::temp_dir().join(format!("vanic-publish-{}-{}", name, version));
