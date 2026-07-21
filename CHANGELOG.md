@@ -1,5 +1,40 @@
 # Changelog
 
+## [v0.6.0] — 2026-07-21
+
+### Added
+
+- **Generic trait bounds inline syntax** — `fn f<T: Iface>(x: T)` as sugar for `where T is Iface` (G1).
+- **Slice/vec destructure patterns in `match`** — `[first, .., last]` on `Vec<T>` and `[T; N]` (L1).
+- **`#[repr(C)]` / `#[repr(packed)]` struct layout attributes** (L2).
+- **`select { await poll then binding { body } }`** — round-robin async select, desugars to `while true` + guards (L3).
+- **Runtime integer overflow guards (Add/Sub/Mul)** with SMT elision when `requires` bounds prove safety (L4).
+- **Closures capture non-`Copy` (affine) bindings** — move-capture semantics, single-call enforcement, scope-exit Drop guard (L5).
+- **`Vec<bool>` packed bit-array** — 64 elements per `u64` word, same API (XL1).
+- **`vanic test`** — built-in `#[test]`-attribute test runner (XL2).
+- **`for await x in <Option<T> expr>`** stream syntax, desugars to `while let` (XL3).
+- **Multi-pass generic monomorphization** — nested generic call chains (`f<T>` calling `g<T>` calling `h<T>`) now specialize correctly (XL4).
+- **`Atomic<f64>`** — `new`/`load`/`store`; `atomic_fetch_add` explicitly rejected on `f64` (G3).
+- **`vanic audit-safety` + `vanic publish` safety-coverage gate** — verifies `#[bounded_stack]`/`#[wcet]` coverage wherever eligible; `vanic publish` hard-blocks on any gap (`--allow-partial-safety-coverage` escape hatch).
+- **`file_open` gains a required `buffered: bool` argument** — `buffered: false` calls `setvbuf(..., _IONBF, 0)` for crash-safe unbuffered writes. **Breaking**: old 2-arg calls are now a compile error.
+
+### Performance
+
+- Sort: pdqsort replaces Lomuto quicksort (branchless block partition, Tukey ninther, heapsort fallback) — 32% faster on 1M integers.
+- Sort: O(n) pattern detection for sorted/reverse-sorted input.
+- Sort: AVX-512 bitmask scan in the block-partition hot path — ~5% further improvement.
+- Parallel `for … reduce`: persistent pthread pool replaces per-invocation thread spawn — 36% faster on 50M-element reduction.
+- `getelementptr inbounds` on all Vec/Array GEPs (SSA-LLVM backend) — 18% faster sieve benchmark.
+
+### Fixed
+
+- `vanic run` misreporting a failed `assert` as a stack overflow on Windows (`abort()`/`SIGABRT` vs LLVM's crash handler) — now uses `exit(3)`.
+- `vanic publish`/`vanic vendor` silently dropping a package's own vendored path dependencies from the published tarball.
+- `sha256_file` corrupting checksums on Windows (GNU coreutils' backslash-escape prefix glued onto the hash by a naive whitespace split).
+- `clone_at` on `Vec<(i64, OwnedStr)>` — missing Tuple/OwnedStr codegen arms in both backends (G2).
+
+---
+
 ## [v0.5.3] — YYYY-MM-DD
 
 ### Added
