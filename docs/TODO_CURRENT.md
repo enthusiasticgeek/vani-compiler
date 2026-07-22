@@ -3,7 +3,7 @@
 Actionable items fully within our control, ordered by effort.
 Blocked items (macOS hardware, grammar consultant, IOCP) are at the bottom.
 
-Last updated: 2026-07-20
+Last updated: 2026-07-21
 
 ---
 
@@ -803,3 +803,92 @@ audited the 12 existing math packages by hand, but nothing stopped the next
   coverage gate" section + CI example + compliance matrix row),
   `tutorials/src/intermediate/16_packages.md` (publish walkthrough +
   command table), and `tutorials/src/beginner/00_cli_reference.md`.
+
+---
+
+## Kosh package namespacing + dependency-graph resolution (added 2026-07-21)
+
+Full design: [`docs/kosh_namespacing_design.md`](kosh_namespacing_design.md).
+Sourced from a direct user question ("what happens if a kosh-index
+package has the same function name as a vāṇी built-in?") that led to
+hands-on testing and surfaced two real bugs: (1) Kosh packages share one
+flat global function namespace with vāṇी builtins and each other — any
+name collision is an unrecoverable compile error, and package authors
+have no way to control other packages' names; (2) transitive
+dependencies (a dependency of a dependency) were only resolved one level
+deep, so a "diamond" — two packages each vendoring their own copy of a
+shared dependency — silently produced missing-function errors instead
+of a working shared dependency.
+
+- [x] **NS-1 (Phase 1). Real transitive dependency graph** ✅ done
+  2026-07-21. `manifest::resolve_transitive_deps` (`src/manifest.rs`)
+  recursively walks `[deps]` through the full graph (not just the
+  top-level manifest), deduplicating by `(name, resolved_version)` —
+  not file path, since a diamond-shared package legitimately lives at
+  two different vendored paths on disk. Same-name-different-version is
+  a hard error in v1 (no per-edge resolution à la Cargo — not needed at
+  current ecosystem scale). A `visiting`-set DFS guard prevents infinite
+  recursion on a cycle (plain error for now; NS-2 upgrades this to a
+  full cycle-chain diagnostic). Wired into all three compilation entry
+  points (`compile_path`, `compile_library_path`,
+  `resolve_combined_source` in `src/lib.rs`); `vanic vendor`'s on-disk
+  vendoring behavior is untouched by design.
+
+  Verified against a real diamond (`vani-probability` + `vani-optimize`,
+  both vendoring `vani-matrix` independently): the old missing-function
+  bug is gone, replaced by an accurate, previously-invisible diagnostic
+  — **the two published packages have actually drifted to different
+  matrix versions** (probability: 0.1.0, optimize: 0.2.0). This is a
+  real bug in the published ecosystem, tracked for fix during NS-6
+  (not fixed standalone — no point re-pinning versions twice across two
+  migrations). Manually aligning both to the same version in a scratch
+  test confirmed the diamond then resolves cleanly: single compile, no
+  duplicate-definition error. Regression-swept clean against all 12 real
+  kosh packages via `vanic audit-safety` plus two `vanic check` test-file
+  spot checks (full SMT verification path).
+
+- [ ] **NS-2 (Phase 2). Circular dependency detection** — reuse the
+  existing Tarjan SCC implementation (`src/safety.rs`, already backs
+  `vanic acyclicity`'s function-call-graph analysis) against the
+  *package* graph. Upgrades NS-1's plain "circular dependency detected"
+  error into a full `A -> B -> C -> A` cycle-chain diagnostic, checked
+  before any compilation is attempted. **Not started.**
+
+- [ ] **NS-3 (Phase 3). Automatic per-package namespacing** — the actual
+  fix for the name-collision bug. Each `[deps]` entry gets implicitly
+  wrapped in `module <pkg_name> { ... }` at compile time (compiler-
+  internal wrapping, no source rewriting of dependency files). Wires up
+  `pub(kosh)` as the real package-boundary marker (currently behaves
+  identically to `pub` — see `docs/namespaces_design.md` closure #258,
+  explicitly documented as preparatory for this exact feature).
+  `vanic publish`-time validation that `[package].name` is a
+  namespace-safe identifier. Combined with NS-1's identity-based dedup,
+  this is what fully kills both original bugs together. **Breaking
+  change** for every existing package's internal cross-package calls and
+  every consumer's unqualified dependency calls. **Not started.**
+
+- [ ] **NS-4 (Phase 4). `vani.lock` becomes a real lockfile** — record
+  the full resolved transitive graph (not just direct deps) so
+  `build`/`check` don't re-walk every `vani.toml` on every compile, and
+  `vanic update` has something concrete to diff against. **Not started.**
+
+- [ ] **NS-5 (Phase 5). Migration UX + docs** — special-case diagnostic
+  for an unqualified call that would resolve to a dependency function
+  post-namespacing ("did you mean `matrix::mat_mul`?"). Update
+  `docs/kosh_design.md`, `docs/namespaces_design.md`,
+  `tutorials/src/intermediate/16_packages.md`; correct the now-superseded
+  DOC-3 claim in the "Device I/O + Big-O doc audit" section above (that
+  `use` lines are always redundant for `[deps]` — true only for the
+  top-level-entry case). **Not started.**
+
+- [ ] **NS-6 (Phase 6). Migrate + republish the ecosystem** — update all
+  ~12 kosh packages' internal cross-package calls to qualified/`use`
+  form, re-run `vanic audit-safety` + full test suites, republish. Fix
+  the `probability`/`optimize` matrix version drift NS-1 surfaced as
+  part of this pass. Re-verify the diamond case compiles clean
+  post-namespacing. **Not started.**
+
+**Non-goals (v1)**: multiple coexisting versions of the same package in
+one graph (Cargo-style per-edge resolution); semver-range-based version
+*selection* across the graph. Neither needed at current ecosystem scale
+(~12-15 first-party packages, no external contributors yet).

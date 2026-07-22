@@ -118,16 +118,25 @@ pub fn compile_path(
         std::collections::HashSet::new();
     let mut combined = String::new();
     let mut file_map = diagnostic::FileMap::new();
-    // Closure #287: if the entry is reached through a
-    // vani.toml manifest with `[deps]` entries, prepend each
-    // dep's entry source so its definitions are in scope for
-    // the main entry. Walks the manifest discovered from the
-    // entry's parent dir (or itself if entry IS a manifest).
+    // Closure #287 / Kosh namespacing arc Phase 1 (2026-07-21): if the
+    // entry is reached through a vani.toml manifest with `[deps]`
+    // entries, prepend every *transitively* reachable dep's entry
+    // source (not just the direct ones) so its definitions are in
+    // scope for the main entry -- see
+    // `manifest::resolve_transitive_deps` and
+    // `docs/kosh_namespacing_design.md`. Walks the manifest discovered
+    // from the entry's parent dir (or itself if entry IS a manifest).
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
-            for dep in &m.deps {
+            let deps = manifest::resolve_transitive_deps(&m).map_err(|err| {
+                (
+                    file_map.clone(),
+                    vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+                )
+            })?;
+            for dep in &deps {
                 if let Err(err) = resolve_uses(
                     &dep.entry_path, &mut visited, &mut combined, &mut file_map,
                 ) {
@@ -165,7 +174,13 @@ pub fn compile_library_path(
         entry.parent().unwrap_or(entry),
     ) {
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
-            for dep in &m.deps {
+            let deps = manifest::resolve_transitive_deps(&m).map_err(|err| {
+                (
+                    file_map.clone(),
+                    vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+                )
+            })?;
+            for dep in &deps {
                 if let Err(err) = resolve_uses(
                     &dep.entry_path, &mut visited, &mut combined, &mut file_map,
                 ) {
@@ -201,7 +216,8 @@ pub fn resolve_combined_source(entry: &std::path::Path) -> Result<String, String
         entry.parent().unwrap_or(entry),
     ) {
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
-            for dep in &m.deps {
+            let deps = manifest::resolve_transitive_deps(&m)?;
+            for dep in &deps {
                 resolve_uses(&dep.entry_path, &mut visited, &mut combined, &mut file_map)?;
             }
         }

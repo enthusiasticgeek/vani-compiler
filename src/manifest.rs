@@ -12,7 +12,7 @@
 //! Registry-dependent steps (resolver, `vanic add`, `vanic publish`)
 //! ship once the Kosh index repo is created.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 /// Parsed `vani.toml` manifest.
@@ -157,6 +157,106 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
         deps,
         registry_cafile,
     })
+}
+
+/// Kosh namespacing arc, Phase 1 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`): recursively walk `manifest`'s
+/// `[deps]` -- and each dependency's own `[deps]`, transitively -- and
+/// return the flattened, deduplicated set of every package reachable
+/// from it, in name order (deterministic).
+///
+/// This is what fixes the "diamond dependency" bug: `load_manifest`
+/// already recurses into each dep's own `vani.toml` (to validate it
+/// exists and read its entry path), but silently discarded that dep's
+/// OWN `deps` -- so a transitive dependency (a dependency of a
+/// dependency) was only ever included if the immediate dependency's
+/// source happened to still have an explicit `use "../vendor/X/..."`
+/// line reaching it. Two dependents that each vendor their own copy of
+/// the same transitive package (e.g. two path-deps both depending on
+/// `matrix`) previously produced silently-missing functions instead of
+/// resolving to one shared package.
+///
+/// Identity for dedup purposes is `(name, resolved_version)` -- not
+/// file path, since a diamond-shared package legitimately lives at two
+/// different vendored paths on disk (`vendor/a/vendor/matrix` vs
+/// `vendor/b/vendor/matrix`) but must resolve to one compiled copy.
+/// Two different versions of the same package name reachable from the
+/// same graph is a hard error in v1 -- vāṇी requires a single resolved
+/// version per package name across the whole dependency graph (no
+/// per-edge version resolution the way Cargo does; not needed at the
+/// current ecosystem scale, and a real gap if it ever is).
+///
+/// Cycle safety: a `visiting` set tracks the current DFS path (pushed
+/// before recursing into a dep, popped after) so `A` depending on `B`
+/// depending on `A` cannot loop forever. This is a safety net, not a
+/// diagnostic -- Phase 2 (Tarjan SCC over the package graph, mirroring
+/// `vanic acyclicity`'s function-call-graph analysis) is what gives a
+/// full cycle-chain error message. For now a cycle just errors plainly.
+pub fn resolve_transitive_deps(manifest: &Manifest) -> Result<Vec<Dependency>, String> {
+    let mut resolved: HashMap<String, Dependency> = HashMap::new();
+    let mut visiting: HashSet<PathBuf> = HashSet::new();
+    let root_canonical = std::fs::canonicalize(&manifest.manifest_path)
+        .unwrap_or_else(|_| manifest.manifest_path.clone());
+    visiting.insert(root_canonical);
+    resolve_transitive_deps_inner(manifest, &mut resolved, &mut visiting)?;
+    let mut out: Vec<Dependency> = resolved.into_values().collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+fn resolve_transitive_deps_inner(
+    manifest: &Manifest,
+    resolved: &mut HashMap<String, Dependency>,
+    visiting: &mut HashSet<PathBuf>,
+) -> Result<(), String> {
+    for dep in &manifest.deps {
+        if let Some(existing) = resolved.get(&dep.name) {
+            if existing.resolved_version != dep.resolved_version {
+                return Err(format!(
+                    "dependency version conflict: '{}' is required as {} via one \
+                     path and {} via another -- vāṇी requires a single resolved \
+                     version per package name across the whole dependency graph. \
+                     Align the version requirements in the affected vani.toml files.",
+                    dep.name,
+                    existing
+                        .resolved_version
+                        .as_deref()
+                        .unwrap_or("<unversioned>"),
+                    dep.resolved_version.as_deref().unwrap_or("<unversioned>"),
+                ));
+            }
+            // Diamond case: already fully resolved via another path.
+            continue;
+        }
+
+        let dep_manifest_path = dep.root_dir.join("vani.toml");
+        let canonical = std::fs::canonicalize(&dep_manifest_path)
+            .unwrap_or_else(|_| dep_manifest_path.clone());
+        if !visiting.insert(canonical.clone()) {
+            return Err(format!(
+                "circular dependency detected: '{}' is reachable from itself \
+                 through its own dependency graph",
+                dep.name
+            ));
+        }
+
+        resolved.insert(dep.name.clone(), dep.clone());
+
+        if dep_manifest_path.is_file() {
+            let dep_manifest = load_manifest(&dep_manifest_path).map_err(|e| {
+                format!(
+                    "loading transitive deps of '{}' from '{}': {}",
+                    dep.name,
+                    dep_manifest_path.display(),
+                    e
+                )
+            })?;
+            resolve_transitive_deps_inner(&dep_manifest, resolved, visiting)?;
+        }
+
+        visiting.remove(&canonical);
+    }
+    Ok(())
 }
 
 /// Returns true when `vani.lock` is absent or older than `vani.toml`.
