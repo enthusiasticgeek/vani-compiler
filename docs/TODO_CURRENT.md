@@ -847,12 +847,36 @@ of a working shared dependency.
   kosh packages via `vanic audit-safety` plus two `vanic check` test-file
   spot checks (full SMT verification path).
 
-- [ ] **NS-2 (Phase 2). Circular dependency detection** — reuse the
-  existing Tarjan SCC implementation (`src/safety.rs`, already backs
-  `vanic acyclicity`'s function-call-graph analysis) against the
-  *package* graph. Upgrades NS-1's plain "circular dependency detected"
-  error into a full `A -> B -> C -> A` cycle-chain diagnostic, checked
-  before any compilation is attempted. **Not started.**
+- [x] **NS-2 (Phase 2). Circular dependency detection** ✅ done
+  2026-07-21. `manifest::check_dependency_cycles` reuses the exact
+  Tarjan SCC implementation that backs `vanic acyclicity`'s
+  function-call-graph analysis (`src/acyclicity.rs::tarjan_scc`, made
+  `pub(crate)` — already generic, no algorithm changes needed) against
+  the package graph. Upgrades NS-1's plain "circular dependency
+  detected" error into a full `pkg_a -> pkg_b -> pkg_a` cycle-chain
+  diagnostic, checked before any compilation is attempted.
+
+  Found and fixed two real pre-existing bugs along the way (neither
+  introduced by NS-1 — just never triggered before, since nobody had a
+  circular Kosh dependency to test with): (1) `load_manifest`'s own
+  internal recursion (which loads each dep's manifest just to read its
+  entry path) had zero cycle protection and crashed/hung on a genuine
+  cycle — fixed with a `visiting`-set DFS-path guard in a new
+  `load_manifest_impl`. (2) Because of (1), `check_dependency_cycles`
+  can't be built as a wrapper around `load_manifest` — every `lib.rs`
+  caller's `if let Ok(m) = load_manifest(...)` pattern silently
+  *swallows* a cycle-caused error rather than surfacing it, producing a
+  false "ok" instead of a diagnostic (verified directly: the first
+  working attempt at this feature reported success on a deliberately
+  circular 3-package fixture). Fixed by having `check_dependency_cycles`
+  build its graph straight from the non-recursive `parse_toml_minimal`
+  parse instead, and adding `check_cycles_before_load` to guard the
+  *root* manifest's `load_manifest` call specifically, since that's the
+  one call site that must be checked before the fact, not after. Full
+  writeup with the exact repro and error output in
+  `docs/kosh_namespacing_design.md`. Regression-swept clean against all
+  12 real kosh packages; the NS-1 diamond fixture (aligned versions)
+  still resolves correctly with no false cycle report.
 
 - [ ] **NS-3 (Phase 3). Automatic per-package namespacing** — the actual
   fix for the name-collision bug. Each `[deps]` entry gets implicitly

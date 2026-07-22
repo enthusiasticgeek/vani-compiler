@@ -97,6 +97,39 @@ pub fn find_manifest(start: &Path) -> Option<PathBuf> {
 }
 
 pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
+    let mut visiting: HashSet<PathBuf> = HashSet::new();
+    load_manifest_impl(manifest_path, &mut visiting)
+}
+
+/// `load_manifest` recurses into each `[deps]` entry's own `vani.toml`
+/// purely to read its `entry_path`/`root_dir`/`package_version` (the
+/// full transitive-dep graph is `resolve_transitive_deps`'s job, run
+/// separately). That recursion had no cycle guard at all until the
+/// Kosh namespacing arc's Phase 2 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`) -- a genuine circular `[deps]`
+/// reference (`pkg_a` depends on `pkg_b` depends on `pkg_a`) recursed
+/// unboundedly and crashed/hung *before* `check_dependency_cycles` ever
+/// got a chance to run, since every path that loads a manifest funnels
+/// through here. `visiting` tracks the current DFS path (canonical
+/// manifest paths, pushed before recursing into a dep, popped after a
+/// successful load) so a cycle is rejected cleanly instead of blowing
+/// the stack; a legitimate diamond (two deps sharing a third) is
+/// unaffected since the same manifest can be visited on two different,
+/// non-overlapping DFS paths.
+fn load_manifest_impl(
+    manifest_path: &Path,
+    visiting: &mut HashSet<PathBuf>,
+) -> Result<Manifest, ManifestError> {
+    let canonical = std::fs::canonicalize(manifest_path)
+        .unwrap_or_else(|_| manifest_path.to_path_buf());
+    if !visiting.insert(canonical.clone()) {
+        return Err(ManifestError::Io(format!(
+            "circular [deps] reference detected while loading '{}' -- a \
+             package's own dependency chain points back to itself",
+            manifest_path.display()
+        )));
+    }
+
     let source = std::fs::read_to_string(manifest_path).map_err(|e| {
         ManifestError::Io(format!("read '{}': {}", manifest_path.display(), e))
     })?;
@@ -129,7 +162,7 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
     for (dep_name, dep_path_rel, version_req) in &dep_entries {
         let dep_dir = root_dir.join(dep_path_rel);
         let dep_manifest_path = dep_dir.join("vani.toml");
-        let dep_loaded = load_manifest(&dep_manifest_path).map_err(|e| {
+        let dep_loaded = load_manifest_impl(&dep_manifest_path, visiting).map_err(|e| {
             ManifestError::Io(format!(
                 "loading dep '{}' from '{}': {}",
                 dep_name, dep_manifest_path.display(), e
@@ -148,6 +181,7 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
         .get("registry")
         .and_then(|s| s.get("cafile"))
         .cloned();
+    visiting.remove(&canonical);
     Ok(Manifest {
         package_name: name,
         package_version,
@@ -193,6 +227,10 @@ pub fn load_manifest(manifest_path: &Path) -> Result<Manifest, ManifestError> {
 /// `vanic acyclicity`'s function-call-graph analysis) is what gives a
 /// full cycle-chain error message. For now a cycle just errors plainly.
 pub fn resolve_transitive_deps(manifest: &Manifest) -> Result<Vec<Dependency>, String> {
+    if let Some(err) = cycle_error(&manifest.package_name, &manifest.manifest_path) {
+        return Err(err);
+    }
+
     let mut resolved: HashMap<String, Dependency> = HashMap::new();
     let mut visiting: HashSet<PathBuf> = HashSet::new();
     let root_canonical = std::fs::canonicalize(&manifest.manifest_path)
@@ -202,6 +240,152 @@ pub fn resolve_transitive_deps(manifest: &Manifest) -> Result<Vec<Dependency>, S
     let mut out: Vec<Dependency> = resolved.into_values().collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
+}
+
+/// Kosh namespacing arc, Phase 2 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`): package-level circular-
+/// dependency detection. Reuses the exact Tarjan SCC algorithm that
+/// backs `vanic acyclicity`'s function-call-graph analysis
+/// (`crate::acyclicity::tarjan_scc` -- already generic over any
+/// `HashMap<String, Vec<String>>` adjacency, no changes needed to
+/// reuse it here) against the *package* dependency graph instead.
+///
+/// Builds the full graph reachable from `(root_name, root_manifest_path)`
+/// -- the root project + every package reachable through `[deps]`,
+/// identified by name -- and returns every cycle found, each as its
+/// members in sorted order. An empty result means the graph is acyclic.
+/// Unlike `resolve_transitive_deps_inner`'s DFS `visiting` guard (a
+/// plain safety net that only detects the first cycle it happens to
+/// walk into and stops), this walks the entire graph up front and
+/// reports every cycle that exists.
+///
+/// Takes a bare `(name, path)` pair rather than an already-loaded
+/// `Manifest` deliberately: `load_manifest` recurses into every
+/// dependency's manifest just to resolve entry paths (see
+/// `load_manifest_impl`'s doc comment), which means it fails
+/// (correctly, via its own cycle guard) on exactly the input this
+/// function exists to analyze -- if this took a `&Manifest`, callers
+/// would need to have already called the very function that breaks on
+/// cyclic input. Building the graph shape only needs each manifest's
+/// raw `[deps]` (name, relative-path) pairs, which `parse_toml_minimal`
+/// gives directly with no recursion at all -- so cycle-safety here
+/// comes purely from `loaded` (each manifest file visited at most once
+/// while building the graph; Tarjan SCC below is what actually finds
+/// the cycles in it).
+pub fn check_dependency_cycles(root_name: &str, root_manifest_path: &Path) -> Vec<Vec<String>> {
+    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    let mut node_order: Vec<String> = Vec::new();
+    let mut queue: Vec<(String, PathBuf)> =
+        vec![(root_name.to_string(), root_manifest_path.to_path_buf())];
+    let mut loaded: HashSet<PathBuf> = HashSet::new();
+
+    while let Some((name, manifest_path)) = queue.pop() {
+        let canonical = std::fs::canonicalize(&manifest_path)
+            .unwrap_or_else(|_| manifest_path.clone());
+        if !loaded.insert(canonical) {
+            continue;
+        }
+        node_order.push(name.clone());
+        let edges = std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|source| parse_toml_minimal(&source).ok())
+            .map(|(_, dep_entries)| {
+                let root_dir = manifest_path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| PathBuf::from("."));
+                let mut edges = Vec::new();
+                for (dep_name, dep_path_rel, _version_req) in &dep_entries {
+                    edges.push(dep_name.clone());
+                    queue.push((
+                        dep_name.clone(),
+                        root_dir.join(dep_path_rel).join("vani.toml"),
+                    ));
+                }
+                edges
+            })
+            .unwrap_or_default();
+        graph.insert(name, edges);
+    }
+
+    let sccs = crate::acyclicity::tarjan_scc(&node_order, &graph);
+    let mut cycles: Vec<Vec<String>> = Vec::new();
+    for scc in sccs {
+        if scc.len() > 1 {
+            let mut members = scc;
+            members.sort();
+            cycles.push(members);
+        } else if scc.len() == 1 {
+            let n = &scc[0];
+            if graph.get(n).map(|e| e.contains(n)).unwrap_or(false) {
+                cycles.push(scc);
+            }
+        }
+    }
+    cycles.sort();
+    cycles
+}
+
+fn format_dependency_cycle(cycle: &[String]) -> String {
+    if cycle.len() == 1 {
+        format!("'{}' depends on itself", cycle[0])
+    } else {
+        let mut chain = cycle.join(" -> ");
+        chain.push_str(&format!(" -> {}", cycle[0]));
+        chain
+    }
+}
+
+/// Runs `check_dependency_cycles` and formats a ready-to-return `Err`
+/// string if any cycle was found, or `None` if the graph is acyclic.
+fn cycle_error(root_name: &str, root_manifest_path: &Path) -> Option<String> {
+    let cycles = check_dependency_cycles(root_name, root_manifest_path);
+    if cycles.is_empty() {
+        return None;
+    }
+    let mut msg = String::from("circular dependency detected in the Kosh dependency graph:\n");
+    for c in &cycles {
+        msg.push_str(&format!("  {}\n", format_dependency_cycle(c)));
+    }
+    msg.push_str(
+        "\nvāṇी does not support circular package dependencies. Break \
+         the cycle by removing one of the [deps] edges shown above.",
+    );
+    Some(msg)
+}
+
+/// Cheap, non-recursive read of just `[package].name` from a
+/// `vani.toml`, via the same non-recursive `parse_toml_minimal` used
+/// by `check_dependency_cycles`. Used to check for cycles *before*
+/// attempting `load_manifest` on the root manifest -- `load_manifest`
+/// recurses into every `[deps]` entry's own manifest just to resolve
+/// entry paths, so on a genuinely cyclic root project it fails (via
+/// `load_manifest_impl`'s cycle guard) before ever returning a
+/// `Manifest` to check cycles against. Falls back to `"<root>"` if the
+/// name can't be read for any reason (malformed manifest, etc.) --
+/// `load_manifest` will report that failure properly on its own right
+/// after this check passes; this function only needs *a* stable label
+/// for the graph's entry node, not a fully validated one.
+fn read_package_name(manifest_path: &Path) -> String {
+    std::fs::read_to_string(manifest_path)
+        .ok()
+        .and_then(|source| parse_toml_minimal(&source).ok())
+        .and_then(|(sections, _)| sections.get("package")?.get("name").cloned())
+        .unwrap_or_else(|| "<root>".to_string())
+}
+
+/// Kosh namespacing arc, Phase 2: check for a circular `[deps]` graph
+/// starting from `manifest_path`, without requiring a successfully
+/// `load_manifest`-ed `Manifest` first (see `read_package_name`'s doc
+/// comment for why that ordering matters). Call this before
+/// `load_manifest` on any manifest reached from a fresh entry point;
+/// `resolve_transitive_deps` already does the equivalent check
+/// internally once it has a `Manifest` in hand for the *rest* of the
+/// graph, but the root manifest's own `load_manifest` call is exactly
+/// the one call site that must be guarded before it happens, not after.
+pub fn check_cycles_before_load(manifest_path: &Path) -> Option<String> {
+    let root_name = read_package_name(manifest_path);
+    cycle_error(&root_name, manifest_path)
 }
 
 fn resolve_transitive_deps_inner(

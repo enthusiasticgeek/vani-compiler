@@ -97,7 +97,14 @@ pub fn check_acyclicity(program: &TypedProgram) -> AcyclicityReport {
 }
 
 /// Iterative Tarjan's SCC. Returns each SCC as a Vec of names.
-fn tarjan_scc(nodes: &[String], graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+///
+/// `pub(crate)` since the Kosh namespacing arc's Phase 2
+/// (`manifest::check_dependency_cycles`, `docs/kosh_namespacing_design.md`)
+/// reuses this exact algorithm against the *package* dependency graph
+/// instead of the function-call graph -- the implementation is already
+/// generic over any `HashMap<String, Vec<String>>` adjacency, so no
+/// changes were needed to make it reusable.
+pub(crate) fn tarjan_scc(nodes: &[String], graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     let n = nodes.len();
     let mut index_of: HashMap<String, usize> = HashMap::new();
     for (i, name) in nodes.iter().enumerate() {

@@ -1,6 +1,6 @@
 # Kosh package namespacing + dependency-graph resolution — design doc
 
-**Status:** Phase 1 shipped 2026-07-21. Phases 2-6 planned, not started.
+**Status:** Phases 1-2 shipped 2026-07-21. Phases 3-6 planned, not started.
 **Authored:** 2026-07-21.
 
 ---
@@ -142,16 +142,83 @@ that's Phase 3.
   `vani-optimize`) still compile correctly end-to-end (`vanic check`,
   full SMT verification included).
 
-### Phase 2 — Circular dependency detection (planned)
+### Phase 2 — Circular dependency detection ✅ shipped 2026-07-21
 
-- Reuse the existing Tarjan SCC implementation (`src/safety.rs`,
-  already powers `vanic acyclicity`'s function-call-graph analysis)
-  against the *package* graph instead.
+- `manifest::check_dependency_cycles(root_name, root_manifest_path)`
+  reuses the exact Tarjan SCC implementation that backs
+  `vanic acyclicity`'s function-call-graph analysis
+  (`src/acyclicity.rs::tarjan_scc`, made `pub(crate)` — it was already
+  generic over any `HashMap<String, Vec<String>>` adjacency, no
+  algorithm changes needed) against the *package* graph instead.
+- Deliberately does **not** build its graph via `load_manifest`.
+  Explained below — this was the crux of getting Phase 2 actually
+  working, not just compiling.
 - Any cycle (including a package accidentally listing itself) becomes
   a hard compile-time error showing the full cycle chain, checked
-  before any compilation is attempted — upgrading Phase 1's plain
-  "circular dependency detected: 'x' is reachable from itself" into a
-  real `A -> B -> C -> A` diagnostic.
+  before any compilation is attempted — replacing Phase 1's plain
+  "circular dependency detected: 'x' is reachable from itself" with a
+  real `pkg_a -> pkg_b -> pkg_a` diagnostic listing every cycle found.
+
+**Two real bugs found and fixed while implementing this, neither of
+which were introduced by Phase 1 — both pre-existing, just never
+triggered before because nobody had a circular Kosh dependency to test
+with:**
+
+1. **`load_manifest`'s own recursion had zero cycle protection.**
+   `load_manifest` recurses into each `[deps]` entry's own `vani.toml`
+   purely to read its `entry_path`/`root_dir`/`package_version` (see
+   the code as it existed before this session). A genuine cycle
+   (`pkg_a` depends on `pkg_b` depends on `pkg_a`) recursed
+   unboundedly and crashed/hung — verified directly: the first test
+   attempt hit exactly this, independent of anything Phase 1 or Phase
+   2 added. Fixed by threading a `visiting: HashSet<PathBuf>` DFS-path
+   guard through an internal `load_manifest_impl` (pushed before
+   recursing into a dep, popped after a successful load — so a
+   legitimate diamond, where the same manifest is reached via two
+   different non-overlapping paths, is unaffected).
+
+2. **Consequently, `check_dependency_cycles` could not be built as a
+   thin wrapper around `load_manifest`.** The natural first attempt —
+   build the package graph by calling `load_manifest` on each node —
+   fails precisely on cyclic input, since that's now correctly
+   rejected via bug 1's fix. Every caller in `lib.rs` used the pattern
+   `if let Ok(m) = manifest::load_manifest(...) { ...walk m.deps... }`,
+   which silently skips the entire `[deps]` block on any `Err` —
+   meaning a real cycle produced a *false negative*: no error at all,
+   dependencies silently dropped, and (in this session's exact test
+   case) the program "succeeded" because the trivial `main()` never
+   actually needed anything from the broken dependency chain. Verified
+   directly: the first working build of Phase 2 reported `ok` on a
+   deliberately circular `pkg_a <-> pkg_b` fixture instead of an error.
+
+   Fixed by making `check_dependency_cycles` build its graph from
+   `parse_toml_minimal` directly — the same non-recursive raw-TOML
+   parse `load_manifest` itself uses internally, but without the
+   recursive entry-path resolution that makes `load_manifest` fragile
+   on cyclic input. Cycle-safety during graph *construction* comes
+   purely from a `loaded: HashSet<PathBuf>` (each manifest file visited
+   at most once while building adjacency); Tarjan SCC over the
+   resulting complete graph is what actually finds the cycles. A new
+   `check_cycles_before_load` entry point runs this check against the
+   *root* manifest before `compile_path`/`compile_library_path`/
+   `resolve_combined_source` ever call `load_manifest` on it — the one
+   call site that must be guarded before the fact, not after, since a
+   root-level cycle makes `load_manifest(root)` itself the thing that
+   fails.
+
+**Verified end-to-end** with a real 3-package fixture
+(`proot` → `pkg_a` → `pkg_b` → `pkg_a`): `vanic check` now reports
+```
+error: circular dependency detected in the Kosh dependency graph:
+  pkg_a -> pkg_b -> pkg_a
+
+vāṇी does not support circular package dependencies. Break the cycle
+by removing one of the [deps] edges shown above.
+```
+cleanly and immediately (no hang, no false success), while the earlier
+Phase 1 diamond-dependency fixture (`probability` + `optimize` sharing
+`matrix`, versions aligned) still resolves correctly with no false
+cycle report. Regression-swept clean against all 12 real kosh packages.
 
 ### Phase 3 — Automatic per-package namespacing (planned)
 

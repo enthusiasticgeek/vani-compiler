@@ -129,6 +129,20 @@ pub fn compile_path(
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
+        // Kosh namespacing arc Phase 2 (2026-07-21): check for a
+        // circular [deps] graph BEFORE calling load_manifest -- that
+        // function recurses into every dependency's own manifest just
+        // to resolve entry paths, so on a genuinely cyclic root
+        // project it fails opaquely (inside its own cycle guard)
+        // before ever returning a Manifest, which the `if let Ok(m)`
+        // below would then silently swallow as "no [deps] to walk"
+        // rather than surfacing the real problem.
+        if let Some(err) = manifest::check_cycles_before_load(&manifest_path) {
+            return Err((
+                file_map,
+                vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+            ));
+        }
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
             let deps = manifest::resolve_transitive_deps(&m).map_err(|err| {
                 (
@@ -173,6 +187,12 @@ pub fn compile_library_path(
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
+        if let Some(err) = manifest::check_cycles_before_load(&manifest_path) {
+            return Err((
+                file_map,
+                vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+            ));
+        }
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
             let deps = manifest::resolve_transitive_deps(&m).map_err(|err| {
                 (
@@ -215,6 +235,9 @@ pub fn resolve_combined_source(entry: &std::path::Path) -> Result<String, String
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
+        if let Some(err) = manifest::check_cycles_before_load(&manifest_path) {
+            return Err(err);
+        }
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
             let deps = manifest::resolve_transitive_deps(&m)?;
             for dep in &deps {
