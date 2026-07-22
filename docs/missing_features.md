@@ -422,12 +422,19 @@ regression test `top_level_use_of_pub_use_as_rename` locks the interaction.
 
 ### Visibility modifiers beyond `pub` / `pub(kosh)`
 
-**Limited.** v1 has `pub`, `pub(kosh)`, and module-private
-(default). Rust's `pub(crate)`, `pub(super)`, `pub(in path)`
-aren't there.
+**Limited, and `pub(kosh)` is currently syntax-only.** v1 parses
+`pub`, `pub(kosh)`, and module-private (default), and the AST
+tracks `pub(kosh)` as a distinct bit (`ModuleVisibility::*_kosh_only`)
+-- but the checker never reads that bit (verified: zero references to
+`_kosh_only` outside where it's set at parse time), so `pub(kosh)`
+behaves identically to `pub` at every call site today, including
+across a real Kosh package boundary. Rust's `pub(crate)`, `pub(super)`,
+`pub(in path)` aren't there either.
 
-**Workaround:** the existing `pub(kosh)` covers
-"package-visible"; module-private covers everything else.
+**Workaround:** none that actually restricts access -- write
+`pub(kosh)` to document intent if you like, but it doesn't do
+anything `pub` doesn't. Module-private is the only tier genuinely
+enforced beyond plain `pub`.
 
 ### Workspace / multi-crate package
 

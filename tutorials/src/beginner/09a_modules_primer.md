@@ -113,25 +113,30 @@ depend on a helper that wasn't intended as API. They'd hit a
 "private item" error and have to switch to a `pub` alternative
 -- a chance for both sides to do the right thing.
 
-## Three visibility tiers in vāṇी
+## Two visibility tiers actually enforced today, and a third that's syntax-only
 
 The default is **private** -- visible only inside the declaring
 module.
 
 - `pub fn foo(...)` -> visible **outside the module**, callable
   from anywhere via the qualified path (`mod::foo`).
-- `pub(kosh) fn bar(...)` -> visible **inside the package**
-  (the user's whole project) but NOT outside it. Useful when
-  a helper is shared across several modules of your project
-  but isn't part of the published-to-users API.
 - (no `pub`) -> visible **only inside this module**. Default.
+- `pub(kosh) fn bar(...)` -> **parses, but is not yet enforced.**
+  The *design intent* (see below) is "visible inside the package but
+  not to external consumers" -- but as of this writing the compiler
+  treats `pub(kosh)` identically to `pub` at every call site, in-project
+  and across a Kosh package boundary alike. Verified directly: a
+  `pub(kosh)` function is callable from completely outside its module
+  with no error. Write `pub(kosh)` to document intent if you like; just
+  don't rely on it to actually restrict who can call something yet.
 
 `kosh` (कोश, "treasure / repository") is vāṇी's word for what
 Rust calls a "crate" -- a single buildable package. The
-`pub(kosh)` tier lets you control sharing within YOUR project
-without exposing helpers as part of the public-published API.
+*intended* `pub(kosh)` tier is for sharing a helper across several
+modules of your project without it becoming part of your
+published-to-users API -- once real enforcement lands.
 
-Here is all three tiers side by side:
+Here is the design intent, with the currently-inert tier called out:
 
 ```
 module stats {
@@ -140,9 +145,10 @@ module stats {
         return sum_all(ref xs) / n;
     }
 
-    // Tier 2 — package-internal.  Other modules in YOUR project can call
-    // this (e.g. a sibling `module report` that also needs the raw sum),
-    // but users who depend on your package cannot.
+    // Intended as package-internal (other modules in YOUR project could
+    // call this, e.g. a sibling `module report`, but a downstream user
+    // of your package couldn't) -- NOT YET ENFORCED. Today this behaves
+    // exactly like `pub`: callable from anywhere, including externally.
     pub(kosh) fn sum_all(xs: ref Vec<i64>) -> i64 {
         let s: i64 = 0;
         let i: i64 = 0;
@@ -153,27 +159,25 @@ module stats {
         return s;
     }
 
-    // Tier 3 — private.  Only callable from inside this module.
+    // Tier — private.  Only callable from inside this module.
     fn assert_nonempty(n: i64) -> i64 {
         assert n > 0 : "stats require at least one element";
         return n;
     }
 }
 
-// Inside the same package (e.g. module report):
+// From anywhere, in-project or across a Kosh package boundary:
 //   stats::mean(ref xs, n)     -- OK, pub
-//   stats::sum_all(ref xs)     -- OK, pub(kosh)
-//   stats::assert_nonempty(n)  -- REJECTED: private to stats
-
-// Outside the package (a downstream user):
-//   stats::mean(ref xs, n)     -- OK, pub
-//   stats::sum_all(ref xs)     -- REJECTED: pub(kosh) stops at package boundary
+//   stats::sum_all(ref xs)     -- OK today (pub(kosh) not yet enforced --
+//                                  intended design would reject this from
+//                                  outside the package)
 //   stats::assert_nonempty(n)  -- REJECTED: private to stats
 ```
 
 The rule of thumb: use `pub` for the API you're willing to support
-forever; use `pub(kosh)` for cross-module helpers that are an
-implementation detail of your package; leave everything else private.
+forever; use `pub(kosh)` to *document* a cross-module helper that's an
+implementation detail of your package (real enforcement is planned);
+leave everything else private, which *is* enforced today.
 
 ## Nested modules
 
@@ -233,8 +237,9 @@ They affect lookups in the surrounding scope.
 - The real reason for modules is **visibility**: `pub` marks
   items as part of the module's exported API; non-`pub` items
   are private to the module.
-- `pub(kosh)` is a middle tier: visible across YOUR package,
-  not exported outside.
+- `pub(kosh)` is a middle tier *by design* (visible across YOUR
+  package, not exported outside) -- but not yet enforced; it
+  behaves exactly like `pub` today.
 - `use mod::name;` imports a name locally so you don't have
   to write the full path every time.
 
@@ -266,6 +271,11 @@ larger projects refactor-able without breaking the world.
 - [Intermediate 4b -- Interfaces primer](../intermediate/04b_interfaces_primer.md)
   -- modules + interfaces compose: a module can export an
   interface that several types in different modules implement
+- [Intermediate 16 -- Kosh Packages](../intermediate/16_packages.md)
+  -- every `[deps]` dependency is compiled inside an implicit
+  `module <pkg_name> { ... }` automatically, using this exact
+  mechanism -- that's why calling a dependency's function looks
+  like `matrix::mat_solve(...)` instead of a bare call
 
 
 ---

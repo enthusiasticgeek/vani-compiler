@@ -358,7 +358,7 @@ match parse("x") {
 ```vani
 module math {
     pub fn sqrt(x: f64) -> f64 { … }          // public API
-    pub(kosh) fn helper() -> f64 { … }        // package-internal only
+    pub(kosh) fn helper() -> f64 { … }        // intended: package-internal only
     fn internal() -> f64 { … }                // private to module
 }
 
@@ -366,7 +366,33 @@ use math::sqrt;
 let r: f64 = sqrt(2.0);
 ```
 
-`kosh` (कोश) is Sanskrit for "repository" — equivalent to Rust's `pub(crate)`.
+`kosh` (कोश) is Sanskrit for "repository" — the intended meaning of
+`pub(kosh)` is Rust's `pub(crate)`. **As of this writing, `pub(kosh)` is
+not yet differentiated from `pub` at type-check time** — an item marked
+`pub(kosh)` is visible identically to plain `pub`, including to
+external consumers. The syntax is accepted and the distinction is
+tracked in the AST for when real enforcement lands; write `pub(kosh)`
+today to document intent, but don't rely on it to actually restrict
+access.
+
+### Kosh package dependencies use this same mechanism automatically
+
+Every `[deps]` entry in `vani.toml` is compiled inside an implicit
+`module <pkg_name> { ... }` — no `module` keyword needed in the
+dependency's own source. Its functions (and any exported struct types)
+are called as `pkgname::item`, exactly like an in-file module:
+
+```vani
+// vani.toml: [deps] matrix = { path = "./vendor/matrix" }
+let y: Vec<f64> = matrix::mat_solve(ref a, ref b, n);
+```
+
+This is what makes two unrelated packages — or a package and a vāṇी
+builtin — safe to share a function name: they live in different
+namespaces and can never collide. See
+[Kosh package namespacing design](kosh_namespacing_design.md) and
+[the Kosh Packages tutorial](../tutorials/src/intermediate/16_packages.md)
+for the full design and worked examples.
 
 ---
 
