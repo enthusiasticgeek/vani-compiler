@@ -308,9 +308,14 @@ fn manifest_deps_local_path_brings_lib_into_scope() {
          [deps]\nmathlib = { path = \"../lib\" }\n",
     )
     .expect("write main manifest");
+    // Kosh namespacing arc (2026-07-21, docs/kosh_namespacing_design.md
+    // Phase 3): a [deps] package is compiled inside its own namespace,
+    // so its functions are called as `pkgname::item`, not bare -- this
+    // is what lets two unrelated packages (or a package and a vāṇी
+    // builtin) share a function name without colliding.
     fs::write(
         main_dir.join("src/main.vani"),
-        "fn main() -> i64 { return triple(7); }\n",
+        "fn main() -> i64 { return mathlib::triple(7); }\n",
     )
     .expect("write main source");
 
@@ -326,7 +331,7 @@ fn manifest_deps_local_path_brings_lib_into_scope() {
     assert_eq!(
         status.code(),
         Some(21),
-        "expected triple(7)=21, got status {} (stderr: {})",
+        "expected mathlib::triple(7)=21, got status {} (stderr: {})",
         status,
         String::from_utf8_lossy(&output.stderr),
     );
