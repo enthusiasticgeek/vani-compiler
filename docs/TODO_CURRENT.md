@@ -927,19 +927,44 @@ of a working shared dependency.
   job to fix. The 4 self-contained packages (`complex`, `discrete`,
   `sparse`, `geometry`) are unaffected.
 
-- [ ] **NS-4 (Phase 4). `vani.lock` becomes a real lockfile** — record
-  the full resolved transitive graph (not just direct deps) so
-  `build`/`check` don't re-walk every `vani.toml` on every compile, and
-  `vanic update` has something concrete to diff against. **Not started.**
+- [x] **NS-4 (Phase 4). `vani.lock` becomes a real lockfile** ✅ done
+  2026-07-21. `write_lockfile` now calls `resolve_transitive_deps`
+  instead of walking only direct `manifest.deps` — every package
+  reachable through the graph gets a `[[package]]` entry. Direct deps
+  keep `path`/`version-req` plus a new `direct = true` marker;
+  transitive-only deps get `direct = false` and a canonicalized
+  absolute `root-path` instead (no single well-defined
+  path-relative-to-root exists for a package vendored at different
+  depths by different dependents). Verified against a 3-package
+  transitive fixture.
 
-- [ ] **NS-5 (Phase 5). Migration UX + docs** — special-case diagnostic
-  for an unqualified call that would resolve to a dependency function
-  post-namespacing ("did you mean `matrix::mat_mul`?"). Update
-  `docs/kosh_design.md`, `docs/namespaces_design.md`,
-  `tutorials/src/intermediate/16_packages.md`; correct the now-superseded
-  DOC-3 claim in the "Device I/O + Big-O doc audit" section above (that
-  `use` lines are always redundant for `[deps]` — true only for the
-  top-level-entry case). **Not started.**
+- [x] **NS-5 (Phase 5). Migration UX + docs** ✅ done 2026-07-21.
+  `checker.rs`'s unknown-function path now calls
+  `module_suggestion_for`, which scans the signature table for a
+  `<module>__<name>` mangled match and suggests `module::name` when
+  found — verified against the real (Phase-3-broken) `vani-pde`
+  package, every failure site got the exact correct fix suggestion.
+
+  Found a second real bug via this same work, in `vanic add` itself
+  (not the namespacing logic): `registry_add` wrote the raw registry
+  package name as the `[deps]` key verbatim, and the real published
+  `hello-kosh` package (`[package].name = "hello-kosh"`, verified in
+  `kosh-index`) has a hyphen — meaning the default, documented
+  `vanic add hello-kosh` workflow generated a `vani.toml` that failed
+  to compile, with no fix short of hand-editing. Fixed with
+  `sanitize_dep_key` (`manifest.rs`): non-identifier characters become
+  `_`; applied to the `[deps]` key only, vendored directory and
+  registry lookups keep the real name. `vanic add` now prints a note
+  when it sanitizes. Verified end-to-end against the real package.
+
+  Docs updated: `docs/kosh_design.md` (calling convention + transitive
+  resolution), `docs/namespaces_design.md` (corrected the
+  `pub`/`pub(kosh)` mixup from NS-3), `tutorials/src/intermediate/16_packages.md`
+  (rewrote the dependency-usage section with accurate syntax + the
+  `hello-kosh`/`hello_kosh` sanitization note + NS-4's new lockfile
+  fields). The DOC-3 claim below needed no correction — NS-1 already
+  made it accurate again; NS-3 changes call *syntax*, not whether
+  `use` is needed.
 
 - [ ] **NS-6 (Phase 6). Migrate + republish the ecosystem** — update all
   ~12 kosh packages' internal cross-package calls to qualified/`use`

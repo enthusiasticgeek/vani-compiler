@@ -465,6 +465,28 @@ pub fn lockfile_is_stale(manifest_path: &Path) -> bool {
 ///
 /// Format mirrors Cargo.lock enough that the same tooling habits
 /// apply, but uses `vani.lock` as the filename.
+/// Kosh namespacing arc, Phase 4 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`): records the FULL resolved
+/// transitive dependency graph (`resolve_transitive_deps`), not just
+/// direct `[deps]` entries. Before this, a transitive dependency (a
+/// dependency of a dependency) had no record in `vani.lock` at all --
+/// consistent with `compile_path` itself only walking one level deep
+/// before NS-1 fixed that gap.
+///
+/// `vani.lock` today is write-only (verified: nothing in the codebase
+/// ever parses it back, `lockfile_is_stale` only checks its mtime) --
+/// it exists as a human/CI-facing record of what's actually resolved,
+/// not yet as an input to compilation. So this only needs to be an
+/// accurate snapshot, not round-trip-parseable back into a `Manifest`.
+///
+/// Direct deps (present in `manifest.deps`) keep the existing
+/// `path`/`version-req` fields, since those are meaningful relative to
+/// the root project. Transitive-only deps (reached through another
+/// package's own `[deps]`) instead record an absolute `root-path` --
+/// there's no single well-defined "path relative to root" for a
+/// package that might be vendored at different nesting depths by
+/// different dependents in the same graph. Both kinds get a `direct`
+/// bool so a reader can tell them apart at a glance.
 pub fn write_lockfile(manifest: &Manifest) -> Result<(), String> {
     let lock_path = manifest.manifest_path.with_file_name("vani.lock");
     let mut out = String::new();
@@ -481,8 +503,11 @@ pub fn write_lockfile(manifest: &Manifest) -> Result<(), String> {
         out.push_str("version = \"0.0.0\"\n");
     }
 
-    // One entry per path-dep.
-    for dep in &manifest.deps {
+    let direct_names: HashSet<String> =
+        manifest.deps.iter().map(|d| d.name.clone()).collect();
+    let all_deps = resolve_transitive_deps(manifest)?;
+
+    for dep in &all_deps {
         out.push_str("\n[[package]]\n");
         out.push_str(&format!("name = \"{}\"\n", dep.name));
         if let Some(v) = &dep.resolved_version {
@@ -491,9 +516,17 @@ pub fn write_lockfile(manifest: &Manifest) -> Result<(), String> {
             out.push_str("version = \"0.0.0\"\n");
         }
         out.push_str("source = \"local\"\n");
-        out.push_str(&format!("path = \"{}\"\n", dep.path_rel));
-        if let Some(req) = &dep.version_req {
-            out.push_str(&format!("version-req = \"{}\"\n", req));
+        let is_direct = direct_names.contains(&dep.name);
+        out.push_str(&format!("direct = {}\n", is_direct));
+        if is_direct {
+            out.push_str(&format!("path = \"{}\"\n", dep.path_rel));
+            if let Some(req) = &dep.version_req {
+                out.push_str(&format!("version-req = \"{}\"\n", req));
+            }
+        } else {
+            let root_path = std::fs::canonicalize(&dep.root_dir)
+                .unwrap_or_else(|_| dep.root_dir.clone());
+            out.push_str(&format!("root-path = \"{}\"\n", root_path.display()));
         }
     }
 
@@ -856,6 +889,22 @@ pub fn add_dep_to_manifest(
 
 /// Full `vanic add` operation: fetch best version, download + extract
 /// tarball to `vendor/<name>/`, update `vani.toml`, rewrite `vani.lock`.
+/// See the doc comment at `registry_add`'s call site. Non-identifier
+/// characters (most commonly `-`) become `_`; a leading digit gets a
+/// `_` prefix. Mirrors `lib.rs`'s `is_valid_vani_identifier` check
+/// (kept as a separate small helper rather than shared across the
+/// module boundary -- both are self-contained one-purpose checks).
+fn sanitize_dep_key(name: &str) -> String {
+    let mut out: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if out.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(true) {
+        out.insert(0, '_');
+    }
+    out
+}
+
 pub fn registry_add<F: Fn(&str)>(
     manifest_path: &Path,
     pkg_name: &str,
@@ -904,7 +953,25 @@ pub fn registry_add<F: Fn(&str)>(
         .unwrap_or_else(|| format!("^{}", entry.version));
     let path_rel = format!("./vendor/{}", entry.name);
 
-    add_dep_to_manifest(manifest_path, pkg_name, &path_rel, Some(&constraint_str))?;
+    // Kosh namespacing arc, Phase 5 (2026-07-21): a `[deps]` key
+    // becomes a literal `module <key> { ... }` identifier (Phase 3,
+    // `docs/kosh_namespacing_design.md`), but registry package names
+    // aren't required to be valid vāṇी identifiers -- e.g. the real
+    // published `hello-kosh` package. Writing the raw registry name as
+    // the deps key by default would generate a `vani.toml` that fails
+    // to compile out of the box. Sanitize it; the vendored directory
+    // and registry lookups still use the real, unsanitized name --
+    // only the `[deps]` table key (and therefore the namespace callers
+    // use, `<key>::item`) changes.
+    let dep_key = sanitize_dep_key(&entry.name);
+    if dep_key != entry.name {
+        on_status(&format!(
+            "  note: '{}' isn't a valid vāṇी identifier, so it's added to \
+             [deps] as `{}` (call its functions as `{}::item`)",
+            entry.name, dep_key, dep_key
+        ));
+    }
+    add_dep_to_manifest(manifest_path, &dep_key, &path_rel, Some(&constraint_str))?;
 
     let updated = load_manifest(manifest_path).map_err(|e| e.to_string())?;
     write_lockfile(&updated).map_err(|e| e.to_string())?;

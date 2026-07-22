@@ -24,7 +24,8 @@ of closure #258:
 | `use foo::bar as baz;` rename + collision diagnostic | #254 | both single-item and per-entry in brace lists |
 | `use` inside `module { }` bodies | #256 | scoped to module body, no leak |
 | Re-exports `pub use foo::bar;` | #257 | transitively resolved via fixed-point |
-| `pub(kosh)` visibility tier | #258 | preparatory; behaves as `pub` today, enforces at the future kosh boundary |
+| `pub(kosh)` visibility tier | #258 | preparatory syntax; kosh boundary itself shipped 2026-07-21 (see Kosh namespacing arc note below) but `pub(kosh)` is not yet truly differentiated from `pub` there |
+| Kosh dependency namespacing (`pkgname::item`, transitive resolution, diamond dedup, cycle detection) | Kosh namespacing arc, Phases 1-5 | 2026-07-21, see `docs/kosh_namespacing_design.md` |
 
 ## Goal
 
@@ -123,14 +124,26 @@ historical context; each item links to the closure that shipped it.
 - **Nested modules** (`module a { module b { ... } }`). ✅ #248.
 - **Glob imports** (`use foo::*;`). ✅ #253 — non-transitive only.
 - **Multi-item imports** (`use foo::{bar, baz};`). ✅ #247.
-- **`pub(kosh)` / `pub(super)`** visibility tiers — `kosh`
-  (कोश, "treasure/repository") is vāṇī's name for what Rust
-  calls a crate. One kosh = one compilation unit / one package;
-  the future package registry is Vāṇī-Kosh. ✅ #258 ships
-  `pub(kosh)` as preparatory syntax (today behaves identically to
-  `pub`; enforcement activates when the kosh boundary ships).
-  `pub(super)` remains unsupported and surfaces a clear
-  diagnostic.
+- **`pub(kosh)` / `pub(super)`** visibility tiers -- `kosh`
+  is vāṇī's name for what Rust calls a crate. One kosh = one
+  compilation unit / one package; the package registry is Kosh
+  (`kosh-index`). #258 shipped `pub(kosh)` as preparatory syntax; the
+  kosh boundary itself shipped 2026-07-21 (Kosh namespacing arc Phase
+  3, see `docs/kosh_namespacing_design.md`) -- but with a v1
+  simplification that leaves `pub(kosh)` not yet truly differentiated
+  from `pub` at that boundary. Every `[deps]` package is compiled
+  inside an implicit `module <pkg_name> { ... }`, and every item in it
+  is force-treated as fully `pub` (crossing the boundary) regardless
+  of what the source actually annotates -- existing kosh packages carry
+  zero visibility annotations at all (written assuming a flat global
+  namespace), so respecting real `pub`/`pub(kosh)`/private
+  distinctions today would make every dependency function invisible.
+  True per-item encapsulation (`pub(kosh)` genuinely staying internal,
+  private genuinely invisible even with the qualifier) is explicit
+  future work, not blocking anything -- it would only ever make some
+  currently-visible items less visible, never the reverse, so no
+  migration is needed to add it later. `pub(super)` remains
+  unsupported and surfaces a clear diagnostic.
 - **Re-exports** (`pub use foo::bar;`). ✅ #257 — transitively
   resolved via fixed-point so chained re-exports collapse.
 - **Module-level `const`** is fine but follows the same
@@ -143,10 +156,15 @@ historical context; each item links to the closure that shipped it.
 
 ### Still queued (post-#258)
 
-- **Kosh package manager** (`kosh.toml`, resolver, lockfile,
-  registry CLI, stdlib-as-kosh). See TODO.md item #10 for the
-  full arc. The smallest beachhead — `pub(kosh)` syntax #258 —
-  has shipped.
+- **Kosh package manager** (`vani.toml`, resolver, lockfile, registry
+  CLI, stdlib-as-kosh) — shipped and live at `kosh-index`; see
+  `docs/kosh_design.md`. The namespace boundary itself (`pkgname::item`
+  qualification, transitive dependency resolution, diamond dedup,
+  circular-dependency detection) shipped 2026-07-21 as its own arc —
+  see `docs/kosh_namespacing_design.md` for the full 6-phase design and
+  status. Still open there: true per-item `pub(kosh)` encapsulation
+  (noted above), and migrating the existing published package ecosystem
+  to qualified call syntax (Phase 6).
 - **Devanagari surface for the namespace keywords** (`module` /
   `pub` / `use`). Blocked on grammar review for the per-language
   3-way alias parity.

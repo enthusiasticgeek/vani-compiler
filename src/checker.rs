@@ -19548,6 +19548,35 @@ fn check_indirect_call(
     )
 }
 
+/// Kosh namespacing arc, Phase 5: given a bare (unqualified) function
+/// name that failed to resolve, look for a module-qualified signature
+/// that would resolve instead -- `mat_mul` -> `matrix__mat_mul` in the
+/// signature table means `matrix::mat_mul` is the fix. Mangled names
+/// use `__` as the module-path separator (`outer__inner__name` for
+/// nested modules); this reconstructs the source-level `::` form.
+/// Skips private (`__priv__`-mangled) matches -- those already get
+/// their own "private to its module" diagnostic via
+/// `lookup_private_item`, and suggesting an inaccessible name would be
+/// actively misleading. Deterministic when multiple matches exist
+/// (picks the alphabetically-first mangled name) rather than whatever
+/// order the HashMap happens to iterate in.
+fn module_suggestion_for(name: &str, signatures: &HashMap<String, Signature>) -> Option<String> {
+    let suffix = format!("__{}", name);
+    let mut candidates: Vec<&String> = signatures
+        .keys()
+        .filter(|k| {
+            k.ends_with(&suffix) && !k.contains("__priv__") && k.len() > suffix.len()
+        })
+        .collect();
+    candidates.sort();
+    let mangled = candidates.first()?;
+    let module_part = &mangled[..mangled.len() - suffix.len()];
+    if module_part.is_empty() {
+        return None;
+    }
+    Some(format!("{}::{}", module_part.replace("__", "::"), name))
+}
+
 fn check_call(
     name: &str,
     name_span: Span,
@@ -20392,12 +20421,33 @@ fn check_call(
                 );
             }
             None => {
-                diagnostics.push(
-                    Diagnostic::new(span, format!("unknown function '{}'", name))
-                        .with_elaboration(
-                            crate::diagnostic_elaborations::unknown_function(name),
-                        ),
-                );
+                // Kosh namespacing arc, Phase 5 (2026-07-21): a bare
+                // name that doesn't resolve might still exist under a
+                // module qualifier -- most commonly a Kosh dependency
+                // function that needs `pkgname::` now that namespacing
+                // (Phase 3) requires it. `module_suggestion_for` scans
+                // the signature table for a `<module>__<name>` mangled
+                // match (module separators normalized back to `::`).
+                match module_suggestion_for(name, signatures) {
+                    Some(suggestion) => {
+                        diagnostics.push(
+                            Diagnostic::new(span, format!("unknown function '{}'", name))
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::unknown_function_with_module_suggestion(
+                                        name, &suggestion,
+                                    ),
+                                ),
+                        );
+                    }
+                    None => {
+                        diagnostics.push(
+                            Diagnostic::new(span, format!("unknown function '{}'", name))
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::unknown_function(name),
+                                ),
+                        );
+                    }
+                }
             }
         }
         return CheckedExpr::fallback_integer(span);

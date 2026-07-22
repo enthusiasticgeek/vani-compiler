@@ -112,6 +112,31 @@ statement is needed to bring a dependency's functions into scope**, only
 *other* files (e.g. a test importing `../src/lib.vani`), which aren't
 `[deps]` entries.
 
+Resolution is also fully **transitive**: a dependency of a dependency
+is automatically included too, deduplicated by `(name, version)` --
+two packages that each depend on the same third package (a "diamond")
+resolve to one shared copy, not a collision or a missing-function
+error. See [`docs/kosh_namespacing_design.md`](kosh_namespacing_design.md)
+for the full dependency-graph design.
+
+**Calling a dependency's functions requires the package-name prefix**
+(2026-07-21 — see `docs/kosh_namespacing_design.md` Phase 3): each
+`[deps]` package is compiled inside its own `module <name> { ... }`
+namespace, so `mathlib`'s `square` function is called as
+`mathlib::square(5)`, or imported unqualified with
+`use mathlib::square;`. This is what lets two unrelated packages (or a
+package and a vāṇी builtin) share a function name with zero conflict --
+before namespacing, every `[deps]` package landed in one flat global
+function table and a name collision with anything, anywhere, was an
+unrecoverable compile error. If you forget the prefix, the compiler
+tells you exactly what to write instead:
+
+```
+error: unknown function 'square'
+  help: 1. No function named `square` is visible at this call site -- but `mathlib::square` exists.
+  help: 2. Did you mean `mathlib::square`? ...
+```
+
 ---
 
 ## CLI surface

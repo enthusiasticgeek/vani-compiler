@@ -1,8 +1,8 @@
 # Kosh package namespacing + dependency-graph resolution — design doc
 
-**Status:** Phases 1-3 shipped 2026-07-21. Phases 4-6 planned, not
-started. **Phase 3 breaks 8 of the 12 published kosh packages until
-Phase 6's migration runs** — see Phase 3's "Verified" section.
+**Status:** Phases 1-5 shipped 2026-07-21. Phase 6 planned, not
+started. **Phase 3 still breaks 8 of the 12 published kosh packages
+until Phase 6's migration runs** — see Phase 3's "Verified" section.
 **Authored:** 2026-07-21.
 
 ---
@@ -314,30 +314,75 @@ new parsing logic, just a missing wire-up.
   (`complex`, `discrete`, `sparse`, `geometry`) are unaffected and still
   pass cleanly.
 
-### Phase 4 — `vani.lock` becomes a real lockfile (planned)
+### Phase 4 — `vani.lock` becomes a real lockfile ✅ shipped 2026-07-21
 
-- Today `vani.lock` (`manifest::write_lockfile`) only pins checksums
-  for *direct* deps. Extend it to record the full resolved graph
-  (every transitive package, resolved version, checksum) so
-  `vanic build`/`check` don't re-walk and re-resolve every `vani.toml`
-  on every compile, and `vanic update` has something concrete to diff
-  against.
+- `write_lockfile` now calls `resolve_transitive_deps` instead of
+  walking only `manifest.deps` — every package reachable through the
+  graph gets a `[[package]]` entry, not just direct ones.
+- Direct deps keep the existing `path`/`version-req` fields (meaningful
+  relative to the root project) plus a new `direct = true` marker.
+  Transitive-only deps get `direct = false` and a canonicalized
+  absolute `root-path` instead of `path` — there's no single
+  well-defined "path relative to root" for a package that might be
+  vendored at different nesting depths by different dependents in the
+  same graph (verified: `vani.lock` today is write-only, nothing parses
+  it back except an mtime check in `lockfile_is_stale`, so this only
+  needs to be an accurate snapshot, not round-trip-parseable).
+- Verified against a 3-package transitive fixture (`proot` → `pkg_x` →
+  `shared`): `vani.lock` correctly lists `shared` with `direct = false`
+  and a real absolute `root-path`, alongside `pkg_x` with
+  `direct = true` and its relative `path`.
 
-### Phase 5 — Migration UX (planned)
+### Phase 5 — Migration UX ✅ shipped 2026-07-21
 
-- Special-case diagnostic: an unqualified call that would resolve to a
-  dependency's function post-namespacing gets *"did you mean
-  `matrix::mat_mul`? Kosh dependency functions now require a package
-  prefix"* instead of a bare unknown-function error.
-- Update `docs/kosh_design.md`, `docs/namespaces_design.md`,
-  `tutorials/src/intermediate/16_packages.md` — and correct this
-  session's now-superseded DOC-3 claim
-  (`docs/TODO_CURRENT.md`, "Device I/O + Big-O doc audit" section) that
-  `use` lines are always redundant for `[deps]` entries. That claim was
-  true only for the top-level-entry case; Phase 1's fix makes it true
-  again in general (transitive deps are now resolved automatically
-  regardless of `use` lines), but Phase 3's namespacing changes what
-  the call sites look like regardless.
+- **Compiler diagnostic**: `checker.rs`'s "unknown function" path now
+  calls `module_suggestion_for`, which scans the signature table for a
+  `<module>__<name>` mangled match (module separators normalized back
+  to `::`, private/`__priv__` matches skipped since those already get
+  their own diagnostic). When found, the error becomes:
+  ```
+  error: unknown function 'mat_zeros'
+    help: 1. No function named `mat_zeros` is visible at this call site -- but `matrix::mat_zeros` exists.
+    help: 2. Did you mean `matrix::mat_zeros`? ...
+    help: 3. If `matrix` is a Kosh package dependency, every call site ... needs updating to `matrix::mat_zeros` ...
+  ```
+  Verified directly against the real (Phase-3-broken) `vani-pde`
+  package — every failure site got the exact correct suggestion,
+  effectively turning the error output into a ready-made fix list for
+  Phase 6's migration.
+- **A second real bug found via this same diagnostic work, this one in
+  `vanic add` itself, not the namespacing logic**: `registry_add`
+  wrote the raw registry package name as the `[deps]` key verbatim.
+  The real published `hello-kosh` package (verified: exists in
+  `kosh-index`, `[package].name = "hello-kosh"`) has a hyphen, which
+  fails `is_valid_vani_identifier` — meaning the *default*, documented
+  `vanic add hello-kosh` workflow generated a `vani.toml` that failed
+  to compile with no path to fix it short of hand-editing. Fixed with
+  `sanitize_dep_key` (`manifest.rs`): non-identifier characters become
+  `_`, a leading digit gets a `_` prefix; applied to the `[deps]` key
+  only — the vendored directory and registry lookups still use the
+  real, unsanitized name. `vanic add` now prints a note when it
+  sanitizes: ``note: 'hello-kosh' isn't a valid vāṇī identifier, so it's
+  added to [deps] as `hello_kosh`.`` Verified end-to-end against the
+  real package: `vani.toml` now gets `hello_kosh = { path =
+  "./vendor/hello-kosh", ... }` and the identifier error is gone
+  (hello-kosh's own source has an unrelated, pre-existing bug —
+  `fn greet() -> str` should be `Str` — surfaced only because this may
+  be the first time anything actually compiled against it; out of
+  scope here, not touched).
+- **Docs updated**: `docs/kosh_design.md` (dependency calling
+  convention + transitive resolution note),
+  `docs/namespaces_design.md` (corrected the `pub`/`pub(kosh)` mixup
+  from Phase 3, updated the "still queued" section),
+  `tutorials/src/intermediate/16_packages.md` (rewrote the "using the
+  dependency in code" section with accurate syntax and the
+  `hello-kosh` → `hello_kosh` sanitization note; updated the
+  `vani.lock` example for Phase 4's new fields). The `docs/TODO_CURRENT.md`
+  DOC-3 claim ("`use` lines are always redundant for `[deps]`") needed
+  no correction — it was already made accurate again by Phase 1's
+  transitive-resolution fix; Phase 3 changes what the call *syntax*
+  looks like (`pkgname::item`), not whether a `use` statement is
+  needed to reach it.
 
 ### Phase 6 — Migrate and republish the ecosystem (planned)
 

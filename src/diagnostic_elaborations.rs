@@ -916,6 +916,42 @@ pub fn main_wrong_signature() -> Vec<String> {
 }
 
 /// Call to a function that has not been declared.
+/// Kosh namespacing arc, Phase 5 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`): migration-UX variant of
+/// `unknown_function`, used when the checker finds a module-qualified
+/// signature matching the bare name the caller wrote (e.g. `mat_mul`
+/// unqualified, but `matrix__mat_mul` exists in the signature table --
+/// meaning `matrix::mat_mul` would resolve). Most common case in
+/// practice: a package's own internal code, or a consumer's code,
+/// still calling a Kosh dependency's function unqualified after
+/// namespacing (Phase 3) started requiring the `pkgname::` prefix.
+pub fn unknown_function_with_module_suggestion(name: &str, suggestion: &str) -> Vec<String> {
+    vec![
+        format!(
+            "No function named `{}` is visible at this call site -- but `{}` \
+             exists.",
+            name, suggestion,
+        ),
+        format!(
+            "Did you mean `{}`? vāṇी resolves all function names at compile \
+             time from the top-level declarations in the current file; a \
+             function that lives inside `module {{ ... }}` (including a Kosh \
+             package pulled in via `[deps]`) must be called with its module \
+             qualifier -- there is no unqualified fallback lookup.",
+            suggestion,
+        ),
+        format!(
+            "If `{}` is a Kosh package dependency, every call site that used \
+             to call `{}(...)` unqualified needs updating to `{}` -- this is \
+             expected after a package adopts per-package namespacing, not a \
+             sign anything is broken on your end.",
+            suggestion.split("::").next().unwrap_or(suggestion),
+            name,
+            suggestion,
+        ),
+    ]
+}
+
 pub fn unknown_function(name: &str) -> Vec<String> {
     vec![
         format!(

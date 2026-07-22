@@ -68,8 +68,16 @@ version = "0.1.0"
 entry   = "src/main.vani"
 
 [deps]
-hello-kosh = { path = "./vendor/hello-kosh", version = "^0.2.0" }
+hello_kosh = { path = "./vendor/hello-kosh", version = "^0.2.0" }
 ```
+
+Note the `[deps]` key is `hello_kosh` (underscore), not `hello-kosh`
+(hyphen) -- a `[deps]` key becomes a literal namespace identifier (see
+below), and `-` isn't a valid character in one. `vanic add` sanitizes
+the registry name automatically when it isn't already a valid
+identifier and tells you what it picked; the vendored directory
+(`vendor/hello-kosh/`) still uses the real registry name, only the
+`[deps]` key -- and therefore the namespace you call it by -- changes.
 
 ### Pinning a version
 
@@ -95,21 +103,45 @@ vanic add hello-kosh@0.1.0     # exact version (no prefix = same as =)
 
 ## Using the dependency in code
 
-After `vanic add`, the dep lives at `vendor/hello-kosh/`. Use it with a
-relative `use` path:
+After `vanic add`, the dep lives at `vendor/hello-kosh/` and is listed in
+`[deps]` -- **no `use` statement is needed**: every `[deps]` entry's source
+is discovered and compiled automatically (`vanic check`/`build`/`run`/`test`
+all walk `vani.toml`), and it's fully **transitive** too -- a dependency of
+a dependency is included automatically, deduplicated if two packages happen
+to share one.
+
+**Calling a dependency's functions requires the package-name prefix.**
+Every `[deps]` package is compiled inside its own namespace, so
+`hello-kosh`'s `greet` function is called as `hello_kosh::greet()` --
+or import it unqualified into scope with `use hello_kosh::greet;`:
 
 ```vani
-use "./vendor/hello-kosh/src/lib.vani"
-
-fn main() {
-    let msg: str = greet()
-    println(msg)
+fn main() -> i64 {
+    let msg: Str = hello_kosh::greet();
+    print msg;
+    return 0;
 }
 ```
 
-Or, if you're in the project root and run `vanic run` (manifest-driven),
-vanic resolves deps automatically and you can `use` relative to the source
-file normally.
+```vani
+use hello_kosh::greet;
+
+fn main() -> i64 {
+    let msg: Str = greet();
+    print msg;
+    return 0;
+}
+```
+
+This namespacing is what lets two unrelated packages -- or a package and a
+vāṇी builtin -- share a function name with zero conflict. If you forget the
+prefix, the compiler tells you exactly what to write instead:
+
+```
+error: unknown function 'greet'
+  help: 1. No function named `greet` is visible at this call site -- but `hello_kosh::greet` exists.
+  help: 2. Did you mean `hello_kosh::greet`? ...
+```
 
 ---
 
@@ -131,12 +163,21 @@ version = "0.1.0"
 name = "hello-kosh"
 version = "0.2.0"
 source = "local"
+direct = true
 path = "./vendor/hello-kosh"
 version-req = "^0.2.0"
 ```
 
+`vani.lock` records the **full resolved dependency graph**, not just
+direct `[deps]` entries -- a transitive dependency (a dependency of a
+dependency) gets its own `[[package]]` entry too, with `direct = false`
+and a `root-path` instead of a `path` (there's no single well-defined
+path-relative-to-root for a package that might be vendored at different
+nesting depths by different dependents).
+
 **Commit `vani.lock`** to version control so teammates get the same
-resolved versions. `vanic.lock` is rewritten whenever `vani.toml` is newer.
+resolved versions. `vani.lock` is rewritten whenever `vani.toml` is newer.
+It's a record of what's resolved, not itself read back by the compiler.
 
 ---
 
