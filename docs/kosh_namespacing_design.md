@@ -1,8 +1,9 @@
 # Kosh package namespacing + dependency-graph resolution — design doc
 
-**Status:** Phases 1-5 shipped 2026-07-21. Phase 6 planned, not
-started. **Phase 3 still breaks 8 of the 12 published kosh packages
-until Phase 6's migration runs** — see Phase 3's "Verified" section.
+**Status:** ALL 6 PHASES SHIPPED 2026-07-21. The full arc is complete:
+namespacing, transitive resolution, diamond dedup, cycle detection,
+real lockfile, migration diagnostics, and all 12 published kosh
+packages migrated and verified.
 **Authored:** 2026-07-21.
 
 ---
@@ -384,17 +385,40 @@ new parsing logic, just a missing wire-up.
   looks like (`pkgname::item`), not whether a `use` statement is
   needed to reach it.
 
-### Phase 6 — Migrate and republish the ecosystem (planned)
+### Phase 6 — Migrate and republish the ecosystem ✅ shipped 2026-07-21
 
-- Update all ~12 kosh math packages' internal cross-package calls to
-  qualified/`use`-imported form.
-- Re-run `vanic audit-safety` + full test suites for each.
-- Republish (patch/minor bump per package as appropriate).
-- Specifically re-verify the `probability` + `optimize` diamond case
-  compiles clean with `matrix` included exactly once, post-namespacing.
-- Fix the version-drift bug Phase 1 surfaced (align `probability` and
-  `optimize` to the same `matrix` version) as part of this pass, not
-  before — no point re-pinning versions twice across two migrations.
+All 8 affected packages (every one with `[deps]`) migrated and
+republished: `vectorcalc` 0.1.3, `algebra` 0.1.3, `pde` 0.1.3,
+`interval` 0.1.3, `tensor` 0.1.3, `signal` 0.1.3, `optimize` 0.1.4,
+`probability` 0.4.6.
+
+- Migration was mechanical: for each package, list its dependency's
+  top-level `fn`/`struct` names, then qualify every unqualified call
+  site (and, for `vani-signal`, every unqualified type reference --
+  `vani-complex` exports a `Complex` struct, not just functions, and
+  type positions need the same `pkgname::` prefix as call sites).
+  Verified against a real, standalone test first (see Phase 3's
+  "Verified" section) that `pkgname::TypeName` works the same way
+  `pkgname::function` does.
+- Every package re-verified with `vanic audit-safety` on its own
+  `src/lib.vani`, then every individual test file and example checked
+  (`vanic check ... --no-verify`), then at least one real runtime run
+  (`vanic run`, exit 0) per package before publishing -- not just
+  static type-checking.
+- `probability`'s vendored `matrix` upgraded 0.1.0 → 0.2.0 (aligning
+  with `optimize`'s already-current version) via `vanic remove matrix
+  && vanic add matrix`, after confirming via `diff` that 0.2.0 is
+  purely additive over 0.1.0 (adds eigenvalue/condition-number/QR/SVD
+  functions; nothing removed or renamed that `probability` depended
+  on) -- no source changes needed beyond the namespacing qualification
+  itself.
+- **Final verification, the actual point of this whole arc**: a fresh
+  scratch project depending on the real, newly-published `probability`
+  and `optimize` (both now on `matrix` 0.2.0) compiles clean --
+  `ok: src/main.vani` -- with zero version conflict, zero missing
+  functions, zero namespace collision. Then a full sweep of all 12
+  published kosh packages via `vanic audit-safety` confirmed every one
+  passes.
 
 ---
 

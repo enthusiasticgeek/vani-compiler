@@ -966,12 +966,29 @@ of a working shared dependency.
   made it accurate again; NS-3 changes call *syntax*, not whether
   `use` is needed.
 
-- [ ] **NS-6 (Phase 6). Migrate + republish the ecosystem** — update all
-  ~12 kosh packages' internal cross-package calls to qualified/`use`
-  form, re-run `vanic audit-safety` + full test suites, republish. Fix
-  the `probability`/`optimize` matrix version drift NS-1 surfaced as
-  part of this pass. Re-verify the diamond case compiles clean
-  post-namespacing. **Not started.**
+- [x] **NS-6 (Phase 6). Migrate + republish the ecosystem** ✅ done
+  2026-07-21 — **the full 6-phase Kosh namespacing arc is now
+  complete.** All 8 affected packages (every one with `[deps]`)
+  migrated to qualified `pkgname::item` call syntax and republished:
+  `vectorcalc` 0.1.3, `algebra` 0.1.3, `pde` 0.1.3, `interval` 0.1.3,
+  `tensor` 0.1.3, `signal` 0.1.3, `optimize` 0.1.4, `probability`
+  0.4.6. `vani-signal`'s migration also had to qualify type references
+  (`vani-complex` exports a `Complex` struct, not just functions) —
+  verified `pkgname::TypeName` works the same way `pkgname::function`
+  does before relying on it. `probability`'s vendored `matrix` upgraded
+  0.1.0 → 0.2.0 (aligning with `optimize`) after confirming via `diff`
+  that 0.2.0 is purely additive (nothing removed/renamed). Every
+  package individually verified: `vanic audit-safety` on its lib.vani,
+  every test file and example via `vanic check --no-verify`, at least
+  one real `vanic run` (exit 0) before publishing.
+
+  **Final verification**: a fresh scratch project depending on the
+  real, newly-published `probability` + `optimize` (both now on
+  `matrix` 0.2.0) compiles clean with zero version conflict, zero
+  missing functions, zero namespace collision — the exact diamond
+  scenario that started this whole arc. Full sweep of all 12 published
+  kosh packages via `vanic audit-safety` confirmed every one passes.
+  Full writeup in `docs/kosh_namespacing_design.md`.
 
 **Non-goals (v1)**: multiple coexisting versions of the same package in
 one graph (Cargo-style per-edge resolution); semver-range-based version
