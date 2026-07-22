@@ -153,6 +153,47 @@ pub fn lookup_private_item(parser_form_mangled: &str) -> Option<String> {
     PRIVATE_MODULE_ITEMS.with(|cell| cell.borrow().get(&priv_mangled).cloned())
 }
 
+thread_local! {
+    /// L23 fix (2026-07-22, see `docs/v1_limitations.md`): registry
+    /// of `pub(kosh)` module items, keyed by mangled name
+    /// (`<mod>__kosh__<item>`) -> source-form path (`<mod>::<item>`).
+    /// Mirrors `PRIVATE_MODULE_ITEMS` exactly, one tier up: a
+    /// `pub(kosh)` item is reachable via a bare intra-module
+    /// reference (same as `pub`/private both already are) but NOT
+    /// via any externally-written qualified path -- the mangled name
+    /// the parser produces for an external `mod::item` reference
+    /// (`mod__item`) never matches `mod__kosh__item`, so it's
+    /// naturally unreachable from outside, the same trick
+    /// `__priv__` already used for plain-private items. Populated by
+    /// `flatten_modules_in_program`. Consulted by the checker's
+    /// unknown-name diagnostic for a clearer message than a bare
+    /// "unknown function".
+    pub(crate) static KOSH_MODULE_ITEMS: std::cell::RefCell<std::collections::HashMap<String, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+pub fn set_kosh_module_items<I: IntoIterator<Item = (String, String)>>(entries: I) {
+    KOSH_MODULE_ITEMS.with(|cell| {
+        let mut map = cell.borrow_mut();
+        map.clear();
+        for (mangled, source_path) in entries {
+            map.insert(mangled, source_path);
+        }
+    });
+}
+
+/// Same trick as `lookup_private_item`, one tier up: reconstruct the
+/// `pub(kosh)` mangled form (`mod__kosh__item`) from the parser-form
+/// external reference (`mod__item`) and check whether it's registered.
+pub fn lookup_kosh_item(parser_form_mangled: &str) -> Option<String> {
+    let parts: Vec<&str> = parser_form_mangled.splitn(2, "__").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let kosh_mangled = format!("{}__kosh__{}", parts[0], parts[1]);
+    KOSH_MODULE_ITEMS.with(|cell| cell.borrow().get(&kosh_mangled).cloned())
+}
+
 pub fn iface_methods_for(iface: &str) -> Option<Vec<(String, Vec<Type>, Type)>> {
     IFACE_METHOD_REGISTRY.with(|cell| cell.borrow().get(iface).cloned())
 }

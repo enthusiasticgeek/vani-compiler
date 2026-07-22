@@ -3649,6 +3649,12 @@ fn flatten_modules_in_program(
     // function 'math__double'".
     let mut private_items: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    // L23 fix (2026-07-22): registry of `pub(kosh)` items, keyed by
+    // their `<mod>__kosh__<name>` mangled form -> source-form
+    // `<mod>::<name>` path. Mirrors `private_items` one tier up --
+    // see `crate::ast::KOSH_MODULE_ITEMS`'s doc comment.
+    let mut kosh_items: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     // Closure #257: re-export map. Built from each module's
     // `pub use foo::bar;` declarations. Key is the source
     // name that external callers see (`<mod_name>__<local>`);
@@ -3728,6 +3734,38 @@ fn flatten_modules_in_program(
         for (i, a) in module.type_aliases.iter().enumerate() {
             let is_pub = module.visibility.type_aliases_pub.get(i).copied().unwrap_or(false);
             visibility.insert(a.name.clone(), is_pub);
+        }
+
+        // L23 fix (2026-07-22): parallel map for `pub(kosh)` items,
+        // same shape as `visibility` above. `qualify()` below checks
+        // this to route a `pub(kosh)` item's bare intra-module
+        // references (and its own registered name) through a third
+        // mangled form distinct from both `pub` and private.
+        let mut kosh_only: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
+        for (i, f) in module.functions.iter().enumerate() {
+            let v = module.visibility.functions_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(f.name.clone(), v);
+        }
+        for (i, s) in module.structs.iter().enumerate() {
+            let v = module.visibility.structs_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(s.name.clone(), v);
+        }
+        for (i, e) in module.enums.iter().enumerate() {
+            let v = module.visibility.enums_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(e.name.clone(), v);
+        }
+        for (i, ifc) in module.interfaces.iter().enumerate() {
+            let v = module.visibility.interfaces_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(ifc.name.clone(), v);
+        }
+        for (i, c) in module.consts.iter().enumerate() {
+            let v = module.visibility.consts_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(c.name.clone(), v);
+        }
+        for (i, a) in module.type_aliases.iter().enumerate() {
+            let v = module.visibility.type_aliases_kosh_only.get(i).copied().unwrap_or(false);
+            kosh_only.insert(a.name.clone(), v);
         }
 
         // Closure #249: collect the names of nested modules
@@ -3815,7 +3853,10 @@ fn flatten_modules_in_program(
         // 4. Anything else stays bare.
         let qualify = |name: &str| -> String {
             if let Some(&is_pub) = visibility.get(name) {
-                return if is_pub {
+                let is_kosh_only = kosh_only.get(name).copied().unwrap_or(false);
+                return if is_kosh_only {
+                    format!("{}__kosh__{}", mod_name, name)
+                } else if is_pub {
                     format!("{}__{}", mod_name, name)
                 } else {
                     format!("{}__priv__{}", mod_name, name)
@@ -3990,9 +4031,12 @@ fn flatten_modules_in_program(
         // instead of the cryptic mangled form.
         for (idx, mut f) in module.functions.into_iter().enumerate() {
             let is_pub = module.visibility.functions_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.functions_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = f.name.clone();
             f.name = qualify(&f.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(f.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 // Record the source-form `mod::name` so
                 // diagnostics can name the item naturally.
                 private_items.insert(
@@ -4011,9 +4055,12 @@ fn flatten_modules_in_program(
         }
         for (idx, mut s) in module.structs.into_iter().enumerate() {
             let is_pub = module.visibility.structs_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.structs_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = s.name.clone();
             s.name = qualify(&s.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(s.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 private_items.insert(
                     s.name.clone(),
                     format!("{}::{}", mod_name, orig_name),
@@ -4024,9 +4071,12 @@ fn flatten_modules_in_program(
         }
         for (idx, mut e) in module.enums.into_iter().enumerate() {
             let is_pub = module.visibility.enums_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.enums_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = e.name.clone();
             e.name = qualify(&e.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(e.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 private_items.insert(
                     e.name.clone(),
                     format!("{}::{}", mod_name, orig_name),
@@ -4039,9 +4089,12 @@ fn flatten_modules_in_program(
         }
         for (idx, mut i) in module.interfaces.into_iter().enumerate() {
             let is_pub = module.visibility.interfaces_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.interfaces_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = i.name.clone();
             i.name = qualify(&i.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(i.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 private_items.insert(
                     i.name.clone(),
                     format!("{}::{}", mod_name, orig_name),
@@ -4078,9 +4131,12 @@ fn flatten_modules_in_program(
         }
         for (idx, mut c) in module.consts.into_iter().enumerate() {
             let is_pub = module.visibility.consts_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.consts_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = c.name.clone();
             c.name = qualify(&c.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(c.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 private_items.insert(
                     c.name.clone(),
                     format!("{}::{}", mod_name, orig_name),
@@ -4092,9 +4148,12 @@ fn flatten_modules_in_program(
         }
         for (idx, mut a) in module.type_aliases.into_iter().enumerate() {
             let is_pub = module.visibility.type_aliases_pub.get(idx).copied().unwrap_or(false);
+            let is_kosh_only = module.visibility.type_aliases_kosh_only.get(idx).copied().unwrap_or(false);
             let orig_name = a.name.clone();
             a.name = qualify(&a.name);
-            if !is_pub {
+            if is_kosh_only {
+                kosh_items.insert(a.name.clone(), format!("{}::{}", mod_name, orig_name));
+            } else if !is_pub {
                 private_items.insert(
                     a.name.clone(),
                     format!("{}::{}", mod_name, orig_name),
@@ -4123,6 +4182,8 @@ fn flatten_modules_in_program(
     // messages when the user references a private module
     // item from outside its module.
     crate::ast::set_private_module_items(private_items);
+    // L23 fix (2026-07-22): same for pub(kosh) items.
+    crate::ast::set_kosh_module_items(kosh_items);
 
     // Closure #245: apply `use foo::bar;` aliases. For each
     // import, build the alias `bar â†’ foo__bar`, then walk
@@ -16250,16 +16311,25 @@ fn check_expr(
             let Some(decl) = env.lookup_struct(type_name) else {
                 // Closure #244: surface "private item" if the
                 // lookup-missing name has a corresponding
-                // private mangling.
-                let private_msg = crate::ast::lookup_private_item(type_name);
+                // private mangling. L23 fix (2026-07-22): same
+                // for pub(kosh), checked first since a kosh-only
+                // struct is also technically absent from
+                // `private_items`.
+                let kosh_msg = crate::ast::lookup_kosh_item(type_name);
+                let private_msg = kosh_msg.clone().or_else(|| crate::ast::lookup_private_item(type_name));
                 let is_unknown = private_msg.is_none();
-                let msg = match private_msg {
-                    Some(src_path) => format!(
-                        "struct '{}' is private to its module â€” \
+                let msg = match (kosh_msg, private_msg) {
+                    (Some(src_path), _) => format!(
+                        "struct '{}' is pub(kosh) -- visible only within its own \
+                         package, not to external consumers",
+                        src_path
+                    ),
+                    (None, Some(src_path)) => format!(
+                        "struct '{}' is private to its module -- \
                          mark it `pub` to allow access from outside",
                         src_path
                     ),
-                    None => format!("unknown struct type '{}'", type_name),
+                    (None, None) => format!("unknown struct type '{}'", type_name),
                 };
                 let mut diag = Diagnostic::new(*type_name_span, msg);
                 if is_unknown {
@@ -20402,15 +20472,32 @@ fn check_call(
         // parser converted it to `mod__name`; if the actual
         // mangled name is `mod__priv__name` (private), surface
         // a clear visibility diagnostic instead of the cryptic
-        // "unknown function".
-        let private_msg = crate::ast::lookup_private_item(name);
-        match private_msg {
-            Some(src_path) => {
+        // "unknown function". L23 fix (2026-07-22): same for
+        // `mod__kosh__name` (pub(kosh)), checked first.
+        let kosh_msg = crate::ast::lookup_kosh_item(name);
+        let private_msg = kosh_msg.clone().or_else(|| crate::ast::lookup_private_item(name));
+        match (kosh_msg, private_msg) {
+            (Some(src_path), _) => {
                 diagnostics.push(
                     Diagnostic::new(
                         span,
                         format!(
-                            "function '{}' is private to its module â€” \
+                            "function '{}' is pub(kosh) -- visible only within its own \
+                             package, not to external consumers",
+                            src_path
+                        ),
+                    )
+                    .with_elaboration(
+                        crate::diagnostic_elaborations::unknown_function(&src_path),
+                    ),
+                );
+            }
+            (None, Some(src_path)) => {
+                diagnostics.push(
+                    Diagnostic::new(
+                        span,
+                        format!(
+                            "function '{}' is private to its module -- \
                              mark it `pub` to allow access from outside",
                             src_path
                         ),
@@ -20420,7 +20507,7 @@ fn check_call(
                     ),
                 );
             }
-            None => {
+            (None, None) => {
                 // Kosh namespacing arc, Phase 5 (2026-07-21): a bare
                 // name that doesn't resolve might still exist under a
                 // module qualifier -- most commonly a Kosh dependency

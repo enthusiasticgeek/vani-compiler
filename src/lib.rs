@@ -121,43 +121,64 @@ fn compile_with(
 /// every top-level item was implicitly reachable. Module semantics
 /// default to *private*, so wrapping them as-is would make every item
 /// invisible even to a `pkgname::item` reference, breaking every
-/// package that hasn't been migrated. v1's deliberate simplification:
-/// every item in a synthetic Kosh-boundary module is treated as fully
-/// `pub` (visible across the boundary), regardless of what visibility
-/// the original source declared -- this is strictly no more permissive
-/// than today's flat-namespace status quo (everything was already
-/// callable by anyone who included the file), it just adds the
-/// namespace-qualification requirement. True per-item encapsulation
-/// (an author deliberately hiding some items from consumers) is an
-/// explicit non-goal for now; layering it on top later needs no
-/// migration since it would only ever make some currently-visible
-/// items private, never the reverse.
+/// package that hasn't been migrated. v1's simplification: any item
+/// that ISN'T explicitly annotated `pub(kosh)` is forced fully `pub`
+/// (visible across the boundary) regardless of what the source wrote
+/// (bare/private or explicit `pub` both end up here) -- this is
+/// strictly no more permissive than today's flat-namespace status quo
+/// (everything was already callable by anyone who included the file),
+/// it just adds the namespace-qualification requirement.
+///
+/// L23 fix (2026-07-22, see `docs/v1_limitations.md`): an item the
+/// author explicitly wrote as `pub(kosh)` is now the one exception --
+/// left as-is (`_pub=true, _kosh_only=true`), so
+/// `flatten_modules_in_program`'s real enforcement (a `pub(kosh)` item
+/// mangles to a form no externally-written `pkgname::item` reference
+/// can ever match, the same trick already used for private items) now
+/// actually restricts it to intra-package access, matching the
+/// documented design. True per-item encapsulation *of unannotated
+/// items* remains a non-goal -- this only gives meaning to an
+/// explicit, opt-in `pub(kosh)`, it doesn't change the default.
 fn mark_kosh_boundary_modules_pub(
     program: &mut ast::Program,
     kosh_boundary_names: &std::collections::HashSet<String>,
 ) {
+    // Force to pub (growing the Vec if the parser left it short of
+    // `len`, same as the old blanket-overwrite version did) everywhere
+    // the item isn't already explicitly pub(kosh); leave pub(kosh)
+    // items (`kosh_only[i] == true`) untouched.
+    fn force_pub_unless_kosh_only(pub_bits: &mut Vec<bool>, kosh_only_bits: &[bool], len: usize) {
+        pub_bits.resize(len, false);
+        for i in 0..len {
+            if !kosh_only_bits.get(i).copied().unwrap_or(false) {
+                pub_bits[i] = true;
+            }
+        }
+    }
+
     for module in &mut program.modules {
         if !kosh_boundary_names.contains(&module.name) {
             continue;
         }
-        module.visibility.functions_pub = vec![true; module.functions.len()];
-        module.visibility.functions_kosh_only = vec![false; module.functions.len()];
-        module.visibility.structs_pub = vec![true; module.structs.len()];
-        module.visibility.structs_kosh_only = vec![false; module.structs.len()];
-        module.visibility.enums_pub = vec![true; module.enums.len()];
-        module.visibility.enums_kosh_only = vec![false; module.enums.len()];
-        module.visibility.interfaces_pub = vec![true; module.interfaces.len()];
-        module.visibility.interfaces_kosh_only = vec![false; module.interfaces.len()];
-        module.visibility.impls_pub = vec![true; module.impls.len()];
-        module.visibility.impls_kosh_only = vec![false; module.impls.len()];
-        module.visibility.consts_pub = vec![true; module.consts.len()];
-        module.visibility.consts_kosh_only = vec![false; module.consts.len()];
-        module.visibility.type_aliases_pub = vec![true; module.type_aliases.len()];
-        module.visibility.type_aliases_kosh_only = vec![false; module.type_aliases.len()];
-        module.visibility.methods_blocks_pub = vec![true; module.methods_blocks.len()];
-        module.visibility.methods_blocks_kosh_only = vec![false; module.methods_blocks.len()];
-        module.visibility.modules_pub = vec![true; module.modules.len()];
-        module.visibility.modules_kosh_only = vec![false; module.modules.len()];
+        let v = &mut module.visibility;
+        v.functions_kosh_only.resize(module.functions.len(), false);
+        v.structs_kosh_only.resize(module.structs.len(), false);
+        v.enums_kosh_only.resize(module.enums.len(), false);
+        v.interfaces_kosh_only.resize(module.interfaces.len(), false);
+        v.impls_kosh_only.resize(module.impls.len(), false);
+        v.consts_kosh_only.resize(module.consts.len(), false);
+        v.type_aliases_kosh_only.resize(module.type_aliases.len(), false);
+        v.methods_blocks_kosh_only.resize(module.methods_blocks.len(), false);
+        v.modules_kosh_only.resize(module.modules.len(), false);
+        force_pub_unless_kosh_only(&mut v.functions_pub, &v.functions_kosh_only, module.functions.len());
+        force_pub_unless_kosh_only(&mut v.structs_pub, &v.structs_kosh_only, module.structs.len());
+        force_pub_unless_kosh_only(&mut v.enums_pub, &v.enums_kosh_only, module.enums.len());
+        force_pub_unless_kosh_only(&mut v.interfaces_pub, &v.interfaces_kosh_only, module.interfaces.len());
+        force_pub_unless_kosh_only(&mut v.impls_pub, &v.impls_kosh_only, module.impls.len());
+        force_pub_unless_kosh_only(&mut v.consts_pub, &v.consts_kosh_only, module.consts.len());
+        force_pub_unless_kosh_only(&mut v.type_aliases_pub, &v.type_aliases_kosh_only, module.type_aliases.len());
+        force_pub_unless_kosh_only(&mut v.methods_blocks_pub, &v.methods_blocks_kosh_only, module.methods_blocks.len());
+        force_pub_unless_kosh_only(&mut v.modules_pub, &v.modules_kosh_only, module.modules.len());
     }
 }
 
@@ -28761,20 +28782,44 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn pub_kosh_qualifier_parses_and_compiles() {
-        // Closure #258: `pub(kosh) fn helper()` is accepted as
-        // a preparatory visibility tier — today it behaves
-        // identically to `pub`, but the `kosh_only` bit lands
-        // in `ModuleVisibility` so future kosh boundaries can
-        // enforce it without source rewrites.
+    fn pub_kosh_qualifier_allows_intra_module_access() {
+        // L23 fix (2026-07-22, docs/v1_limitations.md): `pub(kosh)`
+        // is now actually enforced, one tier above private -- a
+        // bare intra-module reference to a `pub(kosh)` item still
+        // resolves (same as it always has for `pub`/private both),
+        // and a `pub` sibling calling it internally still works.
         let source = r#"
             module m {
-              pub fn outer() -> i64 { return 1; }
+              pub fn outer() -> i64 { return inner() + 1; }
               pub(kosh) fn inner() -> i64 { return 2; }
             }
-            fn main() -> i64 { return m::outer() + m::inner(); }
+            fn main() -> i64 { return m::outer(); }
         "#;
-        compile(source).expect("pub(kosh) parses + behaves as pub");
+        compile(source).expect("pub(kosh) reachable via intra-module bare reference");
+    }
+
+    #[test]
+    fn pub_kosh_qualifier_rejects_external_qualified_access() {
+        // L23 fix (2026-07-22): unlike before (see git history for
+        // the old `pub_kosh_qualifier_parses_and_compiles`, which
+        // pinned "behaves identically to pub" as the then-current
+        // gap), an external qualified reference `m::inner()` must
+        // now be rejected with a pub(kosh)-specific diagnostic --
+        // the same mechanism private items already used (a mangled
+        // name no externally-written qualified path can match),
+        // one tier up.
+        let source = r#"
+            module m {
+              pub(kosh) fn inner() -> i64 { return 2; }
+            }
+            fn main() -> i64 { return m::inner(); }
+        "#;
+        let errors = compile(source).expect_err("pub(kosh) must reject external qualified access");
+        assert!(
+            errors.iter().any(|d| d.message.contains("pub(kosh)") && d.message.contains("m::inner")),
+            "expected a pub(kosh)-specific diagnostic naming m::inner, got: {:?}",
+            errors
+        );
     }
 
     #[test]

@@ -422,19 +422,25 @@ regression test `top_level_use_of_pub_use_as_rename` locks the interaction.
 
 ### Visibility modifiers beyond `pub` / `pub(kosh)`
 
-**Limited, and `pub(kosh)` is currently syntax-only.** v1 parses
-`pub`, `pub(kosh)`, and module-private (default), and the AST
-tracks `pub(kosh)` as a distinct bit (`ModuleVisibility::*_kosh_only`)
--- but the checker never reads that bit (verified: zero references to
-`_kosh_only` outside where it's set at parse time), so `pub(kosh)`
-behaves identically to `pub` at every call site today, including
-across a real Kosh package boundary. Rust's `pub(crate)`, `pub(super)`,
-`pub(in path)` aren't there either.
+**Limited; `pub(kosh)` is enforced for external Kosh-package access,
+not yet for same-project sibling modules.** ✅ Partially fixed
+2026-07-22 (see `docs/v1_limitations.md` L23). `pub(kosh)` now mangles
+to a name no externally-written qualified reference can match (same
+trick private items use, one tier up) -- verified directly: a `[deps]`
+package's `pub(kosh)` function called as `pkgname::item` from a
+separate consumer project is correctly rejected. Still open: a
+same-project sibling module reaching across module boundaries into
+another module's `pub(kosh)` item is *also* currently rejected (no
+caller-identity tracking yet to distinguish that from a genuinely
+external Kosh consumer) -- stricter than the intended design, though
+not a regression (before this fix nothing was enforced at all). Rust's
+`pub(crate)`, `pub(super)`, `pub(in path)` aren't there either.
 
-**Workaround:** none that actually restricts access -- write
-`pub(kosh)` to document intent if you like, but it doesn't do
-anything `pub` doesn't. Module-private is the only tier genuinely
-enforced beyond plain `pub`.
+**Workaround for the remaining gap:** don't rely on `pub(kosh)` for
+same-project cross-module sharing yet -- use plain `pub`, or move the
+sharing functions into the same module so intra-module bare calls
+apply instead. Module-private and (as of this release) `pub(kosh)`
+against external Kosh consumers are both genuinely enforced.
 
 ### Kosh dependency namespacing
 

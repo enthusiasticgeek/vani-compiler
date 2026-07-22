@@ -267,20 +267,25 @@ started to fix.
   `pkgname::item`. `mark_kosh_boundary_modules_pub` (`src/lib.rs`,
   called from `compile_with` after parsing) force-sets every visibility
   bit to `pub` for any top-level module whose name is a known dependency
-  package — regardless of what the source actually wrote. This is a
+  package **unless the item is explicitly annotated `pub(kosh)`** —
+  regardless of what the source actually wrote otherwise. This is a
   deliberate v1 simplification, not an oversight: it's strictly no more
   permissive than today's status quo (everything was already callable
   by anyone who included the file), it only adds the namespace
-  qualification requirement. True per-item encapsulation (an author
-  deliberately hiding some items from consumers) is an explicit
-  non-goal — layering it in later needs no migration, since it would
-  only ever make some already-visible items private, never the reverse.
-  Tracked as [L23](v1_limitations.md#l23--pubkosh-visibility-tier-parsed-but-not-enforced)
-  in the v1 limitations catalog. Note this gap predates and is broader
-  than this arc: `pub(kosh)` was already unenforced for plain
-  in-project `module { }` blocks with no `[deps]` involved at all —
-  this v1 simplification just means Phase 3 doesn't fix that
-  pre-existing gap in passing, not that it introduces a new one.
+  qualification requirement.
+
+  **Update, 2026-07-22**: real `pub(kosh)` enforcement shipped (L23 in
+  the v1 limitations catalog) as a follow-up to this arc — an item an
+  author explicitly marks `pub(kosh)` now genuinely rejects external
+  `pkgname::item` access, closing the collision-adjacent gap this
+  section originally called a non-goal. What's *still* a non-goal:
+  encapsulation for *unannotated* items (they still default to fully
+  `pub`, unchanged, for backward compatibility) and same-project
+  sibling-module access to a `pub(kosh)` item (currently also rejected,
+  needing real caller-context tracking not yet built — see L23 for the
+  full writeup). Neither of those needs a migration to fix later, for
+  the same reason as before: fixing them only ever makes something
+  *less* visible than it is today, never more.
 - Package names are validated as legal vāṇी identifiers before wrapping
   (`is_valid_vani_identifier`) — a hyphenated or otherwise invalid
   `[package].name` gets a clear diagnostic instead of a confusing parse

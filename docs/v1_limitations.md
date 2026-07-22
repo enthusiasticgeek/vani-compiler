@@ -13,9 +13,10 @@
 > open in the current release.
 >
 > **At v0.6.1 (2026-07-21): 19 of 19 original entries resolved; L20–L22 added
-> and fixed; L23 added (open). Open items: L5 (by design), L6 (by design),
-> L10-macOS (no hardware), L13 (partial — `match` SOV by design), L14 (by
-> design for v1), L23 (not started — `pub(kosh)` unenforced).**
+> and fixed; L23 partially fixed 2026-07-22. Open items: L5 (by design),
+> L6 (by design), L10-macOS (no hardware), L13 (partial — `match` SOV by
+> design), L14 (by design for v1), L23 (partial — external Kosh-boundary
+> access enforced; same-project sibling-module access still open).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -41,7 +42,7 @@
 > | L20 | S-19 lock-order detection is intra-procedural only | ✅ Fixed 2026-07-12 — held-set transitive analysis |
 > | L21 | S-20 ISR mutex detection does not follow helper calls | ✅ Fixed 2026-07-12 — collect_locked_mutexes follows calls |
 > | L22 | MISRA 13.2 eval-order check: adjacent args only | ✅ Fixed 2026-07-12 — any-distance duplicate detection |
-> | L23 | `pub(kosh)` visibility tier parsed but not enforced | ⬜ Not started — behaves identically to `pub` |
+> | L23 | `pub(kosh)`: external Kosh-boundary access enforced; same-project sibling-module access still open | 🟨 Partially fixed 2026-07-22 |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -1273,40 +1274,60 @@ adjacency guard removed. `gap_misra_13_2_*` now calls
 
 ## Module system limitations
 
-### L23 — `pub(kosh)` visibility tier is parsed but not enforced
+### L23 -- `pub(kosh)` is enforced for external Kosh-package access; same-project sibling-module access is a remaining gap ✅ Partially fixed 2026-07-22
 
-`pub(kosh)` is accepted syntax on any module item and is tracked as a
-distinct bit in the AST (`ModuleVisibility::*_kosh_only`), but the
-checker never reads that bit — verified directly (zero references to
-`_kosh_only` anywhere in `checker.rs` outside where it's set at parse
-time, and by compiling a real `pub(kosh)` function and calling it from
-completely outside its declaring module, which succeeds with no
-error). It behaves identically to plain `pub` at every call site
-today, both for in-project modules and across a Kosh package boundary
-(`docs/kosh_namespacing_design.md`).
+**Fixed part.** `pub(kosh)` now genuinely restricts access from outside its
+declaring module: `flatten_modules_in_program` (`checker.rs`) mangles a
+`pub(kosh)` item to a third form (`<mod>__kosh__<name>`) distinct from both
+plain `pub` (`<mod>__<name>`) and private (`<mod>__priv__<name>`) -- the
+same trick private items already used to become unreachable via any
+externally-written qualified path, one tier up. Verified directly: a
+`[deps]` package exposing `pub(kosh) fn internal_helper(...)`, called as
+`pkgname::internal_helper(...)` from a separate consumer project, is now
+rejected with `function 'pkgname::internal_helper' is pub(kosh) -- visible
+only within its own package, not to external consumers`. A bare
+intra-module reference to the same function (from a `pub` sibling in the
+same module) still resolves correctly -- this is the practically important
+case: it closes the gap for the actual Kosh-dependency-boundary scenario
+that motivated this entry (`docs/kosh_namespacing_design.md`).
 
-**Why**: the intended semantics — Rust's `pub(crate)` equivalent,
-visible within the declaring package but not to external Kosh
-consumers — need the checker's module-flattening pass
-(`flatten_modules_in_program`, `checker.rs`) to know whether it's
-flattening a package's *own* source or a `[deps]`-pulled dependency's
-source, and to reject a `_kosh_only`-marked item's mangled name when
-referenced from outside that boundary. That distinction doesn't exist
-in the flattening pass yet — it's purely name-mangling with a uniform
-visibility rule (`_pub` → reachable, `_priv_` → not), regardless of
-which side of a Kosh boundary the reference comes from.
+**Remaining gap.** The mangled-name approach can't yet distinguish "a
+different, unrelated kosh calling in" from "a sibling module in the *same*
+project calling across module boundaries" -- both arrive as an identical,
+already-parser-mangled `mod__name` string with no caller-identity
+information attached. So the tutorial's own worked example
+(`tutorials/src/beginner/09a_modules_primer.md`) -- `module report`
+reaching into a sibling `module stats`'s `pub(kosh) fn sum_all` via
+`stats::sum_all(...)` -- is **also currently rejected**, which is stricter
+than the intended design (that access should be allowed; only a *different
+kosh* consuming `stats` as a `[deps]` package should be rejected). Verified
+directly with the exact fixture. This is not a regression -- before this
+fix, that access silently worked (no enforcement at all); now it's
+over-restricted in this one specific case instead of under-restricted
+everywhere.
 
-**Workaround**: none that actually restricts access. Write `pub(kosh)`
-to document intent — a future implementation can only make
-`pub(kosh)` items *less* visible than they are today, never more, so
-no migration is needed when real enforcement lands. Module-private
-(the default, no `pub` at all) is the only tier genuinely enforced
-beyond plain `pub`.
+**Why the remaining gap is harder**: fixing it needs real caller-context
+tracking -- for every function, which top-level module (if any) it's
+lexically declared inside, so a qualified reference can be checked against
+"does the caller's own top-level module match the callee's" rather than
+just "does any matching mangled name exist." `flatten_modules_in_program`
+doesn't track this today; adding it means a second pass over every
+function body (bare top-level and module-nested alike) after the main
+flattening loop, rewriting still-unresolved-but-kosh-eligible references
+only when the caller and callee share a top-level module. Scoped but not
+started.
 
-**Fix path.** Not started. Needs: (1) the Kosh-boundary-wrapped
-synthetic modules from `wrap_deps_into_combined` (`src/lib.rs`) to
-carry a marker distinguishing them from a package's own in-source
-`module { }` blocks; (2) `flatten_modules_in_program` to check that
-marker when deciding whether a `_kosh_only` item's *public*-style
-mangled name (as opposed to its private form) should still resolve
-from a call site outside the boundary.
+**Workaround for the remaining gap**: don't rely on `pub(kosh)` for
+same-project cross-module sharing yet -- use plain `pub` (fully open) or
+restructure so the sharing happens via bare intra-module calls (e.g. move
+both functions into the same module) instead.
+
+**Fix path.** Phase 1 (external Kosh-boundary enforcement) ✅ done
+2026-07-22 -- `checker.rs`'s `flatten_modules_in_program` (third mangled
+form + a `KOSH_MODULE_ITEMS` registry mirroring `PRIVATE_MODULE_ITEMS` in
+`ast.rs` for the diagnostic), `lib.rs`'s `mark_kosh_boundary_modules_pub`
+(now preserves an explicit `pub(kosh)` annotation instead of blanket-
+overriding every item to `pub`, while still defaulting unannotated items
+to `pub` for backward compatibility with the existing, zero-annotation
+kosh package ecosystem). Phase 2 (same-project sibling-module access) --
+not started, needs the caller-context tracking described above.

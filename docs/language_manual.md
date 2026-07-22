@@ -358,7 +358,7 @@ match parse("x") {
 ```vani
 module math {
     pub fn sqrt(x: f64) -> f64 { … }          // public API
-    pub(kosh) fn helper() -> f64 { … }        // intended: package-internal only
+    pub(kosh) fn helper() -> f64 { … }        // package-internal only
     fn internal() -> f64 { … }                // private to module
 }
 
@@ -366,14 +366,19 @@ use math::sqrt;
 let r: f64 = sqrt(2.0);
 ```
 
-`kosh` (कोश) is Sanskrit for "repository" — the intended meaning of
-`pub(kosh)` is Rust's `pub(crate)`. **As of this writing, `pub(kosh)` is
-not yet differentiated from `pub` at type-check time** — an item marked
-`pub(kosh)` is visible identically to plain `pub`, including to
-external consumers. The syntax is accepted and the distinction is
-tracked in the AST for when real enforcement lands; write `pub(kosh)`
-today to document intent, but don't rely on it to actually restrict
-access.
+`kosh` (कोश) is Sanskrit for "repository" — `pub(kosh)` is Rust's
+`pub(crate)` equivalent. **Enforced for external Kosh-package access**
+(as of 2026-07-22): a `pub(kosh)` item called via `pkgname::item` from a
+*different* project consuming it as a `[deps]` dependency is rejected —
+verified directly. **Not yet enforced for same-project sibling modules**:
+one module reaching into a different module's `pub(kosh)` item within the
+*same* compile is currently *also* rejected (stricter than the intended
+"visible within your whole project" design — real caller-identity
+tracking to distinguish that case from a genuinely external consumer is
+still open, see `docs/v1_limitations.md` L23). For now, prefer plain
+`pub` for cross-module sharing within one project; reach for `pub(kosh)`
+specifically to guard a Kosh package's own internal helpers from external
+consumers.
 
 ### Kosh package dependencies use this same mechanism automatically
 

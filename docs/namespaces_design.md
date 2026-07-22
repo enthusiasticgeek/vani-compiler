@@ -24,7 +24,7 @@ of closure #258:
 | `use foo::bar as baz;` rename + collision diagnostic | #254 | both single-item and per-entry in brace lists |
 | `use` inside `module { }` bodies | #256 | scoped to module body, no leak |
 | Re-exports `pub use foo::bar;` | #257 | transitively resolved via fixed-point |
-| `pub(kosh)` visibility tier | #258 | preparatory syntax; kosh boundary itself shipped 2026-07-21 (see Kosh namespacing arc note below) but `pub(kosh)` is not yet truly differentiated from `pub` there |
+| `pub(kosh)` visibility tier | #258 | preparatory syntax; kosh boundary shipped 2026-07-21; external-access enforcement shipped 2026-07-22 (see note below) -- same-project sibling-module access remains open |
 | Kosh dependency namespacing (`pkgname::item`, transitive resolution, diamond dedup, cycle detection) | Kosh namespacing arc, Phases 1-5 | 2026-07-21, see `docs/kosh_namespacing_design.md` |
 
 ## Goal
@@ -125,31 +125,34 @@ historical context; each item links to the closure that shipped it.
 - **Glob imports** (`use foo::*;`). ✅ #253 — non-transitive only.
 - **Multi-item imports** (`use foo::{bar, baz};`). ✅ #247.
 - **`pub(kosh)` / `pub(super)`** visibility tiers -- `kosh`
-  is vāṇī's name for what Rust calls a crate. One kosh = one
+  is vāṇी's name for what Rust calls a crate. One kosh = one
   compilation unit / one package; the package registry is Kosh
   (`kosh-index`). #258 shipped `pub(kosh)` as preparatory syntax; the
   kosh boundary itself shipped 2026-07-21 (Kosh namespacing arc Phase
-  3, see `docs/kosh_namespacing_design.md`) -- but with a v1
-  simplification that leaves `pub(kosh)` not yet truly differentiated
-  from `pub` at that boundary. Every `[deps]` package is compiled
-  inside an implicit `module <pkg_name> { ... }`, and every item in it
-  is force-treated as fully `pub` (crossing the boundary) regardless
-  of what the source actually annotates -- existing kosh packages carry
-  zero visibility annotations at all (written assuming a flat global
-  namespace), so respecting real `pub`/`pub(kosh)`/private
-  distinctions today would make every dependency function invisible.
-  True per-item encapsulation (`pub(kosh)` genuinely staying internal,
-  private genuinely invisible even with the qualifier) is explicit
-  future work, not blocking anything -- it would only ever make some
-  currently-visible items less visible, never the reverse, so no
-  migration is needed to add it later. Tracked as
-  [L23](v1_limitations.md#l23--pubkosh-visibility-tier-parsed-but-not-enforced)
-  in the v1 limitations catalog -- confirmed `pub(kosh)` behaves
-  identically to `pub` even *outside* the Kosh-boundary case (a plain
-  in-project `module { }` block), so this isn't specific to the
-  namespacing arc's simplification; the underlying enforcement gap
-  predates it. `pub(super)` remains unsupported and surfaces a clear
-  diagnostic.
+  3, see `docs/kosh_namespacing_design.md`). **External-access
+  enforcement shipped 2026-07-22**: a `pub(kosh)` item mangles to a
+  third form (`<mod>__kosh__<name>`) that no externally-written
+  qualified reference can match -- the same trick private items already
+  used, one tier up -- so a `[deps]` consumer calling `pkgname::item`
+  into a package's `pub(kosh)` item is correctly rejected. Verified
+  directly. Unannotated items in a Kosh-boundary-wrapped module still
+  default to fully `pub` (unchanged, for backward compatibility with
+  the existing zero-annotation package ecosystem); only an *explicit*
+  `pub(kosh)` opts into the new restriction.
+
+  **Remaining gap**: the mangled-name approach can't yet distinguish "a
+  different kosh calling in" from "a sibling module in the *same*
+  project calling across module boundaries" -- both arrive as an
+  identical, already-parser-mangled string with no caller-identity
+  attached, so same-project sibling-module access to a `pub(kosh)` item
+  is *also* currently rejected (stricter than the intended "visible
+  within your whole project" design). Fixing this needs real
+  caller-context tracking -- which top-level module a reference
+  originates from, checked against the callee's -- not started. Tracked
+  as
+  [L23](v1_limitations.md#l23----pubkosh-is-enforced-for-external-kosh-package-access-same-project-sibling-module-access-is-a-remaining-gap)
+  in the v1 limitations catalog. `pub(super)` remains unsupported and
+  surfaces a clear diagnostic.
 - **Re-exports** (`pub use foo::bar;`). ✅ #257 — transitively
   resolved via fixed-point so chained re-exports collapse.
 - **Module-level `const`** is fine but follows the same
