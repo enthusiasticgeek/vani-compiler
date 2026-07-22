@@ -1,6 +1,8 @@
 # Kosh package namespacing + dependency-graph resolution — design doc
 
-**Status:** Phases 1-2 shipped 2026-07-21. Phases 3-6 planned, not started.
+**Status:** Phases 1-3 shipped 2026-07-21. Phases 4-6 planned, not
+started. **Phase 3 breaks 8 of the 12 published kosh packages until
+Phase 6's migration runs** — see Phase 3's "Verified" section.
 **Authored:** 2026-07-21.
 
 ---
@@ -80,11 +82,20 @@ dependency's files needed). Consumers reference dependency functions as
 `use matrix::mat_mul;`. No new syntax; only new compiler behavior in
 how `[deps]` sources are folded into the combined program.
 
-`pub(kosh)` becomes the real package-boundary marker: plain `pub` stays
-visible only within the package's own module tree (as today); only
-`pub(kosh)` items become visible to external consumers as
-`pkgname::item`. A package can therefore have internal `pub` helpers
-that never leak into its public API surface.
+**Correction (made once Phase 3 implementation started, see below):**
+the original draft of this doc had `pub`/`pub(kosh)` backwards. The
+actual documented semantics in `ast.rs` (`ModuleVisibility`'s doc
+comment) are: `pub(kosh)` means *"exported within this kosh but NOT
+through the kosh boundary into external dependents"* — i.e. visible
+across a package's own internal modules, but never crossing into
+`pkgname::item` for an external consumer. Plain `pub` is the one with
+no such restriction — it's what crosses the boundary. So: plain `pub`
+items are visible to external consumers as `pkgname::item`; `pub(kosh)`
+items stay internal to the package's own module tree (useful for a
+package with multiple internal modules sharing helpers without exposing
+them as part of the public API). Phase 3's actual v1 implementation
+sidesteps needing package authors to write either annotation at all —
+see "Visibility default flipped" below.
 
 ---
 
@@ -220,24 +231,88 @@ Phase 1 diamond-dependency fixture (`probability` + `optimize` sharing
 `matrix`, versions aligned) still resolves correctly with no false
 cycle report. Regression-swept clean against all 12 real kosh packages.
 
-### Phase 3 — Automatic per-package namespacing (planned)
+### Phase 3 — Automatic per-package namespacing ✅ shipped 2026-07-21
 
-Fixes Bug 1 (name collisions). The bulk of the design work:
+Fixes Bug 1 (name collisions) — the actual thing this whole arc was
+started to fix.
 
-- Wrap each resolved graph node's top-level items in
-  `module <pkg_name> { ... }` before concatenation.
-- Wire up `pub(kosh)` as described above.
-- Validate at `vanic publish` time that `[package].name` is a valid
-  vāṇी identifier (namespace-safe) — extend the existing
-  audit-safety-style gate (`vanic::safety`, `manifest::publish_package`).
+- Each resolved dependency (from Phase 1's flattened graph) is wrapped
+  in a synthetic `module <pkg_name> { ... }` — **textually**, not via
+  an AST merge: `wrap_deps_into_combined` (`src/lib.rs`) pushes the
+  `module <name> {` header directly into the same buffer `resolve_uses`
+  appends into, then the closing `}` after. This was a deliberate
+  simplification over a "proper" AST-level merge (parse each
+  dependency separately, splice its items into `program.modules`) —
+  it reuses the entire existing single-string/single-parse pipeline
+  unchanged, and `resolve_uses`'s span-tracking (`file_map.push`,
+  based on `out.len()` at the time it runs) stays correct automatically
+  as long as the wrapper header lands in the buffer first.
+- **Visibility default flipped for wrapped modules only.** Existing
+  kosh packages carry zero `pub`/`pub(kosh)` annotations anywhere —
+  they were written assuming a flat global namespace where every
+  top-level item was already implicitly reachable. Plain module
+  semantics default every item to *private*, which would make a
+  naively-wrapped dependency's entire surface invisible even via
+  `pkgname::item`. `mark_kosh_boundary_modules_pub` (`src/lib.rs`,
+  called from `compile_with` after parsing) force-sets every visibility
+  bit to `pub` for any top-level module whose name is a known dependency
+  package — regardless of what the source actually wrote. This is a
+  deliberate v1 simplification, not an oversight: it's strictly no more
+  permissive than today's status quo (everything was already callable
+  by anyone who included the file), it only adds the namespace
+  qualification requirement. True per-item encapsulation (an author
+  deliberately hiding some items from consumers) is an explicit
+  non-goal — layering it in later needs no migration, since it would
+  only ever make some already-visible items private, never the reverse.
+- Package names are validated as legal vāṇी identifiers before wrapping
+  (`is_valid_vani_identifier`) — a hyphenated or otherwise invalid
+  `[package].name` gets a clear diagnostic instead of a confusing parse
+  error deep inside the wrapped dependency source. (`vanic publish`-time
+  validation of this, so a bad name is caught at publish rather than at
+  every consumer's compile, is still open — folded into Phase 5.)
 - Combined with Phase 1's identity-based dedup, this is what kills both
-  bugs together: a shared transitive dep is compiled exactly once and
-  exposed under one namespace, regardless of how many dependents pull
-  it in or how deeply it's vendored.
-- **Breaking change**: every existing kosh package's internal
-  cross-package calls, and every consumer's unqualified calls to
-  dependency functions, stop resolving once namespacing lands. See
-  Phase 5/6.
+  original bugs together: a shared transitive dep is compiled exactly
+  once and exposed under one namespace, regardless of how many
+  dependents pull it in or how deeply it's vendored. Verified directly
+  with a 4-package diamond fixture (`proot` depending on `pkg_x` and
+  `pkg_y`, both depending on `shared`): `pkg_x::triple_via_shared`,
+  `pkg_y::quad_via_shared`, and a direct `shared::double` call from
+  `proot` itself (via Phase 1's transitive flattening) all produced
+  correct results in one run.
+
+**A real parser gap found and fixed along the way, unrelated to the
+namespacing logic itself**: module bodies had no dispatch branch at all
+for `#[attr]`-prefixed items (`TokenKind::Hash`) — every real kosh
+package leans heavily on `#[bounded_stack(...)]`/`#[wcet(...)]`
+attributes (MAINT-1, this same session), which nobody had ever tried
+wrapping inside a `module { }` block before, since the module system
+predates any use case that would combine the two. Fixed by adding a
+`Hash` branch to the module-body item dispatch (`parser.rs`) that calls
+the exact same `parse_attributed_fn` top-level items already use — no
+new parsing logic, just a missing wire-up.
+
+**Verified**:
+- The original motivating question, directly: a dependency package
+  defining `fn abs(x: i64) -> i64 { ... }` (colliding with the vāṇी
+  builtin `abs`) now compiles and runs correctly — `abs(-7)` (builtin)
+  and `mypkg::abs(-7)` (package function) both resolve and both return
+  `7`, zero collision error.
+- An unqualified call to a dependency function (`square(5)` instead of
+  `mathlib::square(5)`) now correctly fails with "unknown function" —
+  proving real namespace isolation, not just that qualified calls
+  happen to also work.
+- The diamond fixture above.
+- **Expected, deliberate breakage of the published ecosystem**: 8 of
+  the 12 real kosh packages that declare `[deps]` (`vectorcalc`,
+  `algebra`, `pde`, `interval`, `tensor`, `signal`, `optimize`,
+  `probability`) now fail `vanic audit-safety` with "unknown function"
+  errors at their own internal calls into their dependencies (e.g.
+  `vani-pde` calling `mat_zeros(...)` instead of
+  `matrix::mat_zeros(...)`) — because none of them use qualified syntax
+  yet. This is the anticipated breaking change, not a bug; fixing it is
+  Phase 6's job. The 4 self-contained packages with no `[deps]`
+  (`complex`, `discrete`, `sparse`, `geometry`) are unaffected and still
+  pass cleanly.
 
 ### Phase 4 — `vani.lock` becomes a real lockfile (planned)
 

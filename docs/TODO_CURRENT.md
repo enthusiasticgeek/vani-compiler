@@ -878,18 +878,54 @@ of a working shared dependency.
   12 real kosh packages; the NS-1 diamond fixture (aligned versions)
   still resolves correctly with no false cycle report.
 
-- [ ] **NS-3 (Phase 3). Automatic per-package namespacing** — the actual
-  fix for the name-collision bug. Each `[deps]` entry gets implicitly
-  wrapped in `module <pkg_name> { ... }` at compile time (compiler-
-  internal wrapping, no source rewriting of dependency files). Wires up
-  `pub(kosh)` as the real package-boundary marker (currently behaves
-  identically to `pub` — see `docs/namespaces_design.md` closure #258,
-  explicitly documented as preparatory for this exact feature).
-  `vanic publish`-time validation that `[package].name` is a
-  namespace-safe identifier. Combined with NS-1's identity-based dedup,
-  this is what fully kills both original bugs together. **Breaking
-  change** for every existing package's internal cross-package calls and
-  every consumer's unqualified dependency calls. **Not started.**
+- [x] **NS-3 (Phase 3). Automatic per-package namespacing** ✅ done
+  2026-07-21 — the actual fix for the name-collision bug. Each resolved
+  dependency (NS-1's flattened graph) gets wrapped in a synthetic
+  `module <pkg_name> { ... }` textually, in `wrap_deps_into_combined`
+  (`src/lib.rs`) — pushes the `module <name> {`/`}` wrapper directly
+  into the same buffer `resolve_uses` appends into, so existing
+  span-tracking stays correct with no other changes needed. Visibility
+  default is force-flipped to `pub` for every item in a wrapped module
+  (`mark_kosh_boundary_modules_pub`) regardless of what the source
+  declares — existing packages have zero `pub` annotations anywhere, so
+  respecting real module privacy defaults would make every dependency
+  function invisible; this is a deliberate v1 simplification, no more
+  permissive than today's flat-namespace status quo. Package names are
+  validated as legal identifiers before wrapping
+  (`is_valid_vani_identifier`); `vanic publish`-time validation of the
+  same is still open, folded into NS-5.
+
+  Found and fixed a real, unrelated parser gap along the way: module
+  bodies had no dispatch branch for `#[attr]`-prefixed items at all
+  (`#[bounded_stack(...)]`/`#[wcet(...)]` etc., ubiquitous in every real
+  kosh package) — nobody had ever wrapped heavily-attributed code in a
+  `module { }` block before. Fixed with one added branch in
+  `parser.rs`'s module-body item dispatch, reusing the exact
+  `parse_attributed_fn` top-level items already use.
+
+  Verified directly: (1) the original motivating question — a
+  dependency defining `fn abs(...)` colliding with the vāṇी builtin
+  `abs` — now compiles and runs correctly, both `abs(-7)` and
+  `mypkg::abs(-7)` resolve and return `7`; (2) an unqualified call to a
+  dependency function now correctly fails ("unknown function"),
+  confirming real isolation, not just that qualified calls happen to
+  also work; (3) a 4-package diamond fixture (two packages sharing a
+  third, plus the root project also calling the shared package
+  directly) all produced correct results in one run, combining NS-1 +
+  NS-3 correctly. **Correction to the original design doc**: it had
+  `pub`/`pub(kosh)` backwards — the documented `ast.rs` semantics are
+  `pub(kosh)` = visible within-kosh but NOT across the kosh boundary,
+  plain `pub` = the one that crosses it. Corrected in
+  `docs/kosh_namespacing_design.md`.
+
+  **Breaking change, confirmed exactly as anticipated**: 8 of the 12
+  published kosh packages (`vectorcalc`, `algebra`, `pde`, `interval`,
+  `tensor`, `signal`, `optimize`, `probability` — every one with
+  `[deps]`) now fail `vanic audit-safety` with "unknown function" at
+  their own internal calls into their dependencies, since none use
+  qualified `pkgname::item` syntax yet. Not a bug — this is Phase 6's
+  job to fix. The 4 self-contained packages (`complex`, `discrete`,
+  `sparse`, `geometry`) are unaffected.
 
 - [ ] **NS-4 (Phase 4). `vani.lock` becomes a real lockfile** — record
   the full resolved transitive graph (not just direct deps) so

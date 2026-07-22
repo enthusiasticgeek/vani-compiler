@@ -63,19 +63,24 @@ fn inject_prelude(program: &mut ast::Program) {
 }
 
 pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
-    compile_with(source, checker::check)
+    compile_with(source, checker::check, &std::collections::HashSet::new())
 }
 
 /// Like `compile`, but does not require `fn main() -> i64`. Used for
 /// auditing kosh library packages (`src/lib.vani` has no main), e.g.
 /// `vanic audit-safety` / the `vanic publish` coverage gate.
 pub fn compile_library(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
-    compile_with(source, checker::check_library)
+    compile_with(
+        source,
+        checker::check_library,
+        &std::collections::HashSet::new(),
+    )
 }
 
 fn compile_with(
     source: &str,
     checker_fn: fn(ast::Program) -> Result<CheckedProgram, Vec<Diagnostic>>,
+    kosh_boundary_names: &std::collections::HashSet<String>,
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let tokens = lexer::lex(source).map_err(|diagnostic| vec![diagnostic])?;
     // Phase 1.1 (2026-06-07): `inject_prelude` will lex the
@@ -86,6 +91,9 @@ fn compile_with(
     let (mut program, parse_errors) = parser::parse(tokens);
     inject_prelude(&mut program);
     lexer::set_current_print_lang_mode(saved_mode);
+    if !kosh_boundary_names.is_empty() {
+        mark_kosh_boundary_modules_pub(&mut program, kosh_boundary_names);
+    }
     match checker_fn(program) {
         Ok(checked) if parse_errors.is_empty() => Ok(checked),
         Ok(_) => Err(parse_errors),
@@ -97,6 +105,107 @@ fn compile_with(
             Err(all)
         }
     }
+}
+
+/// Kosh namespacing arc, Phase 3 (2026-07-21, see
+/// `docs/kosh_namespacing_design.md`): each `[deps]` package is
+/// wrapped in a synthetic `module <pkg_name> { ... }` (textually, by
+/// `compile_path`/`compile_library_path`/`resolve_combined_source`
+/// before the combined source is parsed) so its items get their own
+/// namespace instead of landing in the flat global function table --
+/// callers reference them as `pkgname::item`, same as any other
+/// vāṇी module (`docs/namespaces_design.md`).
+///
+/// Existing kosh packages carry no `pub`/`pub(kosh)` annotations at
+/// all -- they were written assuming a flat global namespace where
+/// every top-level item was implicitly reachable. Module semantics
+/// default to *private*, so wrapping them as-is would make every item
+/// invisible even to a `pkgname::item` reference, breaking every
+/// package that hasn't been migrated. v1's deliberate simplification:
+/// every item in a synthetic Kosh-boundary module is treated as fully
+/// `pub` (visible across the boundary), regardless of what visibility
+/// the original source declared -- this is strictly no more permissive
+/// than today's flat-namespace status quo (everything was already
+/// callable by anyone who included the file), it just adds the
+/// namespace-qualification requirement. True per-item encapsulation
+/// (an author deliberately hiding some items from consumers) is an
+/// explicit non-goal for now; layering it on top later needs no
+/// migration since it would only ever make some currently-visible
+/// items private, never the reverse.
+fn mark_kosh_boundary_modules_pub(
+    program: &mut ast::Program,
+    kosh_boundary_names: &std::collections::HashSet<String>,
+) {
+    for module in &mut program.modules {
+        if !kosh_boundary_names.contains(&module.name) {
+            continue;
+        }
+        module.visibility.functions_pub = vec![true; module.functions.len()];
+        module.visibility.functions_kosh_only = vec![false; module.functions.len()];
+        module.visibility.structs_pub = vec![true; module.structs.len()];
+        module.visibility.structs_kosh_only = vec![false; module.structs.len()];
+        module.visibility.enums_pub = vec![true; module.enums.len()];
+        module.visibility.enums_kosh_only = vec![false; module.enums.len()];
+        module.visibility.interfaces_pub = vec![true; module.interfaces.len()];
+        module.visibility.interfaces_kosh_only = vec![false; module.interfaces.len()];
+        module.visibility.impls_pub = vec![true; module.impls.len()];
+        module.visibility.impls_kosh_only = vec![false; module.impls.len()];
+        module.visibility.consts_pub = vec![true; module.consts.len()];
+        module.visibility.consts_kosh_only = vec![false; module.consts.len()];
+        module.visibility.type_aliases_pub = vec![true; module.type_aliases.len()];
+        module.visibility.type_aliases_kosh_only = vec![false; module.type_aliases.len()];
+        module.visibility.methods_blocks_pub = vec![true; module.methods_blocks.len()];
+        module.visibility.methods_blocks_kosh_only = vec![false; module.methods_blocks.len()];
+        module.visibility.modules_pub = vec![true; module.modules.len()];
+        module.visibility.modules_kosh_only = vec![false; module.modules.len()];
+    }
+}
+
+/// A package name becomes a literal `module <name> { ... }` identifier
+/// when wrapped, so it must be a valid vāṇी identifier -- checked here
+/// rather than left to surface as a confusing parse error deep inside
+/// the wrapped dependency source.
+fn is_valid_vani_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Kosh namespacing arc, Phase 3: append every resolved dependency's
+/// source into `combined`, each wrapped in a synthetic
+/// `module <pkg_name> { ... }` -- textual wrapping (not an AST merge)
+/// is deliberate: it reuses the existing single-parse pipeline
+/// unchanged, since `resolve_uses`'s `file_map.push` calls compute
+/// spans from `out.len()` at the time they run, which stays correct as
+/// long as the wrapper header is pushed into the *same* buffer before
+/// the wrapped file's own content is appended. Returns the set of
+/// wrapped package names so the caller can pass it to `compile_with`'s
+/// `mark_kosh_boundary_modules_pub` step.
+fn wrap_deps_into_combined(
+    deps: &[manifest::Dependency],
+    visited: &mut std::collections::HashSet<std::path::PathBuf>,
+    combined: &mut String,
+    file_map: &mut diagnostic::FileMap,
+) -> Result<std::collections::HashSet<String>, String> {
+    let mut names = std::collections::HashSet::new();
+    for dep in deps {
+        if !is_valid_vani_identifier(&dep.name) {
+            return Err(format!(
+                "package name '{}' can't be used as a Kosh namespace -- it must be a \
+                 valid vāṇी identifier (letters, digits, underscore; not starting with \
+                 a digit) since dependency functions are referenced as '{}::item'",
+                dep.name, dep.name
+            ));
+        }
+        combined.push_str(&format!("module {} {{\n", dep.name));
+        resolve_uses(&dep.entry_path, visited, combined, file_map)?;
+        combined.push_str("\n}\n");
+        names.insert(dep.name.clone());
+    }
+    Ok(names)
 }
 
 /// Read the file at `entry`, recursively resolve any `use "path";` decls
@@ -126,6 +235,8 @@ pub fn compile_path(
     // `manifest::resolve_transitive_deps` and
     // `docs/kosh_namespacing_design.md`. Walks the manifest discovered
     // from the entry's parent dir (or itself if entry IS a manifest).
+    let mut kosh_boundary_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
@@ -150,16 +261,18 @@ pub fn compile_path(
                     vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
                 )
             })?;
-            for dep in &deps {
-                if let Err(err) = resolve_uses(
-                    &dep.entry_path, &mut visited, &mut combined, &mut file_map,
-                ) {
-                    return Err((
-                        file_map,
-                        vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
-                    ));
-                }
-            }
+            // Kosh namespacing arc Phase 3 (2026-07-21): each dep is
+            // wrapped in its own `module <name> { ... }` instead of
+            // being spliced flat -- see `wrap_deps_into_combined` and
+            // `docs/kosh_namespacing_design.md`.
+            kosh_boundary_names = wrap_deps_into_combined(
+                &deps, &mut visited, &mut combined, &mut file_map,
+            ).map_err(|err| {
+                (
+                    file_map.clone(),
+                    vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+                )
+            })?;
         }
     }
     if let Err(err) = resolve_uses(entry, &mut visited, &mut combined, &mut file_map) {
@@ -168,7 +281,7 @@ pub fn compile_path(
             vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
         ));
     }
-    match compile(&combined) {
+    match compile_with(&combined, checker::check, &kosh_boundary_names) {
         Ok(checked) => Ok((checked, file_map)),
         Err(diagnostics) => Err((file_map, diagnostics)),
     }
@@ -184,6 +297,8 @@ pub fn compile_library_path(
         std::collections::HashSet::new();
     let mut combined = String::new();
     let mut file_map = diagnostic::FileMap::new();
+    let mut kosh_boundary_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     if let Some(manifest_path) = manifest::find_manifest(
         entry.parent().unwrap_or(entry),
     ) {
@@ -200,16 +315,14 @@ pub fn compile_library_path(
                     vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
                 )
             })?;
-            for dep in &deps {
-                if let Err(err) = resolve_uses(
-                    &dep.entry_path, &mut visited, &mut combined, &mut file_map,
-                ) {
-                    return Err((
-                        file_map,
-                        vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
-                    ));
-                }
-            }
+            kosh_boundary_names = wrap_deps_into_combined(
+                &deps, &mut visited, &mut combined, &mut file_map,
+            ).map_err(|err| {
+                (
+                    file_map.clone(),
+                    vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
+                )
+            })?;
         }
     }
     if let Err(err) = resolve_uses(entry, &mut visited, &mut combined, &mut file_map) {
@@ -218,7 +331,7 @@ pub fn compile_library_path(
             vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
         ));
     }
-    match compile_library(&combined) {
+    match compile_with(&combined, checker::check_library, &kosh_boundary_names) {
         Ok(checked) => Ok((checked, file_map)),
         Err(diagnostics) => Err((file_map, diagnostics)),
     }
@@ -240,9 +353,14 @@ pub fn resolve_combined_source(entry: &std::path::Path) -> Result<String, String
         }
         if let Ok(m) = manifest::load_manifest(&manifest_path) {
             let deps = manifest::resolve_transitive_deps(&m)?;
-            for dep in &deps {
-                resolve_uses(&dep.entry_path, &mut visited, &mut combined, &mut file_map)?;
-            }
+            // Wrapped the same way compile_path does (see
+            // wrap_deps_into_combined) for consistency, though note
+            // this function has no way to also carry the resulting
+            // kosh_boundary_names set to a downstream compile step --
+            // it has no current caller (verified 2026-07-21; only
+            // exercised by its own unit test), so that gap is
+            // unaddressed pending an actual consumer.
+            wrap_deps_into_combined(&deps, &mut visited, &mut combined, &mut file_map)?;
         }
     }
     resolve_uses(entry, &mut visited, &mut combined, &mut file_map)?;

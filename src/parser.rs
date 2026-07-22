@@ -629,6 +629,24 @@ impl Parser {
                     }
                     Err(e) => { self.errors.push(e); self.sync_past_brace(); }
                 }
+            } else if self.check(|k| matches!(k, TokenKind::Hash)) {
+                // Kosh namespacing arc, Phase 3 (2026-07-21): module
+                // bodies previously had no attribute-item branch at
+                // all -- `#[bounded_stack(...)] fn ...` / `#[wcet(...)]`
+                // etc. (ubiquitous in real kosh packages, which get
+                // implicitly wrapped in `module <pkg> { ... }` by the
+                // compiler for dependency namespacing) hit the
+                // catch-all "expected an item declaration" error
+                // below. Reuses the exact same `parse_attributed_fn`
+                // top-level items already use (closure #286).
+                match self.parse_attributed_fn() {
+                    Ok(f) => {
+                        functions.push(f);
+                        vis.functions_pub.push(is_pub);
+                        vis.functions_kosh_only.push(is_kosh_only);
+                    }
+                    Err(e) => { self.errors.push(e); self.sync_past_brace(); }
+                }
             } else if self.check(|k| matches!(k, TokenKind::Fn | TokenKind::Pure))
                 || self.check_async_prefix()
             {
