@@ -436,15 +436,32 @@ across a real Kosh package boundary. Rust's `pub(crate)`, `pub(super)`,
 anything `pub` doesn't. Module-private is the only tier genuinely
 enforced beyond plain `pub`.
 
+### Kosh dependency namespacing
+
+✅ **Shipped 2026-07-21** (Kosh namespacing arc, 6 phases — see
+`docs/kosh_namespacing_design.md`). Every `[deps]` package is compiled
+inside an implicit `module <pkg_name> { ... }`, so its functions (and
+any exported struct types) are called as `pkgname::item` — a package
+defining `fn abs(...)` no longer collides with the vāṇी builtin `abs`,
+or with any other package's `abs`, ever. Dependency resolution is fully
+transitive and deduplicated by `(name, version)`: two packages that
+share a third ("diamond" dependency) resolve to one compiled copy
+regardless of how deeply each vendors it. Circular `[deps]` graphs are
+rejected at compile time with a full cycle-chain diagnostic
+(`pkg_a -> pkg_b -> pkg_a`), reusing the same Tarjan SCC algorithm that
+backs `vanic acyclicity`. `vani.lock` records the full resolved graph,
+not just direct deps.
+
 ### Workspace / multi-crate package
 
 **Not in vāṇी.** Each `vani.toml` is a single crate; no
 workspace concept.
 
 **Workaround:** monorepo with one manifest, or build each
-"crate" separately and link via `--link-with`. The Kosh
-package manager (queued, pending registry-hosting
-decision) will lift this.
+"crate" separately and link via `--link-with`. Note this is
+distinct from the Kosh *dependency* namespacing above (which is
+shipped) — a workspace would let one `vani.toml` define multiple
+crates sharing a lockfile, which doesn't exist yet.
 
 ### Built-in test runner (`#[test]`)
 

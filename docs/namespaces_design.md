@@ -142,8 +142,14 @@ historical context; each item links to the closure that shipped it.
   private genuinely invisible even with the qualifier) is explicit
   future work, not blocking anything -- it would only ever make some
   currently-visible items less visible, never the reverse, so no
-  migration is needed to add it later. `pub(super)` remains
-  unsupported and surfaces a clear diagnostic.
+  migration is needed to add it later. Tracked as
+  [L23](v1_limitations.md#l23--pubkosh-visibility-tier-parsed-but-not-enforced)
+  in the v1 limitations catalog -- confirmed `pub(kosh)` behaves
+  identically to `pub` even *outside* the Kosh-boundary case (a plain
+  in-project `module { }` block), so this isn't specific to the
+  namespacing arc's simplification; the underlying enforcement gap
+  predates it. `pub(super)` remains unsupported and surfaces a clear
+  diagnostic.
 - **Re-exports** (`pub use foo::bar;`). ✅ #257 — transitively
   resolved via fixed-point so chained re-exports collapse.
 - **Module-level `const`** is fine but follows the same

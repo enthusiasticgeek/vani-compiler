@@ -153,6 +153,16 @@ that's Phase 3.
   pass cleanly. Two test-file spot checks (`vani-probability`,
   `vani-optimize`) still compile correctly end-to-end (`vanic check`,
   full SMT verification included).
+- **`vanic audit-safety` itself needed no code changes for the dedup
+  fix** — it walks `program.functions` post-compile, which already
+  reflects whatever `compile_library_path` resolved, so it inherits
+  Phase 1's fix automatically. Verified directly with fresh evidence
+  after the full arc shipped: a scratch project depending on both
+  `probability` (106 functions) and `optimize` (23 functions), both of
+  which transitively depend on `matrix` (40 functions), reports
+  exactly `169 vendored fn(s) excluded` — 106+23+40, `matrix` counted
+  *once* despite being a shared transitive dependency of both, not
+  double-counted (209) or silently dropped (129).
 
 ### Phase 2 — Circular dependency detection ✅ shipped 2026-07-21
 
@@ -265,6 +275,12 @@ started to fix.
   deliberately hiding some items from consumers) is an explicit
   non-goal — layering it in later needs no migration, since it would
   only ever make some already-visible items private, never the reverse.
+  Tracked as [L23](v1_limitations.md#l23--pubkosh-visibility-tier-parsed-but-not-enforced)
+  in the v1 limitations catalog. Note this gap predates and is broader
+  than this arc: `pub(kosh)` was already unenforced for plain
+  in-project `module { }` blocks with no `[deps]` involved at all —
+  this v1 simplification just means Phase 3 doesn't fix that
+  pre-existing gap in passing, not that it introduces a new one.
 - Package names are validated as legal vāṇी identifiers before wrapping
   (`is_valid_vani_identifier`) — a hyphenated or otherwise invalid
   `[package].name` gets a clear diagnostic instead of a confusing parse

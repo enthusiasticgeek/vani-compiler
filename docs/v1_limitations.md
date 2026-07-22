@@ -12,9 +12,10 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.4.5 (2026-07-13): 19 of 19 original entries resolved; L20–L22 added
-> and fixed. Open items: L5 (by design), L6 (by design), L10-macOS (no hardware),
-> L13 (partial — `match` SOV by design), L14 (by design for v1).**
+> **At v0.6.1 (2026-07-21): 19 of 19 original entries resolved; L20–L22 added
+> and fixed; L23 added (open). Open items: L5 (by design), L6 (by design),
+> L10-macOS (no hardware), L13 (partial — `match` SOV by design), L14 (by
+> design for v1), L23 (not started — `pub(kosh)` unenforced).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -40,6 +41,7 @@
 > | L20 | S-19 lock-order detection is intra-procedural only | ✅ Fixed 2026-07-12 — held-set transitive analysis |
 > | L21 | S-20 ISR mutex detection does not follow helper calls | ✅ Fixed 2026-07-12 — collect_locked_mutexes follows calls |
 > | L22 | MISRA 13.2 eval-order check: adjacent args only | ✅ Fixed 2026-07-12 — any-distance duplicate detection |
+> | L23 | `pub(kosh)` visibility tier parsed but not enforced | ⬜ Not started — behaves identically to `pub` |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -1266,3 +1268,45 @@ most dangerous real-world occurrence.
 **Fix path.** ✅ Implemented: `seen.remove()` replaces `seen.get()`;
 adjacency guard removed. `gap_misra_13_2_*` now calls
 `assert_rejected("MISRA 13.2")`.
+
+---
+
+## Module system limitations
+
+### L23 — `pub(kosh)` visibility tier is parsed but not enforced
+
+`pub(kosh)` is accepted syntax on any module item and is tracked as a
+distinct bit in the AST (`ModuleVisibility::*_kosh_only`), but the
+checker never reads that bit — verified directly (zero references to
+`_kosh_only` anywhere in `checker.rs` outside where it's set at parse
+time, and by compiling a real `pub(kosh)` function and calling it from
+completely outside its declaring module, which succeeds with no
+error). It behaves identically to plain `pub` at every call site
+today, both for in-project modules and across a Kosh package boundary
+(`docs/kosh_namespacing_design.md`).
+
+**Why**: the intended semantics — Rust's `pub(crate)` equivalent,
+visible within the declaring package but not to external Kosh
+consumers — need the checker's module-flattening pass
+(`flatten_modules_in_program`, `checker.rs`) to know whether it's
+flattening a package's *own* source or a `[deps]`-pulled dependency's
+source, and to reject a `_kosh_only`-marked item's mangled name when
+referenced from outside that boundary. That distinction doesn't exist
+in the flattening pass yet — it's purely name-mangling with a uniform
+visibility rule (`_pub` → reachable, `_priv_` → not), regardless of
+which side of a Kosh boundary the reference comes from.
+
+**Workaround**: none that actually restricts access. Write `pub(kosh)`
+to document intent — a future implementation can only make
+`pub(kosh)` items *less* visible than they are today, never more, so
+no migration is needed when real enforcement lands. Module-private
+(the default, no `pub` at all) is the only tier genuinely enforced
+beyond plain `pub`.
+
+**Fix path.** Not started. Needs: (1) the Kosh-boundary-wrapped
+synthetic modules from `wrap_deps_into_combined` (`src/lib.rs`) to
+carry a marker distinguishing them from a package's own in-source
+`module { }` blocks; (2) `flatten_modules_in_program` to check that
+marker when deciding whether a `_kosh_only` item's *public*-style
+mangled name (as opposed to its private form) should still resolve
+from a call site outside the boundary.
