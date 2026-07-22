@@ -10,6 +10,39 @@
 > Cross-reference [README.md](README.md) for the language tour and
 > [TODO.md](TODO.md) for the canonical work list.
 
+## 📋 NEXT SESSION HANDOFF — 2026-07-22 (Kosh audit-safety gate + v0.6.0 release + Kosh namespacing arc)
+
+**State**: the single biggest-scope session in this log. Four largely-independent
+deliverables landed back to back: (1) `vanic audit-safety` + a `vanic publish`
+coverage gate, (2) a v0.6.0 feature release (14 language features + perf work
+already queued from prior sessions, cut and shipped this session) plus a real
+bug fix to the release-asset pipeline, (3) a tutorial mojibake fix, and (4) a
+full 6-phase Kosh package **namespacing** arc — the largest single piece of
+work — ending with every affected published kosh package migrated and
+republished. Compiler version `v0.6.1-dev` (Cargo.toml); last tagged release
+`v0.6.0`.
+
+### Shipped this session (2026-07-21 -> 2026-07-22)
+
+| Item | What shipped |
+|------|-------------|
+| **GATE-1** `vanic audit-safety` | New CLI command + `vanic publish` hard gate: verifies `#[bounded_stack]`/`#[wcet]` coverage wherever a function is *eligible* (not blanket 100%), reusing existing `wcet_body`/`compute_stack_depths`. `--allow-partial-safety-coverage` escape hatch. Needed `compile_library`/`compile_library_path` (checker::check_library) since packages have no `fn main()`. Found 4 real coverage gaps across published packages on first run; fixed + republished. |
+| v0.6.0 release | Cut via `scripts/release.py --minor`; wrote real `RELEASE_NOTES/v0.6.0.md` + `CHANGELOG.md` entries by hand (not the auto-stub). 14 language/tooling features (generic trait bounds, slice patterns, `#[repr(C/packed)]`, async `select`, overflow guards, affine closures, `Vec<bool>`, `vanic test`, `for await`, multi-pass monomorphization, `Atomic<f64>`, `file_open` buffered arg, the audit-safety gate itself) + 5 perf wins (pdqsort, sort pattern detection, AVX-512 bitmask scan, persistent pthread pool, `getelementptr inbounds`). |
+| Release workflow bug (found + fixed) | Every past tagged release (verified back to v0.4.0) shipped with **zero binary assets** despite reporting success — `actions/download-artifact@v4` nested each artifact into a same-named subdirectory, and the "flatten" step's `mv` moved each file back into its own parent (self-referential no-op). Fixed with `merge-multiple: true`; backfilled v0.6.0's assets manually. Added a pruning step: only the 3 most recent releases keep their binaries (release pages/notes untouched). |
+| Tutorial mojibake fix | `08b_errors_primer.md` had "vāṇी" double-encoded (UTF-8 read as Windows-1252) into `vÄá¹‡Ä«` — same failure class as an earlier `parser.rs` mojibake bug. Fixed both occurrences + a stray BOM. |
+| SIMD/NEON doc parity sweep | `vec512<T>` (shipped v0.5.0) had never been added to `docs/arm_neon_status.md` or `docs/simd_ffi_shims.md` (both stopped at vec128/vec256). No compiler code changes needed — vec512 already uses the same architecture-generic LLVM lowering. Also fixed a README.md inaccuracy (`simd128_add` isn't a real builtin; it's `simd_add`). |
+| **Kosh namespacing arc, all 6 phases** ✅ | Full design + verification in `docs/kosh_namespacing_design.md`. Triggered by a user question ("what happens if a kosh package has the same function name as a builtin?") that led to hands-on testing and uncovered a second bug (diamond dependencies silently produced missing-function errors). NS-1: real transitive dependency graph, `(name,version)`-deduped. NS-2: circular-dependency detection (reused `vanic acyclicity`'s Tarjan SCC). NS-3: automatic per-package namespacing (`pkgname::item`) — the actual fix for the original question; found and fixed a real parser gap (module bodies had no `#[attr]` item support) along the way. NS-4: `vani.lock` records the full transitive graph. NS-5: "did you mean `pkgname::item`?" migration diagnostic; also fixed `vanic add` writing invalid (hyphenated) `[deps]` keys by default. NS-6: migrated + republished all 8 affected packages (`vectorcalc` 0.1.3, `algebra` 0.1.3, `pde` 0.1.3, `interval` 0.1.3, `tensor` 0.1.3, `signal` 0.1.3, `optimize` 0.1.4, `probability` 0.4.6); fixed a real `probability`/`optimize` `matrix`-version-drift bug NS-1 surfaced along the way. Final proof: a fresh project depending on the real, republished `probability`+`optimize` (the exact diamond that started this) compiles clean with zero conflicts. |
+| `pub(kosh)` non-enforcement documented as **L23** | Found while correcting namespacing docs: `pub(kosh)` has never been enforced (verified: zero reads of the AST's `_kosh_only` bit anywhere in `checker.rs`; a `pub(kosh)` fn is callable from completely outside its module with no error). Predates this session; not introduced by the namespacing arc. Added to `docs/v1_limitations.md`, corrected in `tutorials/src/beginner/09a_modules_primer.md` (which had a fabricated "REJECTED" worked example) and `docs/missing_features.md`. |
+| Misc doc fixes | `docs/missing_features.md`'s "Kosh package manager... queued, pending registry-hosting decision" was stale (live all session with 12+ published packages) -- fixed. README.md nav gained a Kosh Package Manager link. |
+
+### Key numbers (2026-07-22)
+- **Compiler version**: `v0.6.1-dev` (last tagged release: `v0.6.0`)
+- **Commits this session**: ~20 across `vani-compiler`, plus 8 kosh package repos + `kosh-index`
+- **`#[test]` functions in `src/lib.rs`**: 2378 (static count; full suite not re-run this session per standing "spot tests only" preference — spot-checked extensively instead: every touched package's `vanic audit-safety`, every test/example file via `vanic check`, and at least one real `vanic run` per package before publishing)
+- **Kosh ecosystem**: 12/12 published packages pass `vanic audit-safety` cleanly; 8/12 required migration to qualified `pkgname::item` syntax
+
+---
+
 ## 📋 NEXT SESSION HANDOFF — 2026-07-21 (file_open buffered arg + Big-O/device-I/O doc audit)
 
 **State**: `file_open` gained a required third `buffered: bool` argument (breaking arity change) with a working unbuffered path on both backends; a stale Big-O doc comment was fixed; device-I/O docs extended past UART-only; one new bug discovered (not fixed) on the LLVM backend. Compiler version `v0.5.4-dev` (Cargo.toml).
@@ -483,7 +516,6 @@ Entry: `src/backend_llvm.rs` `emit_intent_epoll_helpers_llvm_windows` +
 
 - Grammar consultant pass — native-speaker review of 62 dialects
 - macOS empirical verification — needs Darwin host
-- Arc 9 Kosh package manager — pending registry choice
 - CI / GH-Actions (Tier 4) — last
 
 ### Key numbers
