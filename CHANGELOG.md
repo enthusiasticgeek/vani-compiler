@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.8.0] — 2026-07-22
+
+### Added
+
+- **`pub(kosh)` enforcement** — a `pub(kosh)` item is now correctly rejected when referenced by a *different* Kosh package (`[deps]` consumer) via `pkgname::item`, closing the L23 gap from v0.7.0's namespacing arc. Intra-module and same-package access are unaffected. Known remaining gap: same-project sibling-module access to a `pub(kosh)` item is also currently rejected (stricter than intended, not a regression) — see `docs/v1_limitations.md` L23.
+
+---
+
 ## [v0.7.0] — 2026-07-22
 
 ### Added
