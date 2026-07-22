@@ -1,5 +1,26 @@
 # Changelog
 
+## [v0.7.0] — 2026-07-22
+
+### Added
+
+- **Kosh package dependency namespacing** — every `[deps]` package is compiled inside its own namespace; call its functions as `pkgname::item` instead of unqualified. Closes a real name-collision gap (a dependency's function could collide with a vāṇी builtin or another dependency and be an unrecoverable compile error).
+- **Fully transitive, diamond-safe dependency resolution** — a dependency of a dependency resolves automatically, deduplicated by `(name, version)`; two packages sharing a third dependency resolve to one compiled copy instead of a silent missing-function error.
+- **Circular Kosh dependency detection** — rejected at compile time with a full cycle-chain diagnostic (`pkg_a -> pkg_b -> pkg_a`), reusing the Tarjan SCC algorithm behind `vanic acyclicity`.
+- **Migration diagnostic** — an unqualified call to a dependency function now suggests the qualified fix (`did you mean matrix::mat_zeros?`) instead of a bare unknown-function error.
+- **`vani.lock` records the full resolved dependency graph**, not just direct `[deps]` entries.
+- **`vanic add` sanitizes non-identifier package names** into valid `[deps]` keys automatically (a `[deps]` key is now a namespace identifier).
+
+### Fixed
+
+- **Release pipeline never attached binaries to any GitHub release** (verified back through v0.4.0) — `actions/download-artifact@v4`'s nested-subdirectory layout defeated the "flatten" step, a self-referential no-op. Fixed with `merge-multiple: true`. Also added retention: only the 3 most recent releases keep binaries attached.
+
+### Documentation
+
+- `pub(kosh)` visibility tier documented as unenforced (behaves identically to `pub`) — pre-existing gap, not introduced by this release. Tracked as L23 in `docs/v1_limitations.md`.
+
+---
+
 ## [v0.6.0] — 2026-07-21
 
 ### Added
