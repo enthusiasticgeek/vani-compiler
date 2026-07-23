@@ -1,5 +1,7 @@
 # Introduction
 
+<img class="vani-logo" src="images/logo/vani_logo2.png" alt="vāṇी logo"/>
+
 Welcome to the **vāṇी** (वाणी) tutorials.
 
 vāṇी is a programming language designed to read like speech,

@@ -174,7 +174,11 @@ with `Vec`, `OwnedStr`, and structs.
 
 ## Does vāṇी have pointers?
 
-**Short answer: No. vāṇी has references, not raw pointers.**
+**Short answer: Not in safe code -- ordinary vāṇी code uses
+references, not raw pointers. The exception is `unsafe(reason = "...")`
+code, where raw pointers (`*T`, `*mut T`) are fully supported for
+cases like embedded MMIO/DMA registers, FFI with C libraries, and
+hand-rolled allocators -- see [Advanced 4: Embedded](../advanced/04_embedded.md).**
 
 This is one of the most important differences from C and C++.
 

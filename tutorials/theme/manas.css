@@ -30,3 +30,11 @@ img.manas-large {
   opacity: 0.8;
   margin-left: 0.3em;
 }
+
+/* vāṇी logo -- introduction page banner. */
+img.vani-logo {
+  display: block;
+  max-width: 220px;
+  height: auto;
+  margin: 0 auto 1.5em auto;
+}
