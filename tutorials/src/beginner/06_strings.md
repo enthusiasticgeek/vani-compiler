@@ -385,4 +385,4 @@ A cleaner version using `match` will appear in Sec.8.
 ---
 
 **Previous**: [Sec.6c -- Ownership and move ->](06c_ownership_primer.md)
-**Next**: [Sec.7a -- Tuples and destructuring primer ->](07a_tuples_primer.md)
+**Next**: [Sec.6d -- Program memory layout primer ->](06d_memory_sections_primer.md)

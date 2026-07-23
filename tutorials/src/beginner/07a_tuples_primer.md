@@ -342,5 +342,5 @@ covers the actual syntax + a few worked examples.
 
 ---
 
-**Previous**: [Sec.6 -- Strings (Str vs OwnedStr) ->](06_strings.md)
+**Previous**: [Sec.6d -- Program memory layout primer ->](06d_memory_sections_primer.md)
 **Next**: [Sec.7 -- Arrays and Vec<T> basics ->](07_vec_arrays.md)

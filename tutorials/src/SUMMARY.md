@@ -19,6 +19,7 @@
 - [Heap and stack -- intuition primer](beginner/06b_heap_vs_stack_primer.md)
 - [Ownership and move -- intuition primer](beginner/06c_ownership_primer.md)
 - [Strings (`Str` vs `OwnedStr`)](beginner/06_strings.md)
+- [Program memory layout: `.text`/`.rodata`/`.data`/`.bss` -- intuition primer](beginner/06d_memory_sections_primer.md)
 - [Tuples and destructuring -- intuition primer](beginner/07a_tuples_primer.md)
 - [Arrays and `Vec<T>` basics](beginner/07_vec_arrays.md)
 - [Pattern matching -- intuition primer](beginner/08a_pattern_match_primer.md)

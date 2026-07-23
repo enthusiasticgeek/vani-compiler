@@ -15,6 +15,63 @@ rearrange), but only one cleaner can hold the key at a time so
 they don't conflict. When done, the key returns to you. That's
 the borrow model.
 
+## Borrow checker: yes, but smaller than Rust's
+
+If you're coming from Rust (or asking "why doesn't vāṇी have a
+borrow checker like Rust?"), the premise is off: vāṇी has one.
+`ref` / `mut ref` above IS the borrow checker -- it enforces the
+same core rule Rust does, "many shared borrows XOR one exclusive
+mutable borrow, never both," and it rejects use-after-move and
+dangling references at compile time. It's built directly into
+the affine type system rather than living in a separate named
+pass, but the guarantee is the same class of guarantee.
+
+What's smaller than Rust's version:
+
+| | Rust | vāṇी v1 |
+|---|---|---|
+| Shared-XOR-mutable borrows | ✓ enforced | ✓ enforced |
+| Use-after-move rejected | ✓ | ✓ |
+| Partial moves (move one struct field) | ✓ | ✓ |
+| Dangling-reference-return rejected | ✓ | ✓ |
+| Lifetime syntax (`'a`) | explicit, user-written | **none -- always elided** |
+| Fn returning `ref T` with 2+ ref params | ✓ (annotate which lifetime) | [x] rejected -- restructure to one ref param |
+| Struct holding refs with independent lifetimes | ✓ | [x] rejected -- use one shared lifetime or restructure |
+| Closures capturing a ref that outlives the closure | ✓ | [x] deferred to a later version |
+| `Rc<T>` / `Weak<T>` for cyclic data (trees, doubly-linked lists) | ✓ | [x] no equivalent -- use index handles into a `Vec`/`Pool` instead |
+
+**What you'd lose with no borrow checker at all** (i.e. plain
+C-style pointers): silent use-after-free, double-free, data
+races from aliased mutable pointers, and dangling references
+returned from functions -- all of them runtime bugs that show up
+far from their cause, sometimes only under load or with specific
+inputs. vāṇी's borrow checker turns every one of those into a
+compile error at the call site.
+
+**What the smaller (elided-only) design costs you**, versus
+Rust's explicit lifetimes: a few advanced shapes don't compile
+as-written and need a mechanical workaround --
+
+- A function taking two `ref` parameters can't return a `ref`
+  derived from just one of them (Rust: annotate `<'a>`; vāṇी:
+  split into narrower functions, or make the unused param a
+  value instead of a ref). See [Intermediate 3e -- lifetimes
+  primer](03e_lifetimes_primer.md).
+- Cyclic data (a tree node with a parent pointer, a
+  doubly-linked list, an observer pattern) can't use owning
+  pointers in either direction -- there's no `Rc`/`Weak`. The
+  fix is to store the structure as indices into a flat `Vec`
+  instead of a graph of pointers. See [Intermediate 3d --
+  cyclic references primer](03d_cyclic_references_primer.md)
+  for the full rewrite, plus the rare cases (third-party plugin
+  callbacks, DOM-like shared graphs) where an `unsafe(reason =
+  "...")` escape hatch is the honest answer instead.
+
+The design bet, stated in [Intermediate 3e](03e_lifetimes_primer.md#why-this-design):
+elide the easy 90% for free, reject the remaining 10% with a
+loud diagnostic and a mechanical workaround, rather than exposing
+`'a` syntax to every user for the sake of the 10%.
+
 ## The program
 
 ```vani

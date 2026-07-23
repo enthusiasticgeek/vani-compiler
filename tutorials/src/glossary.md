@@ -26,6 +26,7 @@ you can move between the two without re-orienting.
 | **alias / aliasing** | Two names that refer to the same underlying value. vāṇी forbids mutable aliasing -- one `mut ref` rules out every other reference for its scope. |
 | **escape (a reference escapes a scope)** | A reference outliving the local it borrows. The scope-escape analyzer rejects programs where a `ref` is returned, stored in a heap location, or assigned to a global. |
 | **elision** | Compiler-inferred ("elided") lifetime -- when the user doesn't write `<'a>`, the rules pick a sensible default. vāṇी uses Rust-style elision so most code is annotation-free. |
+| **borrow checker** | The compile-time analysis that enforces "many shared borrows XOR one mutable borrow, never both" and rejects use-after-move / dangling references. vāṇी *has* one -- it's built into the affine type system (`ref` / `mut ref`), not a separate pass. It's smaller than Rust's: lifetimes are always elided (no `'a` syntax), so a handful of Rust-legal shapes -- multiple distinct-lifetime ref parameters, ref-capturing closures, multi-lifetime structs -- are rejected outright rather than accepted with annotations. See [Intermediate 3](intermediate/03_affine.md#borrow-checker-yes-but-smaller-than-rusts) for the comparison and workarounds. |
 | **RAII** | "Resource Acquisition Is Initialization" -- the resource's lifetime is tied to the scope of its owning binding. vāṇी's Drop runs at scope exit; no need for `defer` or finalizers. |
 
 > Want a worked example? See *Affine ownership: `ref` / `mut ref`*
@@ -141,6 +142,7 @@ you can move between the two without re-orienting.
 | **prelude** | A small set of declarations the compiler injects before every program: `Option<T>`, `Result<T,E>`, `Future<T>`, `Poll<T>`, `CancelToken`, `AllocError`. |
 | **panic / abort** | A non-resumable termination. `assert` failures call `abort()`, which the OS reports as exit-on-signal SIGABRT. |
 | **stack / heap** | The stack holds activation records (function-call frames); the heap holds long-lived allocations (`Vec<T>`, `OwnedStr`, `Box<T>`). vāṇी puts the choice in the type (Copy = stack-ish, owning = heap). |
+| **`.text` / `.rodata` / `.data` / `.bss`** | The named sections a compiled binary is divided into *before it runs*: `.text` = code, `.rodata` = read-only constants (`Str` literals), `.data` = initialized globals, `.bss` = zero-initialized globals. `.bss` stores no bytes in the binary file -- only a size; the loader (or, on bare metal, your own `Reset_Handler`) zeroes that much RAM at startup. Distinct from stack/heap, which fill up only while the program runs. |
 | **deferred** | A diagnostic or work-item delayed until later in the pipeline. |
 | **runtime** | Two senses: (a) the bundled C / LLVM helpers the compiler emits alongside user code (string concat, Vec helpers, futex-backed Mutex, etc.); (b) "at runtime" -- when the compiled program executes. |
 | **transitive** | Following a chain. "Transitive borrow" = a borrow of a borrow. "Transitive impurity" = if `f` calls `g` and `g` is impure, then `f` is impure. |

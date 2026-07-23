@@ -114,8 +114,8 @@ reference:
 **Stack (clipboard)**:
 - All numeric values (`i64`, `bool`, `f64`, etc.)
 - `Str` (the handle -- but the actual character bytes live in
-  the read-only data section, a third region we'll ignore for
-  now)
+  `.rodata`, the binary's read-only data section, a third kind
+  of region covered in [Beginner 6d](06d_memory_sections_primer.md))
 - Fixed-size arrays `[T; N]` when `N` is small
 - Plain structs (composed of stack-living fields)
 - All references / pointers (an address is a small number)
@@ -198,6 +198,9 @@ ownership, you'll know what's being tracked and why.
   -- first compiler code using the handle/data split.
 - [Intermediate 3 -- Affine ownership](../intermediate/03_affine.md)
   -- the formal rule the compiler uses to free heap items.
+- [Beginner 6d -- Program memory layout primer](06d_memory_sections_primer.md)
+  -- the sections that exist *before* the program runs:
+  `.text` / `.rodata` / `.data` / `.bss`.
 
 
 ---

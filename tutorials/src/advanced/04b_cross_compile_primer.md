@@ -146,8 +146,19 @@ A typical Cortex-M linker script maps:
 |---------|---------|---------|
 | `.text` | 0x08000000 (Flash) | Code |
 | `.rodata` | 0x08020000 (Flash) | Read-only data |
-| `.data` | 0x20000000 (RAM) | Initialized globals |
+| `.data` | 0x20000000 (RAM) | Initialized globals -- values ALSO stored in Flash so `Reset_Handler` can copy them into RAM at startup |
+| `.bss` | 0x20000200 (RAM) | Zero-initialized globals -- occupies RAM only; nothing to copy, `Reset_Handler` just zeroes it |
 | `.vectors` | 0x08000000 (Flash start) | Interrupt vector table |
+
+Unlike `.text` / `.rodata` / `.data`, `.bss` has no corresponding
+bytes in Flash at all -- there's nothing to store for "a block of
+zeroes." See [Beginner 6d -- program memory layout
+primer](../beginner/06d_memory_sections_primer.md) for the general
+`.text`/`.rodata`/`.data`/`.bss` model; on a hosted OS the loader
+zeroes `.bss` for you, but on bare metal there is no loader, so
+`Reset_Handler` -- the first code that runs after reset -- has to
+copy `.data`'s initial values out of Flash and zero `.bss` by hand,
+before `main` (`intent_main`) is called.
 
 By default all vāṇी functions land in `.text`. To place a
 function in a specific section:
