@@ -108,6 +108,83 @@ When you run `vanic run foo.vani`:
 9. **Linking + run**. Tree-C invokes `cc`; LLVM uses `lli` to
    JIT or `llc + cc` to produce a binary.
 
+## SSA vs. tree codegen: what actually gates the fallback
+
+Step 8 above says "SSA backend tries first; falls back to tree
+on any unsupported feature" -- true, but that sentence hides a
+few sharp edges worth knowing before you add a language feature
+or a builtin.
+
+**Where the gate lives**: `src/main.rs`, not the backends
+themselves. `emit_llvm_via_ssa` / `emit_c_via_ssa` each call
+`ssa_path_supports(ir, extra_reject)`, which walks every
+function's param types, return type, and body:
+
+- `ssa_type_supported(ty)` -- can this *type* appear in an SSA
+  signature at all?
+- `extra_reject(stmt)` -- backend-specific statement/expression
+  exclusions, e.g. `ssa_llvm_extra_reject` (checked only for the
+  LLVM path) and `ssa_c_extra_reject` (C path). Each is usually
+  an exhaustive recursive walker over `TypedStmt`/`TypedExpr`
+  looking for one specific unsupported shape -- see
+  `stmt_uses_vec_of_atomic_or_channel` or
+  `stmt_calls_f64_to_str_fixed` for the pattern to copy.
+
+Only if every function clears both checks does the driver call
+`lower_program` + `ssa_backend_llvm::emit` / `ssa_backend_c::emit`;
+otherwise (or if that `Ok`/`Err` comes back `Err`) it calls
+`LlvmBackend.emit(ir)` / `CBackend.emit(ir)` -- the tree path --
+instead.
+
+**The gate is whole-program, not per-function or per-call-site.**
+`ssa_path_supports` returns one `bool` for the entire
+`TypedProgram`. If ONE function anywhere in the program uses an
+unsupported shape, the ENTIRE program -- every function, not just
+the offending one -- gets tree-codegen'd for that target. Output
+is correct either way; but if you're diffing generated C/LLVM IR
+and a program looks unexpectedly tree-shaped, this is why.
+
+**What's currently gated out is not exhaustively documented
+anywhere** -- treat the examples below as illustrative, not a
+complete list; `git grep extra_reject` in `main.rs` is the actual
+source of truth:
+- Payloaded enums force tree-LLVM (SSA-LLVM has no tagged-union
+  codegen yet); SSA-C handles them fine.
+- `Vec<Atomic<T>>` / `Vec<Channel<T,N>>` force tree-LLVM (closure
+  #212 -- SSA-LLVM's vec-literal emit assumes a value-shaped
+  element, and Atomic/Channel are pointer-shaped).
+- `f64_to_str_fixed` forces both tree-C and tree-LLVM (neither
+  SSA backend has an implementation).
+
+**The trap**: adding a new builtin to `checker.rs` + the tree
+backends does **not** make it safe to ship on the SSA path by
+default -- and there's no automatic detection that it's missing.
+Neither SSA backend's `Call`-lowering has an error path for a
+name it doesn't recognize; it silently assumes "must be a
+user-defined function," mangles the callee to `fn_<name>`, and
+the program only fails at LLVM-verify / link time with an
+*undefined symbol* -- not at compile time, and not with a
+diagnostic that points anywhere near the real cause. This is
+exactly the bug that shipping `f64_to_str_fixed` surfaced (full
+writeup: item 27.1 in
+[`docs/TODO_CURRENT.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/TODO_CURRENT.md)).
+
+Two consequences for anyone adding a language feature or builtin:
+1. **Test through `vanic run` / `vanic emit`**, not just
+   `compile_to_c` / `compile_to_llvm`. The latter two (what
+   `src/lib.rs`'s ~1900 tests mostly use) call the tree backends
+   *directly*, bypassing the SSA path entirely -- they would not
+   have caught the bug above.
+2. If the new construct isn't SSA-supported, add a
+   `stmt_uses_<thing>` / `expr_uses_<thing>` walker (copy the
+   `f64_to_str_fixed` or `vec_of_atomic_or_channel` pair) and OR
+   it into `ssa_llvm_extra_reject` / `ssa_c_extra_reject` as
+   appropriate. Add a regression test asserting
+   `emit_llvm_via_ssa` / `emit_c_via_ssa` output actually reaches
+   the tree backend's symbol name (`intent_<thing>`) and not a
+   `fn_<name>` mangle -- the compile_to_c/compile_to_llvm test
+   suite can't see this layer at all.
+
 ## How to contribute a fix
 
 1. **Find the failing test or symptom**. The test ledger lives
