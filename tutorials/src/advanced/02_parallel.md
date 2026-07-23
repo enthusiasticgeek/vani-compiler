@@ -182,6 +182,31 @@ parallel execution doesn't apply — run the loop body sequentially and
 use DMA for true offload. `parallel for` is a POSIX/Win32 feature;
 use it only when linking against a hosted OS.
 
+## Windows thread-count note
+
+On Linux/macOS, `parallel for`'s worker-thread count is decided
+by libgomp (GNU OpenMP) at **run time**, on whichever machine
+executes the binary — it scales to that machine's actual core
+count automatically, or honors `OMP_NUM_THREADS` if you set it
+before running the binary.
+
+On Windows, the LLVM backend hand-rolls its own `CreateThread`
+dispatch instead of delegating to an OpenMP runtime, and that
+path resolves the thread count once, **at `vanic build`/`vanic
+run` time** — from `OMP_NUM_THREADS` if set at build time, else
+from the *build machine's* core count — and bakes it into the
+binary as a fixed constant. Build on an 8-core Windows laptop,
+copy the binary to a 32-core Windows server, and it still only
+ever spawns 8 worker threads.
+
+**Workaround**: set `OMP_NUM_THREADS` to the *target* machine's
+core count before running `vanic build`, or rebuild on (or for)
+the machine the binary will actually run on. This is a v1
+limitation, not a language guarantee — see
+[L24 in v1_limitations.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md)
+for the fix path (a runtime `GetActiveProcessorCount` call would
+close this the same way `GOMP_parallel` already does on POSIX).
+
 ---
 
 **Previous**: [Sec.2c -- RwLock: shared reads, exclusive writes primer ->](02c_rwlock_primer.md)

@@ -1331,3 +1331,51 @@ overriding every item to `pub`, while still defaulting unannotated items
 to `pub` for backward compatibility with the existing, zero-annotation
 kosh package ecosystem). Phase 2 (same-project sibling-module access) --
 not started, needs the caller-context tracking described above.
+
+### L24 -- `parallel for`'s Windows thread count is fixed at build time, not run time
+
+On Windows, `parallel for`'s worker-thread count is decided by
+the *machine that ran `vanic build`* and baked into the generated
+binary as a constant -- not decided by the machine that later
+runs the binary. Build on an 8-core Windows box, ship the binary
+to a 32-core one, and it still only ever spawns 8 worker threads
+until you rebuild there (or set an env var at build time -- see
+below).
+
+**Where it lives**: `backend_llvm.rs`'s Win32 `parallel for`
+dispatch (`host_uses_win32_threading()`, gated purely on
+`cfg!(target_os = "windows")` -- i.e. the OS the *compiler itself*
+is running on, not a `--target` triple). Thread count `N` is
+resolved once, at codegen time, from `OMP_NUM_THREADS` if that
+env var is set when `vanic build`/`vanic run` executes, else from
+`std::thread::available_parallelism()` -- **read on the build
+host**, then written into the LLVM IR as a literal integer (an
+`alloca [N x {...}]` sized array of per-thread argument structs).
+The comment at the call site is explicit about the tradeoff: this
+was a deliberate choice to avoid an `@getenv` call in the
+generated IR, at the cost of the count no longer being resolvable
+at the eventual run site.
+
+**Why only Windows**: the non-Windows path emits a portable
+`call void @GOMP_parallel(...)` (GNU OpenMP), and libgomp
+resolves its own thread count **at run time** on whichever
+machine executes the binary -- respecting `OMP_NUM_THREADS` at run
+time, or `sysconf(_SC_NPROCESSORS_ONLN)`-style queries otherwise.
+Linux/macOS binaries built with `parallel for` already scale
+correctly to the running machine's core count; only the Win32
+CreateThread-based dispatch path has this gap, because it hand-
+rolls its own thread pool instead of delegating to an OpenMP
+runtime.
+
+**Workaround**: set `OMP_NUM_THREADS` to the *target* machine's
+core count before running `vanic build`, or simply rebuild on the
+machine (or a same-core-count machine) the binary will actually
+run on.
+
+**Fix path**: replace the compile-time-resolved constant with a
+runtime call to a Windows API that returns the live processor
+count -- `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)` (or
+`GetSystemInfo`/`GetNativeSystemInfo` for the simpler, single-
+processor-group case) -- emitted as an LLVM `declare` + `call`,
+mirroring how `GOMP_parallel` is already just an external call on
+the non-Windows path. Not started; scoped but untouched.
