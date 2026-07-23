@@ -57,7 +57,107 @@ fn ssa_llvm_extra_reject(stmt: &TypedStmt) -> bool {
     // LLVM so it falls back to tree-LLVM. Also gates any
     // outer Vec containing Atomic/Channel at any nesting
     // depth.
-    stmt_uses_vec_of_atomic_or_channel(stmt)
+    stmt_uses_vec_of_atomic_or_channel(stmt) || stmt_calls_f64_to_str_fixed(stmt)
+}
+
+/// `f64_to_str_fixed(x, decimals)` (fixed-decimal-place float
+/// formatting) has no implementation in either SSA backend's
+/// builtin dispatch. Both SSA backends' `TypedExprKind::Call`
+/// lowering silently falls back to "assume this is a
+/// user-defined function" for any name it doesn't recognize —
+/// there's no error to catch, so `ssa_path_supports` can't
+/// detect the gap on its own. Gate it out explicitly so
+/// programs using it fall back to the tree backends, which do
+/// implement it (`intent_f64_to_str_fixed` in both
+/// `backend_c.rs` and `backend_llvm.rs`).
+fn stmt_calls_f64_to_str_fixed(stmt: &TypedStmt) -> bool {
+    match stmt {
+        TypedStmt::Let { expr, .. } | TypedStmt::Reassign { expr, .. } => {
+            expr_calls_f64_to_str_fixed(expr)
+        }
+        TypedStmt::Discard { expr }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } => expr_calls_f64_to_str_fixed(expr),
+        TypedStmt::Print { items } => items.iter().any(|i| match i {
+            TypedPrintItem::Expr(e) => expr_calls_f64_to_str_fixed(e),
+            TypedPrintItem::Str(_) => false,
+        }),
+        TypedStmt::If { cond, then_body, else_body } => {
+            expr_calls_f64_to_str_fixed(cond)
+                || then_body.iter().any(stmt_calls_f64_to_str_fixed)
+                || else_body.iter().any(stmt_calls_f64_to_str_fixed)
+        }
+        TypedStmt::While { cond, body, .. } => {
+            expr_calls_f64_to_str_fixed(cond)
+                || body.iter().any(stmt_calls_f64_to_str_fixed)
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            expr_calls_f64_to_str_fixed(start)
+                || expr_calls_f64_to_str_fixed(end)
+                || body.iter().any(stmt_calls_f64_to_str_fixed)
+        }
+        TypedStmt::ForIter { body, .. } => {
+            body.iter().any(stmt_calls_f64_to_str_fixed)
+        }
+        TypedStmt::IndexAssign { index, value, .. } => {
+            expr_calls_f64_to_str_fixed(index) || expr_calls_f64_to_str_fixed(value)
+        }
+        TypedStmt::FieldAssign { object, value, .. } => {
+            expr_calls_f64_to_str_fixed(object) || expr_calls_f64_to_str_fixed(value)
+        }
+        TypedStmt::TaskSpawn { body, .. } => {
+            body.iter().any(stmt_calls_f64_to_str_fixed)
+        }
+        _ => false,
+    }
+}
+
+fn expr_calls_f64_to_str_fixed(expr: &TypedExpr) -> bool {
+    use vani::ir::TypedExprKind as E;
+    if let E::Call { name, args, .. } = &expr.kind {
+        if name == "f64_to_str_fixed" {
+            return true;
+        }
+        return args.iter().any(expr_calls_f64_to_str_fixed);
+    }
+    match &expr.kind {
+        E::Unary { expr, .. } | E::Cast { expr, .. } | E::Len { array: expr, .. } => {
+            expr_calls_f64_to_str_fixed(expr)
+        }
+        E::Binary { left, right, .. } => {
+            expr_calls_f64_to_str_fixed(left) || expr_calls_f64_to_str_fixed(right)
+        }
+        E::ArrayLit { elements } => elements.iter().any(expr_calls_f64_to_str_fixed),
+        E::CallIndirect { callee, args } => {
+            expr_calls_f64_to_str_fixed(callee)
+                || args.iter().any(expr_calls_f64_to_str_fixed)
+        }
+        E::Index { array, index, .. } => {
+            expr_calls_f64_to_str_fixed(array) || expr_calls_f64_to_str_fixed(index)
+        }
+        E::Tuple { elements } => elements.iter().any(expr_calls_f64_to_str_fixed),
+        E::TupleAccess { tuple, .. } => expr_calls_f64_to_str_fixed(tuple),
+        E::StructLit { fields, .. } => {
+            fields.iter().any(|(_, e)| expr_calls_f64_to_str_fixed(e))
+        }
+        E::FieldAccess { object, .. } => expr_calls_f64_to_str_fixed(object),
+        E::EnumVariantWithPayload { payload, .. } => expr_calls_f64_to_str_fixed(payload),
+        E::IfExpr { cond, then_value, else_value } => {
+            expr_calls_f64_to_str_fixed(cond)
+                || expr_calls_f64_to_str_fixed(then_value)
+                || expr_calls_f64_to_str_fixed(else_value)
+        }
+        E::Match { scrutinee, arms } => {
+            expr_calls_f64_to_str_fixed(scrutinee)
+                || arms.iter().any(|arm| expr_calls_f64_to_str_fixed(&arm.body))
+        }
+        E::Block { stmts, tail } => {
+            stmts.iter().any(stmt_calls_f64_to_str_fixed)
+                || expr_calls_f64_to_str_fixed(tail)
+        }
+        _ => false,
+    }
 }
 
 fn ty_contains_vec_of_atomic_or_channel(ty: &Type) -> bool {
@@ -190,8 +290,8 @@ fn stmt_uses_vec_of_atomic_or_channel(stmt: &TypedStmt) -> bool {
 /// helpers). Multi-block task bodies and non-canonical
 /// parallel-for carry shapes still surface `EmitError` →
 /// tree-C fallback.
-fn ssa_c_extra_reject(_stmt: &TypedStmt) -> bool {
-    false
+fn ssa_c_extra_reject(stmt: &TypedStmt) -> bool {
+    stmt_calls_f64_to_str_fixed(stmt)
 }
 
 fn ssa_type_supported(ty: &Type) -> bool {
@@ -3900,5 +4000,48 @@ mod tests {
         let (_, _, _, target, machine) = parse_run_args(&args, 3).unwrap();
         assert_eq!(target.as_deref(), Some("riscv32-unknown-none-elf"));
         assert_eq!(machine.as_deref(), Some("sifive_e"));
+    }
+
+    // Regression test for the bug this gate exists to prevent:
+    // neither SSA backend recognizes `f64_to_str_fixed`, and
+    // their `TypedExprKind::Call` lowering has no error path for
+    // an unrecognized builtin name — it silently assumes "must
+    // be a user function" and mangles the callee to `fn_<name>`,
+    // producing a program that fails at LLVM-verify / link time
+    // (undefined symbol) instead of at compile time. Without the
+    // `ssa_*_extra_reject` gate below, `vanic run` / `vanic build`
+    // (which prefer the SSA path) would silently emit that broken
+    // call; only `compile_to_c` / `compile_to_llvm` (used by the
+    // lib.rs test suite, which call the tree backends directly)
+    // would catch it. Asserts both CLI-facing paths route through
+    // the tree backends instead, which do implement it.
+    #[test]
+    fn f64_to_str_fixed_falls_back_to_tree_backends_from_ssa_dispatch() {
+        let source = r#"
+            fn main() -> i64 {
+              let s: OwnedStr = f64_to_str_fixed(3.14159, 2);
+              print s;
+              return 0;
+            }
+        "#;
+        let checked = vani::compile(source).expect("f64_to_str_fixed must type-check");
+
+        let ll = emit_llvm_via_ssa(&checked.ir);
+        assert!(
+            ll.contains("call i8* @intent_f64_to_str_fixed("),
+            "SSA-LLVM dispatch must fall back to tree-LLVM's intent_f64_to_str_fixed, got:\n{}",
+            ll
+        );
+        assert!(
+            !ll.contains("@fn_f64_to_str_fixed"),
+            "must not silently mangle f64_to_str_fixed as a user function call"
+        );
+
+        let c = emit_c_via_ssa(&checked.ir);
+        assert!(
+            c.contains("intent_f64_to_str_fixed("),
+            "SSA-C dispatch must fall back to tree-C's intent_f64_to_str_fixed, got:\n{}",
+            c
+        );
     }
 }

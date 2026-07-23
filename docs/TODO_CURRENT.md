@@ -154,6 +154,87 @@ workarounds, and the exact design goal for each.
   parse_match_arms_block refactor; SOV match at stmt pos → helpful error;
   wired in top-level + module-body dispatchers; 3 new lib tests pass)
 
+- [ ] **27. Inline `print`-item format specs (Rust `{:03}` / `{:.2}` syntax)** —
+  `print` currently takes a flat comma-separated list of string-literal-or-expr
+  items (`parser.rs::parse_print_item`, `PrintItem::{Str,Expr}`) — there's no
+  template-string / placeholder mini-language. `f64_to_str_fixed(x, decimals)`
+  (item 26.1 below) plus `str_pad_left(i64_to_str(n), w, "0")` already cover the
+  *capability* (fixed-decimal floats, zero-padded ints) as ordinary function
+  calls; this item is specifically about adding literal `{:03}`-shaped syntax
+  at a print call site, e.g. `print x:03;` or a template-string form.
+  **Scope, if picked up**: `PrintItem`/`TypedPrintItem` has 132 match sites
+  across 13 files (parser.rs, checker.rs, ssa.rs, backend_c.rs, backend_llvm.rs,
+  lsp.rs, safety.rs, stack_depth.rs, deviations.rs, format.rs, hashmap_bundle.rs,
+  main.rs, lib.rs) — adding a format-spec field touches most of them
+  non-mechanically (effects/purity checking, `vanic fmt` pretty-printing, LSP
+  hover, codegen in both C and LLVM backends). The formatting codegen itself is
+  easy once the plumbing exists (a compile-time-constant width/precision is
+  just a computed `"%03lld"` snprintf format string, same trick already used
+  for `%llu`/`%g`) — nearly all the cost is parser/AST/multi-pass plumbing, not
+  runtime logic. Multi-day effort, not a quick add.
+  **Design question to settle first**: this would be the first "magic syntax
+  inside/beside a print item" feature in the language — worth a deliberate
+  decision (does it fit vāṇी's explicit-over-implicit posture, e.g. mandatory
+  `unsafe(reason=...)`, no operator-overloading magic?) rather than adding it
+  as a side effect of wanting decimal padding, which the cheap path already
+  solves. Gate on: is there real demand for the syntax itself, not just the
+  formatting capability.
+
+  **27.1 (done 2026-07-23)**: `f64_to_str_fixed(x, decimals) -> OwnedStr` —
+  the cheap half of this ask, shipped as an ordinary builtin. Checker
+  (`check_str_builtin`), both tree backends (`intent_f64_to_str_fixed` via
+  two-pass `snprintf(NULL,0,...)` + malloc, in both `backend_c.rs` and
+  `backend_llvm.rs`), 4 tests (typecheck+compile, helper-emission, wrong-arity
+  reject, both in `lib.rs`). **Non-obvious gotcha found + fixed**: `vanic
+  run`/`vanic build` don't call the tree backends directly — `main.rs`'s
+  `emit_llvm_via_ssa`/`emit_c_via_ssa` try the SSA pipeline
+  (`ssa_backend_llvm.rs`/`ssa_backend_c.rs`) first, and neither SSA backend's
+  `Call` lowering has an error path for an unrecognized builtin name — it
+  silently assumes "must be a user function" and mangles the callee to
+  `fn_f64_to_str_fixed`, producing a program that fails at LLVM-verify/link
+  time (undefined symbol) instead of at compile time. The existing
+  `lib.rs` test suite (`compile_to_c`/`compile_to_llvm`) calls the tree
+  backends directly and wouldn't have caught this. Fixed by adding
+  `stmt_calls_f64_to_str_fixed`/`expr_calls_f64_to_str_fixed` (exhaustive
+  `TypedStmt`/`TypedExpr` walkers, `main.rs`) and wiring them into both
+  `ssa_llvm_extra_reject` and `ssa_c_extra_reject` so programs using this
+  builtin fall back to the tree backends (which do implement it) — the same
+  established pattern already used for payloaded enums / `Vec<Atomic|Channel>`.
+  Added a dedicated regression test
+  (`f64_to_str_fixed_falls_back_to_tree_backends_from_ssa_dispatch` in
+  `main.rs`) asserting `emit_llvm_via_ssa`/`emit_c_via_ssa` output actually
+  contains `intent_f64_to_str_fixed`, not `fn_f64_to_str_fixed` — this is the
+  only test in the suite that exercises the SSA-dispatch layer for this
+  builtin; **any future SSA-LLVM/SSA-C work that adds real support for this
+  builtin should keep (or replace with an equivalent) that assertion**, since
+  removing the reject-gate without adding real SSA support would silently
+  reintroduce the bug. Verified end-to-end on both backends via `vanic run`
+  and `vanic emit --backend=c` + `cc`. Documented in
+  `tutorials/src/beginner/06_strings.md`'s string-builtins table.
+
+  **Known caveats** (documented in the tutorial, recorded here for
+  anyone touching this builtin later):
+  - **Whole-program SSA fallback, not per-function.** `ssa_path_supports`
+    gates the *entire* `TypedProgram` on one boolean — one function
+    anywhere in the program calling `f64_to_str_fixed` forces
+    `emit_llvm_via_ssa`/`emit_c_via_ssa` to tree-codegen the whole file,
+    not just that function. Same blast radius as the existing payloaded-enum
+    and `Vec<Atomic|Channel>` gates; output is correct either way, but
+    worth knowing if you're diffing generated C/LLVM output and a program
+    unexpectedly looks tree-shaped.
+  - **NaN/Infinity spelling is toolchain-dependent.** Verified on this
+    machine (MinGW/MSVCRT): `f64_to_str_fixed(f64_nan(), 2)` → `"1.#R"`,
+    `f64_to_str_fixed(f64_inf(), 2)` → `"1.#J"` — legacy MSVCRT strings,
+    not C99 `"nan"`/`"inf"`. Confirmed this is inherited from `snprintf`
+    itself and not new: `f64_to_str(f64_nan())` already gives
+    `"1.#QNAN"` on the same toolchain, so this isn't a regression, just
+    something to be aware of before writing a test that asserts an exact
+    NaN/Inf string.
+  - **Rounding ties away from zero** (`f64_to_str_fixed(0.125, 2)` →
+    `"0.13"`), standard C `printf` behavior but not guaranteed to match
+    Rust's `{:.2}` bit-for-bit at every halfway case (Rust's formatter
+    doesn't call into libc).
+
 ---
 
 ---

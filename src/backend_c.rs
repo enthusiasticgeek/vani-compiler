@@ -8420,6 +8420,17 @@ pub(crate) fn emit_intent_i64_to_str_c(out: &mut String) {
          \x20 out[n] = 0;\n\
          \x20 return out;\n\
          }\n\
+         static char* intent_f64_to_str_fixed(double x, int64_t decimals) INTENT_UNUSED;\n\
+         static char* intent_f64_to_str_fixed(double x, int64_t decimals) {\n\
+         \x20 int prec = (decimals < 0) ? 0 : (int)decimals;\n\
+         \x20 int n = snprintf(NULL, 0, \"%.*f\", prec, x);\n\
+         \x20 if (n < 0) abort();\n\
+         \x20 char* out = (char*)malloc((size_t)n + 1);\n\
+         \x20 if (!out) abort();\n\
+         \x20 int n2 = snprintf(out, (size_t)n + 1, \"%.*f\", prec, x);\n\
+         \x20 if (n2 < 0) abort();\n\
+         \x20 return out;\n\
+         }\n\
          static char* intent_bool_to_str(bool b) INTENT_UNUSED;\n\
          static char* intent_bool_to_str(bool b) {\n\
          \x20 const char* src = b ? \"true\" : \"false\";\n\
@@ -16275,6 +16286,11 @@ fn emit_call(name: &str, args: &[TypedExpr], result_ty: &Type) -> String {
         "f64_to_str" => format!(
             "intent_f64_to_str(({}))",
             emit_expr(&args[0])
+        ),
+        "f64_to_str_fixed" => format!(
+            "intent_f64_to_str_fixed(({}), ({}))",
+            emit_expr(&args[0]),
+            emit_expr(&args[1])
         ),
         "bool_to_str" => format!(
             "intent_bool_to_str(({}))",

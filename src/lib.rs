@@ -17508,6 +17508,62 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn f64_to_str_fixed_typecheck_and_compile() {
+        // f64_to_str_fixed(x, decimals) -> OwnedStr — the Rust
+        // `{:.N}` / C `printf("%.*f", ...)` equivalent, unlike
+        // f64_to_str's trailing-zero-stripping "%g".
+        let source = r#"
+            fn main() -> i64 {
+              let s: OwnedStr = f64_to_str_fixed(3.14159, 2);
+              let z: OwnedStr = f64_to_str_fixed(0.0, 2);
+              let neg: OwnedStr = f64_to_str_fixed(0.0 - 2.5, 3);
+              let combined: OwnedStr = "pi=" + f64_to_str_fixed(3.14159, 4);
+              return 0;
+            }
+        "#;
+        compile_to_c(source).expect("f64_to_str_fixed must type-check");
+        compile_to_llvm(source).expect("f64_to_str_fixed must compile to LLVM");
+    }
+
+    #[test]
+    fn f64_to_str_fixed_emits_helper_in_both_backends() {
+        let source = r#"
+            fn main() -> i64 {
+              let s: OwnedStr = f64_to_str_fixed(0.0, 2);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("f64_to_str_fixed C");
+        assert!(
+            c.contains("intent_f64_to_str_fixed") && c.contains("snprintf"),
+            "C output must include the intent_f64_to_str_fixed helper"
+        );
+        let ll = compile_to_llvm(source).expect("f64_to_str_fixed LLVM");
+        assert!(
+            ll.contains("define i8* @intent_f64_to_str_fixed(double %x, i64 %decimals)")
+                && ll.contains("@.fmt.starf")
+                && ll.contains("@snprintf("),
+            "LLVM output must include the f64_to_str_fixed define + %.*f format + snprintf"
+        );
+    }
+
+    #[test]
+    fn f64_to_str_fixed_wrong_arity_rejected() {
+        let source = r#"
+            fn main() -> i64 {
+              let s: OwnedStr = f64_to_str_fixed(3.14);
+              return 0;
+            }
+        "#;
+        let err = compile_to_c(source).expect_err("f64_to_str_fixed with 1 arg must be rejected");
+        assert!(
+            err.iter().any(|d| d.message.contains("f64_to_str_fixed() expects 2 arguments")),
+            "diagnostic must name the arity mismatch: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn option_f64_ergonomics_typecheck_and_compile() {
         // Closure #360: option_unwrap_or_f64 / option_is_some_f64
         // / option_is_none_f64 — parallels the #357 i64 triad on

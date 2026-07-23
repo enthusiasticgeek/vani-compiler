@@ -281,12 +281,48 @@ vāṇी ships a rich set of string builtins.
 | `str_lines(s)` | `Str -> Vec<OwnedStr>` | split on newlines |
 | `parse_int(s)` | `Str -> Option<i64>` | parse decimal integer |
 | `i64_to_str(n)` | `i64 -> OwnedStr` | integer to string |
-| `f64_to_str(n)` | `f64 -> OwnedStr` | float to string |
+| `f64_to_str(n)` | `f64 -> OwnedStr` | float to string, compact (`%g`) -- trailing zeros stripped |
+| `f64_to_str_fixed(n, decimals)` | `f64, i64 -> OwnedStr` | float to string with exactly `decimals` digits after the point, zero-padded -- the Rust `{:.N}` / C `printf("%.*f", ...)` equivalent |
 | `bool_to_str(b)` | `bool -> OwnedStr` | `"true"` or `"false"` |
 
 All builtins that return `OwnedStr` allocate a new heap buffer.
 All builtins accept either `Str` or `OwnedStr` as input (the
 `OwnedStr` auto-coercion handles it).
+
+`f64_to_str` vs. `f64_to_str_fixed`: `f64_to_str(3.1)` gives
+`"3.1"` (compact, no trailing zeros); `f64_to_str_fixed(3.1, 2)`
+gives `"3.10"` (always exactly 2 digits after the point, even if
+that means padding with zeros). Reach for `f64_to_str_fixed`
+whenever the output needs a *fixed* number of decimal places --
+currency, fixed-width tables, anything a human will compare
+column-by-column. Negative `decimals` is clamped to 0.
+Combined with `str_pad_left(i64_to_str(n), width, "0")` for
+integers, this covers the same ground as Rust's `{:.N}` / `{:0N}`
+format specifiers -- as ordinary function calls rather than a
+`{}` mini-language, since `print` has no format-string syntax of
+its own (a comma-separated list of items, each printed as-is).
+
+**Caveats for `f64_to_str_fixed`**:
+
+- **NaN / Infinity spelling is platform-dependent.** Like
+  `f64_to_str`, it just calls the local C library's `snprintf`,
+  so it inherits whatever that library prints for non-finite
+  values. On a Windows build linked against the legacy MSVCRT
+  runtime, `f64_to_str_fixed(f64_nan(), 2)` prints `"1.#R"` and
+  `f64_to_str_fixed(f64_inf(), 2)` prints `"1.#J"` -- not the
+  C99 `"nan"` / `"inf"` you'd get on Linux/macOS (glibc) or a
+  UCRT-linked Windows build. Don't pattern-match on a specific
+  spelling; check `f64_is_nan(x)` / `f64_is_finite(x)` first if
+  you need to handle these cases.
+- **Rounding ties away from zero, not to even.**
+  `f64_to_str_fixed(0.125, 2)` gives `"0.13"`, not the
+  banker's-rounding `"0.12"` -- standard C `printf("%.*f", ...)`
+  behavior, but not guaranteed bit-identical to Rust's `{:.2}`
+  at every halfway case, since Rust's float formatter doesn't
+  go through the C library at all.
+- **Decimal separator is always `.`**, regardless of OS locale
+  (no locale-aware formatting, matching every other vāṇी
+  numeric builtin).
 
 Quick example:
 

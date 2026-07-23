@@ -1188,6 +1188,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("@.fmt.lld = private constant [5 x i8] c\"%lld\\00\"\n");
     out.push_str("@.fmt.llu = private constant [5 x i8] c\"%llu\\00\"\n");
     out.push_str("@.fmt.g = private constant [3 x i8] c\"%g\\00\"\n");
+    out.push_str("@.fmt.starf = private constant [5 x i8] c\"%.*f\\00\"\n");
     out.push_str("@.fmt.s = private constant [3 x i8] c\"%s\\00\"\n");
     // Single-char printf format; used by the print-statement lowering
     // on Windows where printf and putchar write to separate CRT buffers
@@ -6934,6 +6935,17 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!(
                     "  {} = call i8* @intent_f64_to_str(double {})\n",
                     dest, x
+                ));
+                return dest;
+            }
+            // f64_to_str_fixed(x, decimals) -> OwnedStr.
+            if name == "f64_to_str_fixed" {
+                let x = emit_expr(&args[0], ctx, out);
+                let d = emit_expr(&args[1], ctx, out);
+                let dest = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i8* @intent_f64_to_str_fixed(double {}, i64 {})\n",
+                    dest, x, d
                 ));
                 return dest;
             }
@@ -17759,6 +17771,25 @@ pub(crate) fn emit_intent_i64_to_str_definition(out: &mut String) {
     out.push_str("  %fts_nul_p = getelementptr i8, i8* %fts_out, i64 %fts_n_safe\n");
     out.push_str("  store i8 0, i8* %fts_nul_p\n");
     out.push_str("  ret i8* %fts_out\n");
+    out.push_str("}\n\n");
+
+    // f64_to_str_fixed(x, decimals) via snprintf "%.*f". Two-pass:
+    // probe with a NULL buffer to get the exact required length
+    // (negative `decimals` is clamped to 0 first), then malloc and
+    // format for real. Unlike intent_f64_to_str this can't use a
+    // fixed-size stack buffer -- an arbitrary `decimals` can demand
+    // an arbitrarily long string.
+    out.push_str("define i8* @intent_f64_to_str_fixed(double %x, i64 %decimals) {\n");
+    out.push_str("  %ftsf_neg = icmp slt i64 %decimals, 0\n");
+    out.push_str("  %ftsf_prec64 = select i1 %ftsf_neg, i64 0, i64 %decimals\n");
+    out.push_str("  %ftsf_prec = trunc i64 %ftsf_prec64 to i32\n");
+    out.push_str("  %ftsf_fmt = getelementptr [5 x i8], [5 x i8]* @.fmt.starf, i64 0, i64 0\n");
+    out.push_str("  %ftsf_n = call i32 (i8*, i64, i8*, ...) @snprintf(i8* null, i64 0, i8* %ftsf_fmt, i32 %ftsf_prec, double %x)\n");
+    out.push_str("  %ftsf_n64 = sext i32 %ftsf_n to i64\n");
+    out.push_str("  %ftsf_total = add i64 %ftsf_n64, 1\n");
+    out.push_str("  %ftsf_out = call i8* @malloc(i64 %ftsf_total)\n");
+    out.push_str("  %ftsf_n2 = call i32 (i8*, i64, i8*, ...) @snprintf(i8* %ftsf_out, i64 %ftsf_total, i8* %ftsf_fmt, i32 %ftsf_prec, double %x)\n");
+    out.push_str("  ret i8* %ftsf_out\n");
     out.push_str("}\n\n");
 }
 

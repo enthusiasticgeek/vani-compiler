@@ -55,7 +55,10 @@ const BUILTIN_FUNCTION_NAMES: &[&str] =
     "simd256_splat", "simd256_load", "simd256_store",
     "simd256_add", "simd256_sub", "simd256_mul", "simd256_reduce_add",
     "simd512_splat", "simd512_load", "simd512_store",
-    "simd512_add", "simd512_sub", "simd512_mul", "simd512_reduce_add"];
+    "simd512_add", "simd512_sub", "simd512_mul", "simd512_reduce_add",
+    // f64_to_str_fixed(x, decimals) -> OwnedStr: fixed-decimal-place
+    // float formatting, the Rust {:.N} / C printf "%.*f" equivalent.
+    "f64_to_str_fixed"];
 
 #[derive(Clone, Debug)]
 struct Env {
@@ -19976,6 +19979,7 @@ fn check_call(
         | "parse_float"
         | "i64_to_str"
         | "f64_to_str"
+        | "f64_to_str_fixed"
         | "bool_to_str"
         | "str_index_of"
         | "substring"
@@ -30092,6 +30096,40 @@ fn check_str_builtin(
                 name: name.to_string(),
                 name_span: span,
                 args: vec![coerced.expr],
+            },
+            Type::OwnedStr,
+            None,
+            span,
+        );
+    }
+    // f64_to_str_fixed(x, decimals) -> OwnedStr. Same shape as
+    // f64_round_to's (f64, i64) argument pair, but formats to a
+    // string with exactly `decimals` digits after the point
+    // (zero-padded), unlike f64_to_str's trailing-zero-stripping
+    // "%g". Negative `decimals` is clamped to 0 at runtime.
+    if name == "f64_to_str_fixed" {
+        if args.len() != 2 {
+            diagnostics.push(Diagnostic::new(
+                span,
+                format!("f64_to_str_fixed() expects 2 arguments, got {}", args.len()),
+            ).with_elaboration(crate::diagnostic_elaborations::wrong_arity(2, args.len())));
+            return CheckedExpr::fallback(Type::OwnedStr, span);
+        }
+        let x_raw = check_expr(&args[0], env, signatures, diagnostics);
+        let x = coerce_checked(
+            x_raw, &Type::F64, args[0].span,
+            "f64_to_str_fixed `x` argument", diagnostics,
+        );
+        let d_raw = check_expr(&args[1], env, signatures, diagnostics);
+        let d = coerce_checked(
+            d_raw, &Type::I64, args[1].span,
+            "f64_to_str_fixed `decimals` argument", diagnostics,
+        );
+        return CheckedExpr::new(
+            TypedExprKind::Call {
+                name: "f64_to_str_fixed".to_string(),
+                name_span: span,
+                args: vec![x.expr, d.expr],
             },
             Type::OwnedStr,
             None,
