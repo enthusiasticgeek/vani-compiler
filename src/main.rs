@@ -57,7 +57,9 @@ fn ssa_llvm_extra_reject(stmt: &TypedStmt) -> bool {
     // LLVM so it falls back to tree-LLVM. Also gates any
     // outer Vec containing Atomic/Channel at any nesting
     // depth.
-    stmt_uses_vec_of_atomic_or_channel(stmt) || stmt_calls_f64_to_str_fixed(stmt)
+    stmt_uses_vec_of_atomic_or_channel(stmt)
+        || stmt_calls_f64_to_str_fixed(stmt)
+        || stmt_calls_file_line_read(stmt)
 }
 
 /// `f64_to_str_fixed(x, decimals)` (fixed-decimal-place float
@@ -155,6 +157,107 @@ fn expr_calls_f64_to_str_fixed(expr: &TypedExpr) -> bool {
         E::Block { stmts, tail } => {
             stmts.iter().any(stmt_calls_f64_to_str_fixed)
                 || expr_calls_f64_to_str_fixed(tail)
+        }
+        _ => false,
+    }
+}
+
+/// BUG-1 (found publishing vani-bignum's downstream work,
+/// 2026-07-24): `file_read_line`/`stdin_read_line` have no
+/// implementation in the SSA-LLVM backend's builtin dispatch
+/// either — same silent "assume this is a user-defined function"
+/// fallback as `f64_to_str_fixed` (see `stmt_calls_f64_to_str_fixed`
+/// above), which mangles the call to `@fn_file_read_line` /
+/// `@fn_stdin_read_line` and fails at link time instead of at
+/// compile time. Gate these out so programs using them fall back to
+/// the tree-LLVM backend, which now implements them directly
+/// (`@intent_file_read_line`/`@intent_stdin_read_line`, see
+/// `backend_llvm.rs`'s preamble emission).
+fn stmt_calls_file_line_read(stmt: &TypedStmt) -> bool {
+    match stmt {
+        TypedStmt::Let { expr, .. } | TypedStmt::Reassign { expr, .. } => {
+            expr_calls_file_line_read(expr)
+        }
+        TypedStmt::Discard { expr }
+        | TypedStmt::Return { expr }
+        | TypedStmt::Assert { expr, .. }
+        | TypedStmt::Prove { expr } => expr_calls_file_line_read(expr),
+        TypedStmt::Print { items } => items.iter().any(|i| match i {
+            TypedPrintItem::Expr(e) => expr_calls_file_line_read(e),
+            TypedPrintItem::Str(_) => false,
+        }),
+        TypedStmt::If { cond, then_body, else_body } => {
+            expr_calls_file_line_read(cond)
+                || then_body.iter().any(stmt_calls_file_line_read)
+                || else_body.iter().any(stmt_calls_file_line_read)
+        }
+        TypedStmt::While { cond, body, .. } => {
+            expr_calls_file_line_read(cond)
+                || body.iter().any(stmt_calls_file_line_read)
+        }
+        TypedStmt::For { start, end, body, .. } => {
+            expr_calls_file_line_read(start)
+                || expr_calls_file_line_read(end)
+                || body.iter().any(stmt_calls_file_line_read)
+        }
+        TypedStmt::ForIter { body, .. } => {
+            body.iter().any(stmt_calls_file_line_read)
+        }
+        TypedStmt::IndexAssign { index, value, .. } => {
+            expr_calls_file_line_read(index) || expr_calls_file_line_read(value)
+        }
+        TypedStmt::FieldAssign { object, value, .. } => {
+            expr_calls_file_line_read(object) || expr_calls_file_line_read(value)
+        }
+        TypedStmt::TaskSpawn { body, .. } => {
+            body.iter().any(stmt_calls_file_line_read)
+        }
+        _ => false,
+    }
+}
+
+fn expr_calls_file_line_read(expr: &TypedExpr) -> bool {
+    use vani::ir::TypedExprKind as E;
+    if let E::Call { name, args, .. } = &expr.kind {
+        if name == "file_read_line" || name == "stdin_read_line" {
+            return true;
+        }
+        return args.iter().any(expr_calls_file_line_read);
+    }
+    match &expr.kind {
+        E::Unary { expr, .. } | E::Cast { expr, .. } | E::Len { array: expr, .. } => {
+            expr_calls_file_line_read(expr)
+        }
+        E::Binary { left, right, .. } => {
+            expr_calls_file_line_read(left) || expr_calls_file_line_read(right)
+        }
+        E::ArrayLit { elements } => elements.iter().any(expr_calls_file_line_read),
+        E::CallIndirect { callee, args } => {
+            expr_calls_file_line_read(callee)
+                || args.iter().any(expr_calls_file_line_read)
+        }
+        E::Index { array, index, .. } => {
+            expr_calls_file_line_read(array) || expr_calls_file_line_read(index)
+        }
+        E::Tuple { elements } => elements.iter().any(expr_calls_file_line_read),
+        E::TupleAccess { tuple, .. } => expr_calls_file_line_read(tuple),
+        E::StructLit { fields, .. } => {
+            fields.iter().any(|(_, e)| expr_calls_file_line_read(e))
+        }
+        E::FieldAccess { object, .. } => expr_calls_file_line_read(object),
+        E::EnumVariantWithPayload { payload, .. } => expr_calls_file_line_read(payload),
+        E::IfExpr { cond, then_value, else_value } => {
+            expr_calls_file_line_read(cond)
+                || expr_calls_file_line_read(then_value)
+                || expr_calls_file_line_read(else_value)
+        }
+        E::Match { scrutinee, arms } => {
+            expr_calls_file_line_read(scrutinee)
+                || arms.iter().any(|arm| expr_calls_file_line_read(&arm.body))
+        }
+        E::Block { stmts, tail } => {
+            stmts.iter().any(stmt_calls_file_line_read)
+                || expr_calls_file_line_read(tail)
         }
         _ => false,
     }
@@ -291,7 +394,13 @@ fn stmt_uses_vec_of_atomic_or_channel(stmt: &TypedStmt) -> bool {
 /// parallel-for carry shapes still surface `EmitError` →
 /// tree-C fallback.
 fn ssa_c_extra_reject(stmt: &TypedStmt) -> bool {
-    stmt_calls_f64_to_str_fixed(stmt)
+    // Same gap as SSA-LLVM (see `ssa_llvm_extra_reject` /
+    // `stmt_calls_file_line_read`) -- SSA-C's builtin dispatch
+    // doesn't implement `file_read_line`/`stdin_read_line` either,
+    // so it silently mangles the call to a user-fn symbol instead
+    // of erroring. Fall back to tree-C, which has always implemented
+    // these correctly.
+    stmt_calls_f64_to_str_fixed(stmt) || stmt_calls_file_line_read(stmt)
 }
 
 fn ssa_type_supported(ty: &Type) -> bool {
@@ -4098,6 +4207,42 @@ mod tests {
         assert!(
             c.contains("intent_f64_to_str_fixed("),
             "SSA-C dispatch must fall back to tree-C's intent_f64_to_str_fixed, got:\n{}",
+            c
+        );
+    }
+
+    // BUG-1 regression test: same class of gap as the f64_to_str_fixed
+    // one above, for `stdin_read_line`/`file_read_line`. Without the
+    // `stmt_calls_file_line_read` gate, `vanic run`/`vanic build` would
+    // silently mangle `stdin_read_line()` to `@fn_stdin_read_line` /
+    // `fn_stdin_read_line` via the SSA path's "assume user function"
+    // fallback, failing at link time instead of compile time.
+    #[test]
+    fn stdin_read_line_falls_back_to_tree_backends_from_ssa_dispatch() {
+        let source = r#"
+            fn main() -> i64 {
+              let s: OwnedStr = stdin_read_line();
+              print s;
+              return 0;
+            }
+        "#;
+        let checked = vani::compile(source).expect("stdin_read_line must type-check");
+
+        let ll = emit_llvm_via_ssa(&checked.ir);
+        assert!(
+            ll.contains("call i8* @intent_stdin_read_line("),
+            "SSA-LLVM dispatch must fall back to tree-LLVM's intent_stdin_read_line, got:\n{}",
+            ll
+        );
+        assert!(
+            !ll.contains("@fn_stdin_read_line"),
+            "must not silently mangle stdin_read_line as a user function call"
+        );
+
+        let c = emit_c_via_ssa(&checked.ir);
+        assert!(
+            c.contains("intent_stdin_read_line("),
+            "SSA-C dispatch must fall back to tree-C's intent_stdin_read_line, got:\n{}",
             c
         );
     }

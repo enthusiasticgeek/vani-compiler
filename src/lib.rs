@@ -9154,6 +9154,58 @@ mod tests {
     }
 
     #[test]
+    fn implement_block_accepts_attributed_method() {
+        // BUG-4 (found publishing vani-bignum, 2026-07-24): `implement`
+        // bodies had no dispatch branch for `#[attr]`-prefixed methods
+        // at all -- the same gap Phase 3 of the kosh namespacing arc
+        // already fixed for `module` bodies. `#[bounded_stack(...)]`
+        // above a method inside `implement Eq for T { }` used to be a
+        // parse error ("expected 'fn'") even though `vanic audit-safety`
+        // correctly computed the budget for it.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            interface Eq { fn eq(self: Point, other: Point) -> bool; }
+            implement Eq for Point {
+              #[bounded_stack(bytes = 99)]
+              fn eq(self: Point, other: Point) -> bool {
+                if self.x != other.x { return false; }
+                if self.y != other.y { return false; }
+                return true;
+              }
+            }
+            fn main() -> i64 {
+              let a: Point = Point { x: 1, y: 2 };
+              let b: Point = Point { x: 1, y: 2 };
+              assert a == b;
+              return 0;
+            }
+        "#;
+        compile(source).expect("attributed method inside `implement` block should parse and compile");
+    }
+
+    #[test]
+    fn methods_on_block_accepts_attributed_method() {
+        // Same shape gap as BUG-4, found while fixing it: `methods on
+        // Type { }` bodies (inherent methods, distinct from `implement`)
+        // had the identical missing `#[attr]` dispatch branch.
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            methods on Point {
+              #[bounded_stack(bytes = 72)]
+              fn sum(self: Point) -> i64 {
+                return self.x + self.y;
+              }
+            }
+            fn main() -> i64 {
+              let a: Point = Point { x: 1, y: 2 };
+              assert a.sum() == 3;
+              return 0;
+            }
+        "#;
+        compile(source).expect("attributed method inside `methods on` block should parse and compile");
+    }
+
+    #[test]
     fn struct_drop_reverse_field_order() {
         // T1.2 phase 2b polish: heap-shaped fields are freed
         // in reverse declaration order so destruction mirrors

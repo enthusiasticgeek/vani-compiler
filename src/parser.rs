@@ -740,7 +740,14 @@ impl Parser {
         self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
         let mut methods = Vec::new();
         while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
-            methods.push(self.parse_function()?);
+            // Same `#[attr]`-prefixed-method gap as `implement` blocks
+            // (BUG-4) -- `methods on Type { }` bodies had the identical
+            // shape, found while fixing that bug.
+            if self.check(|k| matches!(k, TokenKind::Hash)) {
+                methods.push(self.parse_attributed_fn()?);
+            } else {
+                methods.push(self.parse_function()?);
+            }
         }
         let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
         Ok(MethodsBlock {
@@ -932,7 +939,17 @@ impl Parser {
         self.expect_keyword("'{'", |k| matches!(k, TokenKind::LBrace))?;
         let mut methods = Vec::new();
         while !self.check(|k| matches!(k, TokenKind::RBrace | TokenKind::Eof)) {
-            methods.push(self.parse_function()?);
+            // BUG-4 fix: `implement` bodies previously had no dispatch
+            // branch for `#[attr]`-prefixed methods at all, the same gap
+            // Phase 3 of the kosh namespacing arc already fixed for
+            // `module` bodies (see the `TokenKind::Hash` branch in
+            // `parse_module_decl` above). Reuses the same
+            // `parse_attributed_fn` top-level items use.
+            if self.check(|k| matches!(k, TokenKind::Hash)) {
+                methods.push(self.parse_attributed_fn()?);
+            } else {
+                methods.push(self.parse_function()?);
+            }
         }
         let close = self.expect_keyword("'}'", |k| matches!(k, TokenKind::RBrace))?;
         // Remove blanket type params from scope after impl block.

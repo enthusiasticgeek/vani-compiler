@@ -834,7 +834,145 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     out.push_str("declare i32 @fputs(i8*, i8*)\n");
     out.push_str("declare i32 @fflush(i8*)\n");
     out.push_str("declare i32 @fgetc(i8*)\n");
+    out.push_str("declare i32 @getchar()\n");
     out.push_str("declare i32 @setvbuf(i8*, i8*, i32, i64)\n");
+    // BUG-1 fix: `file_read_line`/`stdin_read_line` call sites (below,
+    // `name == "file_read_line"` / `"stdin_read_line"`) emit
+    // `call i8* @intent_file_read_line(...)` / `@intent_stdin_read_line()`,
+    // but neither ever had a `declare` or a definition reachable from
+    // the LLVM path -- the C backend's own self-contained, unrelated
+    // same-named helper worked fine, but `lli`/`llc` had nothing to
+    // resolve `@intent_file_read_line` against, failing every program
+    // that used file/stdin line reading under the default LLVM backend
+    // (`vanic run`/`vanic build`/`vanic test`). Defined directly here as
+    // ordinary LLVM IR functions built from already-declared libc
+    // externs (malloc/realloc/free/fgetc/getchar) -- same "inline
+    // instead of adding a custom runtime symbol" approach IO-1 used for
+    // `file_open`'s `setvbuf` call, avoiding needing separate
+    // JIT-vs-AOT-vs-cross-compile linkage for a new `.c` runtime symbol.
+    // `intent_stdin_read_line` uses `getchar()` directly rather than
+    // routing through a `stdin` FILE* (obtaining a portable `stdin`
+    // pointer from raw LLVM IR is itself platform-specific -- glibc vs.
+    // MSVCRT disagree on the symbol/calling convention -- `getchar()` is
+    // ordinary libc and sidesteps that entirely). Unconditionally
+    // emitted (like the Windows `@snprintf`/`@dprintf` shims above) --
+    // small, and simpler than threading a "does this program call these"
+    // gate through the one-pass preamble-then-bodies emission order.
+    out.push_str("define i8* @intent_file_read_line(i8* %_ifrl_f) {\n");
+    out.push_str("  %_ifrl_fnull = icmp eq i8* %_ifrl_f, null\n");
+    out.push_str("  br i1 %_ifrl_fnull, label %_ifrl_nullret, label %_ifrl_init\n");
+    out.push_str("_ifrl_nullret:\n");
+    out.push_str("  %_ifrl_e0 = call i8* @malloc(i64 1)\n");
+    out.push_str("  store i8 0, i8* %_ifrl_e0\n");
+    out.push_str("  ret i8* %_ifrl_e0\n");
+    out.push_str("_ifrl_init:\n");
+    out.push_str("  %_ifrl_cap0 = alloca i64\n");
+    out.push_str("  store i64 256, i64* %_ifrl_cap0\n");
+    out.push_str("  %_ifrl_len0 = alloca i64\n");
+    out.push_str("  store i64 0, i64* %_ifrl_len0\n");
+    out.push_str("  %_ifrl_bufp = alloca i8*\n");
+    out.push_str("  %_ifrl_buf0 = call i8* @malloc(i64 256)\n");
+    out.push_str("  store i8* %_ifrl_buf0, i8** %_ifrl_bufp\n");
+    out.push_str("  br label %_ifrl_loop\n");
+    out.push_str("_ifrl_loop:\n");
+    out.push_str("  %_ifrl_c = call i32 @fgetc(i8* %_ifrl_f)\n");
+    out.push_str("  %_ifrl_iseof = icmp eq i32 %_ifrl_c, -1\n");
+    out.push_str("  %_ifrl_isnl = icmp eq i32 %_ifrl_c, 10\n");
+    out.push_str("  %_ifrl_stop = or i1 %_ifrl_iseof, %_ifrl_isnl\n");
+    out.push_str("  br i1 %_ifrl_stop, label %_ifrl_done, label %_ifrl_grow_check\n");
+    out.push_str("_ifrl_grow_check:\n");
+    out.push_str("  %_ifrl_len_cur = load i64, i64* %_ifrl_len0\n");
+    out.push_str("  %_ifrl_cap_cur = load i64, i64* %_ifrl_cap0\n");
+    out.push_str("  %_ifrl_lenp1 = add i64 %_ifrl_len_cur, 1\n");
+    out.push_str("  %_ifrl_needgrow = icmp uge i64 %_ifrl_lenp1, %_ifrl_cap_cur\n");
+    out.push_str("  br i1 %_ifrl_needgrow, label %_ifrl_grow, label %_ifrl_write\n");
+    out.push_str("_ifrl_grow:\n");
+    out.push_str("  %_ifrl_newcap = mul i64 %_ifrl_cap_cur, 2\n");
+    out.push_str("  store i64 %_ifrl_newcap, i64* %_ifrl_cap0\n");
+    out.push_str("  %_ifrl_oldbuf = load i8*, i8** %_ifrl_bufp\n");
+    out.push_str("  %_ifrl_newbuf = call i8* @realloc(i8* %_ifrl_oldbuf, i64 %_ifrl_newcap)\n");
+    out.push_str("  store i8* %_ifrl_newbuf, i8** %_ifrl_bufp\n");
+    out.push_str("  br label %_ifrl_write\n");
+    out.push_str("_ifrl_write:\n");
+    out.push_str("  %_ifrl_buf_cur = load i8*, i8** %_ifrl_bufp\n");
+    out.push_str("  %_ifrl_slot = getelementptr i8, i8* %_ifrl_buf_cur, i64 %_ifrl_len_cur\n");
+    out.push_str("  %_ifrl_cb = trunc i32 %_ifrl_c to i8\n");
+    out.push_str("  store i8 %_ifrl_cb, i8* %_ifrl_slot\n");
+    out.push_str("  %_ifrl_len_next = add i64 %_ifrl_len_cur, 1\n");
+    out.push_str("  store i64 %_ifrl_len_next, i64* %_ifrl_len0\n");
+    out.push_str("  br label %_ifrl_loop\n");
+    out.push_str("_ifrl_done:\n");
+    out.push_str("  %_ifrl_finlen = load i64, i64* %_ifrl_len0\n");
+    out.push_str("  %_ifrl_iszero = icmp eq i64 %_ifrl_finlen, 0\n");
+    out.push_str("  %_ifrl_trueeof = and i1 %_ifrl_iseof, %_ifrl_iszero\n");
+    out.push_str("  br i1 %_ifrl_trueeof, label %_ifrl_eofempty, label %_ifrl_terminate\n");
+    out.push_str("_ifrl_eofempty:\n");
+    out.push_str("  %_ifrl_oldbuf2 = load i8*, i8** %_ifrl_bufp\n");
+    out.push_str("  call void @free(i8* %_ifrl_oldbuf2)\n");
+    out.push_str("  %_ifrl_e2 = call i8* @malloc(i64 1)\n");
+    out.push_str("  store i8 0, i8* %_ifrl_e2\n");
+    out.push_str("  ret i8* %_ifrl_e2\n");
+    out.push_str("_ifrl_terminate:\n");
+    out.push_str("  %_ifrl_finbuf = load i8*, i8** %_ifrl_bufp\n");
+    out.push_str("  %_ifrl_finlen2 = load i64, i64* %_ifrl_len0\n");
+    out.push_str("  %_ifrl_endslot = getelementptr i8, i8* %_ifrl_finbuf, i64 %_ifrl_finlen2\n");
+    out.push_str("  store i8 0, i8* %_ifrl_endslot\n");
+    out.push_str("  ret i8* %_ifrl_finbuf\n");
+    out.push_str("}\n");
+    out.push_str("define i8* @intent_stdin_read_line() {\n");
+    out.push_str("  %_isrl_cap0 = alloca i64\n");
+    out.push_str("  store i64 256, i64* %_isrl_cap0\n");
+    out.push_str("  %_isrl_len0 = alloca i64\n");
+    out.push_str("  store i64 0, i64* %_isrl_len0\n");
+    out.push_str("  %_isrl_bufp = alloca i8*\n");
+    out.push_str("  %_isrl_buf0 = call i8* @malloc(i64 256)\n");
+    out.push_str("  store i8* %_isrl_buf0, i8** %_isrl_bufp\n");
+    out.push_str("  br label %_isrl_loop\n");
+    out.push_str("_isrl_loop:\n");
+    out.push_str("  %_isrl_c = call i32 @getchar()\n");
+    out.push_str("  %_isrl_iseof = icmp eq i32 %_isrl_c, -1\n");
+    out.push_str("  %_isrl_isnl = icmp eq i32 %_isrl_c, 10\n");
+    out.push_str("  %_isrl_stop = or i1 %_isrl_iseof, %_isrl_isnl\n");
+    out.push_str("  br i1 %_isrl_stop, label %_isrl_done, label %_isrl_grow_check\n");
+    out.push_str("_isrl_grow_check:\n");
+    out.push_str("  %_isrl_len_cur = load i64, i64* %_isrl_len0\n");
+    out.push_str("  %_isrl_cap_cur = load i64, i64* %_isrl_cap0\n");
+    out.push_str("  %_isrl_lenp1 = add i64 %_isrl_len_cur, 1\n");
+    out.push_str("  %_isrl_needgrow = icmp uge i64 %_isrl_lenp1, %_isrl_cap_cur\n");
+    out.push_str("  br i1 %_isrl_needgrow, label %_isrl_grow, label %_isrl_write\n");
+    out.push_str("_isrl_grow:\n");
+    out.push_str("  %_isrl_newcap = mul i64 %_isrl_cap_cur, 2\n");
+    out.push_str("  store i64 %_isrl_newcap, i64* %_isrl_cap0\n");
+    out.push_str("  %_isrl_oldbuf = load i8*, i8** %_isrl_bufp\n");
+    out.push_str("  %_isrl_newbuf = call i8* @realloc(i8* %_isrl_oldbuf, i64 %_isrl_newcap)\n");
+    out.push_str("  store i8* %_isrl_newbuf, i8** %_isrl_bufp\n");
+    out.push_str("  br label %_isrl_write\n");
+    out.push_str("_isrl_write:\n");
+    out.push_str("  %_isrl_buf_cur = load i8*, i8** %_isrl_bufp\n");
+    out.push_str("  %_isrl_slot = getelementptr i8, i8* %_isrl_buf_cur, i64 %_isrl_len_cur\n");
+    out.push_str("  %_isrl_cb = trunc i32 %_isrl_c to i8\n");
+    out.push_str("  store i8 %_isrl_cb, i8* %_isrl_slot\n");
+    out.push_str("  %_isrl_len_next = add i64 %_isrl_len_cur, 1\n");
+    out.push_str("  store i64 %_isrl_len_next, i64* %_isrl_len0\n");
+    out.push_str("  br label %_isrl_loop\n");
+    out.push_str("_isrl_done:\n");
+    out.push_str("  %_isrl_finlen = load i64, i64* %_isrl_len0\n");
+    out.push_str("  %_isrl_iszero = icmp eq i64 %_isrl_finlen, 0\n");
+    out.push_str("  %_isrl_trueeof = and i1 %_isrl_iseof, %_isrl_iszero\n");
+    out.push_str("  br i1 %_isrl_trueeof, label %_isrl_eofempty, label %_isrl_terminate\n");
+    out.push_str("_isrl_eofempty:\n");
+    out.push_str("  %_isrl_oldbuf2 = load i8*, i8** %_isrl_bufp\n");
+    out.push_str("  call void @free(i8* %_isrl_oldbuf2)\n");
+    out.push_str("  %_isrl_e2 = call i8* @malloc(i64 1)\n");
+    out.push_str("  store i8 0, i8* %_isrl_e2\n");
+    out.push_str("  ret i8* %_isrl_e2\n");
+    out.push_str("_isrl_terminate:\n");
+    out.push_str("  %_isrl_finbuf = load i8*, i8** %_isrl_bufp\n");
+    out.push_str("  %_isrl_finlen2 = load i64, i64* %_isrl_len0\n");
+    out.push_str("  %_isrl_endslot = getelementptr i8, i8* %_isrl_finbuf, i64 %_isrl_finlen2\n");
+    out.push_str("  store i8 0, i8* %_isrl_endslot\n");
+    out.push_str("  ret i8* %_isrl_finbuf\n");
+    out.push_str("}\n");
     out.push_str("declare i8* @memcpy(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memmove(i8*, i8*, i64)\n");
     out.push_str("declare i8* @memset(i8*, i32, i64)\n");

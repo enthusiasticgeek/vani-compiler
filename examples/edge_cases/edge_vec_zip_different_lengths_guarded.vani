@@ -1,0 +1,46 @@
+// BUG-3 regression: zipping two Vec<i64> of different lengths, each
+// access guarded by its own `if i < len` check inside a `while i < n`
+// loop where `n = max(len(a), len(b))`. The C backend's while-loop
+// Vec-bounds optimizer hint used to assert every Vec found anywhere in
+// the loop body (including inside `if` branches) satisfies
+// `upper <= vec.len` unconditionally -- false here, since the shorter
+// Vec's real length is legitimately less than `upper` and the `if`
+// guard is exactly what makes the access safe. Caused a false abort
+// ("loop bound out of vec range") under `--backend=c` only; LLVM was
+// always correct. Also exercises `push` into a third Vec each
+// iteration, which was part of the original trigger shape found while
+// building the vani-bignum kosh package.
+fn zip_add(a: ref Vec<i64>, b: ref Vec<i64>) -> Vec<i64> {
+    let na: i64 = len(a) as i64;
+    let nb: i64 = len(b) as i64;
+    let n: i64 = na;
+    if nb > n {
+        n = nb;
+    }
+    let result: Vec<i64> = vec();
+    let i: i64 = 0;
+    while i < n {
+        let av: i64 = 0;
+        if i < na {
+            av = a[i];
+        }
+        let bv: i64 = 0;
+        if i < nb {
+            bv = b[i];
+        }
+        push(mut ref result, av + bv);
+        i = i + 1;
+    }
+    return result;
+}
+
+fn main() {
+    let a: Vec<i64> = vec(1, 2, 3);
+    let b: Vec<i64> = vec(9, 8);
+    let r: Vec<i64> = zip_add(ref a, ref b);
+    assert len(r) == 3;
+    assert r[0] == 10;
+    assert r[1] == 10;
+    assert r[2] == 3;
+    print "ok";
+}

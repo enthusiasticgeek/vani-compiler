@@ -809,19 +809,15 @@ eprint "fatal:", 42;
 See [`examples/language/english/file_io.vani`](../examples/language/english/file_io.vani)
 for the full worked example.
 
-**Newly discovered bug (2026-07-21), NOT part of IO-1**: `file_read_line`
-and `stdin_read_line` are completely broken on the LLVM backend, both
-`vanic run` (JIT) and `vanic build` (AOT) — confirmed by running
-`examples/language/english/file_io.vani` on the default backend:
-`lli`/`llc` both fail with `use of undefined value '@intent_file_read_line'`.
-`backend_llvm.rs` emits `call i8* @intent_file_read_line(...)` but there
-is no corresponding `declare`, and no C definition anywhere provides that
-symbol for the LLVM path (unlike the C backend, which has its own
-self-contained `intent_file_read_line` string-emitted helper — that one
-works fine). `--backend=c` is unaffected and fully functional; this is
-LLVM-only. Tracked as **BUG-1** in `docs/TODO_CURRENT.md` — not fixed as
-part of this pass since it's a pre-existing, unrelated regression
-surfaced while auditing `file_open`, not something IO-1 touched.
+**Fixed 2026-07-24** (was: newly discovered bug 2026-07-21, NOT part of
+IO-1): `file_read_line` and `stdin_read_line` were completely broken on
+the LLVM backend, both `vanic run` (JIT) and `vanic build` (AOT) —
+`backend_llvm.rs` emitted `call i8* @intent_file_read_line(...)` with no
+corresponding `declare` or definition reachable from the LLVM path.
+Fixed by defining both directly as ordinary LLVM IR functions in the
+preamble, built from already-declared libc externs. See **BUG-1** in
+`docs/TODO_CURRENT.md` for the full writeup, including a second,
+related SSA-dispatch bug found and fixed in the same pass.
 
 **Remaining scope** (device I/O — UART / I2C / SPI / RS485 / CAN):
 these are kernel-ioctl-specific and remain a C-shim + FFI pattern by

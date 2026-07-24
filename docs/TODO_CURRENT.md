@@ -797,22 +797,45 @@ candidate feature surfaced by this audit:
   `file_flush`* got the correct content, on both C and LLVM backends,
   both `vanic run` and `vanic build`.
 
-- [ ] **BUG-1. `file_read_line`/`stdin_read_line` completely broken on the
-  LLVM backend** (both `vanic run` and `vanic build`) — discovered while
-  verifying IO-1, NOT part of IO-1's scope, not fixed here. `backend_llvm.rs`
-  emits `call i8* @intent_file_read_line(...)` / `@intent_stdin_read_line()`
-  but neither has a `declare` nor any C definition reachable from the LLVM
-  path (the C backend's own self-contained string-emitted helper of the
-  same name is a *different, unrelated* implementation that works fine —
-  it's LLVM specifically that has nothing). Reproduces immediately:
-  `vanic run examples/language/english/file_io.vani` (no flags — LLVM is
-  the default backend) fails with `use of undefined value
-  '@intent_file_read_line'` from `lli`/`llc`. `--backend=c` is unaffected.
-  Likely fix shape: inline the read-line loop directly in LLVM IR (malloc/
-  realloc/fgetc, all already-declared libc externs) rather than a custom
-  `@intent_*` symbol — same approach IO-1 used for `file_open`'s
-  `setvbuf` call, which avoids needing build-vs-JIT-vs-cross-compile
-  linkage for a new runtime symbol. **Not started.** ~2-4 h estimate.
+- [x] **BUG-1. `file_read_line`/`stdin_read_line` completely broken on the
+  LLVM backend** ✅ fixed 2026-07-24 (both `vanic run` and `vanic build`) —
+  discovered while verifying IO-1. `backend_llvm.rs` emitted
+  `call i8* @intent_file_read_line(...)` / `@intent_stdin_read_line()` but
+  neither had a `declare` nor any definition reachable from the LLVM path.
+  Fixed exactly as sketched: both are now defined directly as ordinary
+  LLVM IR functions in the preamble (`emit_llvm`, `backend_llvm.rs`),
+  built from already-declared libc externs (`malloc`/`realloc`/`free`/
+  `fgetc`/new `getchar` declare) — same "inline the loop instead of a
+  custom runtime symbol" approach IO-1 used for `file_open`'s `setvbuf`
+  call. `intent_stdin_read_line` uses `getchar()` directly rather than
+  hunting for a portable `stdin` `FILE*` global (glibc/MSVCRT disagree on
+  that symbol) — avoids the problem entirely instead of solving it.
+  Unconditionally emitted, matching the existing Windows
+  `@snprintf`/`@dprintf` shim precedent in the same preamble.
+
+  **Second bug found and fixed along the way**: neither SSA backend
+  (`ssa_backend_llvm.rs` / `ssa_backend_c.rs`) implements these builtins
+  either, and — same class of gap as `f64_to_str_fixed` (item 27.1) —
+  their `Call` lowering has no error path for an unrecognized name, so it
+  silently mangled `stdin_read_line()` to `@fn_stdin_read_line` /
+  `fn_stdin_read_line` (assuming a user function), failing at LLVM-verify
+  or link time instead of compile time. Reproduced directly: a program
+  calling only `stdin_read_line()` (no `FileHandle`, so nothing else
+  forced tree-backend fallback) failed with `use of undefined value
+  '@fn_stdin_read_line'` even after the primary fix above. Fixed by
+  adding `stmt_calls_file_line_read`/`expr_calls_file_line_read`
+  (`main.rs`, mirroring `stmt_calls_f64_to_str_fixed`) and wiring into
+  both `ssa_llvm_extra_reject` and `ssa_c_extra_reject`. New regression
+  test `stdin_read_line_falls_back_to_tree_backends_from_ssa_dispatch`
+  (`main.rs`) locks in both SSA dispatch paths, mirroring the existing
+  `f64_to_str_fixed_falls_back_to_tree_backends_from_ssa_dispatch` test.
+
+  Verified end-to-end (not just type-checked): `examples/language/english/file_io.vani`
+  and a dedicated multi-line-with-realloc-growth repro pass under
+  `vanic run` (LLVM JIT), `vanic build` (LLVM AOT), and `--backend=c`;
+  `stdin_read_line()` alone (the SSA-path trigger) verified under all
+  three the same way. Full `cargo test --lib --bin vanic`: no regressions
+  (see commit for exact before/after counts).
 
 - [x] **BUG-2. `#[wcet]` estimator doesn't recurse into struct-literal field
   expressions** ✅ fixed 2026-07-24 — discovered 2026-07-21 while backfilling
@@ -1079,8 +1102,8 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
 
 ## C backend bug found building vani-bignum (added 2026-07-24)
 
-- [ ] **BUG-3. C backend's `while`-loop Vec-bounds optimizer hint aborts
-  on a correct, safe access pattern** — discovered while building
+- [x] **BUG-3. C backend's `while`-loop Vec-bounds optimizer hint aborts
+  on a correct, safe access pattern** ✅ fixed 2026-07-24 — discovered while building
   `vani-bignum`'s `_bn_mag_add` (base-1e9 digit-array add of two
   `Vec<i64>` magnitudes of possibly-different lengths). `while_bounds_hints`
   (`src/backend_c.rs:12521`) emits a pre-loop `abort()` guard asserting
@@ -1122,23 +1145,30 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   only reproduced once embedded in `_bn_mag_add`'s full body (which also
   `push`es into a third `Vec<i64>` each iteration and has a carry/`if`
   chain after the two guarded reads); the minimal standalone repro above
-  needs re-verification against the real trigger conditions before fixing
-  — the *exact* boundary of when `while_bounds_hints` fires wasn't fully
-  isolated, only confirmed real and confirmed LLVM-unaffected. Likely fix
-  shape: either don't collect a Vec name from a nested `if`-guarded index
-  at all (only trust top-level, unconditional accesses in the loop body
-  for this hint), or track the guarding condition and only assert the
-  bound when no `if i < vec.len`-shaped guard covers that access.
+  needed re-verification against the real trigger conditions before
+  fixing.
 
-  **Not blocking**: LLVM is the default backend (`vanic run`/`vanic
-  build`/`vanic test` all default to it) and is unaffected — confirmed
-  `vani-bignum`'s full test suite passes cleanly under LLVM. `--backend=c`
-  is documented as the "legacy" path. `vani-bignum` ships without a
-  workaround; this is tracked here as a real compiler-level gap, not
-  fixed as part of that package's v0.1.0. **Not started.**
+  Fixed exactly per the first likely-fix shape sketched above: stopped
+  collecting Vec names from inside `if` *bodies* in `collect_vec_idx_names`
+  (`src/backend_c.rs`) — only the `if` *condition* is still walked, since
+  that's evaluated unconditionally every iteration and safe to trust.
+  Accesses inside `then`/`else` bodies are no longer assumed safe, which
+  is always correct: this hint is purely an optimizer aid (gcc VRP), every
+  indexed access still goes through the real per-element
+  `intent_check_bounds` regardless of whether the hint fires, so being
+  conservative here has no correctness downside, only a (rare, narrow)
+  missed-optimization one. Verified: the standalone minimal repro above
+  now passes under `--backend=c` (confirmed it reproduced pre-fix on the
+  same binary), and `vani-bignum`'s full test suite + example (30!,
+  large-number gcd) now passes cleanly under `--backend=c` for the first
+  time — previously only LLVM (default) passed. New regression fixture
+  `examples/edge_cases/edge_vec_zip_different_lengths_guarded.vani`
+  (zip-two-different-length-Vecs + `push` into a third Vec, matching the
+  original trigger shape) added to the standard edge-case harness
+  (`tests/edge_cases.rs`), passing on both backends.
 
-- [ ] **BUG-4. `implement <Iface> for T { ... }` blocks reject
-  `#[attr]`-prefixed methods entirely** — discovered publishing
+- [x] **BUG-4. `implement <Iface> for T { ... }` blocks reject
+  `#[attr]`-prefixed methods entirely** ✅ fixed 2026-07-24 — discovered publishing
   `vani-bignum`: `vanic audit-safety` (and therefore `vanic publish`'s
   pre-publish gate, GATE-1) correctly identifies `BigInt_eq` (the `eq`
   method inside `implement Eq for BigInt`) as eligible for
@@ -1156,6 +1186,20 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   legitimately-uncomputable cases, not for "the checker computed a real
   number but the parser has nowhere to put it"). `vani-bignum` published
   with the escape hatch for this one function, documented in its module
-  header. Likely fix: extend whatever parser change Phase 3 made for
-  `module` bodies to `implement` bodies too — same shape of gap, same
-  fix should apply almost verbatim. **Not started.**
+  header.
+
+  Fixed almost verbatim as sketched: `parse_impl_decl`'s method loop
+  (`src/parser.rs`) now dispatches to `parse_attributed_fn` (the same
+  function `parse_module_decl`'s Phase-3 fix and top-level items already
+  use) when a method starts with `#`, instead of always calling
+  `parse_function` directly. **Found and fixed the identical gap in a
+  second, unrelated place while at it**: `methods on Type { }` blocks
+  (`parse_methods_block`, inherent methods, distinct from `implement`)
+  had the exact same missing-dispatch shape — same one-line-pattern fix
+  applied there too. Verified: `implement Eq for BigInt`'s `eq` method
+  now accepts `#[bounded_stack(bytes = 257)]` and `vanic audit-safety`
+  reports full coverage with no escape hatch needed. Two new `lib.rs`
+  regression tests (`implement_block_accepts_attributed_method`,
+  `methods_on_block_accepts_attributed_method`) lock in both fixes,
+  using the checker's own real computed budgets (99 and 72 bytes
+  respectively) rather than guessed placeholders.

@@ -12585,10 +12585,27 @@ fn collect_vec_idx_names(
             S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => {
                 collect_vec_idx_in_expr(expr, loop_var, out);
             }
-            S::If { cond, then_body, else_body } => {
+            S::If { cond, .. } => {
+                // BUG-3 fix: `cond` is evaluated unconditionally every
+                // iteration, so accesses there are safe to collect. But
+                // `then_body`/`else_body` are NOT unconditionally
+                // executed -- the classic "zip two different-length
+                // Vecs" pattern (`if i < na { av = a[i]; }`) indexes a
+                // Vec specifically *because* it's guarded by a check
+                // that makes it safe even when `i` can reach or exceed
+                // that Vec's length elsewhere in the loop. Previously
+                // this recursed into both branches and asserted every
+                // Vec found there satisfies `upper <= vec.len`
+                // unconditionally, which is false for exactly this
+                // guarded pattern and caused a false-abort ("loop bound
+                // out of vec range") on correct, safe code. This hint
+                // is purely an optimizer aid -- every indexed access
+                // still goes through the real per-element
+                // `intent_check_bounds` regardless -- so it's always
+                // safe to just not emit it for accesses we can't prove
+                // are unconditional; not recursing into `if` bodies is
+                // the conservative, always-correct choice.
                 collect_vec_idx_in_expr(cond, loop_var, out);
-                collect_vec_idx_names(then_body, loop_var, out);
-                collect_vec_idx_names(else_body, loop_var, out);
             }
             // Don't recurse into nested loops — different loop variable
             _ => {}
