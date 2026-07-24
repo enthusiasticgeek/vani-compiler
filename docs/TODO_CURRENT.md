@@ -1074,3 +1074,65 @@ of a working shared dependency.
 one graph (Cargo-style per-edge resolution); semver-range-based version
 *selection* across the graph. Neither needed at current ecosystem scale
 (~12-15 first-party packages, no external contributors yet).
+
+---
+
+## C backend bug found building vani-bignum (added 2026-07-24)
+
+- [ ] **BUG-3. C backend's `while`-loop Vec-bounds optimizer hint aborts
+  on a correct, safe access pattern** — discovered while building
+  `vani-bignum`'s `_bn_mag_add` (base-1e9 digit-array add of two
+  `Vec<i64>` magnitudes of possibly-different lengths). `while_bounds_hints`
+  (`src/backend_c.rs:12521`) emits a pre-loop `abort()` guard asserting
+  `upper <= vec.len` for every Vec indexed anywhere in a `while var (<|<=)
+  upper` loop body (recursing into `if` blocks via `collect_vec_idx_names`),
+  intended as an optimizer hint so gcc can prove per-element bounds checks
+  redundant. The assumption is false whenever the loop's upper bound is
+  the *max* of two Vecs' lengths and each Vec is separately guarded by its
+  own `if i < len` check inside the loop (the standard "zip two
+  different-length Vecs" pattern) — the shorter Vec's real length is
+  legitimately less than `upper`, and the inner `if` guard already makes
+  every access safe, but the hint doesn't account for that nesting and
+  aborts unconditionally before the loop even runs.
+
+  Minimal repro (fails under `--backend=c`, passes under the default LLVM
+  backend):
+  ```vani
+  fn f(a: ref Vec<i64>, b: ref Vec<i64>) -> i64 {
+      let na: i64 = len(a) as i64;
+      let nb: i64 = len(b) as i64;
+      let n: i64 = na;
+      if nb > n { n = nb; }
+      let sum: i64 = 0;
+      let i: i64 = 0;
+      while i < n {
+          let av: i64 = 0;
+          if i < na { av = a[i]; }
+          let bv: i64 = 0;
+          if i < nb { bv = b[i]; }
+          sum = sum + av + bv;
+          i = i + 1;
+      }
+      return sum;
+  }
+  ```
+  Calling `f` with `a`/`b` of different lengths aborts with `loop bound out
+  of vec range` under `--backend=c`. Oddly, this exact shape alone did
+  *not* reproduce in isolation during triage (same code, no abort) — it
+  only reproduced once embedded in `_bn_mag_add`'s full body (which also
+  `push`es into a third `Vec<i64>` each iteration and has a carry/`if`
+  chain after the two guarded reads); the minimal standalone repro above
+  needs re-verification against the real trigger conditions before fixing
+  — the *exact* boundary of when `while_bounds_hints` fires wasn't fully
+  isolated, only confirmed real and confirmed LLVM-unaffected. Likely fix
+  shape: either don't collect a Vec name from a nested `if`-guarded index
+  at all (only trust top-level, unconditional accesses in the loop body
+  for this hint), or track the guarding condition and only assert the
+  bound when no `if i < vec.len`-shaped guard covers that access.
+
+  **Not blocking**: LLVM is the default backend (`vanic run`/`vanic
+  build`/`vanic test` all default to it) and is unaffected — confirmed
+  `vani-bignum`'s full test suite passes cleanly under LLVM. `--backend=c`
+  is documented as the "legacy" path. `vani-bignum` ships without a
+  workaround; this is tracked here as a real compiler-level gap, not
+  fixed as part of that package's v0.1.0. **Not started.**
