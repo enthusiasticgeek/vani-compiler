@@ -39401,54 +39401,72 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
     }
 
     // ---- sort / sort_by: in-place insertion sort + quicksort.
-    // v1 supports i64 and f64 elements; IR types are parameterised
-    // via `elt` / `ep` / `epp` locals. The user-supplied comparator
-    // for `sort_by` always returns i64 (strcmp convention) but
-    // takes element-typed args. Both types are Copy so the
-    // comparator takes values directly.
-    if matches!(element, Type::I64 | Type::F64) {
-        let elt = if matches!(element, Type::F64) { "double" } else { "i64" };
-        let ep  = if matches!(element, Type::F64) { "double*" } else { "i64*" };
-        let epp = if matches!(element, Type::F64) { "double**" } else { "i64**" };
-        let cmp_gt = if matches!(element, Type::F64) { "fcmp ogt double" } else { "icmp sgt i64" };
-        let cmp_lt = if matches!(element, Type::F64) { "fcmp olt double" } else { "icmp slt i64" };
-        let _cmp_ge = if matches!(element, Type::F64) { "fcmp oge double" } else { "icmp sge i64" };
-        let cmp_fn_ty = format!("i64 ({elt}, {elt})*", elt = elt);
+    // Default-order `sort()` (ascending, no comparator) only supports
+    // i64/f64 -- there's no derivable ordering for an arbitrary struct
+    // or tuple. `sort_by()` (MATH-2) is widened to any Copy element
+    // type: the caller supplies the order via a `fn(T, T) -> i64`
+    // comparator, so no built-in ordering is needed. IR types are
+    // parameterised via `elt_ty` (computed above for push/pop/etc --
+    // struct/tuple elements already pass by value through those the
+    // same way, e.g. push_name's `%v` parameter) / `ep` / `epp`.
+    if element.is_copy() {
+        let ep = format!("{}*", elt_ty);
+        let epp = format!("{}**", elt_ty);
+        let cmp_fn_ty = format!("i64 ({elt}, {elt})*", elt = elt_ty);
 
         let sort_name = format!("@intent_vec_{}__sort", tag);
         let sort_by_name = format!("@intent_vec_{}__sort_by", tag);
         let sort_with_name = format!("@intent_vec_{}__sort_with", tag);
-        let cmp_asc_name = format!("@intent_vec_{}__cmp_asc", tag);
-        // Default ascending comparator: strcmp convention.
-        out.push_str(&format!(
-            "define internal i64 {cmp}({elt} %a, {elt} %b) {{\n",
-            cmp = cmp_asc_name, elt = elt,
-        ));
-        out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
-        out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
-        out.push_str("  %g = zext i1 %gt to i64\n");
-        out.push_str("  %l = zext i1 %lt to i64\n");
-        out.push_str("  %r = sub i64 %g, %l\n");
-        out.push_str("  ret i64 %r\n");
-        out.push_str("}\n");
-        // qsort comparator for the ascending case: adapts the system
-        // qsort(void*,void*)->int ABI to our element values.
-        let qsort_cmp_name = format!("@intent_vec_{}__qsort_cmp_asc", tag);
-        out.push_str(&format!(
-            "define internal i32 {qcmp}(i8* %ap, i8* %bp) {{\n",
-            qcmp = qsort_cmp_name,
-        ));
-        out.push_str(&format!("  %a_p = bitcast i8* %ap to {ep}\n", ep = ep));
-        out.push_str(&format!("  %b_p = bitcast i8* %bp to {ep}\n", ep = ep));
-        out.push_str(&format!("  %a = load {elt}, {ep} %a_p\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %b = load {elt}, {ep} %b_p\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
-        out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
-        out.push_str("  %g = zext i1 %gt to i32\n");
-        out.push_str("  %l = zext i1 %lt to i32\n");
-        out.push_str("  %r = sub i32 %g, %l\n");
-        out.push_str("  ret i32 %r\n");
-        out.push_str("}\n");
+
+        // Default ascending order + the qsort-runtime `sort()` entry
+        // point exist only for i64/f64 -- no other element type has a
+        // derivable ordering.
+        if matches!(element, Type::I64 | Type::F64) {
+            let cmp_gt = if matches!(element, Type::F64) { "fcmp ogt double" } else { "icmp sgt i64" };
+            let cmp_lt = if matches!(element, Type::F64) { "fcmp olt double" } else { "icmp slt i64" };
+            let cmp_asc_name = format!("@intent_vec_{}__cmp_asc", tag);
+            // Default ascending comparator: strcmp convention.
+            out.push_str(&format!(
+                "define internal i64 {cmp}({elt} %a, {elt} %b) {{\n",
+                cmp = cmp_asc_name, elt = elt_ty,
+            ));
+            out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
+            out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
+            out.push_str("  %g = zext i1 %gt to i64\n");
+            out.push_str("  %l = zext i1 %lt to i64\n");
+            out.push_str("  %r = sub i64 %g, %l\n");
+            out.push_str("  ret i64 %r\n");
+            out.push_str("}\n");
+            // qsort comparator for the ascending case: adapts the system
+            // qsort(void*,void*)->int ABI to our element values.
+            let qsort_cmp_name = format!("@intent_vec_{}__qsort_cmp_asc", tag);
+            out.push_str(&format!(
+                "define internal i32 {qcmp}(i8* %ap, i8* %bp) {{\n",
+                qcmp = qsort_cmp_name,
+            ));
+            out.push_str(&format!("  %a_p = bitcast i8* %ap to {ep}\n", ep = ep));
+            out.push_str(&format!("  %b_p = bitcast i8* %bp to {ep}\n", ep = ep));
+            out.push_str(&format!("  %a = load {elt}, {ep} %a_p\n", elt = elt_ty, ep = ep));
+            out.push_str(&format!("  %b = load {elt}, {ep} %b_p\n", elt = elt_ty, ep = ep));
+            out.push_str(&format!("  %gt = {cgt} %a, %b\n", cgt = cmp_gt));
+            out.push_str(&format!("  %lt = {clt} %a, %b\n", clt = cmp_lt));
+            out.push_str("  %g = zext i1 %gt to i32\n");
+            out.push_str("  %l = zext i1 %lt to i32\n");
+            out.push_str("  %r = sub i32 %g, %l\n");
+            out.push_str("  ret i32 %r\n");
+            out.push_str("}\n");
+            // sort: external introsort implementation in vani_sort_runtime.c,
+            // compiled and linked by build_program_llvm (AOT) / JIT-loaded
+            // as a shared lib by run_program_llvm (MATH-1). Replaces the
+            // old inline Lomuto-partition quicksort with Hoare partition +
+            // heapsort fallback + Tukey ninther pivot — see
+            // src/sort_runtime.c for the algorithm.
+            out.push_str(&format!(
+                "declare i64 {sn}({sty}*)\n",
+                sn = sort_name, sty = s_ty,
+            ));
+        }
+
         // sort_with: insertion sort retained for sort_by (rare; correctness > speed).
         out.push_str(&format!(
             "define i64 {sn_with}({sty}* %xs_p, {cft} %cmp) {{\n",
@@ -39469,16 +39487,16 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %i_p = alloca i64\n");
         out.push_str("  store i64 1, i64* %i_p\n");
         out.push_str("  %j_p = alloca i64\n");
-        out.push_str(&format!("  %key_p = alloca {elt}\n", elt = elt));
+        out.push_str(&format!("  %key_p = alloca {elt}\n", elt = elt_ty));
         out.push_str("  br label %sort_outer\n");
         out.push_str("sort_outer:\n");
         out.push_str("  %i_v = load i64, i64* %i_p\n");
         out.push_str("  %i_cont = icmp slt i64 %i_v, %len\n");
         out.push_str("  br i1 %i_cont, label %sort_outer_body, label %sort_done\n");
         out.push_str("sort_outer_body:\n");
-        out.push_str(&format!("  %slot_i = getelementptr {elt}, {ep} %data, i64 %i_v\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %key_v = load {elt}, {ep} %slot_i\n", elt = elt, ep = ep));
-        out.push_str(&format!("  store {elt} %key_v, {ep} %key_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %slot_i = getelementptr {elt}, {ep} %data, i64 %i_v\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  %key_v = load {elt}, {ep} %slot_i\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  store {elt} %key_v, {ep} %key_p\n", elt = elt_ty, ep = ep));
         out.push_str("  %i_m1 = sub i64 %i_v, 1\n");
         out.push_str("  store i64 %i_m1, i64* %j_p\n");
         out.push_str("  br label %sort_inner\n");
@@ -39487,41 +39505,33 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
         out.push_str("  %j_ok = icmp sge i64 %j_v, 0\n");
         out.push_str("  br i1 %j_ok, label %sort_inner_cmp, label %sort_inner_done\n");
         out.push_str("sort_inner_cmp:\n");
-        out.push_str(&format!("  %slot_j = getelementptr {elt}, {ep} %data, i64 %j_v\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %slot_jv = load {elt}, {ep} %slot_j\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %key_load = load {elt}, {ep} %key_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %slot_j = getelementptr {elt}, {ep} %data, i64 %j_v\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  %slot_jv = load {elt}, {ep} %slot_j\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  %key_load = load {elt}, {ep} %key_p\n", elt = elt_ty, ep = ep));
         out.push_str(&format!(
-            "  %cmp_r = call i64 %cmp({elt} %slot_jv, {elt} %key_load)\n", elt = elt,
+            "  %cmp_r = call i64 %cmp({elt} %slot_jv, {elt} %key_load)\n", elt = elt_ty,
         ));
         out.push_str("  %cmp_gt = icmp sgt i64 %cmp_r, 0\n");
         out.push_str("  br i1 %cmp_gt, label %sort_inner_shift, label %sort_inner_done\n");
         out.push_str("sort_inner_shift:\n");
         out.push_str("  %j_p1 = add i64 %j_v, 1\n");
-        out.push_str(&format!("  %slot_jp1 = getelementptr {elt}, {ep} %data, i64 %j_p1\n", elt = elt, ep = ep));
-        out.push_str(&format!("  store {elt} %slot_jv, {ep} %slot_jp1\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %slot_jp1 = getelementptr {elt}, {ep} %data, i64 %j_p1\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  store {elt} %slot_jv, {ep} %slot_jp1\n", elt = elt_ty, ep = ep));
         out.push_str("  %j_dec = sub i64 %j_v, 1\n");
         out.push_str("  store i64 %j_dec, i64* %j_p\n");
         out.push_str("  br label %sort_inner\n");
         out.push_str("sort_inner_done:\n");
         out.push_str("  %j_final = load i64, i64* %j_p\n");
         out.push_str("  %insert_at = add i64 %j_final, 1\n");
-        out.push_str(&format!("  %insert_p = getelementptr {elt}, {ep} %data, i64 %insert_at\n", elt = elt, ep = ep));
-        out.push_str(&format!("  %k = load {elt}, {ep} %key_p\n", elt = elt, ep = ep));
-        out.push_str(&format!("  store {elt} %k, {ep} %insert_p\n", elt = elt, ep = ep));
+        out.push_str(&format!("  %insert_p = getelementptr {elt}, {ep} %data, i64 %insert_at\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  %k = load {elt}, {ep} %key_p\n", elt = elt_ty, ep = ep));
+        out.push_str(&format!("  store {elt} %k, {ep} %insert_p\n", elt = elt_ty, ep = ep));
         out.push_str("  %i_next = add i64 %i_v, 1\n");
         out.push_str("  store i64 %i_next, i64* %i_p\n");
         out.push_str("  br label %sort_outer\n");
         out.push_str("sort_done:\n");
         out.push_str("  ret i64 0\n");
         out.push_str("}\n");
-        // sort: external introsort implementation in vani_sort_runtime.c,
-        // compiled and linked by build_program_llvm.  Replaces the old inline
-        // Lomuto-partition quicksort with Hoare partition + heapsort fallback
-        // + Tukey ninther pivot — see src/sort_runtime.c for the algorithm.
-        out.push_str(&format!(
-            "declare i64 {sn}({sty}*)\n",
-            sn = sort_name, sty = s_ty,
-        ));
         out.push_str(&format!(
             "define i64 {sn}({sty}* %xs_p, {cft} %cmp) {{\n",
             sn = sort_by_name,

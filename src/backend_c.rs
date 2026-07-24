@@ -11135,22 +11135,18 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
         ));
     }
 
-    // Data-structures roadmap Level 1: in-place `sort` /
-    // `sort_by`. v1 supports i64 and f64 elements; the helpers
-    // are monomorphized over the element width via `{ct}`.
-    // The comparator takes element values directly (both are
-    // Copy); strcmp convention: negative / zero / positive.
-    if matches!(element, Type::I64 | Type::F64) {
+    // Data-structures roadmap Level 1: in-place `sort` / `sort_by`.
+    // Default-order `sort()` (ascending, no comparator) only supports
+    // i64/f64 -- `a > b` / `a < b` don't compile for a struct in C, and
+    // there's no other derivable ordering. `sort_by()` (MATH-2) is
+    // widened to any Copy element type via `{ct}` (already generic,
+    // see `reverse` above): the caller supplies the order through a
+    // `fn(T, T) -> i64` comparator, so `qsort_impl` never needs `>`/`<`
+    // on the element type itself.
+    if element.is_copy() {
         let ct = c_element.clone();
         out.push_str(&format!(
             "typedef int64_t (*{sn}__cmp_fn)({ct}, {ct});\n",
-            sn = struct_name,
-            ct = ct,
-        ));
-        out.push_str(&format!(
-            "static INTENT_UNUSED int64_t {sn}__cmp_ascending({ct} a, {ct} b) {{\
-\n    return (a > b) - (a < b);\
-\n}}\n",
             sn = struct_name,
             ct = ct,
         ));
@@ -11195,15 +11191,26 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
             sn = struct_name,
             ct = ct,
         ));
-        out.push_str(&format!(
-            "static INTENT_UNUSED int64_t {sn}__sort({sn}* xs) {{\
+        // Default ascending order + `sort()` exist only for i64/f64 --
+        // no other element type has a derivable ordering.
+        if matches!(element, Type::I64 | Type::F64) {
+            out.push_str(&format!(
+                "static INTENT_UNUSED int64_t {sn}__cmp_ascending({ct} a, {ct} b) {{\
+\n    return (a > b) - (a < b);\
+\n}}\n",
+                sn = struct_name,
+                ct = ct,
+            ));
+            out.push_str(&format!(
+                "static INTENT_UNUSED int64_t {sn}__sort({sn}* xs) {{\
 \n    if (xs->len > 1) {{\
 \n        {sn}__qsort_impl(xs->data, 0, (int64_t)xs->len - 1, {sn}__cmp_ascending);\
 \n    }}\
 \n    return 0;\
 \n}}\n",
-            sn = struct_name,
-        ));
+                sn = struct_name,
+            ));
+        }
         out.push_str(&format!(
             "static INTENT_UNUSED int64_t {sn}__sort_by({sn}* xs, {sn}__cmp_fn cmp) {{\
 \n    if (xs->len > 1) {{\

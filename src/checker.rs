@@ -23444,13 +23444,21 @@ fn check_sort_builtin(
             return CheckedExpr::fallback_integer(span);
         }
     };
-    let _ = is_array;
-    // v1 restriction: i64 and f64 elements only. Wider integer
-    // widths and user-defined types would need additional
-    // element-typed runtime helpers and are queued as follow-ups.
-    if !matches!(element_type, Type::I64 | Type::F64) {
-        let container = if matches!(xs.ty().deref(), Type::Array { .. }) {
+    // v1 restriction: i64 and f64 elements only for `sort`/`sort_desc`
+    // and for the `[T; N]` array path unchanged (matches codegen: only
+    // `intent_array_i64__sort*` helpers exist -- no f64 or generic
+    // array helpers). MATH-2 widens `sort_by` on `Vec<T>` (not arrays)
+    // to any Copy element type: the caller-supplied comparator means
+    // no derivable ordering is needed, unlike plain `sort()`. Non-Copy
+    // element types (OwnedStr, Vec<_>, etc.) still need a
+    // `fn(ref T, ref T) -> i64` comparator shape to avoid moves --
+    // not implemented yet, so they stay rejected here.
+    let sort_by_vec_generalized = name == "sort_by" && !is_array && element_type.is_copy();
+    if !matches!(element_type, Type::I64 | Type::F64) && !sort_by_vec_generalized {
+        let container = if is_array {
             "[i64; N]"
+        } else if name == "sort_by" {
+            "Vec<T> for any Copy T"
         } else {
             "Vec<i64> or Vec<f64>"
         };
@@ -23465,27 +23473,20 @@ fn check_sort_builtin(
     }
     let mut typed_args = vec![xs.expr];
     if name == "sort_by" {
-        // Comparator takes element values directly (both i64 and f64
-        // are Copy). strcmp convention: negative / zero / positive.
-        // When non-Copy element widths land the comparator will
-        // switch to `fn(ref T, ref T) -> i64` to avoid moves.
+        // Comparator takes element values directly -- every element
+        // type accepted above is Copy (i64/f64 always were; MATH-2
+        // widens this to any other Copy T for Vec, e.g. a struct).
         let cmp = check_expr(&args[1], env, signatures, diagnostics);
-        let cmp_arg = if matches!(element_type, Type::F64) { Type::F64 } else { Type::I64 };
         let expected = Type::FnPtr(
-            vec![cmp_arg.clone(), cmp_arg.clone()],
+            vec![element_type.clone(), element_type.clone()],
             Box::new(Type::I64),
         );
         if cmp.ty() != &expected {
-            let expected_str = if matches!(element_type, Type::F64) {
-                "fn(f64, f64) -> i64"
-            } else {
-                "fn(i64, i64) -> i64"
-            };
             diagnostics.push(Diagnostic::new(
                 args[1].span,
                 format!(
-                    "sort_by comparator must be `{}`, got {}",
-                    expected_str, cmp.ty()
+                    "sort_by comparator must be `fn({0}, {0}) -> i64`, got {1}",
+                    element_type, cmp.ty()
                 ),
             ).with_elaboration(crate::diagnostic_elaborations::builtin_wrong_arg_type()));
         }
