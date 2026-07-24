@@ -111,7 +111,141 @@ variables** (`fn pick<'a>(a: &'a Point, b: &'a Point) ->
 &'a Point`). vāṇी doesn't expose that syntax -- the
 designers decided the ergonomics weren't worth it for v1.
 The workaround: refactor to use one ref + one value, or
-split into two functions.
+split into two functions -- worked examples below.
+
+## Returning more than one reference
+
+Case 3 covers *two ref params, one ref return*. A related shape
+comes up just as often: a return type that packages **more than
+one reference together** -- a tuple of refs, or `Option<ref T>`.
+Both are rejected too, for the same underlying reason: v1's
+elision only understands a bare `ref T` / `mut ref T` return
+type, not a reference nested inside another type.
+
+```vani
+struct Pair { x: i64, y: i64 }
+
+fn two_fields(p: ref Pair) -> (ref i64, ref i64) {
+  return (ref p.x, ref p.y);
+}
+```
+
+Diagnostic (verified directly against the compiler):
+```
+function 'two_fields' returns `(ref i64, ref i64)`, which has
+a reference nested inside a tuple/Vec/array/generic type --
+vāṇी's v1 lifetime elision only understands a bare `ref T` /
+`mut ref T` return type, not a reference nested inside another
+type. Split this into separate accessor functions (one bare
+`ref` return each), or return the referenced values by
+value/clone instead.
+```
+
+The same rejection applies to `Option<ref T>` / `Result<ref T,
+E>` -- a "maybe-a-ref" return is just as ambiguous to the
+elision analyzer as a tuple of refs, even though only one ref
+is ever live at a time.
+
+### Workaround 1: split into narrower functions, select at the call site
+
+This is the general-purpose fix, and it composes cleanly with
+`if` used as an *expression* (the branches must agree on type):
+
+```vani
+struct Point { x: i64, y: i64 }
+
+fn pick_a(a: ref Point) -> ref Point { return a; }
+fn pick_b(b: ref Point) -> ref Point { return b; }
+
+fn main() -> i64 {
+  let p1: Point = Point { x: 1, y: 2 };
+  let p2: Point = Point { x: 9, y: 8 };
+  let want_a: bool = true;
+  let chosen: ref Point =
+    if want_a { pick_a(ref p1) } else { pick_b(ref p2) };
+  print "chosen.x:", chosen.x;   // 1
+  return 0;
+}
+```
+
+Each function satisfies the single-ref-param rule on its own;
+the `if`-expression at the call site picks which one runs, and
+the result is still a zero-copy `ref Point` -- no cloning needed.
+This is exactly the shape the Case 3 diagnostic's "split into two
+narrower functions" advice means in practice.
+
+### Workaround 2: one ref param over a collection, return by value
+
+When the candidates already live in a `Vec`, pass the whole `Vec`
+as the single ref param and return the selected element **by
+value** instead of by ref (v1 can't return a ref into a Vec slot
+-- see the next section):
+
+```vani
+struct Point { x: i64, y: i64 }
+
+fn pick(pts: ref Vec<Point>, want_first: bool) -> Point {
+  if want_first {
+    return pts[0];
+  }
+  return pts[1];
+}
+
+fn main() -> i64 {
+  let pts: Vec<Point> = vec(Point { x: 1, y: 2 }, Point { x: 9, y: 8 });
+  let chosen: Point = pick(ref pts, false);
+  print "chosen.x:", chosen.x;   // 9
+  return 0;
+}
+```
+
+Pick Workaround 1 when you want zero-copy and can name the
+candidates as separate bindings/functions; pick Workaround 2 when
+the candidates are already indexed and a small `Point`-sized copy
+is cheap enough not to matter.
+
+## A real v1 gap: `ref` to a bare scalar has no read-back path
+
+Everything above works because the ref's *referent* is a
+`struct` (or a `Vec`) -- reading through it is `.field` / `[i]`
+access, which yields a plain, printable value. Verified directly:
+a `ref` whose referent is a **bare scalar** (`ref i64`, `ref
+f64`, `ref bool`, `ref OwnedStr`) is a dead end in v1 -- there is
+no deref operator, and none of arithmetic, comparison, `print`,
+plain assignment, or a `let` into an unref'd type will read
+through it:
+
+```vani
+fn double(x: ref i64) -> i64 {
+  return x * 2;     // error: left operand must be numeric, got ref i64
+}
+```
+
+```vani
+let r: ref i64 = ref some_i64;
+print "r:", r;       // error: cannot print a reference directly
+let v: i64 = r;       // error: let initializer must be assignable to i64, got ref i64
+```
+
+Writing through a `mut ref i64` doesn't work either -- plain
+assignment to a `mut ref i64`-typed binding is rejected the same
+way. The only thing you can legally do with a bare-scalar ref is
+pass it *onward* as an argument to another function that also
+declares a `ref i64` (or `mut ref i64`) parameter -- which just
+moves the dead end, it doesn't resolve it.
+
+**The practical rule**: only return/parameterize `ref`/`mut ref`
+down to *struct* or *`Vec`* granularity, never down to a bare
+scalar. If you need a scalar out, either return it **by value**
+(cheap for `i64`/`f64`/`bool` -- they're `Copy`) or keep it behind
+a struct-level ref and let the caller do the final `.field` read,
+same as every working example in this chapter.
+
+(The one place v1 *does* let you read/write through a scalar-level
+reference is the dedicated `region_borrow_i64` / `aref_load` /
+`aref_store` builtins over `ArenaRef<i64>` -- a different, purpose-
+built mechanism, not the general `ref`/`mut ref` syntax. See
+[Advanced 4 -- Embedded](../advanced/04_embedded.md).)
 
 ## How the lifetime threads through
 
@@ -256,39 +390,101 @@ in and out.
 
 ## Common patterns
 
-Three shapes you'll see in real code:
+Three shapes you'll see in real code -- all keep the ref at
+*struct* granularity, per the gap above, never down to a bare
+scalar or an arbitrary Vec slot:
 
-### The accessor
+### The struct passthrough
 
 ```vani
-fn name(person: ref Person) -> ref OwnedStr {
-  return ref person.name;
+struct Person { name: OwnedStr, age: i64 }
+
+fn oldest(a: ref Person, b: ref Person) -> ref Person {
+  if a.age > b.age {
+    return a;
+  }
+  return b;
+}
+
+fn main() -> i64 {
+  let alice: Person = Person { name: "Alice" + "", age: 30 };
+  let bob: Person = Person { name: "Bob" + "", age: 42 };
+  let older: ref Person = oldest(ref alice, ref bob);
+  print "older.age:", older.age;   // 42
+  return 0;
 }
 ```
 
-Returns a borrow of a struct field. Caller can read the
-string through the ref without owning it.
-
-### The index lookup
+Wait -- `oldest` takes *two* ref params. Doesn't Case 3 reject
+that? It would, except here the return itself is a value-typed
+comparison-then-return of `a` or `b`, each independently a valid
+single-source elision -- **this exact shape still needs the
+Workaround 1 split** (`pick_a`/`pick_b`-style) to satisfy the
+one-ref-param rule; `oldest` as written above is illustrative of
+the *goal*, not something the checker accepts as one function. Do
+it for real as:
 
 ```vani
-fn nth(xs: ref Vec<i64>, i: u64) -> ref i64
-  requires i < len(xs)
-{
-  return ref xs[i];
+fn person_a(a: ref Person) -> ref Person { return a; }
+fn person_b(b: ref Person) -> ref Person { return b; }
+
+fn main() -> i64 {
+  let alice: Person = Person { name: "Alice" + "", age: 30 };
+  let bob: Person = Person { name: "Bob" + "", age: 42 };
+  let older: ref Person =
+    if alice.age > bob.age { person_a(ref alice) } else { person_b(ref bob) };
+  print "older.age:", older.age;   // 42
+  return 0;
 }
 ```
 
-Returns a borrow into a Vec slot. Requires the index is
-in-bounds (caller's contract).
+The caller reads `older.age` / `older.name` directly -- struct
+field access through a ref yields a plain, printable value (see
+the gap above for why this only works at struct granularity, not
+for a `ref OwnedStr` returned on its own).
+
+### The index lookup -- returns an index, not a ref
+
+v1 cannot return a ref into an arbitrary Vec slot at all (`ref`
+only accepts a named variable or `t.field`, never `xs[i]` --
+verified: `return ref xs[i];` is rejected with `'ref' can only
+borrow a named variable or a struct field`, regardless of the
+element type). The working pattern returns the **index** instead,
+and lets the caller do the (cheap, in-bounds) indexing themselves:
+
+```vani
+fn find_index(xs: ref Vec<i64>, target: i64) -> Option<i64> {
+  let i: i64 = 0;
+  while i < (xs.len() as i64) {
+    if xs[i] == target {
+      return Option.Some(i);
+    }
+    i = i + 1;
+  }
+  return Option.None;
+}
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(3, 7, 9);
+  let found: Option<i64> = find_index(ref xs, 7);
+  let result: i64 = match found {
+    Option.Some(i) then xs[i],
+    Option.None then 0 - 1,
+  };
+  print "result:", result;   // 7
+  return 0;
+}
+```
 
 ### The map lookup (when you have HashMap)
 
-```vani
-fn lookup(map: ref HashMap, key: i64) -> Option<ref V>
-```
-
-Returns either a borrow into the map's value slot, or None.
+Same idea as the index lookup, and for the same reason:
+`hashmap_get(ref map, key)` already returns `Option<V>` (a
+*copy* of the value, not `Option<ref V>`) -- there is no
+ref-returning HashMap lookup in v1. If `V` is a struct you'd
+rather not copy, store `HashMap<K, i64>` mapping to an index into
+a parallel `Vec<V>`, and apply the index-lookup pattern above to
+read the `V` through a ref.
 Caller matches on the Option before dereferencing.
 
 ## A summary you can carry
@@ -303,7 +499,22 @@ Caller matches on the Option before dereferencing.
   borrow from").
 - Two-or-more ref params + ref return -> reject
   ("ambiguous; v1 needs exactly one"). Workaround: refactor
-  to one ref + values, or split into narrower fns.
+  to one ref + values, or split into narrower fns (each
+  returning a bare `ref`) and select at the call site with an
+  `if`-expression -- zero-copy, verified working.
+- **A ref return can only carry ONE reference** -- a tuple of
+  refs or `Option<ref T>` is rejected the same way (a nested
+  ref, not a bare `ref T` at the top level). Workaround: same
+  as the two-ref-param case, split into narrower functions.
+- **A `ref`/`mut ref` to a bare scalar (`ref i64`, `ref
+  OwnedStr`, ...) is a dead end** -- no deref operator, so
+  nothing reads or writes through it (arithmetic, comparison,
+  `print`, and plain assignment are all rejected). Only
+  struct/`Vec` granularity works, because `.field`/`[i]`
+  access is how you actually read through a ref in v1.
+- v1 also can't return a ref into an arbitrary Vec slot
+  (`ref xs[i]` is rejected outright, any element type) --
+  return the index instead and let the caller index.
 - The compiler tracks the lifetime relationship through
   chained ref-returning calls -- `let r2 = shared(r1)`
   inherits r1's source.
