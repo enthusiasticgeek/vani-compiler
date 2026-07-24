@@ -88,6 +88,17 @@ either = true
 - **`print` accepts multiple comma-separated arguments**. The
   runtime emits them with single spaces in between. There's no
   format-string syntax -- just compose with `,`.
+- **`print` only accepts scalars** -- `i64`/`f64`/`bool`/`Str`/
+  `OwnedStr`. Composite values (arrays, `Vec`, structs, tuples,
+  enums) are rejected at compile time with a diagnostic telling
+  you which field/element/match-arm to extract instead -- there's
+  no auto-`Debug`-style dump of a whole struct or `Vec`.
+- **`f64` formatting is `%g`-style by default** (compact, 6
+  significant digits, switches to scientific notation for very
+  large/small magnitudes) -- it's not lossless and, on Windows,
+  it isn't even identical between the two backends for scientific
+  notation. See [Beginner 6 -- Strings](06_strings.md#string-builtins-reference)
+  for the full caveats and the `f64_to_str_fixed` workaround.
 
 ## Challenge
 

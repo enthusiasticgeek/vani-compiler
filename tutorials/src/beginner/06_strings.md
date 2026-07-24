@@ -302,6 +302,42 @@ format specifiers -- as ordinary function calls rather than a
 `{}` mini-language, since `print` has no format-string syntax of
 its own (a comma-separated list of items, each printed as-is).
 
+**Caveats for `print`ing an `f64` directly (and for `f64_to_str`)**:
+raw `print x;` on an `f64` goes through the exact same `%g`-based
+formatting as `f64_to_str` -- there's no separate code path, so
+these caveats apply equally to plain `print` statements, not just
+explicit `f64_to_str` calls.
+
+- **6 significant digits by default, with real precision loss.**
+  `%g`'s default precision is 6 significant digits, not "however
+  many digits round-trip." `print 123456789.123456;` prints
+  `1.23457e+08` -- everything past the 6th significant digit is
+  gone, not just hidden from display. If you need the value back
+  losslessly, keep the `f64` around and only format for display;
+  don't parse the printed string back with `parse_float`.
+- **Verified backend-parity gap in scientific-notation exponent
+  width on Windows.** Once a magnitude is large/small enough that
+  `%g` switches to scientific notation, the C backend and the LLVM
+  backend disagree on Windows: `vanic run f.vani --backend=c`
+  prints `1e+06`, while `vanic run f.vani` (LLVM/JIT) prints
+  `1e+006` for the identical program and value -- a 2-digit vs.
+  3-digit exponent, respectively (legacy MSVCRT vs. UCRT
+  `snprintf` conventions; the C backend links the host's `cc`,
+  the LLVM backend's `vsnprintf` shim resolves differently). Two
+  backends of the same compiler producing different text for the
+  same `print` statement is a real gap, not a rounding nuance --
+  don't compare `print` output across backends in golden-file
+  tests on Windows if the value might hit scientific notation.
+  Tracked as L25 in [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md).
+- **The portable, deterministic alternative is `f64_to_str_fixed`.**
+  It formats with `%.*f` (fixed notation), which never switches to
+  scientific notation and so never hits the exponent-width gap
+  above. If you need output that's identical across backends and
+  platforms -- test assertions, log lines diffed in CI, anything
+  compared byte-for-byte -- prefer `print f64_to_str_fixed(x, n);`
+  over `print x;` for any `f64` whose magnitude you don't tightly
+  control.
+
 **Caveats for `f64_to_str_fixed`**:
 
 - **NaN / Infinity spelling is platform-dependent.** Like

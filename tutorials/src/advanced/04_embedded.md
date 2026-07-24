@@ -40,10 +40,13 @@ fn poke(addr: *mut i32, val: i32) -> i64 {
   following are allowed:
   - Dereferencing a raw pointer (`*p`).
   - Calling a `pure extern "C" fn` that's marked `unsafe`.
-  - `Pool` / `Handle` borrows that escape their region.
 - The compiler proves *every other* operation safe. The
   `unsafe` keyword is a request to suspend specific safety
-  rules in a small, identifiable scope.
+  rules in a small, identifiable scope. `Pool<T>`/`Handle<T>`
+  and `Region`/`ArenaRef<T>` (below) are NOT in this list --
+  both are safe-by-construction APIs usable without an `unsafe`
+  block, just with different safety proofs (runtime vs.
+  compile-time).
 
 ## Raw pointers: `*const T` and `*mut T`
 
@@ -64,46 +67,121 @@ fn write_register(base: *mut u32, offset: u64, value: u32) -> i64 {
 The C backend lowers these to plain `*` dereferences; the
 LLVM backend uses `load` / `store` instructions.
 
-## Region typing: `Pool<T>` + `Handle<T>`
+## Two arena mechanisms: `Pool<T>` (v1, runtime-checked) vs `Region` + `ArenaRef<T>` (v2, compile-time-checked)
 
-For embedded targets without a malloc, vāṇी provides an
-arena-style allocator scoped to a `region` block:
+`unsafe.md`'s embedded plan ships arena-style allocation in two
+separate layers, with different cost/flexibility tradeoffs. They
+are **not** the same feature, and one is *not* built inside the
+other -- a common mix-up. Pick based on what you need:
+
+| | `Pool<T>` / `Handle<T>` (Layer 2) | `Region` / `ArenaRef<T>` (Layer 5) |
+|---|---|---|
+| Safety proof | **Runtime**: each access checks a generation counter | **Compile-time**: escape analysis proves no dangling ref |
+| Cost | A branch + counter compare per `pool_get` | Zero -- `aref_load`/`aref_store` compile to a bare deref |
+| A `Handle`/`ArenaRef` can... | outlive the `Pool` (stale access returns `Option::None`, not UB) | **not** outlive its `Region` (rejected at compile time) |
+| Needs `unsafe(...)` / embedded gate? | No -- works on hosted targets | No for local use; **yes** (`INTENT_TARGET_EMBEDDED=1`) the moment `ArenaRef<T>` appears in a `fn` parameter or return type |
+| Use when | You need a reference that can legitimately outlive its allocator (caches, graphs, long-lived tables) | You need zero-cost slots scoped to one function/block (hot loops, ISRs, DSP buffers) |
+
+### `Pool<T>` + `Handle<T>` -- generational handles
 
 ```vani
-intent "Advanced 4 -- region-scoped Pool<i64>.";
+intent "Pool<i64> / Handle<i64> — generational handles.";
+
+fn unwrap_or(o: Option<i64>, def: i64) -> i64 {
+  return match o {
+    Option.Some(v) then v,
+    Option.None then def,
+  };
+}
 
 fn use_pool() -> i64 {
-  region {
-    let pool: Pool<i64> = pool_new(64);    // 64 i64 slots
-    let h1: Handle<i64> = pool_alloc(mut ref pool, 7);
-    let h2: Handle<i64> = pool_alloc(mut ref pool, 42);
-    let sum: i64 = handle_read(ref h1) + handle_read(ref h2);
-    print "sum =", sum;
-    return sum;
-  }
-  // Handles cannot escape the region.
+  let p: Pool<i64> = pool_new();
+  let h1: Handle<i64> = pool_alloc(mut ref p, 7);
+  let h2: Handle<i64> = pool_alloc(mut ref p, 42);
+  let sum: i64 = unwrap_or(pool_get(ref p, h1), 0)
+               + unwrap_or(pool_get(ref p, h2), 0);
+  print "sum =", sum;
+  let _ = pool_free(mut ref p, h1);   // stale h1 now reads back None
+  return sum;
 }
 ```
 
-- **`region { ... }`** opens a fresh region scope. Allocations
-  inside live for the region; the compiler proves no
-  `Handle<T>` escapes via the borrow checker.
-- **`Pool<T>`** is the arena. `pool_new(capacity)` creates one
-  with N slots backed by a stack-allocated array (no malloc).
-- **`Handle<T>`** is an affine reference into the pool. Read
-  with `handle_read`; write with `handle_write`.
-- The C lowering is a static array + an index counter -- zero
-  runtime allocator overhead.
+- `pool_new()` takes **no arguments** -- capacity grows as you
+  `pool_alloc` (heap-backed, not a fixed-size stack array).
+- `pool_alloc(mut ref p, v)` returns a `Handle<i64>` -- a `(slot,
+  generation)` pair, `Copy`, not a pointer.
+- `pool_get(ref p, h) -> Option<i64>` is the only way to read: a
+  handle whose slot was freed and reused returns `Option::None`
+  instead of reading garbage -- that's the runtime check paying for
+  itself. There is no `handle_read` / `handle_write` builtin.
+- `pool_free(mut ref p, h)` frees one slot. `Pool`'s own scope-exit
+  drop frees everything still live when `p` goes out of scope.
+- No `region` block involved -- `Pool<T>` is its own affine owner,
+  usable directly inside any function, on hosted targets, with no
+  `unsafe` wrapper.
+
+Full runnable version (double-free + stale-handle behavior
+included): [`examples/language/english/pool.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/pool.vani).
+
+### `region { ... }` + `Region` / `ArenaRef<T>` -- compile-time-checked bump arena
+
+```vani
+fn use_region() -> i64 {
+  region arena {
+    let a: ArenaRef<i64> = region_borrow_i64(mut ref arena, 10);
+    let b: ArenaRef<i64> = region_borrow_i64(mut ref arena, 32);
+    let _ = aref_store(a, aref_load(a) + aref_load(b));
+    return aref_load(a);   // 42
+  }
+  // `arena`'s entire backing storage frees in one call here.
+}
+```
+
+- **`region <name> { ... }`** -- note the name is required
+  (`region { ... }` with no name is a parse error). It desugars to
+  `let <name>: Region = region_new();` followed by the block body,
+  so `<name>`'s scope-exit drop frees the whole arena in one O(1)
+  call.
+- **`region_borrow_i64(mut ref r, v)`** bump-allocates one `i64`
+  slot in `r`, writes `v`, and returns an `ArenaRef<i64>` -- read
+  with `aref_load`, write with `aref_store`. Both lower to a plain
+  pointer deref on both backends; there's no bounds check, no
+  canary, no generation check, because the compiler's escape
+  analysis is the entire safety proof.
+- **The escape check, verified directly**: returning an `ArenaRef`
+  tied to a `Region` declared inside the same function --
+  `fn dangler() -> ArenaRef<i64> { region r { return
+  region_borrow_i64(mut ref r, 1); } }` -- is rejected at compile
+  time (`ArenaRef ... cannot be returned -- the source storage dies
+  on function exit`), whether the escape happens directly on
+  `return` or via an intermediate `let` binding. A `Region` received
+  as a `mut ref Region` **parameter**, by contrast, outlives the
+  callee's frame, so an `ArenaRef` derived from it can freely flow
+  back out.
+- **The embedded gate applies only to signatures, not local use.**
+  `ArenaRef<T>` (and `Region`, though that one's unrestricted) can
+  be used freely as a local variable's type inside one function
+  body on a hosted target -- the example above needs no `unsafe`
+  block and no env var. The gate only fires the moment `ArenaRef<T>`
+  appears as a `fn` **parameter or return type** (`raw pointer type
+  ArenaRef<i64> not permitted in function signature on hosted
+  targets`) -- set `INTENT_TARGET_EMBEDDED=1` to write a helper `fn`
+  that takes or returns one directly. Until then, keep `ArenaRef`
+  values inside a single function (as in the example) or wrap the
+  work in a `Region`-parameter function instead.
+
+Full runnable version: [`examples/language/english/region_arena.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/region_arena.vani).
 
 ## What's safe vs unsafe in this layer
 
 | Layer | Operation | Safety |
 |---|---|---|
 | 1.1 | `*const T` / `*mut T` deref | unsafe |
-| 1.2 | `Pool<T>` / `Handle<T>` | safe (region typed) |
+| 2 | `Pool<T>` / `Handle<T>` | safe (runtime-checked) |
 | 2 | C extern fn call | safe (caller's responsibility) |
 | 3 | `unsafe(reason = "raw pointer write -- hardware register") { ... }` block | author's responsibility |
 | 4.1 | `-fstack-protector-strong` | safe (opt-in build flag) |
+| 5 | `region { ... }` / `Region` / `ArenaRef<T>` (local use) | safe (compile-time-checked, zero cost) |
 
 See [`unsafe.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
 in the repo for the full layered design.
@@ -213,10 +291,11 @@ point.
 
 ## Examples in the repo
 
-- `examples/language/english/region_pool.vani` -- Pool/Handle
-  end-to-end.
-- `examples/language/english/raw_ptr_*.vani` -- raw-pointer
-  variants.
+- [`examples/language/english/pool.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/pool.vani)
+  -- `Pool<T>` / `Handle<T>` end-to-end, including stale-handle and
+  double-free behavior.
+- [`examples/language/english/region_arena.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/region_arena.vani)
+  -- `region { ... }` / `Region` / `ArenaRef<T>` end-to-end.
 
 ## `parallel for` is not available on bare-metal
 

@@ -146,18 +146,23 @@ a fixed-size buffer; you allocate from it bumping a pointer
 up; you free the WHOLE buffer at once when you're done.
 
 ```vani
-region scratch[4096] {
-  let temp_a: ref [u8; 100] = scratch_alloc(scratch, 100);
-  let temp_b: ref [u8; 200] = scratch_alloc(scratch, 200);
-  // ... use temp_a, temp_b ...
-}  // scratch's 4KB is freed; temp_a and temp_b are gone
+region scratch {
+  let temp_a: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 100);
+  let temp_b: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 200);
+  // ... use aref_load(temp_a), aref_load(temp_b) ...
+}  // scratch's whole backing storage is freed; temp_a and temp_b are gone
 ```
 
 Inside the region, allocations are essentially free (just a
 pointer bump). The compiler tracks that `temp_a` and `temp_b`
 are tied to `scratch`'s lifetime -- they can't escape the
-region's scope. When the region ends, all allocations within
-it are released together.
+region's scope (trying to return one from the enclosing
+function is a compile error, not a runtime one). When the
+region ends, all allocations within it are released together.
+The shipped v1 slot type is `i64` (see
+[Advanced 4 -- Embedded](04_embedded.md) for the full,
+runnable `region` / `ArenaRef<i64>` example); a generic
+`ArenaRef<T>` for arbitrary structs is future work.
 
 Region typing is the compile-time mechanism that prevents you
 from accidentally storing a region-allocated pointer in a

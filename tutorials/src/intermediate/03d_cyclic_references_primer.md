@@ -412,11 +412,17 @@ For these, vāṇी's answer is:
    The reason string documents the discipline. The compiler
    doesn't trade safety silently -- you're explicitly opting
    out for one named reason.
-3. **Wait for v2 regions.** `region { ... }` blocks with
-   `&'arena T` (Layer 5 in [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
-   permit cycles between same-region allocations and free
-   them together at region exit. Zero runtime cost, no Rc
-   semantics required.
+3. **`region { ... }` blocks, for `i64` payloads today.** v2
+   regions (Layer 5 in [unsafe.md](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md))
+   have shipped -- `region name { ... }` + `region_borrow_i64` +
+   `ArenaRef<i64>` (see [Advanced 4 -- Embedded](../advanced/04_embedded.md))
+   permit cycles between same-region `i64` slots, freed together at
+   region exit, zero runtime cost, no Rc semantics required.
+   **Not yet generic**: `region_borrow_i64`/`ArenaRef<i64>` only
+   cover `i64` -- a `region`-backed cyclic graph of arbitrary
+   `Node` structs (the motivating case for this section) still
+   needs one of the two options above until a generic
+   `ArenaRef<T>` ships.
 
 ## Side-by-side cheat sheet
 
@@ -466,8 +472,9 @@ this difference compounds.
   wholesale drop.
 - For genuinely unavoidable Rc patterns (third-party
   plugins, multi-modal DOM-like long-lived shared graphs),
-  use `unsafe(reason = "...")` with explicit discipline or
-  await v2 regions.
+  use `unsafe(reason = "...")` with explicit discipline, or
+  `i64`-payload `region` blocks today, or await a generic
+  `ArenaRef<T>` for the arbitrary-struct case.
 
 The takeaway: **cycles in the data don't require cycles in
 ownership.** Decouple them -- flat storage, index edges --
@@ -487,9 +494,9 @@ and the language's affine guarantees cover the rest.
 - [Intermediate 5 -- Dynamic dispatch](05_dyn.md) --
   `Vec<Box<dyn Iface>>` for the observer pattern's
   heterogeneous observer list
-- [Advanced 4a -- Embedded primer](../advanced/04a_embedded_primer.md) --
-  region typing (v2 future) for cycles with compile-time
-  lifetimes
+- [Advanced 4 -- Embedded](../advanced/04_embedded.md) -- `region`
+  typing (`Region` / `ArenaRef<i64>`, shipped for `i64` payloads)
+  for cycles with compile-time lifetimes
 
 
 ---

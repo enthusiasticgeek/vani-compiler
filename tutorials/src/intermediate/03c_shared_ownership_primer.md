@@ -133,23 +133,28 @@ at once. The values "share ownership" of the arena's lifetime
 -- they all live as long as the arena does, then die together.
 
 ```vani
-region scratch[64 * 1024] {
-  let a: ref Foo = scratch_alloc(scratch, Foo { ... });
-  let b: ref Foo = scratch_alloc(scratch, Foo { ... });
+region scratch {
+  let a: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 10);
+  let b: ArenaRef<i64> = region_borrow_i64(mut ref scratch, 32);
   // a and b live as long as `scratch` does
-  process(a, b);
-}  // scratch drops; a + b's data is freed together
+  print "sum:", aref_load(a) + aref_load(b);
+}  // scratch drops; a + b's storage is freed together
 ```
 
-Inside the region, you can pass `ref Foo` handles freely --
+Inside the region, you can pass `ArenaRef<i64>` handles freely --
 they're all valid until the region ends. No per-value
 refcounting; one wholesale cleanup at scope exit. This is
 how compilers, parsers, and game-frame allocators often
 manage many temporary objects.
 
-vāṇी's region typing (chapter [Advanced 4a embedded](../advanced/04a_embedded_primer.md))
-enforces that region-allocated pointers don't escape the
-region's scope.
+vāṇी's region typing ([Advanced 4 -- Embedded](../advanced/04_embedded.md))
+enforces at compile time that a region-allocated `ArenaRef`
+doesn't escape the region's scope. The shipped slot type is
+`i64` -- the `Foo { ... }` struct case shown as the pattern's
+*idea* above isn't allocable in a `region` yet; for that, reach
+for [Pattern 2](#pattern-2-handles-indices-not-pointers)
+(`World` + `Vec<Node>` indices) instead until a generic
+`ArenaRef<T>` ships.
 
 ### Pattern 4: channels for moving ownership between threads
 

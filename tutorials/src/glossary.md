@@ -134,7 +134,7 @@ you can move between the two without re-orienting.
 
 | Term | Meaning |
 |---|---|
-| **arena** | A region allocator whose contents are all freed at once when the arena drops. vāṇी's `Region` is a bump-allocator arena available inside `unsafe(reason = "...")` on embedded targets. |
+| **arena** | A region allocator whose contents are all freed at once when the arena drops. vāṇी's `Region` is a bump-allocator arena (`region <name> { ... }` + `region_borrow_i64` -> `ArenaRef<i64>`), usable directly on hosted targets -- no `unsafe` block needed for local use. Not related to `Pool<T>`/`Handle<T>` (a separate, runtime-checked mechanism); see [Advanced 4 -- Embedded](advanced/04_embedded.md). |
 | **bump allocator** | Allocator that increments a single pointer and never reclaims individual cells -- the arena reclaims everything at once. O(1) allocation. |
 | **BoundedPtr<T>** | A fat pointer carrying `data + len + capacity` so `bptr_get(i)` can return `None` instead of UB on out-of-bounds. Available inside `unsafe(reason = "...")` for low-level interop. |
 | **MMIO** | Memory-mapped I/O -- reads and writes at hardware-defined addresses that map to device registers. `mmio_read_u32` / `mmio_write_u32` are the vāṇी builtins. |

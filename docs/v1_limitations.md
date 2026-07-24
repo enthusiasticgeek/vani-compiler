@@ -13,10 +13,10 @@
 > open in the current release.
 >
 > **At v0.6.1 (2026-07-21): 19 of 19 original entries resolved; L20–L22 added
-> and fixed; L23 partially fixed 2026-07-22. Open items: L5 (by design),
-> L6 (by design), L10-macOS (no hardware), L13 (partial — `match` SOV by
-> design), L14 (by design for v1), L23 (partial — external Kosh-boundary
-> access enforced; same-project sibling-module access still open).**
+> and fixed; L23 fixed in two phases, 2026-07-22 and 2026-07-24; L25 added
+> 2026-07-24. Open items: L5 (by design), L6 (by design), L10-macOS (no
+> hardware), L13 (partial — `match` SOV by design), L14 (by design for v1),
+> L24 (Windows-only, scoped), L25 (Windows-only, scoped).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -42,7 +42,9 @@
 > | L20 | S-19 lock-order detection is intra-procedural only | ✅ Fixed 2026-07-12 — held-set transitive analysis |
 > | L21 | S-20 ISR mutex detection does not follow helper calls | ✅ Fixed 2026-07-12 — collect_locked_mutexes follows calls |
 > | L22 | MISRA 13.2 eval-order check: adjacent args only | ✅ Fixed 2026-07-12 — any-distance duplicate detection |
-> | L23 | `pub(kosh)`: external Kosh-boundary access enforced; same-project sibling-module access still open | 🟨 Partially fixed 2026-07-22 |
+> | L23 | `pub(kosh)`: external Kosh-boundary access enforced; same-project sibling-module access now allowed | ✅ Fixed 2026-07-24 (phase 2) |
+> | L24 | `parallel for`'s Windows thread count is fixed at build time, not run time | ⬜ Windows-only; scoped, not started |
+> | L25 | Windows: `print`/`f64_to_str` scientific-notation exponent width differs between C and LLVM backends | ⬜ Windows-only; scoped, not started |
 
 Cross-referenced from:
 - [`examples/language/english/design_patterns/README.md`](../examples/language/english/design_patterns/README.md) — the GoF pattern examples that hit each limitation
@@ -1270,63 +1272,51 @@ adjacency guard removed. `gap_misra_13_2_*` now calls
 
 ## Module system limitations
 
-### L23 -- `pub(kosh)` is enforced for external Kosh-package access; same-project sibling-module access is a remaining gap ✅ Partially fixed 2026-07-22
+### L23 -- `pub(kosh)` is enforced for external Kosh-package access; same-project sibling-module access now works ✅ Fixed 2026-07-24 (phase 2)
 
-**Fixed part.** `pub(kosh)` now genuinely restricts access from outside its
+**Phase 1 (2026-07-22).** `pub(kosh)` restricts access from outside its
 declaring module: `flatten_modules_in_program` (`checker.rs`) mangles a
 `pub(kosh)` item to a third form (`<mod>__kosh__<name>`) distinct from both
 plain `pub` (`<mod>__<name>`) and private (`<mod>__priv__<name>`) -- the
 same trick private items already used to become unreachable via any
 externally-written qualified path, one tier up. Verified directly: a
 `[deps]` package exposing `pub(kosh) fn internal_helper(...)`, called as
-`pkgname::internal_helper(...)` from a separate consumer project, is now
+`pkgname::internal_helper(...)` from a separate consumer project, is
 rejected with `function 'pkgname::internal_helper' is pub(kosh) -- visible
-only within its own package, not to external consumers`. A bare
-intra-module reference to the same function (from a `pub` sibling in the
-same module) still resolves correctly -- this is the practically important
-case: it closes the gap for the actual Kosh-dependency-boundary scenario
-that motivated this entry (`docs/kosh_namespacing_design.md`).
+only within its own package, not to external consumers`.
 
-**Remaining gap.** The mangled-name approach can't yet distinguish "a
-different, unrelated kosh calling in" from "a sibling module in the *same*
-project calling across module boundaries" -- both arrive as an identical,
-already-parser-mangled `mod__name` string with no caller-identity
-information attached. So the tutorial's own worked example
+**Phase 2 (2026-07-24).** Phase 1's mangled-name approach couldn't yet
+distinguish "a different, unrelated kosh calling in" from "a sibling
+module in the *same* project calling across module boundaries" -- both
+arrived as an identical, already-parser-mangled `mod__name` string with no
+caller-identity information attached. So the tutorial's own worked example
 (`tutorials/src/beginner/09a_modules_primer.md`) -- `module report`
 reaching into a sibling `module stats`'s `pub(kosh) fn sum_all` via
-`stats::sum_all(...)` -- is **also currently rejected**, which is stricter
-than the intended design (that access should be allowed; only a *different
-kosh* consuming `stats` as a `[deps]` package should be rejected). Verified
-directly with the exact fixture. This is not a regression -- before this
-fix, that access silently worked (no enforcement at all); now it's
-over-restricted in this one specific case instead of under-restricted
-everywhere.
+`stats::sum_all(...)` -- was also rejected, stricter than the intended
+design (only a *different kosh* consuming `stats` as a `[deps]` package
+should be rejected).
 
-**Why the remaining gap is harder**: fixing it needs real caller-context
-tracking -- for every function, which top-level module (if any) it's
-lexically declared inside, so a qualified reference can be checked against
-"does the caller's own top-level module match the callee's" rather than
-just "does any matching mangled name exist." `flatten_modules_in_program`
-doesn't track this today; adding it means a second pass over every
-function body (bare top-level and module-nested alike) after the main
-flattening loop, rewriting still-unresolved-but-kosh-eligible references
-only when the caller and callee share a top-level module. Scoped but not
-started.
+Fixed by threading `kosh_boundary_names` (the set of top-level modules
+that are wrapped `[deps]` packages -- see `wrap_deps_into_combined` in
+`lib.rs`) into `checker::check`/`check_library` and on into
+`flatten_modules_in_program`. A new post-flatten pass walks every
+function/impl-method/methods-block body: for an unresolved `mod__item`
+reference that matches a registered `mod__kosh__item`, it rewrites the
+reference to the real mangled name whenever *neither* the calling item's
+nor the target's top-level module is a `[deps]` boundary module (both are
+part of "the current project," whatever its internal module layout).
+External-boundary access is untouched -- it still falls through to the
+existing `lookup_kosh_item` rejection diagnostic. Verified directly: the
+`report`/`stats` sibling-module fixture above now compiles and runs; a
+`[deps]`-wrapped module's `pub(kosh)` item reached via a qualified path
+from outside that package is still rejected (`checker.rs`/`lib.rs` test
+suite: `pub_kosh_qualifier_allows_same_project_sibling_module_access`,
+`pub_kosh_qualifier_still_rejects_external_kosh_boundary_access`,
+`pub_kosh_qualifier_allows_qualified_access_from_same_project`).
 
-**Workaround for the remaining gap**: don't rely on `pub(kosh)` for
-same-project cross-module sharing yet -- use plain `pub` (fully open) or
-restructure so the sharing happens via bare intra-module calls (e.g. move
-both functions into the same module) instead.
-
-**Fix path.** Phase 1 (external Kosh-boundary enforcement) ✅ done
-2026-07-22 -- `checker.rs`'s `flatten_modules_in_program` (third mangled
-form + a `KOSH_MODULE_ITEMS` registry mirroring `PRIVATE_MODULE_ITEMS` in
-`ast.rs` for the diagnostic), `lib.rs`'s `mark_kosh_boundary_modules_pub`
-(now preserves an explicit `pub(kosh)` annotation instead of blanket-
-overriding every item to `pub`, while still defaulting unannotated items
-to `pub` for backward compatibility with the existing, zero-annotation
-kosh package ecosystem). Phase 2 (same-project sibling-module access) --
-not started, needs the caller-context tracking described above.
+No remaining workaround needed -- `pub(kosh)` can now be used for its
+intended purpose: package-internal helpers shared across your own
+project's modules, hidden from `[deps]` consumers.
 
 ### L24 -- `parallel for`'s Windows thread count is fixed at build time, not run time
 
@@ -1375,3 +1365,57 @@ count -- `GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)` (or
 processor-group case) -- emitted as an LLVM `declare` + `call`,
 mirroring how `GOMP_parallel` is already just an external call on
 the non-Windows path. Not started; scoped but untouched.
+
+### L25 -- Windows: `print`/`f64_to_str` scientific-notation exponent width differs between the C and LLVM backends
+
+`print`ing (or `f64_to_str`-converting) an `f64` whose magnitude is
+large/small enough that the default `%g` formatting switches to
+scientific notation produces **different text on the two backends,
+on Windows, for the identical program and value**:
+
+```
+$ vanic run f.vani --backend=c     # prints: 1e+06
+$ vanic run f.vani                 # prints: 1e+006   (LLVM/JIT)
+```
+
+Verified directly across several magnitudes (`1000000.0`,
+`12345678.9`, `123456789.123456`, `0.0000001234`) -- the C backend
+always emits a 2-digit exponent, the LLVM backend always emits a
+3-digit exponent, on the same Windows host, same `snprintf`-based
+formatting call in both cases.
+
+**Root cause**: the C backend's `printf("%g", ...)` call links
+against whatever `cc` the build uses (MinGW/UCRT on this project's
+Windows CI), which follows the C99 (2-digit-minimum) exponent
+convention. The LLVM backend never calls the host's `printf`
+directly -- `backend_llvm.rs` declares its own `@snprintf`/
+`@vsnprintf` (see the Windows-specific IR shims, since neither
+symbol is reliably exported for JIT/AOT linking on Windows) and
+that resolution path lands on the legacy MSVCRT 3-digit-exponent
+convention instead of UCRT's 2-digit one. Both ultimately go
+through *a* C library's `%g` formatter; they just don't go through
+the *same* one.
+
+**Impact**: cosmetic (both strings parse back to the same `f64`
+value with `parse_float`), but it breaks any golden-output test
+that diffs `print` output for large/small `f64` values across
+backends on Windows, and it means a value's printed form isn't
+fully portable across `vanic run` vs. `vanic run --backend=c`.
+Not observed on Linux/macOS (both backends link the same glibc/libc
+`printf` there) -- this is Windows-only, and only for values that
+actually hit scientific notation (`%g`'s default precision is 6
+significant digits; anything with an exponent magnitude below that
+stays in fixed notation on both backends, no divergence).
+
+**Workaround**: use `f64_to_str_fixed(x, decimals)` instead of raw
+`print x;` / `f64_to_str(x)` for any `f64` whose magnitude isn't
+tightly bounded -- fixed notation (`%.*f`) never switches to
+scientific notation, so it never hits this gap. See [Beginner 6 --
+Strings](../tutorials/src/beginner/06_strings.md) for the full
+`f64_to_str` vs. `f64_to_str_fixed` caveats.
+
+**Fix path**: pin the LLVM backend's snprintf resolution to the
+same runtime the C backend's `cc` links (UCRT), or post-process the
+scientific-notation output to normalize exponent width to 2 digits
+regardless of which CRT actually formatted it. Not started; scoped
+but untouched.

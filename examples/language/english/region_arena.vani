@@ -1,0 +1,40 @@
+// build & run:
+//   vanic run examples/language/english/region_arena.vani                     # LLVM backend
+//   vanic run examples/language/english/region_arena.vani --backend=c         # C backend
+//   vanic build examples/language/english/region_arena.vani -o /tmp/region_arena && /tmp/region_arena
+
+intent "Region<T> / ArenaRef<i64> — compile-time-checked bump arena (Layer 5 of unsafe.md)";
+
+// Unlike Pool<i64>/Handle<i64> (see pool.vani), which pay a small
+// runtime cost (a generation check on every access) in exchange for
+// a Handle that can freely outlive the Pool, a Region's safety
+// proof is entirely compile-time: the checker's escape analysis
+// rejects any attempt to return or store an ArenaRef that's tied to
+// a Region local to the current function. Because that's proven
+// statically, `aref_load` / `aref_store` compile to a bare pointer
+// dereference — zero added runtime cost versus a raw `*mut i64`.
+//
+//   region <name> { ... }                   -- opens a fresh arena scope;
+//                                               sugar for `let <name>: Region
+//                                               = region_new();` + a block
+//   region_borrow_i64(mut ref r, v: i64)    -> ArenaRef<i64>
+//   aref_load(a: ArenaRef<i64>)             -> i64
+//   aref_store(a: ArenaRef<i64>, v: i64)    -> bool
+
+fn main() -> i64 {
+  region arena {
+    let a: ArenaRef<i64> = region_borrow_i64(mut ref arena, 10);
+    let b: ArenaRef<i64> = region_borrow_i64(mut ref arena, 32);
+
+    print "a:", aref_load(a);
+    print "b:", aref_load(b);
+
+    let _ = aref_store(a, aref_load(a) + aref_load(b));
+    print "a after store:", aref_load(a);
+
+    // The whole arena -- both slots -- frees in one deterministic
+    // O(1) call when `arena` goes out of scope here. No per-slot
+    // free, no risk of forgetting one.
+  }
+  return 0;
+}
