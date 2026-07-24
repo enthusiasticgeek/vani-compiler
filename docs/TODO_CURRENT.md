@@ -715,8 +715,8 @@ Two narrow compiler items surfaced during that planning pass:
 
 | ID | Task | Effort | Depends on |
 |----|------|--------|-----------|
-| MATH-1 | Fix `vanic run`'s JIT session missing `intent_vec_double__sort`. Plain `sort()` on `Vec<f64>` crashes under `vanic run` ("Symbols not found: intent_vec_double__sort") but works correctly under `vanic build` (AOT). Root cause: `sort_runtime.c` defines `intent_vec_double__sort` correctly (confirmed by reading it) -- the JIT's runtime-symbol registration list is missing it even though `intent_vec_i64__sort` is present. Every published package currently works around this by using `sort_by` (which links fine under both `run` and `build`), so it isn't blocking anything, but it's worth fixing since `vanic run` is the natural first thing anyone reaches for. | ~1-2 h | nothing |
-| MATH-2 | Generalize `sort`/`sort_by` beyond `Vec<i64>`/`Vec<f64>` to arbitrary `Vec<T>` via a `fn(T,T)->i64` comparator (mirrors the F64-1 pattern, widened past numeric element types). Not blocking anything in the current roadmap, but vani-geometry (sorting points by a key) and the symbolic tier (sorting terms in a canonical form) would both benefit from not needing an O(n²) insertion-sort workaround. | ~1 day | nothing |
+| ~~MATH-1~~ ✅ fixed 2026-07-24 | Fixed `vanic run`'s JIT session missing `intent_vec_double__sort`. Plain `sort()` on `Vec<f64>` crashed under `vanic run` ("Symbols not found: intent_vec_double__sort") but worked correctly under `vanic build` (AOT). **Corrected root cause** (the original diagnosis above was wrong on one point): `intent_vec_i64__sort` was never actually present under the JIT either -- reproduced directly, both `Vec<i64>.sort()` and `Vec<f64>.sort()` failed identically with "Symbols not found" before this fix. `run_program_llvm`/`run_program_llvm_capture` (backing `vanic run` / `vanic test`) never linked `sort_runtime.c` at all; only `build_program_llvm` (AOT) did, by compiling it to a `.o` and linking it into the binary. Fixed by adding `sort_runtime_shared_lib()` (`src/main.rs`), which compiles `sort_runtime.c` into a host shared library once per process (`OnceLock`-cached, since `vanic test` calls the JIT path once per file in a loop) and `-load`s it into `lli`, mirroring the existing `add_libgomp_load_flags` pattern. | ~1-2 h | nothing |
+| ~~MATH-2~~ ✅ fixed 2026-07-24 | Generalized `sort_by` (not plain `sort`) beyond `Vec<i64>`/`Vec<f64>` to arbitrary Copy `Vec<T>` via the existing `fn(T,T)->i64` comparator shape. Scope note: plain `sort()`/`sort_desc()` (no comparator) stay i64/f64-only by design -- there's no derivable ascending order for a struct, so widening those would need a different feature (e.g. an ordering trait), not just codegen work. `sort_by` needed no such thing: the caller already supplies the order, so `sort_with`'s IR/C emission just needed `elt`/`ep`/`epp` (LLVM) and `{ct}` (C) driven off `vec_element_value_str`/`c_element` -- both already generic and already used by `push`/`pop`/`reverse` for the exact same element types, per vani-complex's and vani-geometry's existing struct-Vec usage. Verified end-to-end: a `Vec<Point>.sort_by(cmp_by_x)` sorts correctly under `vanic run` (LLVM JIT), `vanic build` (LLVM AOT), and `--backend=c`; non-Copy element types (`Vec<OwnedStr>`) are still correctly rejected with an accurate diagnostic; fixed-size-array `sort`/`sort_by` (separate, i64-only codegen path) and plain `sort()`/`sort_desc()` are unchanged. Full `cargo test --lib` run before/after: 2551 passed / 3 failed both times (the 3 are pre-existing, unrelated Win64 FFI-struct-ABI test failures -- confirmed identical on `main` without this change). | ~1 day | nothing |
 | ~~MATH-3~~ ✅ fixed 2026-07-20 | `vanic run`'s JIT reported a **failed `assert`** as a native stack overflow (Windows `STATUS_STACK_BUFFER_OVERRUN`) instead of a clean non-zero exit, once any `mut ref` Vec operation was live in a caller frame. Root cause: assert-failure lowering called `abort()`, whose SIGABRT triggered LLVM's own crash/backtrace signal handler inside `lli` -- that handler's stack walk could itself fault under the JIT. Fixed by lowering assert failure to `exit(3)` instead (both the SSA-LLVM and tree-LLVM backends), bypassing signal handling entirely and matching the exit code `vanic build`'s AOT binary already produced for the same failure. | ~2-4 h | nothing |
 
 **Out of scope for the compiler**: everything else in the math roadmap is pure
@@ -814,25 +814,24 @@ candidate feature surfaced by this audit:
   `setvbuf` call, which avoids needing build-vs-JIT-vs-cross-compile
   linkage for a new runtime symbol. **Not started.** ~2-4 h estimate.
 
-- [ ] **BUG-2. `#[wcet]` estimator doesn't recurse into struct-literal field
-  expressions** — discovered 2026-07-21 while backfilling `#[wcet]` across
-  kosh-index packages (see `kosh-index/ROADMAP.md` MAINT-1). `wcet_expr` in
-  `src/safety.rs` has explicit arms for `Binary`/`Call`/`Index`/etc. but
-  `StructLit` falls into the catch-all `_ => Some(5)` — a flat cost
-  regardless of how expensive the field expressions actually are.
-  Reproduces: a fn `fn f(z: Complex) -> Complex { return Complex { re:
-  log(complex_abs(z)), im: complex_arg(z) }; }` gets a real enforced
-  `#[wcet]` budget of only 10 cycles despite calling three real functions
-  (`log`, `complex_abs`, `complex_arg`) inside the literal — `vanic check`
-  happily accepts `#[wcet(cycles=10)]` on it. This means every
-  `#[wcet]`-annotated function anywhere that returns a struct literal
-  directly is under-counted by the checker itself, not just by whoever
-  wrote the annotation — the enforcement gives a false sense of rigor.
-  Likely fix: give `StructLit { fields, .. }` its own arm in `wcet_expr`
-  that sums `wcet_expr` over every field's value expression (mirroring
-  `ArrayLit`'s existing arm just above the catch-all, which already does
-  exactly this pattern for array elements). **Not started.** ~1-2 h
-  estimate (small, well-isolated fix; the hard part was finding it).
+- [x] **BUG-2. `#[wcet]` estimator doesn't recurse into struct-literal field
+  expressions** ✅ fixed 2026-07-24 — discovered 2026-07-21 while backfilling
+  `#[wcet]` across kosh-index packages (see `kosh-index/ROADMAP.md` MAINT-1).
+  `wcet_expr` in `src/safety.rs` had explicit arms for `Binary`/`Call`/
+  `Index`/etc. but `StructLit` fell into the catch-all `_ => Some(5)` — a
+  flat cost regardless of how expensive the field expressions actually are.
+  Reproduced exactly as described: a fn `fn f(z: Complex) -> Complex {
+  return Complex { re: log(complex_abs(z)), im: complex_arg(z) }; }` got a
+  real enforced `#[wcet]` budget of only 10 cycles despite calling three
+  real functions (`log`, `complex_abs`, `complex_arg`) inside the literal —
+  `vanic check` accepted `#[wcet(cycles=10)]` on it before this fix. Fixed
+  exactly as sketched: gave `StructLit { fields, .. }` its own arm in
+  `wcet_expr` that sums `wcet_expr` over every field's value expression,
+  mirroring `ArrayLit`'s existing arm just above the catch-all. Verified:
+  the repro fn now correctly reports 68 cycles and `vanic check` rejects
+  `#[wcet(cycles=10)]` on it (accepts `#[wcet(cycles=68)]`). Full
+  `cargo test --lib`: 2551 passed / 3 failed, same pre-existing unrelated
+  Win64 FFI-struct-ABI failures as baseline — no regressions.
 
 ---
 
