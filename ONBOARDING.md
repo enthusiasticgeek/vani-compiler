@@ -47,6 +47,29 @@ cargo clippy                        # Lints
 cargo run -- run examples/basics.vani   # Try a sample
 ```
 
+`--lib` scopes a run to just the `vani` library crate's `src/lib.rs`
+tests, skipping `src/main.rs`'s smaller CLI-focused test module (and
+the `tests/*.rs` integration binaries) — useful when you're iterating
+on checker/backend logic and don't want to pay for the rest.
+`--release` matters for anything that goes through the SMT verifier
+or JIT-compiles a program; debug-profile z3/lli round-trips are
+noticeably slower. Filter substrings match against the fully-qualified
+`tests::test_name`, so any distinctive prefix in a test's own name
+works — a few real ones, by subsystem:
+
+| Filter | Subsystem | Roughly |
+|---|---|---|
+| `cargo test --release --lib smt_` | SMT verifier (`smt.rs`) | ~82 tests |
+| `cargo test --release --lib pub_kosh` | `pub(kosh)` visibility (L23) | ~5 tests |
+| `cargo test --release --lib wcet_` | `#[wcet]` estimator (`safety.rs`) | ~8 tests |
+| `cargo test --release --lib bounded_stack` | `#[bounded_stack]` (`safety.rs`) | ~8 tests |
+| `cargo test --release --lib misra_` | MISRA C:2012 checks | ~7 tests |
+| `cargo test --release --lib simd_` | SIMD (vec128/256/512) codegen | ~29 tests |
+| `cargo test --release --lib atomic_` | `Atomic<T>` | ~14 tests |
+| `cargo test --release --lib parallel_for` | `parallel for` reductions | ~24 tests |
+| `cargo test --release --lib closure_` | Closures (incl. affine capture) | ~23 tests |
+| `cargo test --release --lib sort_` | `sort`/`sort_by` (both backends) | ~12 tests |
+
 If a test needs `lli` / `llc` / `z3` and the tool isn't installed,
 the test gracefully *skips* rather than fails. Look for tests gated
 by `lli_available()` / `z3_available()`.

@@ -63,7 +63,11 @@ fn inject_prelude(program: &mut ast::Program) {
 }
 
 pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
-    compile_with(source, checker::check, &std::collections::HashSet::new())
+    compile_with(
+        source,
+        checker::check_with_kosh_boundary,
+        &std::collections::HashSet::new(),
+    )
 }
 
 /// Like `compile`, but does not require `fn main() -> i64`. Used for
@@ -72,14 +76,14 @@ pub fn compile(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
 pub fn compile_library(source: &str) -> Result<CheckedProgram, Vec<Diagnostic>> {
     compile_with(
         source,
-        checker::check_library,
+        checker::check_library_with_kosh_boundary,
         &std::collections::HashSet::new(),
     )
 }
 
 fn compile_with(
     source: &str,
-    checker_fn: fn(ast::Program) -> Result<CheckedProgram, Vec<Diagnostic>>,
+    checker_fn: fn(ast::Program, &std::collections::HashSet<String>) -> Result<CheckedProgram, Vec<Diagnostic>>,
     kosh_boundary_names: &std::collections::HashSet<String>,
 ) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let tokens = lexer::lex(source).map_err(|diagnostic| vec![diagnostic])?;
@@ -94,7 +98,7 @@ fn compile_with(
     if !kosh_boundary_names.is_empty() {
         mark_kosh_boundary_modules_pub(&mut program, kosh_boundary_names);
     }
-    match checker_fn(program) {
+    match checker_fn(program, kosh_boundary_names) {
         Ok(checked) if parse_errors.is_empty() => Ok(checked),
         Ok(_) => Err(parse_errors),
         Err(mut check_errors) => {
@@ -302,7 +306,7 @@ pub fn compile_path(
             vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
         ));
     }
-    match compile_with(&combined, checker::check, &kosh_boundary_names) {
+    match compile_with(&combined, checker::check_with_kosh_boundary, &kosh_boundary_names) {
         Ok(checked) => Ok((checked, file_map)),
         Err(diagnostics) => Err((file_map, diagnostics)),
     }
@@ -352,7 +356,7 @@ pub fn compile_library_path(
             vec![Diagnostic::new(crate::span::Span::new(0, 0), err)],
         ));
     }
-    match compile_with(&combined, checker::check_library, &kosh_boundary_names) {
+    match compile_with(&combined, checker::check_library_with_kosh_boundary, &kosh_boundary_names) {
         Ok(checked) => Ok((checked, file_map)),
         Err(diagnostics) => Err((file_map, diagnostics)),
     }
@@ -28907,25 +28911,70 @@ fn main() -> i64 {
     }
 
     #[test]
-    fn pub_kosh_qualifier_rejects_external_qualified_access() {
-        // L23 fix (2026-07-22): unlike before (see git history for
-        // the old `pub_kosh_qualifier_parses_and_compiles`, which
-        // pinned "behaves identically to pub" as the then-current
-        // gap), an external qualified reference `m::inner()` must
-        // now be rejected with a pub(kosh)-specific diagnostic --
-        // the same mechanism private items already used (a mangled
-        // name no externally-written qualified path can match),
-        // one tier up.
+    fn pub_kosh_qualifier_allows_qualified_access_from_same_project() {
+        // L23 Phase 1 (2026-07-22) shipped rejection of ANY qualified
+        // reference from outside the declaring module, including bare
+        // top-level code in the SAME compile (no `[deps]` involved at
+        // all) -- overly strict, and the exact gap L23 Phase 2
+        // (2026-07-24, docs/v1_limitations.md) closes: bare top-level
+        // code is part of the same Kosh package as `module m`, so a
+        // qualified `m::inner()` reference to it must resolve, same as
+        // it would if `inner` were plain `pub`. See
+        // `pub_kosh_qualifier_still_rejects_external_kosh_boundary_access`
+        // below for the case that must stay rejected: a reference from
+        // a genuinely different (`[deps]`-wrapped) Kosh package.
         let source = r#"
             module m {
               pub(kosh) fn inner() -> i64 { return 2; }
             }
             fn main() -> i64 { return m::inner(); }
         "#;
-        let errors = compile(source).expect_err("pub(kosh) must reject external qualified access");
+        compile(source).expect("same-project qualified access to pub(kosh) now resolves");
+    }
+
+    #[test]
+    fn pub_kosh_qualifier_allows_same_project_sibling_module_access() {
+        // L23 Phase 2 fix (2026-07-24, docs/v1_limitations.md): a
+        // `pub(kosh)` item is now reachable via a qualified path from
+        // a SIBLING module in the same project -- not just from bare
+        // intra-module references. This is the exact scenario the
+        // tutorial's own worked example uses
+        // (tutorials/src/beginner/09a_modules_primer.md: `module
+        // report` calling `stats::sum_all`, a `pub(kosh)` fn in a
+        // sibling `module stats`).
+        let source = r#"
+            module stats {
+              pub(kosh) fn sum_all(a: i64, b: i64) -> i64 { return a + b; }
+            }
+            module report {
+              pub fn summarize(a: i64, b: i64) -> i64 { return stats::sum_all(a, b); }
+            }
+            fn main() -> i64 { return report::summarize(3, 4); }
+        "#;
+        compile(source).expect("same-project sibling-module pub(kosh) access now resolves");
+    }
+
+    #[test]
+    fn pub_kosh_qualifier_still_rejects_external_kosh_boundary_access() {
+        // The part of L23 that must stay closed: a genuinely
+        // different Kosh package -- modeled here the same way
+        // `wrap_deps_into_combined` marks a `[deps]` entry, as a
+        // top-level module name present in `kosh_boundary_names` --
+        // reaching into another package's `pub(kosh)` item via a
+        // qualified path must still be rejected.
+        let source = r#"
+            module stats {
+              pub(kosh) fn sum_all(a: i64, b: i64) -> i64 { return a + b; }
+            }
+            fn main() -> i64 { return stats::sum_all(3, 4); }
+        "#;
+        let boundary: std::collections::HashSet<String> =
+            ["stats".to_string()].into_iter().collect();
+        let errors = super::compile_with(source, crate::checker::check_with_kosh_boundary, &boundary)
+            .expect_err("external kosh-boundary access to pub(kosh) must still be rejected");
         assert!(
-            errors.iter().any(|d| d.message.contains("pub(kosh)") && d.message.contains("m::inner")),
-            "expected a pub(kosh)-specific diagnostic naming m::inner, got: {:?}",
+            errors.iter().any(|d| d.message.contains("pub(kosh)") && d.message.contains("stats::sum_all")),
+            "expected a pub(kosh)-specific diagnostic naming stats::sum_all, got: {:?}",
             errors
         );
     }

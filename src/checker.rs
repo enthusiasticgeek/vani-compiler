@@ -443,17 +443,42 @@ impl CheckedExpr {
 }
 
 pub fn check(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
-    check_impl(program, true)
+    check_impl(program, true, &std::collections::HashSet::new())
 }
 
 /// Like `check`, but does not require a `fn main() -> i64` entry point.
 /// Used for auditing kosh library packages (`src/lib.vani` has no main),
 /// e.g. `vanic audit-safety` / the `vanic publish` coverage gate.
 pub fn check_library(program: Program) -> Result<CheckedProgram, Vec<Diagnostic>> {
-    check_impl(program, false)
+    check_impl(program, false, &std::collections::HashSet::new())
 }
 
-fn check_impl(program: Program, require_main: bool) -> Result<CheckedProgram, Vec<Diagnostic>> {
+/// Like `check`, but also threads through the set of top-level module
+/// names that are wrapped `[deps]` packages (see
+/// `wrap_deps_into_combined` in `lib.rs`) so `flatten_modules_in_program`
+/// can tell a same-project sibling-module `pub(kosh)` reference apart
+/// from a genuinely external Kosh-package one (L23, `docs/v1_limitations.md`).
+pub fn check_with_kosh_boundary(
+    program: Program,
+    kosh_boundary_names: &std::collections::HashSet<String>,
+) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    check_impl(program, true, kosh_boundary_names)
+}
+
+/// `check_with_kosh_boundary`, but for library packages (no `fn main`
+/// requirement) -- mirrors the `check` / `check_library` split.
+pub fn check_library_with_kosh_boundary(
+    program: Program,
+    kosh_boundary_names: &std::collections::HashSet<String>,
+) -> Result<CheckedProgram, Vec<Diagnostic>> {
+    check_impl(program, false, kosh_boundary_names)
+}
+
+fn check_impl(
+    program: Program,
+    require_main: bool,
+    kosh_boundary_names: &std::collections::HashSet<String>,
+) -> Result<CheckedProgram, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut program = program;
 
@@ -465,7 +490,7 @@ fn check_impl(program: Program, require_main: bool) -> Result<CheckedProgram, Ve
     // After this pass, `program.modules` is empty and the
     // rest of the checker sees a flat program with
     // colon-colon-mangled names.
-    flatten_modules_in_program(&mut program, &mut diagnostics);
+    flatten_modules_in_program(&mut program, &mut diagnostics, kosh_boundary_names);
 
     // Closure #308: lambda-lift anonymous fn expressions.
     // Walks each function's body / requires / ensures and
@@ -3635,6 +3660,7 @@ fn lift_expr_anon_fn(
 fn flatten_modules_in_program(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
+    kosh_boundary_names: &std::collections::HashSet<String>,
 ) {
     use crate::ast::Pattern;
     let modules = std::mem::take(&mut program.modules);
@@ -4180,6 +4206,102 @@ fn flatten_modules_in_program(
             program.methods_blocks.push(m);
         }
     }
+    // L23 Phase 2 fix (2026-07-24, see docs/v1_limitations.md): allow
+    // a `pub(kosh)` item to be reached via a qualified path
+    // (`mod::item`) from a SIBLING module in the same project, while
+    // still rejecting that same qualified path when written from a
+    // genuinely different Kosh package (a `[deps]` consumer). The
+    // distinguishing signal is each side's *top-level* module:
+    // `kosh_boundary_names` names the top-level modules that are
+    // wrapped `[deps]` packages (see `wrap_deps_into_combined` /
+    // `mark_kosh_boundary_modules_pub` in `lib.rs`) -- everything else
+    // is local to the current compilation (the user's own project,
+    // whatever its module structure). Cross-module `pub(kosh)` access
+    // is allowed exactly when BOTH the caller's and the target's
+    // top-level module are local (neither is a `[deps]`-wrapped
+    // boundary) -- i.e. they're part of the same Kosh package.
+    //
+    // This has to run as a pass over the now-fully-flattened program
+    // rather than inline in the per-module loop above, because
+    // `kosh_items` isn't complete until every module has been
+    // visited -- the worklist's pop order is LIFO/unspecified, so a
+    // module processed early can't yet see a sibling's `pub(kosh)`
+    // items registered by a module processed later.
+    if !kosh_items.is_empty() {
+        // A flattened top-level name's boundary status: does its
+        // first `__`-segment name a `[deps]`-wrapped module? Applies
+        // uniformly to the calling item (to find its own home module)
+        // and to the target of a candidate reference.
+        let is_boundary_name = |name: &str| -> bool {
+            name.split("__")
+                .next()
+                .map(|seg| kosh_boundary_names.contains(seg))
+                .unwrap_or(false)
+        };
+        // Given an unresolved reference `mod__item`, reconstruct the
+        // `pub(kosh)` mangled form the same way
+        // `crate::ast::lookup_kosh_item` does, and -- if it names a
+        // real kosh item and both sides are local -- rewrite the
+        // reference to the real mangled name so it resolves. Left
+        // unchanged (and therefore still rejected downstream via
+        // `lookup_kosh_item`'s diagnostic) for every case the design
+        // intends to keep closed: a `[deps]` consumer reaching a
+        // local kosh item, local code reaching into a `[deps]`
+        // package's kosh item, or one `[deps]` package reaching into
+        // another's.
+        let kosh_items_ref = &kosh_items;
+        let make_qualify_kosh = move |caller_is_boundary: bool| {
+            move |name: &str| -> String {
+                let parts: Vec<&str> = name.splitn(2, "__").collect();
+                if parts.len() != 2 {
+                    return name.to_string();
+                }
+                let candidate = format!("{}__kosh__{}", parts[0], parts[1]);
+                if !kosh_items_ref.contains_key(&candidate) {
+                    return name.to_string();
+                }
+                if caller_is_boundary || kosh_boundary_names.contains(parts[0]) {
+                    return name.to_string();
+                }
+                candidate
+            }
+        };
+        for f in &mut program.functions {
+            let qualify_kosh = make_qualify_kosh(is_boundary_name(&f.name));
+            for s in &mut f.body {
+                rewrite_stmt_for_alias(s, &qualify_kosh);
+            }
+            rewrite_type_for_alias(&mut f.return_type, &qualify_kosh);
+            for p in &mut f.params {
+                rewrite_type_for_alias(&mut p.ty, &qualify_kosh);
+            }
+        }
+        for im in &mut program.impls {
+            for m in &mut im.methods {
+                let qualify_kosh = make_qualify_kosh(is_boundary_name(&m.name));
+                for s in &mut m.body {
+                    rewrite_stmt_for_alias(s, &qualify_kosh);
+                }
+                rewrite_type_for_alias(&mut m.return_type, &qualify_kosh);
+                for p in &mut m.params {
+                    rewrite_type_for_alias(&mut p.ty, &qualify_kosh);
+                }
+            }
+        }
+        for mb in &mut program.methods_blocks {
+            for m in &mut mb.methods {
+                let qualify_kosh = make_qualify_kosh(is_boundary_name(&m.name));
+                for s in &mut m.body {
+                    rewrite_stmt_for_alias(s, &qualify_kosh);
+                }
+                rewrite_type_for_alias(&mut m.return_type, &qualify_kosh);
+                for p in &mut m.params {
+                    rewrite_type_for_alias(&mut p.ty, &qualify_kosh);
+                }
+            }
+        }
+    }
+
     // Closure #243: publish the private-item registry so the
     // checker's unknown-name diagnostic can surface clearer
     // messages when the user references a private module
