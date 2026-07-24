@@ -57,18 +57,23 @@ noticeably slower. Filter substrings match against the fully-qualified
 `tests::test_name`, so any distinctive prefix in a test's own name
 works — a few real ones, by subsystem:
 
-| Filter | Subsystem | Roughly |
+Counts below are exact matches for this filter substring as of
+2026-07-24 (`cargo test --release --lib <filter>`, read the `test
+result:` line) — expect them to grow as the suite does; re-run to get
+the current number, the point is which filter to reach for:
+
+| Filter | Subsystem | Count |
 |---|---|---|
-| `cargo test --release --lib smt_` | SMT verifier (`smt.rs`) | ~82 tests |
-| `cargo test --release --lib pub_kosh` | `pub(kosh)` visibility (L23) | ~5 tests |
-| `cargo test --release --lib wcet_` | `#[wcet]` estimator (`safety.rs`) | ~8 tests |
-| `cargo test --release --lib bounded_stack` | `#[bounded_stack]` (`safety.rs`) | ~8 tests |
-| `cargo test --release --lib misra_` | MISRA C:2012 checks | ~7 tests |
-| `cargo test --release --lib simd_` | SIMD (vec128/256/512) codegen | ~29 tests |
-| `cargo test --release --lib atomic_` | `Atomic<T>` | ~14 tests |
-| `cargo test --release --lib parallel_for` | `parallel for` reductions | ~24 tests |
-| `cargo test --release --lib closure_` | Closures (incl. affine capture) | ~23 tests |
-| `cargo test --release --lib sort_` | `sort`/`sort_by` (both backends) | ~12 tests |
+| `smt_` | SMT verifier (`smt.rs`) | 84 |
+| `pub_kosh` | `pub(kosh)` visibility (L23) | 5 |
+| `wcet_` | `#[wcet]` estimator (`safety.rs`) | 9 |
+| `bounded_stack` | `#[bounded_stack]` (`safety.rs`) | 8 |
+| `misra_` | MISRA C:2012 checks | 8 |
+| `simd_` | SIMD (vec128/256/512) codegen | 29 |
+| `atomic_` | `Atomic<T>` | 19 |
+| `parallel_for` | `parallel for` reductions | 45 |
+| `closure_` | Closures (incl. affine capture) | 29 |
+| `sort_` | `sort`/`sort_by` (both backends) | 23 |
 
 If a test needs `lli` / `llc` / `z3` and the tool isn't installed,
 the test gracefully *skips* rather than fails. Look for tests gated
