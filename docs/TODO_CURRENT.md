@@ -1136,3 +1136,26 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   is documented as the "legacy" path. `vani-bignum` ships without a
   workaround; this is tracked here as a real compiler-level gap, not
   fixed as part of that package's v0.1.0. **Not started.**
+
+- [ ] **BUG-4. `implement <Iface> for T { ... }` blocks reject
+  `#[attr]`-prefixed methods entirely** — discovered publishing
+  `vani-bignum`: `vanic audit-safety` (and therefore `vanic publish`'s
+  pre-publish gate, GATE-1) correctly identifies `BigInt_eq` (the `eq`
+  method inside `implement Eq for BigInt`) as eligible for
+  `#[bounded_stack(bytes = 257)]` and reports the exact number — but
+  there is no syntax position to actually write that attribute. Placing
+  `#[bounded_stack(...)]` directly above `fn eq(...)` inside the
+  `implement` block is a parse error (`expected 'fn'`), confirmed by
+  direct test. This is the same class of gap Phase 3 of the kosh
+  namespacing arc already fixed for `module` blocks ("module bodies had
+  no support for `#[attr]`-prefixed items") — `implement` blocks never
+  got the equivalent fix. Net effect: any non-Copy struct's `Eq`/other
+  interface impl with a real (non-trivial) method body can never reach
+  100% attribute coverage, only `vanic publish
+  --allow-partial-safety-coverage` (the escape hatch GATE-1 added for
+  legitimately-uncomputable cases, not for "the checker computed a real
+  number but the parser has nowhere to put it"). `vani-bignum` published
+  with the escape hatch for this one function, documented in its module
+  header. Likely fix: extend whatever parser change Phase 3 made for
+  `module` bodies to `implement` bodies too — same shape of gap, same
+  fix should apply almost verbatim. **Not started.**
