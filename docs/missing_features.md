@@ -294,12 +294,28 @@ dispatch in another language.
 
 ### Attribute macros (`#[derive(Debug)]`)
 
-**Not in vāṇी.** No `derive(Debug)` / `derive(Clone)` etc.
-Print formatting for structs requires a `print` builtin
+**Not in vāṇी.** No `derive(Debug)` / `derive(Clone)` / `derive(Eq)`
+etc. `Eq` (like every interface) is always opt-in and hand-written --
+`implement Eq for T { fn eq(self: ref T, other: ref T) -> bool { ... } }`
+for non-Copy structs, or `self: T, other: T` by value for Copy ones
+(see [`struct_eq.vani`](../examples/language/english/struct_eq.vani)
+and the [interfaces primer](../tutorials/src/intermediate/04b_interfaces_primer.md#no-derive----eq-and-other-traits-are-always-hand-written)).
+Print formatting for structs similarly requires a `print` builtin
 extension or hand-written field-by-field code.
 
-**Workaround:** write the print code yourself, or use
-`vanic emit --backend=c` to read the C representation when
+**Is this a real gap?** Not a capability one -- everything derive
+would generate is still directly expressible by hand, and it matches
+vāṇी's explicit-over-implicit posture (interface conformance is
+always an opt-in `implement` block, never inferred from shape). The
+real cost is boilerplate that scales with struct count × trait count
+-- as the [kosh ecosystem](https://github.com/enthusiasticgeek/kosh-index/blob/main/ROADMAP.md)
+grows, every struct needing `Eq` gets a few hand-written lines instead
+of one attribute. `vani-bignum`'s `BigInt` is the reference example of
+the pattern in a real published package. Revisit only if boilerplate
+volume becomes a measured pain point across packages, not preemptively.
+
+**Workaround:** write the `implement Eq for T` / print code yourself,
+or use `vanic emit --backend=c` to read the C representation when
 debugging.
 
 ---

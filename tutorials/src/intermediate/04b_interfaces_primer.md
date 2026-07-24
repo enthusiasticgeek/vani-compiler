@@ -183,6 +183,67 @@ Now `Point` works anywhere a `Shape` OR `Cloneable` OR
 When a function bounds on multiple interfaces (`where T is
 Shape + Cloneable`), `T` must implement BOTH.
 
+## No derive -- Eq (and other traits) are always hand-written
+
+vāṇी has no `#[derive(Eq)]` / `#[derive(Debug)]` / `#[derive(Clone)]`.
+Every interface implementation, including the ones that would be a
+one-line attribute in many other languages, is a real `implement`
+block you write yourself:
+
+```vani
+struct Point { x: i64, y: i64 }
+
+interface Eq { fn eq(self: Point, other: Point) -> bool; }
+implement Eq for Point {
+  fn eq(self: Point, other: Point) -> bool {
+    return self.x == other.x && self.y == other.y;
+  }
+}
+```
+
+For a non-Copy struct (one owning a `Vec`, `OwnedStr`, `Box<T>`, etc.)
+the receiver has to be a reference instead, since the value can't be
+taken by copy. Note there's no built-in `==` for `Vec<T>` either --
+that gets hand-written too, element by element:
+
+```vani
+struct BigInt { limbs: Vec<i64>, sign: i64 }
+
+interface Eq { fn eq(self: ref BigInt, other: ref BigInt) -> bool; }
+implement Eq for BigInt {
+  fn eq(self: ref BigInt, other: ref BigInt) -> bool {
+    if self.sign != other.sign { return false; }
+    if len(self.limbs) != len(other.limbs) { return false; }
+    let i: i64 = 0;
+    while i < len(self.limbs) as i64 {
+      if self.limbs[i] != other.limbs[i] { return false; }
+      i = i + 1;
+    }
+    return true;
+  }
+}
+```
+
+(This is the same shape as the real `implement Eq for BigInt` in the
+`vani-bignum` Kosh package, which compares magnitude digit-by-digit
+via its own `bn_cmp` rather than field equality directly.)
+
+**Why no derive**: it's the same "opt-in only" philosophy this
+chapter already covers for interfaces generally -- a type never gains
+a capability just because its shape happens to match one. Generating
+that opt-in block automatically from an attribute would be implicit
+magic vāṇी deliberately avoids elsewhere too (no operator overloading
+outside the fixed `Eq` hook, no implicit type coercion).
+
+**Is this a real cost?** Yes, in raw lines -- but not in what's
+*possible*: everything a derive macro would generate is directly
+expressible by hand, just spelled out. The boilerplate scales with
+struct count × trait count, which is worth knowing about if you're
+designing a library with many small structs that all need `Eq`, but
+it's not a blocker for anything. See
+[`docs/missing_features.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/missing_features.md#attribute-macros-derivedebug)
+for the fuller writeup.
+
 ## A summary you can carry
 
 - An **interface** is a contract: "any type calling itself X
