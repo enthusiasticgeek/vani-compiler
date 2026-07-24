@@ -136,21 +136,28 @@ pub fn scope_escape_deeper(name: &str) -> Vec<String> {
     ]
 }
 
-/// Function return-type is `ref T` (not yet supported).
+/// Function return-type is `ref T`, rejected by the single-ref-param
+/// lifetime-elision rule (zero ref params, 2+ ref params, or a ref
+/// nested inside a tuple/Vec/array/generic return type).
 pub fn ret_type_is_ref() -> Vec<String> {
     vec![
-        "A function return type cannot be a `ref T` in v1."
+        "A `ref T` / `mut ref T` return type is allowed, but only \
+         under vāṇी's single-ref-parameter elision rule: the \
+         function must have exactly one `ref`/`mut ref` parameter, \
+         and the returned ref borrows from that parameter's source."
             .to_string(),
-        "Returning refs requires lifetime tracking (path-C \
-         in the design): the compiler has to infer which \
-         input ref the output borrows from. v1 ships without \
-         this; the rejection is the safety guard."
+        "vāṇी doesn't expose Rust-style explicit lifetime variables \
+         (`'a`, `'b`) -- the compiler infers the borrow relationship \
+         purely from the signature shape. That's why zero ref params, \
+         two-or-more ref params, and a ref nested inside another type \
+         (a tuple, `Vec`, or `Option<ref T>`) are all rejected: none \
+         of those shapes has one unambiguous source to elide from."
             .to_string(),
-        "Either return the value by `move` (no `ref` in the \
-         return type), or return an `i64` / index into a Vec \
-         that the caller already owns. The lifetime-elision \
-         arc (path-C) will lift this rejection in a future \
-         release."
+        "Either return the value by `move` (no `ref` in the return \
+         type), restructure to exactly one `ref` parameter (pass the \
+         others by value, or split into narrower functions -- one \
+         bare `ref` return each), or return an `i64` / index into a \
+         Vec that the caller already owns."
             .to_string(),
     ]
 }

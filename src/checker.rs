@@ -559,6 +559,15 @@ fn check_impl(
     // Runs after methods hoisting so signatures are settled.
     desugar_try_let_in_program(&mut program, &mut diagnostics);
 
+    // L4 lifetime-elision fix (2026-07-24): catch a `ref T` nested
+    // inside a tuple or generic type argument (`(ref i64, ref i64)`,
+    // `Option<ref i64>`) before monomorphization rewrites
+    // `Type::Apply`/leaves the nested ref unreachable to a structural
+    // walk. See `type_contains_nested_ref`'s doc comment.
+    for function in &program.functions {
+        validate_no_nested_ref_in_return_type(function, &mut diagnostics);
+    }
+
     // Closure #281: monomorphize generic struct/enum decls.
     // Must run BEFORE the fn-generic monomorphizer because
     // fn signatures can reference `Option<T>` / `Result<T,E>`
@@ -10905,6 +10914,11 @@ fn check_one_stmt(
                                     e.span,
                                     "cannot print an enum directly; use `match` to convert to an integer or string",
                                 ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                            } else if matches!(ty, Type::Ref(_) | Type::RefMut(_)) {
+                                diagnostics.push(Diagnostic::new(
+                                    e.span,
+                                    "cannot print a reference directly; read the pointed-to value into an owned binding first",
+                                ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                             }
                             let mut t = checked.expr;
                             try_elide_bounds_in_typed_expr(&mut t, smt_facts, env, signatures);
@@ -10947,6 +10961,11 @@ fn check_one_stmt(
                             diagnostics.push(Diagnostic::new(
                                 e.span,
                                 "cannot print an enum directly; use `match` to convert to an integer or string",
+                            ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
+                        } else if matches!(ty, Type::Ref(_) | Type::RefMut(_)) {
+                            diagnostics.push(Diagnostic::new(
+                                e.span,
+                                "cannot print a reference directly; read the pointed-to value into an owned binding first",
                             ).with_elaboration(crate::diagnostic_elaborations::cannot_print_type(&ty.to_string())));
                         }
                         let mut t = checked.expr;
@@ -13785,6 +13804,75 @@ fn validate_no_ref(ty: &Type, span: Span, context: &str, diagnostics: &mut Vec<D
             );
         }
         diagnostics.push(diag);
+    }
+}
+
+/// True if `ty` contains a `ref T` / `mut ref T` *nested* inside a
+/// structural type (tuple, `Vec`, array, or a generic instantiation
+/// like `Option<ref T>` / `Result<ref T, E>`) -- as opposed to being
+/// a bare top-level `ref T` return type, which is the one shape the
+/// elision machinery (`compute_elided_ref_source`, call-site lifetime
+/// propagation, and both backends' ref-return lowering) actually
+/// understands. A nested ref slips past `Type::is_ref()` (false for
+/// `(ref i64, ref i64)` or `Option<ref i64>`) and, left unchecked,
+/// reaches codegen with no recorded lifetime source -- verified to
+/// produce an LLVM backend panic for a tuple-of-refs return and
+/// malformed LLVM IR for `Option<ref T>`, instead of a diagnostic.
+/// Deliberately does NOT recurse into `Type::Struct(name)` -- a
+/// struct's own ref-field return (`fn make(t: ref T) -> View` where
+/// `struct View { x: ref T }`) is handled by a separate struct-field
+/// scope-escape analyzer (see Intermediate 3e's tutorial); this
+/// helper only needs to catch the shapes that bypass every existing
+/// check.
+///
+/// Must be called BEFORE `monomorphize_type_decls_in_program` runs:
+/// that pass rewrites `Type::Apply { name: "Option", args: [Ref(_)] }`
+/// into a concrete `Type::Enum("Option__Ref_...")`, at which point the
+/// nested ref is no longer visible to a structural type walk (it's
+/// hiding inside a monomorphized variant payload in the EnumDecl
+/// registry) -- checked too late, this exact function used to compile
+/// straight through to a malformed-LLVM-IR error instead of a
+/// diagnostic.
+fn type_contains_nested_ref(ty: &Type) -> bool {
+    match ty {
+        Type::Tuple(elements) => elements.iter().any(|t| t.is_ref() || type_contains_nested_ref(t)),
+        Type::Vec(inner) | Type::Array { element: inner, .. } => {
+            inner.is_ref() || type_contains_nested_ref(inner)
+        }
+        Type::Apply { args, .. } => args.iter().any(|t| t.is_ref() || type_contains_nested_ref(t)),
+        _ => false,
+    }
+}
+
+/// Companion check to `validate_return_ref_elision`, run separately
+/// (and earlier -- see `type_contains_nested_ref`'s doc comment) so it
+/// sees `Type::Apply`/`Type::Tuple` before monomorphization rewrites
+/// them. Emits the same style of diagnostic as the 0-ref/2+-ref cases
+/// below, for the "ref nested inside another type" shape neither of
+/// those cases was checking for.
+fn validate_no_nested_ref_in_return_type(
+    function: &Function,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    if type_contains_nested_ref(&function.return_type) {
+        diagnostics.push(
+            Diagnostic::new(
+                function.span,
+                format!(
+                    "function '{}' returns `{}`, which has a reference nested \
+                     inside a tuple/Vec/array/generic type -- vāṇी's v1 lifetime \
+                     elision only understands a bare `ref T` / `mut ref T` return \
+                     type, not a reference nested inside another type. Split this \
+                     into separate accessor functions (one bare `ref` return \
+                     each), or return the referenced values by value/clone \
+                     instead.",
+                    function.name, function.return_type,
+                ),
+            )
+            .with_elaboration(
+                crate::diagnostic_elaborations::ret_type_is_ref(),
+            ),
+        );
     }
 }
 

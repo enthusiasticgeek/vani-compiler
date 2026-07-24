@@ -9798,6 +9798,102 @@ mod tests {
     }
 
     #[test]
+    fn l4_c_nested_ref_in_tuple_return_rejected_not_crash() {
+        // 2026-07-24 fix: `(ref i64, ref i64)` as a return type used
+        // to slip past `validate_return_ref_elision` entirely
+        // (`Type::is_ref()` is false for a Tuple), reach codegen with
+        // no recorded lifetime source, and panic the LLVM backend
+        // ("checker rejects print of Ref(I64) but the LLVM backend
+        // was asked to lower it") instead of producing a diagnostic.
+        let source = r#"
+            struct Pair { x: i64, y: i64 }
+            fn two_fields(p: ref Pair) -> (ref i64, ref i64) {
+              return (ref p.x, ref p.y);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("nested ref in tuple return must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("reference nested inside a tuple"),
+            "expected the nested-ref diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn l4_c_nested_ref_in_option_return_rejected_not_malformed_ir() {
+        // Same bug, different shape: `Option<ref i64>` is a
+        // `Type::Apply` at parse time, so it's caught by the same
+        // fix -- but only because the check now runs BEFORE
+        // `monomorphize_type_decls_in_program` rewrites `Apply` into
+        // a concrete `Enum(mangled_name)`. Checked too late (as the
+        // original fix attempt did), this exact program used to
+        // compile straight through to malformed LLVM IR
+        // (`insertvalue %Enum_Option__Ref_I64_ %t6, i64* 0, 1` --
+        // "integer constant must have integer type") instead of a
+        // diagnostic.
+        let source = r#"
+            struct Pair { x: i64, y: i64 }
+            fn maybe_ref(p: ref Pair, want: bool) -> Option<ref i64> {
+              if want {
+                return Option.Some(ref p.x);
+              }
+              return Option.None;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("nested ref in Option return must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("reference nested inside a tuple/Vec/array/generic type"),
+            "expected the nested-ref diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn l4_c_bare_scalar_ref_return_still_accepted() {
+        // Guard against the nested-ref fix over-firing: a bare
+        // top-level `ref T` return (not nested inside anything) must
+        // keep compiling under the ordinary single-ref-param elision
+        // rule -- `type_contains_nested_ref` must return false for a
+        // plain `Type::Ref`.
+        let source = r#"
+            fn first(xs: ref i64) -> ref i64 { return xs; }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile(source).expect("bare top-level ref return must still be accepted");
+    }
+
+    #[test]
+    fn print_of_ref_rejected_not_crash() {
+        // 2026-07-24 fix: printing a `ref i64` (whether from a local
+        // `ref` or a ref-returning function call) wasn't covered by
+        // the array/struct/tuple/enum print-type checks, so it
+        // reached codegen unrejected and crashed -- an LLVM-backend
+        // Rust panic ("checker rejects print of Ref(I64) but the
+        // LLVM backend was asked to lower it") or, for a plain local
+        // ref, malformed LLVM IR ("invalid cast opcode for cast from
+        // 'ptr' to 'i64'").
+        let source = r#"
+            fn main() -> i64 {
+              let x: i64 = 5;
+              let r: ref i64 = ref x;
+              print "r:", r;
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("printing a ref directly must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot print a reference directly"),
+            "expected the ref-print diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
     fn l4_c_phase4_call_site_propagates_lifetime_to_dangle_check() {
         // L4 (C) Phase 4: when a fn returns a ref under elision,
         // the call-site bound `r = foo(ref X)` inherits X's
