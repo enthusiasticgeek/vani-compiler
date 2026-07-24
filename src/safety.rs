@@ -1479,6 +1479,19 @@ fn wcet_expr(
             }
             Some(total)
         }
+        // BUG-2: without this arm, StructLit fell into the `_ =>
+        // Some(5)` catch-all below — a flat cost regardless of how
+        // expensive the field expressions actually are (e.g. a
+        // `Complex { re: log(complex_abs(z)), im: complex_arg(z) }`
+        // return got charged 5 cycles despite three real function
+        // calls inside it). Mirrors the ArrayLit arm just above.
+        E::StructLit { fields, .. } => {
+            let mut total: u64 = 1;
+            for (_, e) in fields {
+                total = total.saturating_add(wcet_expr(e, fn_map, visiting, None)?);
+            }
+            Some(total)
+        }
         E::Call { name, args, .. } => {
             let mut args_cost: u64 = 0;
             for a in args {
