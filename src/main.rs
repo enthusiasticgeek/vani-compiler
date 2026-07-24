@@ -3125,6 +3125,12 @@ fn run_program_llvm(
     // OpenMP entries are unresolved but only get called by
     // `parallel for` sites — pure-sequential programs still run.
     add_libgomp_load_flags(&mut cmd);
+    // MATH-1: sort()'s `intent_vec_{i64,double}__sort` lives in
+    // sort_runtime.c and is only linked in by AOT builds; the JIT needs
+    // it loaded as a shared library too.
+    if let Some(sort_lib) = sort_runtime_shared_lib() {
+        cmd.arg(format!("-load={}", sort_lib.display()));
+    }
     // lli's MCJIT isn't thread-safe for concurrent function
     // resolution; cap libgomp to a single thread when JITting so
     // `parallel for` runs serially under the JIT. AOT builds
@@ -3168,6 +3174,53 @@ fn add_libgomp_load_flags(cmd: &mut Command) {
             cmd.arg(format!("-load={}", p));
         }
     }
+}
+
+/// MATH-1: compile `sort_runtime.c` into a host shared library so
+/// `lli -load=<path>` can resolve `intent_vec_{i64,double}__sort` under
+/// the JIT. `build_program_llvm` (AOT) links the same source as a static
+/// object via `cc`; a JIT session needs a dynamically loadable image
+/// instead, which that path never produced — `vanic run`/`vanic test`
+/// left `sort()` on `Vec<i64>`/`Vec<f64>` permanently unresolved
+/// ("Symbols not found: intent_vec_{i64,double}__sort"), independent of
+/// element type. Compiled once per process and cached (every `vanic
+/// test` invocation runs this for every file in the loop; recompiling a
+/// tiny always-identical C file per file would be pure waste). Returns
+/// `None` on any compile failure, same as a missing libgomp — `sort()`
+/// calls then surface the JIT's own "Symbols not found" error.
+fn sort_runtime_shared_lib() -> Option<&'static Path> {
+    static LIB: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    LIB.get_or_init(|| {
+        let ext = if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let sort_c_path = env::temp_dir().join(format!("vanic-sortlib-{}-{}.c", pid, nanos));
+        let sort_lib_path =
+            env::temp_dir().join(format!("vanic-sortlib-{}-{}.{}", pid, nanos, ext));
+        fs::write(&sort_c_path, include_str!("sort_runtime.c")).ok()?;
+        let cc = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+        let out = Command::new(&cc)
+            .args(["-O3", "-shared", "-fPIC", "-march=native"])
+            .arg(&sort_c_path)
+            .arg("-o")
+            .arg(&sort_lib_path)
+            .output();
+        let _ = fs::remove_file(&sort_c_path);
+        match out {
+            Ok(o) if o.status.success() && sort_lib_path.exists() => Some(sort_lib_path),
+            _ => None,
+        }
+    })
+    .as_deref()
 }
 
 /// Drop lli's signal-handler diagnostics from a captured stderr.
@@ -3283,6 +3336,10 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
     let lli = env::var("LLI").unwrap_or_else(|_| "lli".to_string());
     let mut cmd = Command::new(&lli);
     add_libgomp_load_flags(&mut cmd);
+    // MATH-1: see run_program_llvm's identical comment.
+    if let Some(sort_lib) = sort_runtime_shared_lib() {
+        cmd.arg(format!("-load={}", sort_lib.display()));
+    }
     if env::var("OMP_NUM_THREADS").is_err() {
         cmd.env("OMP_NUM_THREADS", "1");
     }
