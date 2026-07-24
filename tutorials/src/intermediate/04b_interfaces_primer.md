@@ -108,6 +108,84 @@ the bound says "but it must be a type that implements Shape."
 
 The second form uses `dyn Shape` directly.
 
+## Coming from C++: `dyn Iface` is an abstract base class
+
+This is the mapping most C++ readers already have a mental
+model for. `dyn Shape` plays the role of a pointer/reference to
+an **abstract base class** with pure virtual methods; each
+`implement Shape for Circle` block plays the role of a
+**derived class** overriding those methods. Same underlying
+mechanism too -- vāṇी's `dyn Iface` really is a fat pointer to a
+vtable, exactly like a C++ object with virtual methods carries a
+hidden vtable pointer.
+
+```cpp
+// C++
+struct Shape {
+  virtual int area() const = 0;   // pure virtual -- abstract
+  virtual ~Shape() = default;
+};
+struct Circle : Shape {
+  int r;
+  int area() const override { return r * r; }
+};
+struct Square : Shape {
+  int side;
+  int area() const override { return side * side; }
+};
+
+int area_of(const Shape& s) { return s.area(); }   // dispatches via vtable
+```
+
+```vani
+// vāṇी -- see Intermediate 5 for the full worked example
+struct Circle { r: i64 }
+struct Square { side: i64 }
+
+interface Shape {
+  fn area(self: Circle) -> i64;
+}
+implement Shape for Circle {
+  fn area(self: Circle) -> i64 { return self.r * self.r; }
+}
+implement Shape for Square {
+  fn area(self: Square) -> i64 { return self.side * self.side; }
+}
+
+fn area_of(d: dyn Shape) -> i64 { return d.area(); }   // dispatches via vtable
+```
+
+Where they diverge:
+- **Inheritance vs. composition.** C++ derives `Circle : Shape`
+  -- the base class is part of `Circle`'s type, forever. vāṇी's
+  `implement Shape for Circle` is a separate declaration bolted
+  on afterward; `Circle` itself (`struct Circle { r: i64 }`)
+  knows nothing about `Shape`. You can `implement` an interface
+  for a type defined somewhere else entirely (even one you don't
+  own), which C++ single/virtual inheritance can't do without
+  the base class author cooperating up front.
+- **One conformance mechanism, not two.** C++ overloads
+  inheritance for both "is-a" dispatch AND code reuse (a base
+  class with shared implementation, multiple/virtual inheritance
+  for mixing both in). vāṇी keeps `interface`/`implement` purely
+  for the dispatch contract; there's no base-class-style shared
+  state or implementation inheritance to reach for instead.
+- **No slicing, no missing virtual destructor footgun.** Passing
+  a `Circle` where a `Shape` is expected in C++ silently *slices*
+  it to the base-class part if you pass by value instead of by
+  reference/pointer -- a classic bug class. vāṇी's `dyn Shape`
+  coercion always produces a `{ vtable, data }` fat pointer; the
+  underlying `Circle`/`Square` data is never truncated, and there's
+  no `virtual ~Shape()` to forget (vāṇी's affine Drop runs
+  regardless of which concrete type is behind the `dyn`).
+- **Static dispatch has no inheritance-based C++ analogue at
+  all.** The `where T is Shape` generic-bound form above (Answer
+  1) doesn't correspond to inheritance in C++ -- it's closer to a
+  template constrained by a C++20 `concept`, or historically,
+  CRTP (Curiously Recurring Template Pattern) used to fake
+  compile-time polymorphism without vtables. See
+  [Intermediate 4c](04c_generics_primer.md) for that comparison.
+
 ## Choosing between them
 
 A practical rule of thumb:

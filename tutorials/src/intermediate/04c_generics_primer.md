@@ -122,6 +122,54 @@ vāṇी (and Rust, and C++ templates) pick monomorphization
 because the speed win is large for systems code. The cost is
 a bigger compiled binary, but that's usually acceptable.
 
+## Coming from C++: `<T>` is a template parameter
+
+If your mental model is C++, you've already used this feature --
+`fn id<T>(x: T) -> T` is doing exactly what
+`template <typename T> T id(T x)` does: both are compiled once
+per concrete type actually used, and both are zero-cost (no
+boxing, no vtable involved).
+
+```cpp
+// C++
+template <typename T>
+T id(T x) { return x; }
+
+id(3);        // instantiates id<int>
+id(3.0);      // instantiates id<double>
+```
+
+```vani
+// vāṇी
+fn id<T>(x: T) -> T { return x; }
+
+id(3);        // instantiates id__i64
+id(3.0);      // instantiates id__f64
+```
+
+The visible difference shows up once the body needs an operation
+on `T` -- `min<T>` above uses `<`. C++ templates are checked
+*lazily*, at each instantiation site: historically an error
+inside the template body only surfaced (with a wall of nested-
+instantiation text) once you called it with a type that didn't
+support the operation; C++20 `concepts` fixed this by letting you
+write the constraint (`requires std::totally_ordered<T>`) up
+front. vāṇी's `where T is Comparable` is the same idea, but
+mandatory and checked once against the generic definition itself
+-- if the body uses an operation the bound doesn't grant, it's a
+compile error on the `fn` before anyone calls it with any type.
+There's no equivalent to an unconstrained template (any type,
+checked only at use) in vāṇी v1: every generic needs an explicit
+bound for every operation its body performs.
+
+The other difference: C++ templates support far more --
+non-type template parameters, template template parameters,
+partial/explicit specialization, SFINAE, variadic packs. vāṇी
+generics are deliberately smaller: one type parameter per `fn`
+in v1, a fixed set of bound kinds, no specialization. If you've
+felt template-metaprogramming pain in C++, that's the pain vāṇी
+is opting out of.
+
 ## Common generic shapes
 
 ### `Vec<T>` -- generic container
