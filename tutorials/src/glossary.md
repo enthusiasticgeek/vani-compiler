@@ -153,3 +153,64 @@ you can move between the two without re-orienting.
 > ([`advanced/04_embedded.md`](advanced/04_embedded.md));
 > *Runtime errors, panic-free design, the segfault-free guarantee -- intuition primer*
 > ([`intermediate/10b_runtime_errors_primer.md`](intermediate/10b_runtime_errors_primer.md)).
+
+## C++ equivalents
+
+The rest of this glossary (and most of the tutorials) explains
+vāṇी concepts by comparison to Rust, since vāṇी's ownership model
+is Rust-shaped. If C++ is your home language instead, this table
+is the same cross-reference the other way. None of these
+mappings are exact -- vāṇी's compiler enforces things C++ leaves
+to convention or a library -- but they'll get you oriented fast.
+
+**Ownership and memory**
+
+| vāṇी | Rust | Nearest C++ | The gap |
+|---|---|---|---|
+| affine ownership / `move` | ownership + move | Move semantics (C++11, `std::move`) | C++ leaves a moved-from object in a valid-but-unspecified state and lets you keep using it; vāṇी makes touching a moved-from binding a **compile error**. |
+| `ref T` / `mut ref T` | `&T` / `&mut T` | `const T&` / `T&`, or `const T*` / `T*` | C++ references/pointers carry no compile-time aliasing rule; vāṇी (like Rust) enforces "many shared borrows XOR one mutable," checked statically. |
+| borrow checker | borrow checker | *(nothing)* | This is the headline gap -- C++ has no compiler-enforced lifetime/aliasing analysis. Static analyzers (clang-tidy, Address/UBSan at runtime) catch some of the same bugs *after the fact*, not at compile time. |
+| `Box<T>` | `Box<T>` | `std::unique_ptr<T>` | Same shape: single owner, heap-allocated, moves not copies. |
+| RAII / scope-exit `Drop` | `Drop` trait, RAII | RAII, destructors | vāṇी and Rust both inherited this idea from C++ -- the term itself is a C++ coinage (Stroustrup). |
+| `Region` / `ArenaRef<T>` | an arena crate (e.g. `bumpalo`) + a lifetime-tied reference | A hand-rolled arena allocator, or `std::pmr::monotonic_buffer_resource` (C++17 PMR) | Neither C++ option is compiler-verified the way vāṇी's escape analysis is -- using a PMR allocation after its arena resets is a silent use-after-free in C++; it's a compile error in vāṇी. |
+| `Pool<T>` / `Handle<T>` | a `slotmap` / `generational-arena` crate | A hand-rolled "slot map" (index + generation) | No standard-library equivalent in either language; this is a well-known pattern, not a language feature, in C++. |
+| `unsafe(reason = "...") { ... }` | `unsafe { ... }` | *(nothing as an opt-in boundary)* | Ordinary C++ is unsafe-by-default everywhere -- there's no compiler-enforced "safe by default, opt out explicitly" boundary to contrast with. The closest cultural equivalent is a documented raw-pointer comment convention, or a MISRA-style suppression comment. |
+
+**Types, generics, and dispatch**
+
+| vāṇी | Rust | Nearest C++ | The gap |
+|---|---|---|---|
+| generics + monomorphization | generics (monomorphized) | Templates (compile-time instantiation) | Both are zero-cost and instantiate a concrete copy per type used. vāṇी caps generics at one type parameter per `fn` in v1; C++ templates have no such cap. |
+| `interface` (static dispatch) | `trait` (static, via generic bounds) | Templates + "concepts" (C++20), or duck-typing via templates (pre-C++20) | C++ has no single idiomatic mechanism here the way Rust/vāṇी have one keyword; concepts are the closest modern equivalent (compile-time-checked constraints on a template parameter). |
+| `dyn Iface` (dynamic dispatch) | `dyn Trait` (trait object) | An abstract base class with pure virtual methods, called through a base-class pointer/reference (virtual dispatch via vtable) | This is the "interfaces" mapping most C++ readers already know: `interface Shape { fn area(self: ref Self) -> f64; }` + `dyn Shape` ~ `class Shape { public: virtual double area() const = 0; };` + `Shape*`/`Shape&`. |
+| `enum` with payloads | `enum` (tagged union / "sum type") | `std::variant<Ts...>` (C++17), tagged by index; or a manually-tagged union pre-C++17 | vāṇी's `match` requires exhaustiveness the way Rust's does; `std::visit` on a `variant` gets you close in C++, but nothing enforces you handled every alternative unless you opt into `-Wswitch`-style warnings on the index. |
+| `match` | `match` | `switch` (much weaker), or `std::visit` for a `variant` | `switch` has no payload destructuring and (without extra tooling) no exhaustiveness check; fallthrough is opt-out, not opt-in. |
+| `Option<T>` | `Option<T>` | `std::optional<T>` (C++17) | Same shape. |
+| `Result<T, E>` + `try` / `?` | `Result<T, E>` + `?` | *(nothing idiomatic)* | C++ traditionally signals failure via exceptions (unwinding, not a return value) or an error code out-parameter. `std::expected<T, E>` (C++23) is the closest structural match but isn't yet in universal use. |
+| `module` / `pub` / `pub(kosh)` | `mod` / `pub` / `pub(crate)` | `namespace` for organization; `public`/`private`/`protected` class members, or `friend`, for access control | `pub(kosh)`'s "visible to my whole package, not to downstream dependents" has no direct C++ counterpart -- the closest is an `detail`/`internal` namespace convention (pure convention, not enforced) or a C++20 module's export boundary. |
+| Kosh package | crate | A library / translation unit; a `conan`/`vcpkg` package | |
+| closures | closures (`Fn`/`FnMut`/`FnOnce`) | Lambdas (C++11, `[capture](args){ ... }`) | |
+| `Vec<T>` | `Vec<T>` | `std::vector<T>` | |
+| `HashMap<K, V>` | `HashMap<K, V>` | `std::unordered_map<K, V>` | |
+
+**Concurrency**
+
+| vāṇी | Rust | Nearest C++ | The gap |
+|---|---|---|---|
+| `Mutex<T>` + `Guard<T>` | `Mutex<T>` + `MutexGuard` | `std::mutex` + `std::lock_guard`/`std::unique_lock` | Same RAII shape: the guard's destructor/scope-exit unlocks automatically. vāṇी and Rust additionally tie the *protected value* to the guard's type so you can't touch it without holding the lock; a `std::mutex` in C++ is just a bare lock with no compiler-enforced link to what it protects. |
+| `RwLock<T>` | `RwLock<T>` | `std::shared_mutex` (C++17) | |
+| `Atomic<T>` | `std::sync::atomic` types | `std::atomic<T>` (C++11) | |
+| `Barrier` | `std::sync::Barrier` | `std::barrier` (C++20) | |
+| `Channel<T>` | `std::sync::mpsc` / `crossbeam` channels | *(nothing standard)* | No standard-library bounded channel in C++; reach for a library (Boost.Lockfree, moodycamel::ConcurrentQueue) or hand-roll one. |
+| `task` / `join` | `std::thread::spawn` + `.join()` | `std::thread` + `.join()` | |
+
+**Verification**
+
+| vāṇी | Rust | Nearest C++ | The gap |
+|---|---|---|---|
+| `requires` / `ensures` / `prove` (SMT-checked) | *(no stdlib equivalent; similar to `contracts`-style crates)* | `assert()` | `assert()` is a **runtime** check that can be compiled out (`NDEBUG`); vāṇी's `requires`/`ensures`/`prove` are discharged by an SMT solver **at compile time** -- a failure is a compile error, not a 3am production crash. The (still-experimental, repeatedly deferred) C++ Contracts proposal is aiming at similar ground but isn't standardized. |
+
+See [Intermediate 4c -- Generics primer](intermediate/04c_generics_primer.md),
+[Intermediate 4b -- Interfaces primer](intermediate/04b_interfaces_primer.md),
+and [Intermediate 4a -- `dyn Iface` primer](intermediate/04a_dyn_iface_primer.md)
+for these compared side-by-side with worked code, not just a table row.
