@@ -5229,6 +5229,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             ));
             dest
         }
+        // Float negation (int/bool handled by the guarded arm above) --
+        // BUG-6: this arm was missing entirely, so a standalone
+        // Unary{Neg} over a float (e.g. `-3.0` as a call argument, not
+        // pre-folded into a negative literal) fell through to the
+        // catch-all `unreachable!` below and panicked the compiler,
+        // even though `vanic check` accepted the file cleanly. `sub`
+        // rejects float operands ("integer constant must have integer
+        // type"), so this needs `fsub`, matching
+        // ssa_backend_llvm.rs's InstrKind::Unary{Neg} handling (same
+        // `fsub <ty> 0.0, x` shape, chosen there for the same reason).
+        TypedExprKind::Unary { op: UnaryOp::Neg, expr } => {
+            let inner = emit_expr(expr, ctx, out);
+            let dest = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = fsub {} 0.0, {}\n",
+                dest,
+                llvm_type(&expr.ty),
+                inner
+            ));
+            dest
+        }
         TypedExprKind::Unary { op: UnaryOp::Not, expr } => {
             let inner = emit_expr(expr, ctx, out);
             let dest = ctx.fresh_tmp();
@@ -45946,6 +45967,37 @@ mod tests {
             fn main() -> i64 { return pick_larger(3, 7); }
         "#;
         assert_eq!(run_lli(source), 7);
+    }
+
+    #[test]
+    fn lli_runs_standalone_unary_minus_float_literal_as_call_arg() {
+        if !lli_available() {
+            return;
+        }
+        // BUG-6: found building vani-ml (tests/test_logreg.vani). A
+        // standalone Unary{Neg} over a float literal used directly as a
+        // call argument -- not pre-folded into a negative literal by the
+        // checker, and not part of a larger binary expression -- hit
+        // this file's emit_expr `unreachable!` catch-all: the
+        // Unary{Neg} arm only guarded `is_int_or_bool(&expr.ty)`, with
+        // no float case at all. `vanic check` accepted this source
+        // cleanly (the existing `float_negation_via_unary_minus_
+        // compiles` test in lib.rs only exercises the type-checker via
+        // `compile()`, never actual codegen, which is exactly why this
+        // gap went unnoticed). Fix: a dedicated float arm using `fsub`,
+        // matching ssa_backend_llvm.rs's existing InstrKind::Unary{Neg}
+        // handling (`sub` rejects float operands outright).
+        let source = r#"
+            fn first(xs: Vec<f64>) -> f64 {
+              return xs[0];
+            }
+            fn main() -> i64 {
+              let v: f64 = first(vec(-3.0, -2.0, -1.0));
+              if v == 0.0 - 3.0 { return 42; }
+              return 1;
+            }
+        "#;
+        assert_eq!(run_lli(source), 42);
     }
 
     #[test]

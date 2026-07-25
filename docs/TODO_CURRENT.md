@@ -1352,3 +1352,53 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   **Workaround note** (still valid, kept in the tutorial): `f64_to_str_
   fixed(x, decimals)` never hits `%g`'s scientific-notation path at all,
   so it was never affected by this bug either way.
+
+## Bug found building vani-ml (added 2026-07-25)
+
+- [x] **BUG-6. LLVM backend panics on a unary-minus float literal used as
+  a standalone call argument** ✅ fixed 2026-07-25 — discovered building
+  `vani-ml`'s logistic-regression test (`vani-ml/tests/test_logreg.vani`),
+  writing `vec(-3.0, -2.0, -1.0, -0.5, 0.5, 1.0, 2.0, 3.0)` as a
+  training-data literal. `vanic check` (with or without `--no-verify`)
+  accepted the file cleanly; `vanic test`/`vanic run` (default LLVM
+  backend) crashed the compiler itself with an internal panic, not a
+  program-level error:
+
+  ```
+  thread '<unnamed>' panicked at src\backend_llvm.rs:17093:17:
+  internal error: entered unreachable code: backend: TypedExprKind not
+  lowered as standalone expression: Unary { op: Neg, expr: TypedExpr {
+  kind: Float(3.0), ty: F64, constant: Some(Float(3.0)), ... } }
+  ```
+
+  **Root cause**: `emit_expr`'s `TypedExprKind::Unary { op: Neg, .. }`
+  match arm (`backend_llvm.rs`, then line 5221) was guarded
+  `if is_int_or_bool(&expr.ty)` — there was no arm at all for the float
+  case, so any standalone `Unary{Neg}` over an `f64`/`f32` operand fell
+  through to the function's catch-all `unreachable!()`. This is
+  consistent with — and narrower than — the existing documented guidance
+  that vāṇी source in the wild never uses unary minus (this repo's own
+  convention is `0.0 - x`, see `docs/reference_vani_language_notes.md`-
+  style notes in downstream projects); the gap went unnoticed because the
+  one existing regression test for this shape,
+  `float_negation_via_unary_minus_compiles` (`lib.rs`), only calls
+  `compile()` — the type-checker — never actual codegen, so it could not
+  have caught a backend-only crash. Confirmed the sibling `ssa_backend_llvm.rs`
+  (`InstrKind::Unary{Neg}`, around line 3113) already dispatches on
+  `instr.ty.is_float()` and emits `fsub` for floats / `sub` for ints — this
+  file was simply missing the equivalent split.
+
+  **Fix**: added a second, unguarded `TypedExprKind::Unary { op: Neg, expr }`
+  arm immediately after the existing int/bool-guarded one, emitting
+  `fsub <ty> 0.0, %v` — mirroring `ssa_backend_llvm.rs`'s existing choice
+  (plain `sub` rejects float operands outright: "integer constant must
+  have integer type"). Verified: the original `vani-ml` repro now runs
+  correctly on both `vanic run` and `vanic run --backend=c`; all four
+  `vani-ml` test files (`test_linreg`/`test_logreg`/`test_kmeans`/
+  `test_split_metrics`) still pass after rebuilding. New regression test
+  `lli_runs_standalone_unary_minus_float_literal_as_call_arg`
+  (`backend_llvm.rs`, actually executes the emitted IR via `lli`, unlike
+  the pre-existing type-check-only test) plus a targeted
+  `cargo test --release --lib -- unary neg float_arithmetic
+  float_negation` spot-check (23 tests, all passing, no regressions) —
+  full `cargo test --lib` not run.
