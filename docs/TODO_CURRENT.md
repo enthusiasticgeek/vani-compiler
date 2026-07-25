@@ -158,27 +158,94 @@ workarounds, and the exact design goal for each.
   `print` currently takes a flat comma-separated list of string-literal-or-expr
   items (`parser.rs::parse_print_item`, `PrintItem::{Str,Expr}`) — there's no
   template-string / placeholder mini-language. `f64_to_str_fixed(x, decimals)`
-  (item 26.1 below) plus `str_pad_left(i64_to_str(n), w, "0")` already cover the
+  (item 27.1 below) plus `str_pad_left(i64_to_str(n), w, "0")` already cover the
   *capability* (fixed-decimal floats, zero-padded ints) as ordinary function
   calls; this item is specifically about adding literal `{:03}`-shaped syntax
-  at a print call site, e.g. `print x:03;` or a template-string form.
-  **Scope, if picked up**: `PrintItem`/`TypedPrintItem` has 132 match sites
-  across 13 files (parser.rs, checker.rs, ssa.rs, backend_c.rs, backend_llvm.rs,
-  lsp.rs, safety.rs, stack_depth.rs, deviations.rs, format.rs, hashmap_bundle.rs,
-  main.rs, lib.rs) — adding a format-spec field touches most of them
-  non-mechanically (effects/purity checking, `vanic fmt` pretty-printing, LSP
-  hover, codegen in both C and LLVM backends). The formatting codegen itself is
-  easy once the plumbing exists (a compile-time-constant width/precision is
-  just a computed `"%03lld"` snprintf format string, same trick already used
-  for `%llu`/`%g`) — nearly all the cost is parser/AST/multi-pass plumbing, not
-  runtime logic. Multi-day effort, not a quick add.
-  **Design question to settle first**: this would be the first "magic syntax
+  at a print call site.
+
+  **Design question, still open**: this would be the first "magic syntax
   inside/beside a print item" feature in the language — worth a deliberate
   decision (does it fit vāṇी's explicit-over-implicit posture, e.g. mandatory
   `unsafe(reason=...)`, no operator-overloading magic?) rather than adding it
   as a side effect of wanting decimal padding, which the cheap path already
   solves. Gate on: is there real demand for the syntax itself, not just the
-  formatting capability.
+  formatting capability. **Not decided; scoped below on the assumption it's
+  picked up, so implementation can start the moment it is.**
+
+  **Proposed grammar** (scoped 2026-07-25, not implemented): a postfix spec
+  after the expr, `print x:03;` / `print y:.2;` / `print z:08.3;`, grammar
+  `'0'? WIDTH? ('.' PRECISION)?`, hand-parsed as raw tokens right after `:`
+  rather than reusing `parse_expr()`/number-literal lexing (`.2` isn't
+  otherwise a lexable float literal in vāṇी, and `:` is never consumed by
+  general expression parsing — checked every `TokenKind::Colon` site in
+  `parser.rs`; all are struct-field/type-annotation/label contexts — so this
+  is grammatically unambiguous to add). Semantics: WIDTH pads any numeric
+  type (zero or space per the `0` flag); PRECISION only on `f32`/`f64`,
+  fixed notation, same logic `f64_to_str_fixed` already implements; a spec
+  on `bool`/`Str`/`OwnedStr`/aggregate types is a checker diagnostic, not a
+  silent no-op or a crash; width/precision are compile-time integer literals
+  only (no `x:0{n}` with a runtime `n`) — deliberately, since it keeps every
+  codegen site building a literal printf format string instead of one
+  assembled at runtime.
+
+  **Scope, if picked up** (traced all ~160 `PrintItem`/`TypedPrintItem` match
+  sites across the 13 files on 2026-07-25; most are mechanical, the real
+  work concentrates in five places):
+  - **Grammar** (`parser.rs`): new `parse_format_spec()` call after the expr
+    in `parse_print_item`. Small, self-contained. ~2-3h together with the
+    `vanic fmt` item below.
+  - **Pretty-printer** (`format.rs`): 2 real sites (~L951, ~L972) re-emit
+    `:spec` when present; the other 2 matches in the same file (~L1774,
+    ~L1783) are span-zeroing for diffing and don't need to change.
+  - **Type-checking** (`checker.rs`, ~4-6h): **6 duplicated construction
+    blocks**, not the 2 you'd expect — `Print`/`EPrint` and `PrintBlock` are
+    each type-checked twice, once around L10886-10973 and again around
+    L17608-17775 (a second verification pass). Each needs the new
+    width/precision-vs-type validation and a new diagnostic for
+    incompatible combinations; worth factoring into one shared helper while
+    doing this rather than copy-pasting the check 6 times. The other ~55
+    matches in this file (purity/effects/mentions-var walkers) are
+    mechanical — they walk the inner expr and don't care about the spec.
+  - **Codegen, tree backends** (`backend_c.rs`, `backend_llvm.rs`, ~3-4h):
+    both already dispatch the printf format string purely on `expr.ty` in
+    one function each (`emit_print_expr_no_newline` and its LLVM twin) —
+    threading a spec through just adds a parameter and a few
+    `format!("%0{w}lld")`-style branches. The easy half, as originally
+    guessed.
+  - **Codegen, SSA backends** (`ssa.rs`, `ssa_backend_c.rs`,
+    `ssa_backend_llvm.rs`, ~4-6h — **the fiddly half, highest design
+    risk**): SSA lowers every print item to a generic `Call { name:
+    "intent_print_item", args: [op] }`, and both SSA backends special-case
+    that exact name string to inline-dispatch a printf format string on the
+    operand's static type at the call site — there's no spec slot in that
+    instruction today. Recommended mechanism: when a spec is present,
+    `ssa.rs` mangles the call name instead of adding args (e.g.
+    `intent_print_item$w3z0`), and both backends' existing `if name ==
+    "intent_print_item"` blocks gain a sibling branch decoding the mangled
+    suffix. This keeps the untouched-common-case path byte-identical —
+    same zero-regression-risk lesson BUG-5 / L25 just taught for the
+    Windows printf shims. Needs one shared encode/decode helper used by all
+    3 sites so the mangling scheme can't drift between them.
+  - **Mechanical updates** (~1-2h, ~120 sites, no design risk): `safety.rs`
+    (13), `lsp.rs` (5), `stack_depth.rs`, `deviations.rs`,
+    `hashmap_bundle.rs`, `main.rs`'s SSA-fallback-gate walkers (9),
+    `ssa.rs`'s non-lowering matches, `lib.rs` — all just walk the
+    expression inside a print item (purity, effects, hover, hashing,
+    hardware-gate checks) and don't care about the new field; adding it
+    breaks their exhaustive match, fixed with `, _` / `, spec` at each site.
+    `cargo build` walks you to every one.
+  - **Tests** (~3-4h): parser (spec parses / rejects malformed spec),
+    checker (valid spec+type combos accepted, invalid ones rejected with a
+    diagnostic), all 4 backends compiling+running a formatted print and
+    checking the exact output string (mirror the
+    `lli_runs_print_f64_scientific_notation_matches_c_backend_exponent_width`
+    pattern from BUG-5 / L25), `vanic fmt` round-trip.
+  - **Docs** (~1-2h): `06_strings.md` + this item's closure writeup.
+
+  **Total estimate: ~3-4 focused days** (revises the earlier flat "multi-day"
+  guess into where the days actually go — checker duplication and the
+  SSA-backend name-mangling plumbing are the two real risk/effort centers,
+  not parsing or the tree backends).
 
   **27.1 (done 2026-07-23)**: `f64_to_str_fixed(x, decimals) -> OwnedStr` —
   the cheap half of this ask, shipped as an ordinary builtin. Checker
