@@ -150,6 +150,43 @@ arena allocation, channels, Mutex<T>. Covers ~95% of Rc use
 cases; the remaining 5% (third-party plugins, multi-modal
 DOM-like graphs) reach for `unsafe(reason = "...")`.
 
+### Recursive / self-referential types (tree/list nodes via `Box<Self>`)
+
+**Not in vāṇी.** A type can't contain a `Box` of itself, directly or
+through a wrapper struct — the classic Rust
+`enum Expr { Num(i64), Add(Box<Expr>, Box<Expr>) }` shape doesn't
+compile. Confirmed by direct test (2026-07-24, while scoping
+`vani-symbolic`'s expression-tree representation): two independent
+blockers stack here, either one enough to reject it. (1) Enum
+variants only admit a **single** payload field in v1, so
+`Add(Box<Expr>, Box<Expr>)` is rejected outright ("only single-field
+payloads supported in v1"); wrapping the two children in a carrier
+struct doesn't help, because (2) `box()`'s admitted payload types are
+Copy scalars/structs, `dyn Iface`, `Vec<T>`, and `OwnedStr` only — a
+struct or enum that (transitively) contains the type being defined is
+never one of those, so `box(child_of_type_being_defined)` is rejected
+too ("got `Expr`... other owning inner types remain a follow-up").
+`Box<T>` itself is fully shipped (see L2 in
+[`v1_limitations.md`](v1_limitations.md)) — what's missing is
+specifically the self-referential case.
+
+**Workaround: arena representation.** Store every node in a flat
+`Vec<Node>` and reference children by `i64` index (`-1` for "none")
+instead of by pointer — the same "flat `Vec` + explicit index
+convention" idiom already used throughout the
+[Kosh math ecosystem](https://github.com/enthusiasticgeek/kosh-index)
+(`vani-tensor`'s shape encoding, `vani-discrete`'s adjacency matrix,
+`vani-sparse`'s COO/CSR). Confirmed working end-to-end (both backends,
+`vanic check`) with a `struct Node { kind: i64, value: i64, left: i64,
+right: i64 }` arena and a recursive `eval(arena: ref Vec<Node>, idx:
+i64) -> i64` walker. This sidesteps the limitation entirely (no
+recursive type is ever declared — `Node` is a plain Copy struct) and,
+as a side benefit, keeps tree operations expressible as ordinary
+`Vec`-indexed recursion or iteration rather than pointer-chasing,
+which plays better with the safety-attribute system's existing
+"unbounded recursion is `#[wcet]`-exempt but must still terminate"
+model.
+
 ### Lifetime variables (`'a`, `'b`)
 
 **Not in vāṇी (path-D, deferred indefinitely).** v1 has
