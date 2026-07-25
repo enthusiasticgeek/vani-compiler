@@ -1,10 +1,20 @@
-# Ref-capturing closures — scoping document (not started)
+# Ref-capturing closures — scoping + implementation log (v-fix, v1 done)
 
-**Status:** SCOPING ONLY. No implementation. Written 2026-07-25 in response
-to a real, repeated need (`vani-ml` v0.1.0's `logreg_fit` couldn't reuse
+**Status:** v-fix and v1 implemented and pushed 2026-07-25. v2 (non-escape
+enforcement) and v3 (update `vani-optimize`'s signature) **not started** —
+confirm before starting either, per this document's own "confirm before
+starting each phase" rule. Written 2026-07-25 in response to a real,
+repeated need (`vani-ml` v0.1.0's `logreg_fit` couldn't reuse
 `vani-optimize`'s `gradient_descent_fixed`/`backtracking` for exactly this
-reason — see `kosh-index/ROADMAP.md`'s "ML tier" section). This is a
-decision document, not a start signal.
+reason — see `kosh-index/ROADMAP.md`'s "ML tier" section).
+
+**Important**: v1 makes a ref-capturing closure a real, passable `Closure`
+value for the first time — but v2 (the non-escape safety check) hasn't
+been built yet. Right now such a value can be returned, stored in a
+struct/Vec, or otherwise escape its captured ref's scope with **no
+compiler check at all** — the same class of unsoundness BUG-7 was, just
+not yet closed off for this specific new value shape. Don't rely on this
+being safe in real code until v2 lands.
 
 **Along the way, found a real soundness bug (BUG-7) plus a second, related
 codegen bug (BUG-8) — both fixed same day (2026-07-25), see
@@ -179,15 +189,13 @@ more value shape (a `Closure`'s synthesized env), not a new subsystem.
 | Phase | Scope | Depends on | Risk / notes |
 |---|---|---|---|
 | ~~v-fix~~ ✅ done 2026-07-25 | Fix BUG-7 (checker: escape-analyzer bypass) and BUG-8 (LLVM backend: garbage value reading a `ref`-typed Vec field), found along the way. | -- | Both fixed same day. BUG-7: `compute_ref_aliases_from_let_rhs` gained a `StructLit` arm, the `Stmt::Let` guard was relaxed to run it unconditionally. BUG-8: an extra `load` to dereference a field-slot address before treating it as the Vec's own address. 16+32-test regression spot-check clean, all four `vani-ml` tests still pass. See `docs/TODO_CURRENT.md`'s BUG-7/BUG-8 entries for full detail. |
-| v1 | Extend `lambda_lift_program`'s Arc-5c path (the `if ref_captures_clone.is_empty()` branch, `checker.rs:2019`) to also synthesize an env-struct + magic-make-closure call when ref-captures are present, with `Ref<T>`/`RefMut<T>` env-struct fields (the typing already used for the inline path, `checker.rs:1954`). Produces a real `Closure` value for the first time. | v-fix | Medium. Mechanical extension of code that already works for the by-value case; main new work is deciding the env-struct's field type for a ref capture and making sure codegen (both backends) handles a `Ref<T>` struct field inside an env-struct the same way it already handles other closure envs. |
+| ~~v1~~ ✅ done 2026-07-25 | Extended `lambda_lift_program`'s Arc-5c path (`checker.rs`, previously gated `if ref_captures_clone.is_empty()`, now runs unconditionally) to also synthesize an env-struct + magic-make-closure call when ref-captures are present, with `Ref<T>` env-struct fields (the typing already used for the inline path). Produces a real `Closure` value for a ref-capturing closure for the first time — verified end-to-end: `apply(g, 5)` where `g` ref-captures a `Vec<f64>` now runs correctly on **both** backends. | v-fix | Mechanical extension, as predicted — but the C backend needed its own fix: the closure-registry codegen used `c_leaf_type` (a `&'static str` lookup for simple types only) on the capture types, which produced the invalid placeholder `/* ref */` for a `Ref<Vec<T>>` capture. Fixed by switching to `format_declarator` (the same function real `ref T` function parameters already render through, so the `const`-qualified spelling matches the hoisted function's own separately-emitted declaration byte-for-byte — an earlier attempt using `c_element_storage` compiled but produced a `const`-mismatch warning-then-hard-conflicting-declaration error). No LLVM backend changes needed at all — its trampoline/constructor codegen was already fully generic over the capture type. New tests: `lli_runs_ref_capturing_closure_passed_as_higher_order_fn_arg` (`backend_llvm.rs`, actually executes), `ref_capturing_closure_as_value_passes_to_higher_order_fn` (`lib.rs`, pins both backends' generated shape). 74-test regression spot-check clean (closures + L4/escape + struct-field/Vec-indexing), all four `vani-ml` tests + the example on both backends still pass. **No non-escape enforcement yet** — a ref-capturing `Closure` value can currently be returned/stored/escaped with no safety check at all; that's v2, not yet started. |
 | v2 | Non-escape enforcement: reject (using the fixed BUG-7 machinery) any use of a ref-capturing `Closure` value that would let it outlive a captured ref's scope — return, struct/Vec storage, or a `let` binding provably outliving the capture. Accept the "pass directly as a call argument" and "call directly in the same or a nested block" shapes. | v1 | **Highest-risk phase.** This is the actual novel safety argument — needs a clear, written-down rule for exactly which shapes are accepted vs. rejected before writing code, the same way `vani-symbolic`'s v0.2.0 needed a documented policy on which simplification rules fire. Validate against both a positive suite (the `vani-ml`/`vani-optimize` motivating shape: pass a ref-capturing closure as an argument to a higher-order fn, use it, return before the caller's frame does) and a negative suite (every BUG-7-shaped escape attempt, to confirm v-fix + v2 together actually close the hole, not just the two repros already found). |
 | v3 | Update `vani-optimize` (and any other package with a fixed `fn(ref Vec<f64>, i64) -> f64`-style objective parameter) to accept `Closure(...)->...` instead of `fn(...)->...`, so `vani-ml`'s `logreg_fit` (and the future autodiff core) can actually pass a ref-capturing closure through. | v2 | Low — signature-type change in an already-published package, republish as a minor version bump. This is the actual payoff step; nothing upstream of it changes `vani-ml`'s behavior. |
 
-**Recommended order**: v-fix → v1 → v2 (budget the most review time here) →
-v3. **Confirm before starting each phase.** v-fix should probably happen
-regardless of whether the rest of this proceeds, given it's a live
-soundness bug with no relationship to closures at all once you strip the
-motivating context away.
+**Recommended order**: ~~v-fix~~ → ~~v1~~ → v2 (budget the most review time
+here) → v3. **Confirm before starting each phase** — v-fix and v1 are done
+(2026-07-25); v2 and v3 still need an explicit go-ahead before starting.
 
 **Explicitly out of scope**: general multi-parameter lifetime variables
 (path A above), lifetime-parameterized struct *definitions* (`struct
@@ -214,8 +222,15 @@ Take this one estimate with more uncertainty than that table's:
   the "Medium" `TODO_CURRENT.md` bucket's low end rather than its high end.
   The uncertainty was in *finding* the exact root cause, not in the size
   of the eventual patch.
-- **v1**: comparable to `vani-bignum`'s BUG-4 fix (a real but mechanical
-  parser-dispatch extension) — a few hours once v-fix is settled.
+- **v1**: ✅ done — the checker-side change was indeed a few hours, as
+  predicted, comparable to `vani-bignum`'s BUG-4 fix. The one thing this
+  estimate missed: it assumed "codegen (both backends)" would need
+  checking but not necessarily changing; in fact the C backend needed a
+  real fix too (the closure-registry's `capture_types` rendering used a
+  simple-leaf-type-only helper that couldn't spell a `Ref<Vec<T>>`
+  capture type) — LLVM needed no changes at all. Total time was still
+  well within the original estimate, just split differently than
+  expected between "check" and "fix."
 - **v2**: the actual unknown. Writing the accept/reject rule down clearly
   is most of the work; once written, enforcement is "another case in an
   analyzer that already exists," not a new pass. Budget this like

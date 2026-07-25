@@ -1544,3 +1544,43 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   ref-typed Vec field, or a ref-typed field of a non-Vec aggregate type
   like an `Array`) was not exhaustively checked — worth a follow-up sweep
   if a similar shape is hit again.
+
+## Ref-capturing closures v1 (added 2026-07-25)
+
+- [x] **Ref-capturing closures can now be real `Closure` values** ✅ done
+  2026-07-25 — see `docs/ref_capturing_closures_design.md` for the full
+  phase breakdown (v-fix ✅, v1 ✅, v2 not started, v3 not started).
+  `lambda_lift_program`'s Arc-5c Closure-value synthesis (`checker.rs`)
+  used to skip entirely when a closure had any `[ref name]` capture
+  ("only by-value Copy captures supported in the Closure-value path") —
+  such a closure could only be called directly by name in the same
+  scope, never passed as a value. Now it synthesizes a real env-struct +
+  `Closure` value for ref-captures too, with `Ref<T>` env-struct fields.
+  Verified: a closure capturing `ref Vec<f64>` can now be passed to a
+  `Closure(...)->...`-typed higher-order function parameter and produces
+  the correct result, on **both** backends.
+
+  The C backend needed its own fix along the way: the closure-registry
+  codegen rendered capture types via `c_leaf_type` (a `&'static str`
+  lookup for simple types only), which produced the placeholder `/* ref
+  */` for a `Ref<Vec<T>>` capture — invalid C. Fixed by switching to
+  `format_declarator` (the same function real `ref T` parameters already
+  render through, so the spelling — including the `const` qualifier —
+  matches the hoisted function's own separately-emitted declaration
+  exactly). No LLVM backend changes needed; its trampoline/constructor
+  codegen was already fully generic over the capture type.
+
+  New tests: `lli_runs_ref_capturing_closure_passed_as_higher_order_fn_arg`
+  (`backend_llvm.rs`, actually executes via `lli`) and
+  `ref_capturing_closure_as_value_passes_to_higher_order_fn` (`lib.rs`,
+  pins both backends' generated shape via `compile_to_c`/`compile_to_llvm`).
+  74-test regression spot-check (closures, L4/escape, struct-field/
+  Vec-indexing) clean; all four `vani-ml` test files + its example
+  re-verified passing on both backends after rebuild.
+
+  **Not safe yet**: no non-escape enforcement exists for this new value
+  shape — a ref-capturing `Closure` value can currently be returned,
+  stored, or otherwise escape its captured ref's scope with no compiler
+  check at all (the same class of unsoundness BUG-7 was, just not yet
+  closed off here). That's v2, not started — don't rely on this being
+  safe in real code until that lands.

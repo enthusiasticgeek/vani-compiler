@@ -2012,17 +2012,41 @@ fn lift_closures_in_block(
                     // Arc 5c: synthesize env-struct + register
                     // closure-make magic-call entry so Var(bind_name)
                     // in value position (passed to higher-order fn,
-                    // etc.) can resolve to a Closure value. Skip
-                    // ref-captures for v1 (only by-value Copy
-                    // captures supported in the Closure-value path).
+                    // etc.) can resolve to a Closure value.
+                    //
+                    // Ref-capturing closures v1 (2026-07-25, see
+                    // docs/ref_capturing_closures_design.md): this used
+                    // to skip entirely when `ref_captures_clone` was
+                    // non-empty ("only by-value Copy captures supported
+                    // in the Closure-value path"). Now runs
+                    // unconditionally -- a ref-captured field just gets
+                    // `Ref<T>` typing (same choice already used for the
+                    // hoisted fn's own param at `final_ty` above) instead
+                    // of `T`, both in the env-struct declaration and in
+                    // the registry's `capture_types` (which both backends'
+                    // trampoline/constructor codegen already derive the
+                    // GEP/load types from generically -- confirmed no
+                    // backend changes needed, only this checker-side
+                    // type selection). No non-escape enforcement yet
+                    // (that's v2) -- a ref-capturing Closure value can
+                    // already be returned/stored, same as any other
+                    // value, until v2 adds the restriction.
                     let mut closure_replacement: Option<crate::ast::Stmt> = None;
-                    if ref_captures_clone.is_empty() {
+                    {
                         let env_struct_name = format!("__anon_env_{}", closure_id);
                         let env_fields: Vec<crate::ast::StructField> = capture_names_only.iter()
-                            .map(|cap| crate::ast::StructField {
-                                name: cap.clone(),
-                                ty: env.get(cap).cloned().unwrap(),
-                                span: *fn_span,
+                            .map(|cap| {
+                                let cap_ty = env.get(cap).cloned().unwrap();
+                                let field_ty = if ref_captures_clone.contains(cap) {
+                                    crate::ast::Type::Ref(Box::new(cap_ty))
+                                } else {
+                                    cap_ty
+                                };
+                                crate::ast::StructField {
+                                    name: cap.clone(),
+                                    ty: field_ty,
+                                    span: *fn_span,
+                                }
                             })
                             .collect();
                         hoisted_structs.push(crate::ast::StructDecl {
@@ -2035,7 +2059,14 @@ fn lift_closures_in_block(
                         });
                         let magic_name = format!("__intent_make_closure_{}", closure_id);
                         let capture_types: Vec<crate::ast::Type> = capture_names_only.iter()
-                            .map(|c| env.get(c).cloned().unwrap())
+                            .map(|c| {
+                                let cap_ty = env.get(c).cloned().unwrap();
+                                if ref_captures_clone.contains(c) {
+                                    crate::ast::Type::Ref(Box::new(cap_ty))
+                                } else {
+                                    cap_ty
+                                }
+                            })
                             .collect();
                         let closure_arg_types: Vec<crate::ast::Type> = params.iter()
                             .map(|p| p.ty.clone())
@@ -2049,10 +2080,17 @@ fn lift_closures_in_block(
                             );
                         });
                         // L5: register affine closures that have non-Copy captures.
+                        // Ref-captured names are excluded -- Ref<T> is Copy
+                        // even when T isn't, matching the `is_affine` check
+                        // below (which already excluded them for the same
+                        // reason).
                         {
                             let non_copy_fields: Vec<(String, crate::ast::Type)> =
                                 capture_names_only.iter()
                                     .filter_map(|cap| {
+                                        if ref_captures_clone.contains(cap) {
+                                            return None;
+                                        }
                                         let ty = env.get(cap).cloned().unwrap();
                                         if !ty.is_copy() {
                                             Some((cap.clone(), ty))
@@ -2075,11 +2113,26 @@ fn lift_closures_in_block(
                         }
                         // Build replacement Let: bind_name has type
                         // `Closure(args) -> ret`, RHS is the magic
-                        // make-closure call passing the captures.
+                        // make-closure call passing the captures. A
+                        // ref-captured name is passed as `ref cap`
+                        // (matching the env-struct field's Ref<T> type
+                        // above), not bare `cap`.
                         let capture_args: Vec<crate::ast::Expr> = capture_names_only.iter()
-                            .map(|cap| crate::ast::Expr {
-                                kind: crate::ast::ExprKind::Var(cap.clone()),
-                                span: *fn_span,
+                            .map(|cap| {
+                                let var_expr = crate::ast::Expr {
+                                    kind: crate::ast::ExprKind::Var(cap.clone()),
+                                    span: *fn_span,
+                                };
+                                if ref_captures_clone.contains(cap) {
+                                    crate::ast::Expr {
+                                        kind: crate::ast::ExprKind::Ref {
+                                            inner: Box::new(var_expr),
+                                        },
+                                        span: *fn_span,
+                                    }
+                                } else {
+                                    var_expr
+                                }
                             })
                             .collect();
                         let magic_call = crate::ast::Expr {

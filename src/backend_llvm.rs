@@ -46076,6 +46076,38 @@ mod tests {
     }
 
     #[test]
+    fn lli_runs_ref_capturing_closure_passed_as_higher_order_fn_arg() {
+        if !lli_available() {
+            return;
+        }
+        // Ref-capturing closures v1 (2026-07-25, see
+        // docs/ref_capturing_closures_design.md). Before this: a `[ref
+        // name]`-capturing closure could only be called directly by name
+        // within the same scope -- `lambda_lift_program`'s Arc-5c
+        // Closure-value synthesis explicitly skipped ref-captures ("only
+        // by-value Copy captures supported in the Closure-value path"),
+        // so passing one as a value to a higher-order function failed
+        // with "unknown variable" (the binding never actually existed as
+        // a value, only as a compile-time direct-call-site rewrite).
+        // Motivating case: vani-ml's logreg_fit needing to pass a
+        // closure capturing training data by reference to
+        // vani-optimize's generic gradient-descent driver.
+        let source = r#"
+            fn apply(f: Closure(i64) -> f64, x: i64) -> f64 {
+                return f(x);
+            }
+            fn main() -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
+                let r: f64 = apply(g, 5);
+                if r == 6.0 { return 42; }
+                return 1;
+            }
+        "#;
+        assert_eq!(run_lli(source), 42);
+    }
+
+    #[test]
     fn lli_aborts_on_violated_requires() {
         if !lli_available() {
             return;

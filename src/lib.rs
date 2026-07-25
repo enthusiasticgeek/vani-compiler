@@ -17356,6 +17356,43 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn ref_capturing_closure_as_value_passes_to_higher_order_fn() {
+        // Ref-capturing closures v1 (2026-07-25). Same shape as
+        // `closure_as_value_passes_to_higher_order_fn` above, but the
+        // capture is `[ref v]` instead of an implicit by-value capture --
+        // this used to fail with "unknown variable 'g'" (the
+        // Closure-value synthesis path explicitly skipped ref-captures).
+        // Actual execution (not just compilation) is covered by
+        // `backend_llvm::tests::lli_runs_ref_capturing_closure_passed_
+        // as_higher_order_fn_arg`; this test additionally pins the C
+        // backend's generated shape (`format_declarator`-based capture
+        // param spelling, not the `c_leaf_type` placeholder that
+        // previously produced invalid C for a ref-captured field).
+        let source = r#"
+            fn apply(f: Closure(i64) -> f64, x: i64) -> f64 {
+              return f(x);
+            }
+
+            fn main() -> i64 {
+              let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
+              let r: f64 = apply(g, 5);
+              return r as i64;
+            }
+        "#;
+        let c = compile_to_c(source).expect("ref-capturing closure-as-value compiles to C");
+        let ll = compile_to_llvm(source).expect("ref-capturing closure-as-value compiles to LLVM");
+        assert!(
+            c.contains("intent_closure_i64_f64") && c.contains(".call("),
+            "expected closure struct typedef + indirect dispatch in C",
+        );
+        assert!(
+            ll.contains("%intent_closure_i64_f64 = type") && ll.contains("extractvalue"),
+            "expected closure struct + extractvalue dispatch in LLVM",
+        );
+    }
+
+    #[test]
     fn closure_no_capture_still_works() {
         // The capture path must not break the no-capture
         // closure case shipped in closure #308.

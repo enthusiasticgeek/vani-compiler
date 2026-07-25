@@ -732,8 +732,22 @@ pub fn emit_c(program: &TypedProgram) -> String {
         for (_, (hoist_name, _, capture_types, args, ret)) in &entries {
             let ret_c = c_leaf_type(ret);
             let mut decl_params: Vec<String> = Vec::new();
+            // Ref-capturing closures v1 (2026-07-25): a ref-captured
+            // field's type is `Ref<Vec<T>>` (or similar composite), which
+            // `c_leaf_type` (a `&'static str` lookup, only for simple
+            // leaf types) can't represent -- it fell back to the
+            // placeholder `/* ref */`, producing invalid C. Use
+            // `format_declarator` instead (with an empty name, then
+            // trimmed): it's the same function real `ref T` function
+            // parameters render through elsewhere, so the type string
+            // here is guaranteed to match the hoisted function's own
+            // (separately-emitted) declaration byte-for-byte --
+            // including the `const` qualifier on `ref` params, which a
+            // plain type-spelling helper would have missed and produced
+            // a "discards const qualifier" / conflicting-declaration
+            // mismatch instead.
             for cty in capture_types {
-                decl_params.push(c_leaf_type(cty).to_string());
+                decl_params.push(format_declarator(cty, "").trim_end().to_string());
             }
             for cty in args {
                 decl_params.push(c_leaf_type(cty).to_string());
@@ -814,7 +828,12 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let mut ctor_field_inits: Vec<String> = Vec::new();
             for (i, (cname, cty)) in capture_names.iter().zip(capture_types.iter()).enumerate() {
                 let _ = i;
-                ctor_params.push(format!("{} p_{}", c_leaf_type(cty), cname));
+                // Same format_declarator fix as the forward-declare loop
+                // above -- c_leaf_type can't represent a ref-captured
+                // field's composite type, and a plain (non-const) pointer
+                // spelling would mismatch the hoisted function's own
+                // `const`-qualified `ref T` parameter declaration.
+                ctor_params.push(format_declarator(cty, &format!("p_{}", cname)));
                 ctor_field_inits.push(format!(".{} = p_{}", cname, cname));
             }
             let params_str = if ctor_params.is_empty() {
