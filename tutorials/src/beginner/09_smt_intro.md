@@ -109,7 +109,7 @@ The fix is to add an `ensures` clause to `double`:
 fn double(n: i64) -> i64
 requires n >= 0;
 requires n <= 1000;
-ensures result == n * 2;
+ensures _return == n * 2;
 { ... }
 ```
 

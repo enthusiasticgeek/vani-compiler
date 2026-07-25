@@ -115,10 +115,10 @@ vāṇī can enforce this mechanically with `requires` / `ensures`:
 interface Counter {
   // Contract: after increment, value > value_before.
   fn increment(self: Self) -> i64
-    ensures result > 0;
+    ensures _return > 0;
 
   fn value(self: Self) -> i64
-    ensures result >= 0;
+    ensures _return >= 0;
 }
 
 struct UpCounter   { n: i64 }

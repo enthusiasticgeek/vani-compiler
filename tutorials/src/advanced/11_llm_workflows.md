@@ -81,7 +81,7 @@ drifts from reality.
 Paste the bundle as the first message. Then ask:
 
 > "Here's the vāṇी context. Now: write a `fn factorial(n: i64)
-> -> i64` with `requires n >= 0;` and `ensures result >= 1;`
+> -> i64` with `requires n >= 0;` and `ensures _return >= 1;`
 > clauses, using English keywords."
 
 A capable model produces something like:
@@ -89,7 +89,7 @@ A capable model produces something like:
 ```vani
 fn factorial(n: i64) -> i64
 requires n >= 0;
-ensures result >= 1;
+ensures _return >= 1;
 {
   if n == 0 { return 1; }
   return n * factorial(n - 1);
