@@ -1402,3 +1402,72 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   `cargo test --release --lib -- unary neg float_arithmetic
   float_negation` spot-check (23 tests, all passing, no regressions) —
   full `cargo test --lib` not run.
+
+## Soundness bug found scoping ref-capturing closures (added 2026-07-25)
+
+- [ ] **BUG-7. Scope-escape analyzer misses a struct-with-ref-field escape
+  routed through an intermediate `let` binding — confirmed real dangling
+  reference at runtime, not just a rejected-too-late diagnostic gap.**
+  Not fixed. Found while investigating whether ref-capturing closures
+  (docs/missing_features.md's "Lifetime variables", path-D) could lean on
+  the existing L4 Phase-3/4 scope-escape analyzer rather than needing full
+  lifetime variables — see the new `docs/ref_capturing_closures_design.md`
+  for the full context this was found under.
+
+  **The documented-working case** (`docs/v1_limitations.md` L4 Phase 3):
+  ```vani
+  struct Holder { v: ref Vec<f64> }
+  fn make() -> Holder {
+      let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+      return Holder { v: ref v };   // correctly REJECTED
+  }
+  ```
+  This is correctly rejected: `"ref to local binding 'v' escapes the
+  function via return -- the binding drops when the function exits,
+  leaving a dangling reference."` The `Stmt::Return` handler
+  (`checker.rs:10692`) calls `collect_ref_sources_in_expr` (walks the
+  return expression's own literal shape) and `collect_var_ref_aliases`
+  (`checker.rs:13569`, added L4 Phase 4 2026-06-09 specifically to chase
+  `let r = foo(ref local); return r;` through a **ref-typed** intermediate
+  binding).
+
+  **The confirmed bypass** — construct the exact same escaping struct one
+  statement earlier, then return the already-built (owned-struct-typed,
+  not ref-typed) local:
+  ```vani
+  struct Holder { v: ref Vec<f64> }
+  fn make() -> Holder {
+      let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+      let h: Holder = Holder { v: ref v };
+      return h;                     // vanic check: ok  <-- should be rejected
+  }
+  fn main() -> i64 {
+      let h: Holder = make();
+      print h.v[0];                 // prints 1.2655e-311, not 1 -- confirmed
+      return 0;                     //  live use-after-free via `vanic run`
+  }
+  ```
+  `vanic check` accepts this cleanly; `vanic run` prints garbage read from
+  freed memory. **Root cause**: `collect_var_ref_aliases`'s `ExprKind::Var`
+  case (`checker.rs:13575`) only chases `env.lookup(name).info.ref_aliases`
+  — a set populated by `compute_ref_aliases_from_let_rhs`
+  (`checker.rs:13613`), which only fires for a `let` binding whose **own
+  declared type is `ref T`/`mut ref T`**. `h: Holder` is an owned
+  struct-typed binding whose *field* happens to hold a ref — nothing
+  populates or chases `ref_aliases` for that shape, so the escape is
+  invisible to both the Phase-3 inline-literal check (the return
+  expression is just `Var("h")`, no struct literal to walk) and the
+  Phase-4 alias-chase (h was never registered as a ref-alias source).
+
+  **Why this matters beyond the specific repro**: any future
+  ref-capturing-closure design that reuses this analyzer (a closure's
+  synthesized env-struct is structurally identical to `Holder` — an owned
+  struct with a `ref T` field) inherits this exact hole for free. This
+  needs fixing before — or as part of — building on top of the
+  scope-escape analyzer, not after. Likely fix shape (not attempted):
+  extend `Env`'s per-binding info to also track "this owned binding's type
+  contains a ref field sourced from binding X" (not just "this binding's
+  own type IS ref, aliasing X"), and have `collect_var_ref_aliases`'s
+  `Var` case consult that too. Needs someone with real context on `Env`'s
+  existing struct (`checker.rs`, `ref_aliases` field and neighbors) before
+  attempting — not scoped further than this repro + root-cause pointer.

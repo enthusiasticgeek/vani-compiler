@@ -121,6 +121,20 @@ vast majority of practical "return a ref" patterns involve a single
 source; adding explicit lifetime variables for the rare N-ref case
 would add syntax complexity disproportionate to its use.
 
+**Revisited 2026-07-25** (scoping pass, not implementation — see
+`docs/ref_capturing_closures_design.md`): a real, repeated downstream need
+(`vani-ml`'s `logreg_fit` needing to pass a ref-capturing closure to
+`vani-optimize`'s generic gradient-descent driver) prompted checking
+whether this decision should be reopened. Conclusion: **no** — general
+multi-parameter lifetime variables (path-D) are still not warranted; the
+actual gap turned out narrower than expected (see the design doc's
+"Path B" — a bounded extension of the already-shipped Arc-5c closure
+machinery plus the existing scope-escape analyzer, not new lifetime
+inference) and a real, independent soundness bug (BUG-7,
+`docs/TODO_CURRENT.md`) was found in that escape analyzer along the way.
+This decision (defer path-D) stands; path-B is a separate, smaller,
+not-yet-started proposal.
+
 ---
 
 ## 2026-06-06 — CLI rename: intentc → vanic

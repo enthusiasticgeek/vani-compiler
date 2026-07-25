@@ -192,16 +192,32 @@ model.
 **Not in vāṇी (path-D, deferred indefinitely).** v1 has
 single-param lifetime elision for ref returns (path-C); see
 [Intermediate 3e lifetimes](../tutorials/src/intermediate/03e_lifetimes_primer.md).
-The rejected cases are multi-input distinct lifetimes,
-lifetime-parameterized struct definitions, and ref-capturing
-closures.
+The rejected cases are multi-input distinct lifetimes and
+lifetime-parameterized struct definitions.
+
+**Ref-capturing closures — correction (2026-07-25):** this used to be
+listed alongside the other path-D-rejected cases, but that's not quite
+right. The `[ref name]` explicit capture-list syntax (Arc 5c / ARC 3a)
+already works today for a closure called directly by name within the
+same scope, including non-Copy captures like `Vec<f64>` — confirmed by
+direct test. What doesn't work is using such a closure as a genuine
+first-class value (returning it, storing it, passing it to a
+higher-order function) — `checker.rs`'s closure-lift pass explicitly
+skips the Closure-value path when ref-captures are present (see
+`docs/ref_capturing_closures_design.md` for the full scoping writeup,
+including a real soundness bug (BUG-7) found in the scope-escape
+analyzer along the way). That's a narrower, smaller gap than "no lifetime
+variables at all," and is scoped as a separate, not-yet-started proposal.
 
 **Workaround:**
 - Multi-input distinct lifetimes → split into two narrower fns.
 - Lifetime-parameterized struct → store `Box<T>` or
   indices into the owner.
-- Ref-capturing closures → restructure to pass refs as
-  closure-fn args, not captures.
+- Ref-capturing closures used as a value (returned/stored/passed to a
+  higher-order fn) → restructure to pass refs as plain fn args instead of
+  captures (a non-capturing named function works fine as a `Closure`/`fn`
+  value today). Calling a `[ref name]` closure directly by name in the
+  same scope already works and needs no workaround.
 
 ### Custom `Drop` impl
 
