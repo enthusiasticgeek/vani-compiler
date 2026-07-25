@@ -1,14 +1,30 @@
 # Changelog
 
-## [v0.8.1] — YYYY-MM-DD
+## [v0.8.1] — 2026-07-24
 
 ### Added
 
-- TODO
+- **`f64_to_str_fixed` builtin** — fixed-precision float-to-string formatting (Rust `{:.N}` / C `%.*f` equivalent).
+- **`sort_by` widened to any `Copy` `Vec<T>` element** (MATH-2), not just `i64`/`f64`.
 
 ### Fixed
 
-- TODO
+- **Async fn returning `ref T` was broken** — a regression from this release's own nested-ref-return check: `async fn` desugars to a plain fn returning `Future<T>` *before* the elision check runs, so every legal `async fn f(...) -> ref T` was indistinguishable from an illegal nested ref and rejected. `Future<T>` is now unwrapped before the check applies.
+- **Two ref-related compiler crashes** — a `ref`/`mut ref` nested inside a tuple or generic return type (`(ref i64, ref i64)`, `Option<ref i64>`) crashed the LLVM backend or produced malformed IR instead of a diagnostic; printing a `ref` value hit the same unhandled-type gap in `print`/`eprint`. Both now produce clean diagnostics.
+- **L23 phase 2: `pub(kosh)` wrongly rejected same-project sibling-module access** — only cross-package (`[deps]`) access to a `pub(kosh)` item should be rejected; a sibling module in the same project is now correctly allowed, matching the tutorials' worked example.
+- **BUG-1: `file_read_line`/`stdin_read_line` undefined at LLVM link time** — no LLVM implementation existed; both SSA backends also silently mangled the calls into a bogus user-fn symbol instead of erroring.
+- **BUG-3: C-backend Vec-bounds optimizer hint false-aborted** on the standard "zip two different-length Vecs" pattern by asserting bounds safety inside `if`-guarded branches too aggressively.
+- **BUG-4: `implement`/`methods on` blocks didn't parse `#[attr]`-prefixed methods** — same gap already fixed for `module` bodies; both now share `parse_attributed_fn`.
+- **S-13/S-15 diagnostic span pointed at the wrong token** — the composite-safety-tag (`asil_d`, `do178c_level_a`, etc.) missing-`#[bounded_stack]`/`#[wcet]` diagnostic pointed past the end of the annotated function instead of at it.
+- **BUG-2 (`wcet`): struct-literal field expressions weren't recursed into** — a struct literal calling real functions in its fields was under-counted to a flat 5-cycle estimate, letting `vanic check` accept a WCET budget below the function's real worst case.
+- **MATH-1: `sort()` on `Vec<i64>`/`Vec<f64>` crashed under `vanic run`/`test`** — the JIT path never linked `sort_runtime.c`, unlike the AOT build path.
+
+### Documentation
+
+- Kosh math-library ecosystem TODO items (MATH-1, MATH-2, BUG-2) marked done; C-backend and implement-block gaps found while building `vani-bignum` tracked and then closed.
+- New chapter 34 (lifetimes: multi-ref returns, scalar-ref dead end) and targeted C++ equivalents cross-referenced into the generics/interfaces primers and glossary.
+- `pub(kosh)`/region+arena/`print` f64-formatting tutorial fixes; recursive/self-referential `Box<Self>` limitation documented; subsystem test-filter reference table added to `ONBOARDING.md`.
+- All 5 open safety-standards TODO items marked resolved.
 
 ---
 
