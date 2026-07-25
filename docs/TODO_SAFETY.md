@@ -4,6 +4,14 @@ Generated 2026-07-12 from a full audit of `src/safety.rs`, `src/smt.rs`,
 `src/checker.rs`, `src/acyclicity.rs`, `src/stack_depth.rs`, and the
 composite-tag expansion in `src/parser.rs`.
 
+**As of 2026-07-24: all 27 items resolved.** S-13/S-15/S-25/S-26 were
+already implemented (the per-item checklist entries below just hadn't been
+synced with the "Tracking" table's status, which had them right all
+along) -- verified directly, plus a real diagnostic-span bug fixed in the
+S-13/S-15 shared code path. S-18 was the one item genuinely marked open
+everywhere; verified it already works too (no code change needed), with
+new regression tests added so it can't silently regress.
+
 Items are ordered within each section by impact vs effort.
 Legend: ✅ done · 🔄 in progress · [ ] open · ⛔ blocked
 
@@ -104,10 +112,19 @@ self-contained pass in `src/safety.rs`.
   `#[bounded(N)]`-annotated parameter, multiply the body WCET by the bound.
   Requires: read the `requires` clause variables and try constant-fold `N`.
 
-- [ ] **S-13. `wcet` annotation is mandatory under `asil_d` / `do178c_level_a`**
-  Emit an error (not warning) if a function tagged with either composite
-  lacks a `#[wcet(cycles=N)]` annotation. Implement in the composite
-  expansion verification step (after S-1/S-2 are done).
+- [x] **S-13. `wcet` annotation is mandatory under `asil_d` / `do178c_level_a`** ✅ verified 2026-07-24
+  Already implemented as part of S-1/S-2's composite expansion
+  (`parser.rs`, right after `parse_function` returns): for
+  `asil_d`/`do178c_level_a`/`iec_61508_sil3`/`iec_61508_sil4`/`autosar_ap`,
+  a missing `#[wcet(cycles=N)]` is a hard parse-time error ("`#[asil_d]`
+  requires `#[wcet(cycles=N)]`"), not a warning. This checklist entry was
+  simply stale -- the enforcement predates it. The one real bug found:
+  the diagnostic span used `self.current().span` (the token *after* the
+  whole annotated function, typically the next item's `fn` keyword)
+  instead of the annotated function itself; fixed to `f.span`. New
+  regression test:
+  `s13_s15_asil_d_missing_bounded_stack_or_wcet_rejected_with_correct_span`
+  (`lib.rs`), which also asserts the span lands on the right function.
 
 ---
 
@@ -120,10 +137,11 @@ self-contained pass in `src/safety.rs`.
   `FRAME_OVERHEAD_BYTES` push) and their callee subtrees are still traversed.
   The text report marks each inline function with `[inline]`.
 
-- [ ] **S-15. `bounded_stack` enforced under composite tags**
-  Under `#[asil_d]` / `#[do178c_level_a]`, emit an error if
-  `bounded_stack` is not declared on the function. Currently the composite
-  expands only `no_heap + no_recursion`; this requires S-1/S-2.
+- [x] **S-15. `bounded_stack` enforced under composite tags** ✅ verified 2026-07-24
+  Same finding as S-13, same code path, same span fix -- a missing
+  `#[bounded_stack(bytes=N)]` under any of the five composite tags that
+  require it is already a hard parse-time error. Covered by the same
+  regression test as S-13.
 
 ---
 
@@ -143,10 +161,33 @@ self-contained pass in `src/safety.rs`.
   `checker.rs`) and verified via `prove_with_calls_extra` with
   `check_loop_invariants`; counterexamples are emitted as diagnostics.
 
-- [ ] **S-18. Cross-module SMT (requires/ensures across files)**
-  Currently `ensures` substitution only works within a single compilation
-  unit. Track `ensures` in the manifest (`manifest.rs`) so that callers
-  from other `.vani` files can use them.
+- [x] **S-18. Cross-module SMT (requires/ensures across files)** ✅ verified 2026-07-24
+  Verified directly (two scenarios, both pass): (1) a callee declared in
+  a separate file pulled in via `use "path";`, and (2) a callee declared
+  in a `[deps]` Kosh package, consumed as `pkgname::fn(...)`. Both already
+  work -- no manifest.rs changes needed. Root cause of why this was never
+  actually a gap: `resolve_uses` (`lib.rs`) textually splices every
+  `use`-included file into one combined source buffer *before parsing*,
+  and `wrap_deps_into_combined` does the same for every `[deps]` entry
+  (wrapped in `module <pkg_name> { ... }`). By the time
+  `collect_signatures` builds the `ensures`-bearing signature table
+  `record_ensures_facts` reads from, there is no file or package boundary
+  left to cross -- a cross-file/cross-package callee is indistinguishable
+  from one declared earlier in the same file. Confirmed the tests are
+  actually exercising `ensures` (not succeeding for an unrelated reason)
+  with a negative control: the identical cross-package `prove` fails
+  without the callee's `ensures` clause. Three new regression tests in
+  `lib.rs`: `s18_smt_ensures_substitution_works_across_use_included_files`,
+  `s18_smt_ensures_substitution_works_across_kosh_package_boundary`,
+  `s18_smt_ensures_substitution_absence_still_falls_back_to_runtime_check`
+  (the negative control).
+  **Bonus find while testing this**: three tutorial files
+  (`beginner/09_smt_intro.md`, `advanced/11_llm_workflows.md`,
+  `intermediate/11b_solid_primer.md`) used `ensures result == ...;` --
+  `result` was never a recognized binding anywhere in the lexer/parser
+  (only `_return` is; confirmed against `intermediate/12_smt_deepdive.md`,
+  which correctly uses `_return` throughout). All three examples never
+  actually compiled. Fixed to `_return`.
 
 ---
 
@@ -206,15 +247,15 @@ self-contained pass in `src/safety.rs`.
   if any deviation in the transitive closure of a standard-tagged function
   lacks a known prefix.
 
-- [ ] **S-25. Safety attrs report: CLI subcommand**
-  `compute_safety_attrs_report` exists in `safety.rs` but is not wired to a
-  CLI subcommand. Add `vanic safety-attrs [--format=text|json|csv]` to
-  expose it. Useful for audit dashboards.
+- [x] **S-25. Safety attrs report: CLI subcommand** ✅ verified 2026-07-24
+  Already wired: `vanic safety-attrs <path> [--format=text|json|csv]` in
+  `main.rs`. Verified end-to-end against a real `#[asil_d]`-tagged
+  function (`vanic safety-attrs f.vani` correctly lists every composite
+  + primitive + budget attribute). This checklist entry was stale.
 
-- [ ] **S-26. Complexity report: CLI subcommand**
-  `compute_complexity_report` / `format_complexity_*` exist but lack a
-  dedicated subcommand. Add `vanic complexity [--format=text|json|csv]
-  [--threshold=N]`.
+- [x] **S-26. Complexity report: CLI subcommand** ✅ verified 2026-07-24
+  Already wired: `vanic complexity <path> [--format=text|json|csv]
+  [--threshold=N]` in `main.rs`. Verified end-to-end. Stale entry.
 
 - [x] **S-27. Tutorial: safety-critical chapter** ✅ 2026-07-12
   Add `tutorials/src/advanced/12_safety_standards.md` covering:
@@ -247,7 +288,7 @@ self-contained pass in `src/safety.rs`.
 | S-15 | Stack mandatory | ✅ 2026-07-12 | error if absent under asil_d/do178c_level_a (done in S-1/S-2) |
 | S-16 | SMT Vec index | ✅ 2026-07-12 | collect_index_bound_axioms: bvult/bvuge bounds before each query |
 | S-17 | SMT loop invariant | ✅ pre-existing | invariant <expr> syntax + check_loop_invariants + z3 verification |
-| S-18 | SMT cross-module | [ ] | |
+| S-18 | SMT cross-module | ✅ 2026-07-24 | already worked via resolve_uses/wrap_deps_into_combined textual splicing (both pre-parse); 3 new regression tests lock it in |
 | S-19 | Lock-order deadlock | ✅ 2026-07-12 | enforce_lock_order: held-set transitive analysis + DFS cycle detection (L20 fix 2026-07-12) |
 | S-20 | ISR priority model | ✅ 2026-07-12 | #[interrupt(priority=N)] + enforce_isr_preemption: transitive mutex collection (L21 fix 2026-07-12) |
 | S-21 | IEC 61508 SIL-3/4 | ✅ 2026-07-12 | iec_61508_sil3/sil4 tags; no_heap+no_recursion+no_float+det_timing |
