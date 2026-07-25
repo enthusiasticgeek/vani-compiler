@@ -781,27 +781,48 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // after the fact.
 
 
-    out.push_str("declare i32 @printf(i8*, ...)\n");
-    // On Windows, `snprintf` and `dprintf` are not exported from any DLL
-    // (MinGW inlines `snprintf` to `__mingw_snprintf`; `dprintf` is POSIX-only).
-    // Emit IR shims backed by `vsnprintf` / `_write` so ORC JIT can resolve them.
+    // On Windows, declaring `printf`/`vsnprintf` as raw externs resolves
+    // them straight to msvcrt.dll's legacy, non-C99 formatter -- e.g. a
+    // `%g`-formatted double in scientific notation gets a 3-digit
+    // exponent ("1e+006") there, vs. the 2-digit C99 convention
+    // ("1e+06") every C-source build gets for free, because MinGW's
+    // <stdio.h> macro-redirects printf/snprintf to its own
+    // ANSI-compliant `__mingw_*` implementations (statically linked
+    // from libmingwex.a) -- a redirect that only exists at the
+    // preprocessor level and so never applies to hand-emitted IR.
+    // Route through those same `__mingw_*` entry points here so the
+    // LLVM backend's formatted output matches the C backend's
+    // byte-for-byte (BUG-5 / L25). This also fixes `snprintf`/`dprintf`
+    // not being reliably DLL-exported under those names at all (MinGW
+    // inlines `snprintf` to `__mingw_snprintf`; `dprintf` is POSIX-only).
     #[cfg(target_os = "windows")]
     {
-        out.push_str("declare i32 @vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @__mingw_vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @__mingw_vprintf(i8*, i8*)\n");
         out.push_str("declare i32 @_write(i32, i8*, i32)\n");
         out.push_str("declare void @llvm.va_start(i8*)\n");
         out.push_str("declare void @llvm.va_end(i8*)\n");
-        // snprintf shim: collect varargs into a va_list, forward to vsnprintf.
+        // printf shim: collect varargs into a va_list, forward to __mingw_vprintf.
+        out.push_str("define i32 @printf(i8* %_pf_fmt, ...) {\n");
+        out.push_str("  %_pf_ap = alloca i8*, align 8\n");
+        out.push_str("  %_pf_ap_i8 = bitcast i8** %_pf_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_pf_ap_i8)\n");
+        out.push_str("  %_pf_ap_v = load i8*, i8** %_pf_ap\n");
+        out.push_str("  %_pf_r = call i32 @__mingw_vprintf(i8* %_pf_fmt, i8* %_pf_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_pf_ap_i8)\n");
+        out.push_str("  ret i32 %_pf_r\n");
+        out.push_str("}\n");
+        // snprintf shim: collect varargs into a va_list, forward to __mingw_vsnprintf.
         out.push_str("define i32 @snprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, ...) {\n");
         out.push_str("  %_snp_ap = alloca i8*, align 8\n");
         out.push_str("  %_snp_ap_i8 = bitcast i8** %_snp_ap to i8*\n");
         out.push_str("  call void @llvm.va_start(i8* %_snp_ap_i8)\n");
         out.push_str("  %_snp_ap_v = load i8*, i8** %_snp_ap\n");
-        out.push_str("  %_snp_r = call i32 @vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
+        out.push_str("  %_snp_r = call i32 @__mingw_vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
         out.push_str("  call void @llvm.va_end(i8* %_snp_ap_i8)\n");
         out.push_str("  ret i32 %_snp_r\n");
         out.push_str("}\n");
-        // dprintf shim: format via vsnprintf into a stack buffer, write with _write.
+        // dprintf shim: format via __mingw_vsnprintf into a stack buffer, write with _write.
         out.push_str("define i32 @dprintf(i32 %_dpr_fd, i8* %_dpr_fmt, ...) {\n");
         out.push_str("  %_dpr_buf = alloca [256 x i8], align 1\n");
         out.push_str("  %_dpr_bufp = getelementptr [256 x i8], [256 x i8]* %_dpr_buf, i64 0, i64 0\n");
@@ -809,7 +830,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
         out.push_str("  %_dpr_ap_i8 = bitcast i8** %_dpr_ap to i8*\n");
         out.push_str("  call void @llvm.va_start(i8* %_dpr_ap_i8)\n");
         out.push_str("  %_dpr_ap_v = load i8*, i8** %_dpr_ap\n");
-        out.push_str("  %_dpr_n = call i32 @vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
+        out.push_str("  %_dpr_n = call i32 @__mingw_vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
         out.push_str("  call void @llvm.va_end(i8* %_dpr_ap_i8)\n");
         out.push_str("  %_dpr_r = call i32 @_write(i32 %_dpr_fd, i8* %_dpr_bufp, i32 %_dpr_n)\n");
         out.push_str("  ret i32 %_dpr_r\n");
@@ -817,6 +838,7 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        out.push_str("declare i32 @printf(i8*, ...)\n");
         out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
         out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
     }
@@ -45818,6 +45840,8 @@ mod tests {
         // don't use parallel-for are unaffected — lli ignores
         // `-load`'d symbols that aren't referenced.
         add_libgomp_load_flags_for_tests(&mut cmd);
+        // BUG-5 / L25: see add_mingw_ansi_stdio_load_flag_for_tests's doc comment.
+        add_mingw_ansi_stdio_load_flag_for_tests(&mut cmd);
         // lli's MCJIT isn't thread-safe for concurrent function
         // resolution, so cap libgomp to a single thread (same as
         // `intentc run`). The reductions still exercise the
@@ -45860,6 +45884,52 @@ mod tests {
             }
         }
     }
+
+    /// Tests-local mirror of [`crate::main::mingw_ansi_stdio_shared_lib`]
+    /// (BUG-5 / L25): every module this backend emits `define`s Windows
+    /// `printf`/`snprintf`/`dprintf` shims that call `__mingw_vsnprintf`/
+    /// `__mingw_vprintf`, so `lli` must materialize those two symbols
+    /// from a `-load`able DLL to run *any* generated IR on Windows, not
+    /// just programs that call `print`. Kept here so the LLVM-backend
+    /// test module doesn't reach into `main.rs`. No-op (and no compile
+    /// step) on non-Windows hosts.
+    #[cfg(target_os = "windows")]
+    fn add_mingw_ansi_stdio_load_flag_for_tests(cmd: &mut std::process::Command) {
+        static LIB: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        let lib = LIB.get_or_init(|| {
+            let pid = std::process::id();
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let dir = std::env::temp_dir();
+            let c_path = dir.join(format!("vanic-test-ansilib-{}-{}.c", pid, nanos));
+            let def_path = dir.join(format!("vanic-test-ansilib-{}-{}.def", pid, nanos));
+            let dll_path = dir.join(format!("vanic-test-ansilib-{}-{}.dll", pid, nanos));
+            std::fs::write(&c_path, include_str!("mingw_ansi_stdio_shim.c")).ok()?;
+            std::fs::write(&def_path, include_str!("mingw_ansi_stdio_shim.def")).ok()?;
+            let cc = std::env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+            let out = std::process::Command::new(&cc)
+                .args(["-O2", "-shared", "-fPIC"])
+                .arg(&c_path)
+                .arg(&def_path)
+                .arg("-o")
+                .arg(&dll_path)
+                .output();
+            let _ = std::fs::remove_file(&c_path);
+            let _ = std::fs::remove_file(&def_path);
+            match out {
+                Ok(o) if o.status.success() && dll_path.exists() => Some(dll_path),
+                _ => None,
+            }
+        });
+        if let Some(path) = lib {
+            cmd.arg(format!("-load={}", path.display()));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn add_mingw_ansi_stdio_load_flag_for_tests(_cmd: &mut std::process::Command) {}
 
     #[test]
     fn lli_runs_max_program_and_returns_expected_exit_code() {
@@ -45947,7 +46017,9 @@ mod tests {
             let mut f = std::fs::File::create(&path).expect("write .ll");
             f.write_all(ll.as_bytes()).expect("write");
         }
-        let status = std::process::Command::new(lli_path())
+        let mut cmd = std::process::Command::new(lli_path());
+        add_mingw_ansi_stdio_load_flag_for_tests(&mut cmd);
+        let status = cmd
             .arg(&path)
             .stderr(std::process::Stdio::null())
             .status()
@@ -46251,15 +46323,63 @@ mod tests {
             let mut f = std::fs::File::create(&path).expect("write .ll");
             f.write_all(ll.as_bytes()).expect("write");
         }
-        let output = std::process::Command::new(lli_path())
-            .arg(&path)
-            .output()
-            .expect("lli runs");
+        let mut cmd = std::process::Command::new(lli_path());
+        add_mingw_ansi_stdio_load_flag_for_tests(&mut cmd);
+        let output = cmd.arg(&path).output().expect("lli runs");
         let _ = std::fs::remove_file(&path);
         assert!(output.status.success(), "lli failed: {:?}", output);
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("42"), "expected 42 in stdout: {stdout}");
         assert!(stdout.contains("true"), "expected true in stdout: {stdout}");
+    }
+
+    #[test]
+    fn lli_runs_print_f64_scientific_notation_matches_c_backend_exponent_width() {
+        // BUG-5 / L25 regression: this value's `%g` formatting crosses
+        // into scientific notation, where a raw `declare i32
+        // @vsnprintf(...)` on Windows resolves to msvcrt.dll's legacy,
+        // non-C99 formatter (3-digit exponent, "1e+006") instead of the
+        // 2-digit C99 convention ("1e+06") every C-source build gets
+        // via MinGW's ANSI stdio redirect. Non-Windows hosts already
+        // get "1e+06" from glibc either way, so this test locks the
+        // Windows fix in without needing a `#[cfg(windows)]` gate.
+        if !lli_available() {
+            return;
+        }
+        let source = r#"
+            fn main() -> i64 {
+              let x: f64 = 1000000.0;
+              print x;
+              return 0;
+            }
+        "#;
+        use std::io::Write;
+        let checked = compile(source).expect("source compiles");
+        let ll = LlvmBackend.emit(&checked.ir);
+        let path = std::env::temp_dir().join(format!(
+            "intent-llvm-expwidth-{}-{}.ll",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        {
+            let mut f = std::fs::File::create(&path).expect("write .ll");
+            f.write_all(ll.as_bytes()).expect("write");
+        }
+        let mut cmd = std::process::Command::new(lli_path());
+        add_mingw_ansi_stdio_load_flag_for_tests(&mut cmd);
+        let output = cmd.arg(&path).output().expect("lli runs");
+        let _ = std::fs::remove_file(&path);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.trim(),
+            "1e+06",
+            "expected 2-digit exponent \"1e+06\", got {:?} (full output: {:?})",
+            stdout,
+            output
+        );
     }
 
     #[test]

@@ -12,11 +12,11 @@
 > badge in their heading. Only the items **without** a ✅ badge are still
 > open in the current release.
 >
-> **At v0.6.1 (2026-07-21): 19 of 19 original entries resolved; L20–L22 added
+> **At v0.8.1 (2026-07-25): 19 of 19 original entries resolved; L20–L22 added
 > and fixed; L23 fixed in two phases, 2026-07-22 and 2026-07-24; L25 added
-> 2026-07-24. Open items: L5 (by design), L6 (by design), L10-macOS (no
-> hardware), L13 (partial — `match` SOV by design), L14 (by design for v1),
-> L24 (Windows-only, scoped), L25 (Windows-only, scoped).**
+> 2026-07-24 and fixed 2026-07-25. Open items: L5 (by design), L6 (by
+> design), L10-macOS (no hardware), L13 (partial — `match` SOV by design),
+> L14 (by design for v1), L24 (Windows-only, scoped).**
 >
 > | # | Summary | Status |
 > |---|---|---|
@@ -1366,7 +1366,7 @@ processor-group case) -- emitted as an LLVM `declare` + `call`,
 mirroring how `GOMP_parallel` is already just an external call on
 the non-Windows path. Not started; scoped but untouched.
 
-### L25 -- Windows: `print`/`f64_to_str` scientific-notation exponent width differs between the C and LLVM backends
+### L25 -- Windows: `print`/`f64_to_str` scientific-notation exponent width differs between the C and LLVM backends ✅ Fixed 2026-07-25
 
 `print`ing (or `f64_to_str`-converting) an `f64` whose magnitude is
 large/small enough that the default `%g` formatting switches to
@@ -1384,17 +1384,18 @@ always emits a 2-digit exponent, the LLVM backend always emits a
 3-digit exponent, on the same Windows host, same `snprintf`-based
 formatting call in both cases.
 
-**Root cause**: the C backend's `printf("%g", ...)` call links
-against whatever `cc` the build uses (MinGW/UCRT on this project's
-Windows CI), which follows the C99 (2-digit-minimum) exponent
-convention. The LLVM backend never calls the host's `printf`
-directly -- `backend_llvm.rs` declares its own `@snprintf`/
-`@vsnprintf` (see the Windows-specific IR shims, since neither
-symbol is reliably exported for JIT/AOT linking on Windows) and
-that resolution path lands on the legacy MSVCRT 3-digit-exponent
-convention instead of UCRT's 2-digit one. Both ultimately go
-through *a* C library's `%g` formatter; they just don't go through
-the *same* one.
+**Root cause**: MinGW's `<stdio.h>` macro-redirects `printf`/
+`vsnprintf` in *C source* to its own ANSI/C99-compliant
+`__mingw_printf`/`__mingw_vsnprintf` (statically linked from
+`libmingwex.a`) -- a preprocessor-level trick that only applies when
+compiling actual C source, which is why the C backend gets the
+2-digit convention for free. Hand-emitted LLVM IR has no
+preprocessor: `backend_llvm.rs`'s raw `declare i32 @printf(...)` /
+`@vsnprintf(...)` linked straight to msvcrt.dll's legacy, non-C99
+formatter instead (confirmed via `objdump -p` on the built binary --
+it imported `_vsnprintf` from `msvcrt.dll` directly, not the ANSI
+version). This reproduced identically under both `vanic run` (JIT)
+and `vanic build` (AOT), not just the JIT path.
 
 **Impact**: cosmetic (both strings parse back to the same `f64`
 value with `parse_float`), but it breaks any golden-output test
@@ -1407,15 +1408,24 @@ actually hit scientific notation (`%g`'s default precision is 6
 significant digits; anything with an exponent magnitude below that
 stays in fixed notation on both backends, no divergence).
 
-**Workaround**: use `f64_to_str_fixed(x, decimals)` instead of raw
-`print x;` / `f64_to_str(x)` for any `f64` whose magnitude isn't
-tightly bounded -- fixed notation (`%.*f`) never switches to
-scientific notation, so it never hits this gap. See [Beginner 6 --
+**Workaround** (no longer needed for this bug specifically, still
+true on its own merits): `f64_to_str_fixed(x, decimals)` uses fixed
+notation (`%.*f`), which never switches to scientific notation, so it
+was never affected by this gap either way. See [Beginner 6 --
 Strings](../tutorials/src/beginner/06_strings.md) for the full
 `f64_to_str` vs. `f64_to_str_fixed` caveats.
 
-**Fix path**: pin the LLVM backend's snprintf resolution to the
-same runtime the C backend's `cc` links (UCRT), or post-process the
-scientific-notation output to normalize exponent width to 2 digits
-regardless of which CRT actually formatted it. Not started; scoped
-but untouched.
+**Fix**: both LLVM backends' Windows-only preamble shims now declare
+and route `printf`/`snprintf`/`dprintf` through `__mingw_vprintf`/
+`__mingw_vsnprintf` instead of the raw msvcrt-resolving externs. That
+alone fixed `vanic build` (AOT linking resolves `__mingw_*` from
+`libmingwex.a` normally) but broke `vanic run`: `lli`'s JIT symbol
+resolver only sees symbols exported from a *loaded DLL*, and those
+two functions live in a static archive, never loaded as one. Fixed
+the same way MATH-1 fixed the equivalent JIT/AOT split for
+`sort_runtime.c` -- a tiny shim (`mingw_ansi_stdio_shim.c` + a `.def`
+file force-linking and re-exporting the two symbols under their real
+names) compiled once per process into a real DLL and `-load`ed into
+`lli`. Full writeup, including a regression this uncovered in 20
+pre-existing `lli_*` tests, in `docs/TODO_CURRENT.md`'s BUG-5 / L25
+entry.

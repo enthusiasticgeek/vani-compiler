@@ -47203,6 +47203,36 @@ função main() -> i64 {
     }
 
     #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_llvm_printf_shims_use_mingw_ansi_stdio_not_raw_msvcrt() {
+        // BUG-5 / L25: a raw `declare i32 @vsnprintf(...)` / `@printf(...)`
+        // resolves to msvcrt.dll's legacy, non-C99 formatter at JIT/AOT
+        // link time (3-digit scientific-notation exponents), while the C
+        // backend gets the 2-digit C99 convention for free via MinGW's
+        // <stdio.h> macro redirect to `__mingw_*`. The LLVM backend must
+        // route through those same `__mingw_vsnprintf`/`__mingw_vprintf`
+        // entry points so formatted output matches byte-for-byte.
+        let source = r#"
+            fn main() -> i64 {
+              print "hi";
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("must compile to LLVM on Windows");
+        assert!(
+            ll.contains("@__mingw_vsnprintf") && ll.contains("@__mingw_vprintf"),
+            "Windows LLVM backend must route printf/snprintf through __mingw_* \
+             (BUG-5 / L25), got snippet:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+        assert!(
+            !ll.contains("declare i32 @vsnprintf") && !ll.contains("declare i32 @printf"),
+            "must not declare a raw vsnprintf/printf extern on Windows \
+             (resolves to msvcrt.dll's legacy 3-digit-exponent formatter)"
+        );
+    }
+
+    #[test]
     #[cfg(not(target_os = "windows"))]
     fn non_windows_deep_recursion_no_stack_overflow() {
         // Same recursion test for Linux/macOS where the default stack

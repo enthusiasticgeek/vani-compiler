@@ -1,0 +1,4 @@
+LIBRARY vani_mingw_ansi_stdio_shim
+EXPORTS
+    __mingw_vsnprintf
+    __mingw_vprintf

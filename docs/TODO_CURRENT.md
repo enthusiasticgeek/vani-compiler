@@ -1206,48 +1206,82 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
 
 ## Windows backend-parity bug found auditing tutorial docs (added 2026-07-24)
 
-- [ ] **BUG-5 / L25. `print`/`f64_to_str` scientific-notation exponent
-  width differs between the C and LLVM backends on Windows** — discovered
-  auditing `beginner/02_variables.md`/`06_strings.md`'s claims about
-  `print`'s `f64` formatting. Also tracked as L25 in
-  [`docs/v1_limitations.md`](v1_limitations.md) (full root-cause writeup
-  there); this entry is the actionable work-queue side.
+- [x] **BUG-5 / L25. `print`/`f64_to_str` scientific-notation exponent
+  width differs between the C and LLVM backends on Windows** ✅ fixed
+  2026-07-25 — discovered auditing `beginner/02_variables.md`/
+  `06_strings.md`'s claims about `print`'s `f64` formatting. Also tracked
+  as L25 in [`docs/v1_limitations.md`](v1_limitations.md).
 
   Verified directly across several magnitudes (`1000000.0`, `12345678.9`,
-  `123456789.123456`, `0.0000001234`) on this Windows host: any `f64`
+  `123456789.123456`, `0.0000001234`) on a Windows host: any `f64`
   value large/small enough that `%g`'s default (6-significant-digit)
-  formatting switches to scientific notation prints with a **2-digit**
+  formatting switches to scientific notation printed with a **2-digit**
   exponent on the C backend (`1e+06`) and a **3-digit** exponent on the
   LLVM backend (`1e+006`) — same program, same value, different text.
   Both `print x;` (for an `f64` `x`) and the `f64_to_str` builtin hit this
   identically, since `print` routes through the same formatting path.
 
-  **Root cause**: the C backend's `printf("%g", ...)` links against
-  whatever `cc` the build uses (MinGW/UCRT here), which follows the C99
-  2-digit-minimum exponent convention. The LLVM backend never calls the
-  host's `printf` directly — it declares its own `@snprintf`/`@vsnprintf`
-  IR shims (see the Windows-specific comment in `backend_llvm.rs`, since
-  neither symbol reliably exports for JIT/AOT linking on Windows) and
-  that resolution path lands on the legacy MSVCRT 3-digit-exponent
-  convention instead. Not observed on Linux/macOS (both backends link the
-  same glibc `printf` there) — Windows-only, and only for values that
-  actually reach scientific notation.
+  **Root cause, precisely pinned down** (the original writeup's "MinGW/
+  UCRT" guess was half right): MinGW's `<stdio.h>` macro-redirects
+  `printf`/`vsnprintf` in *C source* to its own ANSI/C99-compliant
+  `__mingw_printf`/`__mingw_vsnprintf` (statically linked from
+  `libmingwex.a`) — that redirect is a preprocessor-level trick that
+  only exists when compiling actual C source. Hand-emitted LLVM IR has
+  no preprocessor, so `backend_llvm.rs`'s `declare i32 @printf(...)` /
+  `@vsnprintf(...)` linked straight to msvcrt.dll's raw, legacy,
+  non-C99 formatter instead (confirmed via `objdump -p` on the AOT
+  binary: it imported `_vsnprintf` from `msvcrt.dll`, not the ANSI
+  version). Reproduced identically under `vanic run` (JIT) *and*
+  `vanic build` (AOT) — not JIT-specific, contrary to the earlier
+  guess that AOT's `cc`-linked binary might already be fine.
 
-  **Impact**: cosmetic (both strings parse back to the same `f64` via
-  `parse_float`), but breaks byte-for-byte golden-output comparisons
-  across backends on Windows, and means a value's printed form isn't
-  portable across `vanic run` vs. `vanic run --backend=c`.
+  **Fix**: both LLVM backends' Windows-only preamble shims
+  (`backend_llvm.rs`, `ssa_backend_llvm.rs`) now declare and route
+  `printf`/`snprintf`/`dprintf` through `__mingw_vprintf`/
+  `__mingw_vsnprintf` instead of the raw externs — a new `printf` shim
+  (mirroring the existing `dprintf` va_list-forwarding pattern) was
+  added alongside the existing `snprintf`/`dprintf` shims, whose target
+  symbol was simply renamed. This alone fixed `vanic build` (AOT link
+  resolves `__mingw_*` from `libmingwex.a` normally) but broke `vanic
+  run` (JIT): `lli`'s symbol resolver only sees symbols exported from a
+  *loaded DLL*, and `__mingw_vsnprintf`/`__mingw_vprintf` live in a
+  static archive, never loaded as one. Fixed the same way MATH-1 fixed
+  the equivalent JIT/AOT split for `sort_runtime.c`: two new files
+  (`mingw_ansi_stdio_shim.c` + a `.def` file listing the two symbols)
+  force-link and re-export them from an actual DLL, compiled once per
+  process (`mingw_ansi_stdio_shared_lib()`, `main.rs`, `OnceLock`-cached)
+  and `-load`ed into `lli` alongside the existing libgomp/sort-runtime
+  loads. **Non-obvious part**: getting a DLL to export a symbol name
+  that's merely referenced from a static archive (not defined in your
+  own source) needs an explicit `.def` `EXPORTS` list — `__declspec
+  (dllexport)` on a bare prototype alone does not force it (verified
+  empirically: produced a DLL with an empty export table).
 
-  **Workaround** (already documented in `beginner/06_strings.md`): use
-  `f64_to_str_fixed(x, decimals)` instead of raw `print x;`/`f64_to_str(x)`
-  for any `f64` whose magnitude isn't tightly bounded — fixed notation
-  (`%.*f`) never switches to scientific notation, so it never hits this
-  gap.
+  **Regression found and fixed along the way**: every module either
+  LLVM backend emits unconditionally `define`s the `printf`/`snprintf`/
+  `dprintf` shims (not just programs that call `print`), so *any*
+  Windows `lli` invocation needs the two `__mingw_*` symbols resolved,
+  not just print-related ones. This broke 20 of the library's existing
+  `lli_*` end-to-end tests (`backend_llvm.rs`) the moment the shim
+  rename landed, since their direct `lli` invocations didn't pass a
+  `-load=` for the new DLL. Added a test-local mirror
+  (`add_mingw_ansi_stdio_load_flag_for_tests`, same pattern as the
+  pre-existing `add_libgomp_load_flags_for_tests`) and wired it into
+  all three of the module's direct-`lli` call sites.
 
-  **Fix path**: pin the LLVM backend's snprintf resolution to the same
-  runtime the C backend's `cc` links (UCRT), or post-process the
-  scientific-notation output to normalize exponent width to 2 digits
-  regardless of which CRT actually formatted it. Not started; scoped but
-  untouched. ~2–4h to investigate the resolution difference precisely,
-  effort for the actual fix depends on which of the two approaches above
-  turns out simpler once that's known.
+  Regression tests: `lli_runs_print_f64_scientific_notation_matches_c_
+  backend_exponent_width` (end-to-end via `lli`, not Windows-gated —
+  passes trivially on Linux/macOS via the no-op stub) plus a structural
+  IR-content check in each backend
+  (`windows_llvm_printf_shims_use_mingw_ansi_stdio_not_raw_msvcrt` in
+  `lib.rs`, `windows_ssa_llvm_printf_shims_use_mingw_ansi_stdio_not_raw_
+  msvcrt` in `ssa_backend_llvm.rs`, both `#[cfg(windows)]`). Verified
+  end-to-end across all three magnitudes above under `vanic run`,
+  `vanic run --backend=c`, and `vanic build` — byte-identical output on
+  all three paths. `cargo test --release --lib` on the affected test
+  filters (`lli_`, `mingw`, `windows_llvm`, `windows_ssa_llvm`, plus
+  `eprint`/`stdin`/`file_read_line`/`ssa_backend_llvm`): no regressions.
+
+  **Workaround note** (still valid, kept in the tutorial): `f64_to_str_
+  fixed(x, decimals)` never hits `%g`'s scientific-notation path at all,
+  so it was never affected by this bug either way.

@@ -251,19 +251,34 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     // Most scalar programs don't reference any of these; the
     // ones that do (printing, free, etc.) need them resolved
     // at link time via `lli` or `llc + cc`.
-    out.push_str("declare i32 @printf(i8*, ...)\n");
+    // On Windows, declaring `printf`/`vsnprintf` as raw externs resolves
+    // them straight to msvcrt.dll's legacy, non-C99 formatter -- see the
+    // matching comment in `backend_llvm.rs` (BUG-5 / L25) for the full
+    // root-cause writeup. Route through MinGW's own `__mingw_*` entry
+    // points so this backend's formatted output matches the tree-LLVM
+    // and C backends' byte-for-byte.
     #[cfg(target_os = "windows")]
     {
-        out.push_str("declare i32 @vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @__mingw_vsnprintf(i8*, i64, i8*, i8*)\n");
+        out.push_str("declare i32 @__mingw_vprintf(i8*, i8*)\n");
         out.push_str("declare i32 @_write(i32, i8*, i32)\n");
         out.push_str("declare void @llvm.va_start(i8*)\n");
         out.push_str("declare void @llvm.va_end(i8*)\n");
+        out.push_str("define i32 @printf(i8* %_pf_fmt, ...) {\n");
+        out.push_str("  %_pf_ap = alloca i8*, align 8\n");
+        out.push_str("  %_pf_ap_i8 = bitcast i8** %_pf_ap to i8*\n");
+        out.push_str("  call void @llvm.va_start(i8* %_pf_ap_i8)\n");
+        out.push_str("  %_pf_ap_v = load i8*, i8** %_pf_ap\n");
+        out.push_str("  %_pf_r = call i32 @__mingw_vprintf(i8* %_pf_fmt, i8* %_pf_ap_v)\n");
+        out.push_str("  call void @llvm.va_end(i8* %_pf_ap_i8)\n");
+        out.push_str("  ret i32 %_pf_r\n");
+        out.push_str("}\n");
         out.push_str("define i32 @snprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, ...) {\n");
         out.push_str("  %_snp_ap = alloca i8*, align 8\n");
         out.push_str("  %_snp_ap_i8 = bitcast i8** %_snp_ap to i8*\n");
         out.push_str("  call void @llvm.va_start(i8* %_snp_ap_i8)\n");
         out.push_str("  %_snp_ap_v = load i8*, i8** %_snp_ap\n");
-        out.push_str("  %_snp_r = call i32 @vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
+        out.push_str("  %_snp_r = call i32 @__mingw_vsnprintf(i8* %_snp_buf, i64 %_snp_sz, i8* %_snp_fmt, i8* %_snp_ap_v)\n");
         out.push_str("  call void @llvm.va_end(i8* %_snp_ap_i8)\n");
         out.push_str("  ret i32 %_snp_r\n");
         out.push_str("}\n");
@@ -274,7 +289,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
         out.push_str("  %_dpr_ap_i8 = bitcast i8** %_dpr_ap to i8*\n");
         out.push_str("  call void @llvm.va_start(i8* %_dpr_ap_i8)\n");
         out.push_str("  %_dpr_ap_v = load i8*, i8** %_dpr_ap\n");
-        out.push_str("  %_dpr_n = call i32 @vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
+        out.push_str("  %_dpr_n = call i32 @__mingw_vsnprintf(i8* %_dpr_bufp, i64 256, i8* %_dpr_fmt, i8* %_dpr_ap_v)\n");
         out.push_str("  call void @llvm.va_end(i8* %_dpr_ap_i8)\n");
         out.push_str("  %_dpr_r = call i32 @_write(i32 %_dpr_fd, i8* %_dpr_bufp, i32 %_dpr_n)\n");
         out.push_str("  ret i32 %_dpr_r\n");
@@ -282,6 +297,7 @@ pub fn emit(module: &Module) -> Result<String, EmitError> {
     }
     #[cfg(not(target_os = "windows"))]
     {
+        out.push_str("declare i32 @printf(i8*, ...)\n");
         out.push_str("declare i32 @snprintf(i8*, i64, i8*, ...)\n");
         out.push_str("declare i32 @dprintf(i32, i8*, ...)\n");
     }
@@ -5825,6 +5841,37 @@ mod tests {
             ll.contains("icmp slt i64") || ll.contains("br i1"),
             "expected compare + branch:\n{}",
             ll
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn windows_ssa_llvm_printf_shims_use_mingw_ansi_stdio_not_raw_msvcrt() {
+        // BUG-5 / L25: same fix as backend_llvm.rs's identically-named
+        // test — a raw `declare i32 @vsnprintf(...)` / `@printf(...)`
+        // resolves to msvcrt.dll's legacy, non-C99 formatter (3-digit
+        // scientific-notation exponents) instead of the 2-digit C99
+        // convention the C backend gets via MinGW's ANSI stdio redirect.
+        let src = r#"
+            fn main() -> i64 {
+              print "hi";
+              return 0;
+            }
+        "#;
+        let checked = compile(src).expect("compiles");
+        let (module, errs) = lower_program(&checked.ir);
+        assert!(errs.is_empty(), "lower errors: {:?}", errs);
+        let ll = emit(&module).expect("emit succeeds");
+        assert!(
+            ll.contains("@__mingw_vsnprintf") && ll.contains("@__mingw_vprintf"),
+            "Windows SSA-LLVM backend must route printf/snprintf through \
+             __mingw_* (BUG-5 / L25), got:\n{}",
+            ll
+        );
+        assert!(
+            !ll.contains("declare i32 @vsnprintf") && !ll.contains("declare i32 @printf"),
+            "must not declare a raw vsnprintf/printf extern on Windows \
+             (resolves to msvcrt.dll's legacy 3-digit-exponent formatter)"
         );
     }
 

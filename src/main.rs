@@ -3240,6 +3240,10 @@ fn run_program_llvm(
     if let Some(sort_lib) = sort_runtime_shared_lib() {
         cmd.arg(format!("-load={}", sort_lib.display()));
     }
+    // BUG-5 / L25: Windows-only; see mingw_ansi_stdio_shared_lib's doc comment.
+    if let Some(ansi_lib) = mingw_ansi_stdio_shared_lib() {
+        cmd.arg(format!("-load={}", ansi_lib.display()));
+    }
     // lli's MCJIT isn't thread-safe for concurrent function
     // resolution; cap libgomp to a single thread when JITting so
     // `parallel for` runs serially under the JIT. AOT builds
@@ -3330,6 +3334,56 @@ fn sort_runtime_shared_lib() -> Option<&'static Path> {
         }
     })
     .as_deref()
+}
+
+/// BUG-5 / L25: on Windows, `lli`'s JIT symbol resolver only sees
+/// symbols exported from a *loaded DLL* — it can't reach into the
+/// static archive (`libmingwex.a`) where MinGW's ANSI/C99-compliant
+/// `__mingw_vsnprintf`/`__mingw_vprintf` (2-digit scientific-notation
+/// exponents, matching the C backend) actually live. `vanic build`
+/// (AOT) resolves them fine via ordinary static linking; the JIT
+/// needs the same two functions packaged as a `-load`able shared
+/// library instead. `mingw_ansi_stdio_shim.c`/`.def` force-link and
+/// re-export them under their real names, so `backend_llvm.rs`'s
+/// `declare`d externs resolve unchanged on both paths. Compiled once
+/// per process and cached, same pattern as `sort_runtime_shared_lib`.
+/// Returns `None` on any compile failure; non-Windows hosts never
+/// need this (their `printf`/`snprintf` externs resolve directly).
+#[cfg(target_os = "windows")]
+fn mingw_ansi_stdio_shared_lib() -> Option<&'static Path> {
+    static LIB: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    LIB.get_or_init(|| {
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let c_path = env::temp_dir().join(format!("vanic-ansilib-{}-{}.c", pid, nanos));
+        let def_path = env::temp_dir().join(format!("vanic-ansilib-{}-{}.def", pid, nanos));
+        let dll_path = env::temp_dir().join(format!("vanic-ansilib-{}-{}.dll", pid, nanos));
+        fs::write(&c_path, include_str!("mingw_ansi_stdio_shim.c")).ok()?;
+        fs::write(&def_path, include_str!("mingw_ansi_stdio_shim.def")).ok()?;
+        let cc = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+        let out = Command::new(&cc)
+            .args(["-O2", "-shared", "-fPIC"])
+            .arg(&c_path)
+            .arg(&def_path)
+            .arg("-o")
+            .arg(&dll_path)
+            .output();
+        let _ = fs::remove_file(&c_path);
+        let _ = fs::remove_file(&def_path);
+        match out {
+            Ok(o) if o.status.success() && dll_path.exists() => Some(dll_path),
+            _ => None,
+        }
+    })
+    .as_deref()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn mingw_ansi_stdio_shared_lib() -> Option<&'static Path> {
+    None
 }
 
 /// Drop lli's signal-handler diagnostics from a captured stderr.
@@ -3448,6 +3502,10 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
     // MATH-1: see run_program_llvm's identical comment.
     if let Some(sort_lib) = sort_runtime_shared_lib() {
         cmd.arg(format!("-load={}", sort_lib.display()));
+    }
+    // BUG-5 / L25: see run_program_llvm's identical comment.
+    if let Some(ansi_lib) = mingw_ansi_stdio_shared_lib() {
+        cmd.arg(format!("-load={}", ansi_lib.display()));
     }
     if env::var("OMP_NUM_THREADS").is_err() {
         cmd.env("OMP_NUM_THREADS", "1");
