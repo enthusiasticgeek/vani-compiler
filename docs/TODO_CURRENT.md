@@ -1203,3 +1203,51 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   `methods_on_block_accepts_attributed_method`) lock in both fixes,
   using the checker's own real computed budgets (99 and 72 bytes
   respectively) rather than guessed placeholders.
+
+## Windows backend-parity bug found auditing tutorial docs (added 2026-07-24)
+
+- [ ] **BUG-5 / L25. `print`/`f64_to_str` scientific-notation exponent
+  width differs between the C and LLVM backends on Windows** — discovered
+  auditing `beginner/02_variables.md`/`06_strings.md`'s claims about
+  `print`'s `f64` formatting. Also tracked as L25 in
+  [`docs/v1_limitations.md`](v1_limitations.md) (full root-cause writeup
+  there); this entry is the actionable work-queue side.
+
+  Verified directly across several magnitudes (`1000000.0`, `12345678.9`,
+  `123456789.123456`, `0.0000001234`) on this Windows host: any `f64`
+  value large/small enough that `%g`'s default (6-significant-digit)
+  formatting switches to scientific notation prints with a **2-digit**
+  exponent on the C backend (`1e+06`) and a **3-digit** exponent on the
+  LLVM backend (`1e+006`) — same program, same value, different text.
+  Both `print x;` (for an `f64` `x`) and the `f64_to_str` builtin hit this
+  identically, since `print` routes through the same formatting path.
+
+  **Root cause**: the C backend's `printf("%g", ...)` links against
+  whatever `cc` the build uses (MinGW/UCRT here), which follows the C99
+  2-digit-minimum exponent convention. The LLVM backend never calls the
+  host's `printf` directly — it declares its own `@snprintf`/`@vsnprintf`
+  IR shims (see the Windows-specific comment in `backend_llvm.rs`, since
+  neither symbol reliably exports for JIT/AOT linking on Windows) and
+  that resolution path lands on the legacy MSVCRT 3-digit-exponent
+  convention instead. Not observed on Linux/macOS (both backends link the
+  same glibc `printf` there) — Windows-only, and only for values that
+  actually reach scientific notation.
+
+  **Impact**: cosmetic (both strings parse back to the same `f64` via
+  `parse_float`), but breaks byte-for-byte golden-output comparisons
+  across backends on Windows, and means a value's printed form isn't
+  portable across `vanic run` vs. `vanic run --backend=c`.
+
+  **Workaround** (already documented in `beginner/06_strings.md`): use
+  `f64_to_str_fixed(x, decimals)` instead of raw `print x;`/`f64_to_str(x)`
+  for any `f64` whose magnitude isn't tightly bounded — fixed notation
+  (`%.*f`) never switches to scientific notation, so it never hits this
+  gap.
+
+  **Fix path**: pin the LLVM backend's snprintf resolution to the same
+  runtime the C backend's `cc` links (UCRT), or post-process the
+  scientific-notation output to normalize exponent width to 2 digits
+  regardless of which CRT actually formatted it. Not started; scoped but
+  untouched. ~2–4h to investigate the resolution difference precisely,
+  effort for the actual fix depends on which of the two approaches above
+  turns out simpler once that's known.
