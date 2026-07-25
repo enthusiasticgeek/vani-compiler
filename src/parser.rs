@@ -2004,7 +2004,7 @@ impl Parser {
             let std_name = safety_standard.as_deref().unwrap_or("");
             if bounded_stack.is_none() {
                 return Err(Diagnostic::new(
-                    self.current().span,
+                    f.span,
                     format!(
                         "`#[{}]` requires `#[bounded_stack(bytes=N)]` -- \
                          declare the worst-case stack budget for this function",
@@ -2014,7 +2014,7 @@ impl Parser {
             }
             if wcet_cycles.is_none() {
                 return Err(Diagnostic::new(
-                    self.current().span,
+                    f.span,
                     format!(
                         "`#[{}]` requires `#[wcet(cycles=N)]` -- \
                          declare the worst-case execution time budget for this function",

@@ -26653,6 +26653,174 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn s18_smt_ensures_substitution_works_across_use_included_files() {
+        // S-18 (docs/TODO_SAFETY.md) claimed ensures substitution only
+        // worked "within a single compilation unit" and needed new
+        // manifest.rs plumbing to cross a `use "path";` file boundary.
+        // Verified directly (2026-07-24) that this is already handled:
+        // `resolve_uses` (lib.rs) textually splices every `use`-included
+        // file into one combined buffer BEFORE parsing, so by the time
+        // `collect_signatures` builds the `ensures`-bearing signature
+        // table, there's no file boundary left to cross -- a callee
+        // declared in a different source file behaves identically to one
+        // declared earlier in the same file. This test reproduces that
+        // combined-buffer shape directly (the same shape
+        // `resolve_uses`/`compile_path` would produce for a real
+        // multi-file `use "lib.vani";` project) without touching the
+        // filesystem.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            fn add_positive(a: i64, b: i64) -> i64
+              requires a > 0;
+              requires a < 1000;
+              requires b > 0;
+              requires b < 1000;
+              ensures _return > 0;
+            {
+              return a + b;
+            }
+
+            fn main() -> i64 {
+              let r: i64 = add_positive(3, 4);
+              prove r > 0;
+              return 0;
+            }
+        "#;
+        compile(source).expect(
+            "ensures declared in what would be a separate use-included file \
+             must still be visible to the caller's SMT proof",
+        );
+    }
+
+    #[test]
+    fn s18_smt_ensures_substitution_works_across_kosh_package_boundary() {
+        // Same claim, the other cross-module shape S-18 named
+        // specifically ("track ensures in the manifest... so callers
+        // from other .vani files can use them" -- manifest.rs is the
+        // [deps]/Kosh-package machinery, see wrap_deps_into_combined).
+        // Verified directly: a [deps] package is ALSO textually spliced
+        // in (wrapped in `module <pkg_name> { ... }`) before parsing, so
+        // its `ensures` clauses reach the same signature table too.
+        // Reproduces that shape directly via `check_with_kosh_boundary`
+        // (mirrors `pub_kosh_qualifier_still_rejects_external_kosh_boundary_access`
+        // above) instead of a real filesystem vani.toml + [deps] setup.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            module mathpkg {
+              pub fn add_positive(a: i64, b: i64) -> i64
+                requires a > 0;
+                requires a < 1000;
+                requires b > 0;
+                requires b < 1000;
+                ensures _return > 0;
+              {
+                return a + b;
+              }
+            }
+            fn main() -> i64 {
+              let r: i64 = mathpkg::add_positive(3, 4);
+              prove r > 0;
+              return 0;
+            }
+        "#;
+        let boundary: std::collections::HashSet<String> =
+            ["mathpkg".to_string()].into_iter().collect();
+        super::compile_with(source, crate::checker::check_with_kosh_boundary, &boundary).expect(
+            "ensures declared in a [deps]-wrapped Kosh package must still be \
+             visible to the consumer's SMT proof",
+        );
+    }
+
+    #[test]
+    fn s18_smt_ensures_substitution_absence_still_falls_back_to_runtime_check() {
+        // Control for the two tests above: without the callee's
+        // `ensures` clause, the same cross-module `prove` must NOT be
+        // statically discharged (falls back to a runtime check instead)
+        // -- confirms the two passing tests above are actually exercising
+        // ensures substitution, not some unrelated reason the solver
+        // happens to succeed.
+        if !z3_available() {
+            return;
+        }
+        let source = r#"
+            module mathpkg {
+              pub fn add_positive(a: i64, b: i64) -> i64
+                requires a > 0;
+                requires a < 1000;
+                requires b > 0;
+                requires b < 1000;
+              {
+                return a + b;
+              }
+            }
+            fn main() -> i64 {
+              let r: i64 = mathpkg::add_positive(3, 4);
+              prove r > 0;
+              return 0;
+            }
+        "#;
+        let boundary: std::collections::HashSet<String> =
+            ["mathpkg".to_string()].into_iter().collect();
+        let errors = super::compile_with(source, crate::checker::check_with_kosh_boundary, &boundary)
+            .expect_err("without ensures, the cross-package prove must not be discharged");
+        assert!(
+            errors.iter().any(|e| e.message.contains("counterexample") || e.message.contains("proof failed")),
+            "expected a counterexample/proof-failed diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn s13_s15_asil_d_missing_bounded_stack_or_wcet_rejected_with_correct_span() {
+        // S-13/S-15 (docs/TODO_SAFETY.md): both claimed "not started",
+        // but the enforcement already existed in parser.rs (the
+        // bounded_stack/wcet_cycles presence check right after
+        // `parse_function` in the composite-tag expansion). Verified
+        // directly (2026-07-24) that the enforcement itself works; the
+        // one real bug was the diagnostic span pointing at
+        // `self.current().span` (the token AFTER the whole annotated
+        // function -- typically the start of the next item) instead of
+        // the annotated function itself. Fixed to use `f.span`.
+        let missing_both = r#"
+            #[asil_d]
+            fn critical_fn(x: i64) -> i64 {
+              return x + 1;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(missing_both).expect_err("missing bounded_stack/wcet must be rejected");
+        let combined = errors.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("requires `#[bounded_stack(bytes=N)]`"),
+            "expected the bounded_stack diagnostic, got: {}",
+            combined
+        );
+        // The span must land on `critical_fn` (the annotated function),
+        // not on whatever token follows it.
+        assert!(
+            errors.iter().any(|d| d.span.start < missing_both.find("fn main").unwrap()),
+            "expected the diagnostic span on critical_fn, not on a later item: {:?}",
+            errors
+        );
+
+        let fully_annotated = r#"
+            #[asil_d]
+            #[bounded_stack(bytes=512)]
+            #[wcet(cycles=100)]
+            fn critical_fn(x: i64) -> i64 {
+              return x + 1;
+            }
+            fn main() -> i64 { return critical_fn(1); }
+        "#;
+        compile(fully_annotated)
+            .expect("asil_d with both bounded_stack and wcet declared must compile");
+    }
+
+    #[test]
     fn smt_preserves_bool_slots_across_constant_index_assign() {
         // Bool element completes the element-type matrix for
         // selective IndexAssign drop. After `xs[1] = true`, slots 0
