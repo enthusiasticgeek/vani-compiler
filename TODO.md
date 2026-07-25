@@ -5,12 +5,22 @@
 > The canonical current work queue (actionable, checkbox-ordered) is in
 > **[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md)**.
 
-## Current status (as of 2026-07-13)
+## Current status (as of 2026-07-25)
 
 - **Version**: `0.8.2-dev` (tagged v0.1.0 through v0.8.2-dev; see RELEASING.md for full history).
-- **Tests**: 2466+ lib tests passing.
+- **Tests**: 2571+ lib tests passing (new since 2026-07-13: BUG-6/7/8 regression tests, see below).
 - **Dialects**: 62 across 26 scripts.
 - **Blocked**: macOS hardware, grammar consultant, proper IOCP, crates.io API token.
+- **2026-07-25 session**: BUG-6 (LLVM backend panic on standalone unary-minus
+  float literal), BUG-7 (scope-escape analyzer bypass — a real dangling-
+  reference bug), and BUG-8 (garbage read through a `ref`-typed Vec struct
+  field, LLVM-only) all found and fixed — see
+  [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for full writeups. Also:
+  ref-capturing closures scoped (not implemented) in
+  [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md) —
+  the "no compiler prerequisite" conclusion from `docs/decisions.md`'s
+  2026-06-09 path-D decision was revisited and reaffirmed, but the actual
+  gap turned out narrower than previously documented.
 
 ## Open items (summary)
 
