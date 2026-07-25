@@ -10478,11 +10478,20 @@ fn check_one_stmt(
             //     that binding's aliases (transitive chain).
             //   * else â†’ empty (no propagation; the analyzer
             //     treats this as having no known source).
-            let ref_aliases = if matches!(var_ty, Type::Ref(_) | Type::RefMut(_)) {
-                compute_ref_aliases_from_let_rhs(expr, env, signatures)
-            } else {
-                Vec::new()
-            };
+            // BUG-7 fix (2026-07-25): this used to be gated on
+            // `var_ty` being `Ref`/`RefMut` -- but an *owned*
+            // struct-typed binding can itself hold a ref inside one of
+            // its fields (`let h: Holder = Holder { v: ref v };`), and
+            // that hidden ref needs the same alias tracking so a later
+            // escape site (return / push / field-assign) can trace it
+            // back to `v`. `compute_ref_aliases_from_let_rhs` now has
+            // a `StructLit` case for exactly this; running it
+            // unconditionally is safe for every other binding shape --
+            // it only returns a non-empty list for the handful of RHS
+            // shapes it actually recognizes (bare ref, ref-returning
+            // call, alias-inheriting Var, or a struct literal with a
+            // ref-valued field), `Vec::new()` otherwise.
+            let ref_aliases = compute_ref_aliases_from_let_rhs(expr, env, signatures);
             env.insert_current(
                 name.clone(),
                 VarInfo {
@@ -13659,6 +13668,36 @@ fn compute_ref_aliases_from_let_rhs(
                 }
             }
             Vec::new()
+        }
+        // BUG-7 fix (2026-07-25): an owned struct literal whose
+        // *field(s)* hold a ref (e.g. `let h: Holder = Holder { v: ref
+        // v };`, where `Holder { v: ref Vec<f64> }`) previously fell
+        // through to `_ => Vec::new()` here -- no aliases were ever
+        // recorded for `h`, so a later `return h;` (or any other
+        // escape site that chases Var aliases through
+        // `collect_var_ref_aliases`) had nothing to check against.
+        // Confirmed as a real, live dangling-reference bug: `vanic
+        // check` accepted the two-statement form even though the
+        // inline `return Holder { v: ref v };` shape was already
+        // correctly rejected (that inline case is caught separately,
+        // by `collect_ref_sources_in_expr` walking the return
+        // expression directly -- but never recorded as this binding's
+        // aliases, so it didn't survive being assigned to a local
+        // first). Reuse the same struct-literal-aware walker here, at
+        // the binding site, so `h`'s `ref_aliases` already contains
+        // `v` by the time anything downstream chases it -- no changes
+        // needed on the consuming side (`collect_var_ref_aliases`
+        // already reads `ref_aliases` generically, however it was
+        // populated).
+        ExprKind::StructLit { fields, .. } => {
+            let mut sources: Vec<(String, Span)> = Vec::new();
+            for (_, v) in fields {
+                collect_ref_sources_in_expr(v, &mut sources);
+            }
+            let mut names: Vec<String> = sources.into_iter().map(|(n, _)| n).collect();
+            names.sort();
+            names.dedup();
+            names
         }
         _ => Vec::new(),
     }

@@ -16045,7 +16045,36 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 if let Type::Vec(element) = array.ty.deref().clone() {
                     let s_ty = vec_struct_name(&element);
                     let elt_ty = llvm_type_string(&element);
-                    let base_addr = emit_lvalue_addr(array, ctx, out);
+                    let field_addr = emit_lvalue_addr(array, ctx, out);
+                    // BUG-8 fix (2026-07-25): `emit_lvalue_addr` gives the
+                    // address OF the field slot. When the field's own
+                    // declared type is a plain `Vec<T>` (owned, embedded),
+                    // that address already IS the Vec struct's address --
+                    // correct as before (the `field_addr == base_addr`
+                    // case below). But when the field's own type is `ref
+                    // Vec<T>` / `mut ref Vec<T>` (a pointer FIELD, not an
+                    // embedded struct), `field_addr` is one level too
+                    // shallow: it addresses the pointer slot, not the Vec
+                    // struct itself. Load through it once to get the real
+                    // Vec address first. Without this, `h.v[i]` for
+                    // `struct Holder { v: ref Vec<f64> }` silently
+                    // reinterpreted the field-slot address as the Vec's
+                    // own address, then read the Vec struct's first 8
+                    // bytes (its `data` pointer field) as if it were the
+                    // element itself -- confirmed via direct execution:
+                    // printed a tiny denormalized garbage double (a
+                    // pointer's bit pattern misread as an f64), not a
+                    // crash, not a type error caught by `lli`.
+                    let base_addr = if matches!(array.ty, Type::Ref(_) | Type::RefMut(_)) {
+                        let deref_addr = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = load {}*, {}** {}\n",
+                            deref_addr, s_ty, s_ty, field_addr
+                        ));
+                        deref_addr
+                    } else {
+                        field_addr
+                    };
                     let data_p = ctx.fresh_tmp();
                     out.push_str(&format!(
                         "  {} = getelementptr {}, {}* {}, i64 0, i32 0\n",
@@ -45995,6 +46024,52 @@ mod tests {
               let v: f64 = first(vec(-3.0, -2.0, -1.0));
               if v == 0.0 - 3.0 { return 42; }
               return 1;
+            }
+        "#;
+        assert_eq!(run_lli(source), 42);
+    }
+
+    #[test]
+    fn lli_runs_indexing_through_a_ref_typed_struct_field() {
+        if !lli_available() {
+            return;
+        }
+        // BUG-8: found scoping ref-capturing closures (a closure's
+        // synthesized env-struct is structurally identical to a
+        // user struct holding a `ref T` field, so this was checked
+        // while investigating BUG-7). `struct Holder { v: ref
+        // Vec<f64> }`, then `h.v[i]` for an `h: Holder` binding
+        // silently read garbage instead of the real element.
+        //
+        // Root cause: the `Index` arm's "Vec-typed struct field"
+        // path (this file, the `array.ty.deref()` branch under
+        // `TypedExprKind::FieldAccess`) used `emit_lvalue_addr`'s
+        // result directly as the Vec struct's own address. That's
+        // correct when the field's own declared type IS `Vec<T>`
+        // (owned, embedded) -- `emit_lvalue_addr` already gives the
+        // Vec's address in that case. But when the field's own type
+        // is `ref Vec<T>` (a pointer FIELD), `emit_lvalue_addr`
+        // gives the address OF the pointer slot, one level too
+        // shallow -- it needs an extra `load` to reach the real Vec
+        // address first. Without that load, the code treated the
+        // field-slot address as if it were the Vec struct's address,
+        // then read the Vec struct's first 8 bytes (its own `data`
+        // pointer field) and reinterpreted those bits as the
+        // requested `f64` element -- a pointer's bit pattern misread
+        // as a tiny denormalized double, not a crash, not a type
+        // error caught by `lli`.
+        //
+        // Fix: when the field's own type (`array.ty`, not
+        // `.deref()`'d) is `Ref`/`RefMut`, insert one `load` to
+        // dereference the field-slot address before treating it as
+        // the Vec's address.
+        let source = r#"
+            struct Holder { v: ref Vec<f64> }
+            fn main() -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let h: Holder = Holder { v: ref v };
+                if h.v[0] == 1.0 && h.v[1] == 2.0 && h.v[2] == 3.0 { return 42; }
+                return 1;
             }
         "#;
         assert_eq!(run_lli(source), 42);

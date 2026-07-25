@@ -347,6 +347,26 @@ The walker treats Call/MethodCall/Len/Index args as
 enclosing value), so `read_bag(ref b)` and `len(ref xs)` in
 return position still pass.
 
+**Two real bugs found and fixed 2026-07-25** (scoping ref-capturing
+closures surfaced both — see `docs/ref_capturing_closures_design.md` and
+`docs/TODO_CURRENT.md`'s BUG-7/BUG-8 for full writeups; both fixed same
+day, not just filed):
+- **BUG-7**: the escape check above had a real bypass — routing the exact
+  same escaping struct through one extra `let` binding first
+  (`let h = Bag { item: ref local }; return h;`) slipped past undetected,
+  a confirmed live dangling reference at runtime, not just a
+  diagnostic-timing gap. Fixed.
+- **BUG-8**: even the *legitimate*, non-escaping case this section
+  describes as "shipped" — `struct Bag { item: ref Foo }`, construct and
+  read within a safe scope — silently returned garbage under the LLVM
+  backend when indexing through a `ref`-typed **Vec** field specifically
+  (`struct Holder { v: ref Vec<f64> }`, `h.v[i]`); the C backend was
+  unaffected. The regression test cited for this Phase
+  (`l4_b_phase3_user_struct_ref_field_now_accepted`, `lib.rs:9709`) only
+  ever called `compile()`/`compile_to_llvm()` — never actually executed
+  the emitted IR — so a codegen-only value bug could pass it cleanly.
+  Fixed; new test actually executes via `lli`.
+
 **Phase 4 shipped 2026-06-09**: `Vec<ref T>` and `Vec<mut ref T>`
 are now first-class element types. Both backends emit per-shape
 typedef + helpers (`intent_vec_ref_<inner_tag>` / `intent_vec_refmut_<inner_tag>`);

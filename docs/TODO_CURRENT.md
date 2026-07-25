@@ -1405,10 +1405,10 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
 
 ## Soundness bug found scoping ref-capturing closures (added 2026-07-25)
 
-- [ ] **BUG-7. Scope-escape analyzer misses a struct-with-ref-field escape
+- [x] **BUG-7. Scope-escape analyzer misses a struct-with-ref-field escape
   routed through an intermediate `let` binding — confirmed real dangling
   reference at runtime, not just a rejected-too-late diagnostic gap.**
-  Not fixed. Found while investigating whether ref-capturing closures
+  ✅ fixed 2026-07-25. Found while investigating whether ref-capturing closures
   (docs/missing_features.md's "Lifetime variables", path-D) could lean on
   the existing L4 Phase-3/4 scope-escape analyzer rather than needing full
   lifetime variables — see the new `docs/ref_capturing_closures_design.md`
@@ -1463,11 +1463,84 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   ref-capturing-closure design that reuses this analyzer (a closure's
   synthesized env-struct is structurally identical to `Holder` — an owned
   struct with a `ref T` field) inherits this exact hole for free. This
-  needs fixing before — or as part of — building on top of the
-  scope-escape analyzer, not after. Likely fix shape (not attempted):
-  extend `Env`'s per-binding info to also track "this owned binding's type
-  contains a ref field sourced from binding X" (not just "this binding's
-  own type IS ref, aliasing X"), and have `collect_var_ref_aliases`'s
-  `Var` case consult that too. Needs someone with real context on `Env`'s
-  existing struct (`checker.rs`, `ref_aliases` field and neighbors) before
-  attempting — not scoped further than this repro + root-cause pointer.
+  needed fixing before — or as part of — building on top of the
+  scope-escape analyzer, not after.
+
+  **Fix**: `compute_ref_aliases_from_let_rhs` (`checker.rs:13613`) gained a
+  `StructLit { fields, .. }` arm — walks each field's value expression via
+  the existing `collect_ref_sources_in_expr` (the same struct-literal-aware
+  walker the Phase-3 inline-return check already uses) and returns the
+  collected source names as this binding's `ref_aliases`. The `Stmt::Let`
+  handler's guard (`checker.rs:10481`, previously `if matches!(var_ty,
+  Type::Ref(_) | Type::RefMut(_))`) was relaxed to call
+  `compute_ref_aliases_from_let_rhs` unconditionally — safe for every other
+  binding shape, since the function only returns non-empty for the RHS
+  shapes it actually recognizes. No change needed on the consuming side
+  (`collect_var_ref_aliases` already reads `ref_aliases` generically,
+  however it was populated) — a two-line-ish surgical fix once the right
+  spot was found. **Bonus**: this also correctly rejects a two-hop variant
+  (`let h = Holder{v:ref v}; let h2 = h; return h2;`) for free, via the
+  Var-inheritance arm already present in `compute_ref_aliases_from_let_rhs`.
+  Verified: the confirmed-bypass repro above is now rejected with the same
+  diagnostic as the inline case; the pre-existing L4 Phase 3/4 test suite
+  (16 tests) plus a broader struct-field/Vec-indexing spot-check (32 tests)
+  all still pass; all four `vani-ml` test files still pass after rebuild.
+
+- [x] **BUG-8. `h.v[i]` reads garbage for `struct Holder { v: ref Vec<T>
+  }` under the LLVM backend — a `ref`-typed Vec field silently
+  misreads its own struct's `data` pointer as the requested element.**
+  ✅ fixed 2026-07-25. Found immediately after BUG-7, while writing that
+  fix's positive-control test (a *legitimate*, non-escaping use of a
+  `ref`-typed struct field — the exact shape `docs/v1_limitations.md`'s L4
+  Phase 3 and its own regression test,
+  `l4_b_phase3_user_struct_ref_field_now_accepted` (`lib.rs:9709`), claim
+  is "shipped"). That test only ever calls `compile()`/`compile_to_llvm()`
+  — never actually executes the emitted IR — so it could not have caught
+  a codegen-only value bug, the same class of gap BUG-6 exposed.
+
+  ```vani
+  struct Holder { v: ref Vec<f64> }
+  fn main() -> i64 {
+      let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+      let h: Holder = Holder { v: ref v };
+      print h.v[0];   // prints 1.2655e-311 on the LLVM backend, not 1.0
+      return 0;       // --backend=c prints the correct 1 -- LLVM-only
+  }
+  ```
+
+  **Root cause**, confirmed by inspecting the actual emitted `.ll` (`vanic
+  emit --backend=llvm`), not just reasoning about the Rust source:
+  `backend_llvm.rs`'s `Index` arm, "Vec-typed struct field" branch (under
+  `TypedExprKind::FieldAccess`, the `array.ty.deref()` match), used
+  `emit_lvalue_addr(array, ...)`'s result directly as the Vec struct's own
+  address. That's correct when the field's own declared type IS `Vec<T>`
+  (owned, embedded — `emit_lvalue_addr` already gives the Vec's address).
+  But when the field's own type is `ref Vec<T>` (a pointer *field*, not an
+  embedded struct), `emit_lvalue_addr` gives the address *of the pointer
+  slot* — one level too shallow. The emitted IR then GEP'd into that
+  address as if it directly addressed a `%intent_vec_double` struct,
+  landing on the Vec struct's own first field (its internal `data`
+  pointer) and loading THAT 8-byte pointer value, bit-reinterpreted as an
+  `f64` — a pointer's bit pattern misread as a tiny denormalized double.
+  No LLVM parse/verify error (the mismatch is semantic, not a type-name
+  mismatch caught by the textual IR), no crash — just silently wrong data,
+  every time, on every `ref`-typed Vec field read.
+
+  **Fix**: when `array.ty` (the field's own declared type, *not*
+  `.deref()`'d) is `Ref`/`RefMut`, insert one `load` to dereference the
+  field-slot address before using it as the Vec struct's address; the
+  plain-owned-field case is unchanged. Verified: both the BUG-7 repro's
+  positive control and a same-scope minimal repro now read the correct
+  value on the LLVM backend; new regression test
+  `lli_runs_indexing_through_a_ref_typed_struct_field` (`backend_llvm.rs`,
+  actually executes via `lli`) plus the same 16+32-test spot-check used
+  for BUG-7 (all still passing, confirming the owned-Vec-field case is
+  untouched) and all four `vani-ml` test files after rebuild.
+
+  **Scope note**: only the specific shape found (a `ref`/`mut ref
+  Vec<T>`-typed struct field, indexed) was fixed and tested. Whether the
+  same "field-slot address used one level too shallow" class of bug
+  affects other ref-typed-field access patterns (e.g. `Len`/`.len()` on a
+  ref-typed Vec field, or a ref-typed field of a non-Vec aggregate type
+  like an `Array`) was not exhaustively checked — worth a follow-up sweep
+  if a similar shape is hit again.
