@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.8.1] — YYYY-MM-DD
+
+### Added
+
+- TODO
+
+### Fixed
+
+- TODO
+
+---
+
 ## [v0.8.0] — 2026-07-22
 
 ### Added
