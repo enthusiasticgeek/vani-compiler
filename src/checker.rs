@@ -13854,7 +13854,25 @@ fn validate_no_nested_ref_in_return_type(
     function: &Function,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if type_contains_nested_ref(&function.return_type) {
+    // `async fn f(...) -> T { ... }` is parser-synthesized (before this
+    // pass ever runs) into a plain fn returning `Future<T>` -- see
+    // `Type::Apply { name: "Future", .. }` in parser.rs's async-fn
+    // handling. `Future<T>` is never something a user writes directly;
+    // it's purely this desugaring's wrapper. So `async fn pass(p: ref P)
+    // -> ref P` (single-ref-param, bare ref return -- legal under the
+    // ordinary elision rule) ends up stored as `Future<ref P>`, which
+    // -- if checked as an ordinary generic argument -- looks identical
+    // to a user writing `Option<ref P>` (illegal). Unwrap the Future
+    // wrapper first so the elision-shape check runs against the same
+    // T an equivalent non-async fn would have: T being a bare ref is
+    // fine, T containing a genuinely nested ref (e.g. a tuple of refs)
+    // still isn't. Regression test:
+    // `async_fn_returning_ref_to_user_struct_compiles_on_c_backend`.
+    let ty_to_check = match &function.return_type {
+        Type::Apply { name, args } if name == "Future" && args.len() == 1 => &args[0],
+        other => other,
+    };
+    if type_contains_nested_ref(ty_to_check) {
         diagnostics.push(
             Diagnostic::new(
                 function.span,
