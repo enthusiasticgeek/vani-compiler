@@ -37,10 +37,31 @@ fn main() -> i64 {
 |---------|-------------|
 | `sort(mut ref xs)` | Sort `Vec<i64>` or `Vec<f64>` ascending in place |
 | `sort_desc(mut ref xs)` | Sort descending in place |
-| `sort_by(mut ref xs, cmp)` | Custom comparator: `(i64,i64)->i64` for i64; `(f64,f64)->i64` for f64 |
+| `sort_by(mut ref xs, cmp)` | Custom comparator `fn(T,T)->i64`; works on `Vec<T>` for any `Copy` `T`, not just `i64`/`f64` |
 | `dedup(mut ref xs)` | Remove consecutive duplicates (sort first) |
 | `reverse(mut ref xs)` | Reverse in place |
 | `binary_search(ref xs, v)` | Binary search on sorted vec; returns index or -1 |
+
+`sort`/`sort_desc` (no comparator) stay `i64`/`f64`-only -- there's no
+derivable ascending order for a struct. `sort_by` has no such limit
+since the caller supplies the order, so it works on a `Vec` of any
+`Copy` type, including structs:
+
+```vani
+struct Point { x: i64, y: i64 }
+
+fn cmp_by_x(a: Point, b: Point) -> i64 { return a.x - b.x; }
+
+fn main() -> i64 {
+  let pts: Vec<Point> = [Point { x: 3, y: 0 }, Point { x: 1, y: 0 }];
+  sort_by(mut ref pts, cmp_by_x);
+  print "sorted by x:", pts;  // [Point{x:1,...}, Point{x:3,...}]
+  return 0;
+}
+```
+
+(A `Vec<T>` where `T` is non-`Copy`, e.g. `Vec<OwnedStr>`, is still
+correctly rejected with a diagnostic.)
 
 ---
 
