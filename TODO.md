@@ -7,7 +7,7 @@
 
 ## Current status (as of 2026-07-26)
 
-- **Version**: `0.9.0` (tagged v0.1.0 through v0.9.0; see RELEASING.md for full history).
+- **Version**: `0.9.1-dev` (tagged v0.1.0 through v0.9.1-dev; see RELEASING.md for full history).
 - **Tests**: 2582+ lib tests passing (new since 2026-07-13: BUG-6 through BUG-12
   regression tests, see below).
 - **Dialects**: 62 across 26 scripts.
