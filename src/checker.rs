@@ -11850,6 +11850,51 @@ fn check_one_stmt(
                     // is tracked through this FieldAssign.
                     collect_var_ref_aliases(value, env, &mut ref_sources);
                     for (src_name, ref_span) in &ref_sources {
+                        // BUG-9 fix (2026-07-26): when `object` is
+                        // itself reached through a `mut ref`
+                        // (`through_mut_ref` -- a parameter, or a
+                        // mut-ref local bound to something elsewhere),
+                        // its OWN lexical depth within this function
+                        // says nothing about the real lifetime of the
+                        // struct it points to. That struct lives in
+                        // whatever frame handed us the mut ref --
+                        // almost always the caller's, which outlives
+                        // this entire function. Comparing depths in
+                        // that case is unsound: confirmed via direct
+                        // test that a same-depth local slipped through
+                        // undetected, a real dangling reference (`fn
+                        // fill(h: mut ref Holder) { let v: Vec<f64> =
+                        // ...; h.v = ref v; }` -- `vanic check` accepted
+                        // it, `h.v` dangled the moment `fill` returned).
+                        // Fix: match `Return`'s existing, simpler, safe
+                        // rule instead of depth math -- any ref source
+                        // that isn't itself a parameter of the current
+                        // function is rejected outright.
+                        if through_mut_ref {
+                            let is_param =
+                                function.params.iter().any(|p| p.name == *src_name);
+                            if !is_param {
+                                diagnostics.push(
+                                    Diagnostic::new(
+                                        *ref_span,
+                                        format!(
+                                            "ref to '{}' cannot be stored through '{}' (a \
+                                             `mut ref` parameter) â€” the struct '{}' points \
+                                             to lives in the caller's frame, which outlives \
+                                             '{}'. Only a ref to one of this function's own \
+                                             parameters can safely be stored here.",
+                                            src_name, obj_name, obj_name, src_name
+                                        ),
+                                    )
+                                    .with_elaboration(
+                                        crate::diagnostic_elaborations::scope_escape_deeper(
+                                            src_name,
+                                        ),
+                                    ),
+                                );
+                            }
+                            continue;
+                        }
                         if let Some(src_depth) = env.lookup_depth(src_name) {
                             if src_depth > obj_depth {
                                 diagnostics.push(

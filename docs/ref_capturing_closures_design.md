@@ -223,7 +223,7 @@ creating function's scope while still borrowing (e.g. returning a
 ref-capturing closure to a caller who keeps the borrowed data alive
 longer — Path A territory, not attempted here).
 
-### BUG-9 (found during v2, NOT fixed — pre-existing, not closure-specific)
+### BUG-9 (found during v2, ✅ fixed 2026-07-26 — pre-existing, not closure-specific)
 
 While testing v2's FieldAssign coverage, found that the check can be
 fooled when the assignment target is reached through a `ref`/`mut ref`
@@ -260,16 +260,31 @@ locals appear to share the same depth number in practice, so a
 same-top-level-depth local `v` isn't flagged as "deeper" even though it's
 categorically less long-lived than whatever `h` points to.
 
-**Why not fixed here**: this isn't a small patch — it needs the check to
-either (a) treat *any* ref/mut-ref-parameter-reached object as unconditionally
-rejecting any local ref source (matching Return's simpler "is it a
-parameter" rule, dropping the depth comparison entirely for this case), or
-(b) something closer to real lifetime tracking to know how the parameter's
-lifetime actually relates to locals — which is path-A territory, the exact
-thing this project has deliberately deferred. Option (a) is probably right
-and probably small, but wasn't attempted here — this session's mandate was
-v2/v3 for closures, not a general audit of the L4 Phase 2/3 mechanism's
-soundness. Filed in `docs/TODO_CURRENT.md` for whoever picks it up.
+**Fixed**: took option (a) — when the assignment target is reached through
+a `mut ref` (`through_mut_ref`, already computed above this check), skip
+the depth comparison and instead require the ref source to be one of the
+current function's own parameters, matching `Return`'s existing rule
+exactly. Turned out to be a small, surgical fix, as guessed — `function:
+&Function` was already in scope in `check_one_stmt` (the same place
+`Return`'s check reads `function.params` from), so no plumbing was
+needed. Verified: the repro above now rejects; a positive control
+(assigning a ref sourced from `fill`'s own parameter through the same
+`mut ref` target) still compiles and runs correctly; 112-test regression
+spot-check clean; `vani-ml`/`vani-optimize` full suites re-verified on
+both backends.
+
+**BUG-12, found immediately after (NOT fixed)**: `push(mut ref xs, ref
+X)`'s scope-escape check has the identical `lookup_depth`-through-a-
+`mut-ref`-parameter flaw, confirmed via direct test. Not fixed in the
+same pass: unlike FieldAssign, the push check (`check_push_builtin`,
+called from `check_call`) doesn't have `function: &Function` in scope,
+and `check_call` is a much more widely-called part of the checker —
+threading a "current function's parameter names" signal through it is a
+bigger, higher-blast-radius change than BUG-9's fix was, and needs its
+own careful pass rather than being folded into this one. See
+`docs/TODO_CURRENT.md`'s BUG-12 entry for the full repro and a sketch of
+lower-risk fix shapes (e.g. a thread-local populated per-function-entry,
+avoiding the `check_call` plumbing entirely).
 
 ---
 

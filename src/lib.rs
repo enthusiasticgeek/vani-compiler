@@ -9753,6 +9753,65 @@ mod tests {
     }
 
     #[test]
+    fn bug9_fieldassign_through_mut_ref_param_with_local_source_is_rejected() {
+        // BUG-9 (found 2026-07-25, fixed 2026-07-26): the FieldAssign
+        // scope-escape check compared `env.lookup_depth(obj_name)`
+        // (the object's lexical depth WITHIN THE CURRENT FUNCTION)
+        // against the ref source's depth. When `obj_name` is a `mut
+        // ref` PARAMETER, its struct lives in the CALLER's frame --
+        // categorically longer-lived than anything in the current
+        // function -- but its depth-within-this-function looked no
+        // different from an ordinary local's, so a same-depth local
+        // slipped through undetected. Confirmed as a real, live
+        // dangling reference via direct execution before the fix
+        // (`h.v[0]` read garbage after `fill` returned). Pre-existing,
+        // not specific to closures -- found testing ref-capturing-
+        // closures v2's FieldAssign coverage.
+        let source = r#"
+            struct Holder { v: ref Vec<f64> }
+            fn fill(h: mut ref Holder) -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                h.v = ref v;
+                return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err(
+            "assigning a ref to a function-local through a mut-ref parameter must be rejected",
+        );
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot be stored through") && combined.contains("mut ref"),
+            "expected a mut-ref-parameter FieldAssign-escape diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug9_fieldassign_through_mut_ref_param_with_param_source_still_accepted() {
+        // Positive control for the BUG-9 fix: assigning a ref sourced
+        // from one of the CURRENT function's own parameters through a
+        // mut-ref parameter is legitimate (both refer to data that
+        // outlives this function, in the caller's frame) and must
+        // still compile -- the fix must not overcorrect into
+        // rejecting every FieldAssign through a mut-ref parameter.
+        let source = r#"
+            struct Holder { v: ref Vec<f64> }
+            fn fill(h: mut ref Holder, src: ref Vec<f64>) -> i64 {
+                h.v = src;
+                return 0;
+            }
+            fn main() -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let h: Holder = Holder { v: ref v };
+                fill(mut ref h, ref v);
+                return 0;
+            }
+        "#;
+        compile(source).expect("assigning a ref sourced from a parameter must still compile");
+    }
+
+    #[test]
     fn can_let_bind_reference() {
         // L4 (B) Phase 1 (2026-06-08): refs in let bindings are
         // now accepted (was: rejected with "cannot be stored in

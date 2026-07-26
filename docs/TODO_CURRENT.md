@@ -1603,48 +1603,67 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   `lib.rs`), 97-test regression spot-check clean, all four `vani-ml`
   tests + example re-verified on both backends.
 
-  **Found and filed BUG-9 along the way (not fixed)** — see below.
+  **Found and filed BUG-9 along the way — fixed 2026-07-26** — see below.
 
-- [ ] **BUG-9. FieldAssign scope-escape check can be fooled when the
+- [x] **BUG-9. FieldAssign scope-escape check can be fooled when the
   target is reached through a `ref`/`mut ref` parameter, not an owned
-  local.** Not fixed. Pre-existing (predates this session, confirmed to
-  reproduce with a plain `ref`-field struct, no closures involved) —
-  found while testing ref-capturing-closures v2's FieldAssign coverage,
-  but it's a general L4 Phase 2/3 (2026-06-08) gap, not specific to
-  closures.
+  local.** ✅ fixed 2026-07-26. Pre-existing (predates the 2026-07-25
+  session, confirmed to reproduce with a plain `ref`-field struct, no
+  closures involved) — found while testing ref-capturing-closures v2's
+  FieldAssign coverage, but it's a general L4 Phase 2/3 (2026-06-08) gap,
+  not specific to closures.
 
   ```vani
   struct Holder { v: ref Vec<f64> }
   fn fill(h: mut ref Holder) -> i64 {
       let v: Vec<f64> = vec(1.0, 2.0, 3.0);
-      h.v = ref v;   // vanic check: ok -- should be rejected
+      h.v = ref v;   // was: vanic check ok -- now correctly rejected
       return 0;
   }
   ```
   `h`'s `Holder` lives in the *caller's* frame; `fill`'s local `v` drops
-  at return, leaving `h.v` dangling in the caller. Not caught.
+  at return, leaving `h.v` dangling in the caller. Was not caught.
 
-  **Root cause**: the FieldAssign check compares `env.lookup_depth
+  **Root cause**: the FieldAssign check compared `env.lookup_depth
   (obj_name)` (the object's lexical depth *within the current function*)
-  against the ref source's depth. This conflates a `ref`/`mut ref`
+  against the ref source's depth. This conflated a `ref`/`mut ref`
   **parameter**'s depth (which says nothing about the actual, longer,
   caller-side lifetime of what it points to) with an **owned local**
   binding's depth (which correctly bounds the object's lifetime to the
   current function). Parameters and top-level function-body locals
-  appear to share the same depth number, so a same-depth local isn't
+  appear to share the same depth number, so a same-depth local wasn't
   flagged as "deeper" even though it's categorically shorter-lived.
 
-  **Not fixed**: needs either (a) unconditionally rejecting any local ref
-  source when the assignment target is reached through a ref/mut-ref
-  parameter (matching Return's simpler "is it a parameter" rule, probably
-  small, not attempted), or (b) real lifetime tracking relating the
-  parameter's lifetime to locals (path-A territory, deliberately
-  deferred). This session's mandate was ref-capturing-closures v2/v3, not
-  a general L4 audit — filed here with full root-cause pointer for
-  whoever picks it up. See `docs/ref_capturing_closures_design.md`'s
-  "BUG-9" section for the full writeup, including why v2's closure
-  FieldAssign protection (`b.c = g;` through a `mut ref` parameter `b`)
-  inherits this same hole.
+  **Fix**: took option (a) from the original filing — when the
+  assignment target is reached through a `mut ref` (`through_mut_ref`,
+  already computed by the existing type-check above this point), skip
+  the depth comparison entirely and instead require the ref source to be
+  one of the *current function's own parameters* — matching `Return`'s
+  existing, simpler, already-sound rule. A ref sourced from a parameter
+  is safe (its referent also lives in the caller's frame, same as the
+  mut-ref target); a ref sourced from any local is rejected outright,
+  regardless of depth. Verified: the repro above is now rejected with a
+  clear diagnostic; assigning a ref sourced from one of `fill`'s own
+  parameters through the same `mut ref` target still compiles and runs
+  correctly (positive control). Two new tests in `lib.rs`
+  (`bug9_fieldassign_through_mut_ref_param_with_local_source_is_rejected`,
+  `..._with_param_source_still_accepted`); 112-test regression spot-check
+  clean; `vani-ml` and `vani-optimize`'s full suites re-verified on both
+  backends.
+
+  **Known follow-up, not fixed here (filed as BUG-12)**: the sibling
+  `push(mut ref xs, ref X)` scope-escape check has the exact same
+  `lookup_depth`-based flaw when `xs` is itself reached through a `mut
+  ref Vec<...>` parameter — confirmed via direct test that it currently
+  accepts an equally-unsound case. Not fixed in this pass: unlike the
+  FieldAssign fix (which had `function: &Function`, and therefore
+  `function.params`, already in scope in `check_one_stmt`), the push
+  check lives in `check_push_builtin`, called from `check_call` — neither
+  currently receives `function`, so the equivalent fix needs threading a
+  "does this name refer to a parameter of the current function" signal
+  through a much more widely-called part of the checker, a bigger and
+  riskier change than this one. See `docs/ref_capturing_closures_design.md`'s
+  "BUG-9 / BUG-12" section.
 
 - [x] **Ref-capturing closures v3: _closure variants added to
   vani-optimize** DONE 2026-07-25 -- gradient_descent_fixed_closure,
@@ -1716,3 +1735,45 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   Not published: vani-optimize v0.1.5 changes are committed and pushed
   to its own repo, but vanic publish was not run -- stopping for an
   explicit go-ahead before touching the Kosh registry.
+
+## BUG-12, found fixing BUG-9 (added 2026-07-26)
+
+- [ ] **BUG-12. `push`'s scope-escape check has the same
+  `lookup_depth`-through-a-`mut ref`-parameter flaw BUG-9 had for
+  FieldAssign.** Not fixed. `push(mut ref xs, ref X)`'s L4 Phase 4 check
+  (`checker.rs`, guards `Vec<ref T>` / `Vec<Closure(...)->...>` element
+  types) compares `env.lookup_depth(vec_name)` against the pushed ref's
+  depth, the exact pattern BUG-9 fixed for FieldAssign. When `xs` is
+  itself a `mut ref Vec<...>` parameter (so the real Vec lives in the
+  caller's frame), the same conflation applies: a same-depth local ref
+  source isn't flagged as unsafe even though it's shorter-lived than the
+  parameter's real referent.
+
+  ```vani
+  fn fill(xs: mut ref Vec<ref Vec<f64>>) -> i64 {
+      let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+      push(xs, ref v);   // vanic check: ok -- should be rejected
+      return 0;
+  }
+  ```
+  Confirmed accepted by `vanic check` (not independently confirmed as a
+  garbage-read at runtime the way BUG-7/8/9 were — the specific repro
+  tried hit an unrelated, pre-existing codegen gap, "Index on unsupported
+  base" for double-indexing through `Vec<ref T>`, before a read could be
+  observed — but the root cause is identical to BUG-9's, already proven
+  unsound there, so treat this as real pending that confirmation).
+
+  **Why not fixed alongside BUG-9**: the FieldAssign fix could reuse
+  `function: &Function` (and therefore `function.params`), already in
+  scope in `check_one_stmt`. The push check lives in
+  `check_push_builtin`, called from `check_call` — neither currently
+  receives `function`, and `check_call` is a widely-called, deeply
+  nested part of the checker (used from many `check_expr` call sites).
+  Threading "is this name a parameter of the current function" through
+  that path is a bigger, higher-blast-radius change than BUG-9's fix,
+  needs its own careful pass (or a lower-risk mechanism, e.g. a
+  thread-local set of the current function's parameter names, populated
+  at function-entry the way `CLOSURE_MAKE_REGISTRY` is populated
+  per-compile) — not attempted here. Also inherited by ref-capturing
+  closures v2's `Vec<Closure(...)->...>` push protection, same as BUG-9
+  was inherited by v2's FieldAssign protection.
