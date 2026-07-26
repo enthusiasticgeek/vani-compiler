@@ -13691,6 +13691,34 @@ fn compute_ref_aliases_from_let_rhs(
                 .unwrap_or_default()
         }
         ExprKind::Call { name, args, .. } => {
+            // Ref-capturing closures v2 (2026-07-25): a call to a
+            // registered magic-make-closure function (the desugared
+            // form of `let g: T = fn(...) [ref cap] { ... };`, see
+            // `lambda_lift_program`'s Arc-5c path) may pass some
+            // captures by ref -- `capture_types[i]` is `Ref<T>`/
+            // `RefMut<T>` for exactly the positions the source used
+            // `[ref cap]` for (set at closure-lift time). Trace those
+            // back to their root bindings the same way a struct
+            // literal's ref-valued fields are traced (BUG-7's fix,
+            // just above), so the resulting `Closure`-typed binding
+            // gets correct `ref_aliases` and the *existing* escape
+            // checks (Return / FieldAssign / the widened push check
+            // below) reject it outliving its captured ref's scope --
+            // no new enforcement logic needed, just correct alias
+            // propagation into machinery that already enforces it.
+            if let Some((_, _, capture_types, _, _)) =
+                crate::ast::CLOSURE_MAKE_REGISTRY.with(|r| r.borrow().get(name).cloned())
+            {
+                let mut aliases: Vec<String> = Vec::new();
+                for (arg, cty) in args.iter().zip(capture_types.iter()) {
+                    if matches!(cty, crate::ast::Type::Ref(_) | crate::ast::Type::RefMut(_)) {
+                        if let Some(n) = root_var_of_expr(arg) {
+                            aliases.push(n);
+                        }
+                    }
+                }
+                return aliases;
+            }
             // Ref-returning fn call. If the signature recorded an
             // elided ref-source index (path-C, single ref-param
             // rule), the result borrows from the chosen arg's
@@ -23470,7 +23498,17 @@ fn check_push_builtin(
     // receiver â€” otherwise X drops while `xs` still holds a
     // pointer into its storage, leaving a dangle on the next
     // Vec access.
-    if matches!(element_type, Type::Ref(_) | Type::RefMut(_)) {
+    //
+    // Ref-capturing closures v2 (2026-07-25): widened to also cover
+    // `Vec<Closure(...)->...>` -- a `Closure` value can now (v1) hold a
+    // ref internally (a ref-captured field), so pushing one into a Vec
+    // is exactly the same dangle risk as pushing a `ref T` element,
+    // just one layer removed. `collect_var_ref_aliases` below already
+    // resolves a bare `Var(g)` push value through `g`'s `ref_aliases`
+    // (populated at the closure's construction site, see
+    // `compute_ref_aliases_from_let_rhs`'s `Call` arm), so no other
+    // change is needed here beyond widening this guard.
+    if matches!(element_type, Type::Ref(_) | Type::RefMut(_) | Type::Closure(_, _)) {
         if let Some(vec_name) = root_var_of_expr(&args[0]) {
             if let Some(vec_depth) = env.lookup_depth(&vec_name) {
                 let mut ref_sources: Vec<(String, Span)> = Vec::new();

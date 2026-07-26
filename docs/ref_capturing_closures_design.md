@@ -1,20 +1,22 @@
-# Ref-capturing closures — scoping + implementation log (v-fix, v1 done)
+# Ref-capturing closures — scoping + implementation log (v-fix, v1, v2 done)
 
-**Status:** v-fix and v1 implemented and pushed 2026-07-25. v2 (non-escape
-enforcement) and v3 (update `vani-optimize`'s signature) **not started** —
-confirm before starting either, per this document's own "confirm before
-starting each phase" rule. Written 2026-07-25 in response to a real,
-repeated need (`vani-ml` v0.1.0's `logreg_fit` couldn't reuse
-`vani-optimize`'s `gradient_descent_fixed`/`backtracking` for exactly this
-reason — see `kosh-index/ROADMAP.md`'s "ML tier" section).
+**Status:** v-fix, v1, and v2 implemented and pushed 2026-07-25. v3
+(update `vani-optimize`'s signature) **not started** — confirm before
+starting, per this document's own "confirm before starting each phase"
+rule. Written 2026-07-25 in response to a real, repeated need (`vani-ml`
+v0.1.0's `logreg_fit` couldn't reuse `vani-optimize`'s
+`gradient_descent_fixed`/`backtracking` for exactly this reason — see
+`kosh-index/ROADMAP.md`'s "ML tier" section).
 
-**Important**: v1 makes a ref-capturing closure a real, passable `Closure`
-value for the first time — but v2 (the non-escape safety check) hasn't
-been built yet. Right now such a value can be returned, stored in a
-struct/Vec, or otherwise escape its captured ref's scope with **no
-compiler check at all** — the same class of unsoundness BUG-7 was, just
-not yet closed off for this specific new value shape. Don't rely on this
-being safe in real code until v2 lands.
+**Known remaining gap, found while building v2 (filed as BUG-9, NOT
+fixed)**: v2's Return/push checks are sound, but the FieldAssign check
+(and by the same logic, potentially the push check too) can be fooled
+when the container is reached through a `ref`/`mut ref` **parameter**
+rather than an owned local — see "BUG-9" below. This is a pre-existing
+gap in the original L4 Phase 3 mechanism (2026-06-08), not something v2
+introduced, and it applies equally to plain (non-closure) `ref`-field
+structs. Not fixed — flagged as a real, live caveat on v2's "non-escape
+enforcement" claim.
 
 **Along the way, found a real soundness bug (BUG-7) plus a second, related
 codegen bug (BUG-8) — both fixed same day (2026-07-25), see
@@ -190,12 +192,12 @@ more value shape (a `Closure`'s synthesized env), not a new subsystem.
 |---|---|---|---|
 | ~~v-fix~~ ✅ done 2026-07-25 | Fix BUG-7 (checker: escape-analyzer bypass) and BUG-8 (LLVM backend: garbage value reading a `ref`-typed Vec field), found along the way. | -- | Both fixed same day. BUG-7: `compute_ref_aliases_from_let_rhs` gained a `StructLit` arm, the `Stmt::Let` guard was relaxed to run it unconditionally. BUG-8: an extra `load` to dereference a field-slot address before treating it as the Vec's own address. 16+32-test regression spot-check clean, all four `vani-ml` tests still pass. See `docs/TODO_CURRENT.md`'s BUG-7/BUG-8 entries for full detail. |
 | ~~v1~~ ✅ done 2026-07-25 | Extended `lambda_lift_program`'s Arc-5c path (`checker.rs`, previously gated `if ref_captures_clone.is_empty()`, now runs unconditionally) to also synthesize an env-struct + magic-make-closure call when ref-captures are present, with `Ref<T>` env-struct fields (the typing already used for the inline path). Produces a real `Closure` value for a ref-capturing closure for the first time — verified end-to-end: `apply(g, 5)` where `g` ref-captures a `Vec<f64>` now runs correctly on **both** backends. | v-fix | Mechanical extension, as predicted — but the C backend needed its own fix: the closure-registry codegen used `c_leaf_type` (a `&'static str` lookup for simple types only) on the capture types, which produced the invalid placeholder `/* ref */` for a `Ref<Vec<T>>` capture. Fixed by switching to `format_declarator` (the same function real `ref T` function parameters already render through, so the `const`-qualified spelling matches the hoisted function's own separately-emitted declaration byte-for-byte — an earlier attempt using `c_element_storage` compiled but produced a `const`-mismatch warning-then-hard-conflicting-declaration error). No LLVM backend changes needed at all — its trampoline/constructor codegen was already fully generic over the capture type. New tests: `lli_runs_ref_capturing_closure_passed_as_higher_order_fn_arg` (`backend_llvm.rs`, actually executes), `ref_capturing_closure_as_value_passes_to_higher_order_fn` (`lib.rs`, pins both backends' generated shape). 74-test regression spot-check clean (closures + L4/escape + struct-field/Vec-indexing), all four `vani-ml` tests + the example on both backends still pass. **No non-escape enforcement yet** — a ref-capturing `Closure` value can currently be returned/stored/escaped with no safety check at all; that's v2, not yet started. |
-| v2 | Non-escape enforcement: reject (using the fixed BUG-7 machinery) any use of a ref-capturing `Closure` value that would let it outlive a captured ref's scope — return, struct/Vec storage, or a `let` binding provably outliving the capture. Accept the "pass directly as a call argument" and "call directly in the same or a nested block" shapes. | v1 | **Highest-risk phase.** This is the actual novel safety argument — needs a clear, written-down rule for exactly which shapes are accepted vs. rejected before writing code, the same way `vani-symbolic`'s v0.2.0 needed a documented policy on which simplification rules fire. Validate against both a positive suite (the `vani-ml`/`vani-optimize` motivating shape: pass a ref-capturing closure as an argument to a higher-order fn, use it, return before the caller's frame does) and a negative suite (every BUG-7-shaped escape attempt, to confirm v-fix + v2 together actually close the hole, not just the two repros already found). |
+| ~~v2~~ ✅ done 2026-07-25 | Non-escape enforcement: reject any use of a ref-capturing `Closure` value that would let it outlive a captured ref's scope. | v1 | Turned out smaller than the "highest-risk" label implied, because it reduced almost entirely to **alias propagation into machinery that already existed**: `compute_ref_aliases_from_let_rhs` gained a `Call`-to-magic-make-closure arm (mirroring BUG-7's `StructLit` arm) so a `Closure`-typed binding gets correct `ref_aliases`; the *existing* Return and FieldAssign escape checks then reject it with zero further changes (neither has a restrictive type guard). The `push` check *did* need a one-line widening (its guard only fired for `Vec<ref T>` elements; extended to also cover `Vec<Closure(...)->...>`). Verified: `return g;` (direct + two-hop `let`-chain) and `push(mut ref closures, g)` into an outer-scope `Vec<Closure>` are both now rejected with clear diagnostics; passing `g` as a call argument or calling it directly are both unaffected (Call args were already a "consuming position," per L4 Phase 3's original design). Two new negative-case tests (`ref_capturing_closure_returned_directly_is_rejected`, `ref_capturing_closure_pushed_into_outer_scope_vec_is_rejected`, `lib.rs`) plus a 97-test regression spot-check. **Found and filed BUG-9 along the way** (not fixed) — see below; a real, pre-existing gap unrelated to closures specifically, but one that undercuts the FieldAssign half of this phase's guarantee in one specific shape. |
 | v3 | Update `vani-optimize` (and any other package with a fixed `fn(ref Vec<f64>, i64) -> f64`-style objective parameter) to accept `Closure(...)->...` instead of `fn(...)->...`, so `vani-ml`'s `logreg_fit` (and the future autodiff core) can actually pass a ref-capturing closure through. | v2 | Low — signature-type change in an already-published package, republish as a minor version bump. This is the actual payoff step; nothing upstream of it changes `vani-ml`'s behavior. |
 
-**Recommended order**: ~~v-fix~~ → ~~v1~~ → v2 (budget the most review time
-here) → v3. **Confirm before starting each phase** — v-fix and v1 are done
-(2026-07-25); v2 and v3 still need an explicit go-ahead before starting.
+**Recommended order**: ~~v-fix~~ → ~~v1~~ → ~~v2~~ → v3. **Confirm before
+starting each phase** — v-fix, v1, and v2 are done (2026-07-25); v3 still
+needs an explicit go-ahead before starting.
 
 **Explicitly out of scope**: general multi-parameter lifetime variables
 (path A above), lifetime-parameterized struct *definitions* (`struct
@@ -205,6 +207,54 @@ env-structs this document is about), closures that need to escape their
 creating function's scope while still borrowing (e.g. returning a
 ref-capturing closure to a caller who keeps the borrowed data alive
 longer — Path A territory, not attempted here).
+
+### BUG-9 (found during v2, NOT fixed — pre-existing, not closure-specific)
+
+While testing v2's FieldAssign coverage, found that the check can be
+fooled when the assignment target is reached through a `ref`/`mut ref`
+**parameter** rather than an owned local:
+
+```vani
+struct Holder { v: ref Vec<f64> }
+fn fill(h: mut ref Holder) -> i64 {
+    let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+    h.v = ref v;   // vanic check: ok -- should be rejected
+    return 0;
+}
+```
+`h`'s actual `Holder` lives in the *caller's* frame (potentially far
+outliving `fill`), but `fill`'s local `v` is dropped when `fill` returns
+— after which `h.v` (visible in the caller) dangles. `vanic check` accepts
+this. **Confirmed pre-existing and unrelated to closures**: reproduces
+identically with a plain `ref`-field struct, no `Closure` involved, so it
+predates this session's work and isn't something v2 introduced — but it
+does mean v2's FieldAssign-based closure-escape protection has the same
+hole (`b.c = g;` through a `mut ref` parameter `b` is equally unchecked).
+
+**Root cause**: the FieldAssign check (`checker.rs`, L4 Phase 2,
+2026-06-08) compares `env.lookup_depth(obj_name)` (the object's *lexical
+declaration depth within the current function*) against the ref source's
+depth, rejecting when the source is declared deeper. This conflates two
+different things: a `ref`/`mut ref` **parameter**'s depth-within-the-
+current-function tells you nothing about how long the object it points to
+actually lives (it lives in the *caller's* frame, of unknown — but
+certainly longer — lifetime), yet the check treats it the same as an
+**owned local** binding's depth (which correctly bounds the object's
+lifetime to the current function). Parameters and top-level function-body
+locals appear to share the same depth number in practice, so a
+same-top-level-depth local `v` isn't flagged as "deeper" even though it's
+categorically less long-lived than whatever `h` points to.
+
+**Why not fixed here**: this isn't a small patch — it needs the check to
+either (a) treat *any* ref/mut-ref-parameter-reached object as unconditionally
+rejecting any local ref source (matching Return's simpler "is it a
+parameter" rule, dropping the depth comparison entirely for this case), or
+(b) something closer to real lifetime tracking to know how the parameter's
+lifetime actually relates to locals — which is path-A territory, the exact
+thing this project has deliberately deferred. Option (a) is probably right
+and probably small, but wasn't attempted here — this session's mandate was
+v2/v3 for closures, not a general audit of the L4 Phase 2/3 mechanism's
+soundness. Filed in `docs/TODO_CURRENT.md` for whoever picks it up.
 
 ---
 
@@ -231,11 +281,13 @@ Take this one estimate with more uncertainty than that table's:
   capture type) — LLVM needed no changes at all. Total time was still
   well within the original estimate, just split differently than
   expected between "check" and "fix."
-- **v2**: the actual unknown. Writing the accept/reject rule down clearly
-  is most of the work; once written, enforcement is "another case in an
-  analyzer that already exists," not a new pass. Budget this like
-  `vani-symbolic`'s v0.2.0 (highest-risk phase, most review time) rather
-  than like a typical `TODO_CURRENT.md` item.
+- **v2**: ✅ done — the "actual unknown" resolved cleanly: the accept/
+  reject rule turned out to already exist (Return/FieldAssign's existing
+  logic), so v2 was almost entirely alias-propagation plumbing plus one
+  guard widening, comparable to the v-fix bugs in size, not to
+  `vani-symbolic`'s v0.2.0. The genuine unknown that remained (BUG-9) was
+  a pre-existing gap unrelated to the closure-specific work, found by
+  testing thoroughly rather than by the closure design itself being hard.
 - **v3**: trivial, a signature-type edit in one already-published package.
 
 Overall: **a large single-digit-days-to-low-weeks effort, not the

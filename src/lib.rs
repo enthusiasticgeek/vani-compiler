@@ -17393,6 +17393,64 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn ref_capturing_closure_returned_directly_is_rejected() {
+        // Ref-capturing closures v2 (2026-07-25, non-escape
+        // enforcement): a closure that ref-captures a local and is
+        // then returned from the function must be rejected -- the
+        // captured local drops at return, leaving the returned
+        // Closure value's env holding a dangling ref. Before v2, the
+        // resulting `Closure`-typed binding had no `ref_aliases` at
+        // all (v1 made it a real value but didn't wire it into the
+        // existing escape checks), so this compiled cleanly and would
+        // have been a live dangling reference, the same class of bug
+        // as BUG-7.
+        let source = r#"
+            fn make() -> Closure(i64) -> f64 {
+              let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+              let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
+              return g;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err("returning a ref-capturing closure must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("escapes the function via return"),
+            "expected a return-escape diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn ref_capturing_closure_pushed_into_outer_scope_vec_is_rejected() {
+        // Ref-capturing closures v2: pushing a ref-capturing closure
+        // into a `Vec<Closure(...)->...>` declared at an outer scope
+        // than the captured local is the Vec-storage analogue of the
+        // return-escape case above -- same underlying risk (the Vec
+        // outlives the capture), same L4 Phase 4 push check, widened
+        // to also fire for `Closure`-typed elements (previously only
+        // `Vec<ref T>` triggered it).
+        let source = r#"
+            fn main() -> i64 {
+              let closures: Vec<Closure(i64) -> f64> = vec();
+              if true {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
+                push(mut ref closures, g);
+              }
+              return 0;
+            }
+        "#;
+        let err = compile(source).expect_err("pushing a ref-capturing closure into an outer-scope Vec must be rejected");
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("would dangle when"),
+            "expected a push-escape diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
     fn closure_no_capture_still_works() {
         // The capture path must not break the no-capture
         // closure case shipped in closure #308.

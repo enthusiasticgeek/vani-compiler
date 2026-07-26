@@ -1578,9 +1578,70 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   Vec-indexing) clean; all four `vani-ml` test files + its example
   re-verified passing on both backends after rebuild.
 
-  **Not safe yet**: no non-escape enforcement exists for this new value
-  shape — a ref-capturing `Closure` value can currently be returned,
-  stored, or otherwise escape its captured ref's scope with no compiler
-  check at all (the same class of unsoundness BUG-7 was, just not yet
-  closed off here). That's v2, not started — don't rely on this being
-  safe in real code until that lands.
+  **Update 2026-07-25 (same day)**: v2 (non-escape enforcement) is now
+  done too — see the next entry.
+
+- [x] **Ref-capturing closures v2: non-escape enforcement** ✅ done
+  2026-07-25 — see `docs/ref_capturing_closures_design.md`. A
+  ref-capturing `Closure` value can no longer be returned or pushed into
+  an outer-scope `Vec<Closure(...)->...>` without a compile error.
+
+  Turned out smaller than expected: `compute_ref_aliases_from_let_rhs`
+  (`checker.rs`) gained a `Call`-to-magic-make-closure arm (mirroring
+  BUG-7's `StructLit` arm) so a `Closure`-typed binding gets correct
+  `ref_aliases` at its construction site; the *existing* Return and
+  FieldAssign escape checks then reject it escaping with **zero further
+  changes** (neither has a restrictive type guard — they already walk
+  `ref_aliases` generically). The `push` escape check *did* need a
+  one-line guard widening (previously only fired for `Vec<ref T>`
+  elements; now also covers `Vec<Closure(...)->...>`). Legitimate uses
+  (pass as a call argument, call directly) are unaffected — Call
+  arguments were already a "consuming position" per the original L4
+  Phase 3 design, so nothing needed to change there. Two new negative
+  tests (`ref_capturing_closure_returned_directly_is_rejected`,
+  `ref_capturing_closure_pushed_into_outer_scope_vec_is_rejected`,
+  `lib.rs`), 97-test regression spot-check clean, all four `vani-ml`
+  tests + example re-verified on both backends.
+
+  **Found and filed BUG-9 along the way (not fixed)** — see below.
+
+- [ ] **BUG-9. FieldAssign scope-escape check can be fooled when the
+  target is reached through a `ref`/`mut ref` parameter, not an owned
+  local.** Not fixed. Pre-existing (predates this session, confirmed to
+  reproduce with a plain `ref`-field struct, no closures involved) —
+  found while testing ref-capturing-closures v2's FieldAssign coverage,
+  but it's a general L4 Phase 2/3 (2026-06-08) gap, not specific to
+  closures.
+
+  ```vani
+  struct Holder { v: ref Vec<f64> }
+  fn fill(h: mut ref Holder) -> i64 {
+      let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+      h.v = ref v;   // vanic check: ok -- should be rejected
+      return 0;
+  }
+  ```
+  `h`'s `Holder` lives in the *caller's* frame; `fill`'s local `v` drops
+  at return, leaving `h.v` dangling in the caller. Not caught.
+
+  **Root cause**: the FieldAssign check compares `env.lookup_depth
+  (obj_name)` (the object's lexical depth *within the current function*)
+  against the ref source's depth. This conflates a `ref`/`mut ref`
+  **parameter**'s depth (which says nothing about the actual, longer,
+  caller-side lifetime of what it points to) with an **owned local**
+  binding's depth (which correctly bounds the object's lifetime to the
+  current function). Parameters and top-level function-body locals
+  appear to share the same depth number, so a same-depth local isn't
+  flagged as "deeper" even though it's categorically shorter-lived.
+
+  **Not fixed**: needs either (a) unconditionally rejecting any local ref
+  source when the assignment target is reached through a ref/mut-ref
+  parameter (matching Return's simpler "is it a parameter" rule, probably
+  small, not attempted), or (b) real lifetime tracking relating the
+  parameter's lifetime to locals (path-A territory, deliberately
+  deferred). This session's mandate was ref-capturing-closures v2/v3, not
+  a general L4 audit — filed here with full root-cause pointer for
+  whoever picks it up. See `docs/ref_capturing_closures_design.md`'s
+  "BUG-9" section for the full writeup, including why v2's closure
+  FieldAssign protection (`b.c = g;` through a `mut ref` parameter `b`)
+  inherits this same hole.
