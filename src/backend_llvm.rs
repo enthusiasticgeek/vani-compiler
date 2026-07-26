@@ -1499,7 +1499,49 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
                 r.borrow().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
             });
         let mut emitted_structs: HM<String, ()> = HM::new();
-        for (_, (_, _, _, args, ret)) in &entries {
+        // Ref-capturing closures v3 (2026-07-25): the typedef loop used to
+        // be driven ENTIRELY by `CLOSURE_MAKE_REGISTRY`, which is only
+        // populated when a closure LITERAL is actually lifted somewhere in
+        // the compiled program. A function that merely takes a
+        // `Closure(...)->...`-typed PARAMETER (e.g. a library function like
+        // vani-optimize's `gradient_descent_fixed_closure`) references that
+        // type in its own signature regardless of whether the *calling*
+        // program constructs a matching literal -- confirmed as a real bug:
+        // any program that includes such a function (even one that never
+        // calls it) failed at the LLVM verifier with "invalid type for
+        // function argument", because the struct type its signature names
+        // was never declared. Collect every `Type::Closure` shape appearing
+        // in any function's params/return type too, and emit a typedef for
+        // those as well -- the trampoline/constructor loop below stays
+        // keyed on the real registry (a trampoline only makes sense for an
+        // actually-constructed literal), only the struct *type declaration*
+        // needed broadening.
+        let mut sig_shapes: Vec<(Vec<Type>, Type)> = Vec::new();
+        let mut sig_seen: HM<String, ()> = HM::new();
+        let mut note_closure_shape = |ty: &Type, sig_shapes: &mut Vec<(Vec<Type>, Type)>, sig_seen: &mut HM<String, ()>| {
+            if let Type::Closure(cargs, cret) = ty {
+                let tags: Vec<String> = cargs.iter().map(llvm_closure_tag).collect();
+                let key = format!("{}_{}", tags.join("_"), llvm_closure_tag(cret));
+                if sig_seen.insert(key, ()).is_none() {
+                    sig_shapes.push((cargs.clone(), (**cret).clone()));
+                }
+            }
+        };
+        for f in &program.functions {
+            for p in &f.params {
+                note_closure_shape(&p.ty, &mut sig_shapes, &mut sig_seen);
+            }
+            note_closure_shape(&f.return_type, &mut sig_shapes, &mut sig_seen);
+        }
+        for s in &program.structs {
+            for (_, fty) in &s.fields {
+                note_closure_shape(fty, &mut sig_shapes, &mut sig_seen);
+            }
+        }
+        let registry_shapes = entries.iter().map(|(_, (_, _, _, args, ret))| (args.clone(), ret.clone()));
+        for (args, ret) in registry_shapes.chain(sig_shapes.into_iter()) {
+            let args = &args;
+            let ret = &ret;
             let tags: Vec<String> = args.iter().map(llvm_closure_tag).collect();
             let sname = format!("%intent_closure_{}_{}", tags.join("_"), llvm_closure_tag(ret));
             if emitted_structs.insert(sname.clone(), ()).is_some() {
@@ -46100,6 +46142,43 @@ mod tests {
                 let v: Vec<f64> = vec(1.0, 2.0, 3.0);
                 let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
                 let r: f64 = apply(g, 5);
+                if r == 6.0 { return 42; }
+                return 1;
+            }
+        "#;
+        assert_eq!(run_lli(source), 42);
+    }
+
+    #[test]
+    fn lli_runs_closure_typed_fn_defined_separately_from_its_matching_literal() {
+        if !lli_available() {
+            return;
+        }
+        // Ref-capturing closures v3 (2026-07-25). Companion to the
+        // compile-only tests in lib.rs (`closure_typed_param_with_no_
+        // matching_literal_in_program_compiles`,
+        // `closure_shape_referencing_vec_with_no_prior_vec_usage_
+        // compiles_on_c`) -- this proves the fix doesn't just silence
+        // the compiler, the resulting program actually runs correctly.
+        // `apply` (taking a `Closure`-typed param) is declared in its
+        // own function with no closure literal anywhere nearby; the
+        // matching literal is constructed in a *different* function --
+        // mirroring a real library-function/call-site split like
+        // vani-optimize's `gradient_descent_fixed_closure` (declared in
+        // one repo's lib.vani, with zero closure literals of its own)
+        // vs. a caller like `vani-ml`'s `logreg_fit` constructing the
+        // actual `[ref ...]` closure that gets passed in.
+        let source = r#"
+            fn apply(f: Closure(i64) -> f64, x: i64) -> f64 {
+                return f(x);
+            }
+            fn make_and_call() -> f64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let g: fn(i64) -> f64 = fn(x: i64) -> f64 [ref v] { return v[0] + (x as f64); };
+                return apply(g, 5);
+            }
+            fn main() -> i64 {
+                let r: f64 = make_and_call();
                 if r == 6.0 { return 42; }
                 return 1;
             }

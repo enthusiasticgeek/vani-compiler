@@ -705,16 +705,104 @@ pub fn emit_c(program: &TypedProgram) -> String {
             });
         // Emit closure-struct typedef per unique (args, ret) shape.
         let mut emitted_closure_structs: HM<String, ()> = HM::new();
-        for (_, (_, _, _, args, ret)) in &entries {
+        // Ref-capturing closures v3 (2026-07-25): same fix as
+        // backend_llvm.rs's equivalent loop. This used to be driven
+        // entirely by `CLOSURE_MAKE_REGISTRY` (populated only when a
+        // closure LITERAL is lifted somewhere in the compiled program) --
+        // a function that merely takes a `Closure(...)->...`-typed
+        // PARAMETER (e.g. vani-optimize's `gradient_descent_fixed_closure`)
+        // references that type in its own signature regardless of whether
+        // the calling program constructs a matching literal. Confirmed:
+        // any program including such a function (even unused) failed to
+        // compile because the typedef was never emitted. Collect every
+        // `Type::Closure` shape from function signatures + struct fields
+        // too; the trampoline/constructor loop below stays keyed on the
+        // real registry (only meaningful for an actually-constructed
+        // literal) -- only the struct type *declaration* needed broadening.
+        let mut sig_shapes: Vec<(Vec<Type>, Type)> = Vec::new();
+        let mut sig_seen: HM<String, ()> = HM::new();
+        let mut note_closure_shape = |ty: &Type, sig_shapes: &mut Vec<(Vec<Type>, Type)>, sig_seen: &mut HM<String, ()>| {
+            if let Type::Closure(cargs, cret) = ty {
+                let sname = closure_c_struct_name(cargs, cret);
+                if sig_seen.insert(sname, ()).is_none() {
+                    sig_shapes.push((cargs.clone(), (**cret).clone()));
+                }
+            }
+        };
+        for f in &program.functions {
+            for p in &f.params {
+                note_closure_shape(&p.ty, &mut sig_shapes, &mut sig_seen);
+            }
+            note_closure_shape(&f.return_type, &mut sig_shapes, &mut sig_seen);
+        }
+        for s in &program.structs {
+            for (_, fty) in &s.fields {
+                note_closure_shape(fty, &mut sig_shapes, &mut sig_seen);
+            }
+        }
+        let registry_shapes = entries.iter().map(|(_, (_, _, _, args, ret))| (args.clone(), ret.clone()));
+        let all_shapes: Vec<(Vec<Type>, Type)> = registry_shapes.chain(sig_shapes.into_iter()).collect();
+        // Ordering fix (2026-07-25, found testing v3): a closure shape can
+        // itself reference a Vec type (e.g. `Closure(ref Vec<f64>, i64) ->
+        // f64`), and that Vec's own C typedef (`intent_vec_double`) must
+        // exist before the closure struct typedef below references it.
+        // The existing early-Vec-bundle pass (above, `struct_field_vec_
+        // elements`) only scans struct fields + enum payloads, not
+        // function-signature Closure types, so a Vec used ONLY inside a
+        // closure shape was never queued for early emission -- confirmed
+        // as a real bug: `cc` rejected the closure typedef with "unknown
+        // type name 'intent_vec_double'" in any program where nothing
+        // else happened to trigger that Vec bundle earlier (e.g. a
+        // library-only signature reference with no local `Vec<f64>`
+        // variable anywhere in the calling file). Fix: walk every closure
+        // shape for nested Vec element types (through `Ref`/`RefMut`,
+        // `collect_vec_elements` already does this) and eagerly emit any
+        // not-yet-emitted primitive one here, reusing the same
+        // `emitted_vec_bundles` tracking set the early struct-field pass
+        // uses, before any closure struct typedef is written.
+        {
+            let mut closure_vec_seen: BTreeSet<String> = BTreeSet::new();
+            let mut closure_vec_elements: Vec<Type> = Vec::new();
+            for (args, ret) in &all_shapes {
+                for a in args {
+                    collect_vec_elements(a, &mut closure_vec_seen, &mut closure_vec_elements);
+                }
+                collect_vec_elements(ret, &mut closure_vec_seen, &mut closure_vec_elements);
+            }
+            for element in &closure_vec_elements {
+                let tag = element_tag(element);
+                if emitted_vec_bundles.contains(&tag) || vec_element_has_user_struct(element) {
+                    continue;
+                }
+                emit_vec_bundle(element, &mut body);
+                emitted_vec_bundles.insert(tag);
+            }
+        }
+        for (args, ret) in all_shapes {
+            let args = &args;
+            let ret = &ret;
             let sname = closure_c_struct_name(args, ret);
             if emitted_closure_structs.insert(sname.clone(), ()).is_some() {
                 continue;
             }
             // Build call-field type: R (*call)(uint64_t env, T1, T2, ...)
-            let ret_c = c_leaf_type(ret);
+            //
+            // Ref-capturing closures v3 (2026-07-25): `c_leaf_type` (a
+            // `&'static str` lookup, simple leaf types only) can't spell
+            // a composite type like `ref Vec<f64>` or `Vec<f64>` -- both
+            // real shapes once a closure's own call signature (not just
+            // its captures) takes/returns something composite, e.g.
+            // `Closure(ref Vec<f64>, i64) -> f64` (vani-optimize's
+            // gradient/objective convention). Use `c_type_name` instead
+            // -- the same function/spelling a real function's return type
+            // and bare (unnamed) parameter-type positions use elsewhere
+            // in this file; it already delegates to `format_declarator`
+            // for `Ref`/`RefMut` (same const-correct spelling fixed for
+            // `capture_types` above) and to `vec_c_struct` for `Vec`.
+            let ret_c = c_type_name(ret);
             let mut arg_decls: Vec<String> = vec!["uint64_t".to_string()];
             for a in args {
-                arg_decls.push(c_leaf_type(a).to_string());
+                arg_decls.push(c_type_name(a));
             }
             body.push_str(&format!(
                 "typedef struct {{ uint64_t env; {ret_c} (*call)({args}); }} {sname};\n",
@@ -730,7 +818,7 @@ pub fn emit_c(program: &TypedProgram) -> String {
         // trampolines below can call them without implicit
         // declaration warnings.
         for (_, (hoist_name, _, capture_types, args, ret)) in &entries {
-            let ret_c = c_leaf_type(ret);
+            let ret_c = c_type_name(ret);
             let mut decl_params: Vec<String> = Vec::new();
             // Ref-capturing closures v1 (2026-07-25): a ref-captured
             // field's type is `Ref<Vec<T>>` (or similar composite), which
@@ -750,7 +838,9 @@ pub fn emit_c(program: &TypedProgram) -> String {
                 decl_params.push(format_declarator(cty, "").trim_end().to_string());
             }
             for cty in args {
-                decl_params.push(c_leaf_type(cty).to_string());
+                // Same c_type_name fix as ret_c above -- args can also be
+                // composite (e.g. `ref Vec<f64>`), not just simple leaves.
+                decl_params.push(c_type_name(cty));
             }
             body.push_str(&format!(
                 "static {ret_c} fn_{hn}({params});\n",
@@ -798,12 +888,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let mut tramp_params: Vec<String> = vec!["uint64_t env_addr".to_string()];
             let mut tramp_call_extra: Vec<String> = Vec::new();
             for (i, a) in args.iter().enumerate() {
-                tramp_params.push(format!("{} y{}", c_leaf_type(a), i));
+                // Same c_type_name fix as above -- a trampoline param can
+                // be composite too (e.g. `ref Vec<f64>`).
+                tramp_params.push(format!("{} y{}", c_type_name(a), i));
                 tramp_call_extra.push(format!("y{}", i));
             }
             call_args.extend(tramp_call_extra);
             let env_c = struct_c_name(env_struct_name);
-            let ret_c = c_leaf_type(ret);
+            let ret_c = c_type_name(ret);
             body.push_str(&format!(
                 "static {ret_c} {tn}({tp}) {{\n\
                  \x20 {env_c}* env = ({env_c}*)(uintptr_t)env_addr;\n\

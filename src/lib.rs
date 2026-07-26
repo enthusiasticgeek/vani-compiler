@@ -17451,6 +17451,60 @@ fn main() -> i64 {
     }
 
     #[test]
+    fn closure_typed_param_with_no_matching_literal_in_program_compiles() {
+        // Ref-capturing closures v3 (2026-07-25): found adding
+        // vani-optimize's `_closure` variants (`gradient_descent_fixed_
+        // closure` etc., library functions taking `Closure(...)->...`
+        // params). Both backends' closure-struct-typedef emission used
+        // to be driven ENTIRELY by `CLOSURE_MAKE_REGISTRY`, populated
+        // only when a closure LITERAL is actually lifted somewhere in
+        // the compiled program. A function that merely takes a
+        // `Closure`-typed PARAMETER references that type in its own
+        // signature regardless of whether the *calling* program
+        // constructs a matching literal -- confirmed as a real bug: ANY
+        // program that includes such a function (even one that never
+        // calls it, exactly vani-optimize's own other test files after
+        // the `_closure` variants were added to its shared lib.vani)
+        // failed at the LLVM verifier ("invalid type for function
+        // argument") or the C compiler ("has no member named 'call'"),
+        // because the struct type the signature names was never
+        // declared. This minimal repro has NO closure literal anywhere.
+        let source = r#"
+            fn apply(f: Closure(i64) -> f64, x: i64) -> f64 {
+              return f(x);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("Closure-typed param with no matching literal compiles on C");
+        compile_to_llvm(source).expect("Closure-typed param with no matching literal compiles on LLVM");
+    }
+
+    #[test]
+    fn closure_shape_referencing_vec_with_no_prior_vec_usage_compiles_on_c() {
+        // Ref-capturing closures v3 (2026-07-25), second bug found
+        // fixing the one above: once the missing typedef was discovered
+        // via function signatures, the C backend's closure struct
+        // typedef could reference a Vec type (e.g. `Closure(ref
+        // Vec<f64>, i64) -> f64`, vani-optimize's actual objective-
+        // function convention) whose OWN `intent_vec_double` typedef
+        // hadn't been emitted yet -- `cc` rejected it with "unknown
+        // type name 'intent_vec_double'". The existing early-Vec-bundle
+        // pass only scans struct fields + enum payloads, not function
+        // signatures, so a Vec type appearing ONLY inside a closure
+        // shape (no local `Vec<f64>` variable anywhere else in the
+        // file to otherwise trigger it) was never queued for early
+        // emission. This repro has no `Vec<f64>` local anywhere --
+        // only a closure signature mentions it.
+        let source = r#"
+            fn apply(f: Closure(ref Vec<f64>, i64) -> f64, x0: ref Vec<f64>, n: i64) -> f64 {
+              return f(x0, n);
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        compile_to_c(source).expect("closure shape referencing Vec compiles on C with no prior Vec usage");
+    }
+
+    #[test]
     fn closure_no_capture_still_works() {
         // The capture path must not break the no-capture
         // closure case shipped in closure #308.

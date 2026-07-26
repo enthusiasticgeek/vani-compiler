@@ -1645,3 +1645,74 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   "BUG-9" section for the full writeup, including why v2's closure
   FieldAssign protection (`b.c = g;` through a `mut ref` parameter `b`)
   inherits this same hole.
+
+- [x] **Ref-capturing closures v3: _closure variants added to
+  vani-optimize** DONE 2026-07-25 -- gradient_descent_fixed_closure,
+  armijo_line_search_closure, gradient_descent_backtracking_closure
+  (vani-optimize/src/lib.vani, v0.1.5). Additive only -- the original
+  fn-typed functions are untouched, every existing caller keeps
+  compiling unchanged (confirmed: no implicit coercion exists between
+  fn(...)->... and Closure(...)->..., so an in-place signature change
+  would have broken every current caller, including vani-optimize's own
+  tests/examples -- additive variants were chosen specifically to avoid
+  that). New test vani-optimize/tests/test_closure_variants.vani
+  minimizes a data-parameterized objective (target captured by ref, not
+  hand-coded into a top-level function) via both variants, on both
+  backends. See docs/ref_capturing_closures_design.md's v3 row.
+
+  Found two more real bugs while validating v3 (both fixed same day):
+
+- [x] **BUG-10. A function that merely takes a Closure(...)->...-typed
+  parameter fails to compile if no closure literal anywhere in the
+  program happens to construct that exact shape.** DONE 2026-07-25.
+  Both backends' closure-struct-typedef emission were driven entirely by
+  CLOSURE_MAKE_REGISTRY, populated only when a closure literal is
+  lifted somewhere in the compiled program -- a library function's own
+  signature referencing a Closure type was never scanned. Confirmed via
+  minimal repro (fn apply(f: Closure(i64) -> f64, x: i64) -> f64 with
+  zero closure literals anywhere) failing on both backends: LLVM
+  verifier "invalid type for function argument"; cc "has no member
+  named 'call'". This is exactly what broke vani-optimize's other,
+  pre-existing test files the moment the v0.1.5 _closure functions were
+  added to its shared lib.vani -- none of those files construct a
+  matching closure literal, so v3 without this fix would have broken
+  every existing vani-optimize consumer, not just been inert for them.
+  Fixed: both backend_llvm.rs and backend_c.rs's closure-struct
+  typedef loops now also scan every function's params/return type (and
+  struct fields) for Type::Closure occurrences and union those shapes
+  in -- the trampoline/constructor loop stays keyed on the real registry
+  (only meaningful for an actually-constructed literal); only the struct
+  type declaration needed broadening.
+
+- [x] **BUG-11 (C backend only). A closure shape referencing a Vec<T>
+  (e.g. Closure(ref Vec<f64>, i64) -> f64) could have its struct
+  typedef emitted before Vec<T>'s own typedef, if nothing else in the
+  program happened to trigger Vec<T>'s bundle earlier.** DONE
+  2026-07-25. Found immediately while fixing BUG-10: with the missing
+  typedef restored, the C backend's generated code hit "cc: unknown type
+  name 'intent_vec_double'" at the closure typedef line, in files with no
+  local Vec<f64> variable of their own. Root cause: the existing
+  early-Vec-bundle pass only scans struct fields + enum payloads for
+  needed Vec<T> element types, not function signatures generally, and
+  closures were a new place Vec<T> could hide that this pass never
+  anticipated. Fixed: before emitting any closure struct typedef, walk
+  every closure shape (via the existing collect_vec_elements, which
+  already recurses through Ref/RefMut) and eagerly emit any
+  not-yet-emitted primitive Vec<T> bundle first, reusing the same
+  emitted_vec_bundles tracking set the existing early pass uses. LLVM
+  backend was never affected (Vec types there are plain named LLVM
+  struct types with no forward-declaration ordering requirement the way
+  C typedefs have).
+
+  New regression tests: closure_typed_param_with_no_matching_literal_
+  in_program_compiles, closure_shape_referencing_vec_with_no_prior_
+  vec_usage_compiles_on_c (lib.rs, compile-only), lli_runs_closure_
+  typed_fn_defined_separately_from_its_matching_literal (backend_llvm.rs,
+  actually executes). 105-test regression spot-check clean. Full
+  vani-optimize suite (4 test files) re-verified passing on both
+  backends; vani-ml's 4 test files + example re-verified passing on both
+  backends too.
+
+  Not published: vani-optimize v0.1.5 changes are committed and pushed
+  to its own repo, but vanic publish was not run -- stopping for an
+  explicit go-ahead before touching the Kosh registry.

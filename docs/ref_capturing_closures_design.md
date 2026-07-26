@@ -1,12 +1,27 @@
-# Ref-capturing closures — scoping + implementation log (v-fix, v1, v2 done)
+# Ref-capturing closures — scoping + implementation log (v-fix, v1, v2, v3 done)
 
-**Status:** v-fix, v1, and v2 implemented and pushed 2026-07-25. v3
-(update `vani-optimize`'s signature) **not started** — confirm before
-starting, per this document's own "confirm before starting each phase"
-rule. Written 2026-07-25 in response to a real, repeated need (`vani-ml`
+**Status:** all four phases (v-fix, v1, v2, v3) implemented and pushed
+2026-07-25. Written in response to a real, repeated need (`vani-ml`
 v0.1.0's `logreg_fit` couldn't reuse `vani-optimize`'s
 `gradient_descent_fixed`/`backtracking` for exactly this reason — see
 `kosh-index/ROADMAP.md`'s "ML tier" section).
+
+**v3 used the additive approach, not the "instead of" wording this
+document originally used**: `Closure(...)->...` and `fn(...)->...` have
+no implicit coercion (confirmed by direct test), so changing
+`vani-optimize`'s existing functions' parameter types outright would have
+broken every current caller, including its own tests/examples. Added
+`gradient_descent_fixed_closure`/`armijo_line_search_closure`/
+`gradient_descent_backtracking_closure` instead, leaving the originals
+untouched — genuinely a minor version bump (v0.1.5), zero breakage.
+
+**Two more real bugs found and fixed validating v3 (BUG-10, BUG-11)** —
+see `docs/TODO_CURRENT.md`. BUG-10 was severe: without it, v3 as written
+would have broken *every* existing `vani-optimize` consumer, not just
+been inert for them (any program including the new functions — even
+unused — failed to compile, since the closure struct typedef they
+reference was never emitted unless a matching closure literal happened
+to exist in the same compiled program).
 
 **Known remaining gap, found while building v2 (filed as BUG-9, NOT
 fixed)**: v2's Return/push checks are sound, but the FieldAssign check
@@ -193,7 +208,7 @@ more value shape (a `Closure`'s synthesized env), not a new subsystem.
 | ~~v-fix~~ ✅ done 2026-07-25 | Fix BUG-7 (checker: escape-analyzer bypass) and BUG-8 (LLVM backend: garbage value reading a `ref`-typed Vec field), found along the way. | -- | Both fixed same day. BUG-7: `compute_ref_aliases_from_let_rhs` gained a `StructLit` arm, the `Stmt::Let` guard was relaxed to run it unconditionally. BUG-8: an extra `load` to dereference a field-slot address before treating it as the Vec's own address. 16+32-test regression spot-check clean, all four `vani-ml` tests still pass. See `docs/TODO_CURRENT.md`'s BUG-7/BUG-8 entries for full detail. |
 | ~~v1~~ ✅ done 2026-07-25 | Extended `lambda_lift_program`'s Arc-5c path (`checker.rs`, previously gated `if ref_captures_clone.is_empty()`, now runs unconditionally) to also synthesize an env-struct + magic-make-closure call when ref-captures are present, with `Ref<T>` env-struct fields (the typing already used for the inline path). Produces a real `Closure` value for a ref-capturing closure for the first time — verified end-to-end: `apply(g, 5)` where `g` ref-captures a `Vec<f64>` now runs correctly on **both** backends. | v-fix | Mechanical extension, as predicted — but the C backend needed its own fix: the closure-registry codegen used `c_leaf_type` (a `&'static str` lookup for simple types only) on the capture types, which produced the invalid placeholder `/* ref */` for a `Ref<Vec<T>>` capture. Fixed by switching to `format_declarator` (the same function real `ref T` function parameters already render through, so the `const`-qualified spelling matches the hoisted function's own separately-emitted declaration byte-for-byte — an earlier attempt using `c_element_storage` compiled but produced a `const`-mismatch warning-then-hard-conflicting-declaration error). No LLVM backend changes needed at all — its trampoline/constructor codegen was already fully generic over the capture type. New tests: `lli_runs_ref_capturing_closure_passed_as_higher_order_fn_arg` (`backend_llvm.rs`, actually executes), `ref_capturing_closure_as_value_passes_to_higher_order_fn` (`lib.rs`, pins both backends' generated shape). 74-test regression spot-check clean (closures + L4/escape + struct-field/Vec-indexing), all four `vani-ml` tests + the example on both backends still pass. **No non-escape enforcement yet** — a ref-capturing `Closure` value can currently be returned/stored/escaped with no safety check at all; that's v2, not yet started. |
 | ~~v2~~ ✅ done 2026-07-25 | Non-escape enforcement: reject any use of a ref-capturing `Closure` value that would let it outlive a captured ref's scope. | v1 | Turned out smaller than the "highest-risk" label implied, because it reduced almost entirely to **alias propagation into machinery that already existed**: `compute_ref_aliases_from_let_rhs` gained a `Call`-to-magic-make-closure arm (mirroring BUG-7's `StructLit` arm) so a `Closure`-typed binding gets correct `ref_aliases`; the *existing* Return and FieldAssign escape checks then reject it with zero further changes (neither has a restrictive type guard). The `push` check *did* need a one-line widening (its guard only fired for `Vec<ref T>` elements; extended to also cover `Vec<Closure(...)->...>`). Verified: `return g;` (direct + two-hop `let`-chain) and `push(mut ref closures, g)` into an outer-scope `Vec<Closure>` are both now rejected with clear diagnostics; passing `g` as a call argument or calling it directly are both unaffected (Call args were already a "consuming position," per L4 Phase 3's original design). Two new negative-case tests (`ref_capturing_closure_returned_directly_is_rejected`, `ref_capturing_closure_pushed_into_outer_scope_vec_is_rejected`, `lib.rs`) plus a 97-test regression spot-check. **Found and filed BUG-9 along the way** (not fixed) — see below; a real, pre-existing gap unrelated to closures specifically, but one that undercuts the FieldAssign half of this phase's guarantee in one specific shape. |
-| v3 | Update `vani-optimize` (and any other package with a fixed `fn(ref Vec<f64>, i64) -> f64`-style objective parameter) to accept `Closure(...)->...` instead of `fn(...)->...`, so `vani-ml`'s `logreg_fit` (and the future autodiff core) can actually pass a ref-capturing closure through. | v2 | Low — signature-type change in an already-published package, republish as a minor version bump. This is the actual payoff step; nothing upstream of it changes `vani-ml`'s behavior. |
+| ~~v3~~ ✅ done 2026-07-25 | Added `_closure`-suffixed variants (`gradient_descent_fixed_closure`, `armijo_line_search_closure`, `gradient_descent_backtracking_closure`) to `vani-optimize` accepting `Closure(...)->...`, additive alongside the untouched originals. | v2 | Turned out **not** low-risk as originally estimated — found BUG-10 (a function merely *taking* a `Closure`-typed parameter, with no matching closure literal anywhere in the program, failed to compile on both backends) and BUG-11 (C-backend-only: a closure shape referencing `Vec<T>` could have its typedef ordered before `Vec<T>`'s own). BUG-10 in particular meant the additive approach would otherwise have broken every existing `vani-optimize` consumer outright, not just been a no-op for them — this was the real risk in v3, not the signature-type change itself. Both fixed same day; see `docs/TODO_CURRENT.md`. `vani-optimize` v0.1.5 committed and pushed to its own repo; **not published** to the Kosh registry (stopped for an explicit go-ahead, per this session's pattern). |
 
 **Recommended order**: ~~v-fix~~ → ~~v1~~ → ~~v2~~ → v3. **Confirm before
 starting each phase** — v-fix, v1, and v2 are done (2026-07-25); v3 still
