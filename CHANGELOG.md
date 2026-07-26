@@ -1,5 +1,31 @@
 # Changelog
 
+## [v0.9.0] — 2026-07-26
+
+### Added
+
+- **Ref-capturing closures can now be real `Closure` values** — a `[ref name]`-capturing closure (previously only usable as a same-scope call-by-name shorthand) can now be passed as an argument to a `Closure(...)->...`-typed higher-order function parameter, on both backends.
+- **Non-escape enforcement for ref-capturing closures** — returning one, or storing one in an outer-scope `Vec<Closure(...)->...>`, is now rejected at compile time with a clear diagnostic, matching the existing protection for plain `ref` locals.
+- **`vani-optimize` (Kosh package) gained `Closure`-accepting variants** of its gradient-descent functions (`gradient_descent_fixed_closure`, `armijo_line_search_closure`, `gradient_descent_backtracking_closure`), additive alongside the originals — lets an objective function capture data by reference instead of needing it as a global.
+
+### Fixed
+
+- **BUG-5 / L25**: `print`/`f64_to_str` scientific-notation exponent width differed between the C and LLVM backends on Windows (`1e+06` vs `1e+006`).
+- **BUG-6**: a standalone unary-minus float literal (e.g. `-3.0` as a bare call argument) panicked the LLVM backend at codegen, even though `vanic check` accepted it cleanly.
+- **BUG-7**: the scope-escape analyzer missed a struct-with-ref-field escaping through an intermediate `let` binding — confirmed via direct execution as a live dangling reference, not just a diagnostic-timing gap.
+- **BUG-8 (LLVM backend only)**: indexing through a `ref`-typed `Vec` struct field silently read garbage — the field's own struct address was used one pointer level too shallow.
+- **BUG-9**: the `FieldAssign` scope-escape check could be fooled when the assignment target was reached through a `ref`/`mut ref` parameter rather than an owned local (the parameter's lexical depth doesn't reflect the real, longer, caller-side lifetime of what it points to).
+- **BUG-10**: a function merely *taking* a `Closure(...)->...`-typed parameter failed to compile unless some closure literal elsewhere in the same program happened to construct that exact shape — would have broken every existing consumer of a library adding such a function, not just been inert for them.
+- **BUG-11 (C backend only)**: a closure shape referencing a `Vec<T>` could have its struct typedef ordered before `Vec<T>`'s own, if nothing else in the program triggered early Vec-bundle emission.
+- **BUG-12**: the `push()` scope-escape check had the identical `mut-ref`-parameter flaw BUG-9 fixed for `FieldAssign`, for the same reason.
+
+### Documentation
+
+- `tutorials/src/intermediate/06_closures.md`, `06a_closures_primer.md`, and `03e_lifetimes_primer.md` updated — all three previously claimed ref-capturing closures were entirely unsupported; corrected, with a verified worked example added to the main closures chapter.
+- New `docs/ref_capturing_closures_design.md` records the full scoping, implementation, and bug-fix history behind this release's closures work.
+
+---
+
 ## [v0.8.1] — 2026-07-24
 
 ### Added
