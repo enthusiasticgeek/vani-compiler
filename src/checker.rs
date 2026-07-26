@@ -9272,6 +9272,15 @@ fn check_function(
     // function's `requires` clauses, grows with each `let r = call(...)` whose
     // callee has `ensures` clauses (substituted to refer to `r`).
     let mut smt_facts: Vec<Expr> = function.requires.clone();
+    // BUG-12 fix (2026-07-26): record this function's own parameter
+    // names for scope-escape checks that can't reach `function` directly
+    // (see `CURRENT_FN_PARAMS`'s doc comment in ast.rs). Functions are
+    // checked one at a time, never concurrently within a compile, so a
+    // plain overwrite-before-checking-the-next-function is sufficient --
+    // no push/pop stack needed.
+    crate::ast::CURRENT_FN_PARAMS.with(|r| {
+        *r.borrow_mut() = function.params.iter().map(|p| p.name.clone()).collect();
+    });
     let terminated = check_stmt_list(
         &function.body,
         &mut env,
@@ -23556,6 +23565,25 @@ fn check_push_builtin(
     if matches!(element_type, Type::Ref(_) | Type::RefMut(_) | Type::Closure(_, _)) {
         if let Some(vec_name) = root_var_of_expr(&args[0]) {
             if let Some(vec_depth) = env.lookup_depth(&vec_name) {
+                // BUG-12 fix (2026-07-26): whether to apply the
+                // parameter-only rule below must be decided from the
+                // *binding*'s own declared type, not from `args[0]`'s
+                // checked type / `in_place`. `push(mut ref xs, ...)`
+                // legitimately produces a `RefMut` *call-site expression*
+                // even when `xs` itself is an ordinary owned local (the
+                // `mut ref` there is just the in-place-push syntax, not
+                // evidence `xs` is a ref binding) -- using `in_place`
+                // directly caused a real regression: it rejected pushing
+                // a same-function local's ref into a same-function
+                // owned Vec, which is exactly what the pre-existing
+                // depth check already handled correctly. Only when `xs`
+                // is ITSELF declared as a `ref`/`mut ref` binding (a
+                // parameter, or a ref local) does its real Vec live
+                // outside this function's own depth-tracked scopes.
+                let vec_is_ref_binding = env
+                    .lookup(&vec_name)
+                    .map(|info| matches!(info.ty, Type::Ref(_) | Type::RefMut(_)))
+                    .unwrap_or(false);
                 let mut ref_sources: Vec<(String, Span)> = Vec::new();
                 collect_ref_sources_in_expr(&args[1], &mut ref_sources);
                 // L4 (C) Phase 4: also resolve Var args of ref type
@@ -23564,6 +23592,52 @@ fn check_push_builtin(
                 // ref bindings or a ref-returning function call.
                 collect_var_ref_aliases(&args[1], env, &mut ref_sources);
                 for (src_name, ref_span) in &ref_sources {
+                    // BUG-12 fix (2026-07-26): same issue BUG-9 fixed for
+                    // FieldAssign. When `xs` is itself declared as a
+                    // `ref`/`mut ref` binding (`vec_is_ref_binding`,
+                    // computed above from the binding's own type, NOT
+                    // from the call-site expression), its real Vec lives
+                    // in whatever frame handed us that ref -- almost
+                    // always the caller's, which outlives this entire
+                    // function. `vec_depth` (xs's own lexical depth
+                    // within this function) says nothing about that real
+                    // lifetime, so the depth comparison below is unsound
+                    // for this case -- confirmed via direct test with
+                    // the exact BUG-9 repro shape (`push` instead of a
+                    // field-assign). Match `Return`/`FieldAssign`'s rule
+                    // instead: only a ref sourced from one of the
+                    // CURRENT function's own parameters is safe to push
+                    // through such a target. `CURRENT_FN_PARAMS` (set
+                    // once per function by `check_function`) stands in
+                    // for `function.params`, which isn't reachable here
+                    // -- this code lives in `check_push_builtin`, called
+                    // from `check_call`, neither of which carries
+                    // `&Function`.
+                    if vec_is_ref_binding {
+                        let is_param = crate::ast::CURRENT_FN_PARAMS
+                            .with(|r| r.borrow().contains(src_name));
+                        if !is_param {
+                            diagnostics.push(
+                                Diagnostic::new(
+                                    *ref_span,
+                                    format!(
+                                        "ref to '{}' cannot be pushed into '{}' (a `mut \
+                                         ref` parameter) â€” the Vec '{}' points to lives \
+                                         in the caller's frame, which outlives '{}'. Only \
+                                         a ref to one of this function's own parameters \
+                                         can safely be pushed here.",
+                                        src_name, vec_name, vec_name, src_name
+                                    ),
+                                )
+                                .with_elaboration(
+                                    crate::diagnostic_elaborations::scope_escape_deeper(
+                                        src_name,
+                                    ),
+                                ),
+                            );
+                        }
+                        continue;
+                    }
                     if let Some(src_depth) = env.lookup_depth(src_name) {
                         if src_depth > vec_depth {
                             diagnostics.push(

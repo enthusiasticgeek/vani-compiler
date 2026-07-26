@@ -263,6 +263,25 @@ thread_local! {
     /// static __thread allocation.
     pub(crate) static CLOSURE_AFF_ENV_SET: std::cell::RefCell<std::collections::HashSet<String>> =
         std::cell::RefCell::new(std::collections::HashSet::new());
+    /// BUG-12 fix (2026-07-26): the current function's own parameter
+    /// names, set once by `check_function` right before it checks that
+    /// function's body, read by scope-escape checks that need "is this
+    /// binding a parameter of the function being checked right now" but
+    /// don't have `&Function` threaded to where they live (e.g. `push`'s
+    /// check in `check_push_builtin`, reached via `check_call`, which is
+    /// called from many places that don't carry `function`). A parameter
+    /// is safe to store through a `mut ref` target (its referent lives in
+    /// the caller's frame, same as whatever the `mut ref` points at); an
+    /// ordinary local isn't, regardless of lexical depth -- see BUG-9's
+    /// fix in `check_one_stmt` (which reads `function.params` directly,
+    /// since it already has `function` in scope) for the same rule
+    /// applied to `FieldAssign`. Avoids threading a new parameter through
+    /// `check_call` and its many call sites, mirroring how
+    /// `CLOSURE_MAKE_REGISTRY` and friends already carry per-compile
+    /// ambient context via thread-locals rather than a wider signature
+    /// change.
+    pub(crate) static CURRENT_FN_PARAMS: std::cell::RefCell<std::collections::HashSet<String>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
     /// Arc 8 v3.1 Phase 1 — registry of synthesized async-fn
     /// state machines. Each entry is a `(StructDecl, Function)`
     /// pair: the per-async-fn task struct + its companion

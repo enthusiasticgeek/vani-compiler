@@ -1736,44 +1736,67 @@ one graph (Cargo-style per-edge resolution); semver-range-based version
   to its own repo, but vanic publish was not run -- stopping for an
   explicit go-ahead before touching the Kosh registry.
 
-## BUG-12, found fixing BUG-9 (added 2026-07-26)
+## BUG-12, found fixing BUG-9 (added 2026-07-26, fixed same day)
 
-- [ ] **BUG-12. `push`'s scope-escape check has the same
+- [x] **BUG-12. `push`'s scope-escape check has the same
   `lookup_depth`-through-a-`mut ref`-parameter flaw BUG-9 had for
-  FieldAssign.** Not fixed. `push(mut ref xs, ref X)`'s L4 Phase 4 check
-  (`checker.rs`, guards `Vec<ref T>` / `Vec<Closure(...)->...>` element
-  types) compares `env.lookup_depth(vec_name)` against the pushed ref's
-  depth, the exact pattern BUG-9 fixed for FieldAssign. When `xs` is
-  itself a `mut ref Vec<...>` parameter (so the real Vec lives in the
-  caller's frame), the same conflation applies: a same-depth local ref
-  source isn't flagged as unsafe even though it's shorter-lived than the
-  parameter's real referent.
+  FieldAssign.** ✅ fixed 2026-07-26. `push(mut ref xs, ref X)`'s L4
+  Phase 4 check (`checker.rs`, guards `Vec<ref T>` / `Vec<Closure(...)->
+  ...>` element types) compared `env.lookup_depth(vec_name)` against the
+  pushed ref's depth, the exact pattern BUG-9 fixed for FieldAssign. When
+  `xs` is itself a `mut ref Vec<...>` parameter (so the real Vec lives in
+  the caller's frame), the same conflation applied: a same-depth local
+  ref source wasn't flagged as unsafe even though it's shorter-lived than
+  the parameter's real referent.
 
   ```vani
   fn fill(xs: mut ref Vec<ref Vec<f64>>) -> i64 {
       let v: Vec<f64> = vec(1.0, 2.0, 3.0);
-      push(xs, ref v);   // vanic check: ok -- should be rejected
+      push(xs, ref v);   // was: vanic check ok -- now correctly rejected
       return 0;
   }
   ```
-  Confirmed accepted by `vanic check` (not independently confirmed as a
-  garbage-read at runtime the way BUG-7/8/9 were — the specific repro
-  tried hit an unrelated, pre-existing codegen gap, "Index on unsupported
-  base" for double-indexing through `Vec<ref T>`, before a read could be
-  observed — but the root cause is identical to BUG-9's, already proven
-  unsound there, so treat this as real pending that confirmation).
 
-  **Why not fixed alongside BUG-9**: the FieldAssign fix could reuse
-  `function: &Function` (and therefore `function.params`), already in
-  scope in `check_one_stmt`. The push check lives in
-  `check_push_builtin`, called from `check_call` — neither currently
-  receives `function`, and `check_call` is a widely-called, deeply
-  nested part of the checker (used from many `check_expr` call sites).
-  Threading "is this name a parameter of the current function" through
-  that path is a bigger, higher-blast-radius change than BUG-9's fix,
-  needs its own careful pass (or a lower-risk mechanism, e.g. a
-  thread-local set of the current function's parameter names, populated
-  at function-entry the way `CLOSURE_MAKE_REGISTRY` is populated
-  per-compile) — not attempted here. Also inherited by ref-capturing
-  closures v2's `Vec<Closure(...)->...>` push protection, same as BUG-9
-  was inherited by v2's FieldAssign protection.
+  **Fix required more than mirroring BUG-9's fix directly.** The push
+  check's `check_push_builtin` (called from `check_call`) doesn't have
+  `function: &Function` in scope the way `check_one_stmt` (FieldAssign's
+  home) does, and `check_call` is called from 8+ places throughout the
+  checker — threading a new parameter through all of them would have
+  been a much bigger, higher-blast-radius change. Used a thread-local
+  instead, matching this file's own existing pattern for exactly this
+  kind of ambient per-compile context (`CLOSURE_MAKE_REGISTRY` etc.):
+  new `CURRENT_FN_PARAMS: RefCell<HashSet<String>>` in `ast.rs`, set once
+  by `check_function` right before it checks that function's body (a
+  plain overwrite is sufficient — functions are never checked
+  concurrently within one compile), read by the push check in place of
+  `function.params`.
+
+  **A real regression was caught and fixed before landing this**: the
+  first attempt reused `in_place` (derived from `push`'s first-argument
+  *call-site expression* type) to decide when to apply the
+  parameter-only rule. That's wrong — `push(mut ref xs, ...)` produces a
+  `RefMut` call-site type even when `xs` itself is an ordinary *owned
+  local* Vec (the `mut ref` there is just the in-place-push syntax,
+  unrelated to whether `xs`'s own binding is a ref). Using `in_place`
+  directly rejected a legitimate same-function, same-scope push that the
+  pre-existing depth check already handled correctly — caught by testing
+  the positive control before considering the fix done, not by a
+  pre-existing regression test. Fixed by checking the *binding*'s own
+  declared type (`env.lookup(vec_name)`) instead of the call-site
+  expression's type: only when `xs` is *itself* declared `ref`/`mut ref`
+  (a parameter, or a ref local) does the parameter-only rule apply.
+
+  New tests: `bug12_push_through_mut_ref_vec_param_with_local_source_is_
+  rejected`, `..._with_param_source_still_accepted`, and
+  `bug12_regression_owned_local_vec_pushed_via_mut_ref_syntax_still_
+  accepted` (the regression guard, `lib.rs`). 114-test regression
+  spot-check clean (including the pre-existing `vec_of_ref_phase4_push_
+  accepts_same_scope_source` and `vec_ref_push_after_source_borrow_ends_
+  compiles`, which would have caught the `in_place` regression had it
+  shipped); `vani-ml` and `vani-optimize`'s full suites re-verified on
+  both backends. Also fixes the analogous hole in ref-capturing closures
+  v2's `Vec<Closure(...)->...>` push protection, same as BUG-9 fixed it
+  for v2's FieldAssign protection.
+
+  **All bugs found this session (BUG-6 through BUG-12) are now fixed.
+  None remain open.**

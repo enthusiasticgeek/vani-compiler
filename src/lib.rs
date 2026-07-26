@@ -9812,6 +9812,89 @@ mod tests {
     }
 
     #[test]
+    fn bug12_push_through_mut_ref_vec_param_with_local_source_is_rejected() {
+        // BUG-12 (found fixing BUG-9, fixed same pass, 2026-07-26): the
+        // identical flaw BUG-9 had for FieldAssign, but for push().
+        // `push(mut ref xs: Vec<ref T>, ref X)`'s scope-escape check
+        // compared `env.lookup_depth(vec_name)` (xs's own lexical depth
+        // WITHIN THE CURRENT FUNCTION) against the pushed ref's depth.
+        // When `xs` is itself a `mut ref Vec<...>` PARAMETER, its real
+        // Vec lives in the caller's frame -- categorically longer-lived
+        // than anything local -- but the depth comparison couldn't tell
+        // the difference. Fixed the same way as BUG-9: when the Vec
+        // binding is itself declared as a ref/mut-ref (not just
+        // borrowed via `mut ref` at the push call site -- see the next
+        // test for why that distinction matters), only a ref sourced
+        // from one of the current function's own parameters is accepted.
+        let source = r#"
+            fn fill(xs: mut ref Vec<ref Vec<f64>>) -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                push(xs, ref v);
+                return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let err = compile(source).expect_err(
+            "pushing a ref to a function-local through a mut-ref Vec parameter must be rejected",
+        );
+        let combined = err.iter().map(|d| d.message.as_str()).collect::<Vec<_>>().join("\n");
+        assert!(
+            combined.contains("cannot be pushed into") && combined.contains("mut ref"),
+            "expected a mut-ref-parameter push-escape diagnostic, got: {}",
+            combined
+        );
+    }
+
+    #[test]
+    fn bug12_push_through_mut_ref_vec_param_with_param_source_still_accepted() {
+        // Positive control, mirroring BUG-9's: pushing a ref sourced
+        // from one of the current function's own parameters through a
+        // mut-ref Vec parameter is legitimate and must still compile.
+        let source = r#"
+            fn fill(xs: mut ref Vec<ref Vec<f64>>, src: ref Vec<f64>) -> i64 {
+                push(xs, src);
+                return 0;
+            }
+            fn main() -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let xs: Vec<ref Vec<f64>> = vec();
+                fill(mut ref xs, ref v);
+                return 0;
+            }
+        "#;
+        compile(source).expect("pushing a ref sourced from a parameter must still compile");
+    }
+
+    #[test]
+    fn bug12_regression_owned_local_vec_pushed_via_mut_ref_syntax_still_accepted() {
+        // Regression guard found *while fixing* BUG-12: the first fix
+        // attempt used `in_place` (derived from push's first-argument
+        // call-site EXPRESSION type) to decide whether to apply the
+        // parameter-only rule. That's wrong -- `push(mut ref xs, ...)`
+        // produces a `RefMut` call-site type even when `xs` itself is
+        // an ordinary OWNED local Vec (the `mut ref` there is just the
+        // in-place-push syntax, unrelated to whether `xs`'s own binding
+        // is a ref). Using `in_place` directly caused a real regression:
+        // it rejected this exact same-function, same-scope push, which
+        // the pre-existing depth-based check already handled correctly.
+        // Fixed by checking the *binding*'s own declared type
+        // (`env.lookup(vec_name)`) instead of the call-site expression's
+        // type -- only a `xs` that's ITSELF declared `ref`/`mut ref`
+        // (a parameter, or a ref local) triggers the parameter-only rule.
+        let source = r#"
+            fn main() -> i64 {
+                let v: Vec<f64> = vec(1.0, 2.0, 3.0);
+                let xs: Vec<ref Vec<f64>> = vec();
+                push(mut ref xs, ref v);
+                return 0;
+            }
+        "#;
+        compile(source).expect(
+            "pushing a same-scope local's ref into an owned local Vec (via mut ref syntax) must still compile",
+        );
+    }
+
+    #[test]
     fn can_let_bind_reference() {
         // L4 (B) Phase 1 (2026-06-08): refs in let bindings are
         // now accepted (was: rejected with "cannot be stored in
