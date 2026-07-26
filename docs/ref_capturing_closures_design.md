@@ -273,18 +273,23 @@ needed. Verified: the repro above now rejects; a positive control
 spot-check clean; `vani-ml`/`vani-optimize` full suites re-verified on
 both backends.
 
-**BUG-12, found immediately after (NOT fixed)**: `push(mut ref xs, ref
-X)`'s scope-escape check has the identical `lookup_depth`-through-a-
-`mut-ref`-parameter flaw, confirmed via direct test. Not fixed in the
-same pass: unlike FieldAssign, the push check (`check_push_builtin`,
-called from `check_call`) doesn't have `function: &Function` in scope,
-and `check_call` is a much more widely-called part of the checker —
-threading a "current function's parameter names" signal through it is a
-bigger, higher-blast-radius change than BUG-9's fix was, and needs its
-own careful pass rather than being folded into this one. See
-`docs/TODO_CURRENT.md`'s BUG-12 entry for the full repro and a sketch of
-lower-risk fix shapes (e.g. a thread-local populated per-function-entry,
-avoiding the `check_call` plumbing entirely).
+**BUG-12, found immediately after, ✅ fixed 2026-07-26**: `push(mut ref
+xs, ref X)`'s scope-escape check had the identical `lookup_depth`-
+through-a-`mut-ref`-parameter flaw, confirmed via direct test. Fixed
+differently from BUG-9, not by mirroring it directly: the push check
+(`check_push_builtin`, called from `check_call`) doesn't have `function:
+&Function` in scope, and `check_call` is called from 8+ places — instead
+of threading a new parameter through all of them, added a thread-local
+(`CURRENT_FN_PARAMS` in `ast.rs`, matching this codebase's existing
+ambient-context pattern like `CLOSURE_MAKE_REGISTRY`), set once per
+function by `check_function`. A real regression was caught and fixed
+before landing this: the first attempt keyed off `in_place` (the push
+call-site expression's type), which can't distinguish "`xs` is itself a
+ref/mut-ref binding" from "`xs` is an owned local explicitly borrowed via
+`mut ref` at the call site" — using it directly broke a legitimate
+same-function push. Fixed by checking the *binding's* own declared type
+instead. See `docs/TODO_CURRENT.md`'s BUG-12 entry for the full writeup
+including the regression-test that guards against re-breaking this.
 
 ---
 

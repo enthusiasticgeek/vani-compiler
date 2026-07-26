@@ -8,11 +8,11 @@
 ## Current status (as of 2026-07-26)
 
 - **Version**: `0.8.2-dev` (tagged v0.1.0 through v0.8.2-dev; see RELEASING.md for full history).
-- **Tests**: 2579+ lib tests passing (new since 2026-07-13: BUG-6 through BUG-11
+- **Tests**: 2582+ lib tests passing (new since 2026-07-13: BUG-6 through BUG-12
   regression tests, see below).
 - **Dialects**: 62 across 26 scripts.
 - **Blocked**: macOS hardware, grammar consultant, proper IOCP, crates.io API token.
-- **2026-07-25/26 session**: BUG-6 through BUG-11 found and fixed (real
+- **2026-07-25/26 session**: BUG-6 through BUG-12 found and fixed (real
   dangling-reference / codegen-correctness bugs, not just missing
   features — see [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for full
   writeups). Ref-capturing closures went from "scoped only" to fully
@@ -20,11 +20,7 @@
   enforcement), and v3 (`vani-optimize` v0.1.5 gained `Closure`-accepting
   variants) all shipped — see
   [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md).
-  One item found but deliberately not fixed this session: **BUG-12**
-  (`push`'s scope-escape check has the same `mut-ref`-parameter flaw
-  BUG-9 fixed for `FieldAssign`) — needs threading parameter-name
-  context through the much more widely-called `check_call`, a bigger
-  change than fit in this pass.
+  **No known bugs remain open** as of this session's end.
 
 ## Open items (summary)
 
