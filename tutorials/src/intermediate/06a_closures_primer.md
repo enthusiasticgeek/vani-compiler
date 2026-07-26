@@ -220,12 +220,34 @@ scope, the compiler decides HOW to capture it:
   longer use the variable.
 - **By copy** -- for Copy types (i64, bool, etc.). The closure
   gets a copy; the surrounding scope's binding is unchanged.
+- **By reference** (`[ref name]`, 2026-07-25) -- an explicit
+  capture-list, written between the closure's return type and
+  its body, names exactly which free variables to borrow instead
+  of move/copy: `fn(x: i64) -> f64 [ref data] { ... data[x] ... }`.
+  Useful for a non-Copy value (like a `Vec`) the closure only
+  needs to *read*, where moving would take ownership away from
+  the surrounding scope unnecessarily. The captured reference's
+  lifetime is checked the same way any other `ref` is: the
+  closure (and anything built from it) can't outlive what it
+  borrowed -- see the next paragraph for exactly what that does
+  and doesn't allow yet.
 
-vāṇी's v1 closures don't currently capture by reference (only
-by value or copy). This is a deliberate restriction -- by-ref
-capture would interact in tricky ways with the affine
-ownership rules. It can be added later if real use cases
-surface.
+**Current limits on `[ref name]`, worth knowing going in**: the
+closure can be called directly by name in the same scope, or
+passed as an argument to another function, right away -- both
+work today. What's *not* yet allowed is treating it as a value
+that outlives the scope where it captured the reference: return
+it from the enclosing function, store it in a struct field or a
+`Vec`, or otherwise let it escape past its captured data's
+lifetime -- the compiler rejects all of those with a dangling-
+reference diagnostic, the same class of check that guards a
+plain `ref` local. If you need a closure to outlive its creating
+scope while still borrowing, that's not supported (see
+`vani-compiler/docs/ref_capturing_closures_design.md` for the
+full design writeup, including why -- short version: it needs
+real lifetime-variable tracking, which v1 deliberately doesn't
+have; a non-escaping `[ref name]` closure gets you most of the
+practical value without needing that).
 
 ## When NOT to use closures
 
@@ -261,8 +283,11 @@ If none of those apply, write a plain `fn`.
 - **Lambda lifting** is the compile-time transformation that
   turns the closure expression into a top-level function +
   env struct.
-- vāṇी v1 captures by value (for owning types) or by copy
-  (for Copy types). No by-reference capture yet.
+- vāṇी captures by value (for owning types), by copy (for Copy
+  types), or by reference via an explicit `[ref name]` list. A
+  `[ref name]`-capturing closure can be called directly or
+  passed as an argument today, but can't yet escape its creating
+  scope as a stored/returned value.
 - Use closures for: capturing local context, passing to
   higher-order functions, returning from factories. For
   everything else, plain `fn` is better.

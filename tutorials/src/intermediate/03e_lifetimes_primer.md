@@ -337,9 +337,21 @@ not supported is multi-lifetime structs.
 
 ```vani
 // Path D -- closures + lifetimes is genuinely complex.
-// vāṇी v1 closures don't capture refs that outlive the
-// declaration scope.
+// vāṇी closures CAN capture by reference (`[ref name]`, see
+// Intermediate 6/6a) and can be passed around as real values --
+// but a ref-capturing closure can't yet be returned, stored in a
+// struct/Vec, or otherwise made to outlive the scope where it
+// captured the reference. That specific escape shape is what's
+// still rejected here, not by-ref capture itself.
 ```
+
+This is narrower than it used to be. `[ref name]` closures were
+extended in 2026-07-25 to work as genuine values (not just as a
+same-scope call-by-name shorthand) with a real non-escape check —
+see `docs/ref_capturing_closures_design.md` for the full design and
+why the general case (letting one escape to a caller who keeps the
+borrowed data alive) still needs real lifetime-variable tracking,
+i.e. still needs path-D.
 
 ## Why this design
 
@@ -518,9 +530,12 @@ Caller matches on the Option before dereferencing.
 - The compiler tracks the lifetime relationship through
   chained ref-returning calls -- `let r2 = shared(r1)`
   inherits r1's source.
-- Multi-lifetime struct definitions and ref-capturing
-  closures are deferred ("path D" -- explicit lifetime
-  syntax). v1 doesn't ship them.
+- Multi-lifetime struct definitions are deferred ("path D" --
+  explicit lifetime syntax); v1 doesn't ship them. Ref-capturing
+  closures are narrower than that: they work as real values
+  (pass as an argument, call directly) with a genuine non-escape
+  check, just not yet for the "outlive the creating scope" shape
+  -- see the "Closures capturing refs" section above.
 
 The takeaway: **vāṇी has lifetimes -- they're just always
 implicit.** The single-param elision rule + automatic

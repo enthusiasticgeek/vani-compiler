@@ -84,6 +84,38 @@ max = 5
   compile error (affine / FnOnce semantics). See
   [06a -- closures primer](06a_closures_primer.md) for the
   full capture rules.
+- **Capturing by reference**: write an explicit `[ref name]`
+  list between the return type and the body to borrow a
+  variable instead of moving/copying it:
+
+  ```vani
+  fn apply(f: Closure(i64) -> f64, x: i64) -> f64 {
+    return f(x);
+  }
+
+  fn main() -> i64 {
+    let data: Vec<f64> = vec(1.0, 2.0, 3.0);
+    let lookup: fn(i64) -> f64 = fn(x: i64) -> f64 [ref data] {
+      return data[x];
+    };
+    print "lookup(2) =", apply(lookup, 2);   // 3.0 -- data borrowed, not moved
+    print "still usable:", data[0];          // 1.0 -- `data` wasn't consumed
+    return 0;
+  }
+  ```
+
+  Note the parameter type on the receiving side: a function that
+  accepts a closure *value* (to store it, pass it along, or call
+  it indirectly through a variable) must declare that parameter
+  as `Closure(...) -> R`, not `fn(...) -> R` — the two don't
+  implicitly convert into each other. A closure with no captures,
+  or one you only ever call directly by its own `let` name in the
+  same scope, can still use the plain `fn(...) -> R` type. See
+  [06a's capture rules](06a_closures_primer.md#the-capture-rules)
+  for what a `[ref name]`-capturing closure can and can't do yet
+  as a value (short version: pass it as an argument or call it
+  directly — yes; return it or store it past its capture's scope
+  — not yet).
 - **Statement-style body only**: `fn(x) -> i64 { return x + x; }`,
   not `fn(x) => x + x`. The expression-body sugar is deferred.
 
