@@ -5,22 +5,26 @@
 > The canonical current work queue (actionable, checkbox-ordered) is in
 > **[docs/TODO_CURRENT.md](docs/TODO_CURRENT.md)**.
 
-## Current status (as of 2026-07-25)
+## Current status (as of 2026-07-26)
 
 - **Version**: `0.8.2-dev` (tagged v0.1.0 through v0.8.2-dev; see RELEASING.md for full history).
-- **Tests**: 2571+ lib tests passing (new since 2026-07-13: BUG-6/7/8 regression tests, see below).
+- **Tests**: 2579+ lib tests passing (new since 2026-07-13: BUG-6 through BUG-11
+  regression tests, see below).
 - **Dialects**: 62 across 26 scripts.
 - **Blocked**: macOS hardware, grammar consultant, proper IOCP, crates.io API token.
-- **2026-07-25 session**: BUG-6 (LLVM backend panic on standalone unary-minus
-  float literal), BUG-7 (scope-escape analyzer bypass — a real dangling-
-  reference bug), and BUG-8 (garbage read through a `ref`-typed Vec struct
-  field, LLVM-only) all found and fixed — see
-  [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for full writeups. Also:
-  ref-capturing closures scoped (not implemented) in
-  [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md) —
-  the "no compiler prerequisite" conclusion from `docs/decisions.md`'s
-  2026-06-09 path-D decision was revisited and reaffirmed, but the actual
-  gap turned out narrower than previously documented.
+- **2026-07-25/26 session**: BUG-6 through BUG-11 found and fixed (real
+  dangling-reference / codegen-correctness bugs, not just missing
+  features — see [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md) for full
+  writeups). Ref-capturing closures went from "scoped only" to fully
+  implemented: v-fix, v1 (real `Closure` values), v2 (non-escape
+  enforcement), and v3 (`vani-optimize` v0.1.5 gained `Closure`-accepting
+  variants) all shipped — see
+  [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md).
+  One item found but deliberately not fixed this session: **BUG-12**
+  (`push`'s scope-escape check has the same `mut-ref`-parameter flaw
+  BUG-9 fixed for `FieldAssign`) — needs threading parameter-name
+  context through the much more widely-called `check_call`, a bigger
+  change than fit in this pass.
 
 ## Open items (summary)
 
