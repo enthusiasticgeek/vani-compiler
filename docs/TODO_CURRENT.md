@@ -2036,58 +2036,57 @@ None of these three are fixed. All were found incidentally while
 verifying the four fixes above against their tutorial worked examples
 — not through a dedicated audit of these specific features.
 
-- [ ] **BUG-19. `RwLock<T>`/`Mutex<T>` LLVM backend codegen is
+- [x] **BUG-19. `RwLock<T>`/`Mutex<T>` LLVM backend codegen is
   hardcoded for `i64` payloads only — any struct or enum `T` crashes,
   contrary to both the type system and the docs' "T can be any type:
-  i64, bool, a struct, an enum, Vec<T>" claim.** Found verifying
-  BUG-14's RwLock fix against the tutorial's original `RwLock<Config>`
-  (a struct) worked example. Minimal repro (`RwLock<Point>` where
-  `Point { x: i64, y: i64 }`): `rwlock_new` crashes at LLVM IR
-  verification — `'%t1' defined with type '%Struct_Point = type
-  { i64, i64 }' but expected 'i64'` — because `%intent_rwlock_i64`'s
-  LLVM struct definition literally has an `i64` field baked in
-  (`backend_llvm.rs`, the RwLock/Mutex builtin codegen), not a
-  parametric `T`-sized slot. Confirmed NOT RwLock-specific: the exact
-  same crash reproduces for `Mutex<Point>` (`%intent_mutex_i64`).
-  `docs/v1_limitations.md`'s existing L15/L16 entries claim
-  `Mutex<T>`/`Barrier` are "no longer i64-only" (resolved 2026-06-19)
-  — this needs re-checking; either that resolution never actually
-  covered the RwLock/Mutex *struct payload* case specifically, or it
-  regressed since. `advanced/02c_rwlock_primer.md` updated with a
-  caution note limiting the documented example to scalar payloads
-  until this is fixed. Worth checking `Barrier`/`Condvar`/`Channel<T,N>`
-  for the same hardcoded-scalar pattern while in this code.
+  i64, bool, a struct, an enum, Vec<T>" claim.** ✅ fixed 2026-07-27.
+  Added parametric struct-name helpers (`llvm_rwlock_struct`,
+  `llvm_mutex_struct`, `llvm_guard_struct`, `llvm_read_guard_struct`,
+  `llvm_write_guard_struct` — same `element_tag`-based naming
+  `llvm_channel_struct` already used for `Channel<T,N>`), added the 5
+  missing arms to `llvm_type_string`, replaced the preamble's
+  unconditional single-i64 struct emission with a per-distinct-T scan
+  (reusing `backend_c::collect_mutex_specs`/`collect_rwlock_specs`,
+  mirroring the existing Channel<T,N> scan), and threaded the real
+  element type through every RwLock/Mutex/Guard builtin's codegen
+  (~10 call sites) plus the BUG-14 guard-release Drop logic. Verified
+  end-to-end: struct, enum, `Vec<T>`, and plain `i64` payloads all
+  compile and run correctly on the LLVM backend (`vanic run`,
+  default), including the full acquire/read/release/write/release
+  cycle. 4 new regression tests. Spot-checked 53
+  mutex/guard/rwlock/channel tests + full lib suite (2596 passed, same
+  3 pre-existing unrelated failures): no regressions.
+  `advanced/02c_rwlock_primer.md` updated: "T can be any type" is now
+  actually true on the default backend.
+  **Found and fixed along the way, logged as BUG-22 below**: the SAME
+  class of bug independently existed in the C backend too (missing
+  parametric arms in `c_type_name`), affecting even the plain `i64`
+  case — fixed. A separate C-backend-only struct-definition-ordering
+  bug (struct/enum payloads specifically) was found, a fix attempted
+  and found to regress the working i64 case, and reverted — logged as
+  open in BUG-22, not fixed.
 
-- [ ] **BUG-20. `check_match_slice` type-checks pattern guards on
+- [x] **BUG-20. `check_match_slice` type-checks pattern guards on
   slice/array match arms but never incorporates them into the
   generated dispatch condition at all — a guarded slice-match arm
-  always behaves as if its guard were `true`.** Found verifying
-  BUG-18's fix against `intermediate/02b_match_enhancements.md`'s
-  `classify_scores` example, which uses `[s] if s >= 90 then "single
-  A"` followed by a plain `[s]` fallback arm. Reproduced directly:
-  `classify_scores(vec(50))` (should hit the `[s]` fallback, "single
-  non-A") instead returns "single A" — the guard silently never runs.
-  Root cause: unlike the enum/int/bool dispatch path (`checker.rs`
-  ~17517-17558, which type-checks the guard into `guard_typed` and
-  wraps the arm body in `Block { stmts: [Assert { expr: gexpr }], tail:
-  body }`), `check_match_slice`'s per-arm loop (`checker.rs:15094+`)
-  never reads `arm.guard` at all. Fix is NOT a copy of the enum path's
-  assert-wrapping approach — `check_match_slice` already desugars
-  directly into an if/else-if chain keyed on length, so the natural
-  fix is ANDing the type-checked guard into the per-arm length `cond`
-  before the chain is built, with the guard evaluated inside a scope
-  that has that arm's head/tail bindings available (the tricky part:
-  those bindings are currently constructed as `bind_stmts` further
-  down in the same function, after `cond` is finalized — the guard
-  needs its own binding scope wrapping it, evaluated as part of the
-  condition, not reusing `bind_stmts` verbatim since those are built
-  for the arm BODY's block, not the condition). Deferred — this
-  restructuring is a different shape of fix than BUG-18's (which only
-  touched the exhaustiveness check, not condition-building) and risked
-  the day's remaining budget for BUG-13/BUG-15.
-  `intermediate/02b_match_enhancements.md` updated with a caution note
-  and a workaround (nested `if`/`else` inside one unguarded arm instead
-  of two guard-differentiated arms sharing a pattern shape).
+  always behaves as if its guard were `true`.** ✅ fixed 2026-07-27.
+  Type-checks the guard in the same per-arm scope as the head/tail
+  bindings, then combines it into the dispatch condition as `if
+  length_cond { <bindings>; guard } else { false }` — deliberately
+  NOT a plain `BinaryOp::And` (which lowers to an eager, non-short-
+  circuiting LLVM `and`; the guard's bindings index the scrutinee at
+  offsets only valid once the length check has already passed, so a
+  plain AND would read out of bounds when length doesn't match).
+  Verified directly with `[a, b] if a == b` against empty/one-element
+  inputs: no crash, correct fall-through. New example
+  (`examples/language/english/slice_pattern_guards.vani`) + end-to-end
+  integration test asserting exact stdout on both backends (this is a
+  "compiles fine, wrong answer" bug class — a compile-only test
+  wouldn't have caught the original bug). 140 match_-prefixed tests +
+  a 27-test slice/guard sweep: no regressions.
+  `intermediate/02b_match_enhancements.md` updated: the caution note +
+  workaround replaced with the real guarded example, now verified
+  working.
 
 - [ ] **BUG-21. `Task`/`task`/`join` tutorial content
   (`advanced/03_concurrency.md`, `advanced/02c_rwlock_primer.md`,
@@ -2122,5 +2121,55 @@ verifying the four fixes above against their tutorial worked examples
   worked example was rewritten to avoid `task`/`join` entirely
   (sequential calls instead) with a note pointing at this gap; the
   other two chapters are untouched.
+
+- [ ] **BUG-22. C backend has its own, independent version of BUG-19's
+  bug, PLUS a separate struct-definition-ordering bug — both found
+  while verifying BUG-19's LLVM fix against `--backend=c`.** Partially
+  fixed 2026-07-27 (the `i64` case); the struct/enum case is still
+  open.
+  - **Fixed**: `c_type_name` (`backend_c.rs` — "called by
+    emit_prototype + emit_function for the return type and (mostly) by
+    Let stmts for binding storage") was missing the same 5 arms
+    (Mutex/Guard/RwLock/ReadGuard/WriteGuard) `llvm_type_string` was
+    missing before BUG-19, and fell through to `c_leaf_type`'s
+    hardcoded `intent_mutex_i64`/`intent_rwlock_i64` spelling — which
+    doesn't match the REAL per-T bundle names
+    (`intent_mutex_int64_t` etc) `emit_mutex_bundle`/`emit_rwlock_bundle`
+    already generate correctly. `cc` rejected every program using
+    `Mutex<i64>`/`RwLock<i64>` with "unknown type name
+    'intent_rwlock_i64'; did you mean 'intent_rwlock_int64_t'?" — this
+    reproduced for the PLAIN i64 case, not just struct payloads, and
+    is fully independent of BUG-19 (never touched `backend_llvm.rs`).
+    Fixed by adding the 5 missing arms to `c_type_name`, mirroring the
+    LLVM-side fix exactly. Verified: `Mutex<i64>`/`RwLock<i64>` now
+    compile AND run correctly with a real `cc` invocation. 1 new
+    regression test.
+  - **Still open**: a struct or enum `RwLock<T>`/`Mutex<T>` payload
+    still fails to compile on the C backend — `cc` error "unknown type
+    name 'Struct_Point'" inside the generated bundle typedef
+    (`typedef struct { Struct_Point value; ... }
+    intent_rwlock_Struct_Point;`). Root cause: `emit_concurrency_
+    runtime_helpers` (writes into the `out` buffer) is called BEFORE
+    `out.push_str(&body)` (`backend_c.rs` `emit_c`, ~line 1515 vs
+    1563) — `body` holds every user struct's FULL field definition
+    (emitted by a topological-sort dependency loop earlier in `emit_c`),
+    while only a forward declaration (`typedef struct Struct_Point
+    Struct_Point;`) exists in `out` at the point the bundle is
+    written. The bundle embeds `T` BY VALUE, which needs the complete
+    type, not just a forward-declared pointer-compatible name. **A fix
+    was attempted** (move the `emit_concurrency_runtime_helpers` call
+    to after `out.push_str(&body)`) **and reverted** — it fixed the
+    struct-ordering problem but broke the (previously working) i64
+    case instead, because `body` is a single interleaved string
+    containing BOTH type definitions AND function bodies (`fn_main`
+    etc); moving the call to run after ALL of `body` puts the bundle
+    after the function bodies that call it too ("implicit declaration
+    of function" / "conflicting types" errors). A real fix needs
+    `body`'s type-definition portion separated from its function-body
+    portion so the bundle can land strictly between them — not
+    attempted, given the scope of that restructuring. The default LLVM
+    backend (BUG-19's fix) has no such limitation; if `--backend=c` is
+    required, stick to scalar `RwLock`/`Mutex` payloads.
+    `advanced/02c_rwlock_primer.md` documents this precisely.
 
 ---
