@@ -26121,6 +26121,119 @@ fn main() -> i64 {
         );
     }
 
+    // BUG-13 (2026-07-27): `verify_pure_body`'s IndexAssign arm
+    // unconditionally rejected EVERY indexed write in a `parallel
+    // for` body, with no allowance for the single most common safe
+    // parallel-map pattern -- `xs[i] = â€¦;` where `i` is the loop's
+    // own index. Each iteration owns a distinct `i`, so two threads
+    // never write the same slot. The fix adds a narrow strip pass
+    // (`strip_safe_same_index_writes`, parallel-for-specific --
+    // `pure fn`/`task` bodies are unaffected and still reject any
+    // indexed write, pinned separately below) that only treats a
+    // write as safe when BOTH the write index is exactly the loop var
+    // AND the value expression doesn't read the SAME array at any
+    // other index (a real cross-iteration race even with a safe
+    // write index -- `xs[i] = xs[i-1] + 1` -- pinned below too).
+    #[test]
+    fn parallel_for_accepts_same_index_write() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              parallel for i from 0 to 5 {
+                xs[i] = xs[i] * 2;
+              }
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source).expect("xs[i] = ... where i is the loop's own index must be accepted");
+    }
+
+    #[test]
+    fn parallel_for_accepts_same_index_write_reading_a_different_vec() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(0, 0, 0);
+              let ys: Vec<i64> = vec(10, 20, 30);
+              parallel for i from 0 to 3 {
+                xs[i] = ys[i] + 1;
+              }
+              print xs[0];
+              return 0;
+            }
+        "#;
+        compile(source)
+            .expect("xs[i] = ys[i] + 1 must be accepted -- ys is read-only in this loop");
+    }
+
+    #[test]
+    fn parallel_for_rejects_cross_iteration_read_even_with_safe_write_index() {
+        // The write index (`i`) is safe on its own, but the value
+        // reads `xs[i-1]` -- another iteration's slot, concurrently
+        // being written by THAT iteration. A real race, and the
+        // write-index-only check alone would have missed it.
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              parallel for i from 1 to 5 {
+                xs[i] = xs[i-1] + 1;
+              }
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("xs[i] = xs[i-1] + ... must still be rejected (cross-iteration race)");
+        assert!(
+            errors.iter().any(|e| e.message.contains("cannot mutate")),
+            "expected the indexed-write impurity diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parallel_for_rejects_write_to_non_loop_var_index() {
+        let source = r#"
+            fn main() -> i64 {
+              let xs: Vec<i64> = vec(1, 2, 3, 4, 5);
+              let j: i64 = 0;
+              parallel for i from 0 to 5 {
+                xs[j] = i;
+              }
+              return 0;
+            }
+        "#;
+        let errors = compile(source)
+            .expect_err("xs[j] = ... where j is not the loop's own index must be rejected");
+        assert!(
+            errors.iter().any(|e| e.message.contains("cannot mutate")),
+            "expected the indexed-write impurity diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn pure_fn_still_rejects_any_indexed_write_unaffected_by_bug13_fix() {
+        // The BUG-13 carve-out lives ONLY in the parallel-for-specific
+        // wrapper (`verify_pure_body_with_reductions`), not the shared
+        // `verify_pure_body` `pure fn` also uses -- there's no
+        // per-iteration index isolation guarantee for a plain `pure
+        // fn`, so the blanket rejection must stay exactly as strict
+        // as before this fix.
+        let source = r#"
+            pure fn write_it(xs: mut ref Vec<i64>, i: i64) -> i64 {
+              xs[i] = 99;
+              return 0;
+            }
+            fn main() -> i64 { return 0; }
+        "#;
+        let errors = compile(source).expect_err("pure fn must still reject any indexed write");
+        assert!(
+            errors.iter().any(|e| e.message.contains("cannot mutate")),
+            "expected the indexed-write impurity diagnostic, got: {:?}",
+            errors.iter().map(|e| e.message.as_str()).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn owned_str_auto_borrows_in_str_comparison() {
         // OwnedStr operand in a comparison context auto-borrows to

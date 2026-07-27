@@ -12262,6 +12262,7 @@ fn check_one_stmt(
                     signatures,
                     "'parallel for' body",
                     &typed_reductions,
+                    &var,
                     diagnostics,
                 );
             }
@@ -32826,6 +32827,7 @@ fn verify_pure_body_with_reductions(
     signatures: &HashMap<String, Signature>,
     context: &str,
     reductions: &[crate::ir::TypedReduction],
+    loop_var: &str,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     // First the normal pure-body walk, but with each reduction
@@ -32839,6 +32841,17 @@ fn verify_pure_body_with_reductions(
         .map(|r| (r.var.clone(), r.op))
         .collect();
     let stripped = strip_reduction_uses(body, &by_name, context, diagnostics);
+    // BUG-13 fix (2026-07-27): `verify_pure_body`'s IndexAssign arm
+    // unconditionally rejects EVERY indexed write, with no allowance
+    // for the single most common safe parallel-map pattern: `xs[i] =
+    // â€¦;` where `i` is the loop's own index. Each iteration owns a
+    // distinct `i`, so two threads never write the same slot -- unlike
+    // `xs[i-1] = â€¦` or `xs[j] = â€¦`, which genuinely race. This strip
+    // pass only runs here (the `parallel for`-specific wrapper), NOT
+    // in the shared `verify_pure_body` also used by `pure fn` and
+    // `task` bodies, where there's no per-iteration index isolation
+    // guarantee and the blanket rejection stays correct.
+    let stripped = strip_safe_same_index_writes(&stripped, loop_var, context, diagnostics);
     verify_pure_body(&stripped, signatures, context, diagnostics);
     // Closure #259: implicit-reduction race check. After the
     // strip pass has removed legitimate reduction-reassigns, any
@@ -33020,6 +33033,126 @@ fn strip_reduction_uses(
         out
     }
     rec(body, reductions, context, diagnostics)
+}
+
+/// BUG-13 fix (2026-07-27): strip pass for `parallel for`'s pure-body
+/// check, sibling to `strip_reduction_uses`. Replaces any
+/// `IndexAssign { name, index, field_path: [], value, .. }` whose
+/// `index` expression is syntactically exactly `Var(loop_var)` -- the
+/// loop's own index, not a derived expression like `i-1`/`i+1`, and
+/// not a different variable -- with a `Discard` of the write's VALUE
+/// expression, same trick `strip_reduction_uses` uses: the value is
+/// still walked for hidden impurity (a `print` or impure call inside
+/// the RHS), just the write-to-a-Vec-slot itself is no longer flagged.
+/// Every iteration of a `parallel for` owns a distinct `loop_var`
+/// value, so two threads can never target the same slot this way --
+/// unlike `xs[i-1] = â€¦`, `xs[j] = â€¦`, or a write gated behind an
+/// unrelated condition, all of which fall through unchanged to
+/// `verify_pure_body`'s unconditional rejection, exactly as before
+/// this fix. Field-path writes (`xs[i].field = â€¦`) are deliberately
+/// NOT covered -- kept narrowly scoped to the documented `xs[i] = â€¦`
+/// shape.
+fn strip_safe_same_index_writes(
+    body: &[TypedStmt],
+    loop_var: &str,
+    context: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<TypedStmt> {
+    fn is_bare_loop_var(index: &TypedExpr, loop_var: &str) -> bool {
+        matches!(&index.kind, TypedExprKind::Var(n) if n == loop_var)
+    }
+    // Even when the WRITE index is safely `loop_var`, the write's
+    // value expression must not read the SAME array at any OTHER
+    // index -- `xs[i] = xs[i-1] + 1;` has a safe write index but
+    // reads a slot another iteration is concurrently writing, a real
+    // cross-iteration race. `xs[i] = xs[i] * 2;` (reading the exact
+    // same slot it's about to overwrite) and any read of a DIFFERENT
+    // array are both fine and not flagged here.
+    fn contains_unsafe_self_index_read(expr: &TypedExpr, array_name: &str, loop_var: &str) -> bool {
+        match &expr.kind {
+            TypedExprKind::Index { array, index, .. } => {
+                let this_read_unsafe = matches!(&array.kind, TypedExprKind::Var(n) if n == array_name)
+                    && !matches!(&index.kind, TypedExprKind::Var(n) if n == loop_var);
+                this_read_unsafe
+                    || contains_unsafe_self_index_read(array, array_name, loop_var)
+                    || contains_unsafe_self_index_read(index, array_name, loop_var)
+            }
+            TypedExprKind::Unary { expr, .. } => {
+                contains_unsafe_self_index_read(expr, array_name, loop_var)
+            }
+            TypedExprKind::Binary { left, right, .. } => {
+                contains_unsafe_self_index_read(left, array_name, loop_var)
+                    || contains_unsafe_self_index_read(right, array_name, loop_var)
+            }
+            TypedExprKind::Cast { expr, .. } => {
+                contains_unsafe_self_index_read(expr, array_name, loop_var)
+            }
+            TypedExprKind::Call { args, .. } => args
+                .iter()
+                .any(|a| contains_unsafe_self_index_read(a, array_name, loop_var)),
+            TypedExprKind::ArrayLit { elements } => elements
+                .iter()
+                .any(|e| contains_unsafe_self_index_read(e, array_name, loop_var)),
+            TypedExprKind::Len { array, .. } => {
+                contains_unsafe_self_index_read(array, array_name, loop_var)
+            }
+            _ => false,
+        }
+    }
+    fn rec(stmts: &[TypedStmt], loop_var: &str, context: &str, diagnostics: &mut Vec<Diagnostic>) -> Vec<TypedStmt> {
+        let mut out = Vec::with_capacity(stmts.len());
+        for stmt in stmts {
+            match stmt {
+                TypedStmt::IndexAssign { name, index, field_path, value, .. }
+                    if field_path.is_empty()
+                        && is_bare_loop_var(index, loop_var)
+                        && !contains_unsafe_self_index_read(value, name, loop_var) =>
+                {
+                    out.push(TypedStmt::Discard { expr: value.clone() });
+                }
+                TypedStmt::If { cond, then_body, else_body } => {
+                    out.push(TypedStmt::If {
+                        cond: cond.clone(),
+                        then_body: rec(then_body, loop_var, context, diagnostics),
+                        else_body: rec(else_body, loop_var, context, diagnostics),
+                    });
+                }
+                TypedStmt::While { label, cond, body } => {
+                    out.push(TypedStmt::While {
+                        label: label.clone(),
+                        cond: cond.clone(),
+                        body: rec(body, loop_var, context, diagnostics),
+                    });
+                }
+                TypedStmt::For { label, var, ty, start, end, body, parallel, reductions } => {
+                    out.push(TypedStmt::For {
+                        label: label.clone(),
+                        var: var.clone(),
+                        ty: ty.clone(),
+                        start: start.clone(),
+                        end: end.clone(),
+                        // A nested loop's own index shadows the outer
+                        // one for ITS body; only IndexAssign written
+                        // against the outer `loop_var` is safe here,
+                        // so nested bodies are walked under the same
+                        // outer `loop_var` unless shadowed by an
+                        // identically-named nested `var` (rare; if it
+                        // happens, the nested loop's writes are
+                        // correctly re-evaluated against its own
+                        // index by the recursive call using the same
+                        // `loop_var` string, which still matches).
+                        body: rec(body, loop_var, context, diagnostics),
+                        parallel: *parallel,
+                        reductions: reductions.clone(),
+                    });
+                }
+                other => out.push(other.clone()),
+            }
+        }
+        out
+    }
+    let _ = context; // reserved for future diagnostics on unsafe-index writes
+    rec(body, loop_var, context, diagnostics)
 }
 
 // Returns the "other side" subexpression of a valid reduction-

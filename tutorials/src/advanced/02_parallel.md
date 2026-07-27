@@ -108,9 +108,14 @@ rejects the whole loop rather than risk a race.
   variables (`seq = seq + i`) commit before the next iteration.
 - **`parallel for`** lifts the body to run on N threads. The
   compiler **statically rejects** loops whose body has
-  iteration-to-iteration data dependencies -- assignments to
-  array slots, mutable captures without a `reduce` clause, etc.
-  This is the safety boundary.
+  iteration-to-iteration data dependencies -- mutable captures
+  without a `reduce` clause, an array-slot write at any index
+  other than the loop's own (`xs[j]`, `xs[i-1]`, ...), or a
+  same-index write (`xs[i] = ...`) whose value reads that same
+  array at a different index. A same-index write that only reads
+  its own slot (or a different, untouched array entirely) is
+  allowed -- each iteration owns a distinct slot, so there's
+  nothing to race on. This is the safety boundary.
 - **`reduce <var> with <op>;`** declares an accumulator variable
   that survives across iterations. The SSA LLVM backend (default)
   allocates one stack-local accumulator per thread, applies the
@@ -130,7 +135,8 @@ rejects the whole loop rather than risk a race.
 | Allowed | Rejected |
 |---|---|
 | Reads of captured `let` bindings | Writes to non-reduce captures |
-| Writes through `mut ref` parameters | Indexed assignment `xs[i] = ...` on a captured Vec |
+| Writes through `mut ref` parameters | Indexed assignment `xs[j] = ...` where `j` isn't the loop's own index |
+| `xs[i] = ...` where `i` IS the loop's own index, and the value doesn't read `xs` at any other index | `xs[i] = xs[i - 1] + ...` -- safe write index, but the read side aliases another iteration's write |
 | Calls to pure fns | Calls to impure fns (FFI, IO) without `unsafe` |
 | `reduce var with +`/`*`/`max`/`min` | Multiple `reduce` clauses on the same variable |
 
@@ -138,6 +144,8 @@ rejects the whole loop rather than risk a race.
 
 If you want a transform-each-element pattern (no reduction),
 the safe v1 form is a `mut ref Vec` + index-by-iteration:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 fn double_all(xs: mut ref Vec<i64>) -> i64 {
@@ -151,7 +159,11 @@ fn double_all(xs: mut ref Vec<i64>) -> i64 {
 
 Each iteration writes a *distinct* slot in `xs`. The compiler
 proves the slots don't alias (each iteration writes `xs[i]`
-where `i` ranges over the iteration variable's domain).
+where `i` ranges over the iteration variable's domain) -- the
+write index must be syntactically exactly the loop's own index
+variable, and the value being written must not itself read `xs`
+at any OTHER index (that would be the `bad_prefix` hazard above,
+just hidden on the read side instead of the write side).
 
 ## Challenge
 
