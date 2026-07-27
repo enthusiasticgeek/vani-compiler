@@ -1810,124 +1810,153 @@ Sourced from a doc task: adding compiler-verified `manas_mascot_error`/
 code claim was checked against `vanic.exe` (not just trusted from
 prose) before being marked, which surfaced several places where the
 compiler's actual behavior no longer matches — or never matched — what
-the docs (and in a couple of cases, the compiler's own stated design)
-claim. None of these are fixed yet.
+the docs claim. **Update 2026-07-27 (effort pass):** traced each item
+to its actual root cause in source before estimating. Two of the six
+original findings (BUG-16, BUG-17 below) turned out on inspection to
+be **doc bugs, not compiler bugs** — the compiler's real behavior is
+correct/intentional and the tutorial text was simply wrong; downgraded
+and moved out of the bug list accordingly. The remaining four are real,
+now root-caused, with grounded effort estimates.
 
-- [ ] **BUG-13. `parallel for` now appears to reject ALL indexed writes
-  to the loop index, not just cross-iteration-dependent ones —
-  contradicting an existing "accepted" example already shipped in the
-  tutorial.** Found verifying a new rejected-loop-body example for
-  `tutorials/src/advanced/02_parallel.md`. A deliberately-broken
-  cross-iteration-dependency body (`xs[i] = xs[i-1] + 1;`) correctly
-  fails with `error: 'parallel for' body cannot mutate 'xs[i] = …'
-  (indexed write is a side effect)`, as expected. But the same chapter's
-  pre-existing "Mapping a Vec without a reduce" example —
-  `xs[i] = xs[i] * 2;`, a perfectly safe same-index write with no
-  cross-iteration dependency, presented in the doc as compiling — now
-  triggers the identical rejection under the current build. Left
-  untouched per the mascot task's "don't restructure existing content"
-  rule, but this needs a real look: either the purity/side-effect gate
-  in `parallel for` checking has been tightened to reject indexed writes
-  categorically (a real regression against the documented/intended
-  same-index-write-is-safe case), or the doc's `double_all` example was
-  never actually valid and nobody had re-verified it since it was
-  written. Repro: compile `tutorials/src/advanced/02_parallel.md`'s
-  `double_all` function verbatim under the current `vanic check`.
+- [ ] **BUG-13. `parallel for`'s purity gate rejects EVERY indexed
+  write unconditionally, with no allowance for the safe "write only to
+  `xs[i]` where `i` is the loop's own index" pattern — contradicting an
+  existing "accepted" example already shipped in the tutorial.**
+  ~4–6 h · Medium. Root cause confirmed in `verify_pure_body`
+  (`checker.rs:33166`, the `TypedStmt::IndexAssign` arm): it
+  unconditionally pushes a diagnostic for *any* indexed write, with no
+  carve-out for the same-index case. `tutorials/src/advanced/02_parallel.md`'s
+  pre-existing "Mapping a Vec without a reduce" example
+  (`xs[i] = xs[i] * 2;`) has apparently never actually compiled under
+  this check. Fix must NOT loosen `verify_pure_body` itself — it's also
+  used for `pure fn` (`checker.rs:9320`) and `task` bodies
+  (`checker.rs:12654`), where no per-iteration index isolation exists
+  and the blanket rejection is correct. The safe carve-out belongs
+  specifically in `verify_pure_body_with_reductions`
+  (`checker.rs:32752`, the wrapper already used only by `parallel for`),
+  which needs the loop's index-variable name threaded in so it can
+  allow `IndexAssign` when (a) the index expression is syntactically
+  exactly the loop var (never `i-1`/`i+1`/a different var) and (b) the
+  written-to Vec isn't also read at a *different* index in the same
+  iteration in a way that could alias another thread's write. Needs new
+  tests confirming `xs[i] = ...` is accepted while `xs[i-1] = ...`,
+  `xs[j] = ...`, and writes gated behind an `if` on a different
+  condition are still rejected.
 
 - [ ] **BUG-14. Declaring an `RwLock<T>` local crashes the LLVM backend
-  with an internal compiler error instead of compiling or giving a
-  clean diagnostic.** Found while adding a caution example to
-  `tutorials/src/advanced/02c_rwlock_primer.md`. `vanic check` type-checks
-  fine, but every variant tried (scalar or struct element, with or
-  without `task`/`join`) crashes LLVM codegen:
-  `internal error: entered unreachable code: checker: non-scalar let
-  with type RwLock(...)` at `backend_llvm.rs:2591`. Reproduces even for
-  the tutorial's own pre-existing "one screen" worked example — i.e.
-  this isn't a new/exotic usage, it's the chapter's own canonical
-  example. `RwLock<T>` is documented and taught as a working v1 feature
-  (`advanced/02c_rwlock_primer.md`, `advanced/03_concurrency.md`); this
-  needs investigation into whether `RwLock<T>` codegen ever worked on
-  the LLVM backend or has silently regressed. Repro: compile
-  `tutorials/src/advanced/02c_rwlock_primer.md`'s worked example verbatim
-  with `vanic run` (default LLVM backend).
+  instead of compiling.** ~30 min – 1 h · Trivial, low risk. Root cause
+  found precisely: `is_scalar()` (`backend_llvm.rs:45165`) has an
+  explicit match arm listing every concurrency-primitive struct type
+  that gets the uniform "single alloca" Let-codegen path —
+  `Type::Channel | Type::Mutex | Type::Guard | Type::Condvar |
+  Type::Barrier | ...` (line 45180) — and `Type::RwLock` /
+  `Type::ReadGuard` / `Type::WriteGuard` are simply missing from that
+  list, so they fall through to the `unreachable!()` at line 2591.
+  `llvm_type()` (line 45405-45407) already maps all three to real named
+  structs (`%intent_rwlock_i64` etc.) and the `rwlock_new`/`rwlock_read`/
+  `rwlock_write` builtins already emit working codegen elsewhere
+  (line 6937+) — this looks like a straightforward three-variant
+  omission from one match arm, not a deeper design gap. Fix: add
+  `Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_)` to the
+  `is_scalar()` match arm at line 45180; verify against
+  `advanced/02c_rwlock_primer.md`'s own worked example plus new lib
+  tests; sweep for the same three variants in any other
+  `is_scalar`-shaped exhaustive match elsewhere in the LLVM backend
+  (e.g. drop/clone emission) in case the omission repeats there too.
 
-- [ ] **BUG-15. Blanket `implement<T> Iface for Wrap<T>` plus an
-  overlapping concrete `implement Iface for Wrap<i64>` is not rejected
-  as ambiguous (contra `intermediate/04d_default_methods_primer.md`'s
-  "conflict rule" claim) — it passes `vanic check` cleanly, then crashes
-  the LLVM backend at codegen instead.** Found while trying to add an
-  error example for the documented conflict rule. Three things tested:
-  (1) a delegating-body blanket impl (matching the file's own existing
-  example, `self.inner.print_it()`) fails to even type-check on its own
-  — `field access on non-struct type Wrapper<T>` — unrelated to any
-  conflict; (2) a simpler non-delegating blanket+concrete overlap
-  (`implement<T> Labeled for Wrap<T>` plus `implement Labeled for
-  Wrap<i64>`) passes `vanic check` with no ambiguity diagnostic at all;
-  (3) running that same program crashes the LLVM backend with an
-  internal panic: `unreachable code: llvm_type ... Apply { name: "Wrap",
-  ... }`. So the documented compile-time "ambiguous, rejected" behavior
-  doesn't exist today — the real behavior is either a false type-check
-  pass followed by a codegen crash, or (for the delegating-body variant)
-  an unrelated type error that has nothing to do with the conflict being
-  taught. Needs a decision: either implement real conflict detection (so
-  the doc's claim becomes true) or fix codegen to not crash on this
-  shape and update the doc to describe actual behavior.
+- [ ] **BUG-15. A blanket `implement<T> Iface for Wrap<T>` crashes the
+  LLVM backend even completely on its own, with no concrete-impl
+  conflict involved at all** (broader than first reported — reproduces
+  with *just* the blanket impl, no override). ~3–6 h · Medium. Root
+  cause traced: `hoist_impls_into_functions` (`checker.rs:5658`, called
+  early at `checker.rs:599`) hoists every impl's methods — including
+  blanket ones — into ordinary top-level functions immediately, while
+  the blanket impl's `T` is still an unresolved `Type::Param("T")`.
+  `expand_blanket_impls` (`checker.rs:7857`, called much later at
+  `checker.rs:7832`) is what's supposed to generate the real
+  concrete-substituted copies (e.g. `Wrap__i64_label`), but nothing
+  removes the original hoisted-too-early generic-bodied function before
+  codegen. The existing `program.functions.retain(|f|
+  f.type_params.is_empty())` filter (`checker.rs:6823`, meant to drop
+  unmonomorphized generic-function templates) doesn't catch it, because
+  the genericness here lives on the *impl block* (`imp.type_params`),
+  not on the hoisted `Function`'s own `type_params` field — so the
+  filter sees it as an ordinary non-generic function and keeps it.
+  Reaches codegen with `Wrap<T>` still literally `Apply { name: "Wrap",
+  args: [Param("T")] }`, hence the `llvm_type` unreachable panic. Two
+  viable fixes: (a) have `hoist_impls_into_functions` skip impls with
+  non-empty `type_params` and only hoist `expand_blanket_impls`'s
+  synthesized concrete copies (requires reordering or a second hoist
+  pass after line 7832), or (b) tag hoisted functions with their
+  originating impl's blanket-ness and extend the line-6823-style retain
+  filter to also drop those. (a) is more correct; (b) is more surgical
+  and lower-risk against the rest of the early pipeline that already
+  depends on hoisting happening at line 599. This also settles what
+  `intermediate/04d_default_methods_primer.md`'s doc-fix should say:
+  there is no ambiguity *detection* today at all (concrete-impl
+  precedence is just accidental — `expand_blanket_impls` already skips
+  generating a conflicting expansion when a concrete impl exists, per
+  `checker.rs:7912-7919` — the crash reproduces with or without a
+  conflicting concrete impl present).
 
-- [ ] **BUG-16. A `Vec<T>` local read after being possibly-moved inside
-  one branch of an `if`/`else` is not caught statically — it only aborts
-  silently at runtime, with no diagnostic, despite
-  `intermediate/03b_affine_deeper_primer.md` documenting this as a
-  compile-time rejection.** Found verifying the primer's own
-  `maybe_consume` example (conditional move at a join point). `vanic
-  check` accepts it with exit 0 (no diagnostic of any kind); only `vanic
-  run` aborts (exit 1, no message) once the code actually reads the
-  possibly-moved value. Sanity-checked that *unconditional* use-after-move
-  (no branch, always moved) IS correctly caught by `vanic check` in this
-  same build — so the gap is specifically the join-point/conditional-move
-  case the affine primer is built around. This is either a real
-  regression in the join-point analysis or a case that was never
-  actually implemented despite being taught as working. Repro: compile
-  `intermediate/03b_affine_deeper_primer.md`'s `maybe_consume` example
-  (the unfixed, "should reject" version) with `vanic check`.
+- [ ] **BUG-18. `match` on a slice/array pattern with no wildcard/rest
+  arm silently falls back to a synthetic default instead of being
+  rejected as non-exhaustive, unlike every other scrutinee kind.**
+  ~1–2 h · Short, low risk. Root cause found in `check_match_slice`
+  (`checker.rs:15048`): every other dispatch kind (string
+  `checker.rs:14722`, float `checker.rs:14972`, int/bool
+  `checker.rs:17601-17644`, enum via `seen_variants`) pushes a
+  `non-exhaustive match` diagnostic when no wildcard covers the
+  remainder. `check_match_slice` has no equivalent check — it just does
+  `wildcard_body.unwrap_or_else(|| ...Int(0)...)` (`checker.rs:15287`)
+  and silently uses that fabricated default in the generated if/else
+  chain when no wildcard arm was present. Fix: after the arm loop, if
+  `!wildcard_seen`, push the same-style non-exhaustive diagnostic used
+  by the string/float paths instead of falling back to the synthetic
+  default (mirror `diagnostic_elaborations::match_not_exhaustive`).
+  **Needs a second, separate look**: an agent verifying this also
+  reported that *running* an accepted-but-incomplete slice match
+  (before this fix lands) hits an unrelated LLVM codegen crash rather
+  than any clean error — that crash should reproduce independently and
+  get its own root-cause pass; it may or may not resolve automatically
+  once the exhaustiveness check makes the accepting case unreachable.
 
-- [ ] **BUG-17. Mixed-width same-signedness integer arithmetic (e.g.
-  `i32 * i64`) is not rejected as a type mismatch, unlike every other
-  numeric type mismatch tested.** Found verifying
-  `beginner/02_variables.md`'s Challenge section, which has a
-  commented-out line claiming `narrow * a` (i32 * i64) is a type error.
-  `let x: i64 = narrow * a;` actually compiles cleanly and produces the
-  correct widened result. Cross-checked that the type checker otherwise
-  works correctly for mismatches: `bool` → `i64`, `Str` → `i64`, and
-  mismatched-signedness `u64`/`i64` are all correctly rejected in the
-  same build. So this looks like a narrow, specific gap — implicit
-  same-signedness width promotion (`i32`→`i64` in a binary op) is
-  silently allowed where the language's stated model says every numeric
-  mismatch needs an explicit cast. Needs a decision: either this
-  implicit promotion is intentional (and the doc/design notes should
-  say so) or it's a checker gap that should reject it like every other
-  mismatch does.
+**Reclassified — doc bugs, not compiler bugs** (moved out of the bug
+list; still need a tutorial-text fix, tracked here so the correction
+isn't lost):
 
-- [ ] **BUG-18. A `match` on a slice/array pattern missing a
-  wildcard/rest arm is not rejected as non-exhaustive, contradicting the
-  exhaustiveness guarantee documented and taught for `match` generally
-  — and running such an accepted-but-incomplete match hits an unrelated
-  LLVM codegen crash instead of a clean error.** Found while trying to
-  add a non-exhaustive-slice-match error example to
-  `intermediate/02b_match_enhancements.md`. Tested several variants
-  (`match xs { [] then .., [x] then .. }` with no rest/wildcard arm, on
-  both `Vec<i64>` and `[i64; N]`, both `match xs` and `match ref xs`) —
-  all accepted by `vanic check` with exit 0. `match` exhaustiveness IS
-  correctly enforced for enum variants (see `beginner/08_match.md`'s
-  `Color` example, and `08a_pattern_match_primer.md`), so this is
-  specifically a slice/array-pattern gap in the exhaustiveness checker.
-  Running the accepted-but-incomplete match additionally crashes LLVM
-  codegen rather than producing a clean runtime error, compounding the
-  gap. Needs investigation into whether slice-pattern exhaustiveness was
-  ever implemented, or only enum-variant exhaustiveness was.
+- **~~BUG-16~~ → DOC-4.** `intermediate/03b_affine_deeper_primer.md`'s
+  `maybe_consume` example claims the compiler should reject
+  `return xs[0];` after a conditional move, but it doesn't — and it's
+  *right* not to. Reproduced directly: the move only happens in the
+  `if do_it { ... return other[0]; }` branch, which always returns: the
+  post-`if` `return xs[0];` is only reachable when `do_it` was false, in
+  which case `xs` genuinely was never moved. `checker.rs:11150-11204`'s
+  branch-merge logic is correctly flow- and termination-sensitive here
+  — confirmed the *actually* unsafe variant (same shape, but the moving
+  branch does NOT return) is correctly rejected. ~15–30 min: fix the
+  primer's own example to something that's genuinely unsafe (e.g. drop
+  the early `return` from the moving branch, matching the "real bug"
+  repro used to confirm this), or clearly relabel the existing
+  `maybe_consume` as "already safe, and here's why" instead of "should
+  be rejected."
+- **~~BUG-17~~ → DOC-5.** `beginner/02_variables.md`'s Challenge section
+  comment claims `narrow * a` (`i32 * i64`) is a type error — it isn't,
+  and it's not a bug: `common_integer_type` (`checker.rs:32056`)
+  deliberately widens same-signedness integer operands to the larger
+  width (`(true, true) => signed_type(left_bits.max(right_bits))`);
+  mismatched-signedness combinations are correctly still rejected
+  (confirmed `u64`/`i64` fails). ~10–15 min: fix the comment to
+  describe an actually-rejected mismatch (e.g. keep the existing
+  `bool`/`Str` cases already in that section) instead of the
+  same-signedness widening case.
 
-**None of BUG-13 through BUG-18 are fixed. All were found incidentally
-while verifying tutorial examples, not through a dedicated audit — a
-real audit of `parallel for` purity checking, `RwLock<T>` LLVM codegen,
-`implement` conflict detection, join-point move analysis, mixed-width
-integer promotion, and slice-pattern exhaustiveness would likely find
-more.**
+**Bundled estimate for the 4 real bugs (BUG-13/14/15/18): ~9–15 h
+(roughly 1.5–2 focused days)**, plus ~30–45 min total for the two doc
+corrections (DOC-4, DOC-5). BUG-14 and BUG-18 are safe, well-isolated,
+low-risk fixes suitable for a short session; BUG-13 and BUG-15 touch
+shared checker/hoisting machinery and need real regression coverage
+before landing. All four were found incidentally while verifying
+tutorial examples, not through a dedicated audit — a real audit of
+`parallel for` purity checking, `implement`-conflict/hoisting order,
+and pattern-exhaustiveness checking generally would likely find more.
