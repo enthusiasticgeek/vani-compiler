@@ -10,6 +10,60 @@
 This chapter has **no compiler code**. Pure intuition with
 side-by-side worked examples.
 
+## The coat-check ticket
+
+You and a friend arrive at a fancy restaurant, both wearing heavy
+winter coats. One option: you hold your friend's coat for them, and
+they hold yours, so you can each dance without your own coat getting
+in the way. That sounds fine until it's time to leave -- to get YOUR
+coat back, your friend has to let go of it, but they're still
+holding it because you're still holding theirs. If you both refuse
+to let go until the other lets go first, neither of you ever leaves.
+Two people, each holding onto the other's belonging, each waiting on
+the other -- that's a deadlock, and it's exactly what happens when a
+parent object holds onto its child and the child holds onto its
+parent: neither can be cleaned up because each is waiting on the
+other.
+
+The restaurant's actual solution is simpler than "hold each other's
+coats": there's a coat-check counter. You hand your coat to the
+attendant; they hang it on a numbered hook and give you a small
+numbered ticket -- say, "47." Your friend does the same and gets
+"48." Now, for the rest of the night, neither of you is holding
+anything bulky or entangling. You're each carrying a small paper
+ticket that fits in a pocket. When you want your coat back, you
+don't need to chase down your friend or negotiate who lets go
+first -- you walk up to the counter and hand over ticket 47. The
+attendant looks at hook 47 and hands you your coat. Simple,
+one-directional, no waiting on anyone else.
+
+Notice what changed: the *coats* (the actual heavy, valuable things)
+now live in exactly one place -- the coat-check counter's row of
+hooks. Nobody holds a coat directly anymore. What everybody carries
+instead is a **ticket**: a small number that means nothing on its
+own except "go look this up at the counter." Tickets can't get
+tangled with each other -- ticket 47 doesn't "point at" ticket 48 in
+a way that traps either of you. You could even write your friend's
+ticket number on a napkin and hand it to them ("if anything happens
+to me, coat 47 is ours too") with zero risk -- copying a number
+around is harmless in a way that copying a physical coat isn't.
+
+This is precisely the trick vāṇी uses to avoid reference cycles.
+Instead of a parent node literally *holding onto* its child (and the
+child literally *holding onto* its parent -- two owning pointers,
+tangled, neither collectible until the other lets go), every node's
+data lives in one central place -- a `Vec<Node>`, the coat-check
+counter. What a "parent pointer" or "child pointer" actually stores
+is not the other node itself, it's a small, copyable **index
+number** -- the ticket -- that means "go look this up in the Vec."
+Handing out a hundred copies of the same index costs nothing and
+creates no obligation; unlike a pointer that owns what it points to,
+an index never has to be "let go of" to free anything, because it
+was never holding anything in the first place. All the nodes get
+cleaned up together in one sweep when the coat-check counter itself
+(the `Vec`, or the "World" struct that owns it) closes for the
+night.
+
 ## Why cycles are hard
 
 A *cycle* in a data structure means two values point at each

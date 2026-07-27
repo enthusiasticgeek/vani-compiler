@@ -10,6 +10,57 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The borrowed ladder
+
+Your neighbor owns a tall extension ladder. You're painting your
+fence and need it for the afternoon, so you knock on their door and
+ask to borrow it. They say yes, wheel it over, and you get to work.
+While you're using it, one rule is obvious without anyone stating it
+out loud: the ladder is still THEIRS. You didn't buy it, you can't
+sell it, and your ability to keep using it is entirely tied to your
+neighbor's continued ownership of it. If your neighbor still owns
+the ladder and hasn't asked for it back, you're fine. The moment
+they sell the ladder, or it burns up in a garage fire, or they
+simply want it back -- your use of it ends too. You never had an
+independent claim on the ladder; you had a claim that rides
+piggyback on THEIRS.
+
+Here's the situation that makes this interesting: suppose, halfway
+through painting, a second neighbor leans over the fence and asks if
+THEY can borrow the ladder from you "indefinitely, for as long as
+they need it, no questions asked." Can you promise them that? No --
+and not because you're being stingy. You genuinely don't have the
+authority to make that promise. Your own right to the ladder is only
+as solid as your neighbor's ownership of it, and you have no idea
+how long that will last. The most honest thing you can say is "you
+can use it as long as I still have it, and I can't guarantee how
+long that is." Passing along a borrowed thing doesn't reset the
+clock on it or grant it a fresh, independent lifetime -- it just
+extends the SAME clock one link further, and that clock is still
+ultimately set by whoever owns the ladder.
+
+Now picture the failure case: imagine you tell the second neighbor
+"sure, keep it as long as you like," and then, that same evening,
+the FIRST neighbor sells the ladder to a scrap dealer who hauls it
+away. The second neighbor shows up the next morning expecting a
+ladder that no longer exists anywhere -- they're holding a promise
+about a thing that's already gone. That's a dangling reference: a
+"you can use this" claim that outlived the actual thing it pointed
+to.
+
+This is exactly the shape of a reference in vāṇी. A `ref T` is a
+borrowed ladder -- temporary access to a value you don't own, valid
+only as long as the actual owner still has it. A function that hands
+back a `ref` is like you telling someone "here, use my neighbor's
+ladder" -- and the compiler's whole job in this chapter is making
+sure nobody ever gets handed a ladder-promise that outlives the
+ladder. When the chapter talks about a reference's "lifetime" being
+tied to its source, that's just: your right to the ladder can never
+be longer than your neighbor's ownership of it. And when it talks
+about a function rejected for "returning a reference with nothing to
+borrow from" -- that's the neighbor who tries to lend out a ladder
+they never actually had in the first place.
+
 ## What problem lifetimes solve
 
 You learned that references are second-class -- they're

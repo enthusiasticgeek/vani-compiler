@@ -9,6 +9,55 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The family car, one title
+
+Picture a household with four housemates and one car sitting in the
+driveway. The car has a single title, held by the household account
+-- not four separate quarter-ownerships that need adding up. When
+Priya needs to run an errand, she takes the keys, drives, and puts
+the keys back on the hook when she's done. While she has the keys,
+nobody else can drive the car, but everyone can still see it parked
+outside and knows it's there.
+
+Nobody in this household keeps a running tally of "how many people
+currently claim a piece of this car" -- there's no ledger where each
+housemate's name gets a checkmark and the car only gets sold once
+the last checkmark is erased. That's a DIFFERENT arrangement (a
+timeshare with per-owner shares), and this household doesn't use it.
+Instead, the car has exactly one owner -- the household itself --
+and everyone else just gets **temporary use** of it: keys borrowed
+for an afternoon, always returned, never kept.
+
+Now suppose the household grows, and remembering "the blue sedan,
+the one parked under the oak tree, the one Priya usually drives"
+gets awkward. So they give the car a **spot number** in the
+driveway -- Spot 3. Anyone who wants to refer to the car doesn't
+need to hold or know anything about the car itself; they just say
+"Spot 3" and check the driveway roster to see what's actually
+parked there today. The roster (a numbered list every housemate can
+consult) is the single source of truth; the spot number itself is
+small, harmless to write on a sticky note, and never keeps the car
+from being sold or swapped -- because the number doesn't hold the
+car, it just points at a slot.
+
+This is the shape vāṇी uses instead of the "many owners with a
+running head-count" pattern (what other languages call reference
+counting, `Rc`/`Arc`). One owner holds the actual thing -- the
+household account, or in code, a single struct or `Vec`. Everyone
+else either **borrows it temporarily** (takes the keys, returns the
+keys -- that's `ref T`), or holds a **small number that points at a
+slot in a shared list** (the spot number -- that's an index into a
+`Vec`). Nobody holds a fractional claim that has to be counted down
+to zero before cleanup happens; there's exactly one title-holder,
+and the title-holder decides when the car is gone.
+
+Keep this picture in mind for the rest of the chapter: every time
+you read "borrow," think "took the keys, will give them back."
+Every time you read "index" or "handle," think "wrote down the spot
+number instead of hauling the car around." And every time the
+chapter says vāṇी has NO `Rc`/`Arc`, think "no running head-count of
+claims" -- just one owner, plus keys-borrowing and spot-numbers.
+
 ## What vāṇी does NOT have
 
 Rust has `Rc<T>` (single-threaded reference-counted pointer)
