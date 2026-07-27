@@ -1818,11 +1818,22 @@ correct/intentional and the tutorial text was simply wrong; downgraded
 and moved out of the bug list accordingly. The remaining four are real,
 now root-caused, with grounded effort estimates.
 
-- [ ] **BUG-13. `parallel for`'s purity gate rejects EVERY indexed
+- [x] **BUG-13. `parallel for`'s purity gate rejects EVERY indexed
   write unconditionally, with no allowance for the safe "write only to
   `xs[i]` where `i` is the loop's own index" pattern — contradicting an
   existing "accepted" example already shipped in the tutorial.**
-  ~4–6 h · Medium. Root cause confirmed in `verify_pure_body`
+  ✅ fixed 2026-07-27. New `strip_safe_same_index_writes` pass, scoped
+  ONLY to `verify_pure_body_with_reductions` (`pure fn`/`task` bodies
+  untouched, confirmed by a dedicated regression test). Safe requires
+  BOTH the write index being exactly the loop var AND the value not
+  reading the same array at a different index — the estimate below
+  under-scoped this second condition; caught it via the exact
+  `xs[i] = xs[i-1] + 1` repro, which has a safe write index but a real
+  cross-iteration read race. 5 new lib.rs tests; 58
+  parallel_for/reduce/indirect-call tests swept clean.
+  `tutorials/src/advanced/02_parallel.md` updated: `double_all` marked
+  verified-working, allowed/rejected table and "why it works" bullets
+  corrected. ~4–6 h · Medium. Root cause confirmed in `verify_pure_body`
   (`checker.rs:33166`, the `TypedStmt::IndexAssign` arm): it
   unconditionally pushes a diagnostic for *any* indexed write, with no
   carve-out for the same-index case. `tutorials/src/advanced/02_parallel.md`'s
@@ -1843,8 +1854,31 @@ now root-caused, with grounded effort estimates.
   `xs[j] = ...`, and writes gated behind an `if` on a different
   condition are still rejected.
 
-- [ ] **BUG-14. Declaring an `RwLock<T>` local crashes the LLVM backend
-  instead of compiling.** ~30 min – 1 h · Trivial, low risk. Root cause
+- [x] **BUG-14. Declaring an `RwLock<T>` local crashes the LLVM backend
+  instead of compiling.** ✅ fixed 2026-07-27, exactly the one-match-arm
+  fix anticipated below. **Bigger finding while verifying against the
+  tutorial's own worked example**: even after this fix, RwLock was
+  still completely unusable for any realistic (more than one
+  acquisition) program — `rwlock_read`/`rwlock_write` (acquire) were
+  fully implemented, but NEITHER `ReadGuard` nor `WriteGuard` had ANY
+  scope-exit release logic at all (no code path ever decremented the
+  reader count or reset the writer flag), so a second acquisition on
+  the same lock hung forever. Fixed too (same session, same class of
+  bug — a type-dispatch match missing variants — this time in the
+  `TypedStmt::Drop` handler in `backend_llvm.rs`, mirroring `Type::
+  Guard`'s existing Mutex-unlock wake-one pattern but simpler: wake-all
+  on release, since `rwlock_read`/`rwlock_write` already retry their
+  whole CAS/load unconditionally on wake). Verified end-to-end: a
+  previously-hanging read/write/read sequence now completes instantly
+  with correct output, on both `vanic run` and `vanic build`. 3 new
+  LLVM-backend regression tests (RwLock had C-backend-only test
+  coverage before this — zero LLVM coverage, same class of gap as
+  every bug below). `advanced/02c_rwlock_primer.md` rewritten with a
+  fully-verified scalar-payload worked example (struct payloads hit a
+  SEPARATE bug, see BUG-19 below; `task`/`join` hit ANOTHER separate
+  bug, see BUG-21 below — both newly found while trying to keep the
+  original doc's richer example, both deferred, not fixed).
+  ~30 min – 1 h · Trivial, low risk. Root cause
   found precisely: `is_scalar()` (`backend_llvm.rs:45165`) has an
   explicit match arm listing every concurrency-primitive struct type
   that gets the uniform "single alloca" Let-codegen path —
@@ -1864,10 +1898,23 @@ now root-caused, with grounded effort estimates.
   `is_scalar`-shaped exhaustive match elsewhere in the LLVM backend
   (e.g. drop/clone emission) in case the omission repeats there too.
 
-- [ ] **BUG-15. A blanket `implement<T> Iface for Wrap<T>` crashes the
+- [x] **BUG-15. A blanket `implement<T> Iface for Wrap<T>` crashes the
   LLVM backend even completely on its own, with no concrete-impl
   conflict involved at all** (broader than first reported — reproduces
-  with *just* the blanket impl, no override). ~3–6 h · Medium. Root
+  with *just* the blanket impl, no override). ✅ fixed 2026-07-27, via
+  fix (b) from the two options below — surgical, low-risk: skip
+  hoisting methods from any impl with non-empty `type_params` (the
+  template) in `hoist_impls_into_functions`'s per-impl loop, letting
+  only the already-monomorphized concrete expansions through. Verified
+  both the lone-blanket-impl case and the blanket+concrete-override
+  case (concrete correctly wins, confirmed by output, not just
+  compilation). 2 new LLVM-backend regression tests (existing
+  blanket-impl tests were C-backend-only, same recurring gap). Also
+  fixed `intermediate/04d_default_methods_primer.md`'s "Conflict rule"
+  claim exactly as anticipated below — rewrote as "Overlap rule"
+  describing the real (silent-concrete-wins, no diagnostic) behavior,
+  with a verified example. Spot-checked 30 blanket/implement/interface/
+  generic + 23 dyn/vtable/drop tests: no regressions. ~3–6 h · Medium. Root
   cause traced: `hoist_impls_into_functions` (`checker.rs:5658`, called
   early at `checker.rs:599`) hoists every impl's methods — including
   blanket ones — into ordinary top-level functions immediately, while
@@ -1899,9 +1946,32 @@ now root-caused, with grounded effort estimates.
   `checker.rs:7912-7919` — the crash reproduces with or without a
   conflicting concrete impl present).
 
-- [ ] **BUG-18. `match` on a slice/array pattern with no wildcard/rest
+- [x] **BUG-18. `match` on a slice/array pattern with no wildcard/rest
   arm silently falls back to a synthetic default instead of being
   rejected as non-exhaustive, unlike every other scrutinee kind.**
+  ✅ fixed 2026-07-27 — took two passes, not one. First pass (a literal
+  "`_` required" check) was too strict: it broke the tutorial's own
+  pre-existing `describe_vec` pattern (`[]`, `[x]`, `[first, ..]`),
+  which the docs correctly claim is exhaustive via complete length
+  coverage with no `_` at all. Added coverage tracking (unconditional
+  exact-length arms + an unconditional has_rest arm together proving
+  every length is covered) so that shape is accepted. That in turn
+  exposed a second, previously-unreachable bug: the synthetic
+  "unreachable" default body was hardcoded `Int(0)` regardless of the
+  match's real result type — harmless while every no-wildcard match
+  was rejected (dead code), but produces invalid LLVM IR (`phi i8*` fed
+  an untyped `0`) for a `Str`-returning match the instant the
+  exhaustive-without-wildcard path became reachable. Fixed by reusing
+  the last arm's already-correctly-typed body as the placeholder
+  instead. 3 new regression tests; 136 match_-prefixed + pre-existing
+  slice-pattern tests swept clean. **Second bug found, NOT fixed,
+  logged as BUG-20 below**: verifying the guarded `classify_scores`
+  example for the tutorial revealed `check_match_slice` type-checks
+  pattern guards but never incorporates them into the dispatch
+  condition at all — a guarded slice-match arm always behaves as if
+  its guard were `true`, silently returning wrong results. Deferred;
+  `intermediate/02b_match_enhancements.md` updated with a caution note
+  + workaround, plus the new non-exhaustive error example.
   ~1–2 h · Short, low risk. Root cause found in `check_match_slice`
   (`checker.rs:15048`): every other dispatch kind (string
   `checker.rs:14722`, float `checker.rs:14972`, int/bool
@@ -1951,12 +2021,106 @@ isn't lost):
   `bool`/`Str` cases already in that section) instead of the
   same-signedness widening case.
 
-**Bundled estimate for the 4 real bugs (BUG-13/14/15/18): ~9–15 h
-(roughly 1.5–2 focused days)**, plus ~30–45 min total for the two doc
-corrections (DOC-4, DOC-5). BUG-14 and BUG-18 are safe, well-isolated,
-low-risk fixes suitable for a short session; BUG-13 and BUG-15 touch
-shared checker/hoisting machinery and need real regression coverage
-before landing. All four were found incidentally while verifying
-tutorial examples, not through a dedicated audit — a real audit of
-`parallel for` purity checking, `implement`-conflict/hoisting order,
-and pattern-exhaustiveness checking generally would likely find more.
+**All 4 real bugs (BUG-13/14/15/18) are now fixed** ✅ (2026-07-27,
+same session as this estimate — the ~9-15h bundled estimate above
+turned out reasonably close; DOC-4/DOC-5 not yet fixed, still open,
+~30-45 min combined). Fixing them (mostly the tutorial-verification
+work that came with each) surfaced 3 MORE bugs, none fixed, logged
+below.
+
+---
+
+## More bugs found while fixing BUG-13/14/15/18 (added 2026-07-27)
+
+None of these three are fixed. All were found incidentally while
+verifying the four fixes above against their tutorial worked examples
+— not through a dedicated audit of these specific features.
+
+- [ ] **BUG-19. `RwLock<T>`/`Mutex<T>` LLVM backend codegen is
+  hardcoded for `i64` payloads only — any struct or enum `T` crashes,
+  contrary to both the type system and the docs' "T can be any type:
+  i64, bool, a struct, an enum, Vec<T>" claim.** Found verifying
+  BUG-14's RwLock fix against the tutorial's original `RwLock<Config>`
+  (a struct) worked example. Minimal repro (`RwLock<Point>` where
+  `Point { x: i64, y: i64 }`): `rwlock_new` crashes at LLVM IR
+  verification — `'%t1' defined with type '%Struct_Point = type
+  { i64, i64 }' but expected 'i64'` — because `%intent_rwlock_i64`'s
+  LLVM struct definition literally has an `i64` field baked in
+  (`backend_llvm.rs`, the RwLock/Mutex builtin codegen), not a
+  parametric `T`-sized slot. Confirmed NOT RwLock-specific: the exact
+  same crash reproduces for `Mutex<Point>` (`%intent_mutex_i64`).
+  `docs/v1_limitations.md`'s existing L15/L16 entries claim
+  `Mutex<T>`/`Barrier` are "no longer i64-only" (resolved 2026-06-19)
+  — this needs re-checking; either that resolution never actually
+  covered the RwLock/Mutex *struct payload* case specifically, or it
+  regressed since. `advanced/02c_rwlock_primer.md` updated with a
+  caution note limiting the documented example to scalar payloads
+  until this is fixed. Worth checking `Barrier`/`Condvar`/`Channel<T,N>`
+  for the same hardcoded-scalar pattern while in this code.
+
+- [ ] **BUG-20. `check_match_slice` type-checks pattern guards on
+  slice/array match arms but never incorporates them into the
+  generated dispatch condition at all — a guarded slice-match arm
+  always behaves as if its guard were `true`.** Found verifying
+  BUG-18's fix against `intermediate/02b_match_enhancements.md`'s
+  `classify_scores` example, which uses `[s] if s >= 90 then "single
+  A"` followed by a plain `[s]` fallback arm. Reproduced directly:
+  `classify_scores(vec(50))` (should hit the `[s]` fallback, "single
+  non-A") instead returns "single A" — the guard silently never runs.
+  Root cause: unlike the enum/int/bool dispatch path (`checker.rs`
+  ~17517-17558, which type-checks the guard into `guard_typed` and
+  wraps the arm body in `Block { stmts: [Assert { expr: gexpr }], tail:
+  body }`), `check_match_slice`'s per-arm loop (`checker.rs:15094+`)
+  never reads `arm.guard` at all. Fix is NOT a copy of the enum path's
+  assert-wrapping approach — `check_match_slice` already desugars
+  directly into an if/else-if chain keyed on length, so the natural
+  fix is ANDing the type-checked guard into the per-arm length `cond`
+  before the chain is built, with the guard evaluated inside a scope
+  that has that arm's head/tail bindings available (the tricky part:
+  those bindings are currently constructed as `bind_stmts` further
+  down in the same function, after `cond` is finalized — the guard
+  needs its own binding scope wrapping it, evaluated as part of the
+  condition, not reusing `bind_stmts` verbatim since those are built
+  for the arm BODY's block, not the condition). Deferred — this
+  restructuring is a different shape of fix than BUG-18's (which only
+  touched the exhaustiveness check, not condition-building) and risked
+  the day's remaining budget for BUG-13/BUG-15.
+  `intermediate/02b_match_enhancements.md` updated with a caution note
+  and a workaround (nested `if`/`else` inside one unguarded arm instead
+  of two guard-differentiated arms sharing a pattern shape).
+
+- [ ] **BUG-21. `Task`/`task`/`join` tutorial content
+  (`advanced/03_concurrency.md`, `advanced/02c_rwlock_primer.md`,
+  `advanced/01_async.md`) describes a `Task<R>` generic-return-value
+  model that doesn't match v1's actual implementation.** Found while
+  trying to preserve BUG-14's RwLock tutorial example's original
+  multi-reader-task structure. `ast.rs`'s own `Type::Task` comment says
+  "v1 has no payload — `Task` is structural" (no generic parameter at
+  all), confirmed directly: `let t: Task<i64> = task worker(6);` fails
+  to parse (`error: expected '='` right after `Task`), and even bare
+  `Task` on the right-hand side of a `let` (`let t: Task = task
+  worker(6);`) fails too (`error: expected expression` at `task`).
+  The only form that actually parses is the STATEMENT form documented
+  in `ast.rs`'s `TaskSpawn`/`TaskJoin` AST nodes: `task <name> { <body>
+  } ... join <name>;` — a named, inline block spawn with no return-
+  value capture mechanism at all (confirmed: `task` bodies are
+  purity-gated like `parallel for`, and captures must be Copy, so
+  there's no obvious way to thread a computed result back out even
+  via a captured `mut ref` — untested whether ANY result-passing
+  pattern works). `03_concurrency.md`'s very first worked example
+  (`let t: Task<i64> = task worker(6); ... let r: i64 = join t;`)
+  and `advanced/01_async.md`'s "`Future<R>` for scalar R AND v3.1
+  Task<T> for all v3.1-allowed T" line both describe this as already
+  working; it isn't. Needs a decision: either `Task<R>` with a real
+  return-value-capturing `join` expression is a genuine v1 gap worth
+  implementing (matching what's taught), or every `task`/`join`
+  example across these three chapters needs rewriting to the real
+  statement-only, no-return-value form. Not scoped or estimated —
+  discovered too late in the session for a confident effort read; the
+  blast radius (3 chapters, an unknown number of examples) needs its
+  own audit pass before estimating. `advanced/02c_rwlock_primer.md`'s
+  worked example was rewritten to avoid `task`/`join` entirely
+  (sequential calls instead) with a note pointing at this gap; the
+  other two chapters are untouched.
+
+---
