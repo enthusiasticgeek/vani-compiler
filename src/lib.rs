@@ -48536,6 +48536,83 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-14 (2026-07-27): the LLVM backend's `is_scalar()` was missing
+    // RwLock/ReadGuard/WriteGuard, so ANY `let` binding one of these
+    // types panicked with `unreachable!("checker: non-scalar let with
+    // type {:?}", ty)` instead of compiling. Every prior RwLock test in
+    // this file only exercised the C backend (`compile_to_c`) — this is
+    // the first LLVM-backend regression test for the type. A regression
+    // here re-panics rather than failing an assertion, which cargo test
+    // still reports correctly as a failed test.
+    #[test]
+    fn rwlock_let_binding_compiles_to_llvm_without_panicking() {
+        let source = r#"
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(42);
+              let rg: ReadGuard<i64> = rwlock_read(mut ref rw);
+              let v: i64 = read_guard_get(ref rg);
+              let wg: WriteGuard<i64> = rwlock_write(mut ref rw);
+              let _ = write_guard_set(mut ref wg, v + 1);
+              return 0;
+            }
+        "#;
+        let _ = compile_to_llvm(source).expect("RwLock<i64> program must compile to LLVM IR");
+    }
+
+    // BUG-14 follow-up (2026-07-27): `rwlock_read`/`rwlock_write` (LLVM
+    // backend) acquire the lock, but until this fix NOTHING released it
+    // on scope exit — no code path decremented the reader count or
+    // reset the writer flag. Any realistic use (acquire, use, acquire
+    // again) hung forever. These two tests pin the release codegen the
+    // same way `mutex_lock_uses_futex_wait_and_wake_on_linux` pins
+    // Mutex's Guard release, and an end-to-end repro
+    // (`read_timeout`/`update_timeout` called sequentially, each
+    // acquiring after the previous guard's scope ended) was verified
+    // manually to actually terminate and produce the right output —
+    // it previously hung indefinitely under `vanic run`.
+    #[test]
+    fn rwlock_read_guard_drop_emits_release_and_wake() {
+        let source = r#"
+            fn read_once(rw: mut ref RwLock<i64>) -> i64 {
+              let r: ReadGuard<i64> = rwlock_read(rw);
+              return read_guard_get(ref r);
+              // r drops here -- must release the read lock
+            }
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(1);
+              return read_once(mut ref rw);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("RwLock<i64> read-and-drop compiles");
+        assert!(
+            ll.contains("atomicrmw sub i32*"),
+            "expected an atomic decrement releasing the read lock on ReadGuard drop:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn rwlock_write_guard_drop_emits_release_and_wake() {
+        let source = r#"
+            fn write_once(rw: mut ref RwLock<i64>, new_v: i64) -> i64 {
+              let w: WriteGuard<i64> = rwlock_write(rw);
+              let _ = write_guard_set(mut ref w, new_v);
+              return 0;
+              // w drops here -- must reset the writer flag to 0
+            }
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(1);
+              return write_once(mut ref rw, 2);
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("RwLock<i64> write-and-drop compiles");
+        assert!(
+            ll.contains("store atomic i32 0, i32*"),
+            "expected the writer flag reset to 0 on WriteGuard drop:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
     #[test]
     fn sov_s6_fn_name_first_compiles() {
         // SOV-S6 (2026-06-19): fn keyword after the signature.

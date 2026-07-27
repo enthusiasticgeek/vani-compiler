@@ -74,9 +74,13 @@ accidentally hold the lock in two places at once.
 // Create an RwLock wrapping an initial value.
 let rw: RwLock<i64> = rwlock_new(0);
 
-// Acquire a shared read lock.
+// Acquire a shared read lock. Note: both rwlock_read AND
+// rwlock_write take `mut ref` -- acquiring even a READ lock
+// mutates the lock's internal reader-count, so the handle itself
+// must be mutably borrowed even though you're only reading the
+// payload.
 // Many threads can hold a ReadGuard simultaneously.
-let r: ReadGuard<i64> = rwlock_read(ref rw);
+let r: ReadGuard<i64> = rwlock_read(mut ref rw);
 let v: i64 = read_guard_get(ref r);
 // r goes out of scope here -> read lock released automatically
 
@@ -87,7 +91,17 @@ let _ = write_guard_set(mut ref w, v + 1);
 // w goes out of scope here -> write lock released automatically
 ```
 
-`T` can be any type: `i64`, `bool`, a struct, an enum, `Vec<T>`.
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+`T` is documented as "any type" -- `i64`, `bool`, a struct, an enum,
+`Vec<T>` -- but as of this writing, only **scalar** element types
+(`i64`, `bool`, other integer widths) actually work end to end.
+Struct and enum payloads type-check but currently **crash the LLVM
+backend** at codegen (`RwLock<Point>` etc. -- and the same is true of
+`Mutex<T>`, not just `RwLock<T>`): both lock primitives' generated
+struct layout is hardcoded to an `i64`-sized slot rather than
+parametrized by the real element type. Tracked as a known limitation;
+stick to scalar payloads for `RwLock`/`Mutex` until this is fixed.
 
 ## When to use RwLock vs Mutex
 
@@ -115,45 +129,73 @@ use `Mutex<T>` instead.
 
 ## Worked example
 
-<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
-intent "RwLock primer -- shared configuration table.";
+intent "RwLock primer -- shared timeout setting.";
 
-struct Config { max_retries: i64, timeout_ms: i64 }
-
-fn read_config(rw: ref RwLock<Config>) -> i64 {
-  let r: ReadGuard<Config> = rwlock_read(ref rw);
-  let cfg: Config = read_guard_get(ref r);
-  // ReadGuard drops here -- read lock released
-  return cfg.timeout_ms;
+fn read_timeout(rw: mut ref RwLock<i64>) -> i64 {
+  let r: ReadGuard<i64> = rwlock_read(rw);
+  let ms: i64 = read_guard_get(ref r);
+  // r drops here (end of fn) -- read lock released automatically
+  return ms;
 }
 
-fn update_timeout(rw: mut ref RwLock<Config>, new_ms: i64) -> i64 {
-  let w: WriteGuard<Config> = rwlock_write(mut ref rw);
-  let old: Config = read_guard_get(ref w);   // read current value via write guard
-  let _ = write_guard_set(mut ref w, Config { max_retries: old.max_retries, timeout_ms: new_ms });
-  // WriteGuard drops here -- write lock released
+fn update_timeout(rw: mut ref RwLock<i64>, new_ms: i64) -> i64 {
+  let w: WriteGuard<i64> = rwlock_write(rw);
+  let _ = write_guard_set(mut ref w, new_ms);
+  // w drops here (end of fn) -- write lock released automatically
   return 0;
 }
 
 fn main() -> i64 {
-  let rw: RwLock<Config> = rwlock_new(Config { max_retries: 3, timeout_ms: 5000 });
+  let rw: RwLock<i64> = rwlock_new(5000);
 
-  // Spawn two reader tasks
-  let t1: Task<i64> = task read_config(ref rw);
-  let t2: Task<i64> = task read_config(ref rw);
+  // Two "readers" -- each acquires, reads, and releases before
+  // the next runs. Because each ReadGuard is scoped to
+  // read_timeout's body, the lock is free again by the time
+  // update_timeout tries to acquire it for writing.
+  let seen_by_reader_1: i64 = read_timeout(mut ref rw);
+  let seen_by_reader_2: i64 = read_timeout(mut ref rw);
 
-  // Update from the main thread while readers may be running
   let _ = update_timeout(mut ref rw, 10000);
 
-  let ms1: i64 = join t1;
-  let ms2: i64 = join t2;
-  print "reader 1 saw timeout_ms =", ms1;
-  print "reader 2 saw timeout_ms =", ms2;
+  let seen_after_update: i64 = read_timeout(mut ref rw);
+
+  print "reader 1 saw timeout_ms =", seen_by_reader_1;
+  print "reader 2 saw timeout_ms =", seen_by_reader_2;
+  print "after update, timeout_ms =", seen_after_update;
   return 0;
 }
 ```
+
+Expected output:
+
+```
+reader 1 saw timeout_ms = 5000
+reader 2 saw timeout_ms = 5000
+after update, timeout_ms = 10000
+```
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+If a `ReadGuard`/`WriteGuard` is still alive when you try to acquire
+the lock again on the SAME thread (e.g. you keep both guards from
+`read_timeout`-style calls alive at once, instead of letting each
+drop at the end of its own scope before the next acquisition), the
+second acquisition blocks forever -- there's no thread left to
+release it. Scope each guard as tightly as this example does (one
+guard per function call, dropped at that function's return) rather
+than holding several open at once in the same function body.
+
+`task`/`join` are intentionally not used above -- `Task` in the
+current compiler doesn't carry a return-value payload the way
+`Task<R>` (as used in [Advanced 3](03_concurrency.md)) suggests, so
+the "spawn two concurrent readers, join their results" version this
+example used to show doesn't compile as written. Tracked as a
+separate known issue; the sequential version above demonstrates the
+same acquire/read/release/write/release lifecycle without relying on
+that gap.
 
 ## Cross-reference
 

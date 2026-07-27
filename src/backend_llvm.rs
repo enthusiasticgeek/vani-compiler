@@ -3623,6 +3623,85 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     out.push_str(&format!("  br label %{}\n", done));
                     out.push_str(&format!("{}:\n", done));
                 }
+            } else if matches!(ty, Type::ReadGuard(_) | Type::WriteGuard(_)) {
+                // BUG-14 follow-up fix (2026-07-27): RwLock's RAII
+                // release was never implemented on EITHER guard type
+                // -- `rwlock_read`/`rwlock_write` (above) acquire the
+                // lock, but until this fix nothing ever decremented
+                // the reader count or reset the writer flag on scope
+                // exit. Any realistic usage (acquire, use, acquire
+                // again) hung forever: a second `rwlock_write` after
+                // a `ReadGuard` had already gone out of scope would
+                // spin on its CAS 0 -> -1 indefinitely, since the
+                // state never returned to 0. Mirrors `Type::Guard`'s
+                // unlock above, but simpler: both `rwlock_read` and
+                // `rwlock_write` (see their codegen earlier in this
+                // function) always spin-and-retry the whole CAS/load
+                // on wake rather than trusting a single dequeued
+                // waiter, so an unconditional wake-all on release is
+                // both correct and consistent with that design --
+                // unlike Guard's Drepper three-state optimization,
+                // there's no waiter count to consult here.
+                let is_read_guard = matches!(ty, Type::ReadGuard(_));
+                let guard_ty = if is_read_guard {
+                    "%intent_read_guard_i64"
+                } else {
+                    "%intent_write_guard_i64"
+                };
+                if let Some((_, addr)) = ctx.locals.get(name).cloned() {
+                    let rp_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                        rp_p, guard_ty, guard_ty, addr
+                    ));
+                    let rw_ptr = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
+                        rw_ptr, rp_p
+                    ));
+                    let state_p = ctx.fresh_tmp();
+                    out.push_str(&format!(
+                        "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
+                        state_p, rw_ptr
+                    ));
+                    if is_read_guard {
+                        // One fewer active reader. If this was the
+                        // last reader (new count 0), a parked writer
+                        // may now be able to proceed -- the
+                        // unconditional wake below covers that case
+                        // without needing to branch on the old value.
+                        let _old = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = atomicrmw sub i32* {} , i32 1 seq_cst\n",
+                            _old, state_p
+                        ));
+                    } else {
+                        // Sole writer releasing exclusive access --
+                        // no CAS needed, nothing else can be touching
+                        // this field while a WriteGuard is alive.
+                        out.push_str(&format!(
+                            "  store atomic i32 0, i32* {} seq_cst, align 4\n",
+                            state_p
+                        ));
+                    }
+                    if host_uses_win32_threading() {
+                        let state_i8 = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = bitcast i32* {} to i8*\n",
+                            state_i8, state_p
+                        ));
+                        out.push_str(&format!(
+                            "  call void @WakeByAddressAll(i8* {})\n",
+                            state_i8
+                        ));
+                    } else {
+                        let _wake_ret = ctx.fresh_tmp();
+                        out.push_str(&format!(
+                            "  {} = call i64 (i64, ...) @syscall(i64 {}, i32* {}, i32 129, i32 2147483647, i8* null, i8* null, i32 0)\n",
+                            _wake_ret, sys_futex_for_host(), state_p
+                        ));
+                    }
+                }
             }
         }
         TypedStmt::Discard { expr } => {
@@ -45177,7 +45256,14 @@ fn is_scalar(ty: &Type) -> bool {
         // <ty> <v>, <ty>* …` work uniformly. The builtins
         // (channel_new, mutex_new, mutex_lock) return SSA
         // values of these struct types.
-        || matches!(ty, Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList)
+        // BUG-14 fix (2026-07-27): RwLock/ReadGuard/WriteGuard were
+        // missing from this list despite `llvm_type` already mapping
+        // all three to named structs and the rwlock_* builtins already
+        // emitting working codegen elsewhere — any `let` binding one
+        // fell through to the `unreachable!()` below instead of the
+        // uniform struct-scalar Let path every other lock/guard type
+        // already uses.
+        || matches!(ty, Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList)
         // Function pointers are pointer-sized scalars. The
         // alloca holds a single value of fn-ptr type (the
         // load returns a function-pointer SSA value the
