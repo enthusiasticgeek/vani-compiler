@@ -132,6 +132,33 @@ pub(crate) fn llvm_channel_struct(element: &Type, capacity: u64) -> String {
 /// `"i8"` (the slot is an i8 shadow because `[N x i1]` isn't
 /// byte-addressable). For struct/aggregate types: the named LLVM
 /// struct type spelling via `llvm_type_string`.
+/// BUG-19 fix (2026-07-27): per-T struct name helpers for
+/// `Mutex<T>`/`Guard<T>`/`RwLock<T>`/`ReadGuard<T>`/`WriteGuard<T>`,
+/// mirroring `llvm_channel_struct` above (same `element_tag` naming
+/// scheme reused from the C backend). Before this fix, these five
+/// types' LLVM codegen was entirely hardcoded to a fixed `i64`
+/// payload (`%intent_mutex_i64` etc, regardless of the real element
+/// type) -- any struct/enum `T` crashed at LLVM IR verification with
+/// a type mismatch (e.g. `'%t1' defined with type '%Struct_Point'
+/// but expected 'i64'`), even though the C backend already handled
+/// arbitrary `T` correctly via the exact same `element_tag`-based
+/// naming (see `c_mutex_storage`/`c_rwlock_storage` in backend_c.rs).
+pub(crate) fn llvm_mutex_struct(element: &Type) -> String {
+    format!("%intent_mutex_{}", crate::backend_c::element_tag(element))
+}
+pub(crate) fn llvm_guard_struct(element: &Type) -> String {
+    format!("%intent_guard_{}", crate::backend_c::element_tag(element))
+}
+pub(crate) fn llvm_rwlock_struct(element: &Type) -> String {
+    format!("%intent_rwlock_{}", crate::backend_c::element_tag(element))
+}
+pub(crate) fn llvm_read_guard_struct(element: &Type) -> String {
+    format!("%intent_read_guard_{}", crate::backend_c::element_tag(element))
+}
+pub(crate) fn llvm_write_guard_struct(element: &Type) -> String {
+    format!("%intent_write_guard_{}", crate::backend_c::element_tag(element))
+}
+
 pub(crate) fn channel_slot_llvm_string(element: &Type) -> String {
     match element {
         Type::Bool => "i8".to_string(),
@@ -1224,13 +1251,47 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // Mirrors the C-backend struct so cross-backend parity
     // holds at the IR level.
     out.push_str("%intent_task_handle = type { i64, i8* }\n");
-    // `intent_mutex_i64`: i64 payload + i32 `locked` state.
-    // The state field is i32 to match Linux's futex ABI
-    // (`SYS_futex` reads/writes a 32-bit word). Drepper's
-    // three-state lock: 0=unlocked, 1=locked-no-waiters,
-    // 2=locked-waiters-present.
-    out.push_str("%intent_mutex_i64 = type { i64, i32 }\n");
-    out.push_str("%intent_guard_i64 = type { %intent_mutex_i64* }\n");
+    // BUG-19 fix (2026-07-27): one `%intent_mutex_<T>` /
+    // `%intent_guard_<T>` struct pair per DISTINCT element type T
+    // used in the program, mirroring the Channel<T,N> scan just
+    // above (and the C backend's `collect_mutex_specs` /
+    // `emit_mutex_bundle`, already correctly parametric). Before this
+    // fix, a single hardcoded `%intent_mutex_i64 = type { i64, i32 }`
+    // was emitted unconditionally regardless of what the program
+    // actually used, so `Mutex<Point>` reached codegen expecting an
+    // `i64` field and crashed at LLVM IR verification.
+    // The payload field's LLVM type is i64 to match Linux's futex
+    // ABI... no -- the STATE field is i32 to match Linux's futex ABI
+    // (`SYS_futex` reads/writes a 32-bit word); the payload field is
+    // whatever T's LLVM spelling is. Drepper's three-state lock:
+    // 0=unlocked, 1=locked-no-waiters, 2=locked-waiters-present.
+    {
+        let mut seen = std::collections::BTreeSet::<String>::new();
+        let mut specs: Vec<Type> = Vec::new();
+        for function in &program.functions {
+            crate::backend_c::collect_mutex_specs(&function.return_type, &mut seen, &mut specs);
+            for param in &function.params {
+                crate::backend_c::collect_mutex_specs(&param.ty, &mut seen, &mut specs);
+            }
+            for stmt in &function.body {
+                crate::backend_c::collect_mutex_specs_in_stmt(stmt, &mut seen, &mut specs);
+            }
+        }
+        let mut llvm_seen = std::collections::BTreeSet::<String>::new();
+        for element in &specs {
+            let m_ty = llvm_mutex_struct(element);
+            if !llvm_seen.insert(m_ty.clone()) {
+                continue;
+            }
+            let g_ty = llvm_guard_struct(element);
+            out.push_str(&format!(
+                "{} = type {{ {}, i32 }}\n",
+                m_ty,
+                channel_slot_llvm_string(element),
+            ));
+            out.push_str(&format!("{} = type {{ {}* }}\n", g_ty, m_ty));
+        }
+    }
     // Condvar (stack-by-value, like Mutex/Guard): a single
     // i32 seq counter accessed atomically. Notify ops bump
     // seq + futex-wake; wait snapshots seq + futex-waits.
@@ -1240,11 +1301,38 @@ pub fn emit_llvm(program: &TypedProgram) -> String {
     // `{ _Atomic int64_t count; int64_t n; _Atomic int gen; }`
     // padded to 24 bytes for 8-byte alignment.
     out.push_str("%intent_barrier = type { i64, i64, i32, i32 }\n");
-    // RwLock<i64> (stack-by-value): i64 payload + i32 state
+    // BUG-19 fix: same per-distinct-T scan as Mutex/Guard above.
+    // RwLock<T> (stack-by-value): T payload + i32 state
     // (0=unlocked, N>0=N readers, -1=write-locked) + i32 pad.
-    out.push_str("%intent_rwlock_i64 = type { i64, i32, i32 }\n");
-    out.push_str("%intent_read_guard_i64 = type { %intent_rwlock_i64* }\n");
-    out.push_str("%intent_write_guard_i64 = type { %intent_rwlock_i64* }\n");
+    {
+        let mut seen = std::collections::BTreeSet::<String>::new();
+        let mut specs: Vec<Type> = Vec::new();
+        for function in &program.functions {
+            crate::backend_c::collect_rwlock_specs(&function.return_type, &mut seen, &mut specs);
+            for param in &function.params {
+                crate::backend_c::collect_rwlock_specs(&param.ty, &mut seen, &mut specs);
+            }
+            for stmt in &function.body {
+                crate::backend_c::collect_rwlock_specs_in_stmt(stmt, &mut seen, &mut specs);
+            }
+        }
+        let mut llvm_seen = std::collections::BTreeSet::<String>::new();
+        for element in &specs {
+            let rw_ty = llvm_rwlock_struct(element);
+            if !llvm_seen.insert(rw_ty.clone()) {
+                continue;
+            }
+            let rg_ty = llvm_read_guard_struct(element);
+            let wg_ty = llvm_write_guard_struct(element);
+            out.push_str(&format!(
+                "{} = type {{ {}, i32, i32 }}\n",
+                rw_ty,
+                channel_slot_llvm_string(element),
+            ));
+            out.push_str(&format!("{} = type {{ {}* }}\n", rg_ty, rw_ty));
+            out.push_str(&format!("{} = type {{ {}* }}\n", wg_ty, rw_ty));
+        }
+    }
     // Deque<i64> (closure #303): { data*, front, len, cap }.
     out.push_str("%intent_deque_i64 = type { i64*, i64, i64, i64 }\n");
     // HashSet<i64> (closure #304): { keys*, occ*, len, cap }.
@@ -3553,7 +3641,11 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                         ctx.current_block = done_lbl;
                     }
                 }
-            } else if matches!(ty, Type::Guard(_)) {
+            } else if let Type::Guard(elt) = ty {
+                // BUG-19 fix: parametric struct names instead of the
+                // hardcoded `%intent_guard_i64`/`%intent_mutex_i64`.
+                let g_ty = llvm_guard_struct(elt);
+                let m_ty = llvm_mutex_struct(elt);
                 // RAII unlock with futex wake. Drepper's
                 // three-state lock: an `atomicrmw sub 1`
                 // returns the OLD state. If it was 1
@@ -3565,18 +3657,18 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
                     let mp_p = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = getelementptr %intent_guard_i64, %intent_guard_i64* {}, i32 0, i32 0\n",
-                        mp_p, addr
+                        "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                        mp_p, g_ty, g_ty, addr
                     ));
                     let m_ptr = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = load %intent_mutex_i64*, %intent_mutex_i64** {}\n",
-                        m_ptr, mp_p
+                        "  {} = load {}*, {}** {}\n",
+                        m_ptr, m_ty, m_ty, mp_p
                     ));
                     let locked_p = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = getelementptr %intent_mutex_i64, %intent_mutex_i64* {}, i32 0, i32 1\n",
-                        locked_p, m_ptr
+                        "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                        locked_p, m_ty, m_ty, m_ptr
                     ));
                     let old = ctx.fresh_tmp();
                     out.push_str(&format!(
@@ -3643,11 +3735,19 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                 // unlike Guard's Drepper three-state optimization,
                 // there's no waiter count to consult here.
                 let is_read_guard = matches!(ty, Type::ReadGuard(_));
-                let guard_ty = if is_read_guard {
-                    "%intent_read_guard_i64"
-                } else {
-                    "%intent_write_guard_i64"
+                // BUG-19 fix: parametric struct names instead of the
+                // hardcoded `%intent_read_guard_i64`/
+                // `%intent_write_guard_i64`/`%intent_rwlock_i64`.
+                let elt = match ty {
+                    Type::ReadGuard(e) | Type::WriteGuard(e) => e.as_ref(),
+                    _ => unreachable!("guarded by the outer matches!"),
                 };
+                let guard_ty = if is_read_guard {
+                    llvm_read_guard_struct(elt)
+                } else {
+                    llvm_write_guard_struct(elt)
+                };
+                let rw_ty = llvm_rwlock_struct(elt);
                 if let Some((_, addr)) = ctx.locals.get(name).cloned() {
                     let rp_p = ctx.fresh_tmp();
                     out.push_str(&format!(
@@ -3656,13 +3756,13 @@ fn emit_stmt(stmt: &TypedStmt, ctx: &mut FnCtx, out: &mut String) {
                     ));
                     let rw_ptr = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
-                        rw_ptr, rp_p
+                        "  {} = load {}*, {}** {}\n",
+                        rw_ptr, rw_ty, rw_ty, rp_p
                     ));
                     let state_p = ctx.fresh_tmp();
                     out.push_str(&format!(
-                        "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
-                        state_p, rw_ptr
+                        "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                        state_p, rw_ty, rw_ty, rw_ptr
                     ));
                     if is_read_guard {
                         // One fewer active reader. If this was the
@@ -6157,25 +6257,33 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             // locked-waiters-present (Drepper's three-state
             // futex lock).
             if name == "mutex_new" {
+                // BUG-19 fix: element type comes straight from the
+                // initial value's own type -- `mutex_new(initial: T)
+                // -> Mutex<T>`.
+                let elt = args[0].ty.clone();
+                let m_ty = llvm_mutex_struct(&elt);
                 let initial = emit_expr(&args[0], ctx, out);
                 let s1 = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_mutex_i64 undef, i64 {}, 0\n",
-                    s1, initial
+                    "  {} = insertvalue {} undef, {} {}, 0\n",
+                    s1, m_ty, channel_slot_llvm_string(&elt), initial
                 ));
                 let s2 = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_mutex_i64 {}, i32 0, 1\n",
-                    s2, s1
+                    "  {} = insertvalue {} {}, i32 0, 1\n",
+                    s2, m_ty, s1
                 ));
                 return s2;
             }
             if name == "mutex_lock" {
+                // BUG-19 fix: unwrap `mut ref Mutex<T>` to get T.
+                let elt = crate::backend_c::mutex_element_from_ref_c(&args[0].ty);
+                let m_ty = llvm_mutex_struct(&elt);
                 let m_ptr = emit_expr(&args[0], ctx, out);
                 let locked_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_mutex_i64, %intent_mutex_i64* {}, i32 0, i32 1\n",
-                    locked_p, m_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    locked_p, m_ty, m_ty, m_ptr
                 ));
                 // Drepper's three-state futex lock.
                 //   entry → fast CAS 0→1. On success → done.
@@ -6305,53 +6413,66 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!("  br label %{}\n", loop_head));
                 // acquired: build the guard.
                 out.push_str(&format!("{}:\n", acquired));
+                let g_ty = llvm_guard_struct(&elt);
                 let g = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_guard_i64 undef, %intent_mutex_i64* {}, 0\n",
-                    g, m_ptr
+                    "  {} = insertvalue {} undef, {}* {}, 0\n",
+                    g, g_ty, m_ty, m_ptr
                 ));
                 return g;
             }
             if name == "guard_get" {
+                // BUG-19 fix: unwrap `ref Guard<T>` to get T.
+                let elt = crate::backend_c::guard_element_from_ref_c(&args[0].ty);
+                let g_ty = llvm_guard_struct(&elt);
+                let m_ty = llvm_mutex_struct(&elt);
+                let payload_ty = channel_slot_llvm_string(&elt);
                 let g_ptr = emit_expr(&args[0], ctx, out);
                 let mp_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_guard_i64, %intent_guard_i64* {}, i32 0, i32 0\n",
-                    mp_p, g_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    mp_p, g_ty, g_ty, g_ptr
                 ));
                 let m_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load %intent_mutex_i64*, %intent_mutex_i64** {}\n",
-                    m_ptr, mp_p
+                    "  {} = load {}*, {}** {}\n",
+                    m_ptr, m_ty, m_ty, mp_p
                 ));
                 let value_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_mutex_i64, %intent_mutex_i64* {}, i32 0, i32 0\n",
-                    value_p, m_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    value_p, m_ty, m_ty, m_ptr
                 ));
                 let val = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = load i64, i64* {}\n", val, value_p));
+                out.push_str(&format!("  {} = load {}, {}* {}\n", val, payload_ty, payload_ty, value_p));
                 return val;
             }
             if name == "guard_set" {
+                // BUG-19 fix: unwrap `mut ref Guard<T>` -- guard_set
+                // takes the guard by mut ref, same unwrap shape as
+                // mutex_lock's arg.
+                let elt = crate::backend_c::guard_element_from_ref_c(&args[0].ty);
+                let g_ty = llvm_guard_struct(&elt);
+                let m_ty = llvm_mutex_struct(&elt);
+                let payload_ty = channel_slot_llvm_string(&elt);
                 let g_ptr = emit_expr(&args[0], ctx, out);
                 let v = emit_expr(&args[1], ctx, out);
                 let mp_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_guard_i64, %intent_guard_i64* {}, i32 0, i32 0\n",
-                    mp_p, g_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    mp_p, g_ty, g_ty, g_ptr
                 ));
                 let m_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load %intent_mutex_i64*, %intent_mutex_i64** {}\n",
-                    m_ptr, mp_p
+                    "  {} = load {}*, {}** {}\n",
+                    m_ptr, m_ty, m_ty, mp_p
                 ));
                 let value_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_mutex_i64, %intent_mutex_i64* {}, i32 0, i32 0\n",
-                    value_p, m_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    value_p, m_ty, m_ty, m_ptr
                 ));
-                out.push_str(&format!("  store i64 {}, i64* {}\n", v, value_p));
+                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, v, payload_ty, value_p));
                 return v;
             }
             // Condvar builtins. Stack-by-value `%intent_condvar
@@ -6392,24 +6513,30 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                     "  {} = load atomic i32, i32* {} seq_cst, align 4\n",
                     snapshot, seq_p
                 ));
+                // BUG-19 fix: unwrap `ref Guard<T>` (condvar_wait's
+                // guard arg) to get T, and use parametric struct names
+                // instead of the hardcoded `%intent_guard_i64`/
+                // `%intent_mutex_i64`.
+                let elt = crate::backend_c::guard_element_from_ref_c(&args[1].ty);
+                let g_ty = llvm_guard_struct(&elt);
+                let m_ty = llvm_mutex_struct(&elt);
                 // Read the mutex pointer out of the guard so we
-                // can both unlock and re-lock it. Guard layout
-                // is `{ %intent_mutex_i64* }`.
+                // can both unlock and re-lock it.
                 let mp_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_guard_i64, %intent_guard_i64* {}, i32 0, i32 0\n",
-                    mp_p, g_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    mp_p, g_ty, g_ty, g_ptr
                 ));
                 let m_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load %intent_mutex_i64*, %intent_mutex_i64** {}\n",
-                    m_ptr, mp_p
+                    "  {} = load {}*, {}** {}\n",
+                    m_ptr, m_ty, m_ty, mp_p
                 ));
                 // Pointer to mutex's `locked` field (index 1).
                 let locked_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_mutex_i64, %intent_mutex_i64* {}, i32 0, i32 1\n",
-                    locked_p, m_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    locked_p, m_ty, m_ty, m_ptr
                 ));
                 // Unlock the mutex (mirror of Guard's Drop): if
                 // fetch_sub returns 1 (was-1, no waiters), we're
@@ -7017,31 +7144,41 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             //   field 0 = value (i64), field 1 = state (i32 atomic), field 2 = _pad.
             // ReadGuard / WriteGuard: `{ %intent_rwlock_i64* }`.
             if name == "rwlock_new" {
+                // BUG-19 fix: element type comes straight from the
+                // initial value's own type -- `rwlock_new(initial: T)
+                // -> RwLock<T>`.
+                let elt = args[0].ty.clone();
+                let rw_ty = llvm_rwlock_struct(&elt);
+                let payload_ty = channel_slot_llvm_string(&elt);
                 let v = emit_expr(&args[0], ctx, out);
                 let s1 = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_rwlock_i64 undef, i64 {}, 0\n",
-                    s1, v
+                    "  {} = insertvalue {} undef, {} {}, 0\n",
+                    s1, rw_ty, payload_ty, v
                 ));
                 let s2 = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_rwlock_i64 {}, i32 0, 1\n",
-                    s2, s1
+                    "  {} = insertvalue {} {}, i32 0, 1\n",
+                    s2, rw_ty, s1
                 ));
                 let s3 = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_rwlock_i64 {}, i32 0, 2\n",
-                    s3, s2
+                    "  {} = insertvalue {} {}, i32 0, 2\n",
+                    s3, rw_ty, s2
                 ));
                 return s3;
             }
             if name == "rwlock_read" {
+                // BUG-19 fix: unwrap `mut ref RwLock<T>` to get T.
+                let elt = crate::backend_c::rwlock_element_from_ref_c(&args[0].ty);
+                let rw_ty = llvm_rwlock_struct(&elt);
+                let rg_ty = llvm_read_guard_struct(&elt);
                 // rw_ptr = &RwLock; spin until state >= 0, then CAS increment.
                 let rw_ptr = emit_expr(&args[0], ctx, out);
                 let state_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
-                    state_p, rw_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    state_p, rw_ty, rw_ty, rw_ptr
                 ));
                 let lbl_try = ctx.fresh_label("rw_read_try");
                 let lbl_park = ctx.fresh_label("rw_read_park");
@@ -7101,17 +7238,21 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let g = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_read_guard_i64 undef, %intent_rwlock_i64* {}, 0\n",
-                    g, rw_ptr
+                    "  {} = insertvalue {} undef, {}* {}, 0\n",
+                    g, rg_ty, rw_ty, rw_ptr
                 ));
                 return g;
             }
             if name == "rwlock_write" {
+                // BUG-19 fix: unwrap `mut ref RwLock<T>` to get T.
+                let elt = crate::backend_c::rwlock_element_from_ref_c(&args[0].ty);
+                let rw_ty = llvm_rwlock_struct(&elt);
+                let wg_ty = llvm_write_guard_struct(&elt);
                 let rw_ptr = emit_expr(&args[0], ctx, out);
                 let state_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 1\n",
-                    state_p, rw_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 1\n",
+                    state_p, rw_ty, rw_ty, rw_ptr
                 ));
                 let lbl_try = ctx.fresh_label("rw_write_try");
                 let lbl_park = ctx.fresh_label("rw_write_park");
@@ -7167,17 +7308,27 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 out.push_str(&format!("{}:\n", lbl_done));
                 let g = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = insertvalue %intent_write_guard_i64 undef, %intent_rwlock_i64* {}, 0\n",
-                    g, rw_ptr
+                    "  {} = insertvalue {} undef, {}* {}, 0\n",
+                    g, wg_ty, rw_ty, rw_ptr
                 ));
                 return g;
             }
             if name == "read_guard_get" || name == "write_guard_get" {
                 let is_read = name == "read_guard_get";
-                let guard_ty = if is_read {
-                    "%intent_read_guard_i64"
+                // BUG-19 fix: unwrap `ref ReadGuard<T>` / `ref
+                // WriteGuard<T>` to get T (both accessors take a plain
+                // `ref`, per the checker).
+                let elt = if is_read {
+                    crate::backend_c::read_guard_element_from_ref_c(&args[0].ty)
                 } else {
-                    "%intent_write_guard_i64"
+                    crate::backend_c::write_guard_element_from_ref_c(&args[0].ty)
+                };
+                let rw_ty = llvm_rwlock_struct(&elt);
+                let payload_ty = channel_slot_llvm_string(&elt);
+                let guard_ty = if is_read {
+                    llvm_read_guard_struct(&elt)
+                } else {
+                    llvm_write_guard_struct(&elt)
                 };
                 let g_ptr = emit_expr(&args[0], ctx, out);
                 let rw_pp = ctx.fresh_tmp();
@@ -7187,37 +7338,42 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 ));
                 let rw_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
-                    rw_ptr, rw_pp
+                    "  {} = load {}*, {}** {}\n",
+                    rw_ptr, rw_ty, rw_ty, rw_pp
                 ));
                 let val_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 0\n",
-                    val_p, rw_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    val_p, rw_ty, rw_ty, rw_ptr
                 ));
                 let val = ctx.fresh_tmp();
-                out.push_str(&format!("  {} = load i64, i64* {}\n", val, val_p));
+                out.push_str(&format!("  {} = load {}, {}* {}\n", val, payload_ty, payload_ty, val_p));
                 return val;
             }
             if name == "write_guard_set" {
+                // BUG-19 fix: unwrap `mut ref WriteGuard<T>` to get T.
+                let elt = crate::backend_c::write_guard_element_from_ref_c(&args[0].ty);
+                let rw_ty = llvm_rwlock_struct(&elt);
+                let payload_ty = channel_slot_llvm_string(&elt);
+                let wg_ty = llvm_write_guard_struct(&elt);
                 let g_ptr = emit_expr(&args[0], ctx, out);
                 let v = emit_expr(&args[1], ctx, out);
                 let rw_pp = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_write_guard_i64, %intent_write_guard_i64* {}, i32 0, i32 0\n",
-                    rw_pp, g_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    rw_pp, wg_ty, wg_ty, g_ptr
                 ));
                 let rw_ptr = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = load %intent_rwlock_i64*, %intent_rwlock_i64** {}\n",
-                    rw_ptr, rw_pp
+                    "  {} = load {}*, {}** {}\n",
+                    rw_ptr, rw_ty, rw_ty, rw_pp
                 ));
                 let val_p = ctx.fresh_tmp();
                 out.push_str(&format!(
-                    "  {} = getelementptr %intent_rwlock_i64, %intent_rwlock_i64* {}, i32 0, i32 0\n",
-                    val_p, rw_ptr
+                    "  {} = getelementptr {}, {}* {}, i32 0, i32 0\n",
+                    val_p, rw_ty, rw_ty, rw_ptr
                 ));
-                out.push_str(&format!("  store i64 {}, i64* {}\n", v, val_p));
+                out.push_str(&format!("  store {} {}, {}* {}\n", payload_ty, v, payload_ty, val_p));
                 return v;
             }
             // Closure #358: i64_to_str.
@@ -45638,6 +45794,15 @@ pub fn llvm_type_string(ty: &Type) -> String {
         Type::Channel(element, capacity) => {
             llvm_channel_struct(element, *capacity)
         }
+        // BUG-19 fix: Mutex/Guard/RwLock/ReadGuard/WriteGuard each
+        // have their own struct type per T, exactly like Channel
+        // above -- previously fell through to `llvm_type`'s hardcoded
+        // i64-only fallback.
+        Type::Mutex(element) => llvm_mutex_struct(element),
+        Type::Guard(element) => llvm_guard_struct(element),
+        Type::RwLock(element) => llvm_rwlock_struct(element),
+        Type::ReadGuard(element) => llvm_read_guard_struct(element),
+        Type::WriteGuard(element) => llvm_write_guard_struct(element),
         // ARC 1.5c — per-(K, V) HashMap struct name.
         Type::HashMap(k, v) => {
             let (prefix, _, _) = hashmap_llvm_dispatch(k, v);

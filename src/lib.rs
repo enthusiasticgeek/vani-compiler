@@ -48789,6 +48789,150 @@ fn main() -> i64 { return 0; }
         );
     }
 
+    // BUG-19 (2026-07-27): the LLVM backend's RwLock/Mutex/Guard/
+    // ReadGuard/WriteGuard codegen was entirely hardcoded to a fixed
+    // i64 payload (`%intent_rwlock_i64` etc, regardless of the real
+    // element type) -- any struct/enum T crashed at LLVM IR
+    // verification with a type mismatch, even though the C backend
+    // already handled arbitrary T correctly via the same
+    // `element_tag`-based naming. Fix adds parametric struct-name
+    // helpers (llvm_rwlock_struct etc, mirroring the pre-existing
+    // llvm_channel_struct for Channel<T,N>) and threads the real
+    // element type through every RwLock/Mutex builtin's codegen.
+    // These tests pin struct AND i64 payloads compiling to DISTINCT,
+    // correctly-named LLVM structs -- a regression that silently
+    // re-collapsed every element type back to one shared i64 struct
+    // wouldn't be caught by a test that only checks "compiles".
+    #[test]
+    fn rwlock_struct_payload_compiles_to_llvm_with_parametric_struct_name() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let rw: RwLock<Point> = rwlock_new(Point { x: 1, y: 2 });
+              let r: ReadGuard<Point> = rwlock_read(mut ref rw);
+              let p: Point = read_guard_get(ref r);
+              print p.x, p.y;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("RwLock<Point> (struct payload) must compile to LLVM IR without panicking");
+        assert!(
+            ll.contains("%intent_rwlock_Struct_Point = type { %Struct_Point,"),
+            "expected a per-struct RwLock type distinct from the i64 form:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+        assert!(
+            !ll.contains("%intent_rwlock_i64"),
+            "a Point-only program should never reference the i64-specific RwLock struct:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn mutex_struct_payload_compiles_to_llvm_with_parametric_struct_name() {
+        let source = r#"
+            struct Point { x: i64, y: i64 }
+            fn main() -> i64 {
+              let m: Mutex<Point> = mutex_new(Point { x: 5, y: 6 });
+              let g = mutex_lock(mut ref m);
+              print guard_get(ref g).x;
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("Mutex<Point> (struct payload) must compile to LLVM IR without panicking");
+        assert!(
+            ll.contains("%intent_mutex_Struct_Point = type { %Struct_Point,"),
+            "expected a per-struct Mutex type distinct from the i64 form:\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
+    #[test]
+    fn rwlock_and_mutex_i64_still_use_the_i64_struct_name() {
+        // Regression guard for the plain scalar case, which must
+        // keep working -- naming now goes through element_tag, the
+        // same convention `Channel<i64,N>` already uses
+        // (`%intent_channel_int64_t_16`), rather than the old bespoke
+        // `%intent_rwlock_i64` spelling.
+        let source = r#"
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(42);
+              let r: ReadGuard<i64> = rwlock_read(mut ref rw);
+              print read_guard_get(ref r);
+              let m: Mutex<i64> = mutex_new(7);
+              let g = mutex_lock(mut ref m);
+              print guard_get(ref g);
+              return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source).expect("RwLock<i64>/Mutex<i64> compile to LLVM IR");
+        assert!(
+            ll.contains("%intent_rwlock_int64_t = type { i64,"),
+            "expected the parametric i64 RwLock struct name:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+        assert!(
+            ll.contains("%intent_mutex_int64_t = type { i64,"),
+            "expected the parametric i64 Mutex struct name:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
+    // BUG-22 (2026-07-27): found while verifying BUG-19 against the C
+    // backend. `c_type_name` (called by the Let-statement / fn-param /
+    // fn-return type-spelling path) was missing Mutex/Guard/RwLock/
+    // ReadGuard/WriteGuard entirely and fell through to `c_leaf_type`'s
+    // hardcoded `intent_mutex_i64`/`intent_rwlock_i64` spelling --
+    // which doesn't match the REAL per-T bundle names
+    // (`intent_mutex_int64_t` etc) the C backend's bundle-emission
+    // functions already generate correctly. Reproduced for the plain
+    // `Mutex<i64>`/`RwLock<i64>` case -- `cc` rejected every generated
+    // program with "unknown type name 'intent_rwlock_i64'; did you
+    // mean 'intent_rwlock_int64_t'?" This is a DIFFERENT, C-backend-
+    // only, pre-existing bug independent of BUG-19's LLVM-backend fix
+    // above (confirmed: backend_c.rs wasn't touched by that fix, and
+    // this reproduces for i64, not just struct payloads). Fixed by
+    // adding the same 5 missing arms to `c_type_name`.
+    //
+    // NOTE: a struct-payload RwLock/Mutex on the C backend (e.g.
+    // `RwLock<Point>`) still fails to compile with a real `cc` --
+    // separate struct-definition-ordering bug, NOT fixed by this
+    // change (found and explicitly reverted a risky partial fix
+    // during this session; needs the emission pipeline to split
+    // struct-typedefs from function-bodies before it can be fixed
+    // properly). This test intentionally covers only the i64 case
+    // that IS fixed.
+    #[test]
+    fn rwlock_and_mutex_i64_let_binding_uses_parametric_c_type_name() {
+        let source = r#"
+            fn main() -> i64 {
+              let rw: RwLock<i64> = rwlock_new(42);
+              let r: ReadGuard<i64> = rwlock_read(mut ref rw);
+              print read_guard_get(ref r);
+              let m: Mutex<i64> = mutex_new(7);
+              let g = mutex_lock(mut ref m);
+              print guard_get(ref g);
+              return 0;
+            }
+        "#;
+        let c = compile_to_c(source).expect("RwLock<i64>/Mutex<i64> compile to C");
+        assert!(
+            c.contains("intent_rwlock_int64_t v_rw") || c.contains("intent_rwlock_int64_t rw"),
+            "expected the RwLock local's declared type to use the parametric \
+             `intent_rwlock_int64_t` spelling (matching the bundle's real name), \
+             not the old hardcoded `intent_rwlock_i64`:\n{}",
+            &c[..c.len().min(3000)]
+        );
+        assert!(
+            c.contains("intent_mutex_int64_t v_m") || c.contains("intent_mutex_int64_t m"),
+            "expected the Mutex local's declared type to use the parametric \
+             `intent_mutex_int64_t` spelling:\n{}",
+            &c[..c.len().min(3000)]
+        );
+    }
+
     #[test]
     fn sov_s6_fn_name_first_compiles() {
         // SOV-S6 (2026-06-19): fn keyword after the signature.
