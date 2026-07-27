@@ -7,6 +7,50 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The storage-unit key
+
+You're renting an apartment (your function's stack frame) that's
+too small for a couch. A self-storage facility down the street
+solves this: they hold the couch in a unit sized for it, and hand
+you a single small **key**. You carry the key in your pocket --
+tiny, fits anywhere -- while the actual couch sits somewhere else
+entirely.
+
+- **A struct field that needs an unknown-size guest.** Imagine a
+  form that has a blank labeled "attach one photo of your item" --
+  but items come in wildly different sizes (a stamp vs. a couch).
+  The form can't reserve "enough space" for either, so instead the
+  blank holds a storage-unit key. Whatever's actually stored can be
+  any size; the key itself is always the same small size. That's
+  `Box<dyn Shape>` in a struct field.
+- **A recursive shape.** A storage unit that, itself, contains a
+  full-size second storage unit, which contains a third, forever,
+  is impossible to build. But a storage unit that contains a *key*
+  to the next unit is completely fine -- keys don't nest, they just
+  point onward. That's how a linked chain of `Node`s works: each
+  node holds a key to the next node's storage unit, not the next
+  node itself.
+- **A big item you don't want to lug around.** If your couch has to
+  travel with you everywhere (passed into a function, returned back
+  out), hauling the whole couch each time is expensive. Hauling just
+  the key is cheap -- one small object, same size no matter how big
+  the couch is.
+
+A `Box<T>` **is** that key: a small, fixed-size handle on your
+stack that points at a `T`-sized unit on the heap.
+
+Now here's the important part of the facility's policy: **you never
+have to remember to go empty out your unit.** Your rental is tied to
+your membership card. The instant your membership lapses (the key's
+scope ends), the facility automatically clears the unit and reissues
+the space. You didn't call anyone, you didn't fill out a
+cancellation form -- it just happens because the rental was *tied to*
+the membership's lifetime, not tracked separately.
+
+That automatic "cleanup happens exactly when the owning thing's
+lifetime ends" policy has a name in programming: **RAII**. `Box<T>`
+is one example of it in vāṇी; you'll meet several more below.
+
 ## The problem: where do I put this?
 
 You know from the heap-vs-stack primer that big or dynamic
