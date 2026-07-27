@@ -86,6 +86,24 @@ total = 20
   elements whenever the compiler can see an `implement Iface
   for T` in scope. The coercion source must be a `let`-bound
   variable so the data pointer has a stable address.
+
+  <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+  Always coerce from a `let`-bound name, the way `area_of(c)`
+  does above -- not from an expression built on the fly:
+
+  ```vani
+  fn main() -> i64 {
+    let c: Circle = Circle { r: 3 };   // let-bound first --
+    print "circle =", area_of(c);      // then coerced to dyn Shape.
+    return 0;
+  }
+  ```
+
+  It's an easy habit to break once you're used to passing
+  literals straight into ordinary functions -- with `dyn Iface`
+  the extra `let` isn't just style, it's what gives the fat
+  pointer's data half a stable address to point at.
 - **Method dispatch** through `dyn` reads the vtable's slot for
   the method's declaration-order index, then calls the function
   pointer there. No virtual-table lookup overhead beyond the

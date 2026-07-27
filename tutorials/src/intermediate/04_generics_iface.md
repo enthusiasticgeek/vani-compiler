@@ -102,6 +102,31 @@ area = 16
 - **Dynamic dispatch** (`dyn Iface`) is a separate path --
   covered in [Sec.5 -- Dynamic dispatch](05_dyn.md).
 
+### A missing method is rejected
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+// This is a compile error -- Square's implement block omits `area`,
+// which Drawable requires (no default body):
+interface Drawable {
+  fn area(self: Circle) -> i64;
+}
+
+struct Circle { r: i64 }
+struct Square { side: i64 }
+
+implement Drawable for Circle {
+  fn area(self: Circle) -> i64 {
+    return self.r * self.r;
+  }
+}
+
+implement Drawable for Square {
+  // ERROR: `area` is required by Drawable but never implemented here.
+}
+```
+
 ## Default methods (v0.1.1+)
 
 An interface can provide a default body for a method. Types

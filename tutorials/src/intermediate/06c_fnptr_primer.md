@@ -201,6 +201,39 @@ When you need to capture a local variable, write a closure
 stateless transform (no captured state), a named function passed
 as a value is cleaner.
 
+### A gotcha: `parallel for` rejects indirect calls
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+The table above says fn-pointers and closures are both rejected
+as *indirect calls* inside a `parallel for` body -- the
+race-freedom pass only sees through a **direct** call to a named
+function. It's easy to reach for the fn-pointer-as-parameter
+habit from earlier in this chapter and get bitten. This compiles:
+
+```vani
+pure fn double(x: i64) -> i64 { return x * 2; }
+
+fn main() -> i64 {
+  let total: i64 = 0;
+  parallel for i from 0 to 10
+  reduce total with +;
+  {
+    total = total + double(i);   // OK -- direct call to a named fn
+  }
+  print "total =", total;
+  return 0;
+}
+```
+
+Storing `double` in a `fn(i64) -> i64` variable first and calling
+*that* inside the loop body -- `let f: fn(i64) -> i64 = double;`
+then `total = total + f(i);` -- is rejected: `'parallel for' body
+cannot use indirect calls (fn-ptr) -- the purity gate sees only
+direct calls`. Same restriction applies to closures. Call the
+named function directly in the loop body instead of routing
+through a stored fn-pointer or closure value.
+
 ---
 
 ## Challenge

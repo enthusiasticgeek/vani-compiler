@@ -119,6 +119,24 @@ max = 5
 - **Statement-style body only**: `fn(x) -> i64 { return x + x; }`,
   not `fn(x) => x + x`. The expression-body sugar is deferred.
 
+### Calling an owning-capture closure twice
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+// This is a compile error -- `consume` captures `data` (a Vec,
+// an owning type) by value, so calling it consumes that capture.
+// The second call is a use-after-move.
+fn main() -> i64 {
+  let data: Vec<i64> = vec(1, 2, 3);
+  let consume = fn() -> i64 { return len(data) as i64; };
+  let a: i64 = consume();
+  let b: i64 = consume();   // ERROR: 'consume' was moved; cannot use after move
+  print a, b;
+  return 0;
+}
+```
+
 ## Comparison to Rust
 
 | Rust | vāṇी v1 |

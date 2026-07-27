@@ -111,6 +111,51 @@ cube(3)   = 27
   included at most once across the dependency tree. Don't
   rely on order-of-inclusion semantics; design with one-way
   dependencies.
+
+  <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+  This compiles and runs fine even though `main.vani` and
+  `helper.vani` include each other -- the second `use` of an
+  already-included file is silently a no-op instead of an error:
+
+  `src/main.vani`:
+
+  ```vani
+  use "helper.vani";
+  use helper::{helper_fn};
+
+  intent "Cyclic-include demo -- main includes helper.";
+
+  fn main() -> i64 {
+    print "helper_fn(5) =", helper_fn(5);
+    return 0;
+  }
+  ```
+
+  `src/helper.vani`:
+
+  ```vani
+  use "main.vani";
+
+  intent "Cyclic-include demo -- helper includes main right back.";
+
+  module helper {
+    pub fn helper_fn(n: i64) -> i64 {
+      return n * 2;
+    }
+  }
+  ```
+
+  Output:
+
+  ```
+  helper_fn(5) = 10
+  ```
+
+  Nothing warns you that `helper.vani`'s `use "main.vani";` did
+  nothing -- if you were relying on it for something other than
+  namespace access (say, expecting `main`'s top-level code to run
+  again), you won't get an error, you'll just get silence.
 - **Diagnostic line numbers** refer to the concatenated buffer,
   not the per-file source. Real per-file mapping is a follow-up.
   Until then, when reading errors, grep for the column of the

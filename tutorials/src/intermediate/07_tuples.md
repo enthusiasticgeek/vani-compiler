@@ -72,6 +72,24 @@ a = 10 b = 20 c = 30
 - **Tuples are values**, not references. Returning a tuple
   copies the elements into the caller's stack slot.
 
+### Out-of-range field access
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+// This is a compile error -- `pair` only has fields .0 and .1,
+// so `.3` is out of range for its arity:
+fn divmod(a: i64, b: i64) -> (i64, i64) {
+  return (a / b, a % b);
+}
+
+fn main() -> i64 {
+  let pair: (i64, i64) = divmod(17, 5);
+  print pair.3;   // ERROR: tuple index 3 out of bounds for tuple of arity 2
+  return 0;
+}
+```
+
 ## When to reach for a tuple vs a struct
 
 | Use case | Pick |
