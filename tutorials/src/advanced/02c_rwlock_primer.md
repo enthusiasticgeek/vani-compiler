@@ -115,6 +115,8 @@ use `Mutex<T>` instead.
 
 ## Worked example
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 intent "RwLock primer -- shared configuration table.";
 

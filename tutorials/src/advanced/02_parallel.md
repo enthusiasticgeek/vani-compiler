@@ -19,6 +19,8 @@ that loop iterations don't share writeable data (race-freedom
 
 ## The program
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 intent "Advanced 2 worked example -- parallel for + reduction.";
 
@@ -65,6 +67,39 @@ par = 5050
 Both backends produce the same answer; `parallel for` adds
 multi-threaded execution on hosted targets without changing
 the semantics.
+
+## A rejected loop body: cross-iteration dependency
+
+For contrast, here's a loop body the compiler rejects. Each
+iteration reads the slot the *previous* iteration wrote --
+there is no order guarantee across threads, so the result
+would be nondeterministic:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn bad_prefix(xs: mut ref Vec<i64>, n: u64) -> i64 {
+  parallel for i from 1 to n {
+    xs[i] = xs[i - 1] + 1;   // wrong: reads a slot another iteration writes
+  }
+  return 0;
+}
+```
+
+```
+error: 'parallel for' body cannot mutate 'xs[i] = …' (indexed write is a side effect)
+    xs[i] = xs[i - 1] + 1;   // wrong: reads a slot another iteration writes
+       ^
+  help: Pure functions in vāṇी are honored by both SMT (allowed inside
+  `requires` / `ensures`) AND the parallel-for safety pass. They must be
+  safe to call multiple times with the same arguments and produce the
+  same result, with no externally visible mutation.
+```
+
+Indexed assignment on a captured `Vec` is exactly the "assignments to
+array slots" case called out above -- the compiler can't prove the
+slots don't alias across iterations without a `reduce` clause, so it
+rejects the whole loop rather than risk a race.
 
 ## Why it works that way
 
@@ -148,6 +183,8 @@ requires len(a) == len(b);
 
 ## Bare-metal / RTOS note
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 `parallel for … reduce` emits `pthread_create` (POSIX) or `CreateThread`
 (Windows). Neither symbol exists on bare-metal targets such as
 `arm-none-eabi` or `thumbv7em-none-eabihf`. Linking for those targets will
@@ -183,6 +220,8 @@ use DMA for true offload. `parallel for` is a POSIX/Win32 feature;
 use it only when linking against a hosted OS.
 
 ## Windows thread-count note
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 On Linux/macOS, `parallel for`'s worker-thread count is decided
 by libgomp (GNU OpenMP) at **run time**, on whichever machine

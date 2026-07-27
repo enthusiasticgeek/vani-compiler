@@ -78,6 +78,8 @@ while !predicate {
 }
 ```
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 Never `if !predicate { condvar_wait(...); }`. The `while` re-checks
 after every wakeup (spurious or real) and only proceeds when the
 predicate is actually true.

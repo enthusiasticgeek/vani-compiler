@@ -156,6 +156,8 @@ for `Pending`) runs its body and exits the loop. Remaining
 branches are abandoned -- their futures are not driven to
 completion.
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 **Key constraints in v1**:
 - All `await` expressions inside `select` must call `async fn`s
   that return the same type.
