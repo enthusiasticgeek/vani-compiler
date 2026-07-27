@@ -49795,6 +49795,74 @@ fn main() -> i64 {
         assert!(c.contains("99"), "wildcard arm body should appear in generated output");
     }
 
+    // BUG-18 (2026-07-27): check_match_slice had no exhaustiveness
+    // check at all -- every other scrutinee kind (string, float, int,
+    // bool, enum) rejects a match missing a wildcard, but a slice/array
+    // match with no `_` arm silently fell back to a fabricated `0`
+    // default instead. This pins the fix: a slice match missing a
+    // wildcard is now a compile error, matching every other scrutinee
+    // kind's behavior.
+    #[test]
+    fn slice_pattern_without_wildcard_is_rejected_as_non_exhaustive() {
+        let src = r#"
+intent "slice_non_exhaustive";
+fn main() -> i64 {
+    let xs: Vec<i64> = vec(1, 2, 3);
+    let r: i64 = match xs {
+        [] then 0,
+        [a] then a,
+    };
+    return r;
+}
+"#;
+        let errs = compile_to_c(src).expect_err(
+            "slice match with no wildcard arm must be rejected as non-exhaustive",
+        );
+        assert!(
+            errs.iter().any(|d| d.message.contains("non-exhaustive")),
+            "expected a non-exhaustive match diagnostic, got: {:?}",
+            errs
+        );
+    }
+
+    // BUG-18 follow-up (2026-07-27): the first version of the fix above
+    // was too strict -- it required a LITERAL `_` wildcard, which broke
+    // the tutorial's own pre-existing `describe_vec` pattern
+    // (`[]`, `[x]`, `[first, ..]`), whose docs correctly claim it's
+    // exhaustive via complete length coverage even with no `_` arm.
+    // Pins that a match IS accepted when exact-length arms plus an
+    // unconditional has_rest arm together cover every length -- and
+    // separately pins that the synthetic "unreachable" default in that
+    // case is well-typed for a non-integer result (`Str` here). Before
+    // this follow-up, the default was a bare `Int(0)` regardless of the
+    // match's real result type, which produced invalid LLVM IR
+    // (`phi i8*` fed an untyped `0`) the instant this exhaustive-
+    // without-wildcard path became reachable.
+    #[test]
+    fn slice_pattern_exhaustive_via_rest_arm_coverage_needs_no_wildcard() {
+        let src = r#"
+intent "slice_rest_coverage";
+fn describe(xs: Vec<i64>) -> Str {
+    return match xs {
+        []           then "empty",
+        [x]          then "singleton",
+        [first, ..]  then "starts with something",
+    };
+}
+fn main() -> i64 {
+    print describe(vec(1, 2, 3));
+    return 0;
+}
+"#;
+        let ll = compile_to_llvm(src)
+            .expect("exact-length arms + covering has_rest arm should be accepted with no `_`");
+        assert!(
+            ll.contains("define"),
+            "expected valid LLVM IR to be emitted:\n{}",
+            &ll[..ll.len().min(2000)]
+        );
+    }
+
     #[test]
     fn slice_pattern_non_copy_elem_is_rejected() {
         let src = r#"

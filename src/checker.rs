@@ -15090,6 +15090,17 @@ fn check_match_slice(
     let mut wildcard_body: Option<TypedExpr> = None;
     let mut result_ty: Option<Type> = None;
     let mut wildcard_seen = false;
+    // BUG-18 exhaustiveness bookkeeping: an unconditional (no guard)
+    // `[..]`/`[a, .., b]`-shaped arm with `has_rest` covers every
+    // length >= its `needed`, and unconditional exact arms
+    // (`has_rest == false`) cover exactly their own `needed` length.
+    // A match with no literal `_` wildcard is still exhaustive when
+    // some unconditional has_rest arm's `needed` is N and every
+    // length 0..N-1 is covered by an unconditional exact arm -- the
+    // shape the tutorial's own `describe_vec` example
+    // (`[]`, `[x]`, `[first, ..]`) relies on.
+    let mut exact_lengths_covered: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut min_unconditional_rest_needed: Option<u64> = None;
 
     for arm in arms {
         if wildcard_seen {
@@ -15110,6 +15121,15 @@ fn check_match_slice(
             }
             crate::ast::Pattern::Slice { heads, tail, has_rest } => {
                 let needed = (heads.len() + tail.len()) as u64;
+                if arm.guard.is_none() {
+                    if *has_rest {
+                        min_unconditional_rest_needed = Some(
+                            min_unconditional_rest_needed.map_or(needed, |n| n.min(needed)),
+                        );
+                    } else {
+                        exact_lengths_covered.insert(needed);
+                    }
+                }
                 // Push head + tail bindings into a fresh scope so the arm
                 // body can reference them by name.
                 env.push_scope();
@@ -15283,14 +15303,45 @@ fn check_match_slice(
         }
     }
 
+    // BUG-18 fix (2026-07-27): every other scrutinee kind (string,
+    // float, int, bool, enum) requires a wildcard to cover values not
+    // explicitly listed and rejects the match otherwise. Slice/array
+    // patterns had no equivalent check -- a match with no `_` arm
+    // silently fell through to a fabricated `0` default instead of
+    // being rejected as non-exhaustive, the exact silent-wrong-
+    // behavior `match`'s exhaustiveness guarantee exists to prevent.
+    let covered_by_rest_chain = min_unconditional_rest_needed
+        .is_some_and(|n| (0..n).all(|len| exact_lengths_covered.contains(&len)));
+    if wildcard_body.is_none() && !covered_by_rest_chain {
+        diagnostics.push(Diagnostic::new(
+            span,
+            "non-exhaustive match: slice/array scrutinees require a wildcard \
+             `_ then â€¦` arm (or exact-length arms plus a `[.., x]`-shaped \
+             arm covering every remaining length) to cover lengths not \
+             explicitly listed"
+                .to_string(),
+        ).with_elaboration(crate::diagnostic_elaborations::match_not_exhaustive("_")));
+    }
+
     let unified = result_ty.unwrap_or(Type::I64);
-    let default_body = wildcard_body.unwrap_or_else(|| TypedExpr {
-        kind: TypedExprKind::Int(0),
-        ty: unified.clone(),
-        constant: Some(TypedConst::Int(0)),
-        span,
-        binding_decl_span: None,
-    });
+    // BUG-18 follow-up: when there's no literal wildcard but
+    // `covered_by_rest_chain` proved the match exhaustive anyway, this
+    // default is unreachable at runtime but still has to be a
+    // well-typed placeholder of `unified` -- a bare `Int(0)` is wrong
+    // for any non-integer result type (Str, struct, bool, ...) and
+    // produces invalid LLVM IR (e.g. a `phi i8*` fed an untyped `0`)
+    // rather than a clean diagnostic. Reuse the last arm's already
+    // correctly-`unified`-typed body instead; its value is never
+    // actually observed since coverage is proven complete without it.
+    let default_body = wildcard_body
+        .or_else(|| typed_arms.last().map(|(_, body)| body.clone()))
+        .unwrap_or_else(|| TypedExpr {
+            kind: TypedExprKind::Int(0),
+            ty: unified.clone(),
+            constant: Some(TypedConst::Int(0)),
+            span,
+            binding_decl_span: None,
+        });
 
     // Build the if/else chain from bottom (wildcard/default) to top.
     let mut chain = default_body;

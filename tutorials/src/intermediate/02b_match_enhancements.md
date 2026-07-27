@@ -285,16 +285,26 @@ fn rgb_to_hex(channels: ref Vec<i64>) -> Str {
 
 ### Slice patterns with guards
 
-Pattern guards compose with slice patterns exactly as with enum arms:
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Pattern guards are *intended* to compose with slice patterns exactly
+as with enum arms, but as of this writing the guard condition is not
+actually evaluated for slice/array patterns -- it type-checks (must be
+`Bool`) but is silently ignored at runtime, so a guarded arm always
+behaves as if its guard were `true`. Concretely, `[s] if s >= 90` and
+the plain `[s]` arm right after it are currently indistinguishable at
+runtime: whichever one comes first in source order wins for every
+`s`, not just `s >= 90`. Tracked as a known issue; until it's fixed,
+don't rely on guards to discriminate between two arms with the same
+slice shape -- restructure with nested `if`/`else` inside a single
+un-guarded arm instead:
 
 ```vani
-fn classify_scores(scores: ref Vec<i64>) -> Str {
-  return match ref scores {
-    []                          then "no data",
-    [s] if s >= 90              then "single A",
-    [s]                         then "single non-A",
-    [first, .., last] if first == last  then "balanced",
-    [first, .., last]           then "unbalanced",
+fn classify_scores(scores: Vec<i64>) -> Str {
+  return match scores {
+    []      then "no data",
+    [s]     then if s >= 90 { "single A" } else { "single non-A" },
+    [first, .., last] then if first == last { "balanced" } else { "unbalanced" },
   };
 }
 ```
@@ -307,8 +317,29 @@ fn classify_scores(scores: ref Vec<i64>) -> Str {
 - `..` absorbs zero or more elements, so `[first, ..]` matches any
   Vec of length ≥ 1 and `[first, .., last]` matches length ≥ 2.
 - Slice patterns are exhaustiveness-checked like enum patterns. The
-  compiler requires a `_` or `[..]` wildcard arm (or complete coverage)
-  to avoid "non-exhaustive match" errors.
+  compiler requires a `_` or `[..]` wildcard arm -- OR complete
+  coverage from exact-length arms plus an unconditional (unguarded)
+  has_rest arm, the shape `describe_vec` above uses -- to avoid
+  "non-exhaustive match" errors.
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn classify(xs: Vec<i64>) -> i64 {
+  return match xs {
+    []  then 0,
+    [x] then x,
+    // missing: coverage for length >= 2 -- no `_` and no has_rest arm
+  };
+}
+```
+
+```
+error: non-exhaustive match: slice/array scrutinees require a
+       wildcard `_ then …` arm (or exact-length arms plus a
+       `[.., x]`-shaped arm covering every remaining length) to
+       cover lengths not explicitly listed
+```
 
 ---
 
