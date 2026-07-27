@@ -12,6 +12,56 @@ full attribute / flag reference.
 
 ---
 
+## The print shop and the foreign format
+
+Imagine you're preparing a document that has to be printed and
+bound by a print shop in another country. You do all your actual
+work at your own desk, on your own computer, with your own familiar
+software -- you write the text, proofread it, fix the layout,
+everything happens right there in front of you. But the destination
+print shop uses paper sizes you don't normally use, a binding
+standard your local printer has never heard of, and page-numbering
+conventions that put the numbers in a different corner than you're
+used to. If you just print the document the way you normally would
+and ship it overseas, it won't fit their equipment.
+
+So instead, before anything gets shipped, you (or software you're
+using) reformats the document specifically for the destination:
+resize every page to their paper standard, restructure the binding
+margins the way their machines expect, move the page numbers where
+their convention puts them. None of that reformatting work happens
+AT the foreign print shop -- it all happens back at your desk, using
+your own computer. What leaves your desk is a file shaped exactly
+for a printing process that will happen somewhere else, on equipment
+you don't own and have never touched, possibly equipment that
+couldn't even run your word processor if you shipped it that
+instead.
+
+That's the whole idea of cross-compiling. The compiler runs on your
+machine -- your x86 laptop, the "desk" -- reading and checking your
+source code the same way it always does. But instead of producing a
+binary shaped for your own laptop's CPU, it produces a binary shaped
+for a completely different target: an ARM Cortex-M microcontroller,
+say, with its own instruction set, its own memory layout, and its
+own rules about what a "finished document" (a runnable program) even
+looks like. The compiling happens at your desk; the running happens
+somewhere else entirely, on a chip that in many cases isn't capable
+of running a compiler itself -- exactly like the foreign print shop
+that can bind books all day but couldn't run your word processor
+either.
+
+Everything in the rest of this chapter is about getting that
+"shaped for the destination" step right: the **target triple** is
+how you tell the compiler which foreign format you're printing for
+(which paper size, which binding standard); **bare-metal** targets
+are destinations with no local printing conventions to fall back on
+at all, so you have to specify every convention by hand; and flags
+like `--no-std`, `#[no_mangle]`, and `#[link_section]` are exactly
+the reformatting instructions that make sure the file you ship lands
+correctly on equipment you'll never personally see.
+
+---
+
 ## What is cross-compilation?
 
 On a typical development laptop (x86-64 Linux or Windows), you

@@ -9,6 +9,55 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The microwave and the laptop
+
+Think about your laptop for a second. Dozens of things are running
+on it right now -- a browser with fifteen tabs, a music player, a
+background virus scanner, this very editor -- and an operating
+system is constantly deciding whose turn it is to use the CPU,
+handing out slices of memory to whoever asks, and juggling all of it
+so smoothly you never notice the plumbing. If you want to install a
+brand-new program tomorrow, you just download it and run it. The
+laptop has gigabytes of memory to spare and barely notices.
+
+Now think about the microwave sitting on your kitchen counter. It
+also has a tiny computer inside it -- a real chip, running real
+code -- but the two situations could not be more different. The
+microwave's chip runs exactly ONE program, and it has run that same
+one program, unchanged, since the day it left the factory. There is
+no operating system inside a microwave juggling between programs,
+because there's only ever one program to juggle -- there's nothing
+to arbitrate. There's no "install a new app" button, because the
+code is soldered into the hardware, not loaded from a disk. And
+instead of gigabytes of memory, the microwave's chip typically has a
+handful of KILOBYTES -- enough to track the clock, the power level,
+and whether the door is open, and not really anything more.
+
+If the microwave's program has a bug -- say it forgets to ever
+release some memory it borrowed -- there's no operating system
+standing by to notice, kill the misbehaving program, and reclaim the
+memory for the next one. There IS no "next one." Whatever the
+program does, it does directly to the hardware, permanently, for as
+long as the microwave sits on your counter. A crashed browser tab
+just closes; a crashed microwave chip is a microwave you have to
+unplug and plug back in, or worse, one that gets stuck with the
+turntable spinning forever.
+
+This is the split embedded programming lives on. Writing software
+for your laptop is writing for an environment with an operating
+system underneath you, catching your mistakes, cleaning up after
+you, and giving you room to be a little careless. Writing software
+for the microwave's chip -- or a pacemaker, a thermostat, a
+satellite -- means there is no OS underneath you at all. Whatever
+safety net you want, you have to build into the program itself,
+because nothing else is watching.
+
+That's exactly why the rest of this chapter reads stricter than
+ordinary vāṇी code: `unsafe(reason = "...")` blocks, region typing,
+and hard limits on heap and stack usage are the tools vāṇी gives you
+to be careful BY HAND, on the microwave's chip, in a world where
+there's no operating system left to be careful for you.
+
 ## What is "embedded"?
 
 Most of programming today targets ROUGHLY one shape of

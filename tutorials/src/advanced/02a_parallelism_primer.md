@@ -10,6 +10,60 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The restaurant kitchen
+
+Picture a small restaurant kitchen with one cook and a stack of
+dinner tickets. The cook works through the tickets one at a time:
+chop vegetables for ticket 1, sear the meat for ticket 1, plate
+ticket 1, then start ticket 2 from scratch. It works. Nothing ever
+goes wrong, because there's only ever one pair of hands touching
+anything -- the cutting board, the pan, the plate. But it's slow.
+A rush of twenty tickets means twenty tickets' worth of waiting,
+one after another, no matter how many empty stations sit unused
+around the kitchen.
+
+Now hire three more cooks. Give ticket 1 to cook A, ticket 2 to
+cook B, ticket 3 to cook C, ticket 4 to cook D. If each cook has
+their own cutting board, their own pan, and their own corner of the
+counter, all four tickets get made at the same time and the whole
+rush finishes in a quarter of the time. That's the entire appeal of
+having more cooks: work that doesn't depend on each other can
+happen at the same time instead of waiting in line.
+
+But now suppose the kitchen only owns ONE good chef's knife, and
+both cook A and cook C reach for it at the same instant to start
+chopping. Whoever's hand gets there first wins -- except sometimes
+neither notices the other already has it, and you get two cooks
+mid-chop on the same board, elbows colliding, a customer's onions
+ending up in someone else's dish. Nobody planned for this collision;
+it just happens when two cooks touch the same shared thing at the
+same moment with no rule for who goes first. The dish that comes out
+of that collision is wrong, and it's wrong in a way that only
+happens sometimes -- on a slow night the two cooks might never reach
+for the knife at the exact same second, so the kitchen "seems fine"
+right up until the rush when it isn't.
+
+A well-run multi-cook kitchen avoids this one of two ways: either
+every cook gets their OWN full set of tools so nobody ever needs to
+reach for what someone else is using, or -- when a tool genuinely
+has to be shared, like the one good knife, or the walk-in fridge --
+the kitchen has a clear rule for who gets it and when (a hook by the
+door: take the knife off the hook, use it, hang it back up before
+the next cook can take it). Either solution works. What doesn't work
+is four cooks and one knife with no rule at all.
+
+Now map this onto code: a cook is a **thread** (an independent
+stream of execution running on its own CPU core); working through
+tickets one at a time is a **sequential program**; hiring more cooks
+to work different tickets simultaneously is **parallelism**; two
+cooks colliding over the same knife with no rule is a **data race**
+(two threads reading and writing the same memory at the same moment
+with no coordination); and giving each cook their own tools, or
+putting a clear hand-off rule on the one shared tool, is
+**synchronization** -- exactly the ownership rules and concurrency
+primitives (`Atomic`, `Mutex`, `Channel`) this chapter is about to
+walk through.
+
 ## Why parallelism?
 
 Modern CPUs have many cores. A 2026-era laptop has 8-16 cores;
