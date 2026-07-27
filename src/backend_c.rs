@@ -20304,6 +20304,26 @@ fn c_type_name(ty: &Type) -> String {
         }
         Type::Atomic(element) => c_atomic_storage(element),
         Type::Channel(element, capacity) => c_channel_storage(element, *capacity),
+        // BUG-22 fix (2026-07-27): Mutex/Guard/RwLock/ReadGuard/
+        // WriteGuard were missing from c_type_name (this function --
+        // "called by emit_prototype + emit_function for the return
+        // type and (mostly) by Let stmts for binding storage") and
+        // fell through to c_leaf_type's hardcoded i64-only spelling
+        // (`intent_mutex_i64` etc), which doesn't match the REAL
+        // per-T bundle names emit_mutex_bundle/emit_rwlock_bundle
+        // already emit correctly (`intent_mutex_int64_t` etc, via
+        // c_mutex_storage/c_rwlock_storage). Every `let`/fn-param/
+        // fn-return spelling one of these five types generated a
+        // name the compiled C source never actually defined, so `cc`
+        // rejected it with "unknown type name" -- reproduced even
+        // for the plain `Mutex<i64>`/`RwLock<i64>` case, not just
+        // struct/enum payloads, so this bug predates and is
+        // independent of BUG-19's LLVM-backend fix above.
+        Type::Mutex(element) => c_mutex_storage(element),
+        Type::Guard(element) => c_guard_storage(element),
+        Type::RwLock(element) => c_rwlock_storage(element),
+        Type::ReadGuard(element) => c_read_guard_storage(element),
+        Type::WriteGuard(element) => c_write_guard_storage(element),
         // ARC 1.4e: per-(K, V) HashMap struct name.
         Type::HashMap(k, v) => hashmap_prefix_from_kv(k, v),
         Type::Tuple(elements) => tuple_c_struct(elements),
