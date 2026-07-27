@@ -9,6 +9,51 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The kitchen tap
+
+Picture your kitchen sink. You turn the tap handle and water starts
+flowing -- not because a hidden tank behind the wall filled up in
+advance and is waiting for you, but because the instant you open the
+valve, water begins moving through the pipe, one unit at a time, for
+as long as you keep the handle open. Close the handle and the flow
+simply stops. Nothing was pre-made, nothing is left over sitting in
+a bucket somewhere.
+
+Now imagine you clip a couple of attachments onto the end of the tap,
+one after another: first a mesh screen that only lets clear water
+through and blocks anything gritty, then a little dye cartridge that
+tints whatever passes through it, then finally a cup held under the
+spout to catch what comes out. None of these attachments keeps a
+private stash of water. The screen doesn't pre-filter a bucketful and
+wait around -- it only touches a drop the instant that drop reaches
+it. The dye cartridge only tints a drop when a drop is actually
+passing through it right then. And critically: **nothing happens at
+all until you turn the handle and the cup starts wanting water.** The
+whole line -- tap, screen, dye, cup -- sits idle and inert until the
+demand at the very end (the cup filling up) pulls a drop through the
+whole chain of attachments.
+
+If you only wanted three cupfuls, you'd turn the handle, let exactly
+three drops travel through the whole chain, and shut the tap back
+off. The screen and the dye cartridge never processed a backlog of
+water "just in case" -- they touched only those three drops, one at a
+time, only because the cup at the end asked for exactly that many.
+
+That's the whole idea behind an **iterator chain**. `xs.filter(...)
+.map(...).fold(...)` is exactly this tap-plus-attachments setup:
+`xs` is the water source, `.filter(...)` is the screen, `.map(...)`
+is the dye cartridge, and `.fold(...)` (or `.collect()`, or whatever
+sits at the very end) is the cup -- the thing that actually asks for
+values and makes anything happen at all. Nothing gets computed or
+stored in the gaps between attachments; values flow through the
+whole chain one at a time, only when the far end asks for the next
+one. Programmers call this behavior **lazy evaluation**, and each
+attachment clipped onto the chain (the screen, the dye cartridge) is
+what the rest of this chapter calls a **combinator** or an
+**adapter**. Keep the tap picture in mind -- the rest of this chapter
+is just giving these parts their formal names and vāṇी's exact
+spellings for them.
+
 ## The problem: collections of operations
 
 You have a list of numbers. You want to:
@@ -48,22 +93,6 @@ That's the iterator-combinator style. vāṇी supports it through
 function-style helpers (`vec_filter`, `vec_map`, `vec_fold`)
 and the method-call sugar (`xs.filter(...)`, `xs.map(...)`,
 `xs.fold(...)`).
-
-## An iterator as a "tap"
-
-Picture each step as a kitchen-sink tap.
-
-- **`xs`** is the water source -- the full list of numbers.
-- **`.filter(f)`** is a tap that lets some water through and
-  blocks the rest. (`f` is a closure deciding pass/block per
-  drop.)
-- **`.map(g)`** is a tap that REPLACES each drop with a
-  different drop. (`g` is the transformation.)
-- **`.fold(init, h)`** is the bucket at the end. It collects
-  all the drops into one value using `h`.
-
-Chain the taps; water flows through each in turn. The shape of
-the chain matches the shape of the computation.
 
 ## The combinator vocabulary
 

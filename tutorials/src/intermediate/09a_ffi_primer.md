@@ -10,6 +10,53 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## Hiring a translator
+
+Imagine you run a small business and you've landed a meeting with an
+important partner from another country. They speak a language you
+don't -- and you don't have time to become fluent in it before
+Monday's meeting. So you don't try. Instead, you hire a professional
+interpreter, and crucially, you sit down with them BEFORE the meeting
+and agree on exactly how the conversation is going to work: what
+order topics come up in, which technical terms need an exact
+agreed-on translation (so "deposit" means the same thing to both
+sides), and what a signed-off "yes" is supposed to look like from
+each party. Once that protocol is settled, you walk into the meeting
+and talk business. You never learn the partner's language. You don't
+need to know how their legal system works internally, or how their
+accounting software is structured. You only need to trust that the
+interpreter -- following the protocol you both agreed on in advance
+-- will faithfully carry your words across the language boundary and
+bring their reply back in a shape you understand.
+
+A fixed-format bilingual contract template does the same job in
+writing: both sides sign off in advance on which blank means what, in
+what order the clauses appear, and what units the numbers are in
+(dollars, not some other currency). Neither party has to read the
+other's native paperwork conventions to know what's being agreed to.
+The template itself IS the agreement about how the two sides will
+talk.
+
+That pre-agreed protocol -- not fluency, not shared internals, just
+an exact, mutually-understood contract for the conversation -- is
+what **FFI** is between two programming languages. vāṇी and C are, in
+effect, two parties who don't speak each other's internal language:
+they lay data out in memory differently, they disagree about who's
+responsible for cleaning up after a value, and their error-signaling
+conventions differ. FFI doesn't make vāṇी fluent in C, or C fluent in
+vāṇी. Instead, `extern "C" fn ...` is the contract template: it
+declares, in a fixed, exact shape, "here's precisely what I'm about
+to hand you, and here's precisely what I expect back" -- so the two
+sides can cooperate on a single function call without either one
+needing to understand how the other works on the inside.
+
+Keep that picture -- interpreter, pre-agreed protocol, neither side
+needing to learn the other's internals -- in mind as you read the
+rest of this chapter. Every technical wrinkle below (memory layout,
+calling conventions, ownership, error handling) is really just one
+more thing the protocol has to pin down before the conversation can
+happen safely.
+
 ## The problem: ecosystem reuse
 
 You're writing a vāṇी program. You need to:

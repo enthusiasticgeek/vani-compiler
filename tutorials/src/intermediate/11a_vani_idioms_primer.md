@@ -8,6 +8,48 @@
 > entirely. Knowing the idiomatic vāṇी shape first makes the
 > GoF translation easier to read.
 
+## Local cooking customs
+
+Imagine you move to a new city and want to cook a dish from a cuisine
+you didn't grow up with -- say, a noodle stir-fry. You find a recipe,
+follow the steps, and the result is edible. Technically you
+succeeded: you have food, it tastes fine, nobody's going hungry.
+
+But if you watch someone who grew up cooking that dish, you notice
+they do things differently, even though the ingredient list is
+nearly identical. They cut the vegetables at a particular angle so
+they cook evenly and stay crisp. They add the aromatics before the
+protein, not after, because the order changes what flavor the oil
+picks up. They plate it a certain way -- noodles first, toppings
+arranged so the color balance reads as "done right" to anyone else
+from that food culture. None of this is enforced by a health
+inspector or a law. Your version and theirs are both safe to eat,
+both technically "a stir-fry." But theirs is instantly recognizable
+to another local cook as the way it's supposed to be done -- and
+because it follows the shared conventions, another local cook can
+glance at it, understand every choice at once, and immediately riff
+on it: swap a vegetable, adjust the heat, extend the recipe --
+without first having to puzzle out why it was built that way.
+
+Your version, cut and stacked and seasoned your own improvised way,
+might taste just as good -- but a local cook has to stop and study it
+before they can extend it, because it doesn't follow the patterns
+they already know how to read at a glance.
+
+That gap -- between "technically works" and "recognizable,
+comfortable, and easy for other locals to build on" -- is exactly
+what a programming language's **idioms** are about. Any code that
+compiles is like the edible stir-fry: it runs, it's not wrong. But
+vāṇी, like every language, has its own local cooking customs --
+conventional shapes for common problems -- that aren't enforced by
+the compiler (the compiler doesn't care about your knife technique)
+but ARE what makes your code instantly readable to anyone else who's
+used to vāṇी's kitchen, and easy for them to modify later without
+first reverse-engineering your particular choices. The rest of this
+chapter is a tour of those local customs: the "way locals do it" for
+problems that, in OOP languages, usually get solved with a class
+hierarchy.
+
 ## Idiom 1: enum instead of a class hierarchy
 
 In OOP you might write a `Shape` base class with `Circle` and

@@ -9,6 +9,55 @@
 This chapter has **no compiler code**. Pure concepts, then the
 one-page API reference.
 
+## Checking out a library book
+
+Picture a public library. To read a book, you don't just grab it off
+the shelf and walk out -- you take it to the front desk and check it
+out. The librarian scans it against your library card, and now
+there's a record: this card has this book, checked out right now.
+You didn't get a photocopy of every page in advance -- you got
+permission to read the book, plus a record of which book you're
+holding.
+
+Once you're home, you don't photograph all three hundred pages before
+you start reading. You open to chapter one, read it, then turn to
+chapter two, then chapter three -- a chunk at a time, in order, only
+pulling in the next piece when you're ready for it. You might read
+quickly or slowly, skim or take notes, but either way you're pulling
+content out of the same checked-out book, a bit at a time, not all at
+once in one giant gulp.
+
+When you're done, you return the book to the desk. The librarian
+updates the record: this card no longer has this book. Only after
+that return is the book free for the next patron to check out. If
+you forgot to return it, the record would just sit there forever,
+saying you still have a book you're not even reading anymore -- and
+eventually the library would have to chase you down about it.
+
+And sometimes a book itself has a problem: a chipped barcode the
+scanner can't read, water-damaged pages, or it was pulled for
+rebinding and isn't actually on the shelf where the catalog claims.
+When that happens, checkout itself fails, or reading partway through
+gives you garbage instead of the next chapter. You have to notice the
+book is unusable before you trust anything you tried to read from it.
+
+A `FileHandle` in vāṇी is exactly this checkout record. **Opening a
+file** (`file_open(...)`) is checking the book out -- you get back a
+`FileHandle`, the record of which file you're now holding.
+**Reading** a file a line or chunk at a time (`file_read_line`) is
+reading a chapter at a time rather than photographing the whole book
+up front. **Closing the handle** is returning the book to the desk --
+after that, the record is cleared, and unlike a forgetful human, the
+compiler makes sure this always happens, even if you leave the
+function early. And a **file I/O error** -- a path that doesn't
+exist, permissions that block you, a device that vanished -- is the
+equivalent of that chipped, unreadable book: something you have to
+detect before you trust anything you tried to read from it.
+
+Keep the librarian's desk in mind. Everything below -- `FileHandle`,
+opening, reading, closing, checking for errors -- is that same
+checkout process, spelled out with vāṇी's exact function names.
+
 ## Why a dedicated FileHandle type?
 
 Before v0.1.5, the only way to open a file in vāṇī was to call
