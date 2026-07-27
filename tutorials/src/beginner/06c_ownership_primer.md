@@ -175,7 +175,26 @@ fn main() -> i64 {
 }
 ```
 
+Uncomment that line and the compiler stops you:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn consume(xs: Vec<i64>) -> i64 {
+  return xs[0];
+}
+
+fn main() -> i64 {
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: i64 = consume(xs);
+  print xs[1];
+  return r;
+}
+```
+
 If you don't want to lose `xs`, take a borrow:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 fn peek(xs: ref Vec<i64>) -> i64 {

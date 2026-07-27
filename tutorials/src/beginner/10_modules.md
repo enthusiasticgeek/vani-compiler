@@ -98,6 +98,37 @@ math::next_square(4) = 25
   `vani.toml` + `use "path";` declarations to splice files
   together -- that's Intermediate Sec.8.
 
+### Private items are rejected, not just hidden
+
+"Private by default" isn't just documentation -- the compiler
+enforces it. Calling `internal_helper` from outside `math`
+doesn't compile:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+module math {
+  pub fn square(n: i64) -> i64 {
+    return n * n;
+  }
+
+  fn internal_helper(n: i64) -> i64 {
+    return n + 1;
+  }
+}
+
+fn main() -> i64 {
+  let a: i64 = math::internal_helper(5);
+  print "a =", a;
+  return 0;
+}
+```
+
+The compiler rejects `math::internal_helper(5)` with "function
+'math::internal_helper' is private to its module -- mark it
+`pub` to allow access from outside." Add `pub` in front of
+`fn internal_helper` and the same call compiles.
+
 ## Challenge
 
 Add a `geom` module to `lesson10.vani` with a `pub fn area(w:

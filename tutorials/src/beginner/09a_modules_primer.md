@@ -182,6 +182,35 @@ module stats {
 //   stats::assert_nonempty(n)  -- REJECTED: private to stats
 ```
 
+Those `-- REJECTED` lines aren't hypothetical -- reaching for a
+private item from a sibling module really does fail to
+compile:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```
+module stats {
+    fn assert_nonempty(n: i64) -> i64 {
+        assert n > 0, "stats require at least one element";
+        return n;
+    }
+}
+
+module report {
+    fn check(n: i64) -> i64 {
+        return stats::assert_nonempty(n);   // -- REJECTED: private to stats
+    }
+}
+```
+
+The compiler stops at `stats::assert_nonempty(n)` with
+"function 'stats::assert_nonempty' is private to its module --
+mark it `pub` to allow access from outside." The same rejection
+applies to a `[deps]`-consuming package reaching for either
+`stats::sum_all` (the `pub(kosh)` item) or
+`stats::assert_nonempty` (the private item) across the Kosh
+boundary.
+
 The rule of thumb: use `pub` for the API you're willing to support
 forever, including external Kosh consumers; use `pub(kosh)` for a
 package-internal helper you want to share freely across your own

@@ -160,6 +160,22 @@ covered". You can't accidentally drop a case. Either you
 handle each variant, or you add `_ then default-value`
 explicitly to acknowledge you're catching the rest.
 
+Add the missing arm and the same match compiles:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+enum Color { Red, Green, Blue }
+
+fn name(c: Color) -> Str {
+  return match c {
+    Color.Red then "red",
+    Color.Green then "green",
+    Color.Blue then "blue",
+  };
+}
+```
+
 This is one of the most useful properties of `match`. As your
 enum grows (you add a new variant `Blue` to `Color`), every
 `match` in your codebase that doesn't have a wildcard becomes

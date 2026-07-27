@@ -17,7 +17,35 @@ the value. No fall-through, no hidden priority -- it's exhaustive
 
 ## The program
 
+Before the full worked example, notice what happens if you
+drop the wildcard arm from `weekday_name`:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn weekday_name(n: i64) -> Str {
+  let name: Str = match n {
+    1 then "Monday",
+    2 then "Tuesday",
+    3 then "Wednesday",
+    4 then "Thursday",
+    5 then "Friday",
+    6 then "Saturday",
+    7 then "Sunday",
+  };
+  return name;
+}
+```
+
+Without a `_ then ...` arm, the match on `n: i64` isn't
+exhaustive -- the compiler can't enumerate every possible
+`i64` value, so it rejects the match at compile time. The
+worked example below keeps the wildcard arm and compiles
+cleanly.
+
 Save this in `~/lesson8.vani`:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 intent "Lesson 8 worked example -- match on integers and booleans.";

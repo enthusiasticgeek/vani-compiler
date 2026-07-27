@@ -124,6 +124,30 @@ but they're a stylistic choice, not a requirement.
   See [`tools/README.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/tools/README.md)
   for the full reference and the LLM backend options.
 
+### Mixing keywords from two scripts is a compile error
+
+The "language mismatch" rule isn't just a warning -- once a
+file has committed to a dialect (via a Devanagari structure
+keyword), an English keyword later in the same file is
+rejected:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+// vani-lang: sanskrit
+उद्देश्य "Mixing an English keyword into a Sanskrit-pragma file.";
+
+fn add(a: i64, b: i64) -> i64 {
+  पुनरागम a + b;
+}
+```
+
+The compiler stops at `fn` with "language mismatch: file
+already used a Devanagari structure keyword ... can't switch
+to a English alias mid-file. Pick one script per file." Every
+structure keyword in a `// vani-lang: sanskrit` file must be
+`कार्य`, not `fn`.
+
 ## Should I write vāṇी in Devanagari?
 
 It's a stylistic choice. The Devanagari surface exists for two

@@ -215,6 +215,8 @@ The most common bug. Either no base case, or the base case is
 unreachable for some inputs. Result: the program crashes when
 the stack runs out.
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 fn bad(n: i64) -> i64 {
   return bad(n - 1);  // No base case -> stack overflow.
@@ -232,6 +234,8 @@ The recursive Fibonacci above is `O(2^n)` -- every call spawns
 two more. `fib(40)` makes ~1 billion calls. Compute
 `fib(100)` recursively and you'll wait until the heat death
 of the universe.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
 fn fib(n: i64) -> i64 {

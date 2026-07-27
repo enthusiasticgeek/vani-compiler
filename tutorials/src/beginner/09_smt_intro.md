@@ -17,7 +17,26 @@ the code ever runs.
 
 ## The program
 
+A failing `prove` is always a compile-time error -- there's no
+"maybe it's true at runtime" fallback. For example:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn main() -> i64 {
+  prove 2 + 2 == 5;
+  return 0;
+}
+```
+
+The SMT solver proves this claim is false and the compiler
+rejects the program before it ever runs. The worked example
+below proves a true claim (`2 + 2 == 4`) instead, and compiles
+cleanly.
+
 Save this in `~/lesson9.vani`:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 intent "Lesson 9 worked example -- assert / prove / requires.";
