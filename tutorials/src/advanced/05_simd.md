@@ -12,6 +12,25 @@
 
 ---
 
+## One stamp, four cookies
+
+Picture rolling out cookie dough and cutting shapes one at a time
+with a single cutter: press, lift, move, press, lift, move -- one
+cookie per press. Now swap in a cutter that has *four* shapes welded
+into one frame, spaced to match the dough. One press, one lift, and
+you've cut four cookies at once -- the same motion, four times the
+output, because the four cuts happen simultaneously rather than one
+after another.
+
+That's the whole idea behind **SIMD** (Single Instruction, Multiple
+Data): instead of a CPU adding one pair of numbers, then the next
+pair, then the next, a SIMD instruction loads several numbers into
+one wide register and adds all of them in a single step -- one
+"press" that produces several results at once. The three layers
+below are three different levels of control over how and when
+vāṇी reaches for the four-shape cutter instead of the one-shape
+cutter.
+
 ## Why three layers?
 
 | Layer | What it does | When to use it |

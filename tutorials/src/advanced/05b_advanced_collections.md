@@ -10,6 +10,42 @@
 
 ---
 
+## Before you dive in: seven everyday shapes
+
+Each structure below solves one recognizable everyday problem. Keep
+these pictures in mind while reading the code -- the API calls are
+just that picture, spelled out:
+
+- **Graph** -- a subway map. Stations are nodes, the lines
+  connecting them are edges, and a trip's travel time is the edge's
+  weight. `dijkstra` is "what's the fastest way from this station
+  to that one," the same question a transit app answers for you.
+- **BST** -- a phone book that reorganizes itself as you add names,
+  while always staying alphabetically sorted and evenly balanced
+  from left to right, so a lookup never has to search one lopsided
+  side of the shelf.
+- **Trie** -- the letter-by-letter narrowing of an old rotary
+  directory or a game of 20-questions-by-prefix: typing "C", then
+  "CA", then "CAT" walks you down a shared branch that every word
+  starting with "CAT" hangs off of -- the engine behind autocomplete.
+- **SkipList** -- an express train system layered over a local one.
+  Most trips start on the express line, which skips dozens of stops
+  at once, then drop to the local line only for the last short
+  stretch -- much faster on average than a purely local ride, without
+  needing a rigid schedule (it's randomized, not perfectly planned).
+- **UnionFind** -- tracking friend groups at a party as introductions
+  happen. Each "these two just became friends" merges their two
+  circles into one; the structure can instantly answer "are these
+  two people in the same friend group now?" without re-tracing every
+  introduction.
+- **BloomFilter** -- a bouncer's rapid-fire memory check using a
+  handful of stamps rather than a full guest list: it can confidently
+  say "definitely not on the list," or "probably on the list, worth a
+  closer look" -- but it will never wrongly turn away someone who
+  really is on the list.
+- **Deque** -- a buffet line you're allowed to join or leave from
+  *either* end, front or back, instead of only the back.
+
 ## Graph -- weighted directed graph
 
 ```vani
