@@ -9,6 +9,46 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The LEGO brick and the baseplate
+
+Picture a bin of LEGO bricks in every shape you can imagine: a flat
+2x4 rectangular block, a curved roof slope, a tiny 1x1 stud, a big
+vehicle chassis with wheels already built in. They look wildly
+different, weigh different amounts, and are meant for completely
+different parts of a build. But every single one of them shares one
+thing: on the underside, they all have the identical grid of round
+sockets, spaced the exact same distance apart, sized to grip the
+exact same stud.
+
+That shared socket pattern is the whole reason LEGO works. A
+baseplate doesn't care whether the brick snapping onto it is a plain
+rectangular block, a curved roof tile, or an elaborate mini-figure
+stand. It only checks one thing: does the underside have the
+standard stud-and-socket grid? If yes, it clicks on, no matter what
+the brick looks like otherwise. If no, it simply doesn't fit.
+
+Now here's the part that matters for what this chapter calls
+"static dispatch": when you actually reach into the bin and pick up
+ONE specific brick -- say, the red 2x4 rectangular block -- you're
+not holding "some anonymous stud-pattern thing" anymore. You're
+holding a red 2x4 rectangular block, and you know it, with your own
+eyes, before you ever touch the baseplate. There's no guessing, no
+feeling around blind to figure out what shape it is once it's
+snapped down. You picked it up already knowing exactly what it was
+-- so your hand already knows exactly how to hold it and where it'll
+sit.
+
+Bridge to CS terms: the stud-and-socket pattern is the **interface**
+-- the contract every brick (type) must satisfy to be usable on a
+baseplate. Each differently-shaped brick (Circle, Square, Triangle)
+satisfies that same contract its own way -- that's each type's own
+`implement Shape for X` block. And "you already know exactly which
+brick you picked up, before you snap it down" is **static
+dispatch**: the compiler, like your hand reaching into the bin,
+knows the concrete type at compile time -- at "pick-up time" -- so it
+can generate code specialized to that exact brick shape instead of
+figuring it out blind at runtime.
+
 ## What an interface IS
 
 An **interface** is a contract. It says: "any type that wants

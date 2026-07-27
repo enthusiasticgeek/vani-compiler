@@ -10,6 +10,46 @@
 This chapter has **no compiler code**. Intuition first, then the
 one-page API.
 
+## The government form with pre-filled boxes
+
+Imagine you're filling out an official government form -- something
+like a passport renewal or a tax form. Near the top there's a field
+labeled "Country of residence," and it already has "USA" typed in,
+pre-filled, with a small printed note next to it: "leave as-is if
+this applies to you."
+
+For the overwhelming majority of people filling out this form, USA
+is exactly right. They read the pre-filled box, nod, and move on to
+the next field without touching it. They didn't have to look up how
+to spell "United States of America," didn't have to decide on
+formatting -- the form already did that work for them. Submitted this
+way, the form is still 100% official and 100% valid.
+
+But suppose you live abroad. The pre-filled "USA" is wrong for you.
+Nothing stops you: you cross it out, write "Canada" in its place,
+and submit the form. It's still the exact same official form, still
+fully valid, still accepted at the counter -- you just supplied your
+own answer for that one box instead of the one that came
+pre-printed.
+
+Nobody had to design two different forms -- one for USA residents and
+one for everyone else. Nobody had to reprint the whole form because
+you needed a different country filled in. One form, one pre-filled
+default, and an explicit, always-available option to override it
+for the fields where the default doesn't apply. Notice, too, that
+some boxes on the form -- like "Signature" -- are never pre-filled:
+there's no way around filling those in yourself, because there's no
+sensible default a stranger could write on your behalf.
+
+Bridge to CS terms: the "pre-filled box you're free to leave as-is"
+is a **default method** -- the interface itself supplies a working
+method body, and any type implementing that interface may accept it
+(by simply not writing the method) or override it with its own
+version. The "Signature box with no default" is a **required
+method** -- the interface provides no body, so every implementor
+MUST supply one. Either way, the finished form -- like the finished
+`implement` block -- is complete and valid.
+
 ## Default methods: the "built-in recipe"
 
 Imagine a `Describable` interface that every type in your program

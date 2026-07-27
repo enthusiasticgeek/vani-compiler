@@ -8,6 +8,41 @@
 
 ---
 
+## The phone number on a sticky note
+
+Imagine a friend asks you to arrange a plumber for their leaky sink
+while they're out of town. There are two ways you could handle
+this.
+
+The first way: you personally call the plumber, explain the
+problem, schedule the appointment, and report back once it's done.
+You did the work yourself, start to finish, right then and there.
+
+The second way: you don't call anyone at all. Instead, you write
+the plumber's phone number on a sticky note and hand it to your
+friend. "Here -- call this whenever you need to." Your friend now
+has exactly what they need to reach the plumber themselves, at
+whatever time suits them, without you being involved at all.
+Critically, the sticky note itself is not a plumber -- it's just
+seven digits. Nothing happens until someone actually dials it. And
+whoever's holding the sticky note doesn't need to know anything
+about who answers, how the plumber does the job, or what tools they
+carry -- they just need the number.
+
+That's the difference between doing the work yourself and handing
+someone "the number to call." A phone number on a sticky note is
+small, easy to pass along, easy to tuck into someone else's pocket,
+easy to swap out for a different plumber's number later -- and it
+*represents* a specific, callable thing without *being* that thing.
+
+Bridge to CS terms: a function pointer (`fn(A) -> R`) is exactly
+this sticky note. Instead of calling a function yourself and
+handing back the result, or writing the function's body inline
+wherever it's needed, you hand someone a reference to a specific
+function -- "the number to call" -- which they can invoke themselves,
+whenever they need to, without needing to know how that function is
+implemented until the moment they actually call it.
+
 ## The concept
 
 In vāṇी a function name can be used as a *value* -- not just called,
