@@ -76,6 +76,38 @@ A few one-line answers for the things you'll wonder about:
   as Rust: braces are statements, semicolons aren't required to
   close them.
 
+## Getting the signature wrong
+
+`main` must have *exactly* the signature `fn main() -> i64`. Give it a
+different return type and the compiler rejects the file before it even
+gets to checking the body:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+intent "Wrong return type on main.";
+
+fn main() -> Str {
+  print "Hello, vāṇी!";
+  return "0";
+}
+```
+
+```
+error: main must have signature fn main() -> i64
+```
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+intent "First vāṇी program -- prints a greeting and returns 0.";
+
+fn main() -> i64 {
+  print "Hello, vāṇी!";
+  return 0;
+}
+```
+
 ## Challenge
 
 Modify `hello.vani` to print **two** lines. The compiler accepts

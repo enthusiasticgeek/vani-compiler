@@ -182,6 +182,16 @@ error: no enclosing loop is labeled 'nowhere'
     break nowhere;
 ```
 
+**Fix**: break by a label that's actually defined on an enclosing loop:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+outer: for i from 0 to 3 {
+  break outer;   /* "outer" is a real label on an enclosing loop */
+}
+```
+
 ---
 
 ## Works on `while` loops too

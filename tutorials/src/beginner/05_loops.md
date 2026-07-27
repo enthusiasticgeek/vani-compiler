@@ -96,6 +96,29 @@ first_multiple_of_seven(20) = 21
   Intermediate track. This is a documented v1 deviation --
   see [`docs/v1_limitations.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/docs/v1_limitations.md).
 
+### A closer look: don't forget to advance
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+```vani
+fn count_to(n: i64) -> i64 {
+  let i: i64 = 0;
+  while i < n {
+    print i;
+    // forgot: i = i + 1;
+  }
+  return i;
+}
+```
+
+This compiles cleanly -- `i < n` is a perfectly valid `bool`
+condition -- but nothing inside the loop body changes `i`, so it
+never becomes `false`. The loop runs forever. It's the same shape
+of bug for `while true { ... }`: the compiler can't tell you "you
+forgot to update the loop variable," so it's on you to double-check
+that every loop body moves its condition toward `false` (or hits a
+`break`/`return`).
+
 ## Challenge
 
 Write a `count_digits(n: i64) -> i64` that returns how many

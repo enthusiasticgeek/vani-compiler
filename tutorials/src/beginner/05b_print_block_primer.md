@@ -118,6 +118,8 @@ eprint {
 
 ---
 
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
 ## When to use print block vs plain print
 
 | Use | Form |

@@ -85,7 +85,18 @@ count_positive = 2
 
 - **Arrays have a fixed length in the type**. `[i64; 4]` is "an
   array of four `i64`s." The length is part of the type; passing
-  an `[i64; 3]` where `[i64; 4]` is expected is a type error.
+  an `[i64; 3]` where `[i64; 4]` is expected is a type error:
+
+  <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+  ```vani
+  let arr: [i64; 3] = [10, 20, 30];
+  print "sum_array =", sum_array(ref arr);   // sum_array expects ref [i64; 4]
+  ```
+
+  ```
+  error: argument 1 to 'sum_array' must be assignable to ref [i64; 4], got ref [i64; 3]
+  ```
 - **`Vec<T>` is heap-allocated and grows**. It's the right
   default for variable-length collections. Construct one with
   `vec(...)` (varargs literal) or `Vec::new()` (empty). Both
@@ -105,6 +116,25 @@ count_positive = 2
   runtime value. Both have type `u64`. Mixing `u64` and `i64`
   needs an explicit cast -- that's the most common beginner
   speed-bump.
+
+  <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+  ```vani
+  let v: Vec<i64> = vec(1, 2, 3);
+  let n: u64 = len(ref v);
+  let bad: u64 = n - 5;
+  print "n =", n;
+  print "bad =", bad;
+  ```
+
+  This compiles cleanly -- `n` is a runtime value, so the compiler
+  can't constant-fold the subtraction and catch the underflow the
+  way it would for a `let`-bound literal. `u64` has no negative
+  values, so `n - 5` when `n` is `3` wraps around instead of
+  failing, and the printed result (`bad = -2`) is nonsense you can
+  easily miss in a longer program. Cast to `i64` first (`n as i64`)
+  whenever a `len()`-derived value might go below the amount you're
+  subtracting.
 - **Iterating with `while`** is the most explicit form. The
   Intermediate track shows `for x in xs { ... }` once you're
   comfortable.

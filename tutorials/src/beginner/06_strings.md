@@ -229,6 +229,13 @@ error: let initializer must be assignable to OwnedStr, got Str
 
 **Fix**: concatenate with `""` to heap-copy: `let s: OwnedStr = "hello" + "";`
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+let s: OwnedStr = "hello" + "";
+print s;
+```
+
 ### Passing `Str` where `OwnedStr` is expected
 
 `OwnedStr` auto-coerces **down** to `Str` (borrowed read). The
@@ -254,6 +261,18 @@ error: argument 1 to 'needs_owned' must be assignable to OwnedStr, got Str
 ```
 
 **Fix**: pass `s + ""` to heap-copy the literal first.
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+fn needs_owned(s: OwnedStr) -> i64 { print s; return 0; }
+
+fn main() -> i64 {
+  let s: Str = "hello";
+  needs_owned(s + "");
+  return 0;
+}
+```
 
 ---
 
@@ -301,6 +320,8 @@ integers, this covers the same ground as Rust's `{:.N}` / `{:0N}`
 format specifiers -- as ordinary function calls rather than a
 `{}` mini-language, since `print` has no format-string syntax of
 its own (a comma-separated list of items, each printed as-is).
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 **Caveats for `print`ing an `f64` directly (and for `f64_to_str`)**:
 raw `print x;` on an `f64` goes through the exact same `%g`-based

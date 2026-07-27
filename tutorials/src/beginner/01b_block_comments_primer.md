@@ -116,6 +116,15 @@ error: unterminated block comment
 No crash, no silent truncation -- the compiler rejects the file with a
 precise diagnostic.
 
+**Fix**: add the closing `*/`:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+/* this comment is properly closed */
+fn main() -> i64 { return 0; }
+```
+
 ---
 
 ## Quick reference

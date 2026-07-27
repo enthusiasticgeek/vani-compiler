@@ -112,6 +112,19 @@ has no value when the condition is false. The statement form
 above is allowed without `else`; the expression form below is
 not:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+// expression form -- missing else does NOT compile:
+let label: Str = if x > 0 { "positive" };
+```
+
+```
+error: expected 'else' (if-expression)
+```
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 // statement form -- no else required:
 if x > 0 { print "positive"; }

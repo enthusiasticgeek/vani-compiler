@@ -100,6 +100,21 @@ either = true
   notation. See [Beginner 6 -- Strings](06_strings.md#string-builtins-reference)
   for the full caveats and the `f64_to_str_fixed` workaround.
 
+### A closer look: integer division truncates
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+```vani
+let q: i64 = 7 / 3;
+print "7 / 3 =", q;
+```
+
+This compiles cleanly and runs without error -- but the output is
+`7 / 3 = 2`, not `2.333...`. Both operands are `i64`, so `/` performs
+integer division and truncates toward zero. It's an easy thing to
+overlook when you're expecting fractional-looking results; if you want
+`2.333...`, both operands need to be `f64` (`7.0 / 3.0`).
+
 ## Challenge
 
 Add an `i32` variable to the program, multiply it by `2`, and
