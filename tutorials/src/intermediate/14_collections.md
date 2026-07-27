@@ -26,7 +26,20 @@ let prev: Option<i64> = hashmap_insert(mut ref m, 1, 100);
 ```
 
 The `mut ref` is required because the map is mutated (possibly
-resized). Forgetting `mut` is a compile error.
+resized). Forgetting `mut` is a compile error:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+let scores: HashMap<i64, i64> = hashmap_new();
+let prev: Option<i64> = hashmap_insert(ref scores, 1, 100);   // missing `mut`
+```
+
+```
+error: hashmap_insert() requires a `mut ref HashMap<K, V>` argument, got ref HashMap<i64, i64>
+  let prev: Option<i64> = hashmap_insert(ref scores, 1, 100);
+                                         ^^^^^^^^^^
+```
 
 ### Full API
 

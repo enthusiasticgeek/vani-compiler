@@ -177,6 +177,8 @@ synchronous functions is not yet implemented** (tracked as
 T2.6 Phase 2). Using `try` or `?` in a sync function body
 currently produces a clear diagnostic:
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```
 `try EXPR` is reserved as a keyword but the desugar to
 match-with-early-return is still in progress (T2.6 Phase 2).

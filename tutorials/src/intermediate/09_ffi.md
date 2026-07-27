@@ -16,6 +16,8 @@ the factory's finished goods are stored.
 
 ## The program
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 intent "Intermediate 9 worked example -- FFI to libc.";
 
@@ -96,6 +98,27 @@ Without `#[repr(C)]`, vāṇी may reorder or pad fields differently
 from C, causing silent data corruption across the boundary.
 See [Advanced 4c -- Attributes reference](../advanced/04c_attributes_reference.md)
 for `#[repr(packed)]` (removes padding entirely for wire protocols).
+
+A bare struct -- no `#[repr(C)]` -- passed by value across the
+FFI boundary is rejected outright, with a hint pointing at the fix:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+struct Vec2Bad { x: f64, y: f64 }   // no #[repr(C)]
+
+extern "C" fn c_length_bad(v: Vec2Bad) -> f64;
+```
+
+```
+error: extern fn 'c_length_bad' parameter 'v' has unsupported FFI type Vec2Bad;
+       pass struct 'Vec2Bad' by reference instead -- write `ref Vec2Bad`
+extern "C" fn c_length_bad(v: Vec2Bad) -> f64;
+                           ^^^^^^^^^^^
+```
+
+The fix is either `#[repr(C)]` (pass by value, C-compatible layout) or
+`ref Vec2Bad` / `mut ref Vec2Bad` (pass by reference, layout-agnostic).
 
 ## Linking external code
 

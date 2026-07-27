@@ -100,6 +100,32 @@ the long-form manual style on `Opt`-shaped enums, and
 [10c -- multi-error patterns](10c_error_patterns_primer.md) for
 composing across multiple error types.
 
+Using `try` on this chapter's own `Result` enum, in a sync
+function body, is exactly the rejected case:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn pipeline_try(n: i64) -> Result {
+  let v: i64 = try parse_pos(n);   // rejected -- see below
+  return Result.Ok(v * 2);
+}
+```
+
+```
+error: `try EXPR` is reserved as a keyword but the desugar to
+       match-with-early-return is still in progress (T2.6 Phase 2).
+       Write the pattern manually: `match opt { Opt.Some(v) then v,
+       Opt.None then return Opt.None };`
+  let v: i64 = try parse_pos(n);
+               ^^^^^^^^^^^^^^^^
+```
+
+(v1 also flags that `Result` here has two payloaded variants --
+`try`'s limited desugar wants exactly one payloaded arm and one
+payload-less arm, so this shape trips an extra diagnostic beyond
+the T2.6 one shown above.)
+
 ## v1 limitations to keep in mind
 
 - **No generic `Result<T, E>`**. v1's enums don't carry type

@@ -109,39 +109,56 @@ Classical LSP talks about subclasses. In vāṇी the equivalent is:
 every type that implements an interface must satisfy not just the
 *signature* but also the *behavioral contract* of that interface.
 
-vāṇī can enforce this mechanically with `requires` / `ensures`:
+vāṇी can enforce this mechanically with `requires` / `ensures` --
+but note the clause has to live on each `implement` block's
+function, not on the `interface` declaration itself (v1's parser
+doesn't accept `ensures` directly on an interface method signature):
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```
 interface Counter {
   // Contract: after increment, value > value_before.
-  fn increment(self: Self) -> i64
-    ensures _return > 0;
-
-  fn value(self: Self) -> i64
-    ensures _return >= 0;
+  fn increment(self: Self) -> i64;
+  fn value(self: Self) -> i64;
 }
 
 struct UpCounter   { n: i64 }
 struct BrokenCounter { n: i64 }   // violates the contract
 
 implement Counter for UpCounter {
-  fn increment(self: UpCounter) -> i64 {
+  fn increment(self: UpCounter) -> i64
+    ensures _return > 0;
+  {
     self.n = self.n + 1;
     return self.n;          // always > 0 after first call -- OK
   }
   fn value(self: UpCounter) -> i64 { return self.n; }
 }
+```
 
+That compiles cleanly -- `UpCounter` satisfies the contract it
+declares. Now give `BrokenCounter` the *same* `ensures` clause on
+an implementation that can't satisfy it:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```
 implement Counter for BrokenCounter {
-  fn increment(self: BrokenCounter) -> i64 {
-    return 0 - 1;           // SMT verifier rejects: result > 0 fails
+  fn increment(self: BrokenCounter) -> i64
+    ensures _return > 0;
+  {
+    return 0 - 1;           // violates its own ensures clause
   }
   fn value(self: BrokenCounter) -> i64 { return self.n; }
 }
 ```
 
 The SMT verifier catches the LSP violation at compile time --
-something no runtime test suite can guarantee exhaustively.
+something no runtime test suite can guarantee exhaustively. `vanic`
+rejects it with `ensures clause does not hold at this return (SMT
+counterexample)`, pointing at the exact `return` that breaks the
+promise.
 
 ---
 

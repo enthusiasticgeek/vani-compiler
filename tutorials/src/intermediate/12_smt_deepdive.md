@@ -118,6 +118,40 @@ the operation can't overflow.
 The good news: this is the *same constraint* that production
 software needs -- just made explicit.
 
+Drop the bounding `requires` clauses down to just `a >= b` and
+the solver finds exactly that kind of counterexample -- an `a`
+near `i64::MAX` paired with a `b` near `i64::MIN` -- and refuses
+to compile the function:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn checked_sub_unbounded(a: i64, b: i64) -> i64
+requires a >= b;
+ensures _return >= 0;
+{
+  return a - b;
+}
+
+fn main() -> i64 {
+  print "checked_sub_unbounded(20, 7) =", checked_sub_unbounded(20, 7);
+  return 0;
+}
+```
+
+```
+error: function 'checked_sub_unbounded' ensures clause does not hold at this return
+       [counterexample: a = 9223372036854775806, b = -9223372032559808512]
+ensures _return >= 0;
+        ^^^^^^^^^^^^
+```
+
+Without a lower bound on `b` (`b >= 0`), nothing stops `b` from
+being deeply negative -- and `a - b` with a very negative `b`
+behaves like `a + |b|`, which overflows past `i64::MAX` for the
+solver's counterexample assignment. The `ensures _return >= 0;`
+can no longer be discharged, so the function is rejected.
+
 ## Where SMT can and can't help
 
 | Works today | Doesn't yet |

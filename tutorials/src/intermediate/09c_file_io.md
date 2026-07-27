@@ -8,6 +8,8 @@
 
 ## The program
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 intent "Intermediate 9c -- native file I/O.";
 
@@ -82,6 +84,26 @@ line 2: second line
   compiler marks `fw` / `fr` as moved; any use after this
   is a compile error. Scope-exit also closes automatically
   if you don't call `file_close` explicitly.
+
+Using the handle after `file_close` moved it out from under you:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+let fh: FileHandle = file_open("/tmp/vani_hello.txt", "w", true);
+if !file_is_ok(ref fh) {
+  eprint "error: could not open file for writing";
+  return 1;
+}
+let _ = file_close(fh);
+let _ = file_write(mut ref fh, "too late\n");   // fh was moved by file_close
+```
+
+```
+error: cannot mutably borrow 'fh' after it was moved
+  let _ = file_write(mut ref fh, "too late\n");
+                             ^^
+```
 
 ## Reading stdin
 

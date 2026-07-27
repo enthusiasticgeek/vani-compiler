@@ -77,6 +77,8 @@ union enum (Pattern 1), not stacked.
 
 **Avoid**:
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 fn outer() -> Result<Result<i64, ParseError>, IoError> {
   // Caller must double-match: awkward and error-prone

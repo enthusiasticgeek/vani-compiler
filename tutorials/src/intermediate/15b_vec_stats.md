@@ -63,6 +63,19 @@ fn main() -> i64 {
 (A `Vec<T>` where `T` is non-`Copy`, e.g. `Vec<OwnedStr>`, is still
 correctly rejected with a diagnostic.)
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+let names: Vec<OwnedStr> = vec("banana" + "", "apple" + "");
+sort(mut ref names);
+```
+
+```
+error: sort() only supports `Vec<i64> or Vec<f64>` in v1, got element type OwnedStr
+  sort(mut ref names);
+       ^^^^^^^^^^^^^
+```
+
 ---
 
 ## Argmin / argmax and k-th smallest
