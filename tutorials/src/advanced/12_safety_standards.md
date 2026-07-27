@@ -275,6 +275,8 @@ vanic complexity src/firmware.vani --format=json
 
 ## Full audit pack
 
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
 `vanic audit-pack` runs all six checks (deviations, stack-depth,
 acyclicity, complexity, safety-attrs, HashMap shapes) and bundles
 results into a single Markdown document:

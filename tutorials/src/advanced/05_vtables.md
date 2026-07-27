@@ -113,6 +113,8 @@ that holds the right fat-pointer type.
 
 ## When to peek under the hood
 
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
 Most user code doesn't need to know the vtable layout. Reach
 for this knowledge when:
 

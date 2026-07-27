@@ -405,6 +405,17 @@ throughput.
 
 ### When to prefer vec512 over vec256
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Requesting a wider SIMD type than the target CPU actually supports
+is never a compile error. `vec512<T>` on a CPU without AVX-512 (or
+`vec256<T>` on AArch64 without SVE) compiles and runs correctly --
+LLVM silently legalises the wide type into multiple narrower
+registers, exactly as the platform-mapping tables above show. The
+result is still correct; the only symptom of picking a mismatched
+width is quietly reduced throughput, with nothing in the compiler
+output to flag it.
+
 Use `vec512<T>` when:
 - The target CPU has AVX-512 (`lscpu | grep avx512f`) — Intel Ice Lake-SP,
   Sapphire Rapids, AMD Zen 4, AWS Graviton-3 (via SVE-512)

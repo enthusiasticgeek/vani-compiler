@@ -275,6 +275,8 @@ fn main() -> i64 {
 | `len` | `(ref bf) -> i64` | number of bits in the array |
 | `count` | `(ref bf) -> i64` | number of insertions |
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 False positives are possible (the filter may say "yes" for something never inserted). False negatives are impossible (a `false` answer is definitive). Choose `bits` ~= 10x your expected element count for a ~1% false-positive rate with 4 hashes.
 
 ---

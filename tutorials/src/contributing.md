@@ -13,6 +13,27 @@ Markdown file under `tutorials/src/`. To contribute:
    - Compile + run commands (literal `vanic` invocations)
    - Why it works that way (3-5 design notes)
    - A challenge (an exercise + a collapsed solution block)
+   - Mascot markers on every code block that needs one (see
+     [introduction.md](introduction.md) for the full system). Place
+     the `<img>` tag on its own line immediately before the fenced
+     code block it annotates:
+     `<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>`.
+     Swap the filename and title for the case that applies:
+     - `manas_mascot_error.png`, "this code does not compile!" --
+       broken code, intentional compile error.
+     - `manas_mascot_caution.png`, "this code needs extra care" --
+       compiles cleanly but is subtle or easy to misuse.
+     - `manas_mascot_success.png`, "this is the correct, working
+       version" -- the fixed/working counterpart to an error or
+       caution example.
+     - `manas_mascot_awesome.png`, "a good habit worth adopting" --
+       best-practice tip.
+     - `manas_mascot_waiting.png`, "work in progress / not yet
+       implemented" -- a feature that isn't implemented yet.
+     Not every code block needs a marker -- plain worked examples
+     that just work don't need one -- but if your lesson shows
+     broken code, a gotcha, a fix, a best practice, or a
+     not-yet-implemented feature, mark it.
 3. **Verify the example compiles**. Paste it into a `.vani`
    file and run `vanic run <file>` AND `vanic run <file>
    --backend=c`. If both backends print the expected output,

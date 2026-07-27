@@ -156,6 +156,8 @@ source of truth:
 - `f64_to_str_fixed` forces both tree-C and tree-LLVM (neither
   SSA backend has an implementation).
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 **The trap**: adding a new builtin to `checker.rs` + the tree
 backends does **not** make it safe to ship on the SSA path by
 default -- and there's no automatic detection that it's missing.

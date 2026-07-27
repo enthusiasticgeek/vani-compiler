@@ -158,6 +158,33 @@ fn use_region() -> i64 {
   as a `mut ref Region` **parameter**, by contrast, outlives the
   callee's frame, so an `ArenaRef` derived from it can freely flow
   back out.
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+fn dangler() -> ArenaRef<i64> {
+  region r {
+    return region_borrow_i64(mut ref r, 1);
+  }
+}
+```
+
+`r`'s backing storage frees when the `region` block exits --
+returning an `ArenaRef` tied to it leaves a dangling reference,
+so this is rejected at compile time.
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+fn make_ref(r: mut ref Region) -> ArenaRef<i64> {
+  return region_borrow_i64(r, 1);
+}
+```
+
+Same idea, but `r` is a `mut ref Region` **parameter** instead of a
+`region`-block-local -- the caller's `Region` outlives this
+function's frame, so the `ArenaRef` it returns is never dangling.
+
 - **The embedded gate applies only to signatures, not local use.**
   `ArenaRef<T>` (and `Region`, though that one's unrestricted) can
   be used freely as a local variable's type inside one function

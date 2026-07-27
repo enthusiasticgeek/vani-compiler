@@ -86,6 +86,8 @@ Paste the bundle as the first message. Then ask:
 
 A capable model produces something like:
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 fn factorial(n: i64) -> i64
 requires n >= 0;

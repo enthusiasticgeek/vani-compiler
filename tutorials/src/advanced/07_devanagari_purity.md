@@ -40,6 +40,24 @@ The lexer's `enforce_language_purity` pass (in
    per-dialect spellings (Sanskrit accepts `कार्य` but not
    the Hindi-specific `फलन`).
 
+The gate fires the moment a second script shows up among the
+structure keywords, even without a pragma -- a Devanagari `fn`
+keyword locks the whole file to Devanagari:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+कार्य main() -> i64 {
+  return 0;
+}
+```
+
+`कार्य` (Devanagari `fn`) sets the file's script; `return` is a
+Latin/English keyword, so the lexer rejects it with `language
+mismatch: file already used a Devanagari structure keyword ...
+can't switch to a English alias mid-file. Pick one script per
+file.` -- caught before parsing even starts.
+
 ## The SOV statement shapes
 
 Sanskrit (with optional support in Hindi/Marathi) lets you

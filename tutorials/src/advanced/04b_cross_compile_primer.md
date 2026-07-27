@@ -213,6 +213,8 @@ before `main` (`intent_main`) is called.
 By default all vāṇी functions land in `.text`. To place a
 function in a specific section:
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 ```vani
 #[no_mangle]
 #[link_section = ".text.Reset_Handler"]
@@ -222,6 +224,15 @@ fn Reset_Handler() -> i64 { ... }
 #[link_section = ".text.isr"]
 fn SysTick_Handler() -> i64 { ... }
 ```
+
+`#[link_section = "..."]` takes a bare string -- the compiler has no
+way to know which section names your linker script actually
+defines. A typo (`.text.Reset_Handlr`) or a name that doesn't match
+the `.ld` file compiles cleanly and links cleanly; the function just
+lands wherever the linker's default rule puts it instead of at the
+reset vector, and the failure only shows up as a chip that doesn't
+boot. There's no compiler diagnostic for this -- double-check the
+string against the linker script by hand.
 
 In C output this emits:
 

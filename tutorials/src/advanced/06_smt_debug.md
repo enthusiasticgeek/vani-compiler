@@ -95,6 +95,8 @@ to a runtime `assert`.
 
 ## Tactics for hard proofs
 
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
 - **Add an intermediate `assert`**. If the failing predicate
   is complex, split it: `assert P;` then `assert P && Q;`.
   The first one discharges; the second pinpoints which

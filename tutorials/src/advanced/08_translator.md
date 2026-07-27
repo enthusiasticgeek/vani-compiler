@@ -266,6 +266,8 @@ python3 tools/vani_translate.py basics.vani --to japanese --verify
 # → round-trip ok: english -> japanese -> english (12 keyword tokens preserved)
 ```
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
 The round-trip guarantee covers keywords only. Comments, strings, and
 identifiers are not compared.
 
