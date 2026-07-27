@@ -285,29 +285,28 @@ fn rgb_to_hex(channels: ref Vec<i64>) -> Str {
 
 ### Slice patterns with guards
 
-<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
-Pattern guards are *intended* to compose with slice patterns exactly
-as with enum arms, but as of this writing the guard condition is not
-actually evaluated for slice/array patterns -- it type-checks (must be
-`Bool`) but is silently ignored at runtime, so a guarded arm always
-behaves as if its guard were `true`. Concretely, `[s] if s >= 90` and
-the plain `[s]` arm right after it are currently indistinguishable at
-runtime: whichever one comes first in source order wins for every
-`s`, not just `s >= 90`. Tracked as a known issue; until it's fixed,
-don't rely on guards to discriminate between two arms with the same
-slice shape -- restructure with nested `if`/`else` inside a single
-un-guarded arm instead:
+Pattern guards compose with slice patterns exactly as with enum arms.
+A failed guard falls through to the next arm, just like you'd expect:
 
 ```vani
 fn classify_scores(scores: Vec<i64>) -> Str {
   return match scores {
-    []      then "no data",
-    [s]     then if s >= 90 { "single A" } else { "single non-A" },
-    [first, .., last] then if first == last { "balanced" } else { "unbalanced" },
+    []                          then "no data",
+    [s] if s >= 90              then "single A",
+    [s]                         then "single non-A",
+    [first, .., last] if first == last  then "balanced",
+    [first, .., last]           then "unbalanced",
   };
 }
 ```
+
+`classify_scores(vec(50))` correctly falls through the failed
+`s >= 90` guard to "single non-A"; `classify_scores(vec(1, 2, 3))`
+falls through the failed `first == last` guard to "unbalanced". See
+[`examples/language/english/slice_pattern_guards.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/slice_pattern_guards.vani)
+for a runnable version with every case exercised.
 
 ### What `..` can and cannot do
 

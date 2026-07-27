@@ -1,0 +1,28 @@
+// build & run:
+//   vanic run examples/language/english/slice_pattern_guards.vani
+//   vanic run examples/language/english/slice_pattern_guards.vani --backend=c
+
+intent "BUG-20 regression: pattern guards on slice/array match arms";
+
+// A guard (`if <cond>`) on a slice pattern must actually gate which
+// arm runs -- a guarded arm whose guard is false must fall through
+// to the next arm, not run anyway.
+fn classify(xs: Vec<i64>) -> Str {
+  return match xs {
+    []                          then "no data",
+    [s] if s >= 90              then "single A",
+    [s]                         then "single non-A",
+    [first, .., last] if first == last  then "balanced",
+    [first, .., last]           then "unbalanced",
+  };
+}
+
+fn main() -> i64 {
+  let empty: Vec<i64> = vec();
+  print classify(empty);        // no data
+  print classify(vec(95));      // single A       (guard true)
+  print classify(vec(50));      // single non-A    (guard false -- falls through)
+  print classify(vec(3, 3));    // balanced        (guard true)
+  print classify(vec(1, 2, 3)); // unbalanced      (guard false -- falls through)
+  return 0;
+}

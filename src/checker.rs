@@ -15174,6 +15174,24 @@ fn check_match_slice(
                         ref_aliases: Vec::new(),
                     });
                 }
+                // BUG-20 fix (2026-07-27): type-check the optional
+                // guard in the SAME scope as the head/tail bindings
+                // (mirrors the enum/int dispatch path's `guard_typed`
+                // handling) so `[s] if s >= 90` can reference `s`.
+                // Before this fix the guard was type-checked nowhere
+                // at all -- parsed, attached to the AST, and silently
+                // never read again, so a guarded slice-match arm
+                // always behaved as if its guard were `true`.
+                let guard_typed: Option<TypedExpr> = arm.guard.as_ref().map(|g| {
+                    let gc = check_expr(g, env, signatures, diagnostics);
+                    if gc.ty() != &Type::Bool {
+                        diagnostics.push(Diagnostic::new(
+                            g.span,
+                            format!("pattern guard must be Bool, got {}", gc.ty()),
+                        ));
+                    }
+                    gc.expr
+                });
                 let body_checked = check_expr(&arm.body, env, signatures, diagnostics);
                 env.pop_scope();
                 unify_arm_type(&body_checked, &mut result_ty, diagnostics, arm.body.span);
@@ -15285,6 +15303,53 @@ fn check_match_slice(
                     bind_stmts.push(TypedStmt::Let { name: name.clone(), ty: elem_ty.clone(), expr: elem });
                 }
 
+                // BUG-20 fix: fold the guard into the dispatch
+                // condition. Can't use a plain `BinaryOp::And` here --
+                // it lowers to an eager LLVM `and` (bitwise, not
+                // short-circuiting), and the guard's own bindings
+                // index the scrutinee at fixed offsets that are only
+                // valid once `cond` (the length check) has already
+                // passed. Build `if cond { <bindings>; guard } else {
+                // false }` instead -- a real branch, so the guard
+                // (and its potentially-out-of-bounds-if-length-didn't-
+                // match indexing) is only ever evaluated once the
+                // length is already known to be sufficient.
+                let final_cond = if let Some(guard_expr) = guard_typed {
+                    let guard_block = if bind_stmts.is_empty() {
+                        guard_expr
+                    } else {
+                        TypedExpr {
+                            kind: TypedExprKind::Block {
+                                stmts: bind_stmts.clone(),
+                                tail: Box::new(guard_expr),
+                            },
+                            ty: Type::Bool,
+                            constant: None,
+                            span,
+                            binding_decl_span: None,
+                        }
+                    };
+                    TypedExpr {
+                        kind: TypedExprKind::IfExpr {
+                            cond: Box::new(cond),
+                            then_value: Box::new(guard_block),
+                            else_value: Box::new(TypedExpr {
+                                kind: TypedExprKind::Bool(false),
+                                ty: Type::Bool,
+                                constant: Some(TypedConst::Bool(false)),
+                                span,
+                                binding_decl_span: None,
+                            }),
+                        },
+                        ty: Type::Bool,
+                        constant: None,
+                        span,
+                        binding_decl_span: None,
+                    }
+                } else {
+                    cond
+                };
+
                 // Wrap body in a Block that provides the element bindings.
                 let arm_body_ty = body_checked.expr.ty.clone();
                 let arm_block = if bind_stmts.is_empty() {
@@ -15301,7 +15366,7 @@ fn check_match_slice(
                         binding_decl_span: None,
                     }
                 };
-                typed_arms.push((cond, arm_block));
+                typed_arms.push((final_cond, arm_block));
             }
             other => {
                 diagnostics.push(Diagnostic::new(

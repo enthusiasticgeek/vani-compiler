@@ -1,5 +1,48 @@
 use std::process::Command;
 
+// BUG-20 (2026-07-27): `check_match_slice` type-checked pattern
+// guards on slice/array match arms but never wired them into the
+// generated dispatch condition -- a guarded arm always behaved as if
+// its guard were `true`, silently returning wrong results. This is
+// exactly the "compiles fine but produces the wrong answer" class of
+// bug that only an actual execution test catches -- a compile-only
+// test would never have caught the original bug, so this checks real
+// stdout on both backends against `slice_pattern_guards.vani`, whose
+// comments spell out the expected result of each guarded case.
+#[test]
+fn slice_pattern_guards_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/slice_pattern_guards.vani",
+        manifest_dir
+    );
+    let expected = "no data\nsingle A\nsingle non-A\nbalanced\nunbalanced\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "guarded slice-match arm(s) produced the wrong result for {:?} \
+             -- a guard that should have failed and fallen through to the \
+             next arm silently ran anyway, or vice versa",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");
