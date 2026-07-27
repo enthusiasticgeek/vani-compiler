@@ -122,6 +122,8 @@ first(ref my_vec);` makes `r`'s lifetime equal to `my_vec`'s.
 
 ### Case 2: zero ref params -> [x] reject
 
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
 ```vani
 fn make() -> ref i64 {
   let x: i64 = 42;
@@ -141,6 +143,8 @@ This is the classic "returning a pointer to a local"
 mistake. C compiles it; vāṇी rejects it at the signature.
 
 ### Case 3: two or more ref params -> [x] reject
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 fn pick(a: ref Point, b: ref Point) -> ref Point {
@@ -172,6 +176,8 @@ one reference together** -- a tuple of refs, or `Option<ref T>`.
 Both are rejected too, for the same underlying reason: v1's
 elision only understands a bare `ref T` / `mut ref T` return
 type, not a reference nested inside another type.
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 struct Pair { x: i64, y: i64 }
@@ -265,6 +271,8 @@ f64`, `ref bool`, `ref OwnedStr`) is a dead end in v1 -- there is
 no deref operator, and none of arithmetic, comparison, `print`,
 plain assignment, or a `let` into an unref'd type will read
 through it:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```vani
 fn double(x: ref i64) -> i64 {
@@ -487,6 +495,8 @@ one-ref-param rule; `oldest` as written above is illustrative of
 the *goal*, not something the checker accepts as one function. Do
 it for real as:
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 fn person_a(a: ref Person) -> ref Person { return a; }
 fn person_b(b: ref Person) -> ref Person { return b; }
@@ -514,6 +524,8 @@ verified: `return ref xs[i];` is rejected with `'ref' can only
 borrow a named variable or a struct field`, regardless of the
 element type). The working pattern returns the **index** instead,
 and lets the caller do the (cheap, in-bounds) indexing themselves:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
 ```vani
 fn find_index(xs: ref Vec<i64>, target: i64) -> Option<i64> {

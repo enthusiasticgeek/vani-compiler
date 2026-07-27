@@ -109,6 +109,8 @@ it conservatively treats xs as "possibly moved" after the if
 The fix: either move in BOTH branches, or move in NEITHER.
 Make the branches consistent in their handling of `xs`.
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
 ```vani
 fn maybe_consume_fixed(xs: Vec<i64>, do_it: bool) -> i64 {
   if do_it {

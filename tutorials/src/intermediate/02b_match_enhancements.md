@@ -159,6 +159,31 @@ match msg {
 }
 ```
 
+Using a *different* name on each side of `|` breaks the "same names"
+rule -- only the last alternative's bindings are actually in scope for
+the arm body, so the other name is unresolved:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+enum Msg { Ping(i64), Other(i64) }
+
+fn show(msg: Msg) -> i64 {
+  return match msg {
+    Msg.Ping(seq) | Msg.Other(other) then seq,
+  };
+}
+```
+
+```
+error: unknown variable 'seq'
+    Msg.Ping(seq) | Msg.Other(other) then seq,
+                                          ^^^
+```
+
+**Fix**: use the same binding name (`seq`) on both sides, or `_` to
+discard a payload you don't need on one arm.
+
 ---
 
 ## 4. Pattern guards — refine a match with a runtime condition

@@ -180,6 +180,18 @@ error: argument 1 to 'sum_pair' must be assignable to ref Pair, got Pair
 
 **Fix**: write `sum_pair(ref pair)`.
 
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+fn sum_pair(p: ref Pair) -> i64 { return p.a + p.b; }
+
+fn main() -> i64 {
+  let pair: Pair = Pair { a: 3, b: 4 };
+  let _ = sum_pair(ref pair);
+  return 0;
+}
+```
+
 ### Using a heap-owning value after it was moved
 
 Structs that contain heap-owning fields (like `OwnedStr`,
@@ -214,6 +226,21 @@ note: 'x' was moved here
 
 **Fix**: use `consume(ref x)` if `consume` can accept a borrow,
 or restructure so the second use happens before the move.
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+struct Named { name: OwnedStr, val: i64 }
+
+fn consume(n: ref Named) -> i64 { return n.val; }
+
+fn main() -> i64 {
+  let x: Named = Named { name: "alice" + "", val: 42 };
+  let _ = consume(ref x);   // borrow, doesn't move
+  let _ = consume(ref x);   // fine: x is still owned by main
+  return 0;
+}
+```
 
 > **Note**: structs whose fields are all scalar (`i64`, `bool`,
 > `Str`, etc.) are automatically **Copy** — they can be passed

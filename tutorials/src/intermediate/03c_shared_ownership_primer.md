@@ -123,6 +123,8 @@ The most common pattern: when multiple parts of your code need
 to *read* the same data, give each a `ref T`. Many shared
 borrows can coexist freely.
 
+<img class="manas" src="../images/mascot/manas_mascot_awesome.png" title="a good habit worth adopting"/>
+
 ```vani
 fn use_data(...) -> i64 {
   let xs: Vec<i64> = vec(1, 2, 3, 4);

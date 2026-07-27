@@ -77,6 +77,46 @@ translated.y = -1
   *copy* of the struct. Returning a modified copy (like
   `translated`) is the immutable-update pattern.
 
+## What the compiler catches
+
+### Struct literals must set every field
+
+The prose above says "every field must be set" -- here's what happens
+when you leave one out:
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+struct Point { x: i64, y: i64 }
+
+fn main() -> i64 {
+  let p: Point = Point { x: 3 };   // missing y
+  return p.x;
+}
+```
+
+```
+error: struct 'Point' has 2 fields, literal provides 1
+  let p: Point = Point { x: 3 };
+                 ^^^^^^^^^^^^^^
+  help: Either pass the missing arguments, or update the function's
+  signature if its arity legitimately changed. If you want to pass
+  extra context, add a struct parameter that bundles them.
+```
+
+**Fix**: supply every declared field:
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+struct Point { x: i64, y: i64 }
+
+fn main() -> i64 {
+  let p: Point = Point { x: 3, y: 4 };
+  return p.x + p.y;
+}
+```
+
 ## Challenge
 
 Add a `distance_squared(other: Point) -> i64` method that

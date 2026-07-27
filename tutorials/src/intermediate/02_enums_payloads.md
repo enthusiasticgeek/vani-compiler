@@ -88,6 +88,66 @@ These are listed in [`docs/v1_limitations.md`](https://github.com/enthusiasticge
   Composite design pattern example shows the tagged-struct
   workaround.
 
+### Seeing the `let`-destructure rejection
+
+<img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
+
+```vani
+enum Result { Ok(i64), Err(i64) }
+
+fn main() -> i64 {
+  let r: Result = Result.Ok(5);
+  let Result.Ok(v) = r;   // no enum-destructure in let
+  return v;
+}
+```
+
+```
+error: expected '='
+  let Result.Ok(v) = r;
+            ^
+```
+
+**Fix**: go through `match` instead, exactly like `unwrap_or` does
+above.
+
+### The `Box<T>` workaround needs care
+
+The arena-index workaround mentioned above compiles cleanly, but it
+trades away the compiler's help: nothing stops you from writing an
+out-of-range or stale index, so the discipline of keeping indices
+valid is now on you instead of on the type system.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+```vani
+struct TreeNode { value: i64, left: i64, right: i64 }   // -1 = no child
+
+fn sum_tree(nodes: ref Vec<TreeNode>, idx: i64) -> i64 {
+  if idx < 0 {
+    return 0;
+  }
+  let n: TreeNode = nodes[idx];
+  return n.value + sum_tree(nodes, n.left) + sum_tree(nodes, n.right);
+}
+
+fn main() -> i64 {
+  let nodes: Vec<TreeNode> = vec(
+    TreeNode { value: 1, left: 1, right: 2 },
+    TreeNode { value: 2, left: 0 - 1, right: 0 - 1 },
+    TreeNode { value: 3, left: 0 - 1, right: 0 - 1 },
+  );
+  print "sum =", sum_tree(ref nodes, 0);
+  return 0;
+}
+```
+
+`left` / `right` are plain `i64` indices into `nodes`, not `Box<Tree>`
+pointers -- there's no cycle, no `Rc`, and the whole tree frees at
+once when `nodes` drops. The catch: `-1` as a "no child" sentinel is
+a convention the compiler doesn't check, so an off-by-one edit here
+is a runtime bug, not a compile error.
+
 ## Challenge
 
 Define `enum Color { Red, Green, Blue, Custom(i64) }` and a
