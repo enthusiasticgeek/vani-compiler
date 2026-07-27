@@ -11,6 +11,53 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The relay race
+
+Picture a 4x100 meter relay team. Four runners, one baton. The
+rules are simple but strict: each runner sprints their leg, then
+hands the baton to the next runner inside a small marked zone. If
+the handoff succeeds, the next runner takes off immediately. If the
+handoff FAILS -- the baton is dropped, or fumbled outside the zone
+-- the race for that team is over, right there, on the spot. Nobody
+two legs downstream says "well, I didn't hear about the drop, I'll
+just run my leg anyway with an imaginary baton." The whole team's
+run stops at the exact leg where it went wrong, and the official
+reports precisely which handoff failed.
+
+Notice what does NOT happen. Runner 3 doesn't finish their leg,
+arrive at the exchange zone, and stand there for ten minutes
+wondering whether runner 2 is coming. Runner 4 doesn't take a guess
+and start running with nothing in their hand, hoping there's a
+baton. The check happens at every single handoff, automatically, as
+a condition of moving forward -- if the baton isn't successfully in
+the next runner's hand, the race does not continue to the next leg.
+
+Also notice that a *successful* handoff is completely uneventful.
+The baton passes, the next runner is already moving, nobody blows a
+whistle, nobody stops to look around -- the race just continues at
+full speed as if nothing needed checking at all. It's only on
+failure that anything visible happens.
+
+Now map that onto a chain of function calls. Each function in the
+chain is a runner. What it returns -- succeed with a result, or
+fail with a reason -- is the baton handoff. A chain like "parse the
+input, then validate it, then look it up, then compute the answer"
+is a relay: parse hands off to validate, validate hands off to
+lookup, lookup hands off to compute. If ANY leg fails, you don't
+want the rest of the chain to keep running on a value that was
+never successfully produced -- you want the whole chain to stop
+immediately, at that exact leg, and report which one failed.
+
+That's exactly what `Result<T, E>` plus `try` / `?` give you.
+`Result<T, E>` is the handoff report for one leg -- either "here's
+the baton, cleanly passed" (`Ok(value)`) or "dropped it, here's why"
+(`Err(error)`). The `?` (or `try`) is the automatic official
+standing at every exchange zone: if the handoff succeeded, the next
+runner goes; if it failed, the whole relay stops right there and
+reports the failing leg -- automatically, without you writing "did
+this handoff succeed? let me check..." by hand after every single
+call.
+
 ## The problem: things go wrong
 
 Programs encounter failure constantly:

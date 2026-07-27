@@ -12,6 +12,55 @@
 This chapter has **no compiler code**. Pure intuition with
 side-by-side comparisons.
 
+## The safety interlock
+
+Think about a microwave oven. Physically, mechanically, if the
+door is open, the magnetron will not run. Manufacturers didn't put
+a sticker on the door reading "please don't run this with the door
+open" and hope for the best -- they wired a switch into the door
+hinge itself. Open door means power to the emitter is cut, full
+stop, by the machine's own construction. You cannot "accidentally"
+microwave your hand through the open door, because the state "door
+open + emitter on" simply cannot occur. It isn't that the microwave
+is careful; it's that the dangerous state has no wire connecting to
+it at all.
+
+Now think about a car's transmission. Most modern automatics will
+not let you shift into reverse while you're doing 60 miles an hour
+on the highway. It's not that the car "notices" you did something
+bad and slams the brakes in a panic. The mechanism simply refuses
+to engage the reverse gear above some safe threshold. If you yank
+the lever, nothing catastrophic happens -- the linkage just doesn't
+complete the shift. Compare that to what WOULD happen if the
+gearbox complied: gears shredding, the driveshaft locking at
+highway speed, a violent, unpredictable, un-recoverable mechanical
+failure -- sparks and smoke.
+
+Notice the shape both examples share: the machine doesn't wait for
+the dangerous thing to happen and then scramble to react. It makes
+the dangerous state physically unreachable in the first place. And
+where it CAN'T rule something out mechanically -- say, the oven's
+timer dial gets turned to an invalid number -- a well-designed
+appliance still fails in a controlled, predictable way: a fault
+light, a clear beep code, a documented error state you can look up
+-- never silent internal damage that shows up as a mystery later.
+
+This is the split vāṇी programs live by. Some categories of
+runtime disaster -- the programming equivalent of "door open +
+emitter on," things like writing past the end of an array, using
+memory after it's been freed, following a null pointer -- are made
+structurally unreachable by the compiler itself, the same way the
+door interlock makes the dangerous microwave state unreachable. You
+didn't have to remember to check for them; there is no path to them
+at all. Other categories -- a value that's legitimately out of
+range, a contract the caller failed to uphold -- can't be ruled out
+by construction, so instead of corrupting memory unpredictably, the
+program stops in a controlled, named, diagnosable way, the way the
+transmission just declines the shift instead of shredding gears.
+That controlled stop is vāṇी's `abort()`: not a crash in the
+"anything could happen" sense, but a deliberate, predictable
+refusal to continue in a dangerous state.
+
 ## What "runtime error" even means
 
 In most languages, "runtime error" is a grab-bag of very

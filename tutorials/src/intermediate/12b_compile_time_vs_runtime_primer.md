@@ -10,6 +10,58 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The recipe and the cooking
+
+Picture a recipe card sitting on the counter, and picture actually
+standing at the stove cooking from it. These are two very different
+activities, even though the second one depends on the first.
+
+Reading the recipe card is something you can do entirely on paper,
+without touching a single ingredient or turning on a single burner.
+You can check: does this recipe list an oven temperature? Yes, 375
+degrees, it's right there. Does it list a cook time? Yes, 25
+minutes. Is the ingredient list complete, or does step 4 call for
+"the sauce" when no sauce was ever listed in the ingredients? You
+can catch that mistake sitting at the kitchen table with a pen,
+before you've bought a single item, let alone preheated anything.
+Every one of those checks is about whether the PLAN makes sense --
+and you get the answer without any heat, any raw ingredient, any
+risk of burning something.
+
+Actually cooking is a completely different kind of activity. Now
+you preheat the oven for real, and real ovens drift a little -- the
+dial says 375 but the actual chamber might run a bit hot or a bit
+cold depending on the day. Now the dish is really in there, and
+whether it comes out perfectly done, underdone, or burned depends
+on things the recipe card alone couldn't tell you: your particular
+oven, the particular size of the potato you used, whether you got
+distracted for five extra minutes. The recipe told you the PLAN was
+sound; only the actual cooking tells you how it played out against
+the real world, with its real variation, this one time.
+
+Notice the recipe review can catch some mistakes completely (a
+missing ingredient, a missing temperature) but it can NEVER catch
+others (exactly how done the potato will be at minute 25 in YOUR
+oven) -- that only shows up during the actual cooking. And notice
+which kind of mistake is cheaper to catch: a typo on a recipe card
+costs you nothing to fix with a pen; a dish burning in a real oven
+costs you the ingredients and the time.
+
+That's the split this chapter is about. Checking whether your
+program's plan is internally consistent -- do the types match,
+does every variable exist before it's used, does this function
+call have the right number of arguments -- is reading-the-recipe
+work: it happens once, on the source code itself, before the
+program ever runs, and it's called **compile time**. Checking
+something that depends on the real values flowing through the
+program while it's actually executing -- is this particular array
+index in bounds THIS time, did THIS division actually get a zero --
+is cooking-for-real work: it happens while the program runs,
+against real data, and it's called **runtime**. The rest of this
+chapter is about which of vāṇी's checks happen at which stage, and
+why moving a check from the stove to the recipe card, whenever you
+honestly can, is almost always a win.
+
 ## Two questions
 
 Every check the compiler enforces answers one of two

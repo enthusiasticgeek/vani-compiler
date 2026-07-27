@@ -10,6 +10,59 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The building inspector and the blueprint
+
+Imagine a city that requires an inspection before anyone breaks
+ground on a new building. The inspector doesn't show up after the
+building is finished and walk through the halls checking whether
+stairwells are wide enough or whether a load-bearing wall is
+holding up the floor above it. The inspector shows up FIRST, with
+nothing built yet, and checks the BLUEPRINT: does this drawing show
+fire exits at least 44 inches wide? Does the drawing show the
+load-bearing wall on the second floor sized to hold the weight the
+third floor will put on it? Every question gets answered by reading
+the plan on paper, with a ruler and a code book, long before a
+single brick is laid.
+
+This is a categorically different kind of safety than "build it and
+see." If the inspector finds a problem in the blueprint, the fix
+is: erase a line, redraw it, resubmit. Nobody gets hurt, no money
+is wasted pouring a foundation for a building that would have
+collapsed, and the fix costs an afternoon of drafting. Compare that
+to finding the SAME problem after the building is occupied -- a
+stairwell too narrow to evacuate in a fire, a wall that can't hold
+its floor. Now the fix means an emergency, possibly a tragedy, and
+certainly a demolition-and-rebuild that costs a hundred times what
+the blueprint correction would have. Testing a finished building by
+waiting to see if it falls down is not a safety strategy; it's a
+description of a disaster.
+
+Blueprint review works because building codes are precise enough to
+check on paper: wall thickness, exit width, load ratings are all
+numbers and rules that can be verified with math and logic before
+any physical material exists. That's exactly the trick a compiler
+can pull off for certain properties of a program -- not everything
+about a program can be checked this way, but a surprising amount of
+it can, using the same kind of "check the plan against the rules,
+on paper, before running it" reasoning an inspector applies to a
+blueprint.
+
+In this analogy, the blueprint's PRE-CONSTRUCTION checklist -- what
+must already be true before the crew is allowed to start pouring
+concrete (the lot is zoned correctly, the foundation plan matches
+the soil report) -- is what vāṇी calls `requires`: a condition the
+CALLER must satisfy before the function is allowed to run. And the
+finished building's PROMISE -- what the completed structure must
+satisfy once construction is done (the stairwell IS at least 44
+inches, the wall CAN hold the load) -- is what vāṇी calls `ensures`:
+a condition the function itself guarantees to be true when it hands
+control back. Both are checked against the blueprint itself -- the
+source code -- using logic and math, not by building the thing and
+watching to see whether it falls down. That "watch and see if it
+falls down" approach is what ordinary testing does; SMT
+verification is the inspector catching the problem on paper
+instead.
+
 ## The pitch in one sentence
 
 > Some of the bugs that other languages catch at runtime -- or
