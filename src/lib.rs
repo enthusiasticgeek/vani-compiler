@@ -48377,6 +48377,69 @@ fn main() -> i64 { return 0; }
         compile_to_c(source).expect("blanket impl must expand Wrap__i64 automatically");
     }
 
+    // BUG-15 (2026-07-27): `hoist_impls_into_functions` (checker.rs,
+    // called at the very start of `check`) hoisted a blanket impl's OWN
+    // template method body into `program.functions` alongside its
+    // correctly monomorphized expansions -- the template still had an
+    // unresolved `Type::Param("T")` embedded (substitution only happens
+    // in `expand_blanket_impls`, monomorphization phase, which runs
+    // earlier but only ADDS concrete copies, never removes the
+    // original template from `program.impls`). The template reached
+    // LLVM codegen and crashed `llvm_type()`'s `unreachable!()`.
+    // Reproduces even with NO concrete override present at all -- not
+    // specific to a blanket+concrete conflict. The existing
+    // `blanket_impl_expands_for_concrete_type` test above only ever
+    // exercised the C backend (`compile_to_c`), which never hit this
+    // path -- same class of gap BUG-14 found for RwLock.
+    #[test]
+    fn blanket_impl_alone_compiles_to_llvm_without_panicking() {
+        let source = r#"
+            interface Labeled {
+                fn label(self: Self) -> Str;
+            }
+            struct Wrap<T> { inner: T }
+            implement<T> Labeled for Wrap<T> {
+                fn label(self: Wrap<T>) -> Str { return "generic"; }
+            }
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { inner: 42 };
+                print w.label();
+                return 0;
+            }
+        "#;
+        let _ = compile_to_llvm(source)
+            .expect("a lone blanket impl (no concrete override) must compile to LLVM IR");
+    }
+
+    #[test]
+    fn blanket_impl_with_concrete_override_compiles_to_llvm_and_prefers_concrete() {
+        let source = r#"
+            interface Labeled {
+                fn label(self: Self) -> Str;
+            }
+            struct Wrap<T> { inner: T }
+            implement<T> Labeled for Wrap<T> {
+                fn label(self: Wrap<T>) -> Str { return "generic"; }
+            }
+            implement Labeled for Wrap<i64> {
+                fn label(self: Wrap<i64>) -> Str { return "specific i64"; }
+            }
+            fn main() -> i64 {
+                let w: Wrap<i64> = Wrap { inner: 42 };
+                print w.label();
+                return 0;
+            }
+        "#;
+        let ll = compile_to_llvm(source)
+            .expect("blanket impl + overlapping concrete impl must compile to LLVM IR");
+        assert!(
+            ll.contains("specific i64"),
+            "expected the concrete impl's string literal to appear in the IR \
+             (concrete impl should win over the blanket expansion):\n{}",
+            &ll[..ll.len().min(3000)]
+        );
+    }
+
     #[test]
     fn blanket_impl_bound_blocks_unsatisfied_type() {
         // `where T is Labeled` must prevent expansion when no concrete

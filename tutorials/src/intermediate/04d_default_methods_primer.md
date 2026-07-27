@@ -150,10 +150,52 @@ Without the blanket impl you'd need a separate
 | Syntax | `implement Iface for Type` | `implement<T> Iface for Container<T> where T is Bound` |
 | Use when | You know the specific type | You're building a generic adapter/wrapper |
 
-**Conflict rule**: the compiler rejects overlapping impls. If you
-have a blanket impl for `Wrapper<T> where T is Printable` AND a
-concrete impl `implement Printable for Wrapper<Dog>`, the compiler
-reports ambiguity and rejects. Choose one path per concrete type.
+**Overlap rule**: unlike most conflicting-declaration situations in
+vāṇी (duplicate functions, duplicate struct fields), the compiler
+does **not** reject an overlapping blanket + concrete impl pair --
+there's no "ambiguous, pick one" diagnostic. If you have a blanket
+impl for `Wrapper<T> where T is Printable` AND a concrete impl
+`implement Printable for Wrapper<Dog>`, both are accepted, and the
+**concrete impl silently wins** for `Wrapper<Dog>` specifically (the
+blanket impl still covers every other `T`). This is a real, load-
+bearing behavior -- not just an implementation gap -- since it's
+exactly what lets you write a general-purpose blanket impl and then
+carve out a faster or different hand-written override for one
+specific type without touching the blanket impl at all. But because
+there's no diagnostic, a *typo'd* concrete impl (wrong type param,
+wrong module) won't warn you that it silently stopped shadowing
+anything -- if you expected an override to take effect and it
+doesn't seem to be running, double-check the concrete impl's `for`
+type matches exactly.
+
+<img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
+
+```vani
+interface Printable {
+  fn print_it(self: Self) -> i64;
+}
+
+struct Dog { name: i64 }
+struct Wrapper<T> { inner: T }
+
+implement<T> Printable for Wrapper<T> where T is Printable {
+  fn print_it(self: Wrapper<T>) -> i64 { return 111; }   // generic path
+}
+
+implement Printable for Wrapper<Dog> {
+  fn print_it(self: Wrapper<Dog>) -> i64 { return 222; } // Dog-specific override
+}
+
+implement Printable for Dog {
+  fn print_it(self: Dog) -> i64 { return self.name; }
+}
+
+fn main() -> i64 {
+  let w: Wrapper<Dog> = Wrapper { inner: Dog { name: 7 } };
+  print w.print_it();   // prints 222, not 111 -- the override won
+  return 0;
+}
+```
 
 ## When to use each
 

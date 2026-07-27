@@ -5796,6 +5796,27 @@ fn hoist_impls_into_functions(
 
     let mut hoisted: Vec<Function> = Vec::new();
     for imp in &program.impls {
+        // BUG-15 fix (2026-07-27): a blanket impl
+        // (`implement<T> Iface for Wrap<T> { â€¦ }`, `imp.type_params`
+        // non-empty) must NOT have its own raw method bodies hoisted
+        // here -- they still reference the unresolved generic
+        // `Type::Param("T")` from the impl block, since substitution
+        // only happens in `expand_blanket_impls` (monomorphization
+        // phase, which runs BEFORE this function and appends properly
+        // concrete-substituted copies like `Wrap__i64`'s own impl
+        // straight into `program.impls` with `type_params: vec![]`).
+        // Before this fix, this loop hoisted the blanket impl's
+        // template method too, alongside its correctly-substituted
+        // expansions -- the template's still-generic body reached
+        // codegen with a literal `Type::Param("T")` embedded in it,
+        // crashing the LLVM backend's `llvm_type()` with
+        // `unreachable!()`. Reproduced with just a lone blanket impl
+        // and no concrete override at all, so this isn't specific to
+        // the "blanket + concrete impl for the same type" conflict
+        // case -- ANY blanket impl crashed once actually used.
+        if !imp.type_params.is_empty() {
+            continue;
+        }
         // T2.7 phase 1: `implement Drop for T` is recognized as
         // a special interface contract. The auto-call at
         // scope exit lands with T1.2 phase 2b RAII work (#3);
