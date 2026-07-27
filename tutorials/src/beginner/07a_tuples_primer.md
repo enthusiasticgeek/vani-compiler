@@ -8,6 +8,37 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The combo-meal tray
+
+Picture a fast-food combo tray with three fixed molded slots:
+burger goes in the left slot, fries in the middle dip, drink in
+the round cutout on the right. Three things about that tray:
+
+- **The slots are fixed in number.** You can't cram a fourth item
+  in -- there's no fourth slot. If your order only has two items,
+  one slot sits empty; the tray shape itself doesn't change.
+- **The slots don't need labels.** Nobody printed "BURGER" under
+  the left slot. Its *position* -- leftmost -- is what tells you
+  what belongs there. You know a drink goes in the round cutout
+  because of where it is, not because it says so.
+- **Each slot can hold a different kind of thing.** The burger
+  slot holds a burger-shaped item, the drink slot holds a
+  cup-shaped item. It's not a tray of three identical fries
+  boxes -- the slots are shaped differently on purpose.
+
+A **tuple** is exactly that tray, but for values in your program: a
+fixed number of slots, in a fixed order, where each slot can hold a
+different type, and the slot's *position* -- not a name -- tells you
+what it means. `(i64, i64)` is a two-slot tray where both slots
+happen to hold the same kind of thing (like a two-drink tray);
+`(OwnedStr, i64, bool)` is a three-slot tray holding three different
+kinds of things.
+
+The moment you'd want to print a label under a slot -- "this one's
+specifically the quotient, that one's specifically the remainder" --
+that's the sign you've outgrown the tray and want a **struct**
+instead, where every slot gets an actual name.
+
 ## When a struct feels like overkill
 
 You have a function that returns TWO values. The minimum.

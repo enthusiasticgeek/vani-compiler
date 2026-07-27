@@ -25,6 +25,39 @@ sections. A linker (the tool that stitches compiled `.o` files into
 one executable) groups every piece of output into one of these
 sections by kind.
 
+## The moving truck
+
+Picture packing a moving truck for a household move. Everything
+that goes in the truck falls into one of a few labeled zones, and
+the mover decides which zone based on one question: *does this need
+to physically ride in the truck, or can we just note it down and
+deal with it at the new place?*
+
+- **The furniture that's already assembled** -- a bookshelf, a sofa
+  -- goes in as-is, no packing needed, ready to use the moment it's
+  unloaded. That's `.text`: your compiled functions, ready to run.
+- **The box labeled "fragile -- do not open," full of framed photos
+  and heirlooms that never change** -- it rides in the truck exactly
+  as packed, and nobody's allowed to write into it at the new house.
+  That's `.rodata`: read-only constants like `"hello"`.
+- **The box labeled "kitchen -- already has plates in it"** -- it
+  also rides in the truck, pre-filled with specific items, but
+  unlike the fragile box you're allowed to swap what's in it once
+  you unpack. That's `.data`: globals that start with a real,
+  non-zero value.
+- **The empty dresser you're planning to fill with towels once you
+  arrive** -- there's no reason to load an empty dresser full of
+  nothing. The mover just writes "1 empty dresser, towel-sized" on
+  the inventory sheet and buys an *identical empty dresser* at the
+  destination. Nothing rode in the truck; only the size was noted.
+  That's `.bss`: globals that start at zero -- why ship a million
+  zero bytes when "make this many zero bytes" is one line on the
+  inventory?
+
+The first three zones cost truck space (disk space) in proportion to
+what's actually in them. The fourth zone costs nothing to ship --
+only something to remember.
+
 ## The four sections
 
 Think of the compiled binary as a shipping crate with labeled

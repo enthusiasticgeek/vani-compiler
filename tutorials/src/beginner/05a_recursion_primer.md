@@ -6,7 +6,49 @@
 > time after [Beginner 03 -- Functions and the four return
 > aliases](03_functions.md) and [Beginner 05 -- Loops](05_loops.md).
 
-This chapter has **no compiler code**. Pure intuition.
+This chapter has **no compiler code** until the last section, which
+uses tiny snippets only to point back at the analogy below. Read the
+analogy first.
+
+## The nesting dolls
+
+Picture a Russian nesting doll (matryoshka) -- a wooden doll that
+opens up to reveal a slightly smaller doll inside, which opens to
+reveal a smaller one still, and so on.
+
+To find out how many dolls are in the set, you don't need a special
+counting trick. You do the same simple thing over and over:
+
+1. **Open the doll in front of you.**
+2. **Is there another doll inside?**
+   - If **no** -- you've hit the smallest doll. Stop. That's `1` more
+     doll and nothing left to open.
+   - If **yes** -- set that inner doll in front of you and go back to
+     step 1. Whatever number you get from opening *that* doll, add 1
+     for the one you just opened.
+
+Nobody taught you a "nesting-doll counting formula." You just repeated
+the same two-step check on a smaller doll each time, and trusted that
+the smaller doll would follow the same rule. Eventually a doll doesn't
+open anymore -- that's what stops you. Without a smallest solid doll,
+you'd be opening dolls forever.
+
+That's **recursion**: a task defined as "do a step, then do the exact
+same task again on a smaller piece of the problem," plus one rule for
+when the pieces run out.
+
+- The **smallest solid doll** is the *base case* -- the point where
+  the task stops calling itself and just answers directly.
+- **Opening a doll and handing off to the smaller one** is the
+  *recursive case* -- the task calls itself again, but on something
+  strictly smaller than before.
+- The stack of dolls sitting open on the table while you work your
+  way inward is exactly what a computer's *call stack* is doing --
+  each doll (function call) waits, half-opened, until the one inside
+  it finishes.
+
+Now the code below is just this same nesting-doll process, spelled
+out for the computer.
 
 ## A function that uses itself
 

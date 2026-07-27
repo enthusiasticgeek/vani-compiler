@@ -10,6 +10,36 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## Four ways to find a name
+
+Imagine four different ways someone might find a name among a
+pile of names, and think about how each one gets *worse* as the
+pile grows from 100 names to 100,000 names.
+
+1. **Your own name.** Someone asks for your phone number. You
+   already know it. Doesn't matter if the phone book has 100
+   entries or 100,000 -- the answer takes the same split second.
+2. **A name in a phone book.** Phone books are sorted
+   alphabetically. To find "Ramesh," you open to the middle, see
+   you've landed in the M's, flip forward to the R's, then narrow
+   in a few more times. Each flip cuts the remaining pages roughly
+   in half. A phone book 1,000x bigger only takes a *few* more
+   flips to search, not 1,000x more.
+3. **A name in an unsorted stack of forms.** No order to exploit --
+   you read every single form until you find the one you want (or
+   reach the bottom and confirm it isn't there). Twice as many
+   forms means, on average, twice as much reading.
+4. **Everyone's name against everyone else's.** Now imagine
+   checking every person in a room against every *other* person in
+   the room, to find any two people who share a birthday. Double
+   the room's headcount and the number of pairs to check roughly
+   *quadruples* -- it grows much faster than the room itself does.
+
+Those four searches -- instant, phone-book, unsorted-stack,
+everyone-against-everyone -- are exactly the four growth shapes
+programmers care about, and **Big-O** is just the compact label
+for "which of these four (or five) shapes does this code have."
+
 ## What problem Big-O solves
 
 You wrote a function that searches a list for a value. Question:
@@ -17,7 +47,9 @@ how slow does it get as the list gets bigger?
 
 Concrete numbers don't generalize. "0.3 seconds on my laptop"
 tells you nothing about a server, or a Raspberry Pi, or a list
-that's 10x bigger.
+that's 10x bigger. Just like "finding Ramesh took 4 seconds" tells
+you nothing until you know whether that phone book had 200 names
+or 2 million.
 
 **Big-O** answers a different question: as the input size grows,
 how does the running time GROW? Not "how long does it take" --

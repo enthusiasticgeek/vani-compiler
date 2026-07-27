@@ -9,6 +9,35 @@
 
 This chapter has **no compiler code**. Pure intuition.
 
+## The post-office sorting clerk
+
+Picture a clerk at a post office sorting an incoming pile of mail.
+Each item is different: a postcard, a letter, a small parcel, a
+tube with a poster rolled up inside. The clerk doesn't ask fifty
+yes/no questions per item ("is it a postcard? no. is it a letter?
+no. is it a parcel? ..."). They glance at the item's *shape*, and
+that single glance tells them which bin it goes in AND what to do
+next:
+
+- **Postcard** -> straight into the "local mail" bin, no further
+  handling.
+- **Letter** -> check the return-address label, then into the
+  matching city bin.
+- **Small parcel** -> weigh it, then route by weight class.
+- **Tube** -> handle with care, separate bin.
+
+Notice two things the clerk is doing at once: (1) figuring out
+*which kind* of item this is, by its shape, and (2) *pulling out
+the specific detail* they need from it (the address on a letter,
+the weight of a parcel) in the same glance. They don't sort first
+and then separately go dig for the address -- recognizing the shape
+and extracting the useful part happen together.
+
+That's exactly what `match` does with a value in code: it looks at
+*what kind of thing* the value is, and in the same step, pulls out
+whatever's inside it under a name you can use. The rest of this
+chapter is that sorting clerk, spelled out as code.
+
 ## What `match` lets you do
 
 You have a value. You want to do different things depending on
