@@ -20434,6 +20434,27 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
     }
 }
 
+/// **Landmine note (2026-07-28), not a live bug today**: `Deque`,
+/// `HashSet`, `BTreeSet`, `BTreeMap`, `BinaryHeap`, `Bst`, `Pool`,
+/// `Handle`, `Tainted`, `BoundedPtr`, and `ArenaRef` are all
+/// AST-level generic (`Box<Type>` element type), but every one of
+/// their checker-side constructors (`deque_new`, `pool_new`,
+/// `bst_new`, ...) hardcodes the element type to `Type::I64` today
+/// -- so this function (and `format_declarator` below, in all three
+/// of its match blocks) has no arms for them, and they silently fall
+/// through to `c_leaf_type`'s hardcoded-i64 spelling. That's
+/// currently harmless because there's no other T to misrepresent.
+/// The INSTANT any of these gets genericized past i64 (the natural
+/// next step -- it's exactly the path `Mutex`/`RwLock`/`Task` already
+/// took), this reintroduces BUG-19/22/24's exact bug class: a
+/// per-T-correct codegen path elsewhere in the backend, silently
+/// undercut by one of the several PARALLEL type-dispatch functions
+/// (this one, `format_declarator`, and their LLVM-backend
+/// counterparts `llvm_type_string`/`is_scalar`) not being updated in
+/// lockstep. If you're the one genericizing one of these types:
+/// search this file and `backend_llvm.rs` for the type's name before
+/// assuming "it already has a `Box<Type>` field, it must already
+/// work."
 fn c_type_name(ty: &Type) -> String {
     match ty {
         // Layer 1.1+ of `unsafe.md` — raw pointer storage uses

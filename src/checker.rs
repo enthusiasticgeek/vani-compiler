@@ -8921,6 +8921,31 @@ fn is_ffi_safe_struct(name: &str, structs: &BTreeMap<String, StructInfo>) -> boo
     }
 }
 
+// Bug fix (2026-07-28): factored out of `extern_param_rejection_hint`
+// so `extern_return_rejection_hint` can build the SAME
+// platform-specific ABI detail instead of just pointing at this
+// function's name in prose ("see extern_param_rejection_hint for
+// details") without actually including its text -- a reader gets a
+// compiler error message, not the source code, so a dangling
+// cross-reference like that told them nothing. Found because
+// `extern_12byte_struct_rejected_on_win64` asserted the RETURN-type
+// rejection message contains "Win64 ABI" and it never did.
+fn ffi_struct_abi_rule_text() -> &'static str {
+    if cfg!(all(target_arch = "x86_64", target_os = "windows")) {
+        "Win64 ABI: struct must have all-scalar fields \
+         and total size in {1,2,4,8} bytes to pass by value; \
+         larger structs must use a hidden pointer"
+    } else if cfg!(target_arch = "aarch64") {
+        "AArch64 AAPCS64: struct must be an HFA (1-4 identical \
+         float/double fields) or have all-scalar fields with \
+         total <= 16 bytes to pass by value"
+    } else {
+        "SysV x86-64: struct must have all-scalar fields \
+         (integer / float / bool / Str / ref) and total <= 16 bytes \
+         to pass by value"
+    }
+}
+
 fn extern_param_rejection_hint(
     ty: &Type,
     structs: &BTreeMap<String, StructInfo>,
@@ -8941,19 +8966,7 @@ fn extern_param_rejection_hint(
         Type::FnPtr(_, _) => None,
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
         Type::Struct(name) => {
-            let rule = if cfg!(all(target_arch = "x86_64", target_os = "windows")) {
-                "Win64 ABI: struct must have all-scalar fields \
-                 and total size in {1,2,4,8} bytes to pass by value; \
-                 larger structs must use a hidden pointer"
-            } else if cfg!(target_arch = "aarch64") {
-                "AArch64 AAPCS64: struct must be an HFA (1-4 identical \
-                 float/double fields) or have all-scalar fields with \
-                 total <= 16 bytes to pass by value"
-            } else {
-                "SysV x86-64: struct must have all-scalar fields \
-                 (integer / float / bool / Str / ref) and total <= 16 bytes \
-                 to pass by value"
-            };
+            let rule = ffi_struct_abi_rule_text();
             Some(format!(
                 "pass struct '{}' by reference instead â€” write `ref {}` \
                  ({}; this struct has aggregates, generics, or exceeds \
@@ -9013,11 +9026,16 @@ fn extern_return_rejection_hint(
         Type::Ref(_) | Type::RefMut(_) => None,
         Type::FnPtr(_, _) => None,
         Type::Struct(name) if is_ffi_safe_struct(name, structs) => None,
-        Type::Struct(name) | Type::Enum(name) => Some(format!(
+        Type::Struct(name) => Some(format!(
             "return a pointer instead â€” declare the return type as \
              `ref {}` (struct/enum return-by-value requires platform-specific \
              ABI handling; only all-scalar structs within the platform size \
-             limit pass by value â€” see extern_param_rejection_hint for details)",
+             limit pass by value â€” {})",
+            name, ffi_struct_abi_rule_text()
+        )),
+        Type::Enum(name) => Some(format!(
+            "return a pointer instead â€” declare the return type as \
+             `ref {}` (enum-by-value layout is not yet wired through FFI)",
             name
         )),
         Type::Tuple(_) | Type::Array { .. } => Some(

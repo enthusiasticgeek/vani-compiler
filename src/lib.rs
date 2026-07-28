@@ -40759,7 +40759,19 @@ função main() -> i64 {
     // convention classifier route each eightbyte to the right
     // register class (INTEGER → GPR, SSE → XMM). Verifies the
     // happy-path acceptance.
+    //
+    // Bug fix (2026-07-28): this test was unconditional despite
+    // being SysV/AArch64-specific behavior by its own description
+    // above ("SysV calling-convention classifier") -- `Mixed { i32,
+    // f64 }` is 16 bytes after alignment padding, which is NOT one
+    // of Win64's {1,2,4,8} pass-by-value sizes (see
+    // `is_ffi_safe_struct_win64` in checker.rs), so it's correctly
+    // REJECTED on a genuine Win64 host. Gated to the platforms the
+    // test actually describes; `extern_struct_with_float_field_
+    // rejected_on_win64` below covers the Win64 side with the
+    // opposite (correct) expectation.
     #[test]
+    #[cfg(not(all(target_arch = "x86_64", target_os = "windows")))]
     fn extern_struct_with_float_field_accepted() {
         let source = r#"
             struct Mixed { x: i32, y: f64 }
@@ -40770,6 +40782,27 @@ função main() -> i64 {
         "#;
         compile_to_c(source).expect("mixed int/float struct is FFI-safe (cc handles ABI)");
         compile_to_llvm(source).expect("mixed int/float struct is FFI-safe (LLVM lowers ABI)");
+    }
+
+    // Win64 counterpart of `extern_struct_with_float_field_accepted`
+    // above: the same `Mixed { i32, f64 }` shape (16 bytes after
+    // padding) is NOT in Win64's {1,2,4,8} pass-by-value size set,
+    // so it must be rejected with the Win64 ABI hint, not accepted.
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    fn extern_struct_with_float_field_rejected_on_win64() {
+        let source = r#"
+            struct Mixed { x: i32, y: f64 }
+
+            extern "C" fn takes_mixed(m: Mixed) -> i32;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("16-byte mixed struct rejected on Win64");
+        assert!(
+            errs.iter().any(|d| d.message.contains("Win64 ABI")),
+            "expected Win64 ABI hint, got: {:?}", errs
+        );
     }
 
     // Arc 7 remainder: aggregate-in-aggregate (nested struct
@@ -41718,7 +41751,15 @@ função main() -> i64 {
     // Arc 7 remainder: mixed int/float struct returns now
     // accept under the broadened FFI rules. The rejection path
     // is still tested for nested-aggregate / oversized shapes.
+    //
+    // Bug fix (2026-07-28): same platform gap as
+    // `extern_struct_with_float_field_accepted` (param version) --
+    // `Mixed { i32, f64 }` is 16 bytes after padding, not one of
+    // Win64's {1,2,4,8} pass-by-value sizes, so it's correctly
+    // rejected on a genuine Win64 host. See the counterpart test
+    // below for the Win64 side.
     #[test]
+    #[cfg(not(all(target_arch = "x86_64", target_os = "windows")))]
     fn extern_struct_return_with_float_field_accepted() {
         let source = r#"
             struct Mixed { x: i32, y: f64 }
@@ -41729,6 +41770,30 @@ função main() -> i64 {
         "#;
         compile_to_c(source).expect("mixed int/float struct return is FFI-safe (cc handles ABI)");
         compile_to_llvm(source).expect("mixed int/float struct return is FFI-safe (LLVM handles ABI)");
+    }
+
+    // Win64 counterpart of `extern_struct_return_with_float_field_
+    // accepted` above -- also exercises the `extern_return_
+    // rejection_hint` fix (2026-07-28): the return-type rejection
+    // message used to just say "see extern_param_rejection_hint for
+    // details" without actually including the platform-specific ABI
+    // text, so this assertion would have failed even with the
+    // correct accept/reject split.
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    fn extern_struct_return_with_float_field_rejected_on_win64() {
+        let source = r#"
+            struct Mixed { x: i32, y: f64 }
+
+            extern "C" fn make_mixed() -> Mixed;
+
+            fn main() -> i64 { return 0; }
+        "#;
+        let errs = compile(source).expect_err("16-byte mixed struct return rejected on Win64");
+        assert!(
+            errs.iter().any(|d| d.message.contains("Win64 ABI")),
+            "expected Win64 ABI hint, got: {:?}", errs
+        );
     }
 
     #[test]
