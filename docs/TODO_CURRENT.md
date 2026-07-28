@@ -2153,12 +2153,13 @@ verifying the four fixes above against their tutorial worked examples
   (sequential calls instead) with a note pointing at this gap; the
   other two chapters are still untouched.
 
-- [ ] **BUG-22. C backend has its own, independent version of BUG-19's
+- [x] **BUG-22. C backend has its own, independent version of BUG-19's
   bug, PLUS a separate struct-definition-ordering bug — both found
-  while verifying BUG-19's LLVM fix against `--backend=c`.** Partially
-  fixed 2026-07-27 (the `i64` case); the struct/enum case is still
-  open.
-  - **Fixed**: `c_type_name` (`backend_c.rs` — "called by
+  while verifying BUG-19's LLVM fix against `--backend=c`.** ✅ fully
+  fixed 2026-07-28 (the `i64` case was fixed 2026-07-27; the struct/
+  enum case — including as a function PARAMETER type, a third
+  independent gap found while fixing this — landed the next day).
+  - **Fixed (2026-07-27)**: `c_type_name` (`backend_c.rs` — "called by
     emit_prototype + emit_function for the return type and (mostly) by
     Let stmts for binding storage") was missing the same 5 arms
     (Mutex/Guard/RwLock/ReadGuard/WriteGuard) `llvm_type_string` was
@@ -2172,73 +2173,68 @@ verifying the four fixes above against their tutorial worked examples
     reproduced for the PLAIN i64 case, not just struct payloads, and
     is fully independent of BUG-19 (never touched `backend_llvm.rs`).
     Fixed by adding the 5 missing arms to `c_type_name`, mirroring the
-    LLVM-side fix exactly. Verified: `Mutex<i64>`/`RwLock<i64>` now
-    compile AND run correctly with a real `cc` invocation. 1 new
-    regression test.
-  - **Still open**: a struct or enum `RwLock<T>`/`Mutex<T>` payload
-    still fails to compile on the C backend — `cc` error "unknown type
-    name 'Struct_Point'" inside the generated bundle typedef
-    (`typedef struct { Struct_Point value; ... }
-    intent_rwlock_Struct_Point;`). Root cause: `emit_concurrency_
-    runtime_helpers` (writes into the `out` buffer) is called BEFORE
-    `out.push_str(&body)` (`backend_c.rs` `emit_c`, ~line 1515 vs
-    1563) — `body` holds every user struct's FULL field definition
-    (emitted by a topological-sort dependency loop earlier in `emit_c`),
-    while only a forward declaration (`typedef struct Struct_Point
-    Struct_Point;`) exists in `out` at the point the bundle is
-    written. The bundle embeds `T` BY VALUE, which needs the complete
-    type, not just a forward-declared pointer-compatible name. **A fix
-    was attempted** (move the `emit_concurrency_runtime_helpers` call
-    to after `out.push_str(&body)`) **and reverted** — it fixed the
-    struct-ordering problem but broke the (previously working) i64
-    case instead, because `body` is a single interleaved string
-    containing BOTH type definitions AND function bodies (`fn_main`
-    etc); moving the call to run after ALL of `body` puts the bundle
-    after the function bodies that call it too ("implicit declaration
-    of function" / "conflicting types" errors). A real fix needs
-    `body`'s type-definition portion separated from its function-body
-    portion so the bundle can land strictly between them.
-
-    **~2-4 h · Short, low risk — a clean split point already exists
-    in this exact function, just not used for this purpose yet.**
-    `emit_c` (`backend_c.rs`, ~L1420-1450) already buffers function
-    bodies SEPARATELY from `body` for the identical reason (its own
-    comment: "Emit function bodies into a separate buffer so the
-    task-outlining side-effect ... can be spliced between the
-    prototypes and the bodies") -- `function_bodies` is built at
-    L1436-1440, kept apart from `body`, and only appended at L1446.
-    The same pattern needs one more split: prototypes (currently
-    emitted straight into `body` at L1423-1425 via `emit_prototype`)
-    ALSO need the concurrency bundle to already exist by the time
-    they're emitted, since a fn taking `mut ref RwLock<Point>`
-    spells that type in its own prototype. Fix: buffer prototypes
-    into their own `String` the same way `function_bodies` already
-    is; call `emit_concurrency_runtime_helpers` writing into `body`
-    right after struct/enum/vec-bundle emission finishes (~L1420,
-    before the prototype loop) instead of its current position
-    (~L1515, deep in the unrelated helper-emission sequence); pass a
-    combined `&(prototypes.clone() + &function_bodies)` string (or
-    equivalent) to `emit_concurrency_runtime_helpers` for its
+    LLVM-side fix exactly.
+  - **Fixed (2026-07-28) — struct-definition-ordering**: a struct or
+    enum `RwLock<T>`/`Mutex<T>` payload still failed to compile on the
+    C backend — `cc` error "unknown type name 'Struct_Point'" inside
+    the generated bundle typedef. Root cause: `emit_concurrency_
+    runtime_helpers` was called (writing into `out`) BEFORE
+    `out.push_str(&body)` — `body` holds every user struct's FULL
+    field definition (a topological-sort loop earlier in `emit_c`),
+    while only a forward declaration existed at the point the bundle
+    was written; the bundle embeds `T` BY VALUE, which needs the
+    complete type. Fixed using the previously-estimated approach: the
+    same "separate buffer" pattern `emit_c` already used for splicing
+    `TASK_OUTLINES` between prototypes and function bodies (comment:
+    "so the task-outlining side-effect ... can be spliced between the
+    prototypes and the bodies") was extended one step further —
+    prototypes now build into their own `prototypes: String` (mirrors
+    the pre-existing `function_bodies: String`), and
+    `emit_concurrency_runtime_helpers` now writes into `body` right
+    after struct/enum/vec-bundle emission finishes and BEFORE the
+    prototype loop, using `format!("{}{}", prototypes, function_bodies)`
+    (built first, from the newly-separated buffers) for its
     `.contains("intent_condvar")`/`.contains("intent_task_handle")`
-    gating checks specifically, since those still need to see actual
-    USAGE sites that only exist in the not-yet-assembled prototypes/
-    bodies, not just `mutex_specs`/`rwlock_specs` (which are already
-    collected structurally and unaffected by this reorder); then
-    assemble in the corrected order: struct/enum/vec defs -> bundle
-    -> prototypes -> task outlines -> function bodies -> `main()`.
-    Test plan: the exact `RwLock<Point>`/`Mutex<Point>` repros already
-    in this session's history (both now-passing on LLVM, still-
-    failing on `--backend=c`), plus a `Channel<StructT, N>` case
-    (same bundle-embeds-T-by-value shape, never actually verified
-    end-to-end on either backend this session) and a full
-    `cargo test --lib` sweep (the last attempt at this exact reorder
-    regressed the working `Mutex<i64>`/`RwLock<i64>` case, so re-run
-    the BUG-22 i64 regression test specifically before considering
-    this done).
-
-    The default LLVM backend (BUG-19's fix) has no such limitation;
-    if `--backend=c` is required, stick to scalar `RwLock`/`Mutex`
-    payloads. `advanced/02c_rwlock_primer.md` documents this precisely.
+    gating checks — so gating still sees real usage sites even though
+    the bundle's own output now lands earlier than those buffers do.
+    Assembly order is now: struct/enum/vec defs -> concurrency bundle
+    -> prototypes -> dyn-iface vtables -> task outlines -> function
+    bodies -> `main()`.
+  - **Fixed (2026-07-28) — third independent gap, found verifying the
+    struct-ordering fix**: even after the above, a function taking
+    `mut ref RwLock<Config>` as a PARAMETER still emitted the wrong
+    prototype type (`intent_rwlock_i64*` instead of
+    `intent_rwlock_Struct_Config*`). Root cause: `format_declarator`
+    (used specifically for parameter/pointer declarators, a code path
+    entirely separate from `c_type_name`) has its OWN independent
+    per-type match with the SAME 5-arm gap, duplicated in THREE
+    places (bare, `Type::Ref`, `Type::RefMut`) — `c_type_name`'s fix
+    never touched this function at all. Fixed by adding the same 5
+    arms to all three match blocks in `format_declarator`.
+  - Verified end-to-end (real `cc` invocation, not just type-checking):
+    `Mutex<i64>`/`RwLock<i64>`, `RwLock<Point>`/`Mutex<Point>` (struct
+    payload, standalone), a full `RwLock<Config>` read/write/release
+    cycle threaded through TWO functions taking it as a `mut ref`
+    parameter, and `Channel<Point, 4>` (same by-value-embedding shape,
+    confirmed fixed as a side effect of the ordering fix) all compile
+    AND run correctly on `--backend=c`, matching the already-working
+    LLVM backend. 1 lib.rs regression test (the i64 case) + 1 new
+    end-to-end integration test with a real `cc` build
+    (`examples/language/english/rwlock_struct_payload.vani` +
+    `rwlock_struct_payload_example_compiles_and_runs_on_both_backends`
+    in `tests/run_end_to_end.rs`) — deliberately an execution test,
+    not a `compile_to_c` substring check, since "doesn't compile with
+    a real C compiler" is exactly the class of bug a substring check
+    on generated-but-unverified C source can't catch. Full
+    `cargo test --lib` swept clean (2596 passed, same 3 pre-existing
+    unrelated Win64 FFI-ABI failures) both after the ordering reorder
+    and after the `format_declarator` fix.
+  - The default LLVM backend (BUG-19's fix) never had this limitation;
+    both backends now handle arbitrary `T` for `RwLock`/`Mutex`/
+    `Channel` identically. `advanced/02c_rwlock_primer.md` was already
+    updated (2026-07-27) documenting the C-backend gap as a known
+    limitation with a scalar-only workaround — that caution note is
+    now stale and should be removed/updated to reflect this fix.
 
 - [x] **BUG-23. C backend's `while_bounds_hints` optimizer-aid macro
   referenced a Vec `let`-declared fresh inside the very loop body it
