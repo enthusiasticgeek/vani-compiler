@@ -2299,4 +2299,76 @@ verifying the four fixes above against their tutorial worked examples
   `tests/run_end_to_end.rs`), plus a full `cargo test --release
   backend_c` sweep confirmed no regressions.
 
+- [x] **BUG-24. LLVM backend's task-spawn ctx-size estimator
+  undercounted any aggregate type wider than 8 bytes, causing a real
+  heap buffer overflow. Fixed 2026-07-28.** Found while auditing the
+  codebase (at user request, after BUG-21 Path B shipped) for other
+  instances of the BUG-19/22 "parallel dispatch functions must
+  independently be kept in sync" pattern. `backend_llvm.rs`'s private
+  `type_byte_size` helper — used by both `compute_ctx_size` (the
+  pre-existing block-form `task { .. }`'s capture ctx) and
+  `task_spawn_call_ctx_size` (BUG-21 Path B's `Task<R>` arg/result
+  ctx, which inherited the bug on day one since it reused the same
+  helper) — had a blanket `_ => 8` fallback covering structs, tuples,
+  arrays, payloaded enums, and closures; only a short explicit list
+  (scalars, `Str`, refs, `FnPtr`, `Task`, the SIMD vector types) got a
+  real size. Since Copy structs are explicitly permitted as task
+  captures / `Task<R>` args+results, a struct wider than 8 bytes
+  triggered a real malloc undersizing. Confirmed via generated IR, not
+  just reasoning: `let t: Task<Big> = task make_big(100);` where `Big`
+  has 4 `i64` fields emitted `call i8* @malloc(i64 16)` for a ctx typed
+  `{ %Struct_Big, i64 }` that actually needs 40 bytes — a 24-byte heap
+  overflow on the trampoline's `store %Struct_Big %call_result, ...`
+  on every call. The repro still printed correct output before the
+  fix (allocator slack, not correctness) — classic silent-until-it-
+  isn't heap corruption. Fixed by deleting `type_byte_size` and
+  routing both callers through `llvm_byte_size` instead — a function
+  already in this file, already correct, already used for exactly
+  this kind of sizing problem (enum-payload buffer allocation), which
+  recurses into `LLVM_STRUCT_FIELDS_REGISTRY`/
+  `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY` rather than guessing. The C
+  backend was never affected — it sizes ctx structs with a real
+  `sizeof()` on a generated typedef, which is always correct
+  regardless of field count. Verified: re-ran the `Task<Big>` repro
+  post-fix, confirmed `malloc(i64 40)` in the emitted IR; a second
+  repro for the block-form capture path (`Wide`, 5 `i64` fields, plus
+  a scalar capture) confirmed `malloc(i64 48)` (was `16` before the
+  fix). New example + end-to-end execution test on both backends
+  (`examples/language/english/task_struct_ctx_sizing.vani` +
+  `task_struct_ctx_sizing_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`) — deliberately an execution test since
+  a too-small `malloc` still compiles and links; it corrupts memory
+  silently. Full `cargo test --lib` swept clean (2597 passed, same 3
+  pre-existing unrelated Win64 FFI-ABI failures).
+
+- [x] **BUG-25. `stack_depth.rs`'s per-local byte-size estimator
+  (feeds the `#[bounded_stack]`/recursion stack-overflow-safety
+  verifier) flat-guessed struct/enum sizes regardless of actual
+  declared fields — unsound relative to the module's own documented
+  "over-estimation is safe" invariant. Fixed 2026-07-28.** Found in
+  the same audit pass as BUG-24 (same root-cause family: a byte-size
+  table with a fallback that quietly stops being conservative once a
+  type exceeds the size the table's author had in mind).
+  `type_size`'s `Struct(_) => 32` / `Enum(_) => 16` arms were flat
+  constants, not derived from the type's real fields — a struct with
+  more than 4 `i64`-sized fields (or an enum with a payload bigger
+  than 12 bytes) was UNDERestimated. Since this estimator directly
+  feeds the `#[bounded_stack(N)]` verifier's "does this function's
+  worst-case call chain fit in N bytes" proof, an undercount is the
+  dangerous direction: a function that genuinely overflows the stack
+  at runtime could pass compile-time verification. Fixed by threading
+  a new `SizeCtx` (built once per `compute_stack_depths` call from
+  `TypedProgram.structs`/`.enums`, which already carry real field/
+  payload types — no new registry needed, unlike BUG-24's fix) through
+  `type_size`/`stmt_local_bytes`, and recursing into real field types
+  for `Struct`/`Enum`, mirroring `llvm_byte_size`'s already-correct
+  approach in `backend_llvm.rs`. Verified: `vanic stack-depth` on a
+  function with one `Wide` local (8 `i64` fields = 64 bytes) now
+  reports `local_bytes: 72` (was `32` before the fix — the flat
+  guess); new unit test `stack_depth_struct_local_uses_real_field_size`
+  asserts `local_bytes >= 64`. None of the pre-existing `stack_depth_*`
+  tests use struct/enum locals, so none needed updating. Full `cargo
+  test --lib` swept clean (2597 passed, same 3 pre-existing unrelated
+  Win64 FFI-ABI failures).
+
 ---
