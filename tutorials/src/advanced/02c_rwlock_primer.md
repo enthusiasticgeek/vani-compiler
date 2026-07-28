@@ -91,24 +91,13 @@ let _ = write_guard_set(mut ref w, v + 1);
 // w goes out of scope here -> write lock released automatically
 ```
 
-`T` can genuinely be any type on the default (LLVM) backend --
-`i64`, `bool`, other integer widths, a struct, an enum, `Vec<T>` all
-work end to end (`rwlock_new`, read/write acquire, get/set, and the
-automatic release on scope exit). Each element type gets its own
-correctly-sized generated struct, the same way `Mutex<T>`, `Channel<T,
-N>`, and `Vec<T>` already do.
-
-<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
-
-The **C backend** (`--backend=c`) is behind here: a struct or enum
-`RwLock<T>`/`Mutex<T>` payload currently fails to compile with a real
-`cc` invocation (a struct-definition-ordering issue in the generated
-C -- the lock's bundle type references the payload struct before its
-full field definition has been emitted). Scalar payloads (`i64`,
-`bool`, other integer widths) work fine on the C backend too. If you
-need `--backend=c` specifically, stick to scalar `RwLock`/`Mutex`
-payloads until this is fixed; the default LLVM backend has no such
-restriction.
+`T` can genuinely be any type, on **either** backend -- `i64`,
+`bool`, other integer widths, a struct, an enum, `Vec<T>` all work
+end to end (`rwlock_new`, read/write acquire, get/set, and the
+automatic release on scope exit), including when the type appears as
+a function parameter (`fn f(rw: mut ref RwLock<Config>) -> i64`).
+Each element type gets its own correctly-sized generated struct, the
+same way `Mutex<T>`, `Channel<T, N>`, and `Vec<T>` already do.
 
 ## When to use RwLock vs Mutex
 

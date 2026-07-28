@@ -1420,12 +1420,20 @@ pub fn emit_c(program: &TypedProgram) -> String {
         emit_intent_skiplist_helpers_c_body(&mut body, has_option_i64);
     }
 
+    // BUG-22 fix (2026-07-28): build prototypes into their own
+    // buffer, same reason `function_bodies` already gets its own
+    // buffer below (see that comment) -- a fn taking `mut ref
+    // RwLock<Point>` spells that type in its OWN prototype, so the
+    // concurrency bundle (Mutex/RwLock/Channel structs + helpers,
+    // which can embed a user struct BY VALUE) must exist before the
+    // prototype loop runs, not just before function bodies. Struct/
+    // enum/vec-bundle definitions are already fully emitted into
+    // `body` by this point (the topological-sort loop above), so
+    // this is the correct insertion point.
+    let mut prototypes = String::new();
     for function in &program.functions {
-        emit_prototype(function, &mut body);
+        emit_prototype(function, &mut prototypes);
     }
-    body.push('\n');
-
-    emit_dyn_iface_vtables(&mut body, &used_dyn_ifaces);
 
     // Emit function bodies into a separate buffer so the
     // task-outlining side-effect (TASK_OUTLINES) can be
@@ -1438,6 +1446,29 @@ pub fn emit_c(program: &TypedProgram) -> String {
         emit_function(function, &mut function_bodies);
         function_bodies.push('\n');
     }
+
+    // The concurrency bundle's own gating (`needs_condvar` /
+    // `needs_tasks` / `needs_barrier`, via `.contains(...)` on
+    // literal runtime-symbol substrings) needs to see actual usage
+    // sites -- those only exist in `prototypes` (a fn param typed
+    // `ref Condvar` etc) and `function_bodies` (everything else),
+    // neither of which has landed in `body` yet at this point. Pass
+    // their concatenation for gating purposes only; the bundle's
+    // OUTPUT still goes directly into `body`, ahead of both.
+    let concurrency_usage_text = format!("{}{}", prototypes, function_bodies);
+    emit_concurrency_runtime_helpers(
+        &mut body,
+        &concurrency_usage_text,
+        &channel_specs,
+        &mutex_specs,
+        &rwlock_specs,
+    );
+
+    body.push_str(&prototypes);
+    body.push('\n');
+
+    emit_dyn_iface_vtables(&mut body, &used_dyn_ifaces);
+
     // Splice outlines between prototypes and function bodies.
     TASK_OUTLINES.with(|b| {
         let outlines = std::mem::take(&mut *b.borrow_mut());
@@ -1512,7 +1543,13 @@ pub fn emit_c(program: &TypedProgram) -> String {
     emit_intent_str_repeat_c(&mut out);
     emit_intent_str_case_c(&mut out);
     emit_intent_i64_to_str_c(&mut out);
-    emit_concurrency_runtime_helpers(&mut out, &body, &channel_specs, &mutex_specs, &rwlock_specs);
+    // BUG-22 fix: emit_concurrency_runtime_helpers now runs earlier,
+    // writing directly into `body` right after struct/enum/vec-bundle
+    // definitions (before prototypes/function bodies) so its
+    // Mutex/RwLock/Channel struct definitions -- which can embed a
+    // user struct type BY VALUE -- see the complete struct definition
+    // instead of only a forward declaration. See the call site above,
+    // near the prototype-buffering code.
     emit_intent_rng_helpers_c(&mut out, &body);
     emit_intent_hash_helpers_c(&mut out, &body);
     emit_intent_sleep_ms_helper_c(&mut out, &body);
@@ -20565,6 +20602,18 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             {
                 format!("const {}* {}", enum_c_name(ename), name)
             }
+            // BUG-22 follow-up fix: `ref Mutex<T>` /
+            // `ref RwLock<T>` etc -- same missing-arm gap as the
+            // bare case above.
+            Type::Mutex(element) => format!("const {}* {}", c_mutex_storage(element), name),
+            Type::Guard(element) => format!("const {}* {}", c_guard_storage(element), name),
+            Type::RwLock(element) => format!("const {}* {}", c_rwlock_storage(element), name),
+            Type::ReadGuard(element) => {
+                format!("const {}* {}", c_read_guard_storage(element), name)
+            }
+            Type::WriteGuard(element) => {
+                format!("const {}* {}", c_write_guard_storage(element), name)
+            }
             other => format!("const {}* {}", c_leaf_type(other), name),
         },
         Type::RefMut(inner) => match &**inner {
@@ -20593,12 +20642,39 @@ fn format_declarator(ty: &Type, name: &str) -> String {
             {
                 format!("{}* {}", enum_c_name(ename), name)
             }
+            // BUG-22 follow-up fix: `mut ref Mutex<T>` /
+            // `mut ref RwLock<T>` etc -- same missing-arm gap as the
+            // bare and `Ref` cases above. This is the specific arm
+            // that was hit by `fn read_config(rw: mut ref
+            // RwLock<Config>)`'s prototype.
+            Type::Mutex(element) => format!("{}* {}", c_mutex_storage(element), name),
+            Type::Guard(element) => format!("{}* {}", c_guard_storage(element), name),
+            Type::RwLock(element) => format!("{}* {}", c_rwlock_storage(element), name),
+            Type::ReadGuard(element) => format!("{}* {}", c_read_guard_storage(element), name),
+            Type::WriteGuard(element) => format!("{}* {}", c_write_guard_storage(element), name),
             other => format!("{}* {}", c_leaf_type(other), name),
         },
         Type::Atomic(element) => format!("{} {}", c_atomic_storage(element), name),
         Type::Channel(element, capacity) => {
             format!("{} {}", c_channel_storage(element, *capacity), name)
         }
+        // BUG-22 follow-up fix (2026-07-28): found while verifying
+        // BUG-22's own fix against a fn taking `mut ref RwLock<T>` as
+        // a parameter -- `format_declarator` (used by emit_prototype/
+        // emit_function for parameter declarators) has its OWN
+        // independent per-type match, separate from `c_type_name`,
+        // and was missing the same 5 arms in THREE places (bare,
+        // `Ref`, `RefMut`) -- so a `RwLock<Config>` parameter's
+        // prototype still spelled the wrong hardcoded
+        // `intent_rwlock_i64*` even after the let-binding/return-type
+        // fix landed. This is the bare (non-ref, e.g. a struct field
+        // or fn-ptr param) case; the `Ref`/`RefMut` arms below get the
+        // same fix.
+        Type::Mutex(element) => format!("{} {}", c_mutex_storage(element), name),
+        Type::Guard(element) => format!("{} {}", c_guard_storage(element), name),
+        Type::RwLock(element) => format!("{} {}", c_rwlock_storage(element), name),
+        Type::ReadGuard(element) => format!("{} {}", c_read_guard_storage(element), name),
+        Type::WriteGuard(element) => format!("{} {}", c_write_guard_storage(element), name),
         Type::FnPtr(params, ret) => {
             // C function pointer declarator:
             //   R (*name)(T1, T2, ...)

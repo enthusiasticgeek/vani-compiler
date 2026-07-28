@@ -1,0 +1,30 @@
+// build & run:
+//   vanic run examples/language/english/rwlock_struct_payload.vani
+//   vanic run examples/language/english/rwlock_struct_payload.vani --backend=c
+
+intent "BUG-22 regression: RwLock<T> with a struct payload, including as a function parameter type";
+
+struct Config { max_retries: i64, timeout_ms: i64 }
+
+fn read_config(rw: mut ref RwLock<Config>) -> i64 {
+  let r: ReadGuard<Config> = rwlock_read(rw);
+  let cfg: Config = read_guard_get(ref r);
+  return cfg.timeout_ms;
+}
+
+fn update_timeout(rw: mut ref RwLock<Config>, new_ms: i64) -> i64 {
+  let w: WriteGuard<Config> = rwlock_write(rw);
+  let old: Config = write_guard_get(ref w);
+  let _ = write_guard_set(mut ref w, Config { max_retries: old.max_retries, timeout_ms: new_ms });
+  return 0;
+}
+
+fn main() -> i64 {
+  let rw: RwLock<Config> = rwlock_new(Config { max_retries: 3, timeout_ms: 5000 });
+  let before: i64 = read_config(mut ref rw);
+  let _ = update_timeout(mut ref rw, 10000);
+  let after: i64 = read_config(mut ref rw);
+  print "before:", before;
+  print "after:", after;
+  return 0;
+}

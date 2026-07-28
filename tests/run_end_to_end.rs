@@ -43,6 +43,59 @@ fn slice_pattern_guards_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// BUG-22 (2026-07-28): a struct or enum RwLock<T>/Mutex<T> payload
+// failed to compile with a real `cc` invocation on the C backend --
+// two independent bugs, both fixed this session. (1) `c_type_name`
+// was missing the 5 arms for Mutex/Guard/RwLock/ReadGuard/WriteGuard
+// and fell through to a hardcoded i64-only spelling that didn't match
+// the real per-T bundle names -- broke even plain Mutex<i64>/
+// RwLock<i64>. (2) format_declarator (used for function PARAMETER
+// declarators specifically, a different code path than let-bindings/
+// return types) had the SAME missing-arm gap independently, in three
+// places (bare, `ref T`, `mut ref T`) -- so a function taking `mut
+// ref RwLock<Config>` still emitted the wrong prototype type even
+// after fixing (1). Separately, the concurrency bundle (which embeds
+// T BY VALUE) was emitted before the struct/enum's fields were fully
+// defined -- "unknown type name 'Struct_Point'" -- fixed by emitting
+// it right after struct/enum/vec-bundle definitions instead of deep
+// in an unrelated helper-emission sequence. This is a "doesn't
+// compile with a real C compiler" bug that vanic's own type-checker
+// can't catch (the generated C is syntactically valid vāṇी-side) --
+// only an actual `cc` invocation does, hence the end-to-end test
+// here rather than a compile_to_c substring check alone.
+#[test]
+fn rwlock_struct_payload_example_compiles_and_runs_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/rwlock_struct_payload.vani",
+        manifest_dir
+    );
+    let expected = "before: 5000\nafter: 10000\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "RwLock<Config> (struct payload, used as a fn param type too) \
+             produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");
