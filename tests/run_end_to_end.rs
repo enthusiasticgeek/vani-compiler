@@ -560,6 +560,94 @@ fn run_link_with_resolves_extern_c_symbol_in_run_mode() {
     );
 }
 
+// BUG-23 (found 2026-07-27, fixed same day): the C backend's
+// `while_bounds_hints` pre-loop optimizer-aid macro referenced a Vec
+// name found via `collect_vec_idx_names` even when that Vec was
+// `let`-declared FRESH inside the very loop body being scanned (e.g.
+// `while j < n { let xp: Vec<f64> = ...; set(mut ref xp, j, xp[j] + h); }`).
+// The emitted hint sits BEFORE the `while` statement, where a
+// per-iteration local like `xp` doesn't exist yet in the generated C --
+// `cc` rejected the output with `'v_xp' undeclared`. Found while
+// investigating why vani-algebra's `algebra_newton_system_fd` (real,
+// shipped library code, not a contrived case) failed to compile on
+// `--backend=c`. Fixed by tracking each loop body's own `let`-declared
+// names and excluding them from the hint set.
+#[test]
+fn run_backend_c_vec_declared_fresh_inside_while_loop_body() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let dir: PathBuf = std::env::temp_dir().join(format!(
+        "intentc-bug23-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).expect("mkdir");
+
+    let vani_src = dir.join("prog.vani");
+    fs::write(
+        &vani_src,
+        "fn copy_f64(x: ref Vec<f64>) -> Vec<f64> {\n  \
+           let out: Vec<f64> = vec();\n  \
+           let n: i64 = len(x) as i64;\n  \
+           let i: i64 = 0;\n  \
+           while i < n {\n    \
+             push(mut ref out, x[i]);\n    \
+             i = i + 1;\n  \
+           }\n  \
+           return out;\n\
+         }\n\
+         \n\
+         fn f(x: ref Vec<f64>, n: i64, h: f64) -> f64 {\n  \
+           let s: f64 = 0.0;\n  \
+           let j: i64 = 0;\n  \
+           while j < n {\n    \
+             let xp: Vec<f64> = copy_f64(x);\n    \
+             set(mut ref xp, j, xp[j] + h);\n    \
+             s = s + xp[j];\n    \
+             j = j + 1;\n  \
+           }\n  \
+           return s;\n\
+         }\n\
+         \n\
+         fn main() -> i64 {\n  \
+           let x: Vec<f64> = vec(1.0, 2.0, 3.0);\n  \
+           let r: f64 = f(ref x, 3, 0.1);\n  \
+           print r;\n  \
+           return 0;\n\
+         }\n",
+    )
+    .expect("write prog.vani");
+
+    let run = Command::new(binary)
+        .args(["run", vani_src.to_str().unwrap(), "--backend=c"])
+        .output()
+        .expect("intentc run --backend=c executes");
+
+    let stdout = String::from_utf8_lossy(&run.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&run.stderr).to_string();
+    let status = run.status;
+
+    let _ = fs::remove_dir_all(&dir);
+
+    assert!(
+        status.success(),
+        "intentc run --backend=c failed on a Vec declared fresh inside a \
+         while loop body: {} (stdout: {}, stderr: {})",
+        status,
+        stdout,
+        stderr,
+    );
+    assert!(
+        stdout.trim() == "6.3",
+        "expected `6.3` (hand-computed: sum of x[j]+0.1 for j=0..2), got: {stdout}"
+    );
+}
+
 #[test]
 fn run_link_with_requires_backend_c() {
     let binary = env!("CARGO_BIN_EXE_intentc");

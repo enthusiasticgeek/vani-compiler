@@ -21,6 +21,15 @@
   variants) all shipped — see
   [docs/ref_capturing_closures_design.md](docs/ref_capturing_closures_design.md).
   **No known bugs remain open** as of this session's end.
+- **2026-07-27 update**: this summary is stale relative to
+  [docs/TODO_CURRENT.md](docs/TODO_CURRENT.md), which is the
+  authoritative up-to-date bug log — BUG-13 through BUG-23 were found
+  and (mostly) fixed since the note above was written; BUG-22's
+  struct/enum `RwLock`/`Mutex` payload case on `--backend=c` is the one
+  still open. BUG-23 (C backend's `while_bounds_hints` referencing a
+  Vec declared fresh inside its own loop body — found while fixing
+  vani-algebra's `algebra_newton_system_fd`, which couldn't compile on
+  `--backend=c` at all) is fixed.
 
 ## Open items (summary)
 

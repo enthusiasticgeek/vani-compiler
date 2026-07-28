@@ -12688,9 +12688,22 @@ fn collect_vec_idx_names(
     out: &mut std::collections::BTreeMap<String, bool>,
 ) {
     use crate::ir::TypedStmt as S;
+    // BUG-23: a Vec `let`-declared fresh inside THIS loop's own body
+    // (re-created every iteration, e.g. `let xp = copy(x); set(mut ref
+    // xp, j, ...);`) must never end up in `out` -- the hint macro this
+    // feeds is emitted BEFORE the `while` statement even starts, where a
+    // per-iteration local like `xp` doesn't exist yet in the generated
+    // C (`v_xp` undeclared). Track names this body itself declares and
+    // strip them out at the end, regardless of which branch below
+    // notices the index access first.
+    let mut locally_declared: std::collections::BTreeSet<String> = Default::default();
     for stmt in body {
         match stmt {
-            S::Let { expr, .. } | S::Reassign { expr, .. } | S::Discard { expr } => {
+            S::Let { name, expr, .. } => {
+                collect_vec_idx_in_expr(expr, loop_var, out);
+                locally_declared.insert(name.clone());
+            }
+            S::Reassign { expr, .. } | S::Discard { expr } => {
                 collect_vec_idx_in_expr(expr, loop_var, out);
             }
             S::Return { expr } | S::Assert { expr, .. } | S::Prove { expr } => {
@@ -12721,6 +12734,9 @@ fn collect_vec_idx_names(
             // Don't recurse into nested loops — different loop variable
             _ => {}
         }
+    }
+    for name in &locally_declared {
+        out.remove(name);
     }
 }
 

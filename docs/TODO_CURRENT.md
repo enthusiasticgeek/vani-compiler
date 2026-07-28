@@ -2172,4 +2172,39 @@ verifying the four fixes above against their tutorial worked examples
     required, stick to scalar `RwLock`/`Mutex` payloads.
     `advanced/02c_rwlock_primer.md` documents this precisely.
 
+- [x] **BUG-23. C backend's `while_bounds_hints` optimizer-aid macro
+  referenced a Vec `let`-declared fresh inside the very loop body it
+  was scanning, producing an undeclared-variable `cc` error. Fixed
+  2026-07-27.** Found while investigating why vani-algebra's
+  `algebra_newton_system_fd` (real, shipped library code — a
+  finite-difference Jacobian loop building a fresh perturbed copy `xp`
+  of `x` on every iteration, then writing/reading `xp[j]`) failed to
+  compile on `--backend=c` with `'v_xp' undeclared; did you mean
+  'v_x'?`. Root cause: `while_bounds_hints` emits a pre-loop assertion
+  macro (`if (upper > vec.len) abort();`) for every Vec indexed by the
+  loop variable inside the body, as a GCC-VRP optimizer aid (real
+  per-element bounds checks still happen regardless — this hint is
+  purely advisory, never load-bearing for correctness). Its helper
+  `collect_vec_idx_names` walked the body's statements to find such
+  Vecs but never tracked which names the body itself introduces via
+  `let` — so a pattern like `while j < n { let xp: Vec<f64> = ...;
+  set(mut ref xp, j, xp[j] + h); }` collected `xp` (found via the
+  `set(mut ref xp, j, ...)` call, since `j` is the loop var) and
+  emitted `if (n > v_xp.len) ...` BEFORE the `while` statement even
+  starts — where `v_xp` doesn't exist yet in the generated C (it's
+  declared fresh inside the loop body, once per iteration). Same root
+  category as BUG-3 (documented in `collect_vec_idx_names`'s own
+  comment: this hint must never fire for an access that isn't
+  unconditionally safe at the point the hint is emitted) but a
+  different specific gap. Fixed: `collect_vec_idx_names` now tracks
+  each loop body's own top-level `let`-declared names and strips them
+  from the collected set before returning, regardless of which branch
+  first notices the index access. Verified: the original
+  `algebra_newton_system_fd` repro and vani-algebra's full test suite
+  now compile and run correctly on `--backend=c` (previously blocked
+  entirely); 1 new regression test
+  (`run_backend_c_vec_declared_fresh_inside_while_loop_body` in
+  `tests/run_end_to_end.rs`), plus a full `cargo test --release
+  backend_c` sweep confirmed no regressions.
+
 ---
