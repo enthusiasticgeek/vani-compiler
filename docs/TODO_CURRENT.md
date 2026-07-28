@@ -2371,4 +2371,57 @@ verifying the four fixes above against their tutorial worked examples
   test --lib` swept clean (2597 passed, same 3 pre-existing unrelated
   Win64 FFI-ABI failures).
 
+- [x] **BUG-26. The "3 pre-existing unrelated Win64 FFI-ABI test
+  failures" cited throughout this whole session's `cargo test --lib`
+  runs (BUG-22, BUG-24, BUG-25 entries above) were never actually
+  diagnosed — one turned out to be a real compiler bug, the other two
+  were wrong test expectations. Fixed 2026-07-28.** User asked "how
+  to fix?" after seeing the same 3 failures reported yet again; rather
+  than continuing to write them off as environmental noise, diagnosed
+  each on its merits.
+  - **`extern_12byte_struct_rejected_on_win64` — real bug.**
+    `extern_return_rejection_hint` (checker.rs)'s struct/enum arm
+    built its diagnostic text as "...only all-scalar structs within
+    the platform size limit pass by value — see
+    extern_param_rejection_hint for details" — a literal dangling
+    cross-reference to another function's *name*, not its actual
+    per-platform ABI text (`extern_param_rejection_hint` itself
+    builds a real "Win64 ABI: ..." / "AArch64 AAPCS64: ..." /
+    "SysV x86-64: ..." string). A reader gets a compiler error
+    message, not the source code — "see X for details" without X's
+    actual details told them nothing, and the test's `.contains("Win64
+    ABI")` assertion correctly caught the gap. Fixed by extracting the
+    shared rule text into `ffi_struct_abi_rule_text()` and having both
+    the param and return rejection-hint builders call it.
+  - **`extern_struct_with_float_field_accepted` /
+    `extern_struct_return_with_float_field_accepted` — wrong test
+    expectations, not compiler bugs.** `Mixed { x: i32, y: f64 }` is
+    16 bytes after alignment padding — genuinely outside Win64's
+    `{1,2,4,8}` pass-by-value size set (`is_ffi_safe_struct_win64`),
+    even though it's fine under SysV x86-64 and AArch64 (both accept
+    scalar-only structs ≤ 16 bytes). The tests' own doc comments
+    already say "LLVM's SysV calling-convention classifier" — they
+    were SysV/AArch64-specific by design but were never `#[cfg]`-gated
+    to match, unlike their sibling Win64-specific tests
+    (`extern_12byte_struct_rejected_on_win64`,
+    `extern_8byte_struct_accepted_on_win64`) which already had the
+    right pattern. Fixed by gating both to
+    `#[cfg(not(all(target_arch = "x86_64", target_os = "windows")))]`
+    and adding Win64 counterparts
+    (`extern_struct_with_float_field_rejected_on_win64` /
+    `..._return_..._rejected_on_win64`) asserting the correct
+    rejection — closing the coverage gap instead of just silencing it.
+  - Verified: all 20 `extern_*` tests pass; full `cargo test --lib`
+    is **2600 passed, 0 failed** — the first fully clean run this
+    session (every prior run in this session's BUG-19 through BUG-25
+    work reported these same 3 failures and moved on, assuming they
+    were pre-existing/environmental without checking).
+  - **Lesson**: "pre-existing, unrelated, known failures" is a claim
+    that needs re-verifying occasionally, not a permanent label —
+    especially when the failures are platform-specific and the dev
+    environment IS that platform (this session ran natively on
+    Windows the whole time, so "Win64 FFI-ABI failures" were never
+    going to be a CI-only quirk; they were reachable and actionable
+    the whole session).
+
 ---
