@@ -2466,4 +2466,141 @@ verifying the four fixes above against their tutorial worked examples
   ever showing it). Full `cargo test --lib`: 2600 passed, 0 failed —
   no regressions.
 
+- [x] **BUG-28. Chained guarded match arms (3+ arms sharing the same
+  dispatch tag, e.g. multiple guarded `_` wildcards, or a guarded
+  enum variant repeated) dispatched incorrectly — every arm before
+  the last two silently ignored its own guard. Fixed 2026-07-28.**
+  Found while auditing the tutorial book for claims/patterns never
+  actually demonstrated in code (user request, following the
+  self-deregistering-observer finding above) — writing a verified
+  example for `beginner/08a_pattern_match_primer.md`'s "range
+  patterns" section (which needs a chain of guarded `_` arms) turned
+  up wrong runtime output. Root cause: guarded match arms are
+  represented internally as a placeholder `Block { stmts:
+  [Assert(guard)], tail }` (crash if the guard is false) when first
+  type-checked, on the expectation that a LATER arm sharing the same
+  dispatch tag folds it into a real `if guard { tail } else { .. }`
+  conditional before it's ever reached at runtime ("M3" in
+  `checker.rs`). The fold only ever checked ONE arm back
+  (`typed_arms.last_mut()`), so a chain of 3+ guarded arms only
+  partially resolved: the last two folded together, but every EARLIER
+  guarded arm stayed as an independent `typed_arms` entry sharing the
+  same dispatch tag as a later (already-resolved) entry — and since
+  the backend's tag-based dispatch only ever reaches the FIRST entry
+  for a given tag, those earlier arms' Asserts became unreachable dead
+  code. Confirmed via a minimal repro: `match n { _ if n < 10 then
+  "small", _ if n < 100 then "medium", _ then "big" }` returned
+  "small" for every input (5, 50, 500) before the fix — the second and
+  third arms' logic never ran at all, but the program still compiled
+  cleanly. Fixed by replacing the one-step merge with a new
+  `fold_guard_chain` helper that recurses down the rightmost `else`
+  spine of the previous same-tag arm's body to find whichever guard is
+  still unresolved (however many prior merges deep), so an
+  arbitrary-length chain folds correctly regardless of how many arms
+  precede it. Verified: 3-arm and 5-arm wildcard-guard chains, a
+  5-arm chain mixing an unguarded int-literal arm with wildcard
+  guards, and a guarded-enum-variant chain (`Status.Active if secs >
+  3600 then .., Status.Active if secs > 60 then .., Status.Active then
+  ..`) — all now dispatch correctly on both backends. New example +
+  end-to-end execution test on both backends
+  (`examples/language/english/match_guard_chain.vani` +
+  `match_guard_chain_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`) — deliberately an execution test since
+  the bug compiled cleanly and only produced wrong output at runtime.
+  **Adjacent gaps found but NOT fixed** (out of scope for this pass,
+  noted for later): `check_match_str` and `check_match_float` (string-
+  and float-scrutinee matches) never type-check or wire in `arm.guard`
+  at all — a guard on a string/float match arm is silently accepted by
+  the parser and then completely ignored; `check_match_slice`'s
+  `Pattern::Wildcard` arm also never even reads `arm.guard` (unlike
+  its `Pattern::Slice` arm, which BUG-20 already fixed), so a guarded
+  wildcard arm in a slice/Vec match silently drops the guard entirely
+  (not even the "crash if false" placeholder — just ignored). Full
+  `cargo test --lib`: 2600 passed, 0 failed.
+
+- [x] **BUG-29. LLVM backend: a payload-less variant of an enum whose
+  OTHER variant carries a `Str` payload (not `OwnedStr`) crashed —
+  `lli` rejected the emitted IR. Fixed 2026-07-28.** Found in the same
+  audit pass as BUG-28, writing a "two flat matches instead of one
+  nested pattern" worked example (vāṇी has no nested variant-in-
+  variant match patterns — see the `beginner/08a_pattern_match_
+  primer.md` fixes below) that needed an enum with a `Str` payload.
+  Root cause: the zero-init placeholder for a payload-less variant's
+  unused payload slot (`payload_zero` in `backend_llvm.rs`) had an arm
+  for `Type::OwnedStr => "null"` but not `Type::Str` — both lower to
+  `i8*` at the LLVM level and both need the `null` literal, but `Str`
+  fell through to the generic `_ => "0"` default, emitting `insertvalue
+  %Enum_X %s0, i8* 0, 1` — an integer literal where LLVM expects a
+  pointer. `lli` rejected it with "integer constant must have integer
+  type". Same bug FAMILY as BUG-19/22/24/26/27 (a type's zero/default
+  representation handled correctly for one variant of a type family but
+  not a sibling variant — here `OwnedStr` but not `Str`, both `i8*`).
+  Fixed by adding `Type::Str` alongside `Type::OwnedStr` in the same
+  arm. C backend was never affected. New example + end-to-end
+  execution test on both backends
+  (`examples/language/english/nested_enum_str_payload.vani` +
+  `nested_enum_str_payload_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`). Full `cargo test --lib`: 2600 passed,
+  0 failed.
+
+- [x] **Beginner pattern-match primer (`08a_pattern_match_primer.md`)
+  had SIX broken/nonexistent-syntax code sections, not just the one
+  originally flagged. Fixed 2026-07-28.** The initial audit flagged
+  only the "range patterns" section (`1..99 then ..`, hedged with
+  "check the formal chapter for the exact spelling"); range patterns
+  were indeed never implemented (`ast::Pattern` has no Range variant —
+  confirmed via source, not just a failed compile). But verifying the
+  REST of the file's code blocks by hand (rather than trusting them
+  because ONE was already caught) turned up five more: **Pattern 2**
+  showed Rust-style tuple-destructuring match patterns (`match (x, y)
+  { (0, 0) then .. }`) — vāṇी has no tuple pattern at all, confirmed
+  via the same `Pattern` enum audit. **Pattern 3** showed a bare
+  binding pattern with a guard (`n if n < 0 then ..`) — vāṇी match
+  patterns can't introduce a fresh "catch and bind" name outside enum-
+  variant/slice patterns; the parser expects a bare identifier pattern
+  to be followed by `.` (interpreting it as `EnumName.Variant`) and
+  rejects anything else. **"Default with a name"** showed the same
+  bare-binding shape (`other then handle_unknown(other)`) for an
+  identical reason. **"Match on a structured Result"** showed a nested
+  variant-in-variant pattern (`Ok(Command.Echo(s))`) — `VariantWith
+  Binding` takes exactly one plain binding name, never another
+  pattern; confirmed via a parse error ("expected ')' (variant payload
+  binding close)"). The exhaustiveness section's intentionally-broken
+  example also used `match c { .. }` as a bare STATEMENT (no `return`)
+  — since `match` is expression-only in vāṇी, this hits "expected
+  statement" instead of the intended "not exhaustive" diagnostic the
+  prose promises, teaching the wrong lesson about why the example
+  fails. All six rewritten with genuinely verified-working code (the
+  real idioms: `_ if <condition on the outer scrutinee variable>` for
+  guards/defaults — since only the scrutinee's own name is available,
+  never a pattern-bound one; two flat matches instead of nesting; `if`/
+  `else` instead of tuple patterns; chained `_ if ..` arms — now
+  correctly dispatching end-to-end thanks to BUG-28 — for range-style
+  dispatch). Also found and fixed in the same pass: `print` items
+  can't be bare binary-comparison expressions (`print "x:", a > b;`
+  is a parse error — extract to a `let` first, then print the bool);
+  this was already latent in the file's own pre-existing "Quick
+  example" in a SIBLING file (`beginner/06_strings.md`, see below) and
+  is now avoided in both. Full `cargo test --lib` + `mdbook build`:
+  clean, no regressions.
+
+- [x] **`beginner/06_strings.md`'s "Quick example" never demonstrated
+  `f64_to_str_fixed` despite the file spending a full subsection on
+  its behavioral guarantees, one of which was stated backwards. Fixed
+  2026-07-28.** `f64_to_str_fixed` got extensive prose (rounding
+  behavior, platform-dependent NaN/Infinity spelling) but was never
+  actually invoked in the file's own runnable example. Compiling the
+  claims by hand also found the rounding claim was simply wrong:
+  the file asserted `f64_to_str_fixed(0.125, 2)` "rounds ties away
+  from zero," giving `"0.13"` — the real, verified output is
+  `"0.12"` (round-to-even; 0.125 is exactly representable in `f64`,
+  so this isn't a precision artifact). Also found and fixed the
+  same `print`-item-comparison parse restriction BUG-28's entry
+  above mentions (`print "upper > lower:", upper > lower;` doesn't
+  parse) — pre-existing in this file's own example, extracted to a
+  `let` — and a wrong expected-output value for that same comparison
+  (claimed `"upper > lower: true"`; the real, verified value is
+  `false`, since uppercase precedes lowercase in ASCII). Verified
+  every line of the corrected example end-to-end on both backends.
+
 ---

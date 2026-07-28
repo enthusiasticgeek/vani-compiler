@@ -105,34 +105,57 @@ extracted the value.
 Same for `(e)` in `Err(e)` -- `e` is the ParseError inside the
 Err.
 
-### Pattern 2: tuples
+### Pattern 2: what vāṇी doesn't destructure
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Rust-style `match` can destructure a tuple shape directly:
+`match (x, y) { (0, 0) => ..., (a, b) => ... }`. **vāṇी's v1
+`match` can't** -- patterns are limited to enum variants
+(single-level, one bound name), integer/bool/string/float
+literals, and Vec/array slice patterns. There's no tuple
+pattern and no way to bind a name to "whatever didn't match a
+literal" except the scrutinee's own name (next section).
+
+For tuple-shaped dispatch, use plain `if`/`else` on the
+components instead -- exactly the "naive way" from the top of
+this chapter:
 
 ```vani
-match (x, y) {
-  (0, 0) then print "origin",
-  (0, _) then print "y-axis",
-  (_, 0) then print "x-axis",
-  (a, b) then print "point at", a, b,
+fn describe_point(x: i64, y: i64) -> Str {
+  if x == 0 && y == 0 {
+    return "origin";
+  } else if x == 0 {
+    return "y-axis";
+  } else if y == 0 {
+    return "x-axis";
+  }
+  return "point";
 }
 ```
 
-The pattern `(a, b)` destructures the tuple and binds the
-components. `_` is the don't-care placeholder.
-
-### Pattern 3: literal + binding combined
+### Pattern 3: a wildcard with a guard
 
 ```vani
-match status {
-  0 then print "ok",
-  n if n < 0 then print "error:", n,    // n is bound;
-                                        //  guard adds a condition
-  n then print "warning code:", n,
+fn classify(status: i64) -> Str {
+  return match status {
+    0 then "ok",
+    _ if status < 0 then "error",
+    _ then "warning",
+  };
 }
 ```
 
-A pattern can bind a name AND have a guard (`if condition`).
-The branch runs only if both the pattern matches AND the
-guard is true.
+A `_` arm can carry a guard (`if condition`) -- the branch
+runs only when the guard is true, and the guard (and the
+branch body) can freely reference `status`, the scrutinee's
+own name, which is still in scope. This is also why you don't
+write `n if n < 0` here the way you might in Rust: vāṇी match
+patterns don't introduce a fresh binding for "whatever this
+arm caught" -- only enum-variant and slice patterns bind new
+names. When you need the value inside a catch-all-style arm,
+reach for the original scrutinee variable, not a pattern-bound
+name.
 
 ## Exhaustiveness -- the compiler-checked guarantee
 
@@ -147,11 +170,11 @@ possible value is covered**.
 enum Color { Red, Green, Blue }
 
 fn name(c: Color) -> Str {
-  match c {
+  return match c {
     Color.Red then "red",
     Color.Green then "green",
     // forgot Blue!
-  }
+  };
 }
 ```
 
@@ -235,49 +258,75 @@ fn describe(c: Color) -> Str {
 
 ## Common patterns in practice
 
-### Default with a name
+### Default that still uses the value
 
 ```vani
 let response: i64 = match input_kind {
   "ping" then 100,
   "echo" then 200,
-  other then handle_unknown(other),
-                // ^ `other` is bound to the unmatched value
+  _ then handle_unknown(input_kind),
+                // ^ reads the scrutinee directly, not a pattern binding
 };
 ```
 
-Same as `_` (catch-all) but with a name so you can use the
-value in the branch body.
+Same as `_` (catch-all), but the branch body reaches past the
+`match` to read `input_kind` -- the variable being matched --
+directly, since it's still an ordinary in-scope binding. There
+is no way to attach a fresh name to "the value this wildcard
+arm caught" the way Rust's `other =>` does; `_` never binds
+anything, in any position.
 
-### Match on a structured Result
+### Nested variants -- one level at a time
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Rust can peel two layers of variant in one pattern:
+`Ok(Command::Echo(s)) =>`. **vāṇी can't** -- `EnumName.Variant(binding)`
+patterns take exactly one plain binding name, never another
+pattern. Write nested dispatch as two flat matches instead --
+extract the inner value with a plain binding in the outer
+match, then match on it separately (a real, ordinary
+function call, so it composes and is independently testable):
 
 ```vani
-match parse_command(buf) {
-  Result.Ok(Command.Quit) then exit(0),
-  Result.Ok(Command.Status) then print_status(),
-  Result.Ok(Command.Echo(s)) then print s,
-  Result.Err(e) then print "bad command:", e,
+enum Command { Quit, Status, Echo(i64) }
+enum ParseResult { Ok(Command), Err(i64) }
+
+fn dispatch_command(cmd: Command) -> i64 {
+  return match cmd {
+    Command.Quit then 0,
+    Command.Status then 1,
+    Command.Echo(payload) then payload,
+  };
+}
+
+fn dispatch(pr: ParseResult) -> i64 {
+  return match pr {
+    ParseResult.Ok(cmd) then dispatch_command(cmd),
+    ParseResult.Err(code) then 0 - code,
+  };
 }
 ```
 
-Nested patterns -- `Ok(Command.Echo(s))` peels two layers:
-"the Result is Ok, AND the inner Command is Echo, AND extract
-the inner Str into `s`."
-
-### Range patterns (where supported)
+### Range-like dispatch: chained guards
 
 ```vani
-match code {
-  0 then "ok",
-  1..99 then "informational",
-  100..199 then "redirect",
-  200..299 then "client error",
-  _ then "server error",
+fn describe(code: i64) -> Str {
+  return match code {
+    0 then "ok",
+    _ if code >= 1 && code <= 99 then "informational",
+    _ if code >= 100 && code <= 199 then "redirect",
+    _ if code >= 200 && code <= 299 then "client error",
+    _ then "server error",
+  };
 }
 ```
 
-(`..` syntax for ranges; check the formal chapter for the
-exact spelling vāṇी uses.)
+vāṇी has no `1..99`-style range pattern syntax. The real
+idiom is a chain of guarded `_` arms, each testing a range with
+a plain boolean condition, ending in an unguarded `_` as the
+final fallback -- exactly the "wildcard with a guard" shape
+from Pattern 3 above, chained as many times as you need.
 
 ## A summary you can carry
 

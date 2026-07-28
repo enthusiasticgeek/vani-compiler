@@ -274,11 +274,10 @@ They affect lookups in the surrounding scope.
 - The real reason for modules is **visibility**: `pub` marks
   items as part of the module's exported API; non-`pub` items
   are private to the module.
-- `pub(kosh)` is a middle tier: it correctly blocks a *different*
-  Kosh package from reaching in via `pkgname::item`, but doesn't
-  yet support the intended same-project sibling-module sharing
-  (that part still needs `pub`, or moving the sharing into one
-  module).
+- `pub(kosh)` is a middle tier: it blocks a *different* Kosh
+  package from reaching in via `pkgname::item`, while still
+  allowing sibling modules within your own project to reach it
+  via `mod::item` -- exactly the worked example above.
 - `use mod::name;` imports a name locally so you don't have
   to write the full path every time.
 

@@ -477,13 +477,15 @@ a clear error). `--sve2` wins if both are given.
 
 ## FFI shim escape hatch
 
-When you need an intrinsic that `vec128<T>` does not expose —
-`vaddq_s64` with a carry, `vmull_high_u32`, AES acceleration — use
-an FFI shim: a tiny C file that wraps the intrinsic and is linked
-with `--link` at build time.
+When you need an intrinsic that `vec128<T>` does not expose --
+widening multiplies, AES acceleration, carry-aware arithmetic --
+use an FFI shim: a tiny C file that wraps the intrinsic and is
+linked with `--link` at build time.
 
 See [docs/simd_ffi_shims.md](../../../docs/simd_ffi_shims.md) for
-full NEON and AVX2 shim examples and the type-mapping table.
+a full, verified `vaddq_s64` (NEON) reduction-sum shim, an AVX2
+horizontal-sum shim, and the type-mapping table -- the same
+pattern extends to any other intrinsic you need.
 
 ---
 

@@ -71,31 +71,67 @@ await cancellable(7, tok)  = -1
 
 - **`async fn foo() -> R { ... }`** desugars to
   `fn foo() -> Future<R> { ...; return Future.Ready(v); ... }`.
-  In v1 the body runs to completion synchronously on call;
-  the suspend-point state machine ships under Arc 8 step 8c.
+  **This chapter's worked example never actually suspends** --
+  `fetch`/`cancellable` above run to completion synchronously,
+  same as any ordinary function call, just spelled with
+  `async`/`await`. A REAL suspend-point state machine (one that
+  genuinely parks mid-function on an I/O wait and resumes later)
+  is a separate, considerably more involved feature -- see
+  "The real thing" below.
 - **`await(expr)`** desugars to a `match` that extracts
-  `Future.Ready`'s payload. The `Pending` arm body is the
-  literal `0` because v1 async fns never produce `Pending`.
-  This shape lets you write code that *looks* asynchronous
-  while the compiler treats it as straight-line.
+  `Future.Ready`'s payload. For the synchronous desugar shown
+  above, the `Pending` arm body is the literal `0` and is never
+  actually reached. This shape lets you write code that *looks*
+  asynchronous while the compiler treats it as straight-line.
 - **`CancelToken`** is a prelude-defined struct:
   ```rust
   struct CancelToken { cancelled: bool }
   ```
   Thread it through async functions and check `.cancelled` at
-  natural breakpoints. Real suspend-point cancellation lands
-  when the state-machine codegen ships.
+  natural breakpoints.
 - **The `try` keyword sugar** ([Intermediate Sec.10](../intermediate/10_result_try.md))
   is enabled *inside async fn bodies* in v1 (Arc 8 v3.1 Phase
   2.4). For Result-returning async fns, you can write `let v:
   i64 = try maybe_fetch();` and the compiler inserts the
   short-circuit on `Err`.
 
+## The real thing: suspend points over I/O
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+The synchronous desugar above is the whole story for `fetch`/
+`cancellable`-shaped async fns -- nothing in them can actually
+wait for anything. A genuine suspend point needs an operation
+that can report "not ready yet" without blocking the thread --
+in v1 that means the `io_*_async` family (`io_recv_async`,
+`io_send_async`, ...) layered on non-blocking sockets + `epoll`.
+When an async fn's body calls one of those, the compiler
+transforms the WHOLE function into a real state machine: a
+`Task__<fn_name>` struct holding the suspended local state, a
+generated `__poll_<fn_name>` function that advances it one step
+and returns either the result or "still pending," and a
+caller-side polling loop (typically `epoll_wait` between polls)
+that drives it to completion.
+
+This is a substantially bigger shape than the trivial `await`
+round-trip above -- worth seeing written out, not just described.
+[`examples/language/english/async_showcase.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/async_showcase.vani)
+is the real thing: a single `async fn` with outer `let`s, a
+top-level `if` with a mid-body `return`, a `while` loop with TWO
+suspend points inside it, `break`/`continue` inside the
+suspending loop, and an `if`/`else` where one branch suspends and
+the other falls through -- plus the hand-written `drive(...)`
+polling loop that calls the generated `__poll_showcase` in a loop
+around `epoll_wait_one`. Run it with `--backend=c`; the LLVM
+backend currently miscompiles this specific example on Windows
+(`lli` rejects the emitted IR with an undefined-SSA-value error --
+a known gap, not something introduced by reading this chapter).
+
 ## What's coming and what's queued
 
 | Today | Queued |
 |---|---|
-| `async fn` + `await` synchronous desugar (v1) AND real suspend-point state machine (v3.1, FEATURE-COMPLETE 2026-06-08) | -- |
+| `async fn` + `await` synchronous desugar (v1) AND real suspend-point state machine over `io_*_async` (v3.1) -- see "The real thing" above | -- |
 | `CancelToken` cooperative cancellation AND **A4.4** auto-injected cancel guards at every suspend point | -- |
 | `try EXPR` keyword AND postfix `EXPR?` operator in both sync + async bodies | -- |
 | `Future<R>` for scalar R AND v3.1 Task<T> for all v3.1-allowed T | -- |

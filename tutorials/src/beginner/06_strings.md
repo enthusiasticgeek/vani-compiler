@@ -371,12 +371,16 @@ explicit `f64_to_str` calls.
   UCRT-linked Windows build. Don't pattern-match on a specific
   spelling; check `f64_is_nan(x)` / `f64_is_finite(x)` first if
   you need to handle these cases.
-- **Rounding ties away from zero, not to even.**
-  `f64_to_str_fixed(0.125, 2)` gives `"0.13"`, not the
-  banker's-rounding `"0.12"` -- standard C `printf("%.*f", ...)`
-  behavior, but not guaranteed bit-identical to Rust's `{:.2}`
+- **Rounding at exact halfway points follows the local C
+  library's `printf("%.*f", ...)`, which is round-to-even, not
+  round-away-from-zero.** `f64_to_str_fixed(0.125, 2)` gives
+  `"0.12"` (0.125 is exactly representable in `f64`, and 2 --
+  the nearer even digit -- is what round-half-to-even picks),
+  not `"0.13"`. Not guaranteed bit-identical to Rust's `{:.2}`
   at every halfway case, since Rust's float formatter doesn't
-  go through the C library at all.
+  go through the C library at all -- if a halfway-rounding
+  result matters for a test assertion, verify it against the
+  real compiler rather than assuming either convention.
 - **Decimal separator is always `.`**, regardless of OS locale
   (no locale-aware formatting, matching every other vāṇी
   numeric builtin).
@@ -407,12 +411,20 @@ fn main() -> i64 {
   print "len of upper:", len(upper);
   print "trimmed contains 'World':", str_contains(trimmed, "World");
 
-  // Lexicographic ordering: < / <= / > / >= work on both Str and OwnedStr
-  print "apple < banana:", "apple" < "banana";
-  print "upper > lower:", upper > lower;
+  // Lexicographic ordering: < / <= / > / >= work on both Str and OwnedStr.
+  // A `print` item can't be a bare comparison expression -- compute it
+  // into a `let` first, then print the bool.
+  let apple_lt_banana: bool = "apple" < "banana";
+  print "apple < banana:", apple_lt_banana;
+  let upper_gt_lower: bool = upper > lower;
+  print "upper > lower:", upper_gt_lower;   // false: uppercase < lowercase in ASCII
 
   let parsed: Option<i64> = parse_int("42");
   print "parsed 42:", option_unwrap_or(parsed, -1);
+
+  // f64_to_str_fixed: always exactly `decimals` digits, zero-padded --
+  // portable/deterministic across backends, unlike raw `print` on an f64.
+  print "fixed 2dp:", f64_to_str_fixed(3.1, 2);
 
   return 0;
 }
@@ -431,8 +443,9 @@ repeated: ababab
 len of upper: 5
 trimmed contains 'World': true
 apple < banana: true
-upper > lower: true
+upper > lower: false
 parsed 42: 42
+fixed 2dp: 3.10
 ```
 
 ---

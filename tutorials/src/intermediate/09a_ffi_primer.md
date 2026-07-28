@@ -173,38 +173,49 @@ For structs-by-value, the compiler checks if the struct fits
 the platform's small-struct convention. Yes -> safe. No -> the
 compiler rejects with a hint: "pass by reference instead."
 
-For raw pointer types (`*const T`, `*mut T`), you'd be working
-with C-style memory. These types only appear inside an
-`unsafe(reason = "...")` block -- vāṇी forces you to mark the
-section where the type system isn't tracking ownership.
+**Raw pointer types (`*const T`, `*mut T`) do NOT cross the FFI
+boundary at all in v1** -- `extern fn` parameters/returns are
+scalars, `Str`, or `ref T` / `mut ref T` only; the checker
+rejects a raw-pointer-typed `extern fn` parameter outright
+("this type is not yet wired through the v1 FFI ABI; use
+scalars, `Str`, or `ref T` instead"). For C functions that take
+a pointer, use `ref T` / `mut ref T` on the vāṇी side --
+references already compile down to plain pointers at the ABI
+level, so they line up with C's `const T*` / `T*` without
+needing `unsafe` at all. (Raw `*const T` / `*mut T` still exist
+as a type -- see [Advanced 4 -- Embedded](../advanced/04_embedded.md)
+-- but they're for embedded/MMIO-style code behind `unsafe`,
+gated to `--target embedded`, not for FFI parameter types.)
 
 ## Function pointers -- calling vāṇी from C
 
-The reverse direction also works. vAṇी functions can be passed
+The reverse direction also works. vāṇी functions can be passed
 as callbacks to C functions:
 
 <img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
 
 ```vani
-extern "C" fn qsort(
-  base: *mut i64, n: u64, size: u64,
-  cmp: fn(*const i64, *const i64) -> i64,
-);
+// A hypothetical vendor C library's callback signature
+// (illustrative -- there's no real "vendor_sort" linked here;
+// the point is the shape of the declaration).
+extern "C" fn vendor_sort(
+  base: mut ref i64, n: i64,
+  cmp: fn(ref i64, ref i64) -> i64
+) -> i64;
 
-fn compare(a: *const i64, b: *const i64) -> i64 {
-  ...
+fn compare(a: ref i64, b: ref i64) -> i64 {
+  return 0;
 }
 
 fn main() -> i64 {
-  let xs: [i64; 4] = [3, 1, 4, 2];
-  qsort(/* ... */, compare);   // vāṇी fn passed to C
   return 0;
 }
 ```
 
-The vāṇी function `compare` becomes a callback C can invoke.
-This is how you wire vāṇी logic into existing C frameworks
-(libuv, GTK, etc.).
+The vāṇी function `compare` becomes a callback C can invoke --
+note it takes `ref i64` for the elements being compared, not a
+raw pointer, matching the FFI ABI rule above. This is how you
+wire vāṇी logic into existing C frameworks (libuv, GTK, etc.).
 
 ## "ABI" -- the deeper word
 

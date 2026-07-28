@@ -283,7 +283,10 @@ For these, vāṇी's current answer is:
 2. **Use `unsafe(reason = "...")`** for the unavoidable cases
    -- explicitly mark the section where the type system isn't
    tracking ownership, and explain in the reason string what
-   discipline you're maintaining manually.
+   discipline you're maintaining manually. See
+   [Intermediate 3d -- Cyclic references](03d_cyclic_references_primer.md#worked-example--the-unsafe-escape-hatch)
+   for a worked example (a self-deregistering observer that
+   reaches back into its subject via a raw pointer).
 3. **A v2 `Rc<T>` is conceivable** -- but the design choice
    today is to not have it. If real-world experience shows
    it's needed for a class of programs that no other pattern
