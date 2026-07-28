@@ -140,6 +140,55 @@ fn task_result_multi_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// Heap-overflow bug (found 2026-07-28, while auditing the codebase
+// for other instances of the BUG-19/22 "parallel dispatch functions
+// drift out of sync" pattern): the LLVM backend's task-spawn ctx-size
+// estimator (`compute_ctx_size` / `task_spawn_call_ctx_size` in
+// backend_llvm.rs) hardcoded 8 bytes for any type not on its short
+// explicit list -- so a Copy struct wider than 8 bytes, as a `Task<R>`
+// result/arg or a block-form `task { .. }` capture, got undersized in
+// the `malloc` call. Confirmed via generated IR: `Task<Big>` (a 4-field
+// i64 struct) emitted `malloc(16)` for a ctx that actually needed 40
+// bytes -- a real heap buffer overflow on the trampoline's `store`.
+// Fixed by routing through `llvm_byte_size` (the function this file
+// already uses, correctly, to size enum-payload buffers) instead. This
+// is exactly the class of bug an execution test catches and a
+// compile-only test doesn't -- a too-small malloc still compiles and
+// links; it corrupts heap memory silently until something downstream
+// notices (or doesn't, non-deterministically).
+#[test]
+fn task_struct_ctx_sizing_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/task_struct_ctx_sizing.vani",
+        manifest_dir
+    );
+    let expected = "a: 100\nb: 101\nc: 102\nd: 103\ncapture ok\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "struct-payload task ctx sizing produced the wrong result for {:?} \
+             (or crashed/hung from heap corruption if the malloc undersizing regressed)",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");

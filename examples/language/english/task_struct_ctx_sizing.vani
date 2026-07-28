@@ -1,0 +1,36 @@
+// build & run:
+//   vanic run examples/language/english/task_struct_ctx_sizing.vani
+//   vanic run examples/language/english/task_struct_ctx_sizing.vani --backend=c
+
+intent "Regression: task-spawn ctx sizing for aggregate (struct) payloads wider than 8 bytes -- a Copy struct as a Task<R> result/arg, or as a block-form task capture, must not be truncated when the ctx is heap-allocated. Previously the LLVM backend's ctx-size estimator hardcoded 8 bytes for any type it didn't special-case, undersizing the malloc for anything bigger (a real heap buffer overflow, confirmed via generated IR showing malloc(16) for a ctx that needed 40 bytes) -- fixed by routing through the byte-accurate llvm_byte_size (already used correctly for enum-payload buffer sizing) instead of the flawed estimator.";
+
+struct Big { a: i64, b: i64, c: i64, d: i64 }
+struct Wide { a: i64, b: i64, c: i64, d: i64, e: i64 }
+
+pure fn make_big(seed: i64) -> Big {
+  return Big { a: seed, b: seed + 1, c: seed + 2, d: seed + 3 };
+}
+
+fn main() -> i64 {
+  // Task<R> where R is a multi-field struct (>8 bytes) -- exercises
+  // task_spawn_call_ctx_size's result-slot sizing.
+  let t: Task<Big> = task make_big(100);
+  let r: Big = join t;
+  print "a:", r.a;
+  print "b:", r.b;
+  print "c:", r.c;
+  print "d:", r.d;
+
+  // Block-form task capturing a multi-field struct (>8 bytes) plus
+  // a scalar -- exercises compute_ctx_size's capture sizing.
+  let w: Wide = Wide { a: 10, b: 20, c: 30, d: 40, e: 50 };
+  let tag: i64 = 7;
+  task blk {
+    assert tag == 7;
+    assert w.a == 10;
+    assert w.e == 50;
+  }
+  join blk;
+  print "capture ok";
+  return 0;
+}

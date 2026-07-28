@@ -44995,10 +44995,24 @@ fn emit_task_spawn_call(
 /// Estimate ctx-struct byte size for `emit_task_spawn_call` —
 /// same conservative sum-of-fields-rounded-to-8 approach as
 /// `compute_ctx_size`, but over `{ result_ty, arg_types… }`.
+/// Bug fix (2026-07-28): this used to call a private
+/// `type_byte_size` helper whose `_ => 8` fallback applied to any
+/// aggregate not on its short explicit list -- structs, tuples,
+/// arrays, payloaded enums, closures. A Copy struct bigger than
+/// 8 bytes as a task-spawn arg or result (Copy structs are
+/// explicitly allowed) got undercounted, so the trampoline's
+/// `store` into the ctx wrote past the malloc'd allocation -- a
+/// real heap buffer overflow, confirmed via a repro (`Task<Big>`
+/// where `Big` has 4 `i64` fields emitted `malloc(16)` for a ctx
+/// that actually needs 40 bytes). Fixed by routing through
+/// `llvm_byte_size` instead -- the same function this file
+/// already uses to size enum-payload buffers, which correctly
+/// recurses into `LLVM_STRUCT_FIELDS_REGISTRY` /
+/// `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY` rather than guessing.
 fn task_spawn_call_ctx_size(arg_types: &[Type], result_ty: &Type) -> u64 {
-    let mut total: u64 = (type_byte_size(result_ty) + 7) & !7;
+    let mut total: u64 = (llvm_byte_size(result_ty) + 7) & !7;
     for t in arg_types {
-        total += (type_byte_size(t) + 7) & !7;
+        total += (llvm_byte_size(t) + 7) & !7;
     }
     total.max(8)
 }
@@ -45007,32 +45021,20 @@ fn task_spawn_call_ctx_size(arg_types: &[Type], result_ty: &Type) -> u64 {
 /// bound is fine since we never index past the declared
 /// fields. We compute it as sum of each capture's natural
 /// size (rounded up to 8 bytes for alignment).
+/// Bug fix (2026-07-28): same fix as `task_spawn_call_ctx_size`
+/// above -- routes through `llvm_byte_size` instead of the
+/// removed `type_byte_size`, which undercounted any capture
+/// wider than 8 bytes (struct / tuple / array / payloaded enum /
+/// closure) and could heap-overflow the malloc'd ctx.
 fn compute_ctx_size(captures: &[(String, Type)]) -> u64 {
     let mut total: u64 = 0;
     for (_, t) in captures {
-        let n = type_byte_size(t);
+        let n = llvm_byte_size(t);
         total += (n + 7) & !7;
     }
     // Always at least 8 bytes so malloc(0) doesn't return
     // weird things.
     total.max(8)
-}
-
-fn type_byte_size(t: &Type) -> u64 {
-    match t {
-        Type::I8 | Type::U8 | Type::Bool => 1,
-        Type::I16 | Type::U16 => 2,
-        Type::I32 | Type::U32 | Type::F32 => 4,
-        Type::I64 | Type::U64 | Type::F64 => 8,
-        Type::Str | Type::OwnedStr => 8,
-        Type::Ref(_) | Type::RefMut(_) => 8,
-        Type::FnPtr(_, _) => 8,
-        Type::Task => 16,
-        Type::Vec128(_) => 16, // 128-bit vector — must be 16 bytes
-        Type::Vec256(_) => 32, // 256-bit vector — must be 32 bytes
-        Type::Vec512(_) => 64, // 512-bit vector — must be 64 bytes
-        _ => 8, // conservative
-    }
 }
 
 /// Lift the body of a `parallel for i in start..end { … }` into a

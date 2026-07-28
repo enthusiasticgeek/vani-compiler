@@ -43116,6 +43116,34 @@ função main() -> i64 {
     }
 
     #[test]
+    fn stack_depth_struct_local_uses_real_field_size() {
+        let source = r#"
+            struct Wide { a: i64, b: i64, c: i64, d: i64, e: i64, f: i64, g: i64, h: i64 }
+            fn leaf() -> i64 {
+              let w: Wide = Wide { a: 1, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8 };
+              return w.a;
+            }
+            fn main() -> i64 { return leaf(); }
+        "#;
+        let checked = compile(source).expect("compiles");
+        let report = crate::stack_depth::compute_stack_depths(&checked.ir, None);
+        let leaf = report.frames.iter().find(|f| f.name == "leaf").unwrap();
+        // Bug fix (2026-07-28): `Struct(_)` used to be a flat
+        // 32-byte guess regardless of the real field count --
+        // unsound for this module's own documented "over-
+        // estimation is safe" invariant (a #[bounded_stack]
+        // function with a wide struct local could pass
+        // verification while actually overflowing the stack).
+        // `Wide` has 8 `i64` fields = 64 bytes; local_bytes must
+        // reflect that, not the old flat 32.
+        assert!(
+            leaf.local_bytes >= 64,
+            "Wide (8 x i64 = 64 bytes) must not be undercounted; got {}",
+            leaf.local_bytes
+        );
+    }
+
+    #[test]
     fn stack_depth_propagates_through_call_chain() {
         let source = r#"
             fn leaf() -> i64 { return 1; }

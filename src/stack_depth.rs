@@ -79,6 +79,7 @@ pub struct StackReport {
 /// non-extern, non-recursive top-level function (or every
 /// top-level function if `entry_filter` is None).
 pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) -> StackReport {
+    let size_ctx = SizeCtx::new(program);
     let mut frames: Vec<FrameReport> = Vec::new();
     for f in &program.functions {
         if f.is_extern {
@@ -86,10 +87,10 @@ pub fn compute_stack_depths(program: &TypedProgram, entry_filter: Option<&str>) 
         }
         let mut local_bytes = 0u64;
         for p in &f.params {
-            local_bytes += type_size(&p.ty);
+            local_bytes += type_size(&p.ty, &size_ctx);
         }
         for s in &f.body {
-            local_bytes += stmt_local_bytes(s);
+            local_bytes += stmt_local_bytes(s, &size_ctx);
         }
         let frame_bytes = local_bytes + FRAME_OVERHEAD_BYTES;
         let mut callees: Vec<String> = Vec::new();
@@ -220,7 +221,41 @@ fn traverse_depth(
     }
 }
 
-fn type_size(ty: &Type) -> u64 {
+/// Struct/enum field-type lookup so `type_size` can compute real
+/// aggregate sizes instead of a flat guess. Built once per
+/// `compute_stack_depths` call from `TypedProgram.structs` /
+/// `.enums` (mirrors the pattern `backend_llvm.rs`'s
+/// `llvm_byte_size` already uses via `LLVM_STRUCT_FIELDS_REGISTRY`
+/// / `LLVM_ENUM_VARIANT_PAYLOADS_REGISTRY` -- this module has no
+/// access to those backend-only thread-locals, and doesn't need
+/// its own registry since `TypedProgram` already carries the same
+/// information directly).
+struct SizeCtx<'a> {
+    structs: HashMap<&'a str, &'a [(String, Type)]>,
+    enum_payloads: HashMap<&'a str, &'a [Option<Type>]>,
+}
+
+impl<'a> SizeCtx<'a> {
+    fn new(program: &'a TypedProgram) -> Self {
+        SizeCtx {
+            structs: program.structs.iter().map(|s| (s.name.as_str(), s.fields.as_slice())).collect(),
+            enum_payloads: program.enums.iter().map(|e| (e.name.as_str(), e.payload_types.as_slice())).collect(),
+        }
+    }
+}
+
+/// Bug fix (2026-07-28): `Struct(_) => 32` and `Enum(_) => 16` used
+/// to be flat guesses regardless of the actual declared fields --
+/// unsound for the module's own documented "over-estimation is
+/// safe" invariant (see the module doc comment above). A struct
+/// with more than 4 `i64`-sized fields (or an enum with a payload
+/// bigger than 12 bytes) was UNDERestimated, which could let a
+/// `#[bounded_stack(N)]` function that actually overflows the
+/// stack pass verification. Fixed by looking up real field types
+/// from `TypedProgram.structs` / `.enums` (threaded in via
+/// `SizeCtx`) and recursing, mirroring the already-correct
+/// `llvm_byte_size` in `backend_llvm.rs`.
+fn type_size(ty: &Type, ctx: &SizeCtx) -> u64 {
     use Type::*;
     match ty {
         I8 | U8 | Bool => 1,
@@ -238,10 +273,10 @@ fn type_size(ty: &Type) -> u64 {
         Condvar => 8,
         Barrier => 24, // { i64 count, i64 n, i32 gen, pad }
         FileHandle => 8, // int64_t wrapping FILE*
-        RwLock(inner) => type_size(inner).max(8) + 8, // T + state + pad
+        RwLock(inner) => type_size(inner, ctx).max(8) + 8, // T + state + pad
         ReadGuard(_) | WriteGuard(_) => 8, // pointer to RwLock
         Box(_) => 8, // L2 Phase 1: Box<T> = T* (8 bytes on x86-64)
-        Atomic(inner) | Mutex(inner) | Guard(inner) => type_size(inner).max(8),
+        Atomic(inner) | Mutex(inner) | Guard(inner) => type_size(inner, ctx).max(8),
         Channel(_, _) => 32,
         Deque(_) | HashSet(_) | HashMap(_, _) | BTreeSet(_) | BTreeMap(_, _) => 32,
         UnionFind | BinaryHeap(_) | BloomFilter | Bst(_) | Graph | Trie | SkipList => 48,
@@ -253,22 +288,43 @@ fn type_size(ty: &Type) -> u64 {
         Vec128(_) => 16, // 128-bit SIMD register value
         Vec256(_) => 32, // 256-bit SIMD register value
         Vec512(_) => 64, // 512-bit SIMD register value
-        Array { element, length } => type_size(element).saturating_mul(*length),
-        Tuple(elements) => elements.iter().map(type_size).sum::<u64>().max(8),
-        Struct(_) => 32, // estimate; structs lower to nested struct types
-        Enum(_) => 16, // 4-byte tag + max-payload pad; estimate
+        Array { element, length } => type_size(element, ctx).saturating_mul(*length),
+        Tuple(elements) => elements.iter().map(|t| type_size(t, ctx)).sum::<u64>().max(8),
+        Struct(name) => ctx
+            .structs
+            .get(name.as_str())
+            .map(|fields| fields.iter().map(|(_, t)| type_size(t, ctx)).sum::<u64>().max(8))
+            // Not found should be unreachable (every declared struct
+            // is in TypedProgram.structs); keep the old flat guess
+            // as a defensive fallback rather than panicking.
+            .unwrap_or(32),
+        Enum(name) => {
+            let payload = ctx
+                .enum_payloads
+                .get(name.as_str())
+                .map(|payloads| {
+                    payloads
+                        .iter()
+                        .filter_map(|p| p.as_ref())
+                        .map(|t| type_size(t, ctx))
+                        .max()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(12); // defensive fallback, see Struct arm above
+            4 + payload // 4-byte tag + max-payload
+        }
         Apply { .. } | Param(_) => 16,
-        Tainted(inner) => type_size(inner),
+        Tainted(inner) => type_size(inner, ctx),
     }
 }
 
-fn stmt_local_bytes(stmt: &TypedStmt) -> u64 {
+fn stmt_local_bytes(stmt: &TypedStmt, ctx: &SizeCtx) -> u64 {
     match stmt {
-        TypedStmt::Let { ty, .. } | TypedStmt::Reassign { ty, .. } => type_size(ty),
+        TypedStmt::Let { ty, .. } | TypedStmt::Reassign { ty, .. } => type_size(ty, ctx),
         TypedStmt::If { then_body, else_body, .. } => {
             // Branches share the stack frame; take the max.
-            let t: u64 = then_body.iter().map(stmt_local_bytes).sum();
-            let e: u64 = else_body.iter().map(stmt_local_bytes).sum();
+            let t: u64 = then_body.iter().map(|s| stmt_local_bytes(s, ctx)).sum();
+            let e: u64 = else_body.iter().map(|s| stmt_local_bytes(s, ctx)).sum();
             t.max(e)
         }
         TypedStmt::While { body, .. }
@@ -276,7 +332,7 @@ fn stmt_local_bytes(stmt: &TypedStmt) -> u64 {
         | TypedStmt::ForIter { body, .. }
         | TypedStmt::TaskSpawn { body, .. }
         | TypedStmt::UnsafeBlock { body, .. } => {
-            body.iter().map(stmt_local_bytes).sum()
+            body.iter().map(|s| stmt_local_bytes(s, ctx)).sum()
         }
         _ => 0,
     }
