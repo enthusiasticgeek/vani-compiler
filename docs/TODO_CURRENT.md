@@ -2424,4 +2424,46 @@ verifying the four fixes above against their tutorial worked examples
     going to be a CI-only quirk; they were reachable and actionable
     the whole session).
 
+- [x] **BUG-27. C backend: raw pointer (`*const T` / `*mut T`) struct
+  FIELDS emitted an unusable placeholder comment instead of a real C
+  declarator — `cc` rejected any struct with a raw-pointer field.
+  Fixed 2026-07-28.** Found while writing a worked example for
+  `tutorials/src/intermediate/03d_cyclic_references_primer.md`'s
+  "self-deregistering observer via `unsafe`" pattern (user asked for
+  a runnable example of a sentence the primer had been naming but
+  never actually demonstrating in code) — the shape needs exactly a
+  raw pointer stored as a struct field
+  (`struct SelfDeregisteringObserver { id: i64, subject_ptr: *mut i64
+  }`), which turned out to have never been exercised before. Root
+  cause: same bug FAMILY as BUG-19/22/24/26 (a type gets a correct
+  codegen path in one place but is missing from a PARALLEL
+  type-dispatch function) — `c_element_storage` (used specifically
+  for struct-field / Vec-element storage spelling, a THIRD parallel
+  function alongside `c_type_name` and `format_declarator`, all three
+  of which have independently needed the same class of fix this
+  session) had no arms for `Type::Ptr`/`Type::PtrMut` and fell
+  through to `c_leaf_type`'s placeholder-comment fallback
+  (`/* *mut T */ subject_ptr;` — not valid C). `cc` rejected with
+  "expected specifier-qualifier-list before 'subject_ptr'". The LLVM
+  backend was never affected — it doesn't route struct fields through
+  this function; the example compiled and ran correctly on LLVM on
+  the first attempt. Fixed by adding the same `const {}*`/`{}*`
+  declarator-form arms `c_type_name` already has (its own comment
+  explains why: "raw pointer storage uses the full declarator form,
+  not the leaf-comment placeholder"). Verified: the worked example
+  (concurrent-thread-free — a `Subject { active_count: i64 }` an
+  observer decrements via a raw pointer to that one field, inside
+  `unsafe(reason = "self-deregistering observer needs raw subject
+  pointer")`, requires `INTENT_TARGET_EMBEDDED=1` since raw pointer
+  types are gated to embedded targets in v1) now compiles and runs
+  identically on both backends. New example
+  (`examples/language/english/design_patterns/behavioral/observer_
+  self_deregistering.vani`) + end-to-end execution test on both
+  backends
+  (`observer_self_deregistering_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`), plus the worked example itself slotted
+  into the primer (replacing a sentence that named the pattern without
+  ever showing it). Full `cargo test --lib`: 2600 passed, 0 failed —
+  no regressions.
+
 ---

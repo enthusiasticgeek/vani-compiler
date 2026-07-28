@@ -442,6 +442,105 @@ Rc-required pattern. Use `unsafe(reason = "self-deregistering
 observer needs raw subject pointer")` or refactor to
 World-mediated lifecycle.
 
+### Worked example -- the `unsafe` escape hatch
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+Here's what "use `unsafe`" actually looks like, so it's not
+just a name-dropped escape hatch. Two things are different
+from the Rust version worth calling out up front:
+
+- v1 has **no user-definable `Drop`** -- only the
+  compiler-synthesized scope-exit cleanup for affine types
+  (`Vec`, `OwnedStr`, ...). Rust's version really does run
+  from `impl Drop`; the honest vāṇी translation is an
+  **explicit** `deregister(obs)` call, not an automatic
+  destructor hook.
+- Raw pointer types (`*const T` / `*mut T`) are gated to
+  embedded targets in v1 -- `INTENT_TARGET_EMBEDDED=1` must be
+  set (env var today; a `--target embedded`-style flag will
+  supersede it). This isn't specific to the observer pattern --
+  it's true of every raw pointer in vāṇी. See
+  [Advanced 4 -- Embedded](../advanced/04_embedded.md) and
+  [`unsafe.md`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/unsafe.md)
+  for the full policy.
+
+```vani
+struct Subject {
+  state: i64,
+  active_count: i64,
+}
+
+// A raw *mut i64 pointing directly at subject.active_count --
+// not a safe `ref`/`mut ref` (which would force every call site
+// through `world: mut ref World`, the thing this pattern exists
+// to avoid) and not Rc<Subject> (vāṇी has none).
+struct SelfDeregisteringObserver {
+  id: i64,
+  subject_ptr: *mut i64,
+}
+
+fn make_observer(id: i64, subject: mut ref Subject) -> SelfDeregisteringObserver {
+  unsafe(reason = "self-deregistering observer needs raw subject pointer") {
+    let p: *mut i64 = (mut ref subject.active_count) as *mut i64;
+    return SelfDeregisteringObserver { id: id, subject_ptr: p };
+  }
+}
+
+fn deregister(obs: SelfDeregisteringObserver) -> i64 {
+  unsafe(reason = "self-deregistering observer needs raw subject pointer") {
+    let current: Tainted<i64> = raw_load(obs.subject_ptr);
+    let n: i64 = assert_safe(current);
+    let _ = raw_store(obs.subject_ptr, n - 1);
+  }
+  print "observer", obs.id, "deregistered itself";
+  return 0;
+}
+
+fn main() -> i64 {
+  let subject: Subject = Subject { state: 0, active_count: 2 };
+  let o1: SelfDeregisteringObserver = make_observer(1, mut ref subject);
+  let o2: SelfDeregisteringObserver = make_observer(2, mut ref subject);
+  print "active observers:", subject.active_count;
+  let _ = deregister(o1);
+  print "active observers:", subject.active_count;
+  let _ = deregister(o2);
+  print "active observers:", subject.active_count;
+  return 0;
+}
+```
+
+Build and run (both backends need the embedded gate):
+
+```bash
+INTENT_TARGET_EMBEDDED=1 vanic run observer_self_deregistering.vani
+INTENT_TARGET_EMBEDDED=1 vanic run observer_self_deregistering.vani --backend=c
+```
+
+Expected output:
+
+```
+active observers: 2
+observer 1 deregistered itself
+active observers: 1
+observer 2 deregistered itself
+active observers: 0
+```
+
+The full runnable file is
+[`examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani).
+
+Notice what the `reason` string is doing: it's not decoration.
+Both backends emit it as a comment marker on the generated
+output (`/* UNSAFE-DEVIATION: ... */` in C, `; UNSAFE-DEVIATION:
+...` in LLVM IR) at every `unsafe(reason = "...")` site -- so
+`grep -r UNSAFE-DEVIATION` over a build's output finds every
+place a program does something load-bearing on cleanup, labeled
+with why. Rust's `impl Drop` has no equivalent story -- the
+deregistration logic is wherever the `Drop` impl happens to
+live, with nothing marking it as a deviation from the normal
+ownership discipline.
+
 ## When Rc+Weak is genuinely required
 
 A small set of patterns are genuinely awkward without Rc:
