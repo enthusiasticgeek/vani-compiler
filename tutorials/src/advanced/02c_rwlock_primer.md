@@ -184,14 +184,19 @@ release it. Scope each guard as tightly as this example does (one
 guard per function call, dropped at that function's return) rather
 than holding several open at once in the same function body.
 
-`task`/`join` are intentionally not used above -- `Task` in the
-current compiler doesn't carry a return-value payload the way
-`Task<R>` (as used in [Advanced 3](03_concurrency.md)) suggests, so
-the "spawn two concurrent readers, join their results" version this
-example used to show doesn't compile as written. Tracked as a
-separate known issue; the sequential version above demonstrates the
-same acquire/read/release/write/release lifecycle without relying on
-that gap.
+The sequential version above keeps things simple for a first pass,
+but `task`/`join` work here too -- `read_timeout` is Copy-in/Copy-out
+(`mut ref RwLock<i64>` argument, `i64` result), so both reads can
+genuinely run concurrently:
+
+```vani
+let seen_by_reader_1: Task<i64> = task read_timeout(mut ref rw);
+let seen_by_reader_2: Task<i64> = task read_timeout(mut ref rw);
+let r1: i64 = join seen_by_reader_1;
+let r2: i64 = join seen_by_reader_2;
+```
+
+See [Advanced 3](03_concurrency.md) for the full `Task<R>` reference.
 
 ## Cross-reference
 

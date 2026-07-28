@@ -2088,70 +2088,98 @@ verifying the four fixes above against their tutorial worked examples
   workaround replaced with the real guarded example, now verified
   working.
 
-- [ ] **BUG-21. `Task`/`task`/`join` tutorial content
-  (`advanced/03_concurrency.md`, `advanced/02c_rwlock_primer.md`,
-  `advanced/01_async.md`) describes a `Task<R>` generic-return-value
-  model that doesn't match v1's actual implementation.** Found while
-  trying to preserve BUG-14's RwLock tutorial example's original
-  multi-reader-task structure. `ast.rs`'s own `Type::Task` comment says
-  "v1 has no payload — `Task` is structural" (no generic parameter at
-  all), confirmed directly: `let t: Task<i64> = task worker(6);` fails
-  to parse (`error: expected '='` right after `Task`), and even bare
-  `Task` on the right-hand side of a `let` (`let t: Task = task
-  worker(6);`) fails too (`error: expected expression` at `task`).
-  The only form that actually parses is the STATEMENT form documented
-  in `ast.rs`'s `TaskSpawn`/`TaskJoin` AST nodes: `task <name> { <body>
-  } ... join <name>;` — a named, inline block spawn with no return-
-  value capture mechanism at all (confirmed: `task` bodies are
-  purity-gated like `parallel for`, and captures must be Copy, so
-  there's no obvious way to thread a computed result back out even
-  via a captured `mut ref` — untested whether ANY result-passing
-  pattern works). `03_concurrency.md`'s very first worked example
-  (`let t: Task<i64> = task worker(6); ... let r: i64 = join t;`)
-  and `advanced/01_async.md`'s "`Future<R>` for scalar R AND v3.1
-  Task<T> for all v3.1-allowed T" line both describe this as already
-  working; it isn't. Needs a decision between two paths, now scoped:
-
-  - **Path A -- rewrite the docs to match reality.** ~2-3 h · Short,
-    low risk. Blast radius audited: `03_concurrency.md` (243 lines,
-    6 sections) has exactly 2 code examples using `Task<R>` syntax --
-    the opening `worker(6)` example (~L39) and the `stage_one`
-    pipeline example (~L159-160) -- plus prose mentioning `Task<R>` at
-    L49/L52. `01_async.md` has one passing comparison-table mention
-    (L101), not a worked example. The chapter's own Challenge section
-    (~L234-238) already sidesteps the problem entirely -- it asks for
-    4 worker tasks summed via `Atomic<i64>`, which needs no return-
-    value capture at all, so it needs no rewrite. Total: rewrite 2
-    code blocks + ~4 lines of prose in one file, 1 line in a second.
-    Same shape as the `02c_rwlock_primer.md` fix already done this
-    session (sequential/statement-form `task <name> { body } ... join
-    <name>;`, verified compiling).
-  - **Path B -- implement real `Task<R>` with return-value capture.**
-    ~8-12 h · Large, dedicated session. Not a greenfield feature --
-    `task <name> { body }` already spawns a genuine OS thread
-    (`pthread_create`/`CreateThread`, confirmed in `ast.rs`'s own
-    comment and the concurrency chapter's primitive-by-primitive
-    walkthrough) -- but adding a typed result needs: (1) parser
-    support for the expression form `let t: Task<R> = task EXPR;`
-    alongside the existing statement form; (2) AST/IR changes so
-    `TaskSpawn`/`TaskJoin` (or new expression-form nodes) carry a
-    result type and a join-side value; (3) checker support
-    type-checking the spawned expression's return type against `R`
-    and validating `join`'s result type; (4) LLVM backend: a real
-    cross-thread result-passing mechanism (heap-allocate a small
-    result slot per spawn, trampoline function stores into it,
-    `join` = `pthread_join`/`WaitForSingleObject` + read + free) with
-    correct affine-ownership semantics for non-Copy result types; (5)
-    same for the C backend. Comparable in shape to the XL-tier items
-    already in this file (XL4 nested monomorphization was ~10 h).
-
-  Recommend Path A first regardless of whether Path B is ever picked
-  up -- the docs are actively teaching broken code today, and Path B
-  (if it happens) would need the docs rewritten again anyway once the
-  real syntax is nailed down. `advanced/02c_rwlock_primer.md`'s worked
-  example was already rewritten to avoid `task`/`join` entirely
-  (sequential calls instead) with a note pointing at this gap; the
-  other two chapters are still untouched.
+- [x] **BUG-21. `Task`/`task`/`join` tutorial content described a
+  `Task<R>` generic-return-value model that didn't match v1's actual
+  implementation.** ✅ fully fixed 2026-07-28 — Path B implemented
+  (real `Task<R>` with cross-thread return-value capture), not just
+  a docs rewrite.
+  - **New syntax**: `task <fn>(args…)` in EXPRESSION position spawns
+    a real OS thread (`pthread_create`/`CreateThread`) that calls a
+    named function with the given (Copy-typed) argument values,
+    producing a `Type::TaskR(Box<Type>)` handle — `let t: Task<i64> =
+    task worker(6);`. `join <name>` in expression position
+    (`let r: i64 = join t;`) blocks until the thread finishes and
+    yields the return value; bare `join <name>;` (statement form)
+    still works too and just discards the result. The pre-existing
+    payload-free block form (`task <name> { body }` / statement-only
+    `join <name>;`) is completely unchanged — `Type::Task` (no
+    payload) and `Type::TaskR(Box<Type>)` are separate types, and the
+    two spawn forms are parsed via entirely different code paths
+    (`parse_stmt` dispatches `task`/`join` at statement-start;
+    the new expression forms are reachable only via
+    `parse_primary_expr`), so there is no grammar ambiguity.
+  - **Design decision that changed mid-implementation**: the callee
+    does NOT need to be `pure fn` (an earlier draft required it, but
+    that broke the concurrency chapter's own `stage_one`/`Barrier`
+    example, which calls the inherently-blocking `barrier_wait`).
+    Unlike the block form (whose inline body implicitly captures the
+    *outer* function's bindings and so must stay pure-with-Copy-
+    captures to avoid racing the caller), a call-form callee only
+    ever touches its own explicit arguments — no implicit capture,
+    nothing to race on from the caller's frame. The only requirement
+    is that every argument's type is Copy (references are Copy, so
+    `mut ref` to a shared primitive like `Barrier`/`Mutex<T>` is the
+    normal way to share state with a spawned callee).
+  - **LLVM backend** (`emit_task_spawn_call` in `backend_llvm.rs`):
+    extends the existing `emit_task_via_pthread` ctx-malloc +
+    pthread_create/CreateThread + outlined-trampoline pattern. The
+    ctx struct is `{ result_ty, arg1_ty, arg2_ty, … }` — result
+    FIRST. The trampoline calls the real `@fn_<mangled>` function
+    (or bare `@<name>` for extern/no_mangle callees, mirroring the
+    regular-call path) and stores its return value into the ctx's
+    result field before returning. `join`'s codegen reads the result
+    back by bitcasting the opaque ctx `i8*` directly to `result_ty*`
+    — valid because a struct's first member is always at offset 0
+    regardless of what (or how many) fields follow, which is what
+    lets `TypedExprKind::TaskJoinExpr` get away with carrying only
+    `result_ty` (not the arg types/count that shaped the rest of the
+    struct at the spawn site). The existing `%intent_task_handle =
+    type { i64, i8* }` handle struct is reused as-is for `Task<R>`
+    (`llvm_type_string`/`is_scalar` both route it there) since the
+    result lives in the heap ctx, not the handle.
+  - **C backend** (`emit_task_spawn_call`/`emit_task_join_expr` in
+    `backend_c.rs`): same design, adapted to the tree-C codegen
+    shape. Since `emit_expr` here is a pure expr-to-C-source-string
+    function (no `out: &mut String` side channel like the LLVM
+    backend's `FnCtx`), the whole spawn sequence is wrapped in a GNU
+    statement-expression `({ … })` — an established pattern already
+    used elsewhere in this file for other multi-statement
+    expressions. The outlined trampoline + ctx typedef go into the
+    same `TASK_OUTLINES` module-scope thread-local the block form
+    already uses. `join`'s result read is `*(result_ty*)ctx` — same
+    offset-0 reasoning as the LLVM side.
+  - **Checker**: `check_task_spawn_call`/`check_task_join_expr` in
+    `checker.rs` mirror `check_call`'s signature-lookup/arity/
+    per-arg-coercion shape. `verify_task_affine` (the same-block
+    spawn/join affine-discipline pass) and `emit_current_scope_drops`
+    were extended to recognize the expression forms (reached via
+    `TypedStmt::Let`'s RHS, or `TypedStmt::Discard`'s for a
+    discarded `let _ = join t;`) alongside the pre-existing
+    statement-form nodes.
+  - **Verified**: `examples/language/english/task_result.vani`
+    (single spawn) and `task_result_multi.vani` (two concurrent
+    spawns with a multi-arg callee, join-with-capture and
+    join-without-capture) both produce correct output on both
+    backends — `tests/run_end_to_end.rs`'s
+    `task_result_multi_example_produces_correct_output_on_both_backends`
+    runs the real binary end-to-end (not just a compile check) since
+    a mis-sized ctx struct or wrong field offset would still compile
+    and link, just read back garbage nondeterministically. Error
+    paths spot-checked by hand: non-pure-*capture* still rejected for
+    the block form, non-Copy task-spawn-call arg rejected, double-join
+    rejected, joining a plain `Task` in expression position rejected
+    with a clear "use the statement form" message. Full `cargo test
+    --lib`: 2596 passed, same 3 pre-existing unrelated Win64 FFI-ABI
+    failures, no regressions.
+  - **Docs**: `advanced/03_concurrency.md`'s `worker(6)` example and
+    `stage_one`/`Barrier` example both now compile and run as
+    literally written (the latter also had a pre-existing, never-
+    actually-tested `barrier_wait(mut ref b)` double-ref bug, fixed
+    to `barrier_wait(b)` since `b` is already `mut ref Barrier`
+    inside `stage_one`). `advanced/02c_rwlock_primer.md`'s caution
+    note (added when only the sequential workaround existed) replaced
+    with a real concurrent `task`/`join` snippet, verified compiling
+    and running on both backends.
 
 - [x] **BUG-22. C backend has its own, independent version of BUG-19's
   bug, PLUS a separate struct-definition-ordering bug — both found

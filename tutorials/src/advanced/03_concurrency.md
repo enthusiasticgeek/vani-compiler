@@ -44,13 +44,33 @@ fn main() -> i64 {
 }
 ```
 
-- **`task EXPR`** spawns an OS thread (via `pthread_create` on
-  Linux/macOS, `CreateThread` on Windows -- the backend picks)
-  and runs the expression in it. Returns a `Task<R>` handle.
-- **`join t`** blocks the caller until the task finishes, then
-  returns the task's value.
+- **`task <fn>(args…)`** spawns an OS thread (via
+  `pthread_create` on Linux/macOS, `CreateThread` on Windows --
+  the backend picks) that calls `<fn>` with `args`. Returns a
+  `Task<R>` handle, where `R` is `<fn>`'s return type.
+- **`join t`** (in expression position, e.g. `let r = join t;`)
+  blocks the caller until the task finishes, then returns the
+  task's value. `join t;` as a bare statement also works and
+  just discards the result.
 - **`Task<R>` is affine**: each handle can be joined exactly
-  once. The compiler catches double-join at compile time.
+  once. The compiler catches double-join, and unjoined handles,
+  at compile time.
+- The callee doesn't need to be `pure fn` -- unlike the
+  block-form `task { .. }` below (whose inline body implicitly
+  captures the *outer* function's bindings and so must stay
+  side-effect-free to avoid racing the caller), a call-form
+  callee only ever touches its own explicit arguments. It's free
+  to call blocking/synchronizing builtins (`barrier_wait`,
+  `mutex_lock`, ...) -- see the `Barrier` section below for an
+  example. The one restriction: every argument's type must be
+  Copy (the value is duplicated into the spawned thread's heap
+  context) -- pass `mut ref x` for a shared primitive like
+  `Barrier`/`Mutex<T>` rather than moving it.
+- There's also a block form, `task <name> { <body> }` / bare
+  `join <name>;`, for spawning an inline body instead of a named
+  function. It has no return-value payload (`Task`, not
+  `Task<R>`) and its body must be pure-with-Copy-captures, since
+  it implicitly captures the enclosing function's bindings.
 
 ## The six concurrency primitives
 
@@ -148,7 +168,7 @@ like a starting gun at a race.
 ```vani
 fn stage_one(n: i64, b: mut ref Barrier) -> i64 {
   // ...do first-stage work...
-  let is_last: bool = barrier_wait(mut ref b);
+  let is_last: bool = barrier_wait(b);   // `b` is already `mut ref Barrier`
   // All N threads have now finished stage one.
   // is_last is true for exactly the last thread to arrive.
   return 0;
@@ -208,8 +228,12 @@ For runnable end-to-end programs, see:
 
 - `examples/language/english/atomics.vani` -- atomic counter
   and the five builtin operations.
-- `examples/language/english/concurrency.vani` -- `task` + `join`
-  with multiple workers.
+- `examples/language/english/concurrency.vani` -- `Channel<T>` +
+  `Mutex<T>`/`Guard<T>` producer/consumer and protected-update
+  patterns.
+- `examples/language/english/task_result_multi.vani` -- `Task<R>`:
+  concurrent spawns with a multi-arg callee, `join` with and
+  without capturing the result.
 - `examples/language/english/condvar.vani` -- `Condvar` waiting
   on a `Mutex<i64>` payload.
 
