@@ -240,6 +240,98 @@ fn observer_self_deregistering_example_produces_correct_output_on_both_backends(
     }
 }
 
+// BUG-28 (2026-07-28): a chain of 3+ guarded match arms sharing the
+// same dispatch tag (multiple guarded wildcards, or a guarded enum
+// variant repeated) only partially folded into a real conditional --
+// the merge logic in `check_expr`'s match-arm handling only looked
+// ONE arm back, so a THIRD (or later) guarded arm in a chain never
+// merged with the earlier ones. Those earlier guarded arms became
+// unreachable dead code sharing the same dispatch tag as a later
+// arm, so their guards were silently never evaluated at runtime --
+// dispatch always took the first arm's body for that tag. Found
+// while writing a worked example for `beginner/08a_pattern_match_
+// primer.md`'s "range patterns" section (which needs exactly this
+// shape: several guarded wildcard arms in sequence). Confirmed via
+// a minimal repro (`match n { _ if n < 10 then "small", _ if n < 100
+// then "medium", _ then "big" }`) that returned "small" for every
+// input before the fix. This is exactly the class of bug an
+// execution test catches and a compile-only test doesn't -- the
+// buggy version compiled without error, it just silently dispatched
+// to the wrong arm.
+#[test]
+fn match_guard_chain_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/match_guard_chain.vani",
+        manifest_dir
+    );
+    let expected = "perfect\nA\nB\nC\nD\nF\nactive-long\nactive-medium\nactive-short\nidle\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "chained guarded match arms produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-29 (2026-07-28): a payload-less variant of an enum whose OTHER
+// variant carries a `Str` payload (not `OwnedStr`) crashed the LLVM
+// backend -- the zero-init placeholder for the payload-less variant's
+// unused payload slot only handled `OwnedStr`, not `Str`, even though
+// both lower to `i8*` and both need LLVM's `null` literal instead of
+// the integer `0` the fallback produced. `lli` rejected the emitted
+// IR with "integer constant must have integer type". Found while
+// writing a two-flat-matches worked example (nested variant dispatch)
+// for `beginner/08a_pattern_match_primer.md`. The C backend was never
+// affected.
+#[test]
+fn nested_enum_str_payload_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/nested_enum_str_payload.vani",
+        manifest_dir
+    );
+    let expected = "0\n1\n2\n-1\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "nested enum with Str payload produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");

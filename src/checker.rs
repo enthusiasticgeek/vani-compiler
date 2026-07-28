@@ -15005,6 +15005,73 @@ fn check_match_str(
     )
 }
 
+/// BUG-28 fix (2026-07-28) â€” see the call site in `check_expr`'s
+/// `ExprKind::Match` handling (int / bool / enum-tag / wildcard
+/// dispatch) for the full story. Guarded match arms are represented
+/// as a placeholder `Block { stmts: [Assert(guard)], tail }` (crash
+/// if the guard is false) when first type-checked, on the
+/// expectation that a LATER arm sharing the same dispatch tag will
+/// fold it into a real `if guard { tail } else { next_arm }`
+/// conditional before it's ever reached at runtime. This function
+/// performs that fold: it recurses down the rightmost `else` spine
+/// of `body` (an existing, possibly-already-partially-folded arm
+/// body) looking for the still-unresolved placeholder, and replaces
+/// it with `IfExpr(guard, tail, new_tail)`. Recursing rather than
+/// only checking the top level is what makes an arbitrary-length
+/// chain of guarded arms (not just a single guarded arm immediately
+/// followed by one more arm) fold correctly.
+///
+/// Returns `true` (and mutates `body` in place) if a pending guard
+/// was found and folded â€” the caller should NOT push `new_tail` as
+/// a separate arm, since it's now folded into `body`. Returns
+/// `false` if `body` has no unresolved guard at its rightmost spine
+/// (e.g. the previous arm was unguarded, or this is the first arm
+/// for its tag) â€” the caller should push `new_tail` as a fresh arm.
+fn fold_guard_chain(body: &mut crate::ir::TypedExpr, new_tail: crate::ir::TypedExpr) -> bool {
+    enum Action {
+        FoldHere(crate::ir::TypedExpr, crate::ir::TypedExpr),
+        Recurse,
+        None,
+    }
+    let action = match &body.kind {
+        crate::ir::TypedExprKind::Block { stmts, tail } if stmts.len() == 1 => {
+            if let crate::ir::TypedStmt::Assert { expr, message: None } = &stmts[0] {
+                Action::FoldHere(expr.clone(), (**tail).clone())
+            } else {
+                Action::None
+            }
+        }
+        crate::ir::TypedExprKind::IfExpr { .. } => Action::Recurse,
+        _ => Action::None,
+    };
+    match action {
+        Action::FoldHere(guard_cond, then_val) => {
+            let span = body.span;
+            let ty = body.ty.clone();
+            *body = crate::ir::TypedExpr {
+                kind: crate::ir::TypedExprKind::IfExpr {
+                    cond: Box::new(guard_cond),
+                    then_value: Box::new(then_val),
+                    else_value: Box::new(new_tail),
+                },
+                ty,
+                constant: None,
+                span,
+                binding_decl_span: None,
+            };
+            true
+        }
+        Action::Recurse => {
+            if let crate::ir::TypedExprKind::IfExpr { else_value, .. } = &mut body.kind {
+                fold_guard_chain(else_value, new_tail)
+            } else {
+                unreachable!("Action::Recurse only produced for IfExpr bodies")
+            }
+        }
+        Action::None => false,
+    }
+}
+
 // Closure #278: match on f32 / f64 scrutinee. Mirrors
 // `check_match_str` shape â€” desugar to a nested IfExpr chain
 // keyed on `scrut == lit_arm` with the wildcard body as the
@@ -17824,44 +17891,41 @@ fn check_expr(
                     result_ty = Some(body_checked.ty().clone());
                 }
                 let is_wildcard = matches!(arm.pattern, crate::ast::Pattern::Wildcard);
-                // M3: if this arm has a guard AND the previous arm in typed_arms has
-                // the same tag and a guarded body (Block{Assert,tail}), they were
-                // already pushed with a pending flag. Instead, if THIS arm has no guard
-                // and the last pushed arm has the same tag — merge: replace last arm's
-                // block-assert body with IfExpr(extracted_guard, old_tail, new_body).
+                // M3 fix (2026-07-28, BUG-28): the previous version of this
+                // merge only looked ONE arm back (`typed_arms.last_mut()`,
+                // gated on `arm.guard.is_none()`), so a chain of 3+
+                // consecutive same-tag arms with more than one guarded arm
+                // (e.g. `_ if n < 10`, `_ if n < 100`, `_` -- two guarded
+                // wildcards + a final catch-all) never fully folded: only
+                // the LAST guarded arm merged with the final unguarded one;
+                // earlier guarded arms stayed as independent `typed_arms`
+                // entries whose bodies were still the placeholder
+                // `Block{Assert(guard), tail}` shape (a "crash if the guard
+                // is false" stand-in, meant to be temporary until a later
+                // same-tag arm converts it into a real `if guard { .. }
+                // else { .. }`). Since multiple entries end up sharing the
+                // same dispatch tag, and the backend's tag-based dispatch
+                // only ever reaches the FIRST entry for a given tag, every
+                // earlier guarded arm's Assert became unreachable dead code
+                // -- the guard was silently never evaluated, and dispatch
+                // always took the first arm's body regardless of its own
+                // guard's truth value. Confirmed via a minimal repro:
+                // `match n { _ if n < 10 then "small", _ if n < 100 then
+                // "medium", _ then "big" }` returned "small" for every
+                // input. Fixed: `fold_guard_chain` recurses down the
+                // rightmost `else` spine of the previous same-tag arm's
+                // body to find whichever guard is still unresolved
+                // (however many prior merges deep) and folds the new arm
+                // in there -- so an arbitrary-length chain of guarded arms
+                // folds correctly regardless of how many arms precede it.
                 let this_tag = tag_opt.unwrap_or(if is_wildcard { u32::MAX } else { 0 });
-                let merged = if arm.guard.is_none() {
-                    // Check if last pushed arm has same tag and a Block{Assert,tail} body.
-                    if let Some(last) = typed_arms.last_mut() {
-                        let same_tag = (last.is_wildcard && is_wildcard) ||
-                            (!last.is_wildcard && !is_wildcard && last.tag == this_tag)
-                            || (last.int_value == int_opt && int_opt.is_some());
-                        if same_tag {
-                            if let crate::ir::TypedExprKind::Block { ref stmts, ref tail } = last.body.kind.clone() {
-                                if stmts.len() == 1 {
-                                    if let crate::ir::TypedStmt::Assert { ref expr, message: None } = stmts[0] {
-                                        let guard_cond = expr.clone();
-                                        let then_val = *tail.clone();
-                                        let else_val = body_checked.expr.clone();
-                                        let merged_body = crate::ir::TypedExpr {
-                                            kind: crate::ir::TypedExprKind::IfExpr {
-                                                cond: Box::new(guard_cond),
-                                                then_value: Box::new(then_val),
-                                                else_value: Box::new(else_val),
-                                            },
-                                            ty: body_checked.expr.ty.clone(),
-                                            constant: None,
-                                            span: arm.body.span,
-                                            binding_decl_span: None,
-                                        };
-                                        last.body = merged_body;
-                                        true
-                                    } else { false }
-                                } else { false }
-                            } else { false }
-                        } else { false }
-                    } else { false }
-                } else { false };
+                let same_tag_as_last = typed_arms.last().map_or(false, |last| {
+                    (last.is_wildcard && is_wildcard)
+                        || (!last.is_wildcard && !is_wildcard && last.tag == this_tag)
+                        || (last.int_value == int_opt && int_opt.is_some())
+                });
+                let merged = same_tag_as_last
+                    && fold_guard_chain(&mut typed_arms.last_mut().unwrap().body, body_checked.expr.clone());
                 if !merged {
                     typed_arms.push(crate::ir::TypedMatchArm {
                         variant: variant_name_opt.unwrap_or_default(),

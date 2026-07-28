@@ -1,0 +1,31 @@
+// build & run:
+//   vanic run examples/language/english/nested_enum_str_payload.vani
+//   vanic run examples/language/english/nested_enum_str_payload.vani --backend=c
+
+intent "Regression: a payload-less variant of an enum whose OTHER variant carries a Str payload (not OwnedStr) must not crash the LLVM backend. The zero-init placeholder for a payload-less variant's unused payload slot only handled OwnedStr (a heap-owned string), not Str (a borrowed/interned one) -- both lower to i8* at the LLVM level and need the `null` literal, not `0`. Without the fix, this file's insertvalue emits `i8* 0` (an integer literal where LLVM expects a pointer), and `lli` rejects the IR with 'integer constant must have integer type'. Found while writing a two-flat-matches worked example (nested variant dispatch) for the pattern-match tutorial.";
+
+enum Command { Quit, Status, Echo(Str) }
+enum ParseResult { Ok(Command), Err(Str) }
+
+fn dispatch_command(cmd: Command) -> i64 {
+  return match cmd {
+    Command.Quit then 0,
+    Command.Status then 1,
+    Command.Echo(s) then len(s) as i64,
+  };
+}
+
+fn dispatch(pr: ParseResult) -> i64 {
+  return match pr {
+    ParseResult.Ok(cmd) then dispatch_command(cmd),
+    ParseResult.Err(e) then 0 - 1,
+  };
+}
+
+fn main() -> i64 {
+  print dispatch(ParseResult.Ok(Command.Quit));
+  print dispatch(ParseResult.Ok(Command.Status));
+  print dispatch(ParseResult.Ok(Command.Echo("hi")));
+  print dispatch(ParseResult.Err("bad"));
+  return 0;
+}

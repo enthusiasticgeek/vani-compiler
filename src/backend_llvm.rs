@@ -16791,9 +16791,19 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
             let payload_zero = match &payload_ty {
                 Type::F32 | Type::F64 => "0.0",
                 Type::Bool => "false",
-                // Pointer payloads (OwnedStr lowers to i8*)
-                // need LLVM's `null` literal, not `0`.
-                Type::OwnedStr => "null",
+                // Pointer payloads (Str/OwnedStr both lower to
+                // i8*) need LLVM's `null` literal, not `0` --
+                // `insertvalue %Enum_X %s0, i8* 0, 1` is invalid
+                // IR ("integer constant must have integer type").
+                // Bug fix (2026-07-28): `Type::Str` was missing
+                // here (only `OwnedStr` was covered), so a
+                // payload-less variant of an enum whose OTHER
+                // variant carries a `Str` payload (not OwnedStr)
+                // fell through to the `_ => "0"` default and
+                // `lli` rejected the emitted IR. Found while
+                // writing a tutorial example nesting a `Str`
+                // payload one level inside another enum.
+                Type::Str | Type::OwnedStr => "null",
                 // Aggregate payloads use `zeroinitializer`
                 // for the all-zero placeholder when the
                 // variant has no user-provided payload.
