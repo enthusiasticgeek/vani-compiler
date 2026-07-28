@@ -2110,17 +2110,48 @@ verifying the four fixes above against their tutorial worked examples
   (`let t: Task<i64> = task worker(6); ... let r: i64 = join t;`)
   and `advanced/01_async.md`'s "`Future<R>` for scalar R AND v3.1
   Task<T> for all v3.1-allowed T" line both describe this as already
-  working; it isn't. Needs a decision: either `Task<R>` with a real
-  return-value-capturing `join` expression is a genuine v1 gap worth
-  implementing (matching what's taught), or every `task`/`join`
-  example across these three chapters needs rewriting to the real
-  statement-only, no-return-value form. Not scoped or estimated —
-  discovered too late in the session for a confident effort read; the
-  blast radius (3 chapters, an unknown number of examples) needs its
-  own audit pass before estimating. `advanced/02c_rwlock_primer.md`'s
-  worked example was rewritten to avoid `task`/`join` entirely
+  working; it isn't. Needs a decision between two paths, now scoped:
+
+  - **Path A -- rewrite the docs to match reality.** ~2-3 h · Short,
+    low risk. Blast radius audited: `03_concurrency.md` (243 lines,
+    6 sections) has exactly 2 code examples using `Task<R>` syntax --
+    the opening `worker(6)` example (~L39) and the `stage_one`
+    pipeline example (~L159-160) -- plus prose mentioning `Task<R>` at
+    L49/L52. `01_async.md` has one passing comparison-table mention
+    (L101), not a worked example. The chapter's own Challenge section
+    (~L234-238) already sidesteps the problem entirely -- it asks for
+    4 worker tasks summed via `Atomic<i64>`, which needs no return-
+    value capture at all, so it needs no rewrite. Total: rewrite 2
+    code blocks + ~4 lines of prose in one file, 1 line in a second.
+    Same shape as the `02c_rwlock_primer.md` fix already done this
+    session (sequential/statement-form `task <name> { body } ... join
+    <name>;`, verified compiling).
+  - **Path B -- implement real `Task<R>` with return-value capture.**
+    ~8-12 h · Large, dedicated session. Not a greenfield feature --
+    `task <name> { body }` already spawns a genuine OS thread
+    (`pthread_create`/`CreateThread`, confirmed in `ast.rs`'s own
+    comment and the concurrency chapter's primitive-by-primitive
+    walkthrough) -- but adding a typed result needs: (1) parser
+    support for the expression form `let t: Task<R> = task EXPR;`
+    alongside the existing statement form; (2) AST/IR changes so
+    `TaskSpawn`/`TaskJoin` (or new expression-form nodes) carry a
+    result type and a join-side value; (3) checker support
+    type-checking the spawned expression's return type against `R`
+    and validating `join`'s result type; (4) LLVM backend: a real
+    cross-thread result-passing mechanism (heap-allocate a small
+    result slot per spawn, trampoline function stores into it,
+    `join` = `pthread_join`/`WaitForSingleObject` + read + free) with
+    correct affine-ownership semantics for non-Copy result types; (5)
+    same for the C backend. Comparable in shape to the XL-tier items
+    already in this file (XL4 nested monomorphization was ~10 h).
+
+  Recommend Path A first regardless of whether Path B is ever picked
+  up -- the docs are actively teaching broken code today, and Path B
+  (if it happens) would need the docs rewritten again anyway once the
+  real syntax is nailed down. `advanced/02c_rwlock_primer.md`'s worked
+  example was already rewritten to avoid `task`/`join` entirely
   (sequential calls instead) with a note pointing at this gap; the
-  other two chapters are untouched.
+  other two chapters are still untouched.
 
 - [ ] **BUG-22. C backend has its own, independent version of BUG-19's
   bug, PLUS a separate struct-definition-ordering bug — both found
@@ -2166,11 +2197,48 @@ verifying the four fixes above against their tutorial worked examples
     after the function bodies that call it too ("implicit declaration
     of function" / "conflicting types" errors). A real fix needs
     `body`'s type-definition portion separated from its function-body
-    portion so the bundle can land strictly between them — not
-    attempted, given the scope of that restructuring. The default LLVM
-    backend (BUG-19's fix) has no such limitation; if `--backend=c` is
-    required, stick to scalar `RwLock`/`Mutex` payloads.
-    `advanced/02c_rwlock_primer.md` documents this precisely.
+    portion so the bundle can land strictly between them.
+
+    **~2-4 h · Short, low risk — a clean split point already exists
+    in this exact function, just not used for this purpose yet.**
+    `emit_c` (`backend_c.rs`, ~L1420-1450) already buffers function
+    bodies SEPARATELY from `body` for the identical reason (its own
+    comment: "Emit function bodies into a separate buffer so the
+    task-outlining side-effect ... can be spliced between the
+    prototypes and the bodies") -- `function_bodies` is built at
+    L1436-1440, kept apart from `body`, and only appended at L1446.
+    The same pattern needs one more split: prototypes (currently
+    emitted straight into `body` at L1423-1425 via `emit_prototype`)
+    ALSO need the concurrency bundle to already exist by the time
+    they're emitted, since a fn taking `mut ref RwLock<Point>`
+    spells that type in its own prototype. Fix: buffer prototypes
+    into their own `String` the same way `function_bodies` already
+    is; call `emit_concurrency_runtime_helpers` writing into `body`
+    right after struct/enum/vec-bundle emission finishes (~L1420,
+    before the prototype loop) instead of its current position
+    (~L1515, deep in the unrelated helper-emission sequence); pass a
+    combined `&(prototypes.clone() + &function_bodies)` string (or
+    equivalent) to `emit_concurrency_runtime_helpers` for its
+    `.contains("intent_condvar")`/`.contains("intent_task_handle")`
+    gating checks specifically, since those still need to see actual
+    USAGE sites that only exist in the not-yet-assembled prototypes/
+    bodies, not just `mutex_specs`/`rwlock_specs` (which are already
+    collected structurally and unaffected by this reorder); then
+    assemble in the corrected order: struct/enum/vec defs -> bundle
+    -> prototypes -> task outlines -> function bodies -> `main()`.
+    Test plan: the exact `RwLock<Point>`/`Mutex<Point>` repros already
+    in this session's history (both now-passing on LLVM, still-
+    failing on `--backend=c`), plus a `Channel<StructT, N>` case
+    (same bundle-embeds-T-by-value shape, never actually verified
+    end-to-end on either backend this session) and a full
+    `cargo test --lib` sweep (the last attempt at this exact reorder
+    regressed the working `Mutex<i64>`/`RwLock<i64>` case, so re-run
+    the BUG-22 i64 regression test specifically before considering
+    this done).
+
+    The default LLVM backend (BUG-19's fix) has no such limitation;
+    if `--backend=c` is required, stick to scalar `RwLock`/`Mutex`
+    payloads. `advanced/02c_rwlock_primer.md` documents this precisely.
 
 - [x] **BUG-23. C backend's `while_bounds_hints` optimizer-aid macro
   referenced a Vec `let`-declared fresh inside the very loop body it
