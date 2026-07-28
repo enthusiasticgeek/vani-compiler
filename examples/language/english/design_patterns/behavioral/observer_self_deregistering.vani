@@ -1,0 +1,60 @@
+// build & run (requires the embedded-target gate -- see below):
+//   INTENT_TARGET_EMBEDDED=1 vanic run examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani
+//   INTENT_TARGET_EMBEDDED=1 vanic run examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani --backend=c
+//
+// (PowerShell: $env:INTENT_TARGET_EMBEDDED="1"; vanic run ...)
+
+intent "Observer pattern, self-deregistering variant -- when an observer needs to reach back into its subject without the World holding a live borrow, that's the genuine Rc-required shape vani.md's Weak<T> discussion calls out. vani has no Rc/Weak; the escape hatch is a raw pointer inside unsafe(reason=...), gated to embedded targets in v1 (see tutorials/src/intermediate/03d_cyclic_references_primer.md).";
+
+struct Subject {
+  state: i64,
+  active_count: i64,
+}
+
+// The observer carries a raw *mut i64 pointing directly at
+// subject.active_count -- not a safe `ref`/`mut ref` (which the
+// checker would require flow through a `world: mut ref World`
+// parameter at every call site, exactly the thing this pattern is
+// trying to avoid) and not Rc<Subject> (vani has no Rc). This is
+// the one place in the whole 03d primer where the "refactor to
+// indices + World" advice is deliberately NOT taken -- the raw
+// pointer is the point of the example.
+struct SelfDeregisteringObserver {
+  id: i64,
+  subject_ptr: *mut i64,
+}
+
+fn make_observer(id: i64, subject: mut ref Subject) -> SelfDeregisteringObserver {
+  unsafe(reason = "self-deregistering observer needs raw subject pointer") {
+    let p: *mut i64 = (mut ref subject.active_count) as *mut i64;
+    return SelfDeregisteringObserver { id: id, subject_ptr: p };
+  }
+}
+
+// No Drop hook is involved -- v1 has no user-definable Drop, only
+// the compiler-synthesized scope-exit cleanup for affine types. So
+// "self-deregistering" here means an explicit call, not an
+// automatic destructor. Rust's version really does run this from
+// `impl Drop`; vani's honest translation is "call it yourself
+// before the observer goes out of scope."
+fn deregister(obs: SelfDeregisteringObserver) -> i64 {
+  unsafe(reason = "self-deregistering observer needs raw subject pointer") {
+    let current: Tainted<i64> = raw_load(obs.subject_ptr);
+    let n: i64 = assert_safe(current);
+    let _ = raw_store(obs.subject_ptr, n - 1);
+  }
+  print "observer", obs.id, "deregistered itself";
+  return 0;
+}
+
+fn main() -> i64 {
+  let subject: Subject = Subject { state: 0, active_count: 2 };
+  let o1: SelfDeregisteringObserver = make_observer(1, mut ref subject);
+  let o2: SelfDeregisteringObserver = make_observer(2, mut ref subject);
+  print "active observers:", subject.active_count;
+  let _ = deregister(o1);
+  print "active observers:", subject.active_count;
+  let _ = deregister(o2);
+  print "active observers:", subject.active_count;
+  return 0;
+}

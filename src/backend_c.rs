@@ -12235,6 +12235,23 @@ pub(crate) fn c_element_storage(ty: &Type) -> String {
             let inner_storage = c_element_storage(inner);
             format!("{}*", inner_storage)
         }
+        // Bug fix (2026-07-28): `*const T` / `*mut T` struct
+        // fields fell through to `c_leaf_type`'s placeholder
+        // comment (`/* *const T */` / `/* *mut T */`), which
+        // isn't valid C -- `cc` rejected any struct with a raw
+        // pointer field ("expected specifier-qualifier-list
+        // before '<field>'"). `c_type_name` already has the real
+        // spelling for exactly this reason (its own comment:
+        // "raw pointer storage uses the full declarator form...
+        // not the leaf-comment placeholder"); this arm mirrors it.
+        Type::Ptr(inner) => {
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("const {}*", inner_decl)
+        }
+        Type::PtrMut(inner) => {
+            let inner_decl = format_declarator(inner, "").trim_end().to_string();
+            format!("{}*", inner_decl)
+        }
         _ => c_leaf_type(ty).to_string(),
     }
 }

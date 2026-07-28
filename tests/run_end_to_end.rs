@@ -189,6 +189,57 @@ fn task_struct_ctx_sizing_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// BUG-27 (2026-07-28): raw pointer (`*const T` / `*mut T`) struct
+// FIELDS emitted an unusable placeholder comment on the C backend
+// (`/* *mut T */ subject_ptr;`) instead of a real C declarator --
+// `cc` rejected any struct with a raw-pointer field with "expected
+// specifier-qualifier-list". Root cause: `c_element_storage` (used
+// specifically for struct-field / Vec-element storage spelling, a
+// THIRD parallel type-dispatch function alongside `c_type_name` and
+// `format_declarator`) had no arms for `Type::Ptr`/`Type::PtrMut`
+// and fell through to `c_leaf_type`'s placeholder-comment fallback.
+// The LLVM backend was never affected -- it doesn't route struct
+// fields through this function. Found while writing a worked
+// example for `tutorials/src/intermediate/03d_cyclic_references_
+// primer.md`'s self-deregistering-observer-via-`unsafe` pattern
+// (which needs exactly this shape: a raw pointer stored as a
+// struct field). Requires `INTENT_TARGET_EMBEDDED=1` since raw
+// pointer types are gated to embedded targets in v1 (Layer 1.1 of
+// `unsafe.md`).
+#[test]
+fn observer_self_deregistering_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/design_patterns/behavioral/observer_self_deregistering.vani",
+        manifest_dir
+    );
+    let expected = "active observers: 2\nobserver 1 deregistered itself\nactive observers: 1\nobserver 2 deregistered itself\nactive observers: 0\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .env("INTENT_TARGET_EMBEDDED", "1")
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "self-deregistering observer (raw pointer struct field) produced the \
+             wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");
