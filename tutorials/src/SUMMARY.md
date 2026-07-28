@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](introduction.md)
+[Why vāṇी? -- comparisons with Python, C/C++, and Rust](why_vani.md)
 [Installation & LSP setup](installation.md)
 
 # Beginner

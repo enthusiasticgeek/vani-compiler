@@ -13,6 +13,10 @@ overhead, no garbage collector slowing things down. It supports
 Mandarin, Arabic, and more), so you can write code in the
 language you think in.
 
+**New here and wondering why you'd pick vāṇी over Python, C/C++, or
+Rust?** See **[Why vāṇी?](why_vani.md)** for the direct comparison
+before you dive in.
+
 **No CS background required.** Every computer-science concept
 in these tutorials is introduced with an everyday analogy BEFORE
 the code. Look for chapters labelled *"intuition primer"* -- they
