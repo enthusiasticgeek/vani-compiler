@@ -47010,9 +47010,17 @@ mod tests {
             "expected FUTEX_WAKE_PRIVATE(n=1) operand pattern:\n{ll}"
         );
         // The state field is now i32-wide so futex sees it
-        // as a 32-bit word.
+        // as a 32-bit word. Stale-assertion fix (2026-07-28):
+        // this checked the OLD hardcoded `%intent_mutex_i64`
+        // name BUG-19's fix (above) replaced with the real
+        // per-T bundle name `%intent_mutex_<element_tag>` —
+        // `int64_t` is `i64`'s `element_tag`, matching the C
+        // backend's own `intent_mutex_int64_t` spelling.
+        // Never caught locally since this whole test is
+        // `#[cfg(not(target_os = "windows"))]`; only surfaced
+        // once Linux/AArch64/RISC-V CI actually ran it.
         assert!(
-            ll.contains("%intent_mutex_i64 = type { i64, i32 }"),
+            ll.contains("%intent_mutex_int64_t = type { i64, i32 }"),
             "expected mutex struct with i32 state field:\n{ll}"
         );
     }
