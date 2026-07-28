@@ -15672,7 +15672,124 @@ fn emit_expr(expr: &TypedExpr) -> String {
             // Surface as a 1 literal so any wrapping assert stays compilable.
             "1".to_string()
         }
+        TypedExprKind::TaskSpawnCall { callee, args, arg_types, result_ty } => {
+            emit_task_spawn_call(callee, args, arg_types, result_ty)
+        }
+        TypedExprKind::TaskJoinExpr { name, result_ty } => emit_task_join_expr(name, result_ty),
     }
+}
+
+/// `task <callee>(args…)` in expression position — BUG-21 Path B.
+/// Extends the same outline+ctx-malloc+`intent_thread_create`
+/// pattern as `TypedStmt::TaskSpawn`'s codegen above, but the
+/// outlined fn calls a REAL named function (instead of inlining
+/// body statements) and stores its return value into the ctx
+/// before returning. `emit_expr` has no `out: &mut String` (it's
+/// a pure expr -> C-source-string function), so the whole spawn
+/// sequence is wrapped in a GNU statement-expression `({ … })` --
+/// the same technique already used throughout this file for
+/// other multi-statement expressions (try_vec, box, etc). The
+/// outlined trampoline + ctx typedef go into the same
+/// `TASK_OUTLINES` module-scope side buffer the statement form
+/// already uses.
+///
+/// The ctx struct's `result` field is always FIRST. `emit_task_
+/// join_expr` only has `result_ty` in hand (not the arg types
+/// that shaped the rest of the struct), so it reads the result by
+/// casting the opaque `void* ctx` pointer directly to
+/// `result_ty*` -- valid because a struct's first member is
+/// always at offset 0 regardless of what (or how many) fields
+/// follow.
+fn emit_task_spawn_call(
+    callee: &str,
+    args: &[TypedExpr],
+    arg_types: &[Type],
+    result_ty: &Type,
+) -> String {
+    let id = TASK_OUTLINE_COUNTER.with(|c| {
+        let n = c.get();
+        c.set(n + 1);
+        n
+    });
+    let struct_name = format!("intent_task_call_{}_ctx", id);
+    let outline_fn = format!("intent_task_call_{}", id);
+
+    let mut outline = String::new();
+    outline.push_str(&format!("typedef struct {} {{\n", struct_name));
+    outline.push_str(&format!("  {};\n", format_declarator(result_ty, "result")));
+    for (i, arg_ty) in arg_types.iter().enumerate() {
+        outline.push_str(&format!(
+            "  {};\n",
+            format_declarator(arg_ty, &format!("arg_{}", i))
+        ));
+    }
+    outline.push_str(&format!("}} {};\n\n", struct_name));
+    outline.push_str(&format!(
+        "static void* {}(void* _ctx_raw) {{\n",
+        outline_fn
+    ));
+    outline.push_str(&format!(
+        "  {}* ctx = ({}*)_ctx_raw;\n",
+        struct_name, struct_name
+    ));
+    let call_args: Vec<String> = (0..arg_types.len())
+        .map(|i| format!("ctx->arg_{}", i))
+        .collect();
+    // Closure #269 (mirrored from `emit_call`'s regular-call
+    // fallback): extern "C" fns and `#[no_mangle]` fns emit a
+    // bare C-ABI call; regular vāṇी fns use the `fn_` prefix.
+    let is_extern = C_EXTERN_FN_REGISTRY.with(|r| r.borrow().contains(callee));
+    let is_no_mangle = NO_MANGLE_FN_REGISTRY.with(|r| r.borrow().contains(callee));
+    let symbol = if is_extern || is_no_mangle {
+        callee.to_string()
+    } else {
+        function_name(callee)
+    };
+    outline.push_str(&format!(
+        "  ctx->result = {}({});\n",
+        symbol,
+        call_args.join(", ")
+    ));
+    outline.push_str("  return (void*)0;\n");
+    outline.push_str("}\n\n");
+    TASK_OUTLINES.with(|b| b.borrow_mut().push_str(&outline));
+
+    let rendered_args: Vec<String> = args.iter().map(emit_expr).collect();
+    let mut stmt_expr = String::new();
+    stmt_expr.push_str("({ ");
+    stmt_expr.push_str(&format!(
+        "{}* _intent_ctx_{} = ({}*)malloc(sizeof({}));",
+        struct_name, id, struct_name, struct_name
+    ));
+    for (i, arg) in rendered_args.iter().enumerate() {
+        stmt_expr.push_str(&format!(" _intent_ctx_{}->arg_{} = {};", id, i, arg));
+    }
+    stmt_expr.push_str(&format!(" intent_task_handle _intent_handle_{};", id));
+    stmt_expr.push_str(&format!(
+        " intent_thread_create(&_intent_handle_{}.thread, {}, _intent_ctx_{});",
+        id, outline_fn, id
+    ));
+    stmt_expr.push_str(&format!(
+        " _intent_handle_{}.ctx = _intent_ctx_{};",
+        id, id
+    ));
+    stmt_expr.push_str(&format!(" _intent_handle_{}; }})", id));
+    stmt_expr
+}
+
+/// `join <name>` in expression position — BUG-21 Path B. Mirrors
+/// `TypedStmt::TaskJoin`'s wait/free sequence, plus reading the
+/// result out of the ctx before it's freed. See
+/// `emit_task_spawn_call` for why a raw cast to `result_ty*`
+/// suffices without knowing the full ctx struct shape.
+fn emit_task_join_expr(name: &str, result_ty: &Type) -> String {
+    let handle = local_name(name);
+    format!(
+        "({{ intent_thread_join({handle}.thread); {decl} = *({rty}*){handle}.ctx; free({handle}.ctx); _intent_join_result; }})",
+        handle = handle,
+        decl = format_declarator(result_ty, "_intent_join_result"),
+        rty = c_type_name(result_ty),
+    )
 }
 
 /// Per-shape C struct name for a tuple type. Mirrors
@@ -20138,6 +20255,12 @@ pub(crate) fn c_leaf_type(ty: &Type) -> &'static str {
         // The typedef sits in the runtime preamble alongside
         // the channel / mutex helpers.
         Type::Task => "intent_task_handle",
+        // `Task<R>` reuses the exact same handle struct as the
+        // payload-free `Task` -- the return value of type R lives
+        // inside the heap-allocated ctx (accessed via the same
+        // `.ctx` pointer), not in the handle itself, so the handle
+        // shape doesn't depend on R at all.
+        Type::TaskR(_) => "intent_task_handle",
         // `Atomic<T>` is parametric over T (integer widths +
         // bool). c_leaf_type cannot synthesize a `String`, so
         // callers that need the storage spelling for a specific
@@ -20868,7 +20991,7 @@ fn divisor_helper(ty: &Type) -> &'static str {
         Type::U64 => "intent_check_u64_divisor",
         Type::F32 => "intent_check_f32_divisor",
         Type::F64 => "intent_check_f64_divisor",
-        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
+        Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::TaskR(_) | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => {
             unreachable!("non-numeric type cannot be a divisor")
         }
     }
@@ -20894,6 +21017,7 @@ fn shift_helper(ty: &Type) -> &'static str {
         | Type::Ref(_)
         | Type::RefMut(_)
         | Type::Task
+        | Type::TaskR(_)
         | Type::Atomic(_)
         | Type::Channel(_, _)
         | Type::Mutex(_)

@@ -416,6 +416,7 @@ fn llvm_byte_size(ty: &Type) -> u64 {
         }
         Type::Channel(_, _) => 32, // ring buffer header — generous
         Type::Task => 16, // pthread_t + ctx*
+        Type::TaskR(_) => 16, // same handle shape as Task; R lives in the heap ctx
         Type::Condvar => 8,
         Type::Barrier => 24, // { i64 count, i64 n, i32 gen, pad } = 20+4 pad
         Type::FileHandle => 8, // FILE* stored as i64
@@ -17416,6 +17417,83 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 arg_vals.join(", "),
             ));
             result
+        }
+        TypedExprKind::TaskSpawnCall { callee, args, arg_types, result_ty } => {
+            emit_task_spawn_call(callee, args, arg_types, result_ty, ctx, out)
+        }
+        TypedExprKind::TaskJoinExpr { name, result_ty } => {
+            // Mirrors `TypedStmt::TaskJoin`'s wait/free sequence,
+            // plus loading the result out of the ctx before it's
+            // freed. BUG-21 Path B.
+            let addr = match ctx.locals.get(name) {
+                Some((_, a)) => a.clone(),
+                None => unreachable!(
+                    "checker: join '{}' is in scope when we get here",
+                    name
+                ),
+            };
+            let handle_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 0\n",
+                handle_p, addr
+            ));
+            let handle_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i64, i64* {}\n",
+                handle_v, handle_p
+            ));
+            if host_uses_win32_threading() {
+                let h = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = inttoptr i64 {} to i8*\n",
+                    h, handle_v
+                ));
+                let _wait = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @WaitForSingleObject(i8* {}, i32 -1)\n",
+                    _wait, h
+                ));
+                let _close = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @CloseHandle(i8* {})\n",
+                    _close, h
+                ));
+            } else {
+                let _ret = ctx.fresh_tmp();
+                out.push_str(&format!(
+                    "  {} = call i32 @pthread_join(i64 {}, i8** null)\n",
+                    _ret, handle_v
+                ));
+            }
+            let ctx_p = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 1\n",
+                ctx_p, addr
+            ));
+            let ctx_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load i8*, i8** {}\n",
+                ctx_v, ctx_p
+            ));
+            // The result field is always placed FIRST (offset 0)
+            // in the spawn-site ctx struct (see
+            // `emit_task_spawn_call`), specifically so the join
+            // site can read it back with only `result_ty` in
+            // hand — no need to know the arg types/count that
+            // shaped the rest of the (otherwise opaque) ctx.
+            let result_lty = llvm_type_string(result_ty);
+            let result_ptr = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = bitcast i8* {} to {}*\n",
+                result_ptr, ctx_v, result_lty
+            ));
+            let result_v = ctx.fresh_tmp();
+            out.push_str(&format!(
+                "  {} = load {}, {}* {}\n",
+                result_v, result_lty, result_lty, result_ptr
+            ));
+            out.push_str(&format!("  call void @free(i8* {})\n", ctx_v));
+            result_v
         }
         kind => unreachable!(
             "backend: TypedExprKind not lowered as standalone expression: {:?}",
@@ -43666,6 +43744,10 @@ fn collect_strings_in_expr<F>(
         | TypedExprKind::RefMutField { .. }
         | TypedExprKind::FnRef { .. }
         | TypedExprKind::EnumVariant { .. } => {}
+        TypedExprKind::TaskSpawnCall { args, .. } => {
+            for a in args { collect_strings_in_expr(a, msgs, idx, intern); }
+        }
+        TypedExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -44291,6 +44373,12 @@ pub(crate) fn walk_expr(
         TypedExprKind::Forall { body, .. } => {
             walk_expr(body, declared, order, seen);
         }
+        TypedExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                walk_expr(a, declared, order, seen);
+            }
+        }
+        TypedExprKind::TaskJoinExpr { name, .. } => note_capture(name, declared, order, seen),
     }
 }
 
@@ -44729,6 +44817,190 @@ fn emit_task_via_pthread(
     ctx.deferred_functions.push_str(&outlined_ctx.deferred_functions);
     ctx.deferred_functions.push_str(&deferred);
     ctx.next_outline = outlined_ctx.next_outline;
+}
+
+/// `task <callee>(args…)` in expression position — BUG-21 Path B.
+/// Extends the same ctx-malloc + pthread_create/CreateThread +
+/// outlined-trampoline pattern as `emit_task_via_pthread`, but the
+/// trampoline calls a REAL named function (instead of inlining
+/// body statements) and stores its return value into the ctx
+/// before returning, so the matching `join` expression can read it
+/// back out.
+///
+/// The ctx struct field order is `{ result_ty, arg1_ty, arg2_ty,
+/// … }` — result FIRST. This is deliberate: `TypedExprKind::
+/// TaskJoinExpr` only carries `result_ty` (not the arg types/count
+/// that shaped the rest of the struct), so the join site's codegen
+/// bitcasts the opaque `i8*` ctx pointer directly to `result_ty*`
+/// and reads offset 0. That's only well-defined if the result is
+/// the struct's first field — struct layout never pads before the
+/// first member, regardless of what (or how many) fields follow.
+///
+/// Returns the SSA value of the `%intent_task_handle` struct
+/// (built via `insertvalue`, not written through an alloca) — this
+/// is an expression, not a statement, so the caller (typically a
+/// `Let`) is responsible for storing it wherever it needs to live.
+fn emit_task_spawn_call(
+    callee: &str,
+    args: &[TypedExpr],
+    arg_types: &[Type],
+    result_ty: &Type,
+    ctx: &mut FnCtx,
+    out: &mut String,
+) -> String {
+    let id = ctx.next_outline;
+    ctx.next_outline += 1;
+    let fn_name = format!("intent_task_call_{}", id);
+
+    let arg_ll_tys: Vec<String> = arg_types.iter().map(llvm_type_string).collect();
+    let result_ll_ty = llvm_type_string(result_ty);
+    let mut field_tys = vec![result_ll_ty.clone()];
+    field_tys.extend(arg_ll_tys.iter().cloned());
+    let ctx_ty = format!("{{ {} }}", field_tys.join(", "));
+
+    // --- Spawn-site code in the parent function. ---
+    // Evaluate args in the parent BEFORE the ctx malloc — some
+    // arg expressions may themselves emit blocks/temporaries that
+    // shouldn't be interleaved with ctx field stores.
+    let arg_vals: Vec<String> = args.iter().map(|a| emit_expr(a, ctx, out)).collect();
+
+    let ctx_size = task_spawn_call_ctx_size(arg_types, result_ty);
+    let ctx_raw = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = call i8* @malloc(i64 {})\n",
+        ctx_raw, ctx_size
+    ));
+    let ctx_typed = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = bitcast i8* {} to {}*\n",
+        ctx_typed, ctx_raw, ctx_ty
+    ));
+    for (i, (v, lty)) in arg_vals.iter().zip(arg_ll_tys.iter()).enumerate() {
+        // Field index i + 1: index 0 is the result slot.
+        let slot_p = ctx.fresh_tmp();
+        out.push_str(&format!(
+            "  {} = getelementptr {}, {}* {}, i32 0, i32 {}\n",
+            slot_p, ctx_ty, ctx_ty, ctx_typed, i + 1
+        ));
+        out.push_str(&format!(
+            "  store {} {}, {}* {}\n",
+            lty, v, lty, slot_p
+        ));
+    }
+
+    // Fire the platform spawn (same handle shape/convention as
+    // the block-form `task { .. }`).
+    let handle_addr = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = alloca %intent_task_handle\n",
+        handle_addr
+    ));
+    let thread_field = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 0\n",
+        thread_field, handle_addr
+    ));
+    if host_uses_win32_threading() {
+        let handle = ctx.fresh_tmp();
+        out.push_str(&format!(
+            "  {} = call i8* @CreateThread(i8* null, i64 0, i8* (i8*)* @{}, i8* {}, i32 0, i32* null)\n",
+            handle, fn_name, ctx_raw
+        ));
+        let handle_int = ctx.fresh_tmp();
+        out.push_str(&format!(
+            "  {} = ptrtoint i8* {} to i64\n",
+            handle_int, handle
+        ));
+        out.push_str(&format!(
+            "  store i64 {}, i64* {}\n",
+            handle_int, thread_field
+        ));
+    } else {
+        let _spawn_ret = ctx.fresh_tmp();
+        out.push_str(&format!(
+            "  {} = call i32 @pthread_create(i64* {}, i8* null, i8* (i8*)* @{}, i8* {})\n",
+            _spawn_ret, thread_field, fn_name, ctx_raw
+        ));
+    }
+    let ctx_field = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = getelementptr %intent_task_handle, %intent_task_handle* {}, i32 0, i32 1\n",
+        ctx_field, handle_addr
+    ));
+    out.push_str(&format!(
+        "  store i8* {}, i8** {}\n",
+        ctx_raw, ctx_field
+    ));
+    let handle_val = ctx.fresh_tmp();
+    out.push_str(&format!(
+        "  {} = load %intent_task_handle, %intent_task_handle* {}\n",
+        handle_val, handle_addr
+    ));
+
+    // --- Outlined trampoline: calls the REAL function. ---
+    let mut deferred = String::new();
+    deferred.push_str(&format!(
+        "define internal i8* @{}(i8* %_ctx_raw) {{\n",
+        fn_name
+    ));
+    deferred.push_str("entry:\n");
+    deferred.push_str(&format!(
+        "  %ctx_p = bitcast i8* %_ctx_raw to {}*\n",
+        ctx_ty
+    ));
+    let mut call_arg_strs: Vec<String> = Vec::with_capacity(arg_ll_tys.len());
+    for (i, lty) in arg_ll_tys.iter().enumerate() {
+        let slot_p = format!("%arg_slot_{}", i);
+        deferred.push_str(&format!(
+            "  {} = getelementptr {}, {}* %ctx_p, i32 0, i32 {}\n",
+            slot_p, ctx_ty, ctx_ty, i + 1
+        ));
+        let loaded = format!("%arg_val_{}", i);
+        deferred.push_str(&format!(
+            "  {} = load {}, {}* {}\n",
+            loaded, lty, lty, slot_p
+        ));
+        call_arg_strs.push(format!("{} {}", lty, loaded));
+    }
+    // Closure #269 (mirrored from the regular-call path in
+    // `emit_expr`'s `TypedExprKind::Call` arm): extern "C" fns
+    // and `#[no_mangle]` fns emit a bare `@<name>` symbol;
+    // regular vāṇी fns use the `@fn_<mangled>` prefix.
+    let is_extern = LLVM_EXTERN_FN_REGISTRY.with(|r| r.borrow().contains(callee));
+    let is_no_mangle = LLVM_NO_MANGLE_FN_REGISTRY.with(|r| r.borrow().contains(callee));
+    let symbol = if is_extern || is_no_mangle {
+        format!("@{}", callee)
+    } else {
+        format!("@fn_{}", llvm_mangle_ident(callee))
+    };
+    deferred.push_str(&format!(
+        "  %call_result = call {} {}({})\n",
+        result_ll_ty, symbol, call_arg_strs.join(", ")
+    ));
+    deferred.push_str(&format!(
+        "  %result_slot = getelementptr {}, {}* %ctx_p, i32 0, i32 0\n",
+        ctx_ty, ctx_ty
+    ));
+    deferred.push_str(&format!(
+        "  store {} %call_result, {}* %result_slot\n",
+        result_ll_ty, result_ll_ty
+    ));
+    deferred.push_str("  ret i8* null\n");
+    deferred.push_str("}\n");
+    ctx.deferred_functions.push_str(&deferred);
+
+    handle_val
+}
+
+/// Estimate ctx-struct byte size for `emit_task_spawn_call` —
+/// same conservative sum-of-fields-rounded-to-8 approach as
+/// `compute_ctx_size`, but over `{ result_ty, arg_types… }`.
+fn task_spawn_call_ctx_size(arg_types: &[Type], result_ty: &Type) -> u64 {
+    let mut total: u64 = (type_byte_size(result_ty) + 7) & !7;
+    for t in arg_types {
+        total += (type_byte_size(t) + 7) & !7;
+    }
+    total.max(8)
 }
 
 /// Estimate ctx-struct byte size for malloc — a safe upper
@@ -45481,6 +45753,16 @@ fn is_scalar(ty: &Type) -> bool {
         || matches!(ty, Type::Vec128(_))
         || matches!(ty, Type::Vec256(_))
         || matches!(ty, Type::Vec512(_))
+        // `Task<R>` (BUG-21 Path B) lowers to the named struct
+        // `%intent_task_handle` (same as `Task`). Unlike `Task`
+        // (whose only producer, the block-form `task { .. }`
+        // statement, manages its own alloca directly and never
+        // goes through this generic Let path), `task callee(..)`
+        // is a plain EXPRESSION whose result flows through an
+        // ordinary `let`, so it needs the uniform scalar-Let
+        // alloca+store path like the other struct-shaped handles
+        // above.
+        || matches!(ty, Type::TaskR(_))
 }
 
 /// Map our types to LLVM IR sort spellings. Signedness is the
@@ -45858,6 +46140,12 @@ pub fn llvm_type_string(ty: &Type) -> String {
         // Declared as `%intent_task_handle` in the module
         // preamble. T1.0 / closure #122.
         Type::Task => "%intent_task_handle".to_string(),
+        // `Task<R>` reuses the exact same handle struct as the
+        // payload-free `Task` — R lives in the heap ctx (via the
+        // handle's existing ctx-pointer field), not in the handle
+        // itself, so the handle shape doesn't depend on R. BUG-21
+        // Path B.
+        Type::TaskR(_) => "%intent_task_handle".to_string(),
         // Vtables Phase 3b: `dyn Iface` lowers to a per-Iface
         // named struct type `%intent_dyn_<Iface>` (declared in
         // the module preamble alongside per-Iface vtable

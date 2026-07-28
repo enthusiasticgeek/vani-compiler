@@ -234,6 +234,7 @@ fn type_size(ty: &Type) -> u64 {
         FnPtr(_, _) => 8,
         Closure(_, _) => 16, // Arc 5c: env-ptr + call-ptr
         Task => 16,
+        TaskR(_) => 16,
         Condvar => 8,
         Barrier => 24, // { i64 count, i64 n, i32 gen, pad }
         FileHandle => 8, // int64_t wrapping FILE*

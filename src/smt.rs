@@ -1534,6 +1534,12 @@ fn encode_expr(
         ExprKind::WhileLoop { .. } => Err(EncodeError::Unsupported(
             "while loop expressions not supported in SMT v1".into(),
         )),
+        ExprKind::TaskSpawnCall { .. } => Err(EncodeError::Unsupported(
+            "task spawn expressions not supported in SMT v1".into(),
+        )),
+        ExprKind::TaskJoinExpr { .. } => Err(EncodeError::Unsupported(
+            "task join expressions not supported in SMT v1".into(),
+        )),
     }
 }
 

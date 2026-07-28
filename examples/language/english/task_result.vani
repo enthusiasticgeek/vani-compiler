@@ -1,0 +1,16 @@
+// build & run:
+//   vanic run examples/language/english/task_result.vani
+//   vanic run examples/language/english/task_result.vani --backend=c
+
+intent "BUG-21 Path B: Task<R> -- spawn a real thread that returns a value, and join it for the result.";
+
+pure fn worker(n: i64) -> i64 {
+  return n * n;
+}
+
+fn main() -> i64 {
+  let t: Task<i64> = task worker(6);
+  let r: i64 = join t;
+  print "result:", r;
+  return 0;
+}

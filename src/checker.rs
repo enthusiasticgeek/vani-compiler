@@ -2807,6 +2807,8 @@ fn expr_mentions_var(expr: &crate::ast::Expr, name: &str) -> bool {
         ExprKind::IndirectCall { callee, args } => {
             expr_mentions_var(callee, name) || args.iter().any(|a| expr_mentions_var(a, name))
         }
+        ExprKind::TaskSpawnCall { args, .. } => args.iter().any(|a| expr_mentions_var(a, name)),
+        ExprKind::TaskJoinExpr { name: n, .. } => n == name,
     }
 }
 
@@ -3043,6 +3045,14 @@ fn walk_expr_for_captures(
                 walk_expr_for_captures(a, bound, env, top_level_names, captures, seen);
             }
         }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                walk_expr_for_captures(a, bound, env, top_level_names, captures, seen);
+            }
+        }
+        ExprKind::TaskJoinExpr { name, .. } => {
+            check_var_capture(name, bound, env, top_level_names, captures, seen);
+        }
     }
 }
 
@@ -3267,6 +3277,16 @@ fn rename_vars_in_expr(
             }
         }
         ExprKind::AnonFn { .. } => {}
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                rename_vars_in_expr(a, rename);
+            }
+        }
+        ExprKind::TaskJoinExpr { name, .. } => {
+            if let Some(n) = rename.get(name) {
+                *name = n.clone();
+            }
+        }
     }
 }
 
@@ -3487,6 +3507,12 @@ fn rewrite_closure_calls_in_expr(
             }
         }
         ExprKind::AnonFn { .. } => {}
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                rewrite_closure_calls_in_expr(a, closures);
+            }
+        }
+        ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -3716,6 +3742,12 @@ fn lift_expr_anon_fn(
                 lift_expr_anon_fn(a, counter, hoisted);
             }
         }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                lift_expr_anon_fn(a, counter, hoisted);
+            }
+        }
+        ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -5131,6 +5163,12 @@ fn resolve_enum_types_in_expr(
                 resolve_enum_types_in_expr(a, enums);
             }
         }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                resolve_enum_types_in_expr(a, enums);
+            }
+        }
+        ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -5551,6 +5589,12 @@ fn sub_aliases_in_expr(expr: &mut Expr, aliases: &BTreeMap<String, Type>) {
                 sub_aliases_in_expr(a, aliases);
             }
         }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                sub_aliases_in_expr(a, aliases);
+            }
+        }
+        ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -9775,6 +9819,12 @@ fn walk_branch_mutations_in_expr(
             // branch-mutation analysis runs (closure #308).
             unreachable!("AnonFn should have been lifted before walk_branch_mutations_in_expr")
         }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                walk_branch_mutations_in_expr(a, out);
+            }
+        }
+        ExprKind::TaskJoinExpr { .. } => {}
     }
 }
 
@@ -10100,6 +10150,72 @@ fn verify_task_affine(body: &[TypedStmt], diagnostics: &mut Vec<Diagnostic>) {
                 | TypedStmt::ForIter { body, .. } => {
                     walk(body, diagnostics);
                 }
+                // BUG-21 Path B: `let t = task callee(args);` /
+                // `let r = join t;` are the EXPRESSION-form
+                // spawn/join, tracked by the same affine
+                // same-block discipline as the statement forms
+                // above -- just reached via `Let`'s RHS (or, for
+                // a discarded binding like `let _ = join t;`,
+                // `TypedStmt::Discard` -- the checker rewrites
+                // `let _ = EXPR;` to `Discard` rather than
+                // keeping a `Let` around a `_` binding) instead
+                // of a dedicated statement variant.
+                TypedStmt::Let { name, expr, .. } => match &expr.kind {
+                    TypedExprKind::TaskSpawnCall { .. } => {
+                        if !spawned.insert(name.clone()) {
+                            diagnostics.push(Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "task '{}' was spawned twice in the same block",
+                                    name
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
+                        }
+                    }
+                    TypedExprKind::TaskJoinExpr { name: joined_name, .. } => {
+                        if !spawned.contains(joined_name) {
+                            diagnostics.push(Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "join: task '{}' was not spawned in this block (cross-block joins aren't supported in v1)",
+                                    joined_name
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::task_affine(joined_name)));
+                        }
+                        if !joined.insert(joined_name.clone()) {
+                            diagnostics.push(Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "join: task '{}' was joined twice in the same block",
+                                    joined_name
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::task_affine(joined_name)));
+                        }
+                    }
+                    _ => {}
+                },
+                TypedStmt::Discard { expr } => {
+                    if let TypedExprKind::TaskJoinExpr { name: joined_name, .. } = &expr.kind {
+                        if !spawned.contains(joined_name) {
+                            diagnostics.push(Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "join: task '{}' was not spawned in this block (cross-block joins aren't supported in v1)",
+                                    joined_name
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::task_affine(joined_name)));
+                        }
+                        if !joined.insert(joined_name.clone()) {
+                            diagnostics.push(Diagnostic::new(
+                                crate::span::Span::default(),
+                                format!(
+                                    "join: task '{}' was joined twice in the same block",
+                                    joined_name
+                                ),
+                            ).with_elaboration(crate::diagnostic_elaborations::task_affine(joined_name)));
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -10124,10 +10240,10 @@ fn emit_current_scope_drops(
     _diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (name, info) in env.current_scope().iter() {
-        if matches!(info.ty, Type::Task) {
-            // Task handles are affine but have no runtime
-            // resource to free in v1 (sequential lowering means
-            // the body has already run). The
+        if matches!(info.ty, Type::Task | Type::TaskR(_)) {
+            // Task/Task<R> handles are affine but have no
+            // runtime resource to free in v1 (sequential
+            // lowering means the body has already run). The
             // `verify_task_affine` post-pass flags unjoined
             // handles uniformly across all control-flow paths,
             // so we don't emit a Drop or a duplicate diagnostic
@@ -12757,11 +12873,19 @@ fn check_one_stmt(
                 ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
                 return false;
             };
-            if !matches!(info.ty, Type::Task) {
+            // BUG-21 Path B: the statement form accepts either
+            // the payload-free `Task` (the pre-existing
+            // block-form handle) or `Task<R>` (spawned via
+            // `task callee(args)` in expression position) --
+            // for the latter, `join name;` as a bare statement
+            // just discards the result. Use `join name` in
+            // EXPRESSION position (e.g. `let r = join name;`)
+            // to capture it.
+            if !matches!(info.ty, Type::Task | Type::TaskR(_)) {
                 diagnostics.push(Diagnostic::new(
                     *span,
                     format!(
-                        "join: '{}' has type {}, expected Task",
+                        "join: '{}' has type {}, expected Task or Task<R>",
                         name, info.ty
                     ),
                 ).with_elaboration(crate::diagnostic_elaborations::task_affine(name)));
@@ -15715,6 +15839,12 @@ fn check_expr(
                 None,
                 expr.span,
             )
+        }
+        ExprKind::TaskSpawnCall { callee, callee_span, args } => {
+            check_task_spawn_call(callee, *callee_span, args, env, signatures, expr.span, diagnostics)
+        }
+        ExprKind::TaskJoinExpr { name, .. } => {
+            check_task_join_expr(name, env, expr.span, diagnostics)
         }
         ExprKind::MethodCall { receiver, method, method_span, args } => {
             // T1.3 phase 2b: `EnumName.Variant(payload)` is the
@@ -21176,6 +21306,177 @@ fn check_call(
             args: typed_args,
         },
         signature.return_type,
+        None,
+        span,
+    )
+}
+
+/// `task <callee>(args…)` in expression position — BUG-21 Path B.
+/// Mirrors the general user-function-call path in `check_call`
+/// (signature lookup, arity, per-arg coercion) with one extra
+/// requirement specific to spawning a real thread: every
+/// argument's type must be Copy (the value is duplicated into the
+/// spawned thread's heap ctx, same restriction as the block-form
+/// `task { .. }`'s capture list). `callee` does NOT need to be
+/// `pure fn` -- unlike the block form (whose inline body implicitly
+/// captures the OUTER function's Copy-valued bindings and so must
+/// stay side-effect-free to avoid racing the caller), a call-form
+/// callee only ever touches its own explicit, by-value/by-Copy-ref
+/// arguments -- no implicit capture, nothing to race on from the
+/// caller's frame. This is why the concurrency tutorial's own
+/// `stage_one` example (which calls the inherently-blocking
+/// `barrier_wait`) is spawned via `task stage_one(1, mut ref b)`:
+/// a `mut ref Barrier` argument is Copy (references are Copy) and
+/// `Barrier` is internally synchronized, so the callee is safe to
+/// run concurrently despite being far from pure.
+fn check_task_spawn_call(
+    callee: &str,
+    callee_span: Span,
+    args: &[Expr],
+    env: &mut Env,
+    signatures: &HashMap<String, Signature>,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    let Some(signature) = signatures.get(callee) else {
+        diagnostics.push(
+            Diagnostic::new(callee_span, format!("unknown function '{}'", callee))
+                .with_elaboration(crate::diagnostic_elaborations::unknown_function(callee)),
+        );
+        return CheckedExpr::fallback_integer(span);
+    };
+    if args.len() != signature.params.len() {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "task {}(...): expects {} argument(s), got {}",
+                    callee,
+                    signature.params.len(),
+                    args.len()
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::wrong_arity(
+                signature.params.len(),
+                args.len(),
+            )),
+        );
+    }
+    let result_ty = signature.return_type.clone();
+    let param_types = signature.params.clone();
+    let typed_args: Vec<TypedExpr> = args
+        .iter()
+        .enumerate()
+        .map(|(index, arg)| {
+            let checked = check_expr(arg, env, signatures, diagnostics);
+            let coerced = if let Some(expected) = param_types.get(index) {
+                coerce_checked(
+                    checked,
+                    expected,
+                    arg.span,
+                    &format!("argument {} to 'task {}'", index + 1, callee),
+                    diagnostics,
+                )
+            } else {
+                checked
+            };
+            if !coerced.ty().is_copy() {
+                diagnostics.push(Diagnostic::new(
+                    arg.span,
+                    format!(
+                        "task spawn argument {} (type {}) must be Copy -- the value \
+                         is duplicated into the spawned thread's heap context; \
+                         pre-extract a scalar before the spawn site",
+                        index + 1,
+                        coerced.ty()
+                    ),
+                ));
+            }
+            coerced.expr
+        })
+        .collect();
+    let arg_types: Vec<Type> = param_types.iter().take(typed_args.len()).cloned().collect();
+    CheckedExpr::new(
+        TypedExprKind::TaskSpawnCall {
+            callee: callee.to_owned(),
+            args: typed_args,
+            arg_types,
+            result_ty: result_ty.clone(),
+        },
+        Type::TaskR(Box::new(result_ty)),
+        None,
+        span,
+    )
+}
+
+/// `join <name>` in expression position — BUG-21 Path B. Unlike
+/// the statement-only `Stmt::TaskJoin` (which accepts either
+/// `Task` or `Task<R>` and discards any result), the expression
+/// form requires `Task<R>` specifically since it must produce a
+/// value. Reuses the same affine "moved" bookkeeping as the
+/// statement form for double-join detection.
+fn check_task_join_expr(
+    name: &str,
+    env: &mut Env,
+    span: Span,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> CheckedExpr {
+    let Some(info) = env.lookup(name) else {
+        diagnostics.push(
+            Diagnostic::new(span, format!("join: no task named '{}' in scope", name))
+                .with_elaboration(crate::diagnostic_elaborations::task_affine(name)),
+        );
+        return CheckedExpr::fallback_integer(span);
+    };
+    let result_ty: Type = match &info.ty {
+        Type::TaskR(inner) => (**inner).clone(),
+        Type::Task => {
+            diagnostics.push(
+                Diagnostic::new(
+                    span,
+                    format!(
+                        "join {} used as an expression, but '{}' has type Task (no \
+                         return value) -- use the statement form `join {};` instead",
+                        name, name, name
+                    ),
+                )
+                .with_elaboration(crate::diagnostic_elaborations::task_affine(name)),
+            );
+            return CheckedExpr::fallback_integer(span);
+        }
+        other => {
+            diagnostics.push(
+                Diagnostic::new(
+                    span,
+                    format!("join: '{}' has type {}, expected Task<R>", name, other),
+                )
+                .with_elaboration(crate::diagnostic_elaborations::task_affine(name)),
+            );
+            return CheckedExpr::fallback_integer(span);
+        }
+    };
+    if let Some(prev) = info.moved {
+        diagnostics.push(
+            Diagnostic::new(
+                span,
+                format!(
+                    "join: task '{}' was already joined at byte {}..{}",
+                    name, prev.start, prev.end
+                ),
+            )
+            .with_elaboration(crate::diagnostic_elaborations::task_affine(name)),
+        );
+        return CheckedExpr::fallback(result_ty, span);
+    }
+    if let Some(info_mut) = env.lookup_mut(name) {
+        info_mut.moved = Some(span);
+    }
+    CheckedExpr::new(
+        TypedExprKind::TaskJoinExpr {
+            name: name.to_owned(),
+            result_ty: result_ty.clone(),
+        },
+        result_ty,
         None,
         span,
     )
@@ -32733,6 +33034,11 @@ fn substitute_expr(expr: &Expr, subs: &HashMap<String, Expr>) -> Expr {
             // AnonFn is lifted before contract substitution runs.
             unreachable!("AnonFn should have been lifted before substitute_expr")
         }
+        ExprKind::TaskSpawnCall { .. } | ExprKind::TaskJoinExpr { .. } => {
+            unreachable!(
+                "task/join cannot appear in a proof position (requires/ensures/invariant)"
+            )
+        }
     };
     Expr {
         kind: new_kind,
@@ -32856,6 +33162,8 @@ fn expr_mentions(expr: &Expr, name: &str) -> bool {
             // AnonFn is lifted before fact-tracking analysis runs.
             unreachable!("AnonFn should have been lifted before expr_mentions")
         }
+        ExprKind::TaskSpawnCall { args, .. } => args.iter().any(|a| expr_mentions(a, name)),
+        ExprKind::TaskJoinExpr { name: n, .. } => n == name,
     }
 }
 
@@ -33793,6 +34101,19 @@ fn verify_pure_body(
             TypedExprKind::Forall { body, .. } => {
                 walk_expr(body, signatures, context, diagnostics);
             }
+            TypedExprKind::TaskSpawnCall { args, .. } => {
+                // Same reasoning as the void-task `TypedStmt::TaskSpawn`
+                // case above: spawning a (checker-verified `pure fn`)
+                // callee is pure-with-args by induction, so only walk
+                // the argument expressions here.
+                for a in args {
+                    walk_expr(a, signatures, context, diagnostics);
+                }
+            }
+            TypedExprKind::TaskJoinExpr { .. } => {
+                // Mirrors `TypedStmt::TaskJoin`: consuming a Task
+                // handle is side-effect-free in v1's sequential join.
+            }
         }
     }
     walk(body, signatures, context, diagnostics);
@@ -33914,6 +34235,16 @@ fn pin_var_to_version(expr: &mut Expr, name: &str, version: u32) {
         ExprKind::AnonFn { .. } => {
             // AnonFn is lifted before SMT version-pinning runs.
             unreachable!("AnonFn should have been lifted before pin_var_to_version")
+        }
+        ExprKind::TaskSpawnCall { args, .. } => {
+            for a in args {
+                pin_var_to_version(a, name, version);
+            }
+        }
+        ExprKind::TaskJoinExpr { name: n, .. } => {
+            if n == name && !n.contains('#') {
+                *n = format!("{}#{}", name, version);
+            }
         }
     }
 }
@@ -34686,6 +35017,11 @@ fn pretty_expr(expr: &Expr) -> String {
             let parts: Vec<String> = args.iter().map(pretty_expr).collect();
             format!("({})({})", pretty_expr(callee), parts.join(", "))
         }
+        ExprKind::TaskSpawnCall { callee, args, .. } => {
+            let parts: Vec<String> = args.iter().map(pretty_expr).collect();
+            format!("task {}({})", callee, parts.join(", "))
+        }
+        ExprKind::TaskJoinExpr { name, .. } => format!("join {}", name),
     }
 }
 
@@ -35158,6 +35494,15 @@ fn typed_to_expr(t: &TypedExpr) -> Expr {
             var: var.clone(),
             ty: ty.clone(),
             body: Box::new(typed_to_expr(body)),
+        },
+        TypedExprKind::TaskSpawnCall { callee, args, .. } => ExprKind::TaskSpawnCall {
+            callee: callee.clone(),
+            callee_span: t.span,
+            args: args.iter().map(typed_to_expr).collect(),
+        },
+        TypedExprKind::TaskJoinExpr { name, .. } => ExprKind::TaskJoinExpr {
+            name: name.clone(),
+            name_span: t.span,
         },
     };
     Expr { kind, span: t.span }

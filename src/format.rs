@@ -1532,6 +1532,22 @@ fn format_expr(e: &Expr, parens_if_binary: bool, out: &mut String) {
             out.push_str(", ");
             format_expr(body, false, out);
         }
+        ExprKind::TaskSpawnCall { callee, args, .. } => {
+            out.push_str("task ");
+            out.push_str(callee);
+            out.push('(');
+            for (i, a) in args.iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                format_expr(a, false, out);
+            }
+            out.push(')');
+        }
+        ExprKind::TaskJoinExpr { name, .. } => {
+            out.push_str("join ");
+            out.push_str(name);
+        }
     }
 }
 

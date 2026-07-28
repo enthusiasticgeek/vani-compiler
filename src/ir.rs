@@ -596,6 +596,32 @@ pub enum TypedExprKind {
         ty: crate::ast::Type,
         body: Box<TypedExpr>,
     },
+    /// `task <callee>(args…)` in expression position — BUG-21
+    /// Path B. Spawns a real OS thread that calls the named
+    /// (checker-verified `pure fn`) `callee` with `args`,
+    /// producing a `Type::TaskR(result_ty)` handle. `result_ty`
+    /// mirrors `callee`'s declared return type and is carried
+    /// explicitly (rather than re-derived from the signature
+    /// table) so both backends can size/shape the heap ctx's
+    /// result slot without re-threading the signature map through
+    /// codegen.
+    TaskSpawnCall {
+        callee: String,
+        args: Vec<TypedExpr>,
+        arg_types: Vec<Type>,
+        result_ty: Type,
+    },
+    /// `join <name>` in expression position — BUG-21 Path B.
+    /// Consumes a `Type::TaskR(result_ty)` handle produced by
+    /// `TaskSpawnCall`, blocking until the thread finishes, and
+    /// yielding the loaded result. `result_ty` is carried
+    /// explicitly for the same reason as above — the join site's
+    /// codegen needs to know the ctx's result-slot type/offset
+    /// without a signature lookup.
+    TaskJoinExpr {
+        name: String,
+        result_ty: Type,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]

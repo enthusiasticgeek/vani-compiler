@@ -1,0 +1,23 @@
+// build & run:
+//   vanic run examples/language/english/task_result_multi.vani
+//   vanic run examples/language/english/task_result_multi.vani --backend=c
+
+intent "BUG-21 Path B: two concurrent Task<R> spawns (multi-arg callee) joined for their results, plus join-without-capture on a Task<R>.";
+
+pure fn add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+fn main() -> i64 {
+  let t1: Task<i64> = task add(2, 3);
+  let t2: Task<i64> = task add(10, 20);
+  let r1: i64 = join t1;
+  let r2: i64 = join t2;
+  print "r1:", r1;
+  print "r2:", r2;
+
+  let t3: Task<i64> = task add(100, 1);
+  join t3;
+  print "done";
+  return 0;
+}

@@ -960,6 +960,14 @@ pub enum Type {
     /// the same block. v1 has no payload — `Task` is structural
     /// only — so the type is non-parametric.
     Task,
+    /// `Task<R>` — handle to a spawned `task <fn>(args...)`
+    /// expression that calls a real `pure fn` on a new thread and
+    /// carries its return value of type `R` across the thread
+    /// boundary. Affine: consumed by exactly one `join <name>`
+    /// (statement or expression form). Distinct from the
+    /// payload-free `Task` used by the block-form `task { .. }` /
+    /// statement-only `join`, which remains unchanged.
+    TaskR(Box<Type>),
     /// `Atomic<T>` — opt-in atomic cell. The four builtin
     /// operations (`atomic_new`, `atomic_load`, `atomic_store`,
     /// `atomic_fetch_add`) all promise sequentially-consistent
@@ -1314,6 +1322,7 @@ impl Type {
             | Type::Vec(_)
             | Type::OwnedStr
             | Type::Task
+            | Type::TaskR(_)
             | Type::Atomic(_)
             | Type::Channel(_, _)
             | Type::Mutex(_)
@@ -1397,7 +1406,7 @@ impl Type {
             Type::I16 | Type::U16 => Some(16),
             Type::I32 | Type::U32 => Some(32),
             Type::I64 | Type::U64 => Some(64),
-            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
+            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::TaskR(_) | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1408,7 +1417,7 @@ impl Type {
             Type::I32 => Some(i32::MIN as i128),
             Type::I64 => Some(i64::MIN as i128),
             Type::U8 | Type::U16 | Type::U32 | Type::U64 => Some(0),
-            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
+            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::TaskR(_) | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1422,7 +1431,7 @@ impl Type {
             Type::U16 => Some(u16::MAX as i128),
             Type::U32 => Some(u32::MAX as i128),
             Type::U64 => Some(u64::MAX as i128),
-            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
+            Type::Vec128(_) | Type::Vec256(_) | Type::Vec512(_) | Type::F32 | Type::F64 | Type::Bool | Type::Str | Type::OwnedStr | Type::Array { .. } | Type::Vec(_) | Type::Ref(_) | Type::RefMut(_) | Type::Task | Type::TaskR(_) | Type::Atomic(_) | Type::Channel(_, _) | Type::Mutex(_) | Type::Guard(_) | Type::Condvar | Type::Barrier | Type::FileHandle | Type::RwLock(_) | Type::ReadGuard(_) | Type::WriteGuard(_) | Type::Deque(_) | Type::HashSet(_) | Type::HashMap(_, _) | Type::BTreeSet(_) | Type::BTreeMap(_, _) | Type::UnionFind | Type::BinaryHeap(_) | Type::BloomFilter | Type::Bst(_) | Type::Graph | Type::Trie | Type::SkipList | Type::FnPtr(_, _) | Type::Closure(_, _) | Type::Tuple(_) | Type::Struct(_) | Type::Enum(_) | Type::Apply { .. } | Type::Param(_) | Type::Object(_) | Type::Ptr(_) | Type::PtrMut(_) | Type::Pool(_) | Type::Handle(_) | Type::Tainted(_) | Type::BoundedPtr(_) | Type::Region | Type::ArenaRef(_) | Type::Box(_) => None,
         }
     }
 
@@ -1459,6 +1468,7 @@ impl fmt::Display for Type {
             Type::Ref(inner) => write!(formatter, "ref {}", inner),
             Type::RefMut(inner) => write!(formatter, "mut ref {}", inner),
             Type::Task => write!(formatter, "Task"),
+            Type::TaskR(inner) => write!(formatter, "Task<{}>", inner),
             Type::Atomic(inner) => write!(formatter, "Atomic<{}>", inner),
             Type::Channel(inner, capacity) => {
                 if *capacity == 16 {
@@ -2036,6 +2046,32 @@ pub enum ExprKind {
         /// hoisted-param types and which call-sites pass
         /// `ref name` instead of bare `name`.
         ref_captures: Vec<String>,
+    },
+    /// `task <fn_name>(args…)` in EXPRESSION position — spawns a
+    /// real OS thread that calls the named `pure fn` with the
+    /// given (Copy-typed) argument values, returning a `Task<R>`
+    /// handle (R = the callee's return type). Distinct from the
+    /// existing STATEMENT-only block form `task <name> { body }`
+    /// (`Stmt::TaskSpawn`), which is unchanged and still produces
+    /// a payload-free `Task`. Reachable only from
+    /// `parse_primary_expr` (e.g. the right side of a `let`), so
+    /// there's no grammar overlap with the statement form's
+    /// dispatch in `parse_stmt`. BUG-21 Path B.
+    TaskSpawnCall {
+        callee: String,
+        callee_span: Span,
+        args: Vec<Expr>,
+    },
+    /// `join <name>` in EXPRESSION position — consumes a
+    /// `Task<R>` handle produced by `TaskSpawnCall`, blocking
+    /// until the spawned thread finishes, and yields its `R`
+    /// result. Distinct from the existing STATEMENT-only
+    /// `join <name>;` (`Stmt::TaskJoin`), which stays valid for
+    /// both `Task` and `Task<R>` (discarding the result in the
+    /// latter case). BUG-21 Path B.
+    TaskJoinExpr {
+        name: String,
+        name_span: Span,
     },
 }
 

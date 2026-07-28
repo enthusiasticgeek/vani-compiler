@@ -905,6 +905,10 @@ fn expr_ssa_supported(expr: &TypedExpr) -> bool {
         TypedExprKind::DynDispatch { .. } | TypedExprKind::DynCoerce { .. } => false,
         // Forall is proof-only; never reaches codegen.
         TypedExprKind::Forall { .. } => false,
+        // Task spawn/join expressions (BUG-21 Path B) route
+        // through tree backends only — ssa.rs's lowering
+        // explicitly rejects them (see `lower_expr_to_operand`).
+        TypedExprKind::TaskSpawnCall { .. } | TypedExprKind::TaskJoinExpr { .. } => false,
     }
 }
 

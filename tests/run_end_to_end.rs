@@ -96,6 +96,50 @@ fn rwlock_struct_payload_example_compiles_and_runs_on_both_backends() {
     }
 }
 
+// BUG-21 Path B (2026-07-28): `Task<R>` -- a genuine expression-form
+// `task callee(args)` / `join name` that spawns a real OS thread
+// running a `pure fn` and carries its return value back across the
+// thread boundary, matching what the tutorials describe (as opposed
+// to the pre-existing block-form `task { .. }` / statement-only
+// `join name;`, which has no return-value payload). Exercises two
+// concurrent spawns with a multi-arg callee, join-with-capture
+// (`let r = join t;`), and join-without-capture (bare `join t;` on a
+// `Task<R>`, discarding the result) on both backends -- an actual
+// execution test is the only way to catch a wrong result here (e.g.
+// a mis-sized ctx struct or a wrong field offset would still compile
+// and link, just read back garbage or crash nondeterministically).
+#[test]
+fn task_result_multi_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/task_result_multi.vani",
+        manifest_dir
+    );
+    let expected = "r1: 5\nr2: 30\ndone\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "Task<R> spawn/join produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn run_basics_example_succeeds_and_prints_42() {
     let binary = env!("CARGO_BIN_EXE_intentc");

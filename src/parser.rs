@@ -2397,6 +2397,16 @@ impl Parser {
             }
             if name == "Task" {
                 self.bump();
+                // `Task<R>` (BUG-21 Path B) vs bare `Task` (the
+                // pre-existing payload-free block-form handle).
+                // Lookahead on `<` distinguishes them without
+                // requiring a separate keyword.
+                if self.check(|kind| matches!(kind, TokenKind::Less)) {
+                    self.expect_keyword("'<'", |kind| matches!(kind, TokenKind::Less))?;
+                    let inner = self.parse_type()?;
+                    self.expect_close_angle()?;
+                    return Ok(Type::TaskR(Box::new(inner)));
+                }
                 return Ok(Type::Task);
             }
             if name == "Condvar" {
@@ -5403,6 +5413,62 @@ impl Parser {
                 Ok(Expr {
                     kind: ExprKind::Try { inner: Box::new(inner) },
                     span: token.span.merge(inner_span),
+                })
+            }
+            TokenKind::Task => {
+                // `task <callee>(args…)` in EXPRESSION position
+                // -- BUG-21 Path B. Distinct from the
+                // STATEMENT-only block form `task <name> { body
+                // }`, which `parse_stmt` dispatches to
+                // `parse_task_spawn_stmt` only when `task`
+                // appears at the START of a new statement. This
+                // arm is reached only via `parse_primary_expr`
+                // (e.g. the right side of a `let`), so there's
+                // no grammar ambiguity between the two forms.
+                let callee_tok = self.expect_ident()?;
+                let callee_span = callee_tok.span;
+                let callee = ident_text(callee_tok);
+                self.expect_keyword(
+                    "'(' after task callee",
+                    |k| matches!(k, TokenKind::LParen),
+                )?;
+                let mut args = Vec::new();
+                if !self.check(|k| matches!(k, TokenKind::RParen)) {
+                    loop {
+                        args.push(self.parse_expr()?);
+                        if self
+                            .match_token(|k| matches!(k, TokenKind::Comma))
+                            .is_none()
+                        {
+                            break;
+                        }
+                        if self.check(|k| matches!(k, TokenKind::RParen)) {
+                            break;
+                        }
+                    }
+                }
+                let close = self.expect_keyword(
+                    "')' (task call)",
+                    |k| matches!(k, TokenKind::RParen),
+                )?;
+                Ok(Expr {
+                    kind: ExprKind::TaskSpawnCall { callee, callee_span, args },
+                    span: token.span.merge(close.span),
+                })
+            }
+            TokenKind::Join => {
+                // `join <name>` in EXPRESSION position -- BUG-21
+                // Path B. Distinct from the STATEMENT-only `join
+                // <name>;` (`parse_task_join_stmt`), which stays
+                // valid for both `Task` and `Task<R>` (discarding
+                // any result). Reached only via
+                // `parse_primary_expr`.
+                let name_tok = self.expect_ident()?;
+                let name_span = name_tok.span;
+                let name = ident_text(name_tok);
+                Ok(Expr {
+                    kind: ExprKind::TaskJoinExpr { name, name_span },
+                    span: token.span.merge(name_span),
                 })
             }
             TokenKind::If => {

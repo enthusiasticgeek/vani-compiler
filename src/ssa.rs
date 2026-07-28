@@ -2500,6 +2500,16 @@ fn lower_expr_to_operand(
             message: "forall quantifiers are proof-only and cannot be lowered to SSA".to_string(),
             span: expr.span,
         }),
+        TypedExprKind::TaskSpawnCall { .. } => Err(LowerError {
+            message: "SSA lowering of task-spawn expressions is not yet supported \
+                      (BUG-21 Path B — route through tree backend)".to_string(),
+            span: expr.span,
+        }),
+        TypedExprKind::TaskJoinExpr { .. } => Err(LowerError {
+            message: "SSA lowering of task-join expressions is not yet supported \
+                      (BUG-21 Path B — route through tree backend)".to_string(),
+            span: expr.span,
+        }),
     }
 }
 
@@ -2537,6 +2547,8 @@ fn expr_kind_name(kind: &TypedExprKind) -> &'static str {
         TypedExprKind::DynDispatch { .. } => "DynDispatch",
         TypedExprKind::DynCoerce { .. } => "DynCoerce",
         TypedExprKind::Forall { .. } => "Forall",
+        TypedExprKind::TaskSpawnCall { .. } => "TaskSpawnCall",
+        TypedExprKind::TaskJoinExpr { .. } => "TaskJoinExpr",
     }
 }
 
