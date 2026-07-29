@@ -777,9 +777,11 @@ pub fn iface_impl_missing_method(method: &str, iface: &str, ty: &str) -> Vec<Str
              a body for method `{}`.",
             iface, ty, method,
         ),
-        "Every method listed in the `interface` definition must \
-         have a concrete body in the `implement` block — there \
-         are no default implementations in v1."
+        "This particular method has no default body in the \
+         interface declaration, so every `implement` block must \
+         supply its own. (Interface methods CAN have a default \
+         body that implementors inherit without writing anything — \
+         see default methods — but this one doesn't.)"
             .to_string(),
         format!(
             "Add `fn {}(self: ref {}, …) -> … {{ … }}` inside \

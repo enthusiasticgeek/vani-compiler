@@ -201,9 +201,12 @@ blanket impl.
 ## Challenge
 
 Define a `Cmp` interface with `fn cmp(self: T, other: T) -> i64`
-returning -1 / 0 / 1. Implement it for `i64` and write a
-generic `fn smaller<T>(a: T, b: T) -> T where T is Cmp` that
-returns whichever argument is smaller.
+returning -1 / 0 / 1. Implement it for a small struct (e.g. a
+`Score { value: i64 }` wrapper -- **primitive types like `i64`
+can't `implement` any interface in v1**, `implement Cmp for i64`
+is rejected outright with "requires a struct or enum type") and
+write a generic `fn smaller<T>(a: T, b: T) -> T where T is Cmp`
+that returns whichever argument is smaller.
 
 Hint: this is exactly the shape of
 `examples/language/english/bounded_generics.vani` -- peek there
