@@ -83,13 +83,19 @@ Use `match` to handle both cases:
 ```vani
 fn main() -> i64 {
   let result: Option<i64> = safe_div(10, 2);
-  match result {
-    Option.Some(v) then print "answer = ", v,
-    Option.None    then print "division by zero",
-  }
+  let msg: OwnedStr = match result {
+    Option.Some(v) then "answer = " + i64_to_str(v),
+    Option.None    then "division by zero" + "",
+  };
+  print msg;
   return 0;
 }
 ```
+
+`match` is an expression, not a statement (see
+[Beginner 8](08_match.md)) -- both arms have to produce the same
+type, so build the message as an `OwnedStr` inside the match and
+`print` it once, rather than calling `print` from inside each arm.
 
 Output: `answer = 5`
 
@@ -98,10 +104,11 @@ Try it with a zero divisor:
 ```vani
 fn main() -> i64 {
   let result: Option<i64> = safe_div(10, 0);
-  match result {
-    Option.Some(v) then print "answer = ", v,
-    Option.None    then print "division by zero",
-  }
+  let msg: OwnedStr = match result {
+    Option.Some(v) then "answer = " + i64_to_str(v),
+    Option.None    then "division by zero" + "",
+  };
+  print msg;
   return 0;
 }
 ```
@@ -119,9 +126,9 @@ variant. You cannot accidentally forget the error case:
 
 ```vani
 /* compile error: match is not exhaustive -- Option.None not covered */
-match result {
-  Option.Some(v) then print v,
-}
+let v: i64 = match result {
+  Option.Some(v) then v,
+};
 ```
 
 This is the key advantage over exceptions: forgetting to handle an

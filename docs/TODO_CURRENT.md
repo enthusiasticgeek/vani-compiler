@@ -2916,4 +2916,25 @@ verifying the four fixes above against their tutorial worked examples
   tuple-as-struct-field, Vec-of-tuples via `for`, 4-way mixed-type
   tuple) were all verified correct end-to-end.
 
+- [x] **`beginner/08b_errors_primer.md`'s two primary worked
+  examples, and its exhaustiveness-error illustration, all used a
+  statement-form `match` with `print` calls inside the arms —
+  parse error, since `match` is expression-only in v1 (correctly
+  documented one file earlier, in `08_match.md`, but violated
+  here) — fixed 2026-07-29.** All three code blocks wrote
+  `match result { Option.Some(v) then print ..., Option.None then
+  print ..., }` as a bare statement; `vanic check` rejects it with
+  "expected statement" before ever reaching the logic the examples
+  were meant to demonstrate. Fixed the two worked examples (the
+  `safe_div(10, 2)` and `safe_div(10, 0)` cases) by building an
+  `OwnedStr` message inside the match expression and calling
+  `print` once, outside it — verified both produce the file's
+  exact claimed output ("answer = 5" / "division by zero"). Fixed
+  the exhaustiveness-illustration block similarly (wrapped in
+  `let v: i64 = match result { ... };` so the checker actually
+  reaches the exhaustiveness check instead of dying at parse time
+  first) — verified the real diagnostic is "non-exhaustive match:
+  missing arm for 'Option__i64.None'", matching the block's own
+  claimed error in spirit.
+
 ---
