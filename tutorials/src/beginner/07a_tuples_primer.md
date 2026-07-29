@@ -138,8 +138,8 @@ You've seen `let (q, r) = divmod(17, 5);`. This is
 **destructuring binding**: declare multiple variables in one
 let by matching the tuple's shape.
 
-The same pattern shows up in function arguments AND match
-arms:
+The same pattern shows up in function arguments; `match` patterns
+are a different story (see below).
 
 ### As function arguments
 
@@ -154,33 +154,47 @@ fn distance(p: (i64, i64), q: (i64, i64)) -> i64 {
 Two tuple arguments, each destructured into two locals. The
 function body then operates on the components.
 
-### In match arms
+### Not in match arms
+
+vāṇी's `match` patterns don't include a tuple form -- `match
+position { (0, 0) then "origin", ... }` is a parse error (`match`
+only supports variant, literal, wildcard, and slice patterns; see
+[Beginner 8a](08a_pattern_match_primer.md)). Destructure the tuple
+into named locals first, then branch on those with `if`/`else`:
 
 ```vani
-match position {
-  (0, 0) then "origin",
-  (0, _) then "y-axis",
-  (_, 0) then "x-axis",
-  (x, y) then "general point",
+fn describe(position: (i64, i64)) -> Str {
+  let (x, y) = position;
+  if x == 0 && y == 0 {
+    return "origin";
+  }
+  if x == 0 {
+    return "y-axis";
+  }
+  if y == 0 {
+    return "x-axis";
+  }
+  return "general point";
 }
 ```
 
-The match arms each destructure differently. Wildcards `_` say
-"don't bind this slot." The last arm `(x, y)` catches
-everything else and binds the components.
+### Indexed access -- `.0` / `.1` / `.2` (Copy slots only)
 
-### Indexed access -- `.0` / `.1` / `.2`
-
-You can also access individual slots without destructuring:
+You can access an individual slot without destructuring -- but
+only when that slot's type is Copy (`i64`, `bool`, `f64`, ...).
+A non-Copy slot (`OwnedStr`, a `Vec`, ...) rejects direct `.N`
+access, because reading it out that way would alias the tuple's
+heap data without transferring ownership:
 
 ```vani
-let pair: (i64, OwnedStr) = (42, "answer");
-let n: i64 = pair.0;          // = 42
-let s: OwnedStr = pair.1;     // = "answer" (moved out)
+let pair: (i64, OwnedStr) = (42, "answer" + "");
+let n: i64 = pair.0;          // fine -- i64 is Copy, = 42
+// let s: OwnedStr = pair.1;  // error: use destructuring instead
+let (_, s) = pair;             // this is how you get the OwnedStr out
 ```
 
-Useful when you only want one field. Less common than full
-destructuring in idiomatic code.
+Useful when you only want one Copy field. For a non-Copy slot,
+destructure (`let (_, v) = tuple;`) instead of reaching for `.N`.
 
 ## Tuples + ownership
 
@@ -190,16 +204,31 @@ Tuples follow the same ownership rules as any other type:
   on assignment.
 - A tuple containing a non-Copy type (like `OwnedStr`) is
   non-Copy. It moves on assignment.
-- Partial moves work field-by-field, same as structs.
+- **Unlike structs, tuples don't support true partial moves.**
+  A struct's `p.field` access moves just that one field out and
+  leaves the struct's *other* fields still usable (`p.a` still
+  reads fine after `let x = p.b;`). A tuple has no equivalent:
+  `.N` direct access only works on Copy slots at all (a non-Copy
+  slot rejects `.N` outright, see above), and destructuring
+  (`let (_, v) = tuple;`) -- the only way to pull a non-Copy slot
+  out -- consumes the *entire* tuple, including slots you'd
+  already read via `.N`. Reach for a struct instead of a tuple if
+  you need to move one field while continuing to use the others.
 
 ```vani
 let pair: (i64, OwnedStr) = (42, "hi" + "!");
-let answer: i64 = pair.0;      // copy -- pair.0 is i64
-let msg: OwnedStr = pair.1;    // move -- pair.1 is OwnedStr,
-                                // now pair.1 is moved
+let answer: i64 = pair.0;      // copy -- fine via `.0`, doesn't
+                                // consume `pair`; read pair.0 as
+                                // many times as you like before
+                                // the next line
+let (_, msg) = pair;           // move -- pair.1 is OwnedStr, so it
+                                // has to come out via destructuring,
+                                // not `.1` (see the note above);
+                                // this consumes ALL of `pair`,
+                                // including the already-copied
+                                // slot 0 -- `pair` (and `pair.0`)
+                                // is unusable after this line
 ```
-
-After the move, `pair.0` is still readable; `pair.1` is not.
 
 ## Common shapes in practice
 
@@ -250,11 +279,10 @@ let (ex, ey) = end;
 ```
 
 A pair of pairs. Destructure in stages: outer first, then
-each inner. Or destructure-deep in one let if you want:
-
-```vani
-let ((sx, sy), (ex, ey)) = line;
-```
+each inner, as above. A single nested pattern in one `let` --
+`let ((sx, sy), (ex, ey)) = line;` -- is *not* supported (`let`
+destructuring patterns are one level deep only); staged
+destructuring is the only way to unpack a nested tuple.
 
 ### Tuple containing a `Box`
 
@@ -374,4 +402,4 @@ covers the actual syntax + a few worked examples.
 ---
 
 **Previous**: [Sec.6d -- Program memory layout primer ->](06d_memory_sections_primer.md)
-**Next**: [Sec.7 -- Arrays and Vec<T> basics ->](07_vec_arrays.md)
+**Next**: [Sec.7 -- Arrays and `Vec<T>` basics ->](07_vec_arrays.md)

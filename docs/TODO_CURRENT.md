@@ -2883,4 +2883,37 @@ verifying the four fixes above against their tutorial worked examples
   other file's own confirmed compiler behavior rather than a fresh
   `check` run.
 
+- [x] **`beginner/07a_tuples_primer.md` had four confirmed-wrong
+  code claims, despite opening with "this chapter has no compiler
+  code" (it has many `vani` blocks) — fixed 2026-07-29.** (1)
+  Claimed `match` supports tuple patterns (`match position { (0, 0)
+  then "origin", ... }`) — false, parse error; `match` only
+  supports variant/literal/wildcard/slice patterns (same
+  restriction already documented in `08a_pattern_match_primer.md`
+  from an earlier pass this same audit arc). Replaced with the
+  real idiom: destructure into named locals, then `if`/`else`.
+  (2) Claimed direct `.1` access works on a non-Copy tuple slot
+  (`let s: OwnedStr = pair.1;`) — false: the checker rejects it
+  outright ("tuple element 1 has non-Copy type OwnedStr — direct
+  `.1` access would alias the tuple's heap data. Use tuple
+  destructuring..."), in two separate sections (indexed-access and
+  the ownership example). Fixed both to use
+  `let (_, v) = tuple;` instead. (3) Claimed one-shot nested
+  destructuring works (`let ((sx, sy), (ex, ey)) = line;`) — false,
+  parse error; `let` patterns are one level deep only, so staged
+  destructuring (outer first, then each inner `let`) is the only
+  way. (4) Claimed "partial moves work field-by-field, same as
+  structs" — false and worth calling out explicitly: a struct's
+  `p.field` access is a true partial move (other fields stay
+  usable), confirmed by direct test; a tuple has no equivalent —
+  `.N` only works on Copy slots at all, and the destructuring
+  required for a non-Copy slot consumes the *entire* tuple,
+  including already-`.N`-read Copy slots. Rewrote the bullet to
+  state the real, more limited rule and point at structs for
+  genuine partial-move needs. The other ~10 code examples in the
+  file (divmod via tuple return, fn-arg destructuring, nested
+  tuples via staged `let`s, tuple-of-structs, tuple+Box, tuple+Vec,
+  tuple-as-struct-field, Vec-of-tuples via `for`, 4-way mixed-type
+  tuple) were all verified correct end-to-end.
+
 ---
