@@ -3425,4 +3425,46 @@ verifying the four fixes above against their tutorial worked examples
   pre-existing bare `List<String> vs List<Integer>?` (no
   backticks) causing an `mdbook build` warning in the same file.
 
+- [x] **BUG-39. Calling an interface's default method on a type
+  that INHERITS it (doesn't override it) was rejected outright —
+  checker-level, both backends. Found auditing
+  `intermediate/04d_default_methods_primer.md`'s own worked
+  example** (`interface Describable { fn name(self: Self) -> Str;
+  fn describe(self: Self) -> Str { return "I am something."; } }`,
+  `struct Dog` implementing only `name`, relying on the default
+  `describe`). `d.describe()` failed: "argument 1 to 'Dog_describe'
+  must be assignable to Self, got Dog". Root cause: in
+  `hoist_impls_into_functions` (checker.rs), when an `implement`
+  block is missing a method that has a default body, the checker
+  injects a synthesized function using the interface's OWN declared
+  `params`/`return_type` verbatim (`iface_method.params.clone()`,
+  `iface_method.return_type.clone()`) — but those still say `Self`
+  literally (`Type::Struct("Self")`), because v1's normal impl-
+  validation path never needs an actual Self-substitution step: a
+  user-written `implement Describable for Dog { fn name(self: Dog)
+  ... }` already spells out the concrete type itself, so the
+  checker only does positional shape-matching, never literal
+  substitution. A default method has no user-written impl body at
+  all — nothing ever performed that substitution — so the injected
+  function's signature said `Self` while every real call site
+  passed the concrete type, and the checker's own argument-
+  assignability check then rejected it. Overriding a default method
+  always worked fine (the override's body is user-written, already
+  using the concrete type); only pure inheritance was broken — which
+  is the central, most basic use case the whole "default methods"
+  feature exists for. Fixed by adding `substitute_self_type` (a
+  small recursive `Type` walker covering `Ref`/`RefMut`/`Box`/`Ptr`/
+  `PtrMut`/`Vec`/`Vec128/256/512`/`Array`/`Tuple`/`Apply`/`FnPtr`
+  wrappers around a `Self`) and applying it to both the injected
+  function's params and return type, substituting `Self ->
+  imp.for_type`. Verified: the tutorial's own Dog/Cat example and
+  the file's separate blanket-vs-concrete-impl override example
+  both now produce correct output on both backends; full `cargo
+  test --workspace` clean (only the known pre-existing Windows-local
+  `ssa_backend_c_crosscheck.rs` link-flag gap). New example:
+  `examples/language/english/default_method_inherited_self_type.vani`.
+  New test:
+  `default_method_inherited_self_type_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`.
+
 ---

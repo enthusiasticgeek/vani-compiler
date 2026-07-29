@@ -5699,6 +5699,45 @@ fn hoist_methods_into_functions(
 /// - The impl must not collide with an existing
 ///   `methods on T { fn method() }` or another impl of the
 ///   same interface for the same type.
+/// Recursively replaces the `Self` placeholder (`Type::Struct("Self")`,
+/// the way `self: Self` / `-> Self` parse before an `implement` block
+/// substitutes it) with `concrete` inside `ty`. Used when injecting a
+/// default-method body for a type that didn't override it: the
+/// interface's own declared params/return-type still say `Self`
+/// literally, and unlike a user-written impl (where the user spells
+/// out the concrete type themselves), nothing else performs this
+/// substitution.
+fn substitute_self_type(ty: &Type, concrete: &Type) -> Type {
+    match ty {
+        Type::Struct(n) if n == "Self" => concrete.clone(),
+        Type::Ref(inner) => Type::Ref(Box::new(substitute_self_type(inner, concrete))),
+        Type::RefMut(inner) => Type::RefMut(Box::new(substitute_self_type(inner, concrete))),
+        Type::Box(inner) => Type::Box(Box::new(substitute_self_type(inner, concrete))),
+        Type::Ptr(inner) => Type::Ptr(Box::new(substitute_self_type(inner, concrete))),
+        Type::PtrMut(inner) => Type::PtrMut(Box::new(substitute_self_type(inner, concrete))),
+        Type::Vec(inner) => Type::Vec(Box::new(substitute_self_type(inner, concrete))),
+        Type::Vec128(inner) => Type::Vec128(Box::new(substitute_self_type(inner, concrete))),
+        Type::Vec256(inner) => Type::Vec256(Box::new(substitute_self_type(inner, concrete))),
+        Type::Vec512(inner) => Type::Vec512(Box::new(substitute_self_type(inner, concrete))),
+        Type::Array { element, length } => Type::Array {
+            element: Box::new(substitute_self_type(element, concrete)),
+            length: *length,
+        },
+        Type::Tuple(elems) => Type::Tuple(
+            elems.iter().map(|e| substitute_self_type(e, concrete)).collect(),
+        ),
+        Type::Apply { name, args } => Type::Apply {
+            name: name.clone(),
+            args: args.iter().map(|a| substitute_self_type(a, concrete)).collect(),
+        },
+        Type::FnPtr(params, ret) => Type::FnPtr(
+            params.iter().map(|p| substitute_self_type(p, concrete)).collect(),
+            Box::new(substitute_self_type(ret, concrete)),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn hoist_impls_into_functions(
     program: &mut Program,
     diagnostics: &mut Vec<Diagnostic>,
@@ -6052,12 +6091,31 @@ fn hoist_impls_into_functions(
                 if !program.functions.iter().any(|f| f.name == mangled)
                     && !hoisted.iter().any(|f| f.name == mangled)
                 {
+                    // The interface's declared params/return-type still
+                    // say `Self` literally (a user-written impl would
+                    // have spelled out the concrete type itself, but
+                    // there's no user impl for this method -- it's
+                    // inherited). Substitute Self -> imp.for_type so
+                    // the injected function's signature matches what
+                    // call sites actually pass.
+                    let subst_params: Vec<crate::ast::Param> = iface_method
+                        .params
+                        .iter()
+                        .map(|p| crate::ast::Param {
+                            name: p.name.clone(),
+                            ty: substitute_self_type(&p.ty, &imp.for_type),
+                            name_span: p.name_span,
+                            span: p.span,
+                        })
+                        .collect();
+                    let subst_return_type =
+                        substitute_self_type(&iface_method.return_type, &imp.for_type);
                     hoisted.push(crate::ast::Function {
                         name: mangled,
                         type_params: Vec::new(),
                         where_clauses: Vec::new(),
-                        params: iface_method.params.clone(),
-                        return_type: iface_method.return_type.clone(),
+                        params: subst_params,
+                        return_type: subst_return_type,
                         requires: Vec::new(),
                         ensures: Vec::new(),
                         body: default_body.clone(),

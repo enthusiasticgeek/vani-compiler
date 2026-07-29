@@ -3128,6 +3128,48 @@ fn clone_at_struct_with_nested_vec_field_example_produces_correct_output_on_both
     }
 }
 
+// BUG-39 (2026-07-29): calling an interface's default method on a
+// type that inherits it (doesn't override it) was rejected --
+// "argument 1 to <Type>_<method> must be assignable to Self, got
+// <Type>". The checker's default-method injection copied the
+// interface's own declared params/return-type verbatim, which still
+// say `Self` literally; nothing substituted the concrete type
+// because there's no user-written impl to do it (that's the whole
+// point of a default method). Fixed by substituting Self -> the
+// concrete implementing type when injecting a default-method body.
+// Found auditing the default-methods tutorial's own worked example.
+#[test]
+fn default_method_inherited_self_type_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/default_method_inherited_self_type.vani",
+        manifest_dir
+    );
+    let expected = "I am something.\nI am a cat.\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "inherited default method produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");

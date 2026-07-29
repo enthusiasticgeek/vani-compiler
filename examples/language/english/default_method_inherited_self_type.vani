@@ -1,0 +1,34 @@
+// build & run:
+//   vanic run examples/language/english/default_method_inherited_self_type.vani
+//   vanic run examples/language/english/default_method_inherited_self_type.vani --backend=c
+
+intent "Regression for BUG-39: calling an interface's default method on a type that inherits it (doesn't override it) was rejected with 'argument 1 to <Type>_<method> must be assignable to Self, got <Type>'. The checker's default-method injection copied the interface's own declared params/return-type verbatim -- which still say `Self` literally, since v1's `implement` blocks work by the user spelling out the concrete type themselves rather than the checker substituting a placeholder. There's no user-written impl for an inherited default, so nothing performed that substitution: the injected function's signature said `Self` while every call site passed the real concrete type. Overriding the method (providing your own body) always worked, because the user's own impl already used the concrete type -- only the pure-inheritance path was broken. Fixed by substituting Self -> the concrete implementing type in both the params and return type when injecting a default-method body.";
+
+interface Describable {
+  fn name(self: Self) -> Str;
+
+  fn describe(self: Self) -> Str {
+    return "I am something.";
+  }
+}
+
+struct Dog { breed: Str }
+struct Cat {}
+
+implement Describable for Dog {
+  fn name(self: Dog) -> Str { return self.breed; }
+  // describe() NOT provided -> inherits the default.
+}
+
+implement Describable for Cat {
+  fn name(self: Cat) -> Str { return "Cat"; }
+  fn describe(self: Cat) -> Str { return "I am a cat."; }  // overrides
+}
+
+fn main() -> i64 {
+  let d: Dog = Dog { breed: "Labrador" };
+  let c: Cat = Cat {};
+  print d.describe();
+  print c.describe();
+  return 0;
+}
