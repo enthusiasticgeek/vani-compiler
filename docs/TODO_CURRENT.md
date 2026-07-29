@@ -3390,4 +3390,39 @@ verifying the four fixes above against their tutorial worked examples
   further this session (out of scope for BUG-37) — worth a
   dedicated follow-up.
 
+- [x] **`intermediate/04c_generics_primer.md`'s central worked
+  examples described a `Comparable` bound that doesn't exist and
+  can't be expressed in v1 — fixed 2026-07-29.** Found continuing
+  the sequential audit past `03_affine.md`. The chapter's "cookie
+  cutter" example, its "What the compiler ACTUALLY does"
+  monomorphization walkthrough, and its later "Generic with
+  bounds" section all used `fn max<T>(a: T, b: T) -> T where T is
+  Comparable { if a > b { ... } }`, called with `i64`/`f64`/`u32`
+  literals directly. None of it compiles: (1) v1 has no built-in
+  `Comparable`/`Ord`-style interface — `where T is Comparable`
+  requires a real `implement Comparable for X` block, none shown;
+  (2) primitive types can't `implement` any interface at all in
+  v1 (`implement Cmp for i64` is rejected outright: "requires a
+  struct or enum type"), confirmed directly; (3) even with a
+  struct-typed bound, generic-bound method calls dispatch through
+  an explicit method (`a.cmp(b)`), never a bare operator like `>`
+  on the type parameter. This is the same real pattern already
+  used correctly elsewhere (`examples/language/english/bounded_generics.vani`,
+  and `04_generics_iface.md`'s own Challenge section) — 04c just
+  never matched it. Rewrote all three sections to use a real,
+  verified `Cmp` interface + `.cmp()` method + two independent
+  `Score`/`Money` structs (confirmed on both backends: two
+  distinct monomorphized specializations, correct output), and
+  added an explicit callout on the primitives-can't-implement-
+  interfaces boundary. Also caught and noted a related, non-
+  obvious constraint while verifying the rewrite: v1's generic-
+  call type inference only reads the concrete type off a literal
+  or a `let`-annotated variable at the `T` position — passing a
+  struct-literal expression directly (`max(Score { value: 3 },
+  ...)`) is rejected ("v1 generic-call inference supports literal
+  arguments ... or Var ... More complex argument expressions need
+  full type-checking context"); documented this too. Also fixed a
+  pre-existing bare `List<String> vs List<Integer>?` (no
+  backticks) causing an `mdbook build` warning in the same file.
+
 ---

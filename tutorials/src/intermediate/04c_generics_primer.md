@@ -35,41 +35,64 @@ versions for you.
 ## The cookie cutter analogy
 
 A generic function is a **cookie cutter**. The shape is fixed --
-"take two values, return whichever is larger" -- but the
+"take two values, return whichever is bigger" -- but the
 material isn't specified. When you press the cutter into
 chocolate-chip dough, you get a chocolate-chip cookie. When you
 press it into oatmeal dough, you get an oatmeal cookie.
 
 ```vani
-fn max<T>(a: T, b: T) -> T where T is Comparable {
-  if a > b { return a; }
+interface Cmp {
+  fn cmp(self: Score, other: Score) -> i64;   // -1 / 0 / 1
+}
+
+struct Score { value: i64 }
+implement Cmp for Score {
+  fn cmp(self: Score, other: Score) -> i64 {
+    if self.value < other.value { return -1; }
+    if self.value > other.value { return 1; }
+    return 0;
+  }
+}
+
+fn max<T>(a: T, b: T) -> T where T is Cmp {
+  if a.cmp(b) >= 0 { return a; }
   return b;
 }
 ```
 
 `<T>` is the cookie cutter's "material slot". `T` is a
-placeholder -- when someone calls `max(3, 7)`, the compiler
-sees T = i64. When they call `max(3.14, 2.71)`, T = f64.
+placeholder -- when you call `max(score1, score2)`, the compiler
+sees `T = Score`. Call it with a different `Cmp`-implementing
+struct and you get a second, independently-compiled `max`.
 
-The `where T is Comparable` is the bound -- only types
-supporting `>` (the Comparable interface) can use this cookie
+The `where T is Cmp` is the bound -- only types implementing
+`Cmp` (i.e. providing a `cmp` method) can use this cookie
 cutter. Without the bound, the compiler couldn't be sure the
-`if a > b` step would work for arbitrary T.
+`a.cmp(b)` call would work for arbitrary T. **v1 doesn't ship a
+built-in `Comparable`/`Ord`-style interface with native `<`/`>`
+operator dispatch through a bound** -- and primitive types
+(`i64`, `f64`, ...) can't `implement` a user interface at all in
+v1 (`implement Cmp for i64` is rejected: "requires a struct or
+enum type"). So a bounded generic always compares through an
+explicit method like `cmp` on a struct/enum you define, never a
+bare `a > b` on the type parameter directly. See the real worked
+example in
+[`examples/language/english/bounded_generics.vani`](https://github.com/enthusiasticgeek/vani-compiler/blob/main/examples/language/english/bounded_generics.vani).
 
-Since v0.5.3 you can also write the bound inline, directly in
-the angle brackets:
+You can also write the bound inline, directly in the angle
+brackets:
 
 ```vani
-fn max<T: Comparable>(a: T, b: T) -> T {   // inline bound
-  if a > b { return a; }
+fn max<T: Cmp>(a: T, b: T) -> T {   // inline bound
+  if a.cmp(b) >= 0 { return a; }
   return b;
 }
 ```
 
-`<T: Comparable>` and `<T> where T is Comparable` produce
-identical code -- pick whichever reads more naturally. Inline
-bounds are shorter for single-constraint generics; `where` is
-clearer when several constraints appear on different type params.
+`<T: Cmp>` and `<T> where T is Cmp` produce identical code --
+pick whichever reads more naturally. Inline bounds are shorter
+for single-constraint generics; `where` is clearer when several
+constraints appear on different type params.
 
 ## What the compiler ACTUALLY does
 
@@ -77,21 +100,42 @@ This is the load-bearing concept: the compiler doesn't keep
 one generic version. It generates a **specialized copy per
 concrete type** you call it with.
 
-In your program:
+In your program, given a second `Cmp`-implementing struct
+alongside `Score`:
 ```vani
-let x: i64 = max(3, 7);
-let y: f64 = max(3.14, 2.71);
-let z: u32 = max(100 as u32, 50 as u32);
+struct Money { cents: i64 }
+implement Cmp for Money {
+  fn cmp(self: Money, other: Money) -> i64 {
+    if self.cents < other.cents { return -1; }
+    if self.cents > other.cents { return 1; }
+    return 0;
+  }
+}
+
+let s1: Score = Score { value: 3 };
+let s2: Score = Score { value: 7 };
+let bigger_score: Score = max(s1, s2);
+
+let m1: Money = Money { cents: 500 };
+let m2: Money = Money { cents: 250 };
+let bigger_money: Money = max(m1, m2);
 ```
 
-The compiler emits THREE functions:
-- `max_i64(a: i64, b: i64) -> i64` (specialized to i64)
-- `max_f64(a: f64, b: f64) -> f64` (specialized to f64)
-- `max_u32(a: u32, b: u32) -> u32` (specialized to u32)
+(Note the `let`-bound intermediates -- v1's generic-call type
+inference only reads the concrete type off a literal or a
+named, `let`-annotated variable at the `T` position, not an
+arbitrary expression like a struct literal. `max(Score { value:
+3 }, ...)` inline is rejected; `let s1: Score = Score { value: 3
+}; max(s1, ...)` works.)
 
-Each is fully optimized for its specific type. The i64 version
-uses i64 comparison instructions; the f64 version uses f64
-comparison instructions. No runtime type-dispatch, no
+The compiler emits TWO functions behind the one `max<T>` source:
+- `max__Score(a: Score, b: Score) -> Score` (specialized to Score)
+- `max__Money(a: Money, b: Money) -> Money` (specialized to Money)
+
+Each is fully optimized for its specific type -- the `Score`
+version's `a.cmp(b)` call resolves directly to `Score`'s
+`implement Cmp` block at compile time; the `Money` version
+resolves to `Money`'s. No runtime type-dispatch, no
 indirection.
 
 This process is called **monomorphization** -- "making
@@ -116,7 +160,7 @@ Cons:
 - No type-specific optimization: the one compiled version has
   to work for everything.
 - Lost type info at runtime: you can't ask "is this a
-  List<String> vs List<Integer>?".
+  `List<String>` vs `List<Integer>`?".
 
 vāṇी (and Rust, and C++ templates) pick monomorphization
 because the speed win is large for systems code. The cost is
@@ -148,16 +192,17 @@ id(3.0);      // instantiates id__f64
 ```
 
 The visible difference shows up once the body needs an operation
-on `T` -- `min<T>` above uses `<`. C++ templates are checked
-*lazily*, at each instantiation site: historically an error
-inside the template body only surfaced (with a wall of nested-
-instantiation text) once you called it with a type that didn't
-support the operation; C++20 `concepts` fixed this by letting you
-write the constraint (`requires std::totally_ordered<T>`) up
-front. vāṇी's `where T is Comparable` is the same idea, but
-mandatory and checked once against the generic definition itself
--- if the body uses an operation the bound doesn't grant, it's a
-compile error on the `fn` before anyone calls it with any type.
+on `T` -- `max<T>` above uses `a.cmp(b)`, gated by `where T is
+Cmp`. C++ templates are checked *lazily*, at each instantiation
+site: historically an error inside the template body only
+surfaced (with a wall of nested-instantiation text) once you
+called it with a type that didn't support the operation; C++20
+`concepts` fixed this by letting you write the constraint
+(`requires std::totally_ordered<T>`) up front. vāṇी's `where T
+is Iface` bound is the same idea, but mandatory and checked once
+against the generic definition itself -- if the body uses an
+operation the bound doesn't grant, it's a compile error on the
+`fn` before anyone calls it with any type.
 There's no equivalent to an unconstrained template (any type,
 checked only at use) in vāṇी v1: every generic needs an explicit
 bound for every operation its body performs.
@@ -202,16 +247,16 @@ be anything. Useful as a building block in functional patterns.
 ### Generic with bounds
 
 ```vani
-fn min<T>(a: T, b: T) -> T where T is Comparable {
-  if a < b { return a; }
+fn min<T>(a: T, b: T) -> T where T is Cmp {
+  if a.cmp(b) <= 0 { return a; }
   return b;
 }
 ```
 
-The `where T is Comparable` bound tells the compiler what
-operations you'll use inside the body (`<`). Without it, the
-compiler can't verify the body -- it'd reject the use of `<` on
-an unknown type.
+The `where T is Cmp` bound tells the compiler what operations
+you'll use inside the body (`a.cmp(b)`). Without it, the
+compiler can't verify the body -- it'd reject the call to `cmp`
+on an unknown type.
 
 ## Multi-parameter generics
 
