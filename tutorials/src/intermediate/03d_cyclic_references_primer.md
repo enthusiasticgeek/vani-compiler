@@ -105,7 +105,7 @@ the forward edge; parents are referenced but not owned.
 
 ### The Rust shape
 
-```vani
+```rust
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -160,22 +160,32 @@ struct Tree { nodes: Vec<Node> }
 
 fn add_child(t: mut ref Tree, parent_idx: i64, value: i64) -> i64 {
   let new_idx: i64 = len(t.nodes) as i64;
+  let empty_children: Vec<i64> = vec();
   let _ = push(mut ref t.nodes, Node {
     value: value,
     parent: parent_idx,
-    children: vec(),
+    children: empty_children,
   });
-  // Wire the parent's children list:
-  let _ = push(mut ref t.nodes[parent_idx as u64].children, new_idx);
+  // Wire the parent's children list. `t.nodes[i].children` is a
+  // two-hop path (index, then field) -- `mut ref` can only reach a
+  // bare variable or a single struct-field hop, so a direct
+  // `push(mut ref t.nodes[parent_idx as u64].children, new_idx)`
+  // is rejected. The workaround: pull an owned deep-clone of the
+  // parent node out with `clone_at`, mutate the clone, write it
+  // back with `set`.
+  let parent_node: Node = clone_at(t.nodes, parent_idx as u64);
+  let _ = push(mut ref parent_node.children, new_idx);
+  set(mut ref t.nodes, parent_idx as u64, parent_node);
   return new_idx;
 }
 
 fn root(t: mut ref Tree, value: i64) -> i64 {
   let new_idx: i64 = len(t.nodes) as i64;
+  let empty_children: Vec<i64> = vec();
   let _ = push(mut ref t.nodes, Node {
     value: value,
     parent: 0 - 1,
-    children: vec(),
+    children: empty_children,
   });
   return new_idx;
 }
@@ -191,10 +201,17 @@ Three things to notice:
    `nodes[child].parent == parent_idx` and
    `nodes[parent_idx].children` contains `child` -- but
    neither end OWNS the other. No Rc, no Weak, no RefCell.
-3. **Mutation is direct.** `push(mut ref t.nodes[i].children,
-   new_idx)` is one borrow chain. Affine ownership of the
-   `Tree` lets vāṇी's checker prove this safe at compile
-   time -- no runtime borrow checks, no panics.
+3. **Mutation goes through `clone_at` + `set`, not a direct
+   two-hop `mut ref`.** `t.nodes[i].children` is a Vec index
+   followed by a field access -- two hops -- and vāṇी's `mut
+   ref` can only reach a bare variable or a single
+   struct-field hop, by design (it keeps the checker's
+   exclusivity analysis local and simple). The idiom above --
+   `clone_at` an owned copy of the slot, mutate the copy,
+   `set` it back -- is the standard way to reach a nested
+   field inside a `Vec<Struct>` element. It costs one deep
+   clone per `add_child` call; fine for tree-building, worth
+   knowing about for hot loops.
 
 The cost: indices need a "world" parameter (`t: mut ref
 Tree`) threaded through anything that touches the tree. The
@@ -207,7 +224,7 @@ contiguous).
 
 - **Rust**: when the last `Rc<Node>` to the root drops, the
   root's strong count hits 0, the root drops, which drops
-  its Vec<Rc<Node>> children, which decrements each child's
+  its `Vec<Rc<Node>>` children, which decrements each child's
   count to 0, which drops each child. The cascade can be
   deep. `Weak<Node>` back-pointers are inert during this --
   their non-zero weak count keeps the *control block*
@@ -227,7 +244,7 @@ non-owning.
 
 ### The Rust shape
 
-```vani
+```rust
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -246,7 +263,7 @@ is `Weak<Node>`. Drop the head and the whole list cascades.
 
 The walking-backwards code looks like:
 
-```vani
+```rust
 fn walk_back(end: Rc<Node>) {
     let mut cur = Some(end);
     while let Some(n) = cur {
@@ -286,7 +303,18 @@ fn push_back(l: mut ref List, value: i64) -> i64 {
     prev: prev_tail,
   });
   if prev_tail >= 0 {
-    l.nodes[prev_tail as u64].next = new_idx;
+    // `l.nodes[i].next = new_idx` -- assigning through a Vec
+    // index plus a field hop -- isn't a valid assignment target
+    // (same two-hop restriction `mut ref` has). Same fix as
+    // Shape 1: clone_at the slot, rebuild it with the field
+    // changed, set it back.
+    let prev_node: Node = clone_at(l.nodes, prev_tail as u64);
+    let fixed_node: Node = Node {
+      value: prev_node.value,
+      next: new_idx,
+      prev: prev_node.prev,
+    };
+    set(mut ref l.nodes, prev_tail as u64, fixed_node);
   } else {
     l.head = new_idx;
   }
@@ -295,7 +323,7 @@ fn push_back(l: mut ref List, value: i64) -> i64 {
 }
 
 fn walk_back(l: ref List) -> i64 {
-  let mut cur: i64 = l.tail;
+  let cur: i64 = l.tail;   // no `let mut` -- every `let` binding is reassignable
   while cur >= 0 {
     print l.nodes[cur as u64].value;
     cur = l.nodes[cur as u64].prev;
@@ -306,7 +334,9 @@ fn walk_back(l: ref List) -> i64 {
 
 Symmetric. Both directions are indices; both are equally
 "cheap" to follow. No Rc, no Weak, no upgrade. The List
-owns the storage; head/tail are sentinel indices.
+owns the storage; head/tail are sentinel indices. (Note:
+v1 has no `let mut` keyword -- every `let` binding can be
+reassigned; `mut` only appears inside `mut ref`.)
 
 ### The deletion subtlety
 
@@ -345,7 +375,7 @@ of Observers. Cycle.
 
 ### The Rust shape
 
-```vani
+```rust
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 
@@ -385,39 +415,62 @@ struct Subject {
   observers: Vec<i64>,    // indices into world.observers[]
 }
 
-struct World {
-  subject: Subject,
-  observers: Vec<Box<dyn Observer>>,
+interface Observer {
+  fn on_change(self: ref Self, new_state: i64) -> i64;
 }
 
-iface Observer {
-  fn on_change(self: ref Self, new_state: i64) -> i64;
+struct World {
+  subject: Subject,
+  observers: Vec<dyn Observer>,
 }
 
 fn notify(w: mut ref World, new_state: i64) -> i64 {
   w.subject.state = new_state;
   let n: i64 = len(w.subject.observers) as i64;
-  let mut i: i64 = 0;
+  let i: i64 = 0;
   while i < n {
     let idx: i64 = w.subject.observers[i as u64];
-    w.observers[idx as u64].on_change(new_state);
+    let o: dyn Observer = w.observers[idx as u64];
+    let _ = o.on_change(new_state);
     i = i + 1;
   }
   return 0;
 }
 
-fn register(w: mut ref World, obs: Box<dyn Observer>) -> i64 {
+fn register(w: mut ref World, obs: dyn Observer) -> i64 {
   let new_idx: i64 = len(w.observers) as i64;
   let _ = push(mut ref w.observers, obs);
-  let _ = push(mut ref w.subject.observers, new_idx);
+  let sub: mut ref Subject = mut ref w.subject;
+  let _ = push(mut ref sub.observers, new_idx);
   return new_idx;
 }
 ```
 
+Two things worth calling out, beyond the obvious `iface` ->
+`interface` keyword and dropped `let mut`:
+
+- **`Vec<dyn Observer>`, not `Vec<Box<dyn Observer>>`.**
+  `dyn Iface` on its own is a fat pointer (vtable + data
+  pointer) and is Copy, so `w.observers[idx as u64]` can
+  index it by value directly. `Box<dyn Observer>` is an
+  owning heap handle -- NOT Copy -- and indexing a
+  non-Copy Vec element by value is rejected (as it should
+  be; see the `clone_at` idiom used in Shapes 1 and 2). v1's
+  `clone_at` doesn't yet support `Box<dyn Iface>` elements
+  either, so there's currently no working indexed-dispatch
+  path through a `Vec<Box<dyn Iface>>` -- stick to `Vec<dyn
+  Iface>` when you need index-addressable dynamic dispatch.
+- **`push(mut ref w.observers, obs)` needs `w.subject.observers`
+  reached via an intermediate `mut ref Subject` binding**,
+  not `mut ref w.subject.observers` directly -- the same
+  two-hop restriction from Shape 1, worked around the same
+  way `ref`/`mut ref` chains usually are: bind the
+  intermediate hop to a local first.
+
 Notice what's NOT there: no observer holds a back-pointer.
 The `World` itself is the "shared context" -- both subject
 and observers exist within it. Unregister is "remove this
-index from subject.observers"; the observer's `Box<dyn Observer>`
+index from subject.observers"; the observer's `dyn Observer`
 slot remains until the World drops, OR you swap-remove from
 `w.observers` and update indices, OR (as before) use a Pool
 for stable handles.
@@ -583,9 +636,9 @@ For these, vāṇी's answer is:
 |---|---|---|
 | Parent <-> child tree | `Rc<Node> + Weak<Node>` + RefCell | `Vec<Node>` with `parent: i64` + `children: Vec<i64>` |
 | Doubly-linked list | `Rc<Node>` next + `Weak<Node>` prev | `Vec<Node>` with `next: i64` + `prev: i64` |
-| Observer pattern | `Weak<dyn Observer>` + `Weak<Subject>` | `World { subject, observers: Vec<Box<dyn Observer>> }` with indices |
+| Observer pattern | `Weak<dyn Observer>` + `Weak<Subject>` | `World { subject, observers: Vec<dyn Observer> }` with indices |
 | Shared cache | `Rc<CacheEntry>` per consumer | `Pool<CacheEntry>` + `Handle<CacheEntry>` per consumer |
-| Self-deregistering | Observer's `Drop` upgrades a Weak<Subject> | refactor to World-mediated; or unsafe |
+| Self-deregistering | Observer's `Drop` upgrades a `Weak<Subject>` | refactor to World-mediated; or unsafe |
 | Long-lived plugins | `Rc<Callback>` shared | `Pool<Callback>` + generation handles |
 
 The general substitution: **`Rc<T>` becomes `Vec<T>` or
@@ -645,7 +698,7 @@ and the language's affine guarantees cover the rest.
   -- the broader "no Rc by design" story; this chapter
   zooms in on the cyclic-data subset
 - [Intermediate 5 -- Dynamic dispatch](05_dyn.md) --
-  `Vec<Box<dyn Iface>>` for the observer pattern's
+  `Vec<dyn Iface>` for the observer pattern's
   heterogeneous observer list
 - [Advanced 4 -- Embedded](../advanced/04_embedded.md) -- `region`
   typing (`Region` / `ArenaRef<i64>`, shipped for `i64` payloads)

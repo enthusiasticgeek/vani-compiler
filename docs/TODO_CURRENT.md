@@ -3302,4 +3302,92 @@ verifying the four fixes above against their tutorial worked examples
   the real expression-form `task`/`Task<R>`/`join`/`guard_get`/
   `guard_set` APIs throughout.
 
+- [ ] **BUG-38 (found, NOT fixed — internal compiler error, not a
+  clean rejection). `clone_at()` on a `Vec<Box<dyn Iface>>` element
+  panics the compiler itself** (`internal error: entered unreachable
+  code: clone_at on element type Box(Object("Observer")) not yet
+  supported in tree-LLVM`, `src/backend_llvm.rs:9992`) **instead of
+  emitting a normal diagnostic.** Found while working out the
+  correct v1-compatible design for
+  `intermediate/03d_cyclic_references_primer.md`'s observer-pattern
+  example (originally written with `Vec<Box<dyn Observer>>`, which
+  needs `clone_at` for indexed dispatch since a `Box<dyn Iface>`
+  element isn't Copy). Worked around in the doc by switching to
+  `Vec<dyn Observer>` (unboxed `dyn Iface` is a Copy fat pointer, so
+  direct indexing `w.observers[idx as u64]` works with no
+  `clone_at` needed at all) — confirmed correct on both backends.
+  Separately, `examples/edge_cases/mix_vec_of_box_dyn.vani`'s own
+  comment claims "v1 C-codegen has a known issue with `Vec<dyn
+  Iface>` as a struct field," which is why that file and
+  `design_patterns/behavioral/observer.vani` both use `Vec<dyn
+  Observer>` as a function *parameter* rather than a struct field —
+  but a direct test this session (`World { observers: Vec<dyn
+  Observer> }`, built + populated + dispatched through) worked
+  cleanly on both backends, so that comment may already be stale;
+  not chased further. **Not fixed this session**: the ICE itself is
+  low-severity (there's always a working alternative — use unboxed
+  `dyn Iface` — so it doesn't block real code), and turning it into
+  a clean checker-time rejection is a small but separate fix from
+  BUG-37's double-free; logged here rather than bundled in.
+
+- [x] **BUG-37. LLVM backend: `clone_at()` on a `Vec<Struct>` element
+  double-freed when the struct had a nested non-Copy `Vec<T>` field
+  — exit 116, heap corruption. Found auditing
+  `intermediate/03d_cyclic_references_primer.md`'s tree-building
+  example.** Building a tree (`struct Node { value: i64, children:
+  Vec<i64> }`, `struct Tree { nodes: Vec<Node> }`) the natural way —
+  since `mut ref t.nodes[i].children` is rejected (two-hop `mut ref`,
+  see the standing `ref`/`mut ref` single-level-place restriction) —
+  requires the `clone_at(t.nodes, i)` / mutate the clone / `set(mut
+  ref t.nodes, i, clone)` idiom. `clone_at`ing a node crashed the
+  LLVM backend the instant the clone (or the original tree) went out
+  of scope; the C backend produced correct output the whole time.
+  Root cause: TWO independent LLVM codegen sites build a per-field
+  deep clone of a struct element and both only special-cased
+  `Type::OwnedStr` as needing a real clone call, falling through to
+  a bare `extractvalue`/`insertvalue` shallow copy for every other
+  field type — including a nested `Vec<T>`. The "cloned" struct's
+  `children` field ended up pointing at the exact same heap buffer
+  as the original still sitting in the source `Vec`; both later got
+  freed independently (once via the clone's own scope exit, once via
+  the tree's), corrupting the allocator. The two sites: (1)
+  `emit_vec_bundle_functions`'s `__clone` bundle function (used by
+  the general `Vec::clone()` builtin), and (2) `clone_at`'s own,
+  entirely separate inline struct-clone codegen — confirmed via IR
+  inspection that fixing site (1) alone changed that bundle
+  function's IR correctly but did NOT fix the end-to-end crash,
+  because `clone_at()` compiles through site (2), not the bundle
+  function. Both are the same "parallel dispatch function" bug class
+  as BUG-29/BUG-35: a per-type dispatch match gets the right handling
+  added in one place while a structurally identical sibling dispatch
+  elsewhere keeps the old incomplete fallback. Fixed by adding a
+  `Type::Vec(inner) => { ... call @intent_vec_{tag}__clone on the
+  field ... }` arm to both dispatch sites' `match fty` (mirroring the
+  `Type::Vec(inner)` handling that already existed correctly for the
+  direct, non-struct-field Vec-element case in `clone_at`). Verified:
+  minimal repro and the fuller tree-building example both now
+  produce correct, matching output on LLVM and C backends (previously
+  LLVM crashed, C was already correct); full `cargo test --workspace`
+  clean (only the already-known pre-existing Windows-local
+  `ssa_backend_c_crosscheck.rs` `-lsynchronization` link-flag gap,
+  confirmed passing on Linux CI). New example:
+  `examples/language/english/clone_at_struct_with_nested_vec_field.vani`.
+  New test:
+  `clone_at_struct_with_nested_vec_field_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`. Also checked the adjacent
+  `Type::Enum` per-payload clone dispatch in `clone_at` right after
+  this Struct arm: it has a real-looking gap of its own (only
+  `Type::OwnedStr` payloads get a deep-clone branch; any other
+  payload type with `payload_tags` non-empty falls into the
+  "tag-only" round-trip, which never inserts a payload into `dest`
+  at all) — but a minimal probe (`enum Item { Empty, Full(Vec<i64>)
+  }`, construct + `match` on `Item.Full(...)`, no `clone_at`
+  involved) already fails identically on BOTH backends (exit 9, no
+  output) before `clone_at` even enters the picture, so this is a
+  separate, pre-existing gap in `enum`-with-non-scalar-payload
+  support generally, not part of the BUG-37 double-free pattern and
+  not caused by either of this session's fixes. Not investigated
+  further this session (out of scope for BUG-37) — worth a
+  dedicated follow-up.
+
 ---

@@ -9800,6 +9800,33 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                                     ));
                                     cloned
                                 }
+                                // BUG-37 (2026-07-29): same gap as
+                                // `emit_vec_bundle_functions`'s
+                                // struct-field clone (fixed just
+                                // above in this same file) — this
+                                // is `clone_at`'s OWN independent
+                                // inlined struct-clone, and it had
+                                // the identical bug: only OwnedStr
+                                // fields were deep-cloned, a `Vec<T>`
+                                // field (or Box<T>) fell through to
+                                // a bare `extractvalue` shallow
+                                // copy, aliasing the source slot's
+                                // heap buffer and causing a double-
+                                // free once both the original (still
+                                // in the source Vec) and the
+                                // `clone_at`ed local eventually drop.
+                                Type::Vec(inner) => {
+                                    let clone_fn = format!(
+                                        "@intent_vec_{}__clone",
+                                        vec_struct_tag(inner)
+                                    );
+                                    let cloned = ctx.fresh_tmp();
+                                    out.push_str(&format!(
+                                        "  {} = call {} {}({} {})\n",
+                                        cloned, f_lty, clone_fn, f_lty, f_src
+                                    ));
+                                    cloned
+                                }
                                 _ => f_src.clone(),
                             };
                             let next_acc = if idx + 1 == fields.len() {
@@ -43080,6 +43107,45 @@ pub(crate) fn emit_vec_helpers(element: &Type, out: &mut String) {
                                 out.push_str(&format!(
                                     "  {} = call i8* @intent_str_concat(i8* {}, i32 0, i8* %f_empty_p, i32 0)\n",
                                     cloned, f_src
+                                ));
+                                cloned
+                            }
+                            // BUG-37 (2026-07-29): this per-field
+                            // clone dispatch only special-cased
+                            // OwnedStr — any OTHER non-Copy field
+                            // (starting with the extremely common
+                            // `Vec<T>` field, e.g. `struct Node {
+                            // value: i64, children: Vec<i64> }`)
+                            // fell through to the `_` arm below,
+                            // which is a bare shallow copy of the
+                            // field's handle (extractvalue, no
+                            // clone call) — the cloned struct's
+                            // Vec field then ALIASES the same heap
+                            // buffer as the original still sitting
+                            // in the source Vec. Both eventually
+                            // free that buffer independently
+                            // (double-free / heap corruption) —
+                            // confirmed as a real, silent crash
+                            // (JIT process aborts with no output)
+                            // via `clone_at` on a `Vec<Node>` where
+                            // `Node` has a `Vec<i64>` field, the
+                            // canonical tree/graph-node shape
+                            // several tutorials use. The C backend
+                            // was never affected — it already calls
+                            // the field's own `__clone` helper
+                            // unconditionally, mirroring what the
+                            // OUTER `Type::Vec(inner)` arm a few
+                            // lines above this match already does
+                            // correctly for a bare `Vec<Vec<T>>`.
+                            // This mirrors that same fix into the
+                            // struct-field case.
+                            Type::Vec(inner) => {
+                                let inner_clone =
+                                    format!("@intent_vec_{}__clone", vec_struct_tag(inner));
+                                let cloned = format!("%f_cloned_{}", idx);
+                                out.push_str(&format!(
+                                    "  {} = call {} {}({} {})\n",
+                                    cloned, f_lty, inner_clone, f_lty, f_src
                                 ));
                                 cloned
                             }

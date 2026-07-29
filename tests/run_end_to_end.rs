@@ -3087,6 +3087,47 @@ fn option_box_recursive_struct_example_produces_correct_output_on_both_backends(
     }
 }
 
+// BUG-37 (2026-07-29): clone_at() on a Vec<Struct> element whose
+// struct has a nested non-Copy Vec<T> field crashed the LLVM backend
+// with a double-free (exit 116). Two independent LLVM codegen sites
+// (emit_vec_bundle_functions's `__clone` bundle function, and
+// clone_at's own separate inline struct-clone codegen) only deep-
+// cloned Type::OwnedStr fields, silently shallow-copying any other
+// non-Copy field -- including a nested Vec<T> -- so the "clone"
+// aliased the source's heap buffer. Found auditing the cyclic-
+// references tutorial's tree-building example.
+#[test]
+fn clone_at_struct_with_nested_vec_field_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/clone_at_struct_with_nested_vec_field.vani",
+        manifest_dir
+    );
+    let expected = "7\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "clone_at on a struct with a nested Vec field produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");
