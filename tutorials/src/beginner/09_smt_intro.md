@@ -129,12 +129,33 @@ fn double(n: i64) -> i64
 requires n >= 0;
 requires n <= 1000;
 ensures _return == n * 2;
-{ ... }
+{
+  return n * 2;
+}
 ```
 
 ...and now the callers' `assert`s become compile-time `prove`s.
 `ensures` is covered in depth in **Intermediate Sec.12 -- SMT
 verification deep-dive**.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+**A real v1 limitation worth knowing about**: `ensures` only
+resolves the return value when it flows straight out of `return
+<expr>;`. The `let r: i64 = n * 2; return r;` shape from the main
+worked example above -- extremely common in real code -- currently
+fails an attached `ensures _return == n * 2;` with a nonsensical
+counterexample (`n = 0, r = -1`), because the checker substitutes
+the *variable* `r` for `_return` without also carrying over `r`'s
+definition, leaving the solver treating `r` as totally unconstrained
+for this specific check. `assert` inside the same function doesn't
+have this problem (a separate, later pass resolves the full
+local-variable chain) -- but adding an `assert r == n * 2;` right
+before the `return` does *not* help the `ensures` check either
+(verified: still the same failure), since asserted facts aren't
+carried into the `ensures` substitution any more than `let` facts
+are. The only verified workaround today is to return the expression
+directly, with no intermediate `let`, exactly as shown above.
 
 ## Challenge
 

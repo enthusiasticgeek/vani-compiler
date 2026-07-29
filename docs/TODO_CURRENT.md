@@ -2937,4 +2937,77 @@ verifying the four fixes above against their tutorial worked examples
   missing arm for 'Option__i64.None'", matching the block's own
   claimed error in spirit.
 
+- [ ] **BUG-33 (found, NOT fixed — high value, needs careful work in
+  the SMT proof engine). `ensures` clauses fail to resolve a
+  `let`-bound return value, always with the same nonsensical
+  counterexample — a soundness-adjacent false-negative in a
+  headline "verifiable language" feature, affecting an extremely
+  common code shape.** Found writing the `ensures` addendum for
+  `beginner/09_smt_intro.md`. Repro (any of these three, all fail
+  identically):
+  ```vani
+  fn double(n: i64) -> i64
+  requires n >= 0;
+  ensures _return == n * 2;   // or even the trivial `ensures _return >= 0;`
+  {
+    let r: i64 = n * 2;       // or even `let r: i64 = n;` for the trivial case
+    return r;
+  }
+  ```
+  Every variant rejects with `error: function 'double' ensures
+  clause does not hold at this return [counterexample: n = 0, r =
+  -1]` — a **nonsensical** counterexample, since `r` is defined as
+  `n * 2` (or `n`) two lines above and can never independently be
+  `-1` while `n = 0`. `return n * 2;` (no intermediate `let`)
+  compiles cleanly with the identical `ensures` clause — confirmed
+  the bug is specifically about the `let`-then-`return` shape, not
+  the arithmetic or the postcondition. Root cause, diagnosed but
+  not fixed: `verify_ensures_at_return` (`checker.rs`) substitutes
+  `_return` in the `ensures` expression with the literal AST of the
+  `return` statement's expression via `substitute_expr` — for
+  `return r;` that's just `Var("r")`, with no knowledge of what
+  `r` equals. It then calls `prove_with_calls(substituted,
+  smt_facts, ...)`, but `smt_facts` (built incrementally as each
+  `Stmt::Let` is checked) has NO general case that records a plain
+  scalar `let name = expr;` as an equality fact — the existing
+  fact-recorders (`record_vec_builtin_facts`,
+  `record_array_element_facts`, `record_ensures_facts`) only cover
+  Vec-builtin calls, array/Vec literals, and calls to functions
+  that themselves have `ensures` — never an ordinary scalar
+  arithmetic/boolean RHS. So `r` reaches the prover as a genuinely
+  free variable, and the solver correctly (from its point of view)
+  finds `r = -1` disproves `r >= 0`. Contrast: `assert` *inside* the
+  same function discharges fine using `r`'s definition (confirmed:
+  `assert r >= n;` works in the exact same function) — that must go
+  through a separate, later mechanism (an SMT-elision pass over the
+  full typed body, per the "assert is free at runtime when SMT
+  discharges it" behavior another part of this same tutorial
+  documents) that isn't reused here. Also confirmed a tempting-
+  looking "just add `assert r == n * 2;` before the `return`"
+  workaround does NOT help — `Stmt::Assert`'s handler doesn't push
+  its condition into `smt_facts` either, so the fact still never
+  reaches `verify_ensures_at_return`.
+  **Why not fixed this session**: this is core SMT-proof-engine
+  code, the highest-risk part of the compiler to touch under time
+  pressure — a wrong fix risks the opposite, far worse failure mode
+  (soundness: an `ensures` clause appearing to hold when it
+  doesn't), and this session already had one real regression
+  (BUG-31's follow-up commit) caught only by CI. Two candidate fix
+  directions, neither attempted: (a) add a general scalar-`let`
+  equality fact to `smt_facts` (architecturally consistent with the
+  existing Vec/array-literal fact-recorders, but touches a hot path
+  every contract-bearing function's every `let` runs through — wide
+  blast radius); (b) narrower — before substituting into `ensures`,
+  recursively resolve any `Var` in the return expression back to
+  its most recent same-function `let` RHS (mirroring whatever the
+  assert-elision pass already does), scoped only to
+  `verify_ensures_at_return`'s own substitution step. (b) is
+  probably the safer starting point. Whoever picks this up should
+  find and read whatever pass discharges `assert r >= n;` first —
+  it already solves the "resolve a local through its let-chain"
+  problem correctly for a sibling contract keyword.
+  **Workaround documented in the tutorial**: return the expression
+  directly (no intermediate `let`) in any function carrying an
+  `ensures` clause on that return value.
+
 ---
