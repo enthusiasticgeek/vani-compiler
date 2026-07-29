@@ -22,7 +22,7 @@ fn sign(n: i64) -> i64 {
   if n > 0 {
     return 1;
   } else if n < 0 {
-    return 0 - 1;
+    return -1;
   } else {
     return 0;
   }
@@ -43,7 +43,7 @@ fn grade(score: i64) -> Str {
 fn main() -> i64 {
   print "sign(7) =", sign(7);
   print "sign(0) =", sign(0);
-  print "sign(-3) =", sign(0 - 3);
+  print "sign(-3) =", sign(-3);
 
   print "grade(95) =", grade(95);
   print "grade(82) =", grade(82);
@@ -86,10 +86,9 @@ x is a single-digit positive
   produce the same type if the `if` is used as an expression
   (you'll see expression-form `if` in Intermediate Sec.1); as
   statements they're independent.
-- **No standalone unary minus on integer literals**. `0 - 1`
-  works; `-1` directly doesn't parse as a literal in v1. You
-  write the subtraction explicitly. (For float literals, `-1.0`
-  is fine.)
+- **Unary minus works on any expression, literals included**.
+  `-1`, `-x`, and `0 - 1` all parse and all give the same result
+  -- pick whichever reads better at the call site.
 - **`&&` short-circuits**, so does `||`. If the left side of `&&`
   is `false`, the right side never executes -- useful when the
   right side would otherwise divide by zero or call into a

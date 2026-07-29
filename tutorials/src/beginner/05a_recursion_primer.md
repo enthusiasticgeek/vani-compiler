@@ -108,18 +108,32 @@ has the recursive shape "a node is a value plus zero or more
 child nodes." Code that walks the tree is naturally recursive:
 
 ```vani
+struct Node {
+  value: i64,
+  children: Vec<Node>,
+}
+
 fn visit(node: ref Node) -> i64 {
   // Do something with this node's value...
   print node.value;
-  // ...then recurse into each child.
-  let mut i: u64 = 0;
+  // ...then recurse into each child. `ref` can only borrow a
+  // named variable or a struct field, not an index expression
+  // (`ref node.children[i]` doesn't parse) -- so pull each child
+  // out with `clone_at` first, then borrow the local.
+  let i: u64 = 0;
   while i < len(node.children) {
-    let _ = visit(ref node.children[i]);
+    let child: Node = clone_at(ref node.children, i);
+    let _ = visit(ref child);
     i = i + 1;
   }
   return 0;
 }
 ```
+
+(Run this shape yourself: `examples/language/english/self_referential_struct_vec.vani`
+in the compiler's own repo -- build with `--backend=c`; the LLVM
+backend has an unrelated, open bug on self-referential structs
+like `Node` as of this writing.)
 
 The shape of the code mirrors the shape of the data. Trying
 to flatten this into a loop usually requires an explicit

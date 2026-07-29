@@ -616,11 +616,15 @@ no hardware, no external tokens, no grammar consultants required.
   udiv/urem/lshr/and extraction; `emit_vec_bool_helpers_llvm` for push/pop/free/clone/set_mut.
   `vec_struct_tag(Type::Bool)` = `"bool"` so struct name = `%intent_vec_bool`. 6/6 tests pass.
 
-- [x] **XL2. `vanic test` — built-in test runner** ✅ done 2026-07-16
+- [x] **XL2. `vanic test` — built-in test runner** ✅ attribute-parsing done 2026-07-16,
+  harness actually wired up 2026-07-28 (see BUG-30 below — this entry's original text
+  described the intended design; the `main.rs` "test" command never consumed the flag
+  until BUG-30 closed the gap).
   `#[test]` attribute in ast/ir/parser/checker sets is_test flag. `vanic test file.vani`
-  collects is_test fns, synthesises a harness main (each fn called in order; pass = print
-  "ok", fail = assert aborts with message), compiles+runs via CC. `resolve_combined_source()`
-  public API in lib.rs for multi-file imports. 4 lib tests pass.
+  on a file with no top-level `main` now collects is_test fns and runs each in its own
+  synthesized-`main` process (pass = exit 0, fail = assert aborts that process only).
+  `resolve_combined_source()` public API in lib.rs for multi-file imports. 4 lib tests
+  (attribute-parsing) + 3 new end-to-end tests (actual harness behavior) pass.
 
 - [x] **XL3. `for await x in expr { body }` syntax** (parser sugar only)
   Desugars at parse time to `while let Option.Some(x) = expr { body }`.
@@ -2602,5 +2606,170 @@ verifying the four fixes above against their tutorial worked examples
   (claimed `"upper > lower: true"`; the real, verified value is
   `false`, since uppercase precedes lowercase in ASCII). Verified
   every line of the corrected example end-to-end on both backends.
+
+## `vanic test` `#[test]` harness mode was documented but never wired up (found continuing the tutorial-example audit, added+fixed 2026-07-28)
+
+- [x] **BUG-30. `vanic test`'s "`#[test]` attribute mode" — documented in
+  `tutorials/src/beginner/00_cli_reference.md`, in the `is_test` field's
+  own doc comment (`ast.rs`), and marked done in this file's XL2 entry
+  above — never actually ran.** `is_test` has parsed onto `Function`
+  since 2026-07-16 (XL2), but nothing downstream ever consumed the
+  flag: the `"test"` match arm in `main.rs` unconditionally called
+  `run_program_llvm_capture` on the file as-is, which requires a real
+  `fn main`. A `#[test]`-only file (the CLI reference's own example —
+  two `#[test]` fns, no `main`) failed with "program must define fn
+  main() -> i64" instead of the documented `running 2 tests` /
+  `test addition_works ... ok` / `test result: ok. 2 passed; 0 failed`
+  output. Found while extending the tutorial audit from "claims left
+  undemonstrated" to "mechanically compile every example," starting
+  with the CLI reference. Fixed by implementing the feature for real
+  in `main.rs`: `detect_harness_test_fns(path)` lexes+parses the file
+  (without requiring a checked/typed program) and returns the
+  `#[test]` fn names iff the file has no top-level `fn main` with zero
+  params; when non-empty, `run_test_function(path, name)` writes a
+  sibling temp file (same directory, so relative `use` imports still
+  resolve) containing the original source plus a synthesized
+  `fn main() -> i64 { return <name>(); }`, and runs it through the
+  existing `run_program_llvm_capture` — each test its own process, so
+  one failing `assert` doesn't abort the rest of the suite. A file
+  that already defines `main` keeps using legacy mode unchanged
+  (`#[test]` fns are not combined with an existing `main` — documented
+  as a real restriction, not silently ignored). Type-correctness of
+  each test fn (no params, `i64` return) falls out of the ordinary
+  checker running on the synthesized `main` — no separate validation
+  needed. `--json` mode emits one result object per test
+  (`"path":"<file>::<fn>"`). Verified against the tutorial's exact
+  example (output now matches verbatim) plus a deliberate-failure
+  case (one test fails, the other still runs and reports). New tests:
+  `intentc_test_harness_mode_runs_each_test_fn_in_isolation`,
+  `intentc_test_harness_mode_reports_one_failure_without_killing_the_rest`,
+  `intentc_test_legacy_mode_unaffected_by_harness_detection` in
+  `tests/run_end_to_end.rs`. Corrected `00_cli_reference.md`'s prose
+  to describe the real per-test-process design (not a single combined
+  harness `main`, which would have the same one-abort-kills-the-suite
+  problem legacy mode already has).
+
+- [x] **`beginner/02_variables.md` overclaimed integer/float mixing
+  strictness -- three false claims in one file, fixed 2026-07-28.**
+  Found continuing the mechanical example-compiling audit past the
+  CLI reference. The file asserted "mixing [integer] widths without
+  an explicit cast is a type error" and "don't multiply an `f64` by
+  an `i64` without casting" — both false: `checker.rs`'s
+  `promoted_numeric_type`/`common_integer_type` deliberately auto-
+  widens same-signedness integer pairs to the larger width (`i32 *
+  i64` → `i64`, no cast needed) and auto-promotes any int/float
+  mix to the float type (`f64 * i64` → `f64`, no cast needed) — by
+  design, not a gap (this is a real, intentional, safe-direction-
+  only promotion scheme; verified both backends compute the
+  promoted values correctly). What genuinely requires a cast is a
+  narrower case than documented: same-width mixed signedness
+  (`i32 * u32`) or a signed type no wider than its unsigned
+  partner (`i8 + u32`) — confirmed via `check`, real diagnostic
+  "no safe implicit integer promotion for X and Y; use an explicit
+  cast". The file's Challenge exercise asked the reader to "note
+  the type error" on exactly a case that now compiles fine
+  (`i32 * i64`); rewritten to use the genuinely-erroring same-width
+  case instead. Also found the bitwise-operators table listed a
+  unary `~` (bitwise NOT) that doesn't exist in the language at
+  all — lexer has no `Tilde` token, so `~0` is a lex error, not a
+  language feature gap this session chose to fill (would touch 11
+  files: lexer/parser/checker/smt/both tree backends/both SSA
+  backends/big_o/safety/format — XL-tier scope, not a quick add).
+  Replaced with the verified-correct `n ^ -1` idiom (XOR against
+  all-ones == two's-complement bitwise-NOT). Verified every
+  corrected example end-to-end on both backends, including the
+  named bitwise builtins (`i64_set_bit` etc.) the file also lists,
+  which do exist and work as documented.
+
+- [x] **`beginner/04_if_else.md` claimed integer literal unary minus
+  ("`-1`") doesn't parse in v1 -- stale, fixed 2026-07-28.** Verified
+  `-1`, `-x` (on a variable), and `-1` inside a larger expression all
+  parse and evaluate correctly on both backends (`print -5 + 3;` →
+  `-2`, correct). This matches BUG-6 (fixed 2026-07-25, unrelated
+  session): that bug was specifically a *float*-literal codegen
+  crash, already fixed; this tutorial's blanket "no unary minus on
+  literals" claim was simply never true for integers and appears to
+  be leftover from early drafting. Simplified `sign(n)`'s negative
+  branch and its caller from `0 - 1` / `sign(0 - 3)` to `-1` /
+  `sign(-3)` for both correctness and readability.
+
+- [x] **BUG-31. C backend: a self-referential struct (`struct Node {
+  children: Vec<Node> }` -- the shape every tree / recursive-data
+  example needs) was silently never emitted, breaking every
+  downstream use with a confusing "incomplete type" error.**
+  Found auditing `beginner/05a_recursion_primer.md`'s tree-walk
+  example (Shape 1), which used this exact pattern. Root cause,
+  in `backend_c.rs`'s unified struct/Vec-bundle topological emit
+  loop in `emit_c`: `struct_deps_in_ty` treated a `Vec<X>` field
+  the same as a by-value `X` field -- recursing in and requiring
+  X's FULL struct body before the outer struct could be emitted.
+  For `Node { children: Vec<Node> }` this makes Node depend on
+  Node (a false self-dependency: `Vec<X>`'s C spelling is a
+  fixed-size pointer-indirected handle, `{ X* data; len; cap; }`,
+  which never needs X complete -- same as `Ref`/`Box`/`Ptr`, which
+  already got the correct no-propagate treatment right next to
+  the wrong `Vec` arm). Worse, even after fixing that, a SECOND
+  false cycle remained: the struct-emission loop's separate `vok`
+  check required the Vec bundle's full *helper functions* (needs
+  `sizeof(X)`, genuinely needs X complete) to already be emitted
+  before the struct itself -- but the bundle's functions
+  themselves wait on the struct being complete, so Node and its
+  own bundle deadlocked either way. The iterate-to-fixpoint loop
+  has no cycle detection -- it just silently stops making
+  progress and moves on, so `struct Struct_Node { ... }`'s body
+  never appeared ANYWHERE in the generated C, with no diagnostic
+  pointing at why. Fixed with three changes: (1) `struct_deps_in_ty`'s
+  `Type::Vec` arm now no-ops (joins `Ref`/`RefMut`/`Box`/`Ptr`/`PtrMut`)
+  since Vec is always pointer-indirected in C. (2) Split
+  `emit_vec_bundle` into `emit_vec_bundle_typedef` (just the
+  handle typedef -- needs only a forward-declared element type)
+  and `emit_vec_bundle_functions` (the `sizeof`-dependent
+  helpers); `emit_c` now emits every struct-field/enum-payload Vec
+  bundle's typedef eagerly, upfront, before the topo loop runs at
+  all, so a struct's own `vok` check (now against a new
+  `emitted_vec_typedefs` set, always satisfied) never has to wait
+  on the bundle's functions -- breaking the cycle at its root. The
+  functions themselves still emit later, through the ordinary topo
+  loop, once their element type is complete (unchanged, correct
+  requirement). (3) A third, narrower bug surfaced once the above
+  two fixes let `Struct_Node` actually get emitted: within a
+  single bundle, `__clear`'s per-slot drop for a self-referential
+  element recurses into this SAME bundle's own `__free` (to
+  release each child's nested `Vec<Node>`), but `__clear` is
+  emitted earlier in `emit_vec_bundle_functions` than `__free`'s
+  definition -- `cc` implicitly declared `__free` as `int(...)` at
+  the call site, then rejected the real `static void` definition
+  as a conflicting redeclaration. Fixed by forward-declaring
+  `__free` at the top of `emit_vec_bundle_functions`, before any
+  other helper. Verified end-to-end: prints "1\n2\n3\n" (root then
+  its two children) for the exact tree-walk shape the tutorial
+  needed. Full `cargo test --lib`: 2600/2600 clean, no regressions
+  from touching the shared topo-sort logic (also applies the same
+  fix to the parallel enum-payload topo loop, closing the same
+  class of bug for a hypothetical `enum X { A(Vec<X>) }`, untested
+  but same reasoning). New example:
+  `examples/language/english/self_referential_struct_vec.vani`.
+  New test: `self_referential_struct_vec_example_produces_correct_output_on_c_backend`
+  in `tests/run_end_to_end.rs`.
+  **Not fixed -- LLVM backend counterpart, same repro program**:
+  `vanic build` succeeds and produces a native binary, but running
+  it (or running via `vanic run`, or via `lli` directly on the
+  emitted `.ll`) produces zero stdout/stderr and a nonzero exit
+  (116 via `vanic run`'s wrapper, 127 running the built binary
+  directly under Git Bash) -- crashes before the very first
+  `print` in `visit` would fire, so the failure is somewhere in
+  `main`'s construction of the tree or very early in `visit`'s
+  entry, not in the recursion itself. The generated LLVM struct
+  type (`%Struct_Node = type { i64, %intent_vec_Struct_Node }`)
+  looks correct -- LLVM doesn't have C's forward-declaration
+  problem for named struct types, so this is very likely a
+  genuinely different root cause than BUG-31's C-backend one
+  (candidate: a self-referential-struct byte-size computation used
+  somewhere in `backend_llvm.rs`'s malloc/copy codegen, in the
+  spirit of BUG-24's `llvm_byte_size` undercounting -- not yet
+  confirmed). Tutorial and example both recommend `--backend=c`
+  for this pattern until the LLVM side is root-caused; not
+  attempted this session given the scope already spent on the
+  C-backend half.
 
 ---

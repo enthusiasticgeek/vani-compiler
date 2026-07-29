@@ -2997,6 +2997,172 @@ fn intentc_test_trims_lli_backtrace_from_failed_stderr() {
     );
 }
 
+// BUG-31 (2026-07-28): a struct that owns a Vec of its own type
+// (`struct Node { children: Vec<Node> }`) made the C backend's
+// struct-emission topological sort deadlock on a false self-
+// dependency -- `Struct_Node` was silently never emitted (no
+// diagnostic at all), and every downstream reference then failed
+// with a confusing "incomplete type" error from `cc`. This is
+// the shape every tree / recursive-structure example needs, so
+// it's a high-value fix -- found auditing the recursion-primer
+// tutorial's tree-walk example. C-backend only: the LLVM backend
+// has a separate, not-yet-root-caused issue on this same program
+// (compiles to a native binary that silently crashes with no
+// output) -- see docs/TODO_CURRENT.md's BUG-31 entry.
+#[test]
+fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/self_referential_struct_vec.vani",
+        manifest_dir
+    );
+    let expected = "1\n2\n3\n";
+
+    let output = Command::new(binary)
+        .args(["run", &example, "--backend=c"])
+        .output()
+        .unwrap_or_else(|e| panic!("intentc run {} --backend=c should execute: {e}", example));
+    assert!(
+        output.status.success(),
+        "intentc run {} --backend=c failed with status {:?}\nstderr: {}",
+        example,
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        stdout.replace("\r\n", "\n"),
+        expected,
+        "self-referential struct (Vec<Self> field) tree walk produced the wrong result"
+    );
+}
+
+#[test]
+fn intentc_test_harness_mode_runs_each_test_fn_in_isolation() {
+    // A file with no top-level `fn main` and `#[test]`-attributed
+    // fns should run in harness mode: each fn gets its own
+    // synthesized driver, run as a separate process, so one
+    // failing assert doesn't take out the rest of the suite. This
+    // is the exact example from tutorials/src/beginner/00_cli_reference.md.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_harness_ok_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn addition_works() -> i64 {\n  assert 1 + 1 == 2;\n  return 0;\n}\n\n#[test]\nfn subtraction_works() -> i64 {\n  assert 5 - 3 == 2;\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <harness file>");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(
+        run.status.success(),
+        "expected exit 0, stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr),
+    );
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("running 2 tests"), "got:\n{stdout}");
+    assert!(stdout.contains("test addition_works ... ok"), "got:\n{stdout}");
+    assert!(stdout.contains("test subtraction_works ... ok"), "got:\n{stdout}");
+    assert!(stdout.contains("test result: ok. 2 passed; 0 failed"), "got:\n{stdout}");
+}
+
+#[test]
+fn intentc_test_harness_mode_reports_one_failure_without_killing_the_rest() {
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_harness_fail_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(
+        &tmp,
+        b"#[test]\nfn addition_works() -> i64 {\n  assert 1 + 1 == 2;\n  return 0;\n}\n\n#[test]\nfn broken_test() -> i64 {\n  assert 1 == 2, \"deliberately wrong\";\n  return 0;\n}\n",
+    )
+    .expect("write tmp");
+
+    let run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <harness file>");
+    let _ = std::fs::remove_file(&tmp);
+    assert_eq!(run.status.code(), Some(1));
+
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains("test addition_works ... ok"), "got:\n{stdout}");
+    assert!(stdout.contains("test broken_test ... FAILED"), "got:\n{stdout}");
+    assert!(stdout.contains("test result: FAILED. 1 passed; 1 failed"), "got:\n{stdout}");
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    assert!(
+        stderr.contains("assertion failed: deliberately wrong"),
+        "got:\n{stderr}"
+    );
+}
+
+#[test]
+fn intentc_test_legacy_mode_unaffected_by_harness_detection() {
+    // A file WITH a real `fn main` (no #[test] fns) must keep
+    // running the pre-existing legacy behavior unchanged.
+    let lli = std::env::var("LLI").unwrap_or_else(|_| "lli".to_string());
+    let lli_ok = Command::new(&lli)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !lli_ok {
+        return;
+    }
+
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let tmp = std::env::temp_dir().join(format!(
+        "intentc_legacy_still_works_{}.vani",
+        std::process::id()
+    ));
+    std::fs::write(&tmp, b"fn main() -> i64 {\n  return 0;\n}\n").expect("write tmp");
+
+    let run = Command::new(binary)
+        .args(["test", tmp.to_str().unwrap()])
+        .output()
+        .expect("vanic test <legacy file>");
+    let _ = std::fs::remove_file(&tmp);
+    assert!(run.status.success());
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    assert!(stdout.contains(": ok ("), "got:\n{stdout}");
+    assert!(!stdout.contains("running"), "must not enter harness mode, got:\n{stdout}");
+}
+
 #[test]
 #[ignore = "echo_with_timeout.vani LLVM IR has undefined value for async TCP locals; lli rejects it"]
 fn intentc_test_passes_for_all_examples_and_fails_on_violated_assertion() {

@@ -2341,7 +2341,10 @@ fn run() -> Result<ExitCode, String> {
             // fired, no runtime guard tripped, no proof obligation
             // remained unsatisfied at runtime). Output per file plus a
             // summary line; exit 1 if any failed. A directory arg
-            // expands to its `*.vani` children (non-recursive).
+            // expands to every `*.vani` descendant, recursively
+            // (see `walk_intent_files`). A file with no top-level
+            // `fn main` and at least one `#[test]` fn runs in
+            // harness mode instead (see `detect_harness_test_fns`).
             if args.len() < 3 {
                 return Err("test requires at least one source file\n\n".to_string() + HELP);
             }
@@ -2379,6 +2382,82 @@ fn run() -> Result<ExitCode, String> {
             // the human-readable form prints them on FAILED.
             let mut json_results: Vec<String> = Vec::new();
             for path in &files {
+                let harness_fns = detect_harness_test_fns(path);
+                if !harness_fns.is_empty() {
+                    if !json {
+                        println!(
+                            "running {} test{} ({})",
+                            harness_fns.len(),
+                            if harness_fns.len() == 1 { "" } else { "s" },
+                            path.display()
+                        );
+                    }
+                    let mut file_passed = 0usize;
+                    let mut file_failed = 0usize;
+                    for name in &harness_fns {
+                        let start = std::time::Instant::now();
+                        let result = run_test_function(path, name);
+                        let elapsed = start.elapsed().as_millis();
+                        let label_json =
+                            json_escape(&format!("{}::{}", path.display(), name));
+                        match result {
+                            Ok((0, _, _)) => {
+                                if !json {
+                                    println!("test {} ... ok", name);
+                                }
+                                json_results.push(format!(
+                                    "{{\"path\":\"{}\",\"ok\":true,\"ms\":{}}}",
+                                    label_json, elapsed
+                                ));
+                                passed += 1;
+                                file_passed += 1;
+                            }
+                            Ok((code, stdout, stderr)) => {
+                                if !json {
+                                    println!(
+                                        "test {} ... FAILED (exit {}, {} ms)",
+                                        name, code, elapsed
+                                    );
+                                    if !stdout.is_empty() {
+                                        eprintln!("--- stdout ---\n{}", stdout);
+                                    }
+                                    let stderr = trim_lli_backtrace(&stderr);
+                                    if !stderr.is_empty() {
+                                        eprintln!("--- stderr ---\n{}", stderr);
+                                    }
+                                }
+                                json_results.push(format!(
+                                    "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"exit\":{},\"reason\":\"runtime\"}}",
+                                    label_json, elapsed, code
+                                ));
+                                failed += 1;
+                                file_failed += 1;
+                            }
+                            Err(msg) => {
+                                if !json {
+                                    println!("test {} ... FAILED (compile, {} ms)", name, elapsed);
+                                    eprintln!("{}", msg);
+                                }
+                                json_results.push(format!(
+                                    "{{\"path\":\"{}\",\"ok\":false,\"ms\":{},\"reason\":\"compile\"}}",
+                                    label_json, elapsed
+                                ));
+                                failed += 1;
+                                file_failed += 1;
+                            }
+                        }
+                    }
+                    if !json {
+                        println!();
+                        println!(
+                            "test result: {}. {} passed; {} failed",
+                            if file_failed == 0 { "ok" } else { "FAILED" },
+                            file_passed,
+                            file_failed
+                        );
+                    }
+                    continue;
+                }
                 let start = std::time::Instant::now();
                 let result = run_program_llvm_capture(path);
                 let elapsed = start.elapsed().as_millis();
@@ -3524,6 +3603,72 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
         String::from_utf8_lossy(&out.stdout).into_owned(),
         String::from_utf8_lossy(&out.stderr).into_owned(),
     ))
+}
+
+/// XL2 follow-up (2026-07-28): `is_test` has parsed onto every
+/// `Function` since 2026-07-16 (see `ast::Function::is_test`'s doc
+/// comment), but `vanic test` never consumed the flag — a
+/// `#[test]`-only file (no `fn main`) simply failed to compile with
+/// "program must define fn main() -> i64", contradicting the CLI
+/// reference's documented harness-mode example. This closes the
+/// gap: a file with no top-level `fn main` and at least one
+/// `#[test]` fn runs in harness mode (each test gets its own
+/// synthesized driver, see `run_test_function`); a file that already
+/// defines `main` keeps running in legacy mode unchanged.
+fn detect_harness_test_fns(path: &Path) -> Vec<String> {
+    let Ok(source) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(tokens) = vani::lexer::lex(&source) else {
+        return Vec::new();
+    };
+    let (program, _parse_errors) = vani::parser::parse(tokens);
+    let has_main = program
+        .functions
+        .iter()
+        .any(|f| f.name == "main" && f.params.is_empty());
+    if has_main {
+        return Vec::new();
+    }
+    program
+        .functions
+        .iter()
+        .filter(|f| f.is_test)
+        .map(|f| f.name.clone())
+        .collect()
+}
+
+/// Compile+run a single `#[test]` fn from `path` in isolation: write
+/// a sibling temp file (same directory, so relative `use` imports
+/// still resolve) containing the original source plus a synthesized
+/// `fn main() -> i64 { return <fn_name>(); }`, then reuse the normal
+/// LLVM run-and-capture path. Running each test as its own process
+/// means one test's `assert` abort doesn't take out the rest of the
+/// suite. Mirrors `run_program_llvm_capture`'s Result shape so
+/// callers share pass/fail/compile-error handling with legacy mode.
+fn run_test_function(path: &Path, fn_name: &str) -> Result<(i32, String, String), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("failed to read '{}': {}", path.display(), error))?;
+    let synth_source = format!(
+        "{}\n\nfn main() -> i64 {{\n  return {}();\n}}\n",
+        source, fn_name
+    );
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let stem = path.file_stem().and_then(|name| name.to_str()).unwrap_or("test");
+    let pid = std::process::id();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let synth_path = dir.join(format!(".vanic-test-{}-{}-{}-{}.vani", stem, fn_name, pid, nanos));
+    fs::write(&synth_path, synth_source)
+        .map_err(|error| format!("failed to write '{}': {}", synth_path.display(), error))?;
+    let result = run_program_llvm_capture(&synth_path);
+    let _ = fs::remove_file(&synth_path);
+    result
 }
 
 /// AOT-compile to a native binary via the LLVM backend.

@@ -499,7 +499,27 @@ pub fn emit_c(program: &TypedProgram) -> String {
         match ty {
             Type::Struct(name) => out.push(name.clone()),
             Type::Array { element, .. } => struct_deps_in_ty(element, out),
-            Type::Vec(element) => struct_deps_in_ty(element, out),
+            // BUG-31 (2026-07-28): `Vec<X>`'s C spelling
+            // (`intent_vec_X`) is a fixed-size handle (`X*
+            // data; len; capacity;`) — like `Ref`/`Box`/`Ptr`
+            // below, it's pointer-indirected, so a struct field
+            // of type `Vec<X>` does NOT need X's full struct
+            // body to declare itself, only the `intent_vec_X`
+            // handle typedef (tracked separately via
+            // `vec_bundle_deps_in_ty`). Treating `Vec` the same
+            // as `Struct`/`Array` here created a false
+            // self-dependency for any self-referential struct
+            // (`struct Node { children: Vec<Node> }` made Node
+            // depend on Node) that the iterate-to-fixpoint topo
+            // loop below could never satisfy — Node was silently
+            // dropped from the C output entirely (no diagnostic;
+            // every later use of `Struct_Node` then failed with
+            // "incomplete type"). This is the same class of bug
+            // as BUG-22 (a required definition emitted too late
+            // relative to its user) but the missing definition
+            // never lands at all rather than landing late, since
+            // the cycle it's stuck in never resolves.
+            Type::Vec(_) => {}
             // A4.4 (2026-06-08): with the 2026-06-09 forward-
             // declaration of struct names, `ref Struct` /
             // `mut ref Struct` no longer need the FULL struct
@@ -573,6 +593,25 @@ pub fn emit_c(program: &TypedProgram) -> String {
             .entry(element_tag(element))
             .or_insert_with(|| element.clone());
     }
+    // BUG-31: emit every deferred Vec<UserStruct> bundle's handle
+    // typedef eagerly, upfront — it only needs the element type
+    // forward-declared (already true for every struct at this
+    // point), never the full body, so there's nothing to wait on.
+    // This is what breaks the self-referential-struct cycle: a
+    // struct field of `Vec<Self>` can now always find
+    // `intent_vec_Self` already declared, so the struct-emission
+    // loop below never needs to wait on its own Vec bundle's
+    // helper functions (which DO need the struct complete, and
+    // are still emitted through the ordinary topo loop further
+    // down via `emit_vec_bundle_functions`).
+    let mut emitted_vec_typedefs: BTreeSet<String> = BTreeSet::new();
+    for (tag, element) in &vec_elements_by_tag {
+        emit_vec_bundle_typedef(element, &mut body);
+        emitted_vec_typedefs.insert(tag.clone());
+    }
+    if !vec_elements_by_tag.is_empty() {
+        body.push('\n');
+    }
     let struct_decls: Vec<&crate::ir::TypedStructDecl> = program.structs.iter().collect();
     loop {
         let mut progress = false;
@@ -588,7 +627,10 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let mut deps: Vec<String> = Vec::new();
             struct_deps_in_ty(&element, &mut deps);
             if deps.iter().all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str())) {
-                emit_vec_bundle(&element, &mut body);
+                // Typedef already landed in the eager pass above;
+                // only the sizeof-dependent helper functions wait
+                // on the element's struct body here.
+                emit_vec_bundle_functions(&element, &mut body);
                 emitted_vec_bundles.insert(tag);
                 progress = true;
             }
@@ -610,9 +652,14 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let sok = sdeps
                 .iter()
                 .all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str()));
+            // BUG-31: a struct field only needs the Vec handle
+            // TYPEDEF (always available — see the eager pass
+            // above), never the bundle's sizeof-dependent helper
+            // functions, so check against `emitted_vec_typedefs`
+            // rather than `emitted_vec_bundles` here.
             let vok = vdeps
                 .iter()
-                .all(|t| emitted_vec_bundles.contains(t) || !vec_elements_by_tag.contains_key(t));
+                .all(|t| emitted_vec_typedefs.contains(t) || !vec_elements_by_tag.contains_key(t));
             let eok = edeps
                 .iter()
                 .all(|d| emitted_enums.contains(d) || !enum_by_name.contains_key(d.as_str()));
@@ -641,9 +688,12 @@ pub fn emit_c(program: &TypedProgram) -> String {
             let sok = sdeps
                 .iter()
                 .all(|d| emitted_structs.contains(d) || !by_name.contains_key(d.as_str()));
+            // BUG-31: same reasoning as the struct loop above —
+            // an enum payload field of `Vec<T>` only needs the
+            // handle typedef, not the sizeof-dependent functions.
             let vok = vdeps
                 .iter()
-                .all(|t| emitted_vec_bundles.contains(t) || !vec_elements_by_tag.contains_key(t));
+                .all(|t| emitted_vec_typedefs.contains(t) || !vec_elements_by_tag.contains_key(t));
             if sok && vok {
                 // Inline the typedef emission (mirrors the
                 // logic in the post-emit pass below); marking
@@ -11040,9 +11090,62 @@ fn emit_vec_bool_bundle(out: &mut String) {
     );
 }
 
+// BUG-31 (2026-07-28): split out of `emit_vec_bundle` so a
+// self-referential struct (`struct Node { children: Vec<Node> }`)
+// can break its C-emission cycle. The handle typedef (`{ T*
+// data; len; capacity; }`) only needs T forward-declared (it's a
+// pointer field) — but the bundle's helper FUNCTIONS (`__from`,
+// `__push`, ...) use `sizeof(T)`, which needs T's full body. The
+// old single-function `emit_vec_bundle` coupled these, so the
+// unified struct/vec-bundle topo loop in `emit_c` saw a genuine
+// cycle for the self-referential case (struct Node's field needs
+// the bundle *functions* emitted first per the old dependency
+// tracking; the bundle's functions need struct Node emitted
+// first for `sizeof`) that could never resolve — struct Node was
+// silently never emitted, and every later use of `Struct_Node`
+// failed downstream with "incomplete type" and no diagnostic
+// pointing at the real cause. `emit_c` now emits every struct-
+// field Vec bundle's typedef eagerly, upfront (this function),
+// before the topo loop runs, so struct bodies never wait on it;
+// the topo loop still emits the (typedef-free) function bodies
+// once their element type is fully defined, via `emit_vec_bundle_functions`.
+pub(crate) fn emit_vec_bundle_typedef(element: &Type, out: &mut String) {
+    if *element == Type::Bool {
+        // `Vec<bool>` is a bit-vector (`uint64_t*` words), never
+        // a user struct — can't participate in the self-reference
+        // cycle this split exists for. `emit_vec_bool_bundle`
+        // already emits its typedef+functions together elsewhere.
+        return;
+    }
+    let struct_name = vec_c_struct(element);
+    let c_element = c_element_storage(element);
+    // __restrict__ tells gcc that this data pointer is the sole
+    // access path for the buffer, enabling auto-vectorisation of
+    // loops over Vec<i64> and Vec<f64> (matmul inner loop, stats
+    // accumulation). gcc honours restrict on struct members under
+    // -O2 with -fstrict-aliasing (the default).
+    out.push_str(&format!(
+        "typedef struct {{ {ct}* __restrict__ data; uint64_t len; uint64_t capacity; }} {sn};\n",
+        ct = c_element,
+        sn = struct_name
+    ));
+}
+
 pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
     if *element == Type::Bool {
         emit_vec_bool_bundle(out);
+        return;
+    }
+    emit_vec_bundle_typedef(element, out);
+    emit_vec_bundle_functions(element, out);
+}
+
+/// BUG-31: the helper-function half of the old `emit_vec_bundle`
+/// (everything that needs the element type's `sizeof`), with the
+/// typedef line (`emit_vec_bundle_typedef`, no `sizeof` needed)
+/// split out. See that function's doc comment for why.
+pub(crate) fn emit_vec_bundle_functions(element: &Type, out: &mut String) {
+    if *element == Type::Bool {
         return;
     }
     let struct_name = vec_c_struct(element);
@@ -11060,14 +11163,17 @@ pub(crate) fn emit_vec_bundle(element: &Type, out: &mut String) {
     // writes (C forbids `arr1 = arr2` via `=`). Phase 2c.
     let element_is_array = matches!(element, Type::Array { .. });
 
-    // __restrict__ tells gcc that this data pointer is the sole
-    // access path for the buffer, enabling auto-vectorisation of
-    // loops over Vec<i64> and Vec<f64> (matmul inner loop, stats
-    // accumulation). gcc honours restrict on struct members under
-    // -O2 with -fstrict-aliasing (the default).
+    // BUG-31: forward-declare `__free` before any other helper
+    // in this bundle. For a self-referential element (`Vec<Node>`
+    // where `Node` itself owns a `Vec<Node>`), `__clear`'s
+    // per-slot drop calls this same bundle's own `__free` on each
+    // element's nested Vec — but `__clear` is emitted earlier in
+    // this function than `__free`'s definition. Without a
+    // prototype, `cc` implicitly declares `__free` as `int(...)`
+    // at the call site, then rejects the real `static void`
+    // definition as a conflicting redeclaration.
     out.push_str(&format!(
-        "typedef struct {{ {ct}* __restrict__ data; uint64_t len; uint64_t capacity; }} {sn};\n",
-        ct = c_element,
+        "static INTENT_UNUSED void {sn}__free({sn} xs);\n",
         sn = struct_name
     ));
 

@@ -115,10 +115,13 @@ vanic fmt --check src/          # CI-style check for entire tree
 
 `vanic test` supports two modes:
 
-**`#[test]` attribute mode (v0.1.5+, recommended)**
+**`#[test]` attribute mode (recommended)**
 
-Mark individual functions with `#[test]`. `vanic test` collects
-them, synthesises a harness `main`, compiles and runs it:
+Mark individual functions with `#[test]` and give the file no
+top-level `fn main`. `vanic test` collects the `#[test]` fns and
+gives each one its own synthesized `fn main() -> i64 { return
+<fn>(); }` driver, compiled and run as a separate process -- so
+one failing test doesn't take the rest of the suite down with it:
 
 ```vani
 #[test]
@@ -142,15 +145,19 @@ vanic test math_test.vani
 # test result: ok. 2 passed; 0 failed
 ```
 
-Each test function must return `i64`. Passing is `return 0;`
-(or any code path that doesn't abort). A failing `assert` inside
-the test body aborts with a named diagnostic and counts as a
-failure.
+Each test function must take no parameters and return `i64`
+(enforced by the ordinary type checker on the synthesized `main`).
+Passing is `return 0;` (or any code path that doesn't abort). A
+failing `assert` inside the test body aborts that test's process
+with a named diagnostic and counts as a failure; the rest of the
+suite still runs.
 
-**Legacy mode (pre-v0.1.5)**
+**Legacy mode**
 
-Each file's `main` is expected to return 0 for pass, non-zero
-for fail. Still works; prefer `#[test]` for new code.
+Once a file defines its own top-level `fn main`, `vanic test`
+always uses legacy mode for it -- `#[test]` attributes are not
+combined with an existing `main`. `main` is expected to return 0
+for pass, non-zero for fail:
 
 ```bash
 vanic test tests/

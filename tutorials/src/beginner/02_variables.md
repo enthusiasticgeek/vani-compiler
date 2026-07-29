@@ -73,13 +73,23 @@ either = true
   type. You'll see inferred `let answer = ...` later, but until you
   trust your guess about what the inferred type is, spelling it
   out is the safe choice.
-- **Integer widths matter**. vāṇी has `i8`, `i16`, `i32`, `i64`
-  (signed) and `u8`, `u16`, `u32`, `u64` (unsigned). Mixing widths
-  without an explicit cast is a type error. Pick `i64` for
-  general arithmetic; pick narrower widths when memory layout or
-  embedded targets demand it.
-- **Floats are `f32` or `f64`**. Same width-strictness rule
-  applies: don't multiply an `f64` by an `i64` without casting.
+- **Integer widths matter, but *safe* mixing doesn't need a cast**.
+  vāṇी has `i8`, `i16`, `i32`, `i64` (signed) and `u8`, `u16`,
+  `u32`, `u64` (unsigned). Two operands of the *same signedness*
+  (`i32 * i64`, `u8 + u32`, ...) silently widen to the bigger of
+  the two -- that direction can't lose information, so there's
+  nothing to make explicit. What's rejected without an explicit
+  `as` cast is anything that *could* lose information: mixed
+  signedness at the same width (`i32 * u32`), or a signed type
+  no wider than the unsigned one it's paired with (`i8 + u32`).
+  Pick `i64` for general arithmetic; pick narrower widths when
+  memory layout or embedded targets demand it.
+- **Floats mix with integers the same permissive way**: `f64 * i64`
+  silently converts the integer operand to float and evaluates as
+  `f64` -- no cast required. This differs from many languages'
+  "explicit everywhere" stance; vāṇी's explicitness requirement
+  is really about *narrowing or sign-changing* conversions, not
+  numeric mixing in general.
 - **`bool` is its own type**, not a 0-or-1 integer. `&&` / `||` /
   `!` work as you'd expect.
 - **`/` on integers truncates toward zero**; `%` is the
@@ -117,36 +127,50 @@ overlook when you're expecting fractional-looking results; if you want
 
 ## Challenge
 
-Add an `i32` variable to the program, multiply it by `2`, and
-print it. Note the **type error** when you mix it with `a` (an
-`i64`) without a cast. Then fix the error using a cast.
+Add a `u32` variable to the program and multiply it by `a` (an
+`i64`). Note this one *does* type-check and run -- `u32` is
+narrower than `i64`, so it's a safe implicit widen. Now add an
+`i32` variable at the *same width* as a `u32` and multiply the
+two together. This time note the **type error**: same-width
+mixed signedness is exactly the case vāṇी won't silently resolve,
+because there's no widening direction that's obviously safe.
+Then fix the error using a cast.
 
 <details>
 <summary>Solution</summary>
 
 ```vani
-let narrow: i32 = 5;
-// print narrow * a;            // error: type mismatch (i32 vs i64)
-let widened: i64 = narrow as i64;
+let small_u: u32 = 5;
+print "small_u * a =", small_u * a;   // ok: u32 safely widens to i64
+
+let small_i: i32 = 5;
+// print small_u * small_i;      // error: no safe implicit integer
+//                                // promotion for u32 and i32 (same
+//                                // width, different signedness)
+let widened: i64 = small_i as i64;
 print "widened * a =", widened * a;
 ```
 
-vāṇी uses `as` for explicit numeric casts. There's no implicit
-widening -- the compiler tells you exactly where the conversion
-must happen, which is harder to write but easier to read.
+vāṇी uses `as` for the conversions it won't do implicitly: any
+cast that could change a value's meaning (sign-changing, or
+narrowing to a type that might not hold the value) has to be
+spelled out at the call site.
 
 </details>
 
 ## Bitwise operators
 
-All integer types support the standard bitwise operators:
+Integer types support these bitwise operators. There's no unary
+`~` (bitwise-NOT) operator -- get the same result with `n ^ -1`
+(XOR against all-ones flips every bit, which *is* what a
+two's-complement bitwise-NOT does):
 
 | Operator | Meaning | Example |
 |---|---|---|
 | `&` | bitwise AND | `12 & 10` -> `8` |
 | `\|` | bitwise OR | `12 \| 10` -> `14` |
 | `^` | bitwise XOR | `12 ^ 10` -> `6` |
-| `~` | bitwise NOT (complement) | `~0` -> `-1` |
+| `^ -1` | bitwise NOT (complement) | `0 ^ -1` -> `-1` |
 | `<<` | left shift | `1 << 3` -> `8` |
 | `>>` | right shift | `16 >> 2` -> `4` |
 
@@ -159,7 +183,7 @@ fn main() -> i64 {
   print "AND:", a & b;    // 8  (0b1000)
   print "OR:", a | b;     // 14 (0b1110)
   print "XOR:", a ^ b;    // 6  (0b0110)
-  print "NOT 0:", ~0;     // -1 (all bits set in two's-complement)
+  print "NOT 0:", 0 ^ -1; // -1 (all bits set in two's-complement)
   print "left shift:", 1 << 4;   // 16
   print "right shift:", 64 >> 3; // 8
   return 0;
