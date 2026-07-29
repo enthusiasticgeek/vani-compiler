@@ -604,8 +604,21 @@ pub fn emit_c(program: &TypedProgram) -> String {
     // helper functions (which DO need the struct complete, and
     // are still emitted through the ordinary topo loop further
     // down via `emit_vec_bundle_functions`).
-    let mut emitted_vec_typedefs: BTreeSet<String> = BTreeSet::new();
+    // Only elements the early "Vec<primitive>" phase above SKIPPED
+    // (`vec_element_has_user_struct == true`) still need a bundle
+    // at all here — the early phase already emitted a COMPLETE
+    // bundle (typedef + functions) for every primitive element, so
+    // eagerly emitting the typedef again for those would duplicate
+    // it (`cc` then rejects the second `typedef` as a conflicting
+    // redeclaration). Track eagerly-emitted typedefs in their own
+    // set seeded with whatever the early phase already covered, so
+    // the `vok` check below is satisfied for every element either
+    // way.
+    let mut emitted_vec_typedefs: BTreeSet<String> = emitted_vec_bundles.clone();
     for (tag, element) in &vec_elements_by_tag {
+        if emitted_vec_bundles.contains(tag) {
+            continue;
+        }
         emit_vec_bundle_typedef(element, &mut body);
         emitted_vec_typedefs.insert(tag.clone());
     }
