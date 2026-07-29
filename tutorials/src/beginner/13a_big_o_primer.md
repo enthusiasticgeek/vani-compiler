@@ -128,7 +128,11 @@ fn all_pairs(xs: ref Vec<i64>) -> i64 {
 }
 ```
 
-ships annotated as `O(n^2)`.
+ships annotated as `O(n²)` (the compiler's actual output uses the
+Unicode superscript digit, not a caret -- `O(n^2)` in this chapter's
+prose is the conventional math notation for talking *about* the
+complexity class, not a literal transcription of what `--big-o`
+prints).
 
 ## Reading vāṇी's annotation output
 
@@ -136,7 +140,7 @@ ships annotated as `O(n^2)`.
 
 ```
   fn one_loop: O(n)
-  fn nested_loops: O(n^2)
+  fn nested_loops: O(n²)
   fn just_sort: O(n log n)
   fn recursive: O(recursive)
 ```

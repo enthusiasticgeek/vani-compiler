@@ -3010,4 +3010,20 @@ verifying the four fixes above against their tutorial worked examples
   directly (no intermediate `let`) in any function carrying an
   `ensures` clause on that return value.
 
+- [x] **`beginner/09a_modules_primer.md` through `13a_big_o_primer.md`
+  (rest of the beginner track) audited 2026-07-29 — one confirmed
+  doc bug found.** `13a_big_o_primer.md`'s "ships annotated as
+  `O(n^2)`" and its "Reading vāṇी's annotation output" code block
+  used a caret (`O(n^2)`) for what's presented as literal
+  `--big-o` terminal output — the real output uses the Unicode
+  superscript digit (`O(n²)`), confirmed via raw byte inspection
+  (`c2 b2` = U+00B2). Fixed both spots; left the *other* seven
+  `O(n^2)` mentions in the file alone since those are genuinely
+  general math notation (discussing the complexity class in prose,
+  a table, or a summary bullet), not transcriptions of compiler
+  output. `09a_modules_primer.md`, `10_modules.md`,
+  `11_challenges.md`, `12_devanagari.md` (including the Devanagari-
+  numeral output `१२`) all verified fully correct end-to-end,
+  including exact error-message text in three cases.
+
 ---
