@@ -3572,4 +3572,22 @@ verifying the four fixes above against their tutorial worked examples
   `parallel_for_mul_reduction_example_produces_correct_output_on_both_backends`
   in `tests/run_end_to_end.rs`.
 
+- [x] **`intermediate/09a_ffi_primer.md`'s FFI worked example used
+  `sqrt` as the `extern "C"` function name, which collides with
+  vāṇी's own built-in `sqrt` — fixed 2026-07-29.** `extern "C" fn
+  sqrt(x: f64) -> f64;` is rejected outright: "function 'sqrt' is
+  a built-in name and cannot be redefined" (vāṇी ships `sqrt` as
+  one of its many bare-named math builtins). Replaced with `hypot`
+  (confirmed not a builtin collision, real libm function). Also
+  corrected the surrounding claim that `vanic build --link-with=m`
+  is needed to resolve libm symbols — verified directly that the
+  `hypot` example runs correctly via both `vanic run` and a plain
+  `vanic build` with no `--link-with` flag at all (libm is folded
+  into libc on this toolchain); reworded to note `--link-with` is
+  for when a symbol genuinely doesn't resolve on its own, not
+  something every libm call needs. Also confirmed the file's
+  "vendor_sort" callback-declaration snippet (already explicitly
+  labeled illustrative/hypothetical) type-checks correctly as
+  written.
+
 ---

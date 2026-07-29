@@ -152,19 +152,29 @@ The actual chapter ([Intermediate 9](09_ffi.md)) has the
 syntax. The shape:
 
 ```vani
-extern "C" fn sqrt(x: f64) -> f64;
+extern "C" fn hypot(x: f64, y: f64) -> f64;
 
 fn main() -> i64 {
-  let r: f64 = sqrt(2.0);
-  print "sqrt(2) =", r;
+  let r: f64 = hypot(3.0, 4.0);
+  print "hypot(3,4) =", r;
   return 0;
 }
 ```
 
+(`hypot`, not `sqrt` -- vāṇी already ships a builtin named `sqrt`,
+and `extern "C" fn sqrt(...)` is rejected as a name collision:
+"function 'sqrt' is a built-in name and cannot be redefined."
+Pick an FFI symbol name that isn't already one of vāṇी's many
+built-in math helpers.)
+
 `extern "C"` declares: "there exists a C function with this
-name + signature; trust me, link it in." When you run `vanic
-build --link-with=m`, vāṇी links against libm and the call
-resolves to the actual libm `sqrt`.
+name + signature; trust me, link it in." `vanic build
+--link-with=m` is the general way to make sure a libm symbol
+resolves at link time; in practice `libm` is folded into `libc`
+on most modern toolchains (confirmed: the `hypot` example above
+runs correctly via both `vanic run` and a plain `vanic build`
+with no `--link-with` flag at all) -- reach for `--link-with`
+when a symbol genuinely doesn't resolve without it.
 
 For scalars + bool + Str + references, the FFI is **safe by
 default** -- vāṇी handles all the calling-convention details.
