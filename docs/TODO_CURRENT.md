@@ -3508,4 +3508,68 @@ verifying the four fixes above against their tutorial worked examples
   warning (bare `` `Vec<i64>` `` inside a quoted diagnostic string,
   outside backticks).
 
+- [x] **`intermediate/06_closures.md`: whole-number `f64` prints
+  without a trailing `.0` — fixed 2026-07-29.** The ref-capturing-
+  closure example's inline comments claimed `apply(lookup, 2)`
+  prints `"3.0"` and `data[0]` prints `"1.0"`; confirmed directly
+  the real output is `"3"` and `"1"` on both backends. Corrected
+  the comments; no compiler change (this is just how `print`
+  formats a whole-number `f64` in this compiler, consistent
+  elsewhere).
+
+- [x] **BUG-40. `vanic run` (the `lli` JIT path) failed on EVERY
+  `parallel for` program with "Symbols not found: [
+  intent_pool_run ]" — `vanic build` + running the binary always
+  worked fine. Found auditing `intermediate/06c_fnptr_primer.md`'s
+  own "this compiles" `parallel for` example, which failed the
+  instant it was actually run.** Root cause: `intent_pool_run` (the
+  pthreads thread-pool runtime `parallel for` lowers into, defined
+  in `parallel_runtime.c`) is compiled as a static object and linked
+  into AOT (`vanic build`) binaries by `build_program_llvm` — but
+  `run_program_llvm`/`run_program_llvm_capture` (the `lli` JIT paths
+  behind `vanic run` and `vanic test`) never got the equivalent
+  `-load`able shared-library build the way `sort()`'s runtime
+  already has (`sort_runtime_shared_lib`, added for a prior,
+  unrelated bug). Every `parallel for` program — a large fraction of
+  the concurrency tutorials' worked examples — was silently broken
+  under the exact command (`vanic run`) those tutorials tell readers
+  to use. Fixed by adding `parallel_runtime_shared_lib()` (mirrors
+  `sort_runtime_shared_lib()` exactly: compiles `parallel_runtime.c`
+  to a `.dll`/`.dylib`/`.so`, `-shared -fPIC` plus `-lpthread`/
+  `-pthread` so the shared lib's own pthread calls resolve
+  standalone) and wiring its `-load=` flag into both `lli`
+  invocation sites. Verified: the tutorial's own minimal example and
+  the full, much larger `examples/language/english/parallel.vani`
+  (covers `+`/`*`/`min`/`max`/`&`/`|`/`^`/`&&`/`||` reductions plus
+  outer-scalar and outer-array captures) both now run correctly via
+  `vanic run` on both backends, matching `vanic build`'s
+  already-correct output exactly. New example:
+  `examples/language/english/parallel_for_jit_run.vani`. New test:
+  `parallel_for_jit_run_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`.
+
+- [x] **BUG-41. LLVM backend: `parallel for ... reduce x with *;`
+  (multiplicative reduction) crashed `lli`/`llc` with "atomic load
+  must have explicit non-zero alignment" — found testing
+  `examples/language/english/parallel.vani` while diagnosing
+  BUG-40.** `atomicrmw` has no `mul` variant, so the Mul reduction
+  is the one operator lowered via a `cmpxchg` retry loop instead of
+  a plain `atomicrmw`; its initial atomic load
+  (`backend_llvm.rs`, the outlined-worker Mul-reduction codegen) read
+  `load atomic i64, i64* %cap_N monotonic` with no `, align 8` —
+  the one atomic-load call site in the entire file missing an
+  alignment (every sibling site already specifies one; grepped to
+  confirm). Modern LLVM requires an explicit alignment on every
+  atomic load. Fixed by adding `, align 8`. Verified: both the
+  minimal repro and the full `parallel.vani` example's `*`
+  reduction now produce correct output (`24` and `240000`
+  respectively) on both backends, cross-checked several of
+  `parallel.vani`'s other reduction outputs by hand
+  (`acc_or`/`acc_xor` match `10|20|30|40=62` /
+  `10^20^30^40=40`). New example:
+  `examples/language/english/parallel_for_mul_reduction.vani`. New
+  test:
+  `parallel_for_mul_reduction_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`.
+
 ---

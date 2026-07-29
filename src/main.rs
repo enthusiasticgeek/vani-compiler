@@ -3323,6 +3323,10 @@ fn run_program_llvm(
     if let Some(sort_lib) = sort_runtime_shared_lib() {
         cmd.arg(format!("-load={}", sort_lib.display()));
     }
+    // BUG-40: see parallel_runtime_shared_lib's doc comment.
+    if let Some(par_lib) = parallel_runtime_shared_lib() {
+        cmd.arg(format!("-load={}", par_lib.display()));
+    }
     // BUG-5 / L25: Windows-only; see mingw_ansi_stdio_shared_lib's doc comment.
     if let Some(ansi_lib) = mingw_ansi_stdio_shared_lib() {
         cmd.arg(format!("-load={}", ansi_lib.display()));
@@ -3413,6 +3417,59 @@ fn sort_runtime_shared_lib() -> Option<&'static Path> {
         let _ = fs::remove_file(&sort_c_path);
         match out {
             Ok(o) if o.status.success() && sort_lib_path.exists() => Some(sort_lib_path),
+            _ => None,
+        }
+    })
+    .as_deref()
+}
+
+/// BUG-40 (2026-07-29): `parallel for` calls `intent_pool_run`
+/// (defined in `parallel_runtime.c`, the pthreads thread-pool
+/// runtime) — `build_program_llvm` (AOT) compiles it as a static
+/// object and links it into the final binary, but `vanic run`'s
+/// JIT (`lli`) never got the equivalent `-load`able shared library
+/// the way `sort_runtime_shared_lib` already does for `sort()`.
+/// Every `parallel for` program failed under `vanic run`/`vanic
+/// test` with "Symbols not found: [ intent_pool_run ]", while
+/// `vanic build` + running the binary worked fine — found auditing
+/// `intermediate/06c_fnptr_primer.md`'s own "this compiles" example.
+/// Same pattern as `sort_runtime_shared_lib`, plus `-lpthread`/
+/// `-pthread` so the pthread symbols `intent_pool_run` itself calls
+/// resolve inside the standalone shared library (a static object
+/// relies on the final binary's own pthread linkage; a `-load`ed
+/// `.so`/`.dll` has none of that unless it's self-contained).
+fn parallel_runtime_shared_lib() -> Option<&'static Path> {
+    static LIB: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    LIB.get_or_init(|| {
+        let ext = if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let pid = std::process::id();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let par_c_path = env::temp_dir().join(format!("vanic-parlib-{}-{}.c", pid, nanos));
+        let par_lib_path =
+            env::temp_dir().join(format!("vanic-parlib-{}-{}.{}", pid, nanos, ext));
+        fs::write(&par_c_path, include_str!("parallel_runtime.c")).ok()?;
+        let cc = env::var("CC").unwrap_or_else(|_| "gcc".to_string());
+        let mut cmd = Command::new(&cc);
+        cmd.args(["-O2", "-shared", "-fPIC", "-march=native"]);
+        cmd.arg(&par_c_path).arg("-o").arg(&par_lib_path);
+        if cfg!(target_os = "windows") {
+            cmd.arg("-lpthread");
+        } else {
+            cmd.arg("-pthread");
+        }
+        let out = cmd.output();
+        let _ = fs::remove_file(&par_c_path);
+        match out {
+            Ok(o) if o.status.success() && par_lib_path.exists() => Some(par_lib_path),
             _ => None,
         }
     })
@@ -3585,6 +3642,10 @@ fn run_program_llvm_capture(path: &Path) -> Result<(i32, String, String), String
     // MATH-1: see run_program_llvm's identical comment.
     if let Some(sort_lib) = sort_runtime_shared_lib() {
         cmd.arg(format!("-load={}", sort_lib.display()));
+    }
+    // BUG-40: see run_program_llvm's identical comment.
+    if let Some(par_lib) = parallel_runtime_shared_lib() {
+        cmd.arg(format!("-load={}", par_lib.display()));
     }
     // BUG-5 / L25: see run_program_llvm's identical comment.
     if let Some(ansi_lib) = mingw_ansi_stdio_shared_lib() {

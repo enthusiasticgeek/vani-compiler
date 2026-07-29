@@ -45508,7 +45508,7 @@ fn emit_parallel_for_via_gomp(
                 deferred.push_str(&format!("{}:\n", &cas_loop[1..]));
                 let old_v = outlined_ctx.fresh_tmp();
                 deferred.push_str(&format!(
-                    "  {} = load atomic i64, i64* {} monotonic\n",
+                    "  {} = load atomic i64, i64* {} monotonic, align 8\n",
                     old_v, global_ptr
                 ));
                 let new_v = outlined_ctx.fresh_tmp();

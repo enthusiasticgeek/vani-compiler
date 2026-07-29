@@ -3170,6 +3170,87 @@ fn default_method_inherited_self_type_example_produces_correct_output_on_both_ba
     }
 }
 
+// BUG-40 (2026-07-29): `vanic run` (the lli JIT path) failed on any
+// `parallel for` program with "Symbols not found: [ intent_pool_run ]"
+// -- the pthreads thread-pool runtime parallel-for calls into was
+// never packaged as a `-load`able shared library for the JIT the way
+// sort()'s runtime already was. `vanic build` + running the binary
+// always worked. Fixed by adding parallel_runtime_shared_lib() and
+// wiring it into both lli invocation sites. Found auditing the
+// function-pointers tutorial's own "this compiles" parallel-for
+// example.
+#[test]
+fn parallel_for_jit_run_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/parallel_for_jit_run.vani",
+        manifest_dir
+    );
+    let expected = "90\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "parallel for under vanic run produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+// BUG-41 (2026-07-29): LLVM backend's `parallel for ... reduce x
+// with *;` emitted an atomic load missing its required alignment --
+// `load atomic i64, i64* %cap_N monotonic` with no `, align 8` --
+// which modern LLVM rejects outright: "atomic load must have
+// explicit non-zero alignment". The only atomic-load site in
+// backend_llvm.rs missing an alignment; every sibling site already
+// had one. Found testing examples/language/english/parallel.vani
+// while diagnosing BUG-40.
+#[test]
+fn parallel_for_mul_reduction_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/parallel_for_mul_reduction.vani",
+        manifest_dir
+    );
+    let expected = "24\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "parallel for multiplicative reduction produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");

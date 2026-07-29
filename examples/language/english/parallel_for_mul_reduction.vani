@@ -1,0 +1,18 @@
+// build & run:
+//   vanic run examples/language/english/parallel_for_mul_reduction.vani
+//   vanic run examples/language/english/parallel_for_mul_reduction.vani --backend=c
+//   vanic build examples/language/english/parallel_for_mul_reduction.vani -o /tmp/parallel_for_mul_reduction && /tmp/parallel_for_mul_reduction
+
+intent "Regression for BUG-41: LLVM backend's `parallel for ... reduce x with *;` (multiplicative reduction) emitted an atomic load missing its required alignment -- `load atomic i64, i64* %cap_N monotonic` with no `, align 8` -- which modern LLVM (lli/llc) rejects outright: 'atomic load must have explicit non-zero alignment'. Every OTHER atomic load in backend_llvm.rs already specified an alignment; this was the one missed site, in the Mul reduction's cmpxchg-retry-loop initial load (the only reduction operator using cmpxchg instead of a plain atomicrmw, since atomicrmw has no `mul` variant). Fixed by adding `, align 8`. Found testing the existing examples/language/english/parallel.vani example while diagnosing BUG-40.";
+
+fn main() -> i64 {
+  let xs: [i64; 4] = [1, 2, 3, 4];
+  let product: i64 = 1;
+  parallel for i from 0 to 4
+  reduce product with *;
+  {
+    product = product * xs[i];
+  }
+  print product;
+  return 0;
+}

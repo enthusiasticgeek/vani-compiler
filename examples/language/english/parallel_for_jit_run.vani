@@ -1,0 +1,21 @@
+// build & run:
+//   vanic run examples/language/english/parallel_for_jit_run.vani
+//   vanic run examples/language/english/parallel_for_jit_run.vani --backend=c
+//   vanic build examples/language/english/parallel_for_jit_run.vani -o /tmp/parallel_for_jit_run && /tmp/parallel_for_jit_run
+
+intent "Regression for BUG-40: `vanic run` (the lli JIT path) failed on any `parallel for` program with 'Symbols not found: [ intent_pool_run ]', while `vanic build` + running the resulting binary worked fine. Root cause: intent_pool_run (the pthreads thread-pool runtime `parallel for` calls into) is compiled as a static object and linked into AOT binaries, but the JIT's `lli -load=<path>` invocation never got the equivalent shared-library build the way sort()'s runtime already has (sort_runtime_shared_lib). Fixed by adding parallel_runtime_shared_lib(), mirroring that existing pattern, and wiring its -load= flag into both lli invocation sites (vanic run and vanic test). Found auditing the function-pointers tutorial's own 'this compiles' parallel-for example.";
+
+pure fn double(x: i64) -> i64 {
+  return x * 2;
+}
+
+fn main() -> i64 {
+  let total: i64 = 0;
+  parallel for i from 0 to 10
+  reduce total with +;
+  {
+    total = total + double(i);
+  }
+  print total;
+  return 0;
+}
