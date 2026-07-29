@@ -86,28 +86,33 @@ the other?
 
 ```vani
 fn maybe_consume(xs: Vec<i64>, do_it: bool) -> i64 {
+  let extra: i64 = 0;
   if do_it {
     let other: Vec<i64> = xs;   // moves xs
-    return other[0];
-  } else {
-    // xs NOT moved here
+    print other[0];
   }
-  return xs[0];                  // is xs valid here?
+  // both branches fall through to here (no early return in
+  // the `if` arm this time -- that distinction matters, see below)
+  return xs[0] + extra;          // is xs valid here?
 }
 ```
 
-If `do_it == true`: xs was moved; reading xs[0] would be a
-use-after-move.
+If `do_it == true`: xs was moved inside the `if`, then control
+falls through to the shared `return` -- reading `xs[0]` there
+would be a use-after-move.
 
 If `do_it == false`: xs is fine.
 
 The compiler can't predict at compile time which branch
-runs -- but it can know that AT LEAST ONE PATH moves xs. So
-it conservatively treats xs as "possibly moved" after the if
+runs -- but it can know that AT LEAST ONE PATH moves xs and then
+*falls through* to the shared code after the `if`. So it
+conservatively treats xs as "possibly moved" from that point on
 -- reading xs[0] is rejected.
 
-The fix: either move in BOTH branches, or move in NEITHER.
-Make the branches consistent in their handling of `xs`.
+The fix: either move in BOTH branches, or move in NEITHER, or
+(as below) make the moving branch `return` before it would ever
+fall through to the shared code -- so there's no post-`if` point
+where xs could be read after being moved.
 
 <img class="manas" src="../images/mascot/manas_mascot_success.png" title="this is the correct, working version"/>
 
@@ -155,27 +160,42 @@ print xs[0];          // <- can we still read xs while r is alive?
 Answer: yes for **shared (read-only) borrows** like `ref`. You
 can have many of them at once. They're all read-only.
 
-But for **mutable borrows** (`mut ref`): no, you can't.
+The design intent -- and the rule Rust enforces, which this
+section used to claim vāṇी enforces too -- is that a **mutable**
+borrow should be exclusive: no reading the original while a
+`mut ref` alias to it is outstanding.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this code needs extra care"/>
+
+**As of this writing, the checker does not actually enforce
+this.** The following compiles and runs cleanly, on both
+backends, with no diagnostic at all:
 
 ```vani
 let xs: Vec<i64> = vec(1, 2, 3);
 let r: mut ref Vec<i64> = mut ref xs;
 push(r, 4);
-print xs[0];           // <- REJECTED: xs is mutably borrowed
+print xs[0];           // NOT rejected -- compiles and runs fine
 ```
 
-The compiler rejects the read of `xs` while `r` exists. This
-is the **single mutable borrow** rule:
+Confirmed not narrow to this one shape either -- the identical
+gap shows up whether the `mut ref` is stored in a `let` or passed
+inline (`push(mut ref xs, 4); print xs[0];`), and whether the
+conflicting access is a read or a write through the other alias
+(`set(r, 0, 99); print xs[0];` also compiles). Only vāṇी's
+**affine move rule** is enforced here (you can't read a value
+after it's been *moved*) -- there is currently no checker pass
+that tracks "an outstanding `mut ref` alias makes the original
+binding temporarily unreadable," the "single mutable borrow"
+exclusivity Rust is known for. In the example above nothing
+actually goes wrong at runtime (`push` only appends, so `xs[0]`
+is unaffected regardless), but the *rule* that would catch a
+genuinely dangerous version of this pattern isn't there to catch
+it if the aliasing ever did matter.
 
-> At any one time, you can have either many shared borrows OR
-> exactly one mutable borrow -- never both.
-
-The rule prevents the "I'm reading xs[0] while another piece
-of code is busy resizing the Vec" disaster -- what would xs[0]
-even mean during a realloc?
-
-vāṇी (and Rust) enforce this at compile time. Programs that
-compile can't have aliased mutation.
+Rust enforces this at compile time; as covered just above, vāṇी
+does not yet -- affine *moves* are checked, exclusive *borrowing*
+is not.
 
 ## What "ends" a borrow?
 
@@ -200,8 +220,13 @@ outlives the holder.
 
 ## The two-way trade
 
-Affine ownership eliminates a class of bugs (use-after-free,
-double-free, dangling pointer, data races) at compile time.
+Affine ownership (the move rule) eliminates a class of bugs
+(use-after-free, double-free, dangling pointer) at compile time.
+Data races specifically depend on the mutable-borrow-exclusivity
+rule from the section above, which -- as covered there -- isn't
+enforced yet; see [Advanced 2a](../advanced/02a_parallelism_primer.md)
+for how vāṇी's concurrency primitives handle shared mutable state
+in practice today.
 
 The cost: you have to think about WHO OWNS WHAT and pass
 values around explicitly. Code that "looks fine" in
@@ -227,9 +252,11 @@ ownership errors.
   construct moves a value, the value is "possibly moved"
   after -- reads are rejected. Fix by making all paths
   consistent.
-- **Borrow scopes**: shared borrows can multiply; mutable
-  borrows are exclusive. The compiler enforces "many shared
-  XOR one mutable" at any moment.
+- **Borrow scopes**: shared borrows (`ref`) can multiply freely --
+  confirmed enforced. The "many shared XOR one mutable"
+  exclusivity rule for `mut ref` is the *design intent* but is
+  **not currently enforced by the checker** (see the section
+  above) -- only the affine move rule is checked today.
 - **Borrow ends** when the borrow's binding goes out of
   scope (or earlier via NLL).
 
@@ -254,6 +281,6 @@ sensibly.
 
 ---
 
-**Previous**: [Sec.3a -- Box<T> and RAII primer ->](03a_box_raii_primer.md)
+**Previous**: [Sec.3a -- `Box<T>` and RAII primer ->](03a_box_raii_primer.md)
 **Next**: [Sec.3c -- Shared ownership primer ->](03c_shared_ownership_primer.md)
 

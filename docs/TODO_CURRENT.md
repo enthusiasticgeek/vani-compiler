@@ -3204,4 +3204,75 @@ verifying the four fixes above against their tutorial worked examples
   `Box<Vec<T>>`, `Box<OwnedStr>`, `Box<dyn Iface>`, `Option<Box<T>>`
   type declaration) verified correct.
 
+- [ ] **BUG-36 (found, NOT fixed — a documented core safety
+  guarantee that the checker doesn't currently enforce at all;
+  this is a missing subsystem, not a bug in the traditional
+  sense). The "single mutable borrow" exclusivity rule (`ref`
+  can multiply, `mut ref` must be exclusive — the rule that's
+  supposed to make aliased mutation, and therefore data races, a
+  compile error) is not enforced by the checker in any tested
+  shape.** Found auditing
+  `intermediate/03b_affine_deeper_primer.md`'s own worked
+  example, which explicitly claimed this compiles-error:
+  ```vani
+  let xs: Vec<i64> = vec(1, 2, 3);
+  let r: mut ref Vec<i64> = mut ref xs;
+  push(r, 4);
+  print xs[0];   // claimed: REJECTED -- xs is mutably borrowed
+  ```
+  It doesn't reject — compiles and runs cleanly on both backends,
+  no diagnostic at all. Confirmed not a narrow gap in one shape:
+  identical result whether the `mut ref` is stored in a `let` or
+  passed inline (`push(mut ref xs, 4); print xs[0];`), and
+  whether the conflicting access on the other alias is a read or
+  a write (`set(r, 0, 99); print xs[0];` also compiles clean).
+  Searched `checker.rs` for any exclusivity-tracking diagnostic
+  text ("mutably borrowed", "already borrowed", "shared XOR
+  mutable", etc.) — found exactly one unrelated hit (a check
+  about what CAN be the *source* of a `mut ref`, not about
+  excluding concurrent access to the same binding). Only the
+  **affine move rule** is enforced (a value can't be read after
+  being *moved*) — there is no pass tracking "an outstanding
+  `mut ref` alias makes the original binding temporarily
+  unreadable." **Not fixed this session**: implementing real
+  borrow-exclusivity tracking (a non-lexical-lifetime-style
+  analysis over every `mut ref`'s live range, checked against
+  every other access to the same binding) is a substantial new
+  checker subsystem, not a quick fix — well outside what's
+  reasonable to attempt under time pressure in an audit session,
+  and if implemented incorrectly could itself introduce false
+  rejections across a huge amount of existing working code.
+  Corrected `03b_affine_deeper_primer.md`'s "Borrow scopes"
+  section, its "two-way trade" section (removed "data races"
+  from the list of bugs affine ownership eliminates — that
+  specifically depends on this unenforced rule — with a pointer
+  to how the concurrency chapters handle shared mutable state in
+  practice today), and its summary bullet to state the real,
+  current enforcement boundary instead of the aspirational one.
+  **Follow-up for whoever picks this up**: cross-check
+  `advanced/02a_parallelism_primer.md` and the other concurrency
+  chapters (not yet audited this session) for the same "shared
+  XOR mutable eliminates data races" claim — this finding likely
+  has implications there too.
+
+- [x] **`03b_affine_deeper_primer.md`'s "conditional moves" flagship
+  example also didn't demonstrate what it claimed — fixed
+  2026-07-29.** The "broken" example (meant to show the compiler
+  rejecting a value read after only one `if`-branch moves it) had
+  the moving branch `return` early — which means the compiler's
+  flow analysis correctly proves the post-`if` code is only ever
+  reached via the non-moving branch, so it's genuinely safe and
+  the checker accepts it (confirmed: `vanic check` says "ok",
+  contradicting the tutorial's claimed rejection). This is a
+  real, positive finding about the checker being *more precise*
+  than the tutorial gave it credit for, not a compiler bug —
+  early-return branches are correctly excluded from the
+  "possibly moved" conservative join. Replaced with a version
+  where the moving branch does NOT return early (assigns instead)
+  — confirmed genuinely rejected — so the example actually
+  demonstrates the join-point problem it's named after. The
+  file's own "fixed" version was already correct as written (it's
+  exactly the early-return shape that makes the original "broken"
+  example not actually broken).
+
 ---
