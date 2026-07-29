@@ -3048,6 +3048,45 @@ fn eprint_string_literal_example_produces_correct_output_on_both_backends() {
     }
 }
 
+// BUG-35 (2026-07-29): same bug class as BUG-29 -- a payload-less
+// enum variant's zero-init placeholder only handled Str/OwnedStr as
+// needing LLVM's `null` literal for a pointer-shaped payload slot;
+// Box<T> (and raw pointers) also lower to a bare pointer but fell
+// through to the integer `0` default. Option<Box<Node>> -- the
+// canonical recursive-struct shape -- crashed the LLVM backend as a
+// result. Found auditing the Box<T>/RAII tutorial's own examples.
+#[test]
+fn option_box_recursive_struct_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/option_box_recursive_struct.vani",
+        manifest_dir
+    );
+    let expected = "1\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "Option<Box<Node>> construction produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");

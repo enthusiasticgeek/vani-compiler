@@ -293,29 +293,25 @@ When `d` drops:
 Phase 1 + 3 + 3b of the L2 lift (described earlier in the
 session ledger) wired this end-to-end on both backends.
 
-### `Box` of a tuple
+### Two things `Box<T>` does NOT support yet
 
-```vani
-let pair: Box<(i64, OwnedStr)> = box((42, "answer" + ""));
-```
+Two shapes that sound plausible given everything above -- but
+both are explicitly rejected in v1, so it's worth knowing the
+boundary rather than guessing:
 
-A Box wrapping a tuple. Useful when you have a multi-component
-value you want allocated together on the heap rather than
-inline. Less common than Box<Struct> because tuples don't have
-a name to reference -- but the compiler accepts it.
-
-### `Box<Box<T>>` -- pointer to a pointer
-
-```vani
-let inner: Box<i64> = box(99);
-let outer: Box<Box<i64>> = box(inner);
-```
-
-Two heap allocations: one for the outer Box's slot (holds the
-inner Box pointer), one for the inner Box's slot (holds the
-99). Rare in idiomatic code; mostly shows up in recursive type
-definitions where one Box layer doesn't add the right
-indirection.
+- **`Box` of a tuple.** `box((42, "answer" + ""))` for a
+  `Box<(i64, OwnedStr)>` fails: `box() v1 supports Copy + sized
+  element types (primitives, Copy structs), dyn Iface, Vec<T>,
+  and OwnedStr; got (i64, OwnedStr)`. Reach for a small named
+  struct instead of a tuple if you need to box a multi-component
+  value.
+- **`Box<Box<T>>` -- pointer to a pointer.** `box(inner)` where
+  `inner: Box<i64>` fails with the same diagnostic, which
+  explicitly calls this out: "Other owning inner types
+  (`Box<Box<T>>`, `Box<HashMap<…>>`, etc.) remain a follow-up."
+  So a second Box layer isn't available yet, even though it would
+  be a natural way to add indirection in some recursive type
+  definitions.
 
 ### `Vec<Box<T>>` -- sequence of heap-allocated Ts
 

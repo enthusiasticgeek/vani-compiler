@@ -1,0 +1,18 @@
+// build & run:
+//   vanic run examples/language/english/option_box_recursive_struct.vani
+//   vanic run examples/language/english/option_box_recursive_struct.vani --backend=c
+
+intent "Regression for BUG-35: Option<Box<Node>> -- the canonical recursive-struct shape the Box<T>/RAII tutorial itself demonstrates -- crashed the LLVM backend. Same bug class as BUG-29 (2026-07-28): the payload_zero placeholder for a payload-less enum variant (Option.None here) only handled Str/OwnedStr as needing LLVM's `null` literal for a pointer-shaped slot; Box<T> (and raw pointers) also lower to a bare pointer but fell through to the integer `0` default, and `lli` rejected the resulting `insertvalue %Enum_X %s0, %Struct_Node* 0, 1` with 'integer constant must have integer type'. Fixed by adding Type::Box/Type::Ptr/Type::PtrMut to the same null-literal match arm BUG-29 already covers for Str/OwnedStr.";
+
+struct Node {
+  value: i64,
+  next: Option<Box<Node>>,
+}
+
+fn main() -> i64 {
+  let tail: Node = Node { value: 3, next: Option.None };
+  let mid: Node = Node { value: 2, next: Option.Some(box(tail)) };
+  let head: Node = Node { value: 1, next: Option.Some(box(mid)) };
+  print head.value;
+  return 0;
+}

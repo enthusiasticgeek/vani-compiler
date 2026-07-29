@@ -3159,4 +3159,49 @@ verifying the four fixes above against their tutorial worked examples
   independent things were wrong, no single fix was trusted in
   isolation.
 
+- [x] **BUG-35. LLVM backend crashed on `Option<Box<Node>>` — the
+  canonical recursive-struct shape the `Box<T>`/RAII tutorial
+  itself teaches — with "integer constant must have integer
+  type". Same bug class as BUG-29 (2026-07-28), found auditing
+  `intermediate/03a_box_raii_primer.md`'s own examples.** The
+  `payload_zero` zero-init placeholder for a payload-less enum
+  variant (`Option.None` here) treats pointer-shaped payload
+  types specially (needs LLVM's `null` literal, not the integer
+  `0`) — but only listed `Type::Str`/`Type::OwnedStr`, the exact
+  gap BUG-29 fixed. `Box<T>` (and raw pointers) also lower to a
+  bare pointer and fell through to the same `_ => "0"` default,
+  so any `struct Node { ..., next: Option<Box<Node>> }` — a
+  linked-list/tree node, about as common a shape as exists —
+  crashed the LLVM backend the instant a value with a `None` was
+  constructed (works fine on the C backend the whole time,
+  confirmed). Fixed by adding `Type::Box(_)` /`Type::Ptr(_)` /
+  `Type::PtrMut(_)` to the exact same match arm BUG-29 already
+  fixed for `Str`/`OwnedStr`. Verified end-to-end on both
+  backends; full `cargo test --workspace`: clean (only the
+  already-known pre-existing Windows-local `lli`/`cc` link-flag
+  gaps in `vtables_phase3.rs`/`ssa_backend_llvm_crosscheck.rs`/
+  `user_drop_by_ref.rs`'s own test helpers, confirmed passing on
+  Linux CI both before and after this session's changes). New
+  example: `examples/language/english/option_box_recursive_struct.vani`.
+  New test:
+  `option_box_recursive_struct_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`.
+
+- [x] **`intermediate/03a_box_raii_primer.md` claimed two `Box<T>`
+  shapes work that are explicitly rejected in v1 — fixed
+  2026-07-29.** "`Box` of a tuple" (`box((42, "answer"))` for
+  `Box<(i64, OwnedStr)>`) and "`Box<Box<T>>`" (`box(inner)` where
+  `inner: Box<i64>`) both fail with the identical diagnostic:
+  "box() v1 supports Copy + sized element types (primitives, Copy
+  structs), `dyn Iface`, `Vec<T>`, and `OwnedStr`... Other owning
+  inner types (`Box<Box<T>>`, `Box<HashMap<…>>`, etc.) remain a
+  follow-up" — the error message ITSELF names `Box<Box<T>>` as a
+  known future gap, directly contradicting the tutorial's own
+  "the compiler accepts it" / "two heap allocations" framing of
+  the identical pattern. Rewrote both sections into one "Two
+  things `Box<T>` does NOT support yet" section stating the real
+  boundary. All other examples in the file (move, borrow,
+  `Box<Vec<T>>`, `Box<OwnedStr>`, `Box<dyn Iface>`, `Option<Box<T>>`
+  type declaration) verified correct.
+
 ---

@@ -16803,7 +16803,19 @@ fn emit_expr(expr: &TypedExpr, ctx: &mut FnCtx, out: &mut String) -> String {
                 // `lli` rejected the emitted IR. Found while
                 // writing a tutorial example nesting a `Str`
                 // payload one level inside another enum.
-                Type::Str | Type::OwnedStr => "null",
+                // BUG-35 (2026-07-29): same bug class as BUG-29
+                // just above -- `Box<T>` and raw pointers also
+                // lower to a bare pointer (`Struct_X*` / `i8*`),
+                // so a payload-less sibling variant needs `null`
+                // here too. Found testing `Option<Box<Node>>`
+                // (the canonical recursive-struct shape the
+                // `Box<T>`/RAII tutorial itself demonstrates) --
+                // `Option.None`'s unused Box payload slot fell
+                // through to the `_ => "0"` default and `lli`
+                // rejected the emitted IR with the identical
+                // "integer constant must have integer type" error
+                // BUG-29 fixed for Str.
+                Type::Str | Type::OwnedStr | Type::Box(_) | Type::Ptr(_) | Type::PtrMut(_) => "null",
                 // Aggregate payloads use `zeroinitializer`
                 // for the all-zero placeholder when the
                 // variant has no user-provided payload.

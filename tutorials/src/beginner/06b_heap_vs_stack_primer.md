@@ -67,7 +67,7 @@ Your program does the same dance constantly:
 
 ```
 fn greet(name: Str) -> i64 {
-  let count: i64 = name.len();
+  let count: i64 = len(name) as i64;
   print "hello,", name;
   return count;
 }
