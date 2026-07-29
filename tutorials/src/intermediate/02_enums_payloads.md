@@ -83,10 +83,17 @@ These are listed in [`docs/v1_limitations.md`](https://github.com/enthusiasticge
   doesn't work. You always go through `match`.
 - **No nested patterns**: `Some(Some(v))` patterns aren't
   supported; flatten with two `match` levels.
-- **`Box<T>` is unsupported**: recursive enums (`Tree(Box<Tree>,
-  Box<Tree>)`) need a workaround using arena indices. The
-  Composite design pattern example shows the tagged-struct
-  workaround.
+- **`Box<T>` works fine in general** -- including a self-
+  referential *struct* (`struct Node { next: Option<Box<Node>> }`
+  compiles and runs correctly). What's **not** supported is boxing
+  an *enum*: `box(some_enum_value)` is rejected ("box() v1
+  supports Copy + sized element types... got `Tree`"), and an enum
+  variant can't take a non-Copy struct payload either (a struct
+  containing `Box<T>` fields isn't an admitted enum payload type).
+  So a recursive **enum** specifically (`Tree.Node(Box<Tree>,
+  Box<Tree>)`) needs a workaround using arena indices -- recursive
+  *structs* don't. The Composite design pattern example shows the
+  tagged-struct workaround for the enum case.
 
 ### Seeing the `let`-destructure rejection
 

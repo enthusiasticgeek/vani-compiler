@@ -3026,4 +3026,25 @@ verifying the four fixes above against their tutorial worked examples
   numeral output `१२`) all verified fully correct end-to-end,
   including exact error-message text in three cases.
 
+- [x] **Started intermediate-track audit 2026-07-29.
+  `intermediate/01_struct_methods.md` fully clean.
+  `intermediate/02_enums_payloads.md` overclaimed "`Box<T>` is
+  unsupported" — false and misleading; `Box<T>` works fine in
+  general, including a self-referential *struct*
+  (`struct Node { next: Option<Box<Node>> }` compiles and runs) —
+  confirmed by direct test, and already independently demonstrated
+  working in `beginner/07a_tuples_primer.md`'s "Tuple containing a
+  Box" section. What's actually unsupported is narrower: boxing an
+  *enum* value (`box()` rejects non-struct/non-scalar element
+  types) and enum payloads that are non-Copy structs (so a struct
+  holding `Box<T>` fields can't be used as an enum payload either)
+  — meaning a recursive *enum* genuinely needs the arena-index
+  workaround the file already shows, but a recursive *struct*
+  doesn't. Rewrote the bullet to state the real, narrower
+  restriction instead of the blanket wrong one.** All other
+  examples in both files (struct methods worked example + missing-
+  field error + challenge; enum worked example + let-destructure
+  rejection + arena-index tree + Color/brightness challenge)
+  verified correct end-to-end.
+
 ---
