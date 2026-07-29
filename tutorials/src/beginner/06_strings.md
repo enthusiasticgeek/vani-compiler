@@ -290,8 +290,8 @@ vāṇी ships a rich set of string builtins.
 | `str_trim(s)` | `Str -> OwnedStr` | strip leading/trailing whitespace |
 | `str_replace(s, from, to)` | `Str, Str, Str -> OwnedStr` | replace all occurrences |
 | `str_split(s, sep)` | `Str, Str -> Vec<OwnedStr>` | split on separator |
-| `str_join(v, sep)` | `Vec<OwnedStr>, Str -> OwnedStr` | join with separator |
-| `str_index_of(s, sub)` | `Str, Str -> i64` | index of first occurrence, -1 if absent |
+| `str_join(v, sep)` | `ref Vec<OwnedStr>, Str -> OwnedStr` | join with separator |
+| `str_index_of(s, sub)` | `Str, Str -> Option<i64>` | index of first occurrence, `Option.None` if absent |
 | `substring(s, start, len)` | `Str, i64, i64 -> OwnedStr` | extract slice |
 | `str_repeat(s, n)` | `Str, i64 -> OwnedStr` | repeat N times |
 | `str_pad_left(s, n, c)` | `Str, i64, Str -> OwnedStr` | left-pad to width N |

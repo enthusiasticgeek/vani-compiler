@@ -2834,4 +2834,34 @@ verifying the four fixes above against their tutorial worked examples
   label with no compiler-inserted gap, matching the file's own
   claimed `test:` output.
 
+- [x] **`beginner/05c_loop_labels_primer.md` had two more issues,
+  fixed 2026-07-29.** (1) Same double-space class as the print-block
+  file: `print i, " ", j;` (a manual `" "` separator item) double-
+  spaces against `print`'s own auto-inserted separator, so real
+  output was `0   0` (three spaces) against the file's claimed
+  `0 0` — fixed in both places it appeared (the `break label` and
+  `continue label` examples) by dropping the manual `" "` item
+  entirely and letting `print`'s automatic single space do the
+  separating. (2) The challenge solution's claimed output
+  (`found: 6 * 7 = 42`) was simply wrong for the algorithm as
+  written: `j` runs fully for each `i` before `i` advances, so the
+  actual first pair hit in iteration order is `(3, 14)` — `search`
+  breaks out before `i` ever reaches `6`. Verified by running the
+  exact solution code; corrected the claimed output and added a
+  one-line explanation of why `(3, 14)` and not `(6, 7)`.
+
+- [x] **`beginner/06_strings.md`'s builtins-reference table had two
+  wrong signatures, found doing a full re-pass of the file (past
+  the "Quick example" already fixed 2026-07-28), fixed 2026-07-29.**
+  `str_index_of(s, sub)` was documented as returning plain `i64`
+  ("-1 if absent") — the real return type is `Option<i64>`
+  (`Option.None` if absent, not a sentinel `-1`); confirmed via
+  `check`, which rejects printing the result directly ("cannot
+  print an enum directly") and requires `option_unwrap_or` first.
+  `str_join(v, sep)` was documented as taking `Vec<OwnedStr>` by
+  value — it actually requires `ref Vec<OwnedStr>` (confirmed via
+  `check`: "str_join() arg 0 must be `ref Vec<OwnedStr>`, got
+  Vec<OwnedStr>"). Every other entry in the table (13 of 15
+  builtins) was verified correct by direct call.
+
 ---

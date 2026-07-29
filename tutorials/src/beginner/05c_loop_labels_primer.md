@@ -63,7 +63,7 @@ fn main() -> i64 {
       if i == 2 {
         break outer;   /* exits both loops immediately */
       }
-      print i, " ", j;
+      print i, j;
     }
   }
   print "done";
@@ -102,7 +102,7 @@ fn main() -> i64 {
       if j == 2 {
         continue outer;   /* skip j=2, j=3, and any outer tail code; go to i+1 */
       }
-      print i, " ", j;
+      print i, j;
     }
     print "tail of outer";   /* never reached -- continue outer skips this */
   }
@@ -251,7 +251,7 @@ fn main() -> i64 {
   search: for i from 0 to 20 {
     for j from 0 to 20 {
       if i * j == 42 {
-        print "found: ", i, " * ", j, " = 42";
+        print "found:", i, "*", j, "= 42";
         break search;
       }
     }
@@ -260,7 +260,7 @@ fn main() -> i64 {
 }
 ```
 
-Output: `found: 6 * 7 = 42`
+Output: `found: 3 * 14 = 42` -- `j` runs fully for each `i` before `i` advances, so the *first* pair found in iteration order is `(3, 14)`, not `(6, 7)` (which `search` never even reaches -- it breaks out at `i == 3` first).
 
 </details>
 
