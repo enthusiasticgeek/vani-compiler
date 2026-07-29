@@ -3009,6 +3009,45 @@ fn intentc_test_trims_lli_backtrace_from_failed_stderr() {
 // has a separate, not-yet-root-caused issue on this same program
 // (compiles to a native binary that silently crashes with no
 // output) -- see docs/TODO_CURRENT.md's BUG-31 entry.
+// BUG-32 (2026-07-29): an `eprint` string-literal item that never
+// also appeared in a `print` statement anywhere in the program was
+// silently dropped from LLVM output (the string-interning pre-pass
+// only walked Print, never EPrint). Found auditing the print-block
+// tutorial's eprint example. Both backends checked since the C
+// backend was never affected (it doesn't share this interning
+// pass) -- this test pins that it stays that way.
+#[test]
+fn eprint_string_literal_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/eprint_string_literal.vani",
+        manifest_dir
+    );
+    let expected = "eprint-only literal, never printed elsewhere\npath = /tmp/example\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(
+            stderr.replace("\r\n", "\n"),
+            expected,
+            "eprint string-literal item(s) dropped for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");

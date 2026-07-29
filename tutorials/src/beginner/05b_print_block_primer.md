@@ -50,14 +50,21 @@ can contain as many comma-separated items as a regular `print`:
 ```vani
 fn report(label: Str, a: i64, b: i64, total: i64) -> i64 {
   print {
-    label, ":";
-    "  a     = ", a;
-    "  b     = ", b;
-    "  total = ", total;
+    label + ":";
+    "  a     =", a;
+    "  b     =", b;
+    "  total =", total;
   }
   return 0;
 }
 ```
+
+`print` always inserts its own single space between comma-separated
+items, on top of whatever's already in the string -- so the label
+strings above end at `=` (no trailing space) rather than `= ` (with
+one), and `label` is concatenated with `":"` via `+` rather than
+comma-joined, or the output would come out double-spaced (`a     =  3`,
+`test :`).
 
 Output when called with `report("test", 3, 4, 7)`:
 
@@ -80,8 +87,8 @@ fn main() -> i64 {
   for i from 0 to 3 {
     let sq: i64 = i * i;
     print {
-      "i  = ", i;
-      "i^2 = ", sq;
+      "i  =", i;
+      "i^2 =", sq;
       "---";
     }
   }
@@ -105,15 +112,15 @@ i^2 = 4
 
 ---
 
-## `eprint` block
+## `eprint` doesn't have a block form (yet)
 
-The `eprint` variant (which writes to stderr) supports the same block form:
+Unlike `print`, `eprint` (which writes to stderr) does **not**
+support the `{ ... }` block form -- `eprint { ... }` is a parse
+error today. For multiple related stderr lines, repeat `eprint`:
 
 ```vani
-eprint {
-  "[ERROR] file not found";
-  "  path = ", path;
-}
+eprint "[ERROR] file not found";
+eprint "  path = ", path;
 ```
 
 ---
@@ -135,10 +142,10 @@ eprint {
 ```vani
 fn show_stats(name: Str, min: i64, max: i64, avg: i64) -> i64 {
   print {
-    "=== ", name, " ===";
-    "  min = ", min;
-    "  max = ", max;
-    "  avg = ", avg;
+    "===", name, "===";
+    "  min =", min;
+    "  max =", max;
+    "  avg =", avg;
   }
   return 0;
 }

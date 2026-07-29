@@ -1,0 +1,12 @@
+// build & run:
+//   vanic run examples/language/english/eprint_string_literal.vani
+//   vanic run examples/language/english/eprint_string_literal.vani --backend=c
+
+intent "Regression for BUG-32: an eprint string-literal item that never also appears in a print statement anywhere in the program was silently dropped from LLVM output. Root cause: the module-level string-interning pre-pass (collect_print_strings) only walked TypedStmt::Print, never TypedStmt::EPrint, so an eprint-only literal was never registered in the shared @.print_str.<idx> constant pool. The lookup at the eprint call site had no fallback on a miss, so the item was silently skipped -- not even an empty placeholder. A bare `eprint \"message\";` printed nothing at all; a mixed `eprint \"label:\", value;` dropped just the label, leaving only the auto-inserted separator space before the value. Found auditing the print-block tutorial's eprint example.";
+
+fn main() -> i64 {
+  eprint "eprint-only literal, never printed elsewhere";
+  let path: Str = "/tmp/example";
+  eprint "path =", path;
+  return 0;
+}

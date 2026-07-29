@@ -2772,4 +2772,66 @@ verifying the four fixes above against their tutorial worked examples
   attempted this session given the scope already spent on the
   C-backend half.
 
+- [x] **BUG-32. LLVM backend: an `eprint` string-literal item that
+  never also appears in a `print` statement anywhere in the
+  program is silently dropped from output -- not even an empty
+  placeholder.** Found auditing `beginner/05b_print_block_primer.md`'s
+  `eprint { ... }` example (which surfaced two other issues: see
+  below). Repro: `eprint "message";` alone printed nothing; a
+  mixed `eprint "label:", value;` dropped only the label, leaving
+  just the auto-inserted separator space before the value (so
+  stderr showed a leading space then the value, e.g. ` /tmp/x`
+  instead of `  path = /tmp/x`). `print` was unaffected, and the C
+  backend was unaffected on both. Root cause: `print`/`eprint`
+  string literals share one module-level constant pool
+  (`@.print_str.<idx>`, both `emit_print_items_llvm` and
+  `emit_eprint_items_llvm` GEP into the same naming scheme), which
+  is populated once, upfront, by `collect_print_strings` walking
+  every statement in the program -- but that function's dedicated
+  string-collection arm only matched `TypedStmt::Print`, never
+  `TypedStmt::EPrint`, falling through to the catch-all `_ => {}`.
+  So an eprint-only literal never got interned. The lookup at the
+  eprint call site (`ctx.print_str_indices.get(text)`) had no
+  fallback on a miss — the whole `if let Some(...)` block is
+  simply skipped, so the item silently vanishes rather than
+  erroring or falling back to some other emission path. Fixed by
+  changing `TypedStmt::Print { items } =>` to
+  `TypedStmt::Print { items } | TypedStmt::EPrint { items } =>` in
+  `collect_print_strings` — both statement kinds now feed the same
+  shared pool, matching how their *emission* already assumed one
+  shared pool. Verified end-to-end on both backends. New example:
+  `examples/language/english/eprint_string_literal.vani`. New
+  test: `eprint_string_literal_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`.
+
+- [x] **`beginner/05b_print_block_primer.md` had three more issues
+  besides the above, all fixed 2026-07-29.** (1) Claimed `eprint`
+  "supports the same block form" as `print` — false: `eprint { ... }`
+  is a parse error (`parse_eprint_stmt` only ever implemented the
+  flat comma-list form; `print`'s block form is a distinct,
+  dedicated parser path with its own desugar in the checker,
+  confirmed nowhere near eprint's parser code). Fixing this for
+  real would mean adding a new `Stmt`/`TypedStmt` variant threaded
+  through ~19 separate statement-walking passes in `checker.rs`
+  (recursion/heap/stack-depth/WCET/purity/... analyses each have
+  their own `Stmt::PrintBlock` arm) — logged as a real gap, out of
+  scope for a doc-audit pass; corrected the tutorial to show
+  `eprint` used as repeated flat statements instead. (2) Every
+  "Expected output" block in the file that padded a label with a
+  trailing space before its comma-separated value (`"  a     = ", a`)
+  was wrong by one space per item — `print`/`eprint` always insert
+  their own single separating space on top of whatever's already
+  in the string, so the real output was double-spaced
+  (`a     =  3`) against the file's own claimed single-spaced
+  output (`a     = 3`). Fixed by dropping the manual trailing space
+  from each label literal (letting the auto-inserted space do the
+  job alone), which restores the originally-intended alignment
+  exactly rather than just editing the claimed output text to
+  match a worse-looking real result. (3) The `label, ":";` group
+  had the same problem in an uneditable form (`label` is a
+  variable, not a literal, so there's no space to trim) — switched
+  to `label + ":";` (string concatenation) so the colon abuts the
+  label with no compiler-inserted gap, matching the file's own
+  claimed `test:` output.
+
 ---

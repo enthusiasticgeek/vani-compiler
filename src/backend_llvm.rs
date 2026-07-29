@@ -43628,7 +43628,22 @@ fn collect_print_strings(
         | TypedStmt::Return { expr }
         | TypedStmt::Assert { expr, .. }
         | TypedStmt::Prove { expr } => collect_strings_in_expr(expr, msgs, idx, &intern),
-        TypedStmt::Print { items } => {
+        // BUG-32 (2026-07-29): this arm used to only match
+        // `Print`, never `EPrint` -- an `eprint`-only string
+        // literal (never also `print`ed elsewhere in the program)
+        // never got interned into the shared `@.print_str.<idx>`
+        // constant pool that `emit_eprint_items_llvm` looks up by
+        // text. That lookup (`ctx.print_str_indices.get(text)`)
+        // has no fallback on a miss, so the whole item was
+        // silently skipped -- `eprint "message";` printed nothing
+        // at all, not even an empty line, and a mixed
+        // `eprint "label:", value;` dropped just the label,
+        // leaving only the auto-inserted separator space before
+        // the value. `print` and `eprint` share one string pool
+        // (see the identical `@.print_str.{idx}` naming in both
+        // `emit_print_items_llvm` and `emit_eprint_items_llvm`),
+        // so both statement kinds need to feed it here.
+        TypedStmt::Print { items } | TypedStmt::EPrint { items } => {
             for it in items {
                 match it {
                     crate::ir::TypedPrintItem::Str(text) => intern(text, msgs, idx),
