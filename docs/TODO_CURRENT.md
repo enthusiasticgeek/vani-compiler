@@ -3275,4 +3275,31 @@ verifying the four fixes above against their tutorial worked examples
   exactly the early-return shape that makes the original "broken"
   example not actually broken).
 
+- [x] **`intermediate/03c_shared_ownership_primer.md`'s channel and
+  Mutex patterns (4 and 5) both had multiple broken claims — fixed
+  2026-07-29.** (1) `Channel<Vec<i64>, 8>` — the doc's own example
+  — is rejected: "Channel element type must be an integer width or
+  bool, got Vec<i64>." `Channel<T, N>`'s `T` is scalar-only in v1;
+  you send a computed result/handle, not an owning value like a
+  `Vec` directly. (2) Both patterns used the block form
+  `task name { ...captures an outer non-Copy binding... }` —
+  rejected outright ("task body captures non-Copy binding...
+  Captures must be Copy types"), confirmed for `Channel<i64, 8>`
+  AND `Mutex<T>` alike (not narrow to one type). The fix in both
+  cases: define an ordinary function taking the shared value by
+  `ref`, and spawn it with the expression form
+  `task fn_name(ref x)` instead. (3) Task bodies can only call
+  `pure fn`s ("task body cannot call non-pure function") — the
+  doc's `process`/`expensive_compute` calls inside `task { }`
+  blocks would have hit this too even setting aside the capture
+  issue. (4) The Mutex pattern's `g.value = g.value + 1;` direct
+  field-assignment on a `Guard<T>` is rejected — "only structs
+  support field assignment ... Guard<T>` isn't one; the real API
+  is `guard_get(ref g)` / `guard_set(mut ref g, new_value)`,
+  confirmed working for both a struct-typed and (separately) a
+  scalar-typed `Mutex`. Rewrote both patterns as fully verified,
+  runnable programs (previously undefined-helper fragments) using
+  the real expression-form `task`/`Task<R>`/`join`/`guard_get`/
+  `guard_set` APIs throughout.
+
 ---

@@ -213,42 +213,76 @@ If you'd reach for `Arc<T>` to share data across threads,
 ask first: do you need shared READ access (chapter 5 mutex
 pattern) or do you actually need to MOVE the value?
 
-For moves, channels are cleaner:
+For moves, channels are cleaner -- with two v1 restrictions worth
+knowing up front: **`Channel<T, N>`'s element type `T` must be an
+integer width or `bool`** (not an arbitrary type like `Vec<i64>` --
+send a handle/index/scalar result instead of a heap-owning value
+directly), and **the block form `task { ... }` cannot capture a
+non-Copy binding from the enclosing scope at all** (not just
+`Channel` -- the same restriction hit `Mutex<T>` in the pattern
+below). Both restrictions push toward the same fix: define an
+ordinary function that takes the channel by `ref`, and spawn it
+with the expression form `task fn_name(ref ch)` instead of the
+block form:
 
 ```vani
-let ch: Channel<Vec<i64>, 8> = channel_new();
-
-task producer {
-  let data: Vec<i64> = expensive_compute();
-  channel_send(mut ref ch, data);    // data moves OUT of producer
+fn produce(ch: ref Channel<i64, 8>) -> i64 {
+  let data: i64 = expensive_compute();
+  channel_send(ch, data);    // data moves OUT of producer
+  return 0;
 }
 
-task consumer {
-  let data: Vec<i64> = channel_recv(mut ref ch);
-                                      // data moves INTO consumer
-  process(data);
+fn consume(ch: ref Channel<i64, 8>) -> i64 {
+  let data: i64 = channel_recv(ch);
+                              // data moves INTO consumer
+  return process(data);
+}
+
+fn main() -> i64 {
+  let ch: Channel<i64, 8> = channel_new();
+  let p: Task<i64> = task produce(ref ch);
+  let _ = join p;
+  let c: Task<i64> = task consume(ref ch);
+  let result: i64 = join c;
+  print result;
+  return 0;
 }
 ```
 
-At any moment, exactly one task owns the Vec. There's no
-shared mutable state -- no race possible. The channel is the
-synchronization primitive AND the ownership-transfer
+At any moment, exactly one task owns the value moving through the
+channel. There's no shared mutable state -- no race possible. The
+channel is the synchronization primitive AND the ownership-transfer
 primitive.
 
 ### Pattern 5: `Mutex<T>` for actual shared mutable state
 
 When you genuinely need multiple threads to MUTATE the same
-data, use `Mutex<T>`:
+data, use `Mutex<T>` -- with the same "block-form `task` can't
+capture a non-Copy value" restriction from Pattern 4 above, so
+this needs the same fix: a function taking the mutex by `ref`,
+spawned with `task fn_name(ref m)`. And a `Guard<T>`'s payload is
+read/written through `guard_get` / `guard_set`, not direct field
+access (`g.value = ...` is rejected -- "only structs support field
+assignment", and `Guard<T>` isn't a plain struct):
 
 ```vani
 struct SharedCounter { value: i64 }
 
-let counter: Mutex<SharedCounter> = mutex_new(SharedCounter { value: 0 });
-
-task incrementer {
-  let g: Guard<SharedCounter> = mutex_lock(ref counter);
-  g.value = g.value + 1;
+fn increment(m: ref Mutex<SharedCounter>) -> i64 {
+  let g: Guard<SharedCounter> = mutex_lock(m);
+  let current: SharedCounter = guard_get(ref g);
+  guard_set(mut ref g, SharedCounter { value: current.value + 1 });
   // g drops at end of scope -> mutex unlocks
+  return 0;
+}
+
+fn main() -> i64 {
+  let counter: Mutex<SharedCounter> = mutex_new(SharedCounter { value: 0 });
+  let t: Task<i64> = task increment(ref counter);
+  let _ = join t;
+  let g: Guard<SharedCounter> = mutex_lock(ref counter);
+  print guard_get(ref g).value;
+  return 0;
 }
 ```
 
