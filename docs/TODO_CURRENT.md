@@ -3047,4 +3047,116 @@ verifying the four fixes above against their tutorial worked examples
   rejection + arena-index tree + Color/brightness challenge)
   verified correct end-to-end.
 
+- [ ] **BUG-34 (found, NOT fixed — real compiler bug, root cause
+  identified but the fix touches generic-enum monomorphization
+  timing). `if let`/`while let` reject a direct call to a function
+  returning the builtin generic `Option<T>` (or presumably
+  `Result<T,E>`) as their scrutinee, even though the identical call
+  works fine as a `match` scrutinee or when pre-bound to an
+  explicitly-typed variable.** Found writing
+  `intermediate/02b_match_enhancements.md`'s slice/while-let
+  examples. Repro:
+  ```vani
+  if let Option.Some(v) = parse_int("42") { print v; }
+  ```
+  fails with `error: enum 'Option__i64' not declared`. Both of
+  these succeed on the identical logic:
+  ```vani
+  let v: i64 = match parse_int("42") {
+    Option.Some(n) then n, Option.None then -1,
+  };                                          // match: fine
+
+  let r: Option<i64> = parse_int("42");
+  while let Option.Some(v) = r { ... }         // pre-bound var: fine
+  ```
+  Root cause, diagnosed but not fixed: `check_iflet_stmt` (and its
+  `while let` counterpart, `checker.rs`) type-checks the scrutinee
+  via the ordinary `check_expr`, which correctly resolves to
+  `Type::Enum("Option__i64")`, then does its own direct
+  `env.lookup_enum("Option__i64")` — this lookup fails because
+  nothing has registered the monomorphized `Option__i64` enum into
+  `env` at that point. A pre-bound `let r: Option<i64> = ...;`
+  works because the *explicit type annotation* is what triggers
+  registration (via the program-wide `monomorphize_type_decls_in_program`
+  pass, which walks `Type::Apply` occurrences). Regular `match`
+  somehow resolves the same call-expression scrutinee successfully
+  with no explicit annotation anywhere in scope — so `match`'s path
+  must trigger monomorphization (or reach a registry `if let`/
+  `while let` don't) somewhere between its own `check_expr` call and
+  its own enum lookup; tracing exactly where match's checker differs
+  from `check_iflet_stmt`/`check_whilelet_stmt` is the next step for
+  whoever picks this up. **Not fixed this session** — generic
+  monomorphization ordering is shared, sensitive infrastructure
+  (touches every generic type in the language), and this session
+  already had one real regression from touching adjacent shared
+  logic (BUG-31's follow-up commit). Only ever affects the
+  **builtin generic enums** (`Option<T>`, presumably `Result<T,E>`)
+  — user-defined non-generic enums (`enum Opt { None, Some(i64) }`)
+  are completely unaffected, confirmed by extensive testing, which
+  is why `02b_match_enhancements.md`'s examples route around this
+  entirely by using the tutorial's own hand-rolled `Opt` enum
+  instead of the builtin `Option<T>` for every `if let`/`while let`
+  example (a real, verified, zero-cost workaround — not a
+  compromise, since a hand-rolled enum is often clearer in tutorial
+  code anyway).
+
+- [x] **`intermediate/02b_match_enhancements.md` — the single most
+  broken file found this entire tutorial-audit arc: at least 9
+  distinct confirmed bugs across a 519-line file, essentially every
+  code example needed a fix. Found+fixed 2026-07-29.** In order of
+  appearance: (1) shared-setup `try_parse` used `len(s)` where
+  `len` returns `u64` and the function needs `i64` — missing `as
+  i64` cast. (2) The `if let` "desugars to" illustration used
+  statement-form `match` (parse error — `match` is expression-only,
+  see the `08b_errors_primer.md` fix earlier this arc) — reframed
+  as an explicitly-illustrative, non-runnable block. (3)
+  `drain_all` called a nonexistent `vec_len` (real name: `len`) and
+  used an `i64` loop index where Vec indexing needs `u64`. (4)
+  `sum_stack` assumed a `vec_pop` builtin that returns `Option<i64>`
+  — doesn't exist; the real `pop(mut ref xs)` returns a bare `i64`
+  and *aborts* on an empty Vec — rewritten to guard on `len(xs) >
+  0` instead of (fictional) `while let`-driven draining. (5)+(6)
+  The `Dir`/`Msg` or-pattern illustrations were statement-form
+  `match` with `print` inside arms (same class of bug as #2) —
+  both wrapped in real functions returning a value, `print`ed
+  outside. (7) All three of `describe_vec`/`first_and_last`/
+  `rgb_to_hex`'s slice-match functions took `xs: ref Vec<i64>` and
+  matched via `match ref xs` (double-ref — "cannot create a
+  reference to a reference") or bare `match xs` on a ref parameter
+  ("match scrutinee must be an enum, integer, or bool type, got
+  Vec<i64>") — slice-pattern matching requires the `Vec` **by
+  value**; only the file's *fourth* slice example (`classify_scores`,
+  evidently modeled on the real, already-tested
+  `examples/language/english/slice_pattern_guards.vani`) had this
+  right. Fixed all three to take `Vec<i64>` by value. (8)
+  `rgb_to_hex` additionally called a completely fabricated
+  `int_to_hex` builtin (no hex-conversion builtin exists in the
+  language at all) and used `return` inside a match-arm block (the
+  same expression-vs-statement restriction as #2/#5/#6) — simplified
+  to `rgb_to_packed` returning the packed `i64` directly, with the
+  arm's block ending in a tail expression instead of a `return`.
+  (9) The combined example declared `enum Task { ... }` — `Task` is
+  a **reserved built-in type name** (the `task <fn>(...)`
+  concurrency primitive), rejected outright with "enum name 'Task'
+  is a reserved built-in type" — renamed to `Job` throughout, and
+  fixed a second, independent bug in the same example: indexing a
+  non-Copy enum element by value (`tasks[i]`) or ref-borrowing
+  through an index (`ref tasks[i]`) are both rejected ("would alias
+  the owner's slot and double-free" / "`ref` can only borrow a
+  named variable or a struct field") — fixed via `clone_at(tasks,
+  i)`, plus the same `i64`-index/`vec_len` issues as `drain_all`.
+  (10) The challenge's `enum Shape { ..., Triangle(i64, i64) }` hit
+  the *same* single-payload-per-variant restriction found earlier
+  this arc in `02_enums_payloads.md` ("only single-field payloads
+  supported in v1") — wrapped the two sides in a new `TriSides`
+  struct payload, matching that file's own documented workaround —
+  and its `total_perimeter` used the same fictional `vec_pop`
+  Option-returning pop as #4, redesigned as an index-scan with
+  `clone_at` (matching the fix in #9) rather than a stack-drain.
+  Verified the ENTIRE corrected file's example set end-to-end in
+  one combined program on both backends (identical output on each)
+  before writing anything back into the doc — given how many
+  independent things were wrong, no single fix was trusted in
+  isolation.
+
 ---

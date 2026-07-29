@@ -38,7 +38,7 @@ enum Opt    { None, Some(i64) }
 
 fn try_parse(s: Str) -> Opt {
   // toy parser: returns Some(len) when s is non-empty
-  let n: i64 = len(s);
+  let n: i64 = len(s) as i64;   // len() returns u64; cast to i64
   if n > 0 { return Opt.Some(n); }
   return Opt.None;
 }
@@ -60,14 +60,20 @@ fn show_length(s: Str) -> i64 {
 }
 ```
 
-`if let Opt.Some(n) = try_parse(s)` is exactly:
+`if let Opt.Some(n) = try_parse(s)` captures exactly this shape --
+"run this block when the pattern matches, otherwise fall through":
 
-```vani
+```
 match try_parse(s) {
   Opt.Some(n) then { print "length:", n; return n; },
   _           then {},
 }
 ```
+
+(Illustrative, not literal syntax to type yourself -- `match` is
+expression-only in v1, so a bare `match` statement like this doesn't
+parse on its own. This is the shape `if let` compiles down to
+internally, in a position ordinary code can't reach directly.)
 
 The bound variable `n` is in scope only inside the `{ … }` block. The
 else path (variant did not match) falls through normally; you can add
@@ -88,11 +94,11 @@ if let Opt.Some(n) = try_parse(s) {
 ```vani
 fn drain_all(inputs: ref Vec<Str>) -> i64 {
   let total: i64 = 0;
-  let i: i64 = 0;
+  let i: u64 = 0;
   while let Opt.Some(n) = try_parse(inputs[i]) {
     total = total + n;
     i = i + 1;
-    if i >= vec_len(ref inputs) { break; }
+    if i >= len(inputs) { break; }
   }
   return total;
 }
@@ -102,13 +108,19 @@ The loop body runs as long as `try_parse` returns `Opt.Some(n)`. The
 first time it returns `Opt.None`, the loop exits. The binding `n` is
 re-bound fresh on every iteration — it does not carry over.
 
-A common pattern with a mutable queue or stack:
+**A place `while let` does *not* apply**: draining a `Vec` used as
+a stack. It's tempting to reach for `while let Opt.Some(v) = pop(...)`,
+but the built-in `pop(mut ref xs)` returns a plain `i64` (it aborts
+on an empty Vec, it doesn't hand back an `Option`) -- there's no
+variant to match against, so `while let` isn't the right tool here.
+Guard the length instead:
 
 ```vani
 // Drain a Vec<i64> used as a stack (pop from the back)
 fn sum_stack(stack: mut ref Vec<i64>) -> i64 {
   let total: i64 = 0;
-  while let Opt.Some(v) = vec_pop(mut ref stack) {
+  while len(stack) > 0 {
+    let v: i64 = pop(stack);
     total = total + v;
   }
   return total;
@@ -142,9 +154,13 @@ Or-patterns without payloads (tag-only variants) have no binding
 constraint and are always safe to combine:
 
 ```vani
-match direction {
-  Dir.North | Dir.South then print "vertical",
-  Dir.East  | Dir.West  then print "horizontal",
+enum Dir { North, South, East, West }
+
+fn orientation(direction: Dir) -> Str {
+  return match direction {
+    Dir.North | Dir.South then "vertical",
+    Dir.East  | Dir.West  then "horizontal",
+  };
 }
 ```
 
@@ -153,9 +169,11 @@ Or-patterns with payloads — all alternatives must bind the same name:
 ```vani
 enum Msg { Ping(i64), Pong(i64), Other }
 
-match msg {
-  Msg.Ping(seq) | Msg.Pong(seq) then { print "seq:", seq; },
-  Msg.Other                     then { print "other"; },
+fn describe_msg(msg: Msg) -> Str {
+  return match msg {
+    Msg.Ping(seq) | Msg.Pong(seq) then "seq: " + i64_to_str(seq),
+    Msg.Other                     then "other" + "",
+  };
 }
 ```
 
@@ -238,9 +256,14 @@ fixed-size array `[T; N]` in a `match` arm, binding elements by
 position while `..` absorbs any number of middle elements you don't
 need.
 
+Slice-pattern matching takes the `Vec` **by value** -- `match xs`
+on a `ref Vec<i64>` parameter is rejected ("match scrutinee must be
+an enum, integer, or bool type"); pass the `Vec` itself, not a
+reference to it:
+
 ```vani
-fn describe_vec(xs: ref Vec<i64>) -> Str {
-  return match ref xs {
+fn describe_vec(xs: Vec<i64>) -> Str {
+  return match xs {
     []           then "empty",
     [x]          then "singleton",
     [first, ..]  then "starts with something",
@@ -251,8 +274,8 @@ fn describe_vec(xs: ref Vec<i64>) -> Str {
 ### Binding first and last
 
 ```vani
-fn first_and_last(xs: ref Vec<i64>) -> i64 {
-  return match ref xs {
+fn first_and_last(xs: Vec<i64>) -> i64 {
+  return match xs {
     []                    then 0,
     [only]                then only,
     [first, .., last]     then first + last,
@@ -271,14 +294,16 @@ fn first_and_last(xs: ref Vec<i64>) -> i64 {
 When you know the exact length, you can name every element:
 
 ```vani
-fn rgb_to_hex(channels: ref Vec<i64>) -> Str {
-  return match ref channels {
+fn rgb_to_packed(channels: Vec<i64>) -> i64 {
+  return match channels {
     [r, g, b] then {
-      // exactly three elements
-      let hex: i64 = r * 65536 + g * 256 + b;
-      return "0x" + int_to_hex(hex);
+      // exactly three elements -- a block arm's last expression
+      // (no `;`, no `return`) is the arm's value; match arms can't
+      // contain `return` since match is an expression, not a
+      // statement (see Beginner Sec.8)
+      r * 65536 + g * 256 + b
     },
-    _ then "invalid",
+    _ then 0 - 1,
   };
 }
 ```
@@ -344,18 +369,26 @@ error: non-exhaustive match: slice/array scrutinees require a
 
 ## Putting it all together
 
+`Task` is a reserved built-in type name in vāṇी (the `task <fn>(...)`
+concurrency primitive from Intermediate's later concurrency chapters
+uses it) -- name your own enum something else, e.g. `Job`:
+
 ```vani
 intent "Match enhancements — combined example.";
 
-enum Task { Ready(i64), Blocked, Done }
+enum Job { Ready(i64), Blocked, Done }
 
-fn run_queue(tasks: ref Vec<Task>) -> i64 {
+fn run_queue(tasks: ref Vec<Job>) -> i64 {
   let completed: i64 = 0;
-  let i: i64 = 0;
+  let i: u64 = 0;
 
-  while i < vec_len(ref tasks) {
+  while i < len(tasks) {
+    // Job is non-Copy, so reading a slot by value needs clone_at
+    // (indexing directly, or `ref tasks[i]`, isn't allowed here --
+    // `ref` only borrows a named variable or a struct field).
+    let item: Job = clone_at(tasks, i);
     // if let: skip Blocked and Done silently
-    if let Task.Ready(priority) = tasks[i] {
+    if let Job.Ready(priority) = item {
       // pattern guard: only process high-priority tasks in this pass
       if priority > 5 {
         print "running high-priority task", i;
@@ -367,30 +400,30 @@ fn run_queue(tasks: ref Vec<Task>) -> i64 {
   return completed;
 }
 
-fn describe(t: Task) -> Str {
+fn describe(t: Job) -> Str {
   return match t {
     // or-pattern: Blocked and Done share the same message
-    Task.Blocked | Task.Done           then "inactive",
+    Job.Blocked | Job.Done           then "inactive",
     // guard: distinguish priority tiers
-    Task.Ready(p) if p > 5            then "high-priority",
-    Task.Ready(p) if p > 0            then "normal",
-    Task.Ready(_)                      then "idle",
+    Job.Ready(p) if p > 5            then "high-priority",
+    Job.Ready(p) if p > 0            then "normal",
+    Job.Ready(_)                      then "idle",
   };
 }
 
 fn main() -> i64 {
-  let tasks: Vec<Task> = vec(
-    Task.Ready(8),
-    Task.Blocked,
-    Task.Ready(3),
-    Task.Done,
-    Task.Ready(6),
+  let tasks: Vec<Job> = vec(
+    Job.Ready(8),
+    Job.Blocked,
+    Job.Ready(3),
+    Job.Done,
+    Job.Ready(6),
   );
   let n: i64 = run_queue(ref tasks);
   print "completed:", n;
-  print describe(Task.Ready(8));
-  print describe(Task.Blocked);
-  print describe(Task.Ready(0 - 1));
+  print describe(Job.Ready(8));
+  print describe(Job.Blocked);
+  print describe(Job.Ready(0 - 1));
   return 0;
 }
 ```
@@ -425,11 +458,14 @@ idle
 
 ## Challenge
 
-Define `enum Shape { Circle(i64), Square(i64), Triangle(i64, i64) }` where
-the payload(s) are dimensions. Write:
+Define `enum Shape { Circle(i64), Square(i64), Triangle(TriSides) }`
+where `TriSides` is a small struct holding two `i64` sides (an enum
+variant can only carry a *single* payload in v1 -- see
+[Sec.2](02_enums_payloads.md) -- so a two-field payload like
+`Triangle(i64, i64)` needs a wrapper struct, not a tuple). Write:
 
-1. A `while let` loop that pops shapes from a `Vec` and accumulates their
-   perimeters (circle = `2 * 3 * r`, square = `4 * side`, triangle skip it).
+1. A function that sums the perimeters of every `Circle` in a `Vec`
+   (circle = `2 * 3 * r`; skip `Square` and `Triangle`).
 2. A `classify(s: Shape) -> Str` function that uses or-patterns to group
    `Circle` and `Square` as `"regular"`, and a guard to label `Triangle`
    as `"scalene"` when the two sides differ or `"isosceles"` when they're equal.
@@ -438,30 +474,38 @@ the payload(s) are dimensions. Write:
 <summary>Solution</summary>
 
 ```vani
-enum Shape { Circle(i64), Square(i64), Triangle(i64, i64) }
+struct TriSides { a: i64, b: i64 }
+enum Shape { Circle(i64), Square(i64), Triangle(TriSides) }
 
-fn total_perimeter(shapes: mut ref Vec<Shape>) -> i64 {
+fn total_circle_perimeter(shapes: ref Vec<Shape>) -> i64 {
   let total: i64 = 0;
-  while let Shape.Circle(r) = vec_pop(mut ref shapes) {
-    total = total + 2 * 3 * r;
+  let i: u64 = 0;
+  while i < len(shapes) {
+    // Shape is non-Copy, so reading a slot by value needs clone_at
+    // (same reason as the combined example above).
+    let s: Shape = clone_at(shapes, i);
+    if let Shape.Circle(r) = s {
+      total = total + 2 * 3 * r;
+    }
+    i = i + 1;
   }
-  // Note: this loop stops at the first non-Circle; a real
-  // drain would use a full match inside a plain while loop.
   return total;
 }
 
 fn classify(s: Shape) -> Str {
   return match s {
-    Shape.Circle(_) | Shape.Square(_)      then "regular",
-    Shape.Triangle(a, b) if a == b         then "isosceles",
-    Shape.Triangle(_, _)                   then "scalene",
+    Shape.Circle(_) | Shape.Square(_)           then "regular",
+    Shape.Triangle(sides) if sides.a == sides.b then "isosceles",
+    Shape.Triangle(_)                           then "scalene",
   };
 }
 
 fn main() -> i64 {
+  let shapes: Vec<Shape> = vec(Shape.Circle(5), Shape.Square(4), Shape.Circle(2));
+  print total_circle_perimeter(ref shapes);
   print classify(Shape.Circle(5));
-  print classify(Shape.Triangle(3, 3));
-  print classify(Shape.Triangle(3, 4));
+  print classify(Shape.Triangle(TriSides { a: 3, b: 3 }));
+  print classify(Shape.Triangle(TriSides { a: 3, b: 4 }));
   return 0;
 }
 ```
