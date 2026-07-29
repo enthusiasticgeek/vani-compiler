@@ -2864,4 +2864,23 @@ verifying the four fixes above against their tutorial worked examples
   Vec<OwnedStr>"). Every other entry in the table (13 of 15
   builtins) was verified correct by direct call.
 
+- [x] **`beginner/06a_pointers_refs_primer.md` recommended `unsafe`
+  raw pointers for FFI, contradicting the FFI primer's own
+  (verified) guidance — fixed 2026-07-29.** Twice in the file
+  ("Does vāṇी have pointers?" and "When do you actually need
+  unsafe"), the "when you need unsafe raw pointers" list included
+  "FFI with a C library that passes raw pointers." This directly
+  contradicts `intermediate/09a_ffi_primer.md` (fixed earlier this
+  same tutorial-audit arc, 2026-07-28): raw pointer types never
+  cross the `extern fn` boundary at all, unsafe or not — the
+  checker rejects them outright. The correct, unsafe-free idiom
+  for FFI pointer parameters is `ref T` / `mut ref T`, which
+  already compile down to plain pointers at the ABI level. Fixed
+  both mentions to point at the real guidance instead of inventing
+  a plausible-sounding but wrong one; this file has no compiler
+  examples of its own (by design — it's a pre-code intuition
+  primer), so the fix was prose-only, cross-checked against the
+  other file's own confirmed compiler behavior rather than a fresh
+  `check` run.
+
 ---

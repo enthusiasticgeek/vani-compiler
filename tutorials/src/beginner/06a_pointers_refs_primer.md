@@ -177,8 +177,14 @@ with `Vec`, `OwnedStr`, and structs.
 **Short answer: Not in safe code -- ordinary vāṇी code uses
 references, not raw pointers. The exception is `unsafe(reason = "...")`
 code, where raw pointers (`*T`, `*mut T`) are fully supported for
-cases like embedded MMIO/DMA registers, FFI with C libraries, and
-hand-rolled allocators -- see [Advanced 4: Embedded](../advanced/04_embedded.md).**
+cases like embedded MMIO/DMA registers and hand-rolled allocators --
+see [Advanced 4: Embedded](../advanced/04_embedded.md). FFI with C
+libraries is *not* one of those cases: raw pointers never cross the
+`extern fn` boundary at all (the checker rejects them outright, even
+inside `unsafe`) -- `ref T` / `mut ref T` already compile down to
+plain pointers at the ABI level, so they line up with C's
+`const T*` / `T*` directly, no `unsafe` needed. See
+[Intermediate 9a -- FFI primer](../intermediate/09a_ffi_primer.md).**
 
 This is one of the most important differences from C and C++.
 
@@ -278,8 +284,9 @@ if the program compiles, none of those classes of bugs exist.
 ### When do you actually need `unsafe` (raw memory access)?
 
 In the rare case you need to interact with a hardware register
-map, FFI with a C library that passes raw pointers, or write a
-custom allocator, vāṇī has an `unsafe(reason = "...")` escape
+map or write a custom allocator (FFI with a C library does *not*
+need it -- `ref T` / `mut ref T` cover that directly, see the
+FFI primer), vāṇī has an `unsafe(reason = "...")` escape
 hatch. This is an explicit, audited opt-out that shows up in
 the `vanic deviations` audit report. Normal application code
 never needs it.
