@@ -98,8 +98,8 @@ max = 5
     let lookup: fn(i64) -> f64 = fn(x: i64) -> f64 [ref data] {
       return data[x];
     };
-    print "lookup(2) =", apply(lookup, 2);   // 3.0 -- data borrowed, not moved
-    print "still usable:", data[0];          // 1.0 -- `data` wasn't consumed
+    print "lookup(2) =", apply(lookup, 2);   // 3 -- data borrowed, not moved (whole-number f64 prints without a trailing .0)
+    print "still usable:", data[0];          // 1 -- `data` wasn't consumed
     return 0;
   }
   ```
