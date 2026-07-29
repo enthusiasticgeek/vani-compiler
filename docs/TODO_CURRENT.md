@@ -3467,4 +3467,45 @@ verifying the four fixes above against their tutorial worked examples
   `default_method_inherited_self_type_example_produces_correct_output_on_both_backends`
   in `tests/run_end_to_end.rs`.
 
+- [x] **`intermediate/06b_iterators_primer.md` had THREE separate,
+  significant false claims about iterator-combinator semantics —
+  fixed 2026-07-29.** Found continuing the sequential audit past
+  05_dyn.md. (1) The flagship chain example
+  (`xs.filter(...).map(...).fold(...)`, written as one fluent
+  expression) doesn't parse: v1's method-call sugar only rewrites a
+  receiver that's a plain named `Var` (confirmed in checker.rs's own
+  comment: "Non-Var receivers (`f().map(...)`) need an explicit
+  named intermediate in v1 — same rule as `ref` borrowing only named
+  places"); every chained call in the file needed splitting into
+  separate `let` steps. (2) The entire "Lazy evaluation" section was
+  fabricated — confirmed directly against the compiler's own doc
+  comment on `check_vec_map_fold_builtin`: "v1 is eager — `vec_map`/
+  `vec_filter` materialize fresh Vecs. Loop fusion at monomorphization
+  time is queued as a follow-up" (not shipped). `.take(3)` does NOT
+  short-circuit upstream work — it slices an already-fully-computed
+  Vec. (3) The "Fusion" section claimed the compiler auto-fuses
+  arbitrary adjacent combinators into one loop — also contradicted by
+  the same comment ("queued as a follow-up"). What v1 actually ships:
+  a small set of hand-written, pre-fused combined builtins
+  (`map_fold`/`filter_fold`/`map_filter`/`map_filter_fold`) covering
+  specific 2-3-step shapes, verified working. **A fourth, even more
+  surprising issue found while verifying the "closure connection"
+  section's example**: `vec_map`/`vec_filter`/`vec_fold`'s closure
+  argument is typed as a **plain non-capturing function pointer**
+  (`fn(i64) -> i64` etc., confirmed against `06_closures.md`'s own
+  accurate signature table) — a closure literal referencing ANY
+  outer-scope variable, even a `Copy` `i64`, is rejected with "unknown
+  variable" the instant it's passed to `.filter(...)`/`vec_filter(...)`,
+  because a bare `fn` pointer has no environment slot to hold a
+  capture in (unlike the real, capture-carrying `Closure` type
+  chapter 06a describes). Confirmed this is NOT specific to
+  method-call sugar — the free-function `vec_filter(ref xs, |x| x >
+  threshold)` form fails identically. There is currently no working
+  way to filter/map/fold a Vec using a captured value through these
+  builtins in v1 — an explicit `for` loop is the only way. Rewrote
+  all four sections with verified-accurate replacements (both
+  backends, where applicable) and fixed a resulting `mdbook build`
+  warning (bare `` `Vec<i64>` `` inside a quoted diagnostic string,
+  outside backticks).
+
 ---

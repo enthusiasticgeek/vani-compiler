@@ -79,15 +79,26 @@ code in 6 months, you have to mentally untangle them.
 The "iterator combinator" way:
 
 ```vani
-let total: i64 = xs.filter(|x| x % 2 == 0)
-                   .map(|x| x * 2)
-                   .fold(0, |acc, x| acc + x);
+let evens: Vec<i64> = xs.filter(|x| x % 2 == 0);
+let doubled: Vec<i64> = evens.map(|x| x * 2);
+let total: i64 = doubled.fold(0, |acc, x| acc + x);
 ```
 
-Each step does ONE thing. The chain READS like the
-description: "filter ... then map ... then fold." If you need
-to change one step, you change one step. The code is its own
-documentation.
+Each step does ONE thing. Read top to bottom: "filter ... then
+map ... then fold." If you need to change one step, you change
+one step. The code is its own documentation.
+
+**A style note, not just a preference**: unlike Rust, v1's
+method-call sugar only rewrites a receiver that's a plain,
+named variable (`xs.filter(...)`) -- chaining directly onto the
+result of another call (`xs.filter(...).map(...)`, all on one
+expression) is rejected: "cannot call method 'map' on `Vec<i64>`
+-- methods are attached to struct/enum types only in v1" (the
+method-call sugar never got a chance to rewrite it, because the
+receiver there is a call expression, not a `Var`). Give each
+step its own `let` the way the three lines above do -- same
+rule that governs `ref`/`mut ref`, which also only bind to a
+named place, never an arbitrary expression.
 
 That's the iterator-combinator style. vāṇी supports it through
 function-style helpers (`vec_filter`, `vec_map`, `vec_fold`)
@@ -123,91 +134,155 @@ closure applied per element.
 - **`.collect()`** -- gather the elements into a fresh Vec.
 
 A chain has zero or more adapters between a producer + a
-consumer. Adapters don't actually do anything until the
-consumer pulls -- that's called *lazy evaluation*.
+consumer.
 
-## Lazy evaluation -- what it means and why it matters
+## v1 is eager, not lazy -- a real difference from Rust/Python
 
-In the imperative code, the `for` loop runs once, top to
-bottom. Every operation happens for every element, in order.
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this is a real v1 boundary, not a style choice"/>
 
-In the combinator code, no work happens until the consumer
-asks for it. When `.fold(0, ...)` is called, it requests an
-element from `.map`. `.map` requests an element from
-`.filter`. `.filter` requests an element from `xs`. The
-element flows back up: pass-or-block, transform, accumulate.
-Then the cycle repeats for the next element.
+The kitchen-tap picture at the top of this chapter -- water
+flowing on demand, nothing pre-made -- is how Rust's iterators
+and Python's generators actually work: *lazy evaluation*, where
+an adapter only touches an element the instant the consumer
+asks for the next one. **vāṇी v1 does NOT work this way.** Every
+adapter is **eager**: `.filter(...)` walks the whole input right
+then and there and materializes a brand-new `Vec` holding the
+results, before the next step ever runs. `.map(...)` does the
+same. There is no on-demand pulling, no fused single pass across
+`.filter(...).map(...)` unless you reach for the combined
+builtins in the next section.
 
-This matters when chains involve `.take(n)`:
-
-```vani
-let first_three_doubled: Vec<i64> = xs.map(|x| x * 2).take(3).collect();
-```
-
-If `xs` has a million elements, the lazy chain doesn't double
-all million. It doubles ONE, hands it to `.take`, `.take`
-forwards it, `.collect` collects it. Then the SECOND. Then
-the THIRD. After three, `.take(3)` says "no more"; the chain
-stops. The remaining 999,997 elements are never touched.
-
-Lazy evaluation makes chains efficient even when intermediate
-operations would be expensive on the full input.
-
-## The closure connection
-
-Every adapter takes a closure (chapter 06a). The closure
-captures whatever local context the adapter needs. This is
-why iterators + closures live in the same conceptual area --
-they compose to express most "operations over a collection"
-patterns.
+Concretely:
 
 ```vani
-let threshold: i64 = compute_threshold();
-let large_ones: Vec<i64> = xs.filter(|x| x > threshold).collect();
-                              // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-                              //  closure captures threshold
+let evens: Vec<i64> = xs.filter(|x| x % 2 == 0);   // walks ALL of xs, builds a new Vec
+let doubled: Vec<i64> = evens.map(|x| x * 2);       // walks ALL of evens, builds another new Vec
 ```
 
-`threshold` is computed once outside the chain; the closure
-inside `.filter` reaches out and captures it. Without closures,
-you'd need a separate top-level function plus a way to pass
-threshold to it.
+If `xs` has a million elements, `.filter` walks all million and
+allocates a fresh Vec for whatever passed; `.map` then walks
+*that* Vec's elements (however many passed the filter) and
+allocates a second fresh Vec. `.take(n)` is no exception -- it
+still needs its input Vec already fully built; it slices the
+first `n` elements off an already-complete result, it does not
+short-circuit the step that produced that Vec:
 
-## Fusion -- what the compiler does for performance
+```vani
+let all_doubled: Vec<i64> = xs.map(|x| x * 2);      // doubles EVERY element of xs, million included
+let first_three: Vec<i64> = all_doubled.take(3);    // then keeps just the first 3
+```
+
+`.collect()` fits this model exactly, and explains its own
+implementation: since every adapter already returns a real,
+finished `Vec`, `.collect()` on a Vec-typed value is just
+identity -- it exists so code translated from a lazy language
+still reads naturally, not because there's a lazy stream that
+needs materializing.
+
+None of this makes combinator chains *wrong* to reach for --
+they're still clearer than a hand-rolled loop for most cases --
+but budget for the real cost: each step in a chain is a full
+pass + a full allocation, same as if you'd written the
+intermediate Vecs out by hand. For a chain where that overhead
+actually matters, see the combined builtins below.
+
+## The closure connection -- and a real limit worth knowing up front
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="this is a real v1 boundary, not a style choice"/>
+
+Every adapter takes an anonymous function (chapter 06a covers
+"closure" generally). It's tempting to assume that means you
+can reach out and capture local context the way a real closure
+does -- but `vec_map`/`vec_filter`/`vec_fold` (and everything
+this chapter's method-call sugar desugars to) are typed to take
+a **plain, non-capturing function pointer**: `fn(i64) -> i64`,
+`fn(i64) -> bool`, and so on ([Intermediate 6](06_closures.md)
+spells out the exact table). A function pointer is just a code
+address -- there's no environment slot for a captured value to
+live in, unlike a real `Closure` (chapter 06a's two-pointer
+bundle). Confirmed directly: even a `Copy` capture fails --
+
+```vani
+let threshold: i64 = 3;
+let filtered: Vec<i64> = xs.filter(|x| x > threshold);
+// error: unknown variable 'threshold' -- the closure literal
+// here compiles straight to a bare fn pointer with no capture
+// slot, so `threshold` is simply out of scope inside it.
+```
+
+This isn't a version of the "chain directly" restriction from
+earlier in this chapter -- it fails exactly the same way even
+with `threshold` passed to the equivalent `vec_filter(ref xs,
+|x| x > threshold)` free-function form. **Every closure literal
+you pass to a `vec_*` combinator must be self-contained** --
+reference only its own parameters and top-level items, nothing
+from the enclosing scope. If you need outer context, the honest
+v1 answer is: write the loop explicitly instead --
+
+```vani
+let threshold: i64 = 3;
+let large_ones: Vec<i64> = vec();
+for x in ref xs {
+  if x > threshold {
+    let _ = push(mut ref large_ones, x);
+  }
+}
+```
+
+-- which is exactly the "imperative way" this chapter opened by
+contrasting with combinators. For this specific "filter by a
+captured value" shape, the loop isn't a fallback for people who
+don't like combinators; it is, today, the only way that works.
+
+## Combined builtins -- v1's real answer to "too many passes"
 
 A common worry: "doesn't all this chaining make a lot of
-intermediate Vecs and Closures and slow things down?"
+intermediate Vecs and slow things down?" Given the previous
+section, the honest answer is: yes, exactly that much -- each
+step in a `let`-by-`let` chain is its own full pass and its own
+fresh allocation. **v1 does not have a general-purpose compiler
+"fuser"** that automatically collapses an arbitrary chain into
+one loop (that's an explicitly-tracked follow-up, not shipped
+functionality).
 
-In a naive implementation, yes. In vāṇी, no -- the compiler
-**fuses** adjacent combinators into a single loop.
+What v1 ships instead is a small, fixed set of **hand-written,
+pre-fused combined builtins** covering the most common 2- and
+3-step shapes, each doing everything in ONE pass with ZERO
+intermediate Vecs:
+
+- **`.map_fold(init, mapper, folder)`** -- map then fold.
+- **`.filter_fold(init, predicate, folder)`** -- filter then fold.
+- **`.map_filter(mapper, predicate)`** -- map then filter, still
+  returns a `Vec` (no fold at the end).
+- **`.map_filter_fold(init, mapper, predicate, folder)`** -- all
+  three in one pass.
 
 ```vani
-let total: i64 = xs.map(|x| x * 2)
-                   .filter(|x| x > 10)
-                   .sum();
+let total: i64 =
+  xs.map_filter_fold(0, |x| x * 2, |y| y > 10, |acc, y| acc + y);
 ```
 
-A naive compiler would: build a doubled-vec, build a
-filtered-vec, sum the filtered-vec. Three passes, two
-intermediate allocations.
-
-vāṇี's fuser sees the chain and emits:
+This one call walks `xs` exactly once, applying the map, the
+filter, and the fold inline per element -- equivalent to the
+hand-written loop:
 
 ```
 total = 0
 for x in xs:
   let y = x * 2          // map step
   if y > 10:             // filter step
-    total = total + y    // sum step
+    total = total + y    // fold step
 ```
 
-ONE pass, ZERO intermediate allocations. The combinator
-syntax compiles to the same machine code as the hand-written
-loop -- but you wrote it more readably.
-
-This is the "best of both worlds": functional clarity at the
-source level, imperative efficiency at the machine level.
-Other languages call this "loop fusion" or "deforestation".
+ONE pass, ZERO intermediate allocations -- but you get there by
+reaching for the specific combined builtin whose shape matches
+your chain, not by writing `.map(...).filter(...).fold(...)`
+and trusting the compiler to collapse it (it won't -- and as
+covered above, that exact chain doesn't even parse without
+intermediate `let`s in the first place). If your chain doesn't
+match one of the four combined shapes above, it costs one pass
++ one allocation per step, same as any other eager language
+without a fuser.
 
 ## When NOT to use combinators
 
@@ -237,14 +312,21 @@ state, write the loop.
 - **Combinator** = a transformation that consumes an iterator
   and produces a new one (adapter) or a single value
   (consumer).
-- **Adapters**: `map`, `filter`, `take`, `drop` -- chain them.
+- **Adapters**: `map`, `filter`, `take`, `drop` -- compose them
+  via a separate `let` per step (v1's method-call sugar only
+  rewrites a plain-variable receiver; `xs.filter(...).map(...)`
+  chained directly on one expression doesn't parse).
 - **Consumers**: `fold`, `sum`, `count`, `collect` -- end the
   chain.
-- **Lazy evaluation**: chains only do work when the consumer
-  asks. `.take(3)` after a million-element source touches
-  only 3 elements.
-- **Fusion**: the compiler combines adjacent combinators into
-  a single loop. Functional syntax, imperative codegen.
+- **v1 is eager, not lazy**: every adapter walks its whole input
+  and materializes a fresh `Vec` immediately -- unlike Rust/
+  Python, nothing is pulled on-demand, and `.take(3)` still
+  requires its input already fully computed.
+- **No general fusion, but combined builtins**: the compiler
+  doesn't auto-fuse arbitrary chains (that's unshipped, tracked
+  future work) -- but `.map_fold`, `.filter_fold`, `.map_filter`,
+  and `.map_filter_fold` are hand-written, pre-fused, single-pass
+  builtins covering the common 2- and 3-step shapes.
 
 That's iterators. The next chapter ([Intermediate 6](06_closures.md))
 shows the actual `.map` / `.filter` / `.fold` syntax + worked
