@@ -1547,9 +1547,9 @@ fn run() -> Result<ExitCode, String> {
             Ok(ExitCode::SUCCESS)
         }
         "run" => {
-            let (file, flag_start) = required_file_at(&args, 2, "run")?;
+            let (file, flags) = required_file_at(&args, 2, "run")?;
             let (backend_kind, link_args, big_o_mode, target, qemu_machine) =
-                parse_run_args(&args, flag_start)?;
+                parse_run_args(&flags, 0)?;
             match backend_kind {
                 BackendKind::C => run_program(&file, &link_args, big_o_mode),
                 BackendKind::Llvm => {
@@ -1591,8 +1591,8 @@ fn run() -> Result<ExitCode, String> {
             }
         }
         "build" => {
-            let (file, flag_start) = required_file_at(&args, 2, "build")?;
-            let (out, link_args, target, cpu, sve) = parse_build_args(&args, flag_start)?;
+            let (file, flags) = required_file_at(&args, 2, "build")?;
+            let (out, link_args, target, cpu, sve) = parse_build_args(&flags, 0)?;
             build_program_llvm(&file, out.as_deref(), &link_args, target.as_deref(), cpu.as_deref(), sve.as_deref())
         }
         "tokens" => {
@@ -2840,7 +2840,7 @@ fn run() -> Result<ExitCode, String> {
 }
 
 fn required_file(args: &[String], index: usize, command: &str) -> Result<PathBuf, String> {
-    let (file, _next_idx) = required_file_at(args, index, command)?;
+    let (file, _flags) = required_file_at(args, index, command)?;
     Ok(file)
 }
 
@@ -2854,12 +2854,26 @@ fn required_file_at(
     args: &[String],
     index: usize,
     command: &str,
-) -> Result<(PathBuf, usize), String> {
+) -> Result<(PathBuf, Vec<String>), String> {
     // Look for the first positional (non-flag) arg, skipping
     // flag pairs `-o PATH` / `--out PATH` / `--link-with PATH`
     // / `--backend=...` etc. Without this, `vanic build -o
     // out` with an implicit manifest entry would mis-read
     // `out` as the source path.
+    //
+    // BUG-42 (2026-07-29): this used to return just the index
+    // AFTER the file and let the caller resume flag-parsing
+    // from there — silently DROPPING every flag that appeared
+    // BEFORE the file (`vanic run --backend=c file.vani`
+    // defaulted to the LLVM backend with no error, because
+    // `--backend=c` sat at an index flag-parsing never looked
+    // at again). Found auditing the FFI tutorial's own examples,
+    // which surfaced a real backend-selection discrepancy that
+    // turned out to be this CLI bug, not a compiler bug. Now
+    // returns every flag arg (both before and after the file,
+    // file itself excluded, relative order preserved) so the
+    // caller can parse the full set regardless of where the
+    // file appeared on the command line.
     let mut idx = index;
     while let Some(arg) = args.get(idx) {
         if arg == "-o" || arg == "--out" || arg == "--link-with" {
@@ -2870,14 +2884,16 @@ fn required_file_at(
             idx += 1;
             continue;
         }
-        // Found the positional file at `idx`. The caller
-        // should start flag parsing from `idx + 1` (the arg
-        // just after).
-        return Ok((PathBuf::from(arg), idx + 1));
+        // Found the positional file at `idx`. Every other arg
+        // (before AND after) is a flag for the caller to parse.
+        let mut flags: Vec<String> = Vec::with_capacity(args.len().saturating_sub(1));
+        flags.extend_from_slice(&args[index..idx]);
+        flags.extend_from_slice(&args[idx + 1..]);
+        return Ok((PathBuf::from(arg), flags));
     }
-    // No positional — try manifest discovery. The caller
-    // should start flag parsing from `index` (no arg
-    // consumed for the source).
+    // No positional — try manifest discovery. Every arg from
+    // `index` onward is a flag (nothing was consumed for the
+    // source).
     let cwd = std::env::current_dir()
         .map_err(|e| format!("failed to read cwd: {}", e))?;
     if let Some(manifest_path) = vani::manifest::find_manifest(&cwd) {
@@ -2890,7 +2906,7 @@ fn required_file_at(
                 eprintln!("warning: could not write vani.lock: {}", e);
             }
         }
-        return Ok((manifest.entry_path, index));
+        return Ok((manifest.entry_path, args[index..].to_vec()));
     }
     Err(format!(
         "'{}' requires a source file argument (or a `vani.toml` \

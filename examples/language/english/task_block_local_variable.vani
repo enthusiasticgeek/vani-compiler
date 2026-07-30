@@ -1,0 +1,21 @@
+// build & run:
+//   vanic run examples/language/english/task_block_local_variable.vani
+//   vanic run examples/language/english/task_block_local_variable.vani --backend=c
+
+intent "Regression for BUG-43: a `let`-declared local inside a `task NAME { ... }` block body (beyond the block's own captures) crashed the LLVM backend at JIT time with 'use of undefined value' -- the outlined task function's FnCtx didn't set skip_alloca_hoisting=true the way the parallel-for outlined worker already does, so the local's alloca was silently pushed into a preamble buffer that's never flushed for outlined functions, while the store/load referencing it were still emitted. Found via BUG-42 (a CLI flag-parsing bug that silently dropped --backend=c when placed before the file path) un-hiding a previously-vacuous C-vs-LLVM parity test in examples/language/english/echo_loop.vani.";
+
+fn main() -> i64 {
+  let n: i64 = 3;
+
+  task worker {
+    let a: i64 = n;
+    let b: i64 = a * 2;
+    let c: i64 = b + 1;
+    let _ = sleep_ms(1);
+    let _ = c;
+  }
+  join worker;
+
+  print "done";
+  return 0;
+}

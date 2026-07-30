@@ -3590,4 +3590,97 @@ verifying the four fixes above against their tutorial worked examples
   labeled illustrative/hypothetical) type-checks correctly as
   written.
 
+- [x] **BUG-42. CLI: `vanic run --backend=c file.vani` (flag BEFORE
+  the file path) silently ignored `--backend=c` and ran the LLVM
+  backend instead — no error, no warning. Found auditing
+  `intermediate/09_ffi.md`'s `strlen` Challenge example, which
+  crashed only when the flag was placed after the file
+  (`vanic run file.vani --backend=c`) worked. This turned out to
+  affect a large fraction of THIS SESSION'S OWN verification
+  methodology — every `vanic.exe run --backend=c "$file"` spot-check
+  performed with the flag before the path (the pattern used
+  throughout most of this session) was silently re-running the LLVM
+  backend a second time instead of actually exercising the C
+  backend.** Root cause: `required_file_at` (shared by `run` and
+  `build`) correctly LOCATES the positional file argument even when
+  preceded by flags (it skips over them during the scan) — but it
+  only told the caller to resume flag-parsing from the index AFTER
+  the file, discarding every flag it had skipped over to get there.
+  `parse_run_args`/`parse_build_args` never saw `--backend=c`, `-o`,
+  `--link-with`, etc. if they appeared before the file. Fixed by
+  having `required_file_at` return every flag argument (both before
+  and after the file position, file itself excluded, relative order
+  preserved) instead of just a resume-index; callers now parse the
+  full reconstructed flag list from index 0. Verified: `-o path`
+  before the file for `build` (previously also silently dropped, now
+  confirmed correct) and `--backend=c` before the file for `run`
+  (confirmed via a canary that crashes loudly if it silently fell
+  through to LLVM). New test: `backend_flag_before_file_path_is_honored`
+  in `tests/run_end_to_end.rs`.
+  **Consequence — this fix un-hid a real, separate, pre-existing bug
+  (BUG-43 below) via `tests/run_end_to_end.rs`'s own
+  `echo_loop_llvm_matches_c_on_windows` test, which had used the
+  buggy flag-before-path ordering and could therefore never have
+  failed, no matter what the LLVM backend actually did — it was
+  comparing LLVM's stdout against itself.**
+  **Retrospective note on this session's own methodology**: most of
+  this session's "confirmed correct on both backends" spot-checks
+  used `vanic.exe run --backend=c "$SCRATCH/file.vani"` (flag before
+  path) via ad-hoc scratch-file testing, NOT the `tests/
+  run_end_to_end.rs` pattern (which consistently puts the flag after
+  the path and was therefore unaffected). This means many of those
+  ad-hoc spot-checks' "C backend" runs were silently LLVM re-runs.
+  The actual compiler-BUG findings from those checks (BUG-37, 39,
+  40, 41, and the doc corrections) remain valid — their root causes
+  were independently confirmed via source-code reading and/or IR
+  inspection, not solely via the black-box comparison — but the
+  blanket "verified identical on both backends" claims for the
+  surrounding tutorial examples in this session's post-compaction
+  work were not all independently double-checked against a real C
+  backend run. Not practical to retroactively re-verify every prior
+  claim; flagging this here as an honest record. **Going forward,
+  always place `--backend=c` AFTER the file path in ad-hoc testing**
+  (`vanic run file.vani --backend=c`), matching the CLI's own
+  documented usage string and this fix's now-verified-correct
+  before-path behavior as a safety net either way.
+
+- [x] **BUG-43. LLVM backend: a `let`-declared local inside a `task
+  NAME { ... }` block body (beyond the block's own captures) crashed
+  with "use of undefined value '%N.name.addr'" — a pre-existing bug
+  that BUG-42 above had kept permanently hidden from
+  `echo_loop_llvm_matches_c_on_windows`'s own parity test.** Root
+  cause: the outlined task function's `FnCtx` (in
+  `emit_task_via_pthread`, `backend_llvm.rs`) never set
+  `skip_alloca_hoisting = true` the way the sibling `parallel for`
+  outlined-worker codegen already does (found the exact matching
+  one-line precedent a few hundred lines down in the same file).
+  Without it, a scalar `let`'s alloca gets pushed into
+  `ctx.alloca_preamble` (normally flushed into the function's entry
+  block by a second pass so `mem2reg` can promote it) — but outlined
+  functions never get that second pass, so the alloca was silently
+  dropped from the emitted IR entirely while the `store`/`load`
+  referencing its address were still emitted, producing an
+  LLVM-IR-verifier-rejected module. Same "parallel dispatch
+  function" bug class as BUG-19/22/24/27/29/35/37 this session (and
+  prior sessions) — a new kind of outlined-function context needed a
+  fix a sibling context already had, and it was missed. Fixed with
+  the matching one-line `outlined_ctx.skip_alloca_hoisting = true;`.
+  Verified: `examples/language/english/echo_loop.vani` (the example
+  that surfaced this) now produces byte-identical output on both
+  backends; new minimal regression example
+  `examples/language/english/task_block_local_variable.vani`; new
+  test `task_block_local_variable_example_produces_correct_output_on_both_backends`
+  in `tests/run_end_to_end.rs`. Also fixed
+  `echo_loop_windows_byte_count_matches_c` (a second, adjacent test
+  that started failing once BUG-42 made it meaningful too) — its
+  failure was NOT a real IOCP/async-semantics issue despite its own
+  comment blaming one; the actual cause was simply comparing raw
+  stdout byte lengths without CRLF normalization (C backend's stdout
+  is in Windows CRT text mode, `\r\n` per line; LLVM's isn't, `\n`)
+  — a 2-byte-per-line artifact. Fixed by normalizing before
+  comparing, matching every other cross-backend stdout comparison in
+  the same test file. Full `cargo test --workspace`: clean (only the
+  known pre-existing Windows-local `ssa_backend_c_crosscheck.rs`
+  link-flag gap).
+
 ---

@@ -44862,6 +44862,20 @@ fn emit_task_via_pthread(
         ctx.assert_msg_indices,
         ctx.print_str_indices,
     );
+    // BUG-43 (2026-07-29): outlined functions don't get a second
+    // pass to flush a hoisted `alloca_preamble` the way ordinary
+    // function bodies do (see the `parallel for` outlined worker's
+    // identical `skip_alloca_hoisting = true` a few hundred lines
+    // down) — without this, a `let`-declared local inside a `task
+    // NAME { ... }` block body (anything beyond the block's own
+    // captures) had its alloca silently pushed into a preamble
+    // buffer that's never written anywhere, while the store/load
+    // referencing it still got emitted, producing an LLVM IR
+    // "use of undefined value" crash. Found auditing the FFI
+    // tutorial's own examples, which led to a CLI flag-parsing fix
+    // (BUG-42) that in turn un-hid this pre-existing, never-
+    // actually-exercised bug in a "C vs LLVM backend parity" test.
+    outlined_ctx.skip_alloca_hoisting = true;
     outlined_ctx.next_outline = ctx.next_outline;
     for (i, (cap_name, cap_ty)) in captures.iter().enumerate() {
         let slot_p = format!("%cap_slot_{}", i);

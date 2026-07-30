@@ -3251,6 +3251,104 @@ fn parallel_for_mul_reduction_example_produces_correct_output_on_both_backends()
     }
 }
 
+// BUG-42 (2026-07-29): `vanic run --backend=c file.vani` (flag
+// BEFORE the file path) silently ignored `--backend=c` and ran the
+// LLVM backend instead, with no error. `required_file_at` correctly
+// located the file even when preceded by flags, but only told the
+// caller to resume flag-parsing AFTER the file's position --
+// discarding every flag that came before it. Only `vanic run
+// file.vani --backend=c` (flag AFTER) worked as documented. This
+// silently made every `Command` in this test file that happened to
+// place `--backend=c` before the path (several did) compare the
+// LLVM backend against itself instead of against the C backend --
+// see the BUG-43 entry below for a real bug that discovery un-hid.
+// Fixed by having `required_file_at` return every flag arg (both
+// before and after the file, file itself excluded) instead of just
+// an index to resume from.
+#[test]
+fn backend_flag_before_file_path_is_honored() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    // strlen collides with nothing on the C side but does collide
+    // with an internal LLVM declaration when NOT actually routed
+    // through the C backend -- a convenient canary since it fails
+    // loudly (a distinctive "invalid redefinition" lli crash) if
+    // --backend=c silently didn't take effect.
+    let src = "extern \"C\" fn strlen(s: Str) -> u64;\n\
+               fn main() -> i64 { print \"ok\"; return 0; }\n";
+    let dir = std::env::temp_dir().join(format!(
+        "vani_bug42_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let file = dir.join("bug42.vani");
+    std::fs::write(&file, src).expect("write temp source");
+
+    let output = Command::new(binary)
+        .args(["run", "--backend=c", file.to_str().unwrap()])
+        .output()
+        .expect("intentc run --backend=c <file> (flag before path) should execute");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        output.status.success(),
+        "flag-before-path --backend=c was not honored (fell through to LLVM \
+         and crashed on the strlen canary): stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).replace("\r\n", "\n"),
+        "ok\n"
+    );
+}
+
+// BUG-43 (2026-07-29): a `let`-declared local inside a `task NAME {
+// ... }` block body (beyond the block's own captures) crashed the
+// LLVM backend with "use of undefined value '%N.name.addr'" -- the
+// outlined task function's FnCtx never set skip_alloca_hoisting =
+// true the way the parallel-for outlined worker already does, so
+// the local's alloca was silently pushed into a preamble buffer
+// that's never flushed for outlined functions, while the store/load
+// referencing it were still emitted. This was a pre-existing,
+// never-actually-exercised bug: examples/language/english/
+// echo_loop.vani's own C-vs-LLVM parity tests always passed
+// vacuously because of BUG-42 above, until fixing BUG-42 made them
+// meaningful and they caught this for real.
+#[test]
+fn task_block_local_variable_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/task_block_local_variable.vani",
+        manifest_dir
+    );
+    let expected = "done\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "task-block local variable example produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");
@@ -4668,22 +4766,36 @@ fn echo_loop_windows_byte_count_matches_c() {
         .output()
         .expect("intentc run --backend=llvm should execute");
 
-    let c_bytes = c_out.stdout.len();
-    let llvm_bytes = llvm_out.stdout.len();
+    // BUG-42 fallout (2026-07-29): both `Command`s above used to
+    // silently run the LLVM backend regardless of `--backend=c`
+    // (the flag sat BEFORE the file path, which the pre-fix CLI
+    // parser dropped without error) — so this assertion was
+    // comparing LLVM's stdout against itself and could never have
+    // failed, no matter what "IOCP parity" state the runtime was
+    // actually in. Now that the CLI bug is fixed, the two `Command`s
+    // really do exercise different backends, and the raw byte
+    // counts genuinely differ — but only because the C backend's
+    // stdout is in Windows CRT text mode (`\r\n` per line) while
+    // LLVM's is not (`\n`), a 2-byte-per-line artifact with nothing
+    // to do with IOCP semantics. Normalize line endings before
+    // comparing, matching every other cross-backend stdout
+    // comparison in this file.
+    let c_normalized = String::from_utf8_lossy(&c_out.stdout).replace("\r\n", "\n");
+    let llvm_normalized = String::from_utf8_lossy(&llvm_out.stdout).replace("\r\n", "\n");
+    let c_bytes = c_normalized.len();
+    let llvm_bytes = llvm_normalized.len();
 
     // Print diagnostics even on failure so CI logs are informative.
     eprintln!(
-        "echo_loop byte counts — C backend: {c_bytes}, LLVM backend: {llvm_bytes}\n\
-         C stdout:    {:?}\n\
-         LLVM stdout: {:?}",
-        String::from_utf8_lossy(&c_out.stdout),
-        String::from_utf8_lossy(&llvm_out.stdout),
+        "echo_loop byte counts (CRLF-normalized) — C backend: {c_bytes}, LLVM backend: {llvm_bytes}\n\
+         C stdout:    {c_normalized:?}\n\
+         LLVM stdout: {llvm_normalized:?}",
     );
 
     assert_eq!(
         c_bytes, llvm_bytes,
-        "echo_loop byte-count diverges: C={c_bytes} LLVM={llvm_bytes} — \
-         IOCP parity not yet achieved (see STATUS.md item 6)"
+        "echo_loop byte-count diverges after CRLF normalization: \
+         C={c_bytes} LLVM={llvm_bytes}"
     );
 }
 

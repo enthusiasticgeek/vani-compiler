@@ -89,13 +89,31 @@ extern "C" fn c_length(v: Vec2) -> f64;
 
 fn main() -> i64 {
   let v: Vec2 = Vec2 { x: 3.0, y: 4.0 };
-  let len: f64 = c_length(v);
+  let mag: f64 = c_length(v);   // `len` is reserved (it's the builtin len(xs)) -- can't be a binding name
   return 0;
 }
 ```
 
 Without `#[repr(C)]`, vāṇी may reorder or pad fields differently
 from C, causing silent data corruption across the boundary.
+
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="platform-specific — this example needs a tweak on Windows"/>
+
+**Platform note**: `#[repr(C)]` fixes field *layout*, but each
+platform separately caps how large a by-value struct can be
+before the ABI requires a hidden pointer instead — and that cap
+is NOT the same everywhere. `Vec2` (16 bytes, two `f64` fields)
+passes by value fine on SysV x86-64 (Linux/macOS, cap: all-scalar
++ total ≤ 16 bytes) and AArch64 (same 16-byte cap, or an HFA).
+**On Win64 the cap is much stricter — all-scalar AND total size
+in exactly `{1, 2, 4, 8}` bytes** — so this exact `Vec2` example
+is rejected on Windows with the same "unsupported FFI type"
+diagnostic as the no-`#[repr(C)]` case below, confirmed directly.
+`#[repr(C)]` alone doesn't override the size cap on any platform;
+if you hit this on Windows, the fix is the same one the diagnostic
+suggests: pass `ref Vec2` / `mut ref Vec2` instead of `Vec2` by
+value.
+
 See [Advanced 4c -- Attributes reference](../advanced/04c_attributes_reference.md)
 for `#[repr(packed)]` (removes padding entirely for wire protocols).
 
