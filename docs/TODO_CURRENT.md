@@ -3683,4 +3683,61 @@ verifying the four fixes above against their tutorial worked examples
   known pre-existing Windows-local `ssa_backend_c_crosscheck.rs`
   link-flag gap).
 
+- [x] **BUG-44. `#[no_mangle]` silently did nothing for any program
+  simple enough to hit the SSA fast path (the common case) — on
+  BOTH backends. Found auditing `intermediate/09d_build_systems.md`'s
+  "Calling vāṇी functions from C" example, and confirmed the bug
+  ALSO already affected the already-shipped
+  `examples/language/english/bare_metal.vani` (its own comment
+  claims `#[no_mangle]` "makes Reset_Handler appear with its
+  literal name in the ELF" — it didn't; still emitted as
+  `fn_Reset_Handler`).** Root cause: both `emit_c_via_ssa` and
+  `emit_llvm_via_ssa` (`main.rs`) try a newer SSA-driven codegen
+  path first and only fall back to the older tree-based backends
+  (`CBackend`/`LlvmBackend`) for programs using a feature the SSA
+  path doesn't cover yet. The bare-symbol-emission machinery for
+  `#[no_mangle]` (`NO_MANGLE_FN_REGISTRY` in `backend_c.rs`,
+  `LLVM_NO_MANGLE_FN_REGISTRY` in `backend_llvm.rs`) only exists in
+  those older tree backends — `ssa_backend_c.rs`/
+  `ssa_backend_llvm.rs` never got the equivalent, so any `#[no_mangle]
+  fn` simple enough to qualify for the SSA fast path (which is most
+  real code, including every tutorial example that tried it) kept
+  its normal mangled `fn_<name>` symbol with no error or warning —
+  silently breaking the entire point of the attribute (external C
+  code — a linker script's reset vector, a hand-written `extern`
+  declaration — expecting the bare name never found it). Fixed with
+  a minimal, low-risk change: added `f.no_mangle` to
+  `ssa_path_supports`'s per-function rejection list, so any program
+  containing a `#[no_mangle]` function is routed to the tree backend
+  wholesale (matching every other "SSA doesn't support this yet"
+  entry already in that same gate) rather than attempting to
+  reimplement the registry machinery inside both SSA emitters.
+  Verified: both `bare_metal.vani` (now correctly emits
+  `Reset_Handler`/`fn_Reset_Handler`-free on both backends) and a
+  new minimal regression example now produce the documented bare
+  symbol name; full `cargo test --workspace` clean. Also fixed the
+  tutorial's own example, which had TWO further problems on top of
+  the underlying bug: (1) it wrote `pub fn add(...)` for the
+  `#[no_mangle]` function — `pub` requires being inside a `module {
+  ... }` block (the same rule `08_manifest.md` already documents
+  correctly) and doesn't parse bare; the correct, already-
+  established pattern (confirmed against `bare_metal.vani`) is a
+  plain top-level `fn`, no `pub` at all; (2) the doc's own
+  parenthetical "remove vāṇी's `main` or rename it" wasn't backed by
+  any actual mechanism — every vāṇī file requires a `fn main()`, and
+  `vanic emit`'s C output always lowers it to a literal, unmangled
+  `int main(void)` (unlike every other function), so linking
+  `c_helper.c` (which has its own `main`) straight against the vāṇी
+  object genuinely fails with "multiple definition of `main`",
+  confirmed directly. Replaced the unactionable claim with a
+  verified, working fix: `objcopy -N main` on the vāṇी object before
+  the final link, plus the matching CMake `add_custom_command`.
+  Confirmed end-to-end: without the `objcopy` step the link fails
+  exactly as described; with it, the link and run both succeed and
+  print `7`. New example:
+  `examples/language/english/no_mangle_ssa_fastpath.vani`. New
+  tests: `no_mangle_ssa_fastpath_example_produces_correct_output_on_both_backends`
+  and `no_mangle_ssa_fastpath_emits_bare_symbol_on_both_backends` in
+  `tests/run_end_to_end.rs`.
+
 ---

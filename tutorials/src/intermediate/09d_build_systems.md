@@ -240,20 +240,24 @@ re-emit + recompile automatically.
 ### Calling vāṇī functions from C
 
 When `c_helper.c` needs to call a function defined in vāṇī, add
-`#[no_mangle]` to the vāṇī side and declare it `extern` in C:
+`#[no_mangle]` to the vāṇī side and declare it `extern` in C.
+**No `pub` here** -- `#[no_mangle]` goes on a plain top-level `fn`
+(matching `examples/language/english/bare_metal.vani`'s own usage);
+`pub` is for vāṇī's own module-visibility system and requires
+being inside a `module { ... }` block, an unrelated concern:
 
-`src/main.vani` — expose one function to C:
+`src/main.vani` -- expose one function to C:
 
 ```vani
 #[no_mangle]
-pub fn add(a: i64, b: i64) -> i64 {
+fn add(a: i64, b: i64) -> i64 {
   return a + b;
 }
 
 fn main() -> i64 { return 0; }
 ```
 
-`c_helper.c` — call it:
+`c_helper.c` -- call it:
 
 ```c
 #include <stdio.h>
@@ -266,13 +270,46 @@ int main(void) {
 }
 ```
 
-`CMakeLists.txt` — the `add_executable` uses `c_helper.c` as the C entry point
-and links the vāṇī library; remove vāṇī's `main` or rename it:
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="the vani side always emits a real main -- linking needs one extra step"/>
+
+**The `main`-collision problem is real, and here's the actual
+fix.** Every vāṇī source file needs a `fn main()` (the compiler
+requires one), and `vanic emit` always lowers it to a literal
+`int main(void)` in the generated C (unlike other functions, it's
+never mangled to `fn_main` -- that's what makes `vanic build`'s
+output directly runnable). Link `c_helper.c` (which has its own
+`main`) straight against the vāṇī object and you get "multiple
+definition of `main`" from the linker, confirmed directly. Strip
+the symbol out of the vāṇī object before the final link, with
+`objcopy`:
+
+```bash
+# after: vanic emit src/main.vani --backend=c -o build/main_vani.c
+#        cc -c build/main_vani.c -o build/main_vani.o
+objcopy -N main build/main_vani.o build/main_vani_nomain.o
+cc c_helper.c build/main_vani_nomain.o -o build/myproject
+./build/myproject   # 7
+```
+
+Verified end-to-end: without the `objcopy` step, linking fails
+with `multiple definition of 'main'`; with it, the link and run
+both succeed and print `7`. In CMake, add this as its own
+`add_custom_command` between compiling `main_vani.c` and the final
+`add_executable`/`target_link_libraries` step:
 
 ```cmake
-add_executable(myproject c_helper.c)
-target_link_libraries(myproject PRIVATE myproject_vani)
+add_custom_command(
+  OUTPUT  ${CMAKE_BINARY_DIR}/main_vani_nomain.o
+  COMMAND objcopy -N main $<TARGET_OBJECTS:myproject_vani> ${CMAKE_BINARY_DIR}/main_vani_nomain.o
+  DEPENDS myproject_vani
+  COMMENT "strip vāṇī's main so it doesn't collide with c_helper.c's"
+)
 ```
+
+(`objcopy` ships with binutils -- available on Linux/macOS
+toolchains and MinGW on Windows; MSVC toolchains need an
+equivalent, e.g. `lib.exe`'s object-editing options or simply
+excluding the symbol at the `link.exe` level.)
 
 ---
 

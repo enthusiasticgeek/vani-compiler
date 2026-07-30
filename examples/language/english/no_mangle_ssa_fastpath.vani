@@ -1,0 +1,15 @@
+// build & run:
+//   vanic emit examples/language/english/no_mangle_ssa_fastpath.vani --backend=c -o /tmp/no_mangle_test.c
+//   vanic emit examples/language/english/no_mangle_ssa_fastpath.vani -o /tmp/no_mangle_test.ll
+
+intent "Regression for BUG-44: `#[no_mangle]` silently did nothing for any program simple enough to hit the SSA fast path (the common case) -- neither ssa_backend_c.rs nor ssa_backend_llvm.rs implement bare-symbol emission for no_mangle functions, only the older tree-backend fallback's NO_MANGLE_FN_REGISTRY / LLVM_NO_MANGLE_FN_REGISTRY machinery does. A #[no_mangle] fn kept its normal mangled `fn_<name>` symbol on both backends, breaking any external C code (a linker script's reset vector, a hand-written `extern` declaration) expecting the bare name to resolve. Confirmed against the ALREADY-SHIPPED examples/language/english/bare_metal.vani, whose own Reset_Handler -- despite the #[no_mangle] attribute and an explanatory comment claiming it works -- was ALSO still emitted as fn_Reset_Handler on both backends before this fix. Fixed by adding f.no_mangle to ssa_path_supports's per-function rejection list, so any program containing a #[no_mangle] function falls back to the tree backend (which already gets this right) instead of the broken SSA fast path.";
+
+#[no_mangle]
+fn add(a: i64, b: i64) -> i64 {
+  return a + b;
+}
+
+fn main() -> i64 {
+  print add(3, 4);
+  return 0;
+}

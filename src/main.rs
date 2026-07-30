@@ -20,6 +20,24 @@ fn ssa_path_supports(
     extra_reject: impl Fn(&TypedStmt) -> bool,
 ) -> bool {
     for f in &ir.functions {
+        // BUG-44 (2026-07-30): neither SSA backend implements
+        // `#[no_mangle]` bare-symbol emission (only the tree
+        // backends' `NO_MANGLE_FN_REGISTRY`/`LLVM_NO_MANGLE_FN_
+        // REGISTRY` populate-and-consult machinery does) — a
+        // `#[no_mangle] fn` silently kept its normal `fn_<name>`
+        // mangled symbol under the SSA fast path, breaking any
+        // external C code (a linker script's reset vector, a
+        // hand-written `extern` declaration) expecting the bare
+        // name to resolve. Found auditing the build-systems
+        // tutorial's own `#[no_mangle]` FFI-export example, which
+        // failed identically on both backends. Reject the whole
+        // module from the SSA path when ANY function is
+        // `no_mangle`, so it falls back to the tree backend that
+        // already gets this right, rather than reimplementing the
+        // registry machinery in both SSA emitters.
+        if f.no_mangle {
+            return false;
+        }
         for param in &f.params {
             if !ssa_type_supported(&param.ty) {
                 return false;

@@ -3349,6 +3349,102 @@ fn task_block_local_variable_example_produces_correct_output_on_both_backends() 
     }
 }
 
+// BUG-44 (2026-07-30): `#[no_mangle]` silently did nothing for any
+// program simple enough to hit the SSA fast path (the common case)
+// -- neither SSA backend implements bare-symbol emission for
+// no_mangle functions, only the tree-backend fallback's registry
+// machinery does. Confirmed even against the already-shipped
+// bare_metal.vani example, whose own Reset_Handler was still
+// emitted as fn_Reset_Handler on both backends despite the
+// attribute. Fixed by rejecting any no_mangle-containing program
+// from the SSA fast path in `ssa_path_supports`.
+#[test]
+fn no_mangle_ssa_fastpath_example_produces_correct_output_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/no_mangle_ssa_fastpath.vani",
+        manifest_dir
+    );
+    let expected = "7\n";
+
+    for backend_args in [vec!["run", &example], vec!["run", &example, "--backend=c"]] {
+        let output = Command::new(binary)
+            .args(&backend_args)
+            .output()
+            .unwrap_or_else(|e| panic!("intentc {:?} should execute: {e}", backend_args));
+        assert!(
+            output.status.success(),
+            "intentc {:?} failed with status {:?}\nstderr: {}",
+            backend_args,
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(
+            stdout.replace("\r\n", "\n"),
+            expected,
+            "no_mangle example produced the wrong result for {:?}",
+            backend_args
+        );
+    }
+}
+
+#[test]
+fn no_mangle_ssa_fastpath_emits_bare_symbol_on_both_backends() {
+    let binary = env!("CARGO_BIN_EXE_intentc");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    let example = format!(
+        "{}/examples/language/english/no_mangle_ssa_fastpath.vani",
+        manifest_dir
+    );
+    let out_dir = std::env::temp_dir();
+
+    let c_out_path = out_dir.join("bug44_no_mangle_test.c");
+    let c_output = Command::new(binary)
+        .args([
+            "emit",
+            &example,
+            "--backend=c",
+            "-o",
+            c_out_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("intentc emit --backend=c should execute");
+    assert!(
+        c_output.status.success(),
+        "emit --backend=c failed: {}",
+        String::from_utf8_lossy(&c_output.stderr)
+    );
+    let c_src = std::fs::read_to_string(&c_out_path).expect("read emitted C");
+    let _ = std::fs::remove_file(&c_out_path);
+    assert!(
+        c_src.contains("int64_t add(int64_t"),
+        "C backend did not emit a bare 'add' symbol for the no_mangle fn:\n{c_src}"
+    );
+    assert!(
+        !c_src.contains("fn_add("),
+        "C backend emitted a mangled 'fn_add' symbol despite #[no_mangle]:\n{c_src}"
+    );
+
+    let ll_out_path = out_dir.join("bug44_no_mangle_test.ll");
+    let ll_output = Command::new(binary)
+        .args(["emit", &example, "-o", ll_out_path.to_str().unwrap()])
+        .output()
+        .expect("intentc emit should execute");
+    assert!(
+        ll_output.status.success(),
+        "emit (LLVM) failed: {}",
+        String::from_utf8_lossy(&ll_output.stderr)
+    );
+    let ll_src = std::fs::read_to_string(&ll_out_path).expect("read emitted LLVM IR");
+    let _ = std::fs::remove_file(&ll_out_path);
+    assert!(
+        ll_src.contains("@add(") && !ll_src.contains("@fn_add("),
+        "LLVM backend did not emit a bare '@add' symbol for the no_mangle fn:\n{ll_src}"
+    );
+}
+
 #[test]
 fn self_referential_struct_vec_example_produces_correct_output_on_c_backend() {
     let binary = env!("CARGO_BIN_EXE_intentc");
