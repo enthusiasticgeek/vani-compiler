@@ -3830,4 +3830,111 @@ verifying the four fixes above against their tutorial worked examples
   '='"), confirmed directly. All examples verified end-to-end on
   both backends after the fix; `mdbook build` clean.
 
+- [ ] **BUG-46 (found, NOT fixed — deep checker/monomorphization
+  machinery, high risk to touch under time pressure). ANY
+  constructor call (`EnumName.Variant(...)`) for a built-in generic
+  enum (`Result<T, E>`, and confirmed ALSO `Option<T>`) breaks — on
+  EVERY call site in the program, not just the "extra" ones — the
+  instant a second, differently-parameterized instantiation of that
+  SAME generic enum exists anywhere else in the program.** Found
+  auditing `intermediate/10c_error_patterns_primer.md`'s Pattern 1
+  (a function calling two sub-functions that each return a
+  different `Result<i64, E>`, unified into one error enum — the
+  single most natural real-world use of `Result<T, E>`, now that
+  it's a genuine generic per the `10_result_try.md` fix above).
+  Minimal repro: `fn f() -> Option<i64> { return Option.Some(1); }`
+  alone compiles fine; add ANY sibling `fn g() -> Option<OwnedStr> {
+  return Option.Some("x" + ""); }` to the SAME file and BOTH
+  constructor calls fail with "unknown variable 'Option'" / "cannot
+  call method 'Some' on i64" (a parser/checker confusion, not a
+  real name-resolution issue — the diagnostics are clearly
+  downstream noise from whatever actually breaks). Same for
+  `Result<i64, IoError>` + `Result<i64, ParseError>` in one file:
+  ALL FOUR of `Ok`/`Err` construction sites across both functions
+  fail, plus a third, later, differently-parameterized `Result<i64,
+  ConfigError>` construction ALSO fails — i.e. this isn't "the
+  first one wins" or "the last one wins," every constructor call
+  for the affected generic breaks once 2+ instantiations coexist.
+  **Crucially, only CONSTRUCTION breaks — PATTERN matching
+  (`match`/`if let` destructuring an already-`let`-typed value)
+  is unaffected**, confirmed directly: `main()`'s `if let
+  Result.Ok(v) = outcome` (where `outcome`'s type is already known
+  from its own `let` annotation) works fine throughout every repro
+  above, even with 2+ instantiations present. This strongly
+  suggests the break is in whatever resolves a bare
+  `EnumName.Variant(payload)` CONSTRUCTOR expression's concrete
+  monomorphization from context (return-type inference, `let`
+  target-type inference) when multiple candidate instantiations of
+  the same generic enum are registered — as opposed to pattern
+  matching, which already has a concrete type to check against and
+  never needs that inference step. **Not fixed this session** —
+  this is core generic-enum monomorphization/constructor-resolution
+  machinery; a wrong fix risks silently breaking the (already
+  fragile, freshly-corrected) single-instantiation case that DOES
+  work today. **Workaround, verified working**: when a program
+  needs 2+ DIFFERENT instantiations of the same builtin generic
+  enum with constructor calls at more than one of them, use
+  hand-declared custom enums (`enum IoResult { Ok(i64), Err(i64) }`,
+  etc.) for all but one of the instantiations instead — reserve the
+  generic `Result<T, E>`/`Option<T>` for the single "outermost"
+  unified error boundary. Worked around this way in the
+  `10c_error_patterns_primer.md` fix below. Whoever picks this up
+  next: the "unknown variable 'Result'"/"cannot call method on i64"
+  diagnostic shape (treating `Result`/`Option` as if the identifier
+  itself failed to resolve, then treating the constructed value as
+  a bare `i64` fallback) is a strong hint about where in
+  `checker.rs` to start looking — probably a per-generic-enum
+  "resolve pending constructor calls once we know the concrete
+  instantiation" pass that keys off name alone instead of a
+  (name, call-site) pair, so a second registration for the same
+  name clobbers the first's resolution state.
+
+- [ ] **BUG-47 (found, NOT fixed — C-backend-only type-emission bug).
+  A function parameter typed `ref HashMap<OwnedStr, V>` gets the
+  WRONG hardcoded C struct type in its emitted C signature
+  (`intent_hashmap_<K2>_<V2>` from some OTHER HashMap instantiation
+  used elsewhere in the same program) instead of the correct
+  `intent_hashmap_owned_str_<V>`, causing real `cc` compile errors.
+  LLVM backend is unaffected. Found auditing
+  `intermediate/10c_error_patterns_primer.md`'s Pattern 4.**
+  Minimal repro:
+  ```vani
+  fn lookup(map: ref HashMap<OwnedStr, i64>, key: OwnedStr) -> Option<i64> {
+    return hashmap_get(map, key);
+  }
+  fn main() -> i64 {
+    let m: HashMap<OwnedStr, i64> = hashmap_new();
+    let _ = hashmap_insert(mut ref m, "a" + "", 1);
+    let r: Option<i64> = lookup(ref m, "a" + "");
+    if let Option.Some(v) = r { print v; }
+    return 0;
+  }
+  ```
+  Runs correctly (`1`) on the default LLVM backend. Under
+  `--backend=c`, `cc` fails: `fn_lookup`'s emitted signature uses
+  `const intent_hashmap_i64_i64* v_map` — a type name that isn't
+  even declared anywhere in the emitted file, since no
+  `HashMap<i64, i64>` exists in this program at all — while the
+  function body correctly calls
+  `intent_hashmap_owned_str_int64_t_get(v_map, ...)`, and the
+  `main()` call site correctly passes an
+  `intent_hashmap_owned_str_int64_t*`. So the parameter's DECLARED
+  type and its ACTUAL use are inconsistent within the same
+  generated function — strongly suggests the C backend's function
+  SIGNATURE emission for a `ref HashMap<K,V>` parameter is resolving
+  the monomorphized struct name from some global/first-seen-instantiation
+  state rather than from the parameter's own declared type, while
+  the body and call sites correctly use the parameter's real type.
+  Confirmed specific to HashMap-as-parameter — the same
+  `HashMap<OwnedStr, i64>` type used entirely within one function
+  (no parameter passing) works fine on both backends. **Not fixed
+  this session** — logged and worked around in the
+  `10c_error_patterns_primer.md` fix (uses `HashMap<i64, i64>`
+  instead, sidestepping the bug entirely for that doc's example).
+  Whoever picks this up next: look at the C backend's function
+  signature emission for `ref HashMap<K,V>` params (likely in
+  `backend_c.rs` or `ssa_backend_c.rs`, wherever parameter types are
+  stringified to their monomorphized C struct name) versus how the
+  same resolution is done correctly for the body/call sites.
+
 ---
