@@ -136,23 +136,38 @@ or `Err(e)`?
 
 ## The naive way (without language support)
 
-You inspect every Result with a match:
+You inspect every Result with `if let` / `else if let`:
 
 ```vani
+fn parse_num(s: Str) -> Result<i64, ParseError> { ... }
+
 fn pipeline(s: Str) -> Result<i64, ParseError> {
-  let parsed: Result<i64, ParseError> = parse_int(s);
-  let n: i64 = match parsed {
-    Result.Ok(v) then v,
-    Result.Err(e) then return Result.Err(e),   // bail out
-  };
+  let parsed: Result<i64, ParseError> = parse_num(s);
+  let n: i64 = 0;
+  if let Result.Ok(v) = parsed {
+    n = v;
+  } else if let Result.Err(e) = parsed {
+    return Result.Err(e);   // bail out
+  }
   let validated: Result<i64, ParseError> = validate(n);
-  let v: i64 = match validated {
-    Result.Ok(v) then v,
-    Result.Err(e) then return Result.Err(e),
-  };
+  let v: i64 = 0;
+  if let Result.Ok(vv) = validated {
+    v = vv;
+  } else if let Result.Err(e) = validated {
+    return Result.Err(e);
+  }
   return Result.Ok(v * 2);
 }
 ```
+
+(Not `parse_int` -- that's one of vāṇी's own built-in names and
+can't be redefined; and not a `match`-expression with a `return`
+arm -- verified directly that doesn't parse: a `let x = match {
+... }` puts every arm in expression position, and `return` is a
+statement, not an expression, so it can't appear there. `if let` /
+`else if let` are statements, which is exactly why they're the
+right tool for "extract a value, or bail out of the enclosing
+function" -- confirmed working on both backends.)
 
 This works but is repetitive. Every fallible call has the same
 pattern: "if Ok, continue; if Err, bail out propagating the
@@ -190,7 +205,7 @@ Opt.None then return Opt.None };`
 the match-then-bail pattern from the previous section. The
 manual form is what [Intermediate 10](10_result_try.md) shows.
 
-## "Option<T>" -- for "absent" rather than "failed"
+## "`Option<T>`" -- for "absent" rather than "failed"
 
 Sometimes a function might not have a value to return -- not
 because something WENT WRONG, but because there's just nothing

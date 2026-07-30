@@ -3740,4 +3740,29 @@ verifying the four fixes above against their tutorial worked examples
   and `no_mangle_ssa_fastpath_emits_bare_symbol_on_both_backends` in
   `tests/run_end_to_end.rs`.
 
+- [x] **`intermediate/10a_result_try_primer.md`'s central "naive
+  way" example (the manual match-then-bail idiom for propagating a
+  `Result` before `try`/`?` land) used a fundamentally invalid
+  pattern — fixed 2026-07-30.** `let n: i64 = match parsed {
+  Result.Ok(v) then v, Result.Err(e) then return Result.Err(e), };`
+  doesn't parse: "expected expression" at `return`. Root cause,
+  confirmed directly: a `let x = match { ... }` puts every arm in
+  **expression** position (each arm must produce a value of the
+  match's result type), and `return` is a statement, not an
+  expression — it can't appear there. A bare *statement-form*
+  `match` (no `let`, no `return match`) also doesn't exist in v1
+  ("expected statement" — matches the same finding already logged
+  for `02b_match_enhancements.md` earlier this session). The
+  correct idiom, confirmed working end-to-end on both backends: `if
+  let Result.Ok(v) = parsed { n = v; } else if let Result.Err(e) =
+  parsed { return Result.Err(e); }` — `if let`/`else if let` are
+  statements, which is exactly why they're the right tool for
+  "extract a value, or bail out of the enclosing function." Also
+  fixed the example's function name (`parse_int`) — it collides
+  with one of vāṇी's own built-in names ("function 'parse_int' is a
+  built-in name and cannot be redefined"), confirmed directly;
+  renamed to `parse_num`. Also fixed a pre-existing `mdbook build`
+  warning in the same file (bare `Option<T>` in an H2 heading,
+  outside backticks).
+
 ---
