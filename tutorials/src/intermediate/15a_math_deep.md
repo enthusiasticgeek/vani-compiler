@@ -94,7 +94,7 @@ fn main() -> i64 {
   let r:  f64 = f64_relu(x);                 // max(0, x) = 1.5
   let lr: f64 = f64_leaky_relu(0.0 - 1.5, 0.01); // 0.01 * (-1.5) = -0.015
   let sp: f64 = f64_softplus(x);             // ln(1 + e^x) ~= 1.701
-  let sw: f64 = f64_swish(x);               // x * sigma(x) ~= 1.253
+  let sw: f64 = f64_swish(x);               // x * sigma(x) ~= 1.226
   let sg: f64 = f64_sigmoid(0.0);           // 1/(1+e^0) = 0.5
   let ss: f64 = f64_softsign(x);            // x/(1+|x|) = 1.5/2.5 = 0.6
   let lo: f64 = f64_logit(0.5);             // ln(p/(1-p)) = 0.0
@@ -143,7 +143,7 @@ fn main() -> i64 {
   // Float extras
   let pi: f64 = f64_pow_int(2.0, 10);          // 1024.0 -- integer exponent (faster)
   let rm: f64 = f64_round_to_multiple(3.7, 0.5); // 3.5
-  let qr: f64 = f64_quadratic_root(1.0, 0.0 - 3.0, 2.0); // smaller root of x^2-3x+2=0 -> 1.0
+  let qr: f64 = f64_quadratic_root(1.0, 0.0 - 3.0, 2.0); // larger root of x^2-3x+2=0 -> 2.0
 
   print "mod_pos(-7, 3):", pm;
   print "mod_inverse(3, 7):", mi;
@@ -163,7 +163,7 @@ fn main() -> i64 {
 | `i64_parity(n: i64) -> i64` | 1 if odd number of set bits, 0 otherwise |
 | `f64_pow_int(base: f64, exp: i64) -> f64` | Faster than `pow` when exponent is integer |
 | `f64_round_to_multiple(x: f64, m: f64) -> f64` | Round x to the nearest multiple of m |
-| `f64_quadratic_root(a: f64, b: f64, c: f64) -> f64` | Smaller root of ax^2+bx+c=0 |
+| `f64_quadratic_root(a: f64, b: f64, c: f64) -> f64` | Larger root of ax^2+bx+c=0 (`(-b + sqrt(b^2-4ac)) / 2a`) |
 
 ---
 
