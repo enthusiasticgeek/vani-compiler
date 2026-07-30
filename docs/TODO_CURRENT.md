@@ -3806,4 +3806,28 @@ verifying the four fixes above against their tutorial worked examples
   a drop sequence the way the normal `return` path does, and
   whether parameters specifically are included in that walk.
 
+- [x] **`intermediate/10_result_try.md`'s entire premise was
+  outdated: "There's no built-in `Result<T, E>` in v1 — you
+  declare your own per-function-family enum" is false — fixed
+  2026-07-30.** Confirmed directly: `Result<T, E>` (and
+  `Result.Ok(...)`/`Result.Err(...)`) work perfectly with ZERO
+  custom declaration, on both backends — a real, working generic
+  built-in enum, same as `Option<T>`. The chapter had readers
+  hand-declare `enum Result { Ok(i64), Err(i64) }` (a fixed,
+  non-generic, `i64`-only shape) as if that were necessary; it
+  isn't. This also directly contradicted a separate claim later in
+  the SAME file ("v1's enums don't carry type parameters yet") —
+  also false, confirmed both `Option<T>` and `Result<T, E>` are
+  genuine generic enums throughout this entire audit. Rewrote the
+  worked example, the `try`-rejection example, and the "v1
+  limitations" list to use the real `Result<T, E>` generic
+  directly, dropped the false "no generics" limitation bullet, and
+  corrected the "Why it works" explanation. Cross-checked the
+  file's OTHER claims, which held up: `try`/`?` really is rejected
+  for `Result<T, E>` specifically (confirmed exact diagnostic
+  text), and `let Result.Ok(v) = r;` (destructuring directly in a
+  `let`, not `match`/`if let`) really doesn't parse ("expected
+  '='"), confirmed directly. All examples verified end-to-end on
+  both backends after the fix; `mdbook build` clean.
+
 ---
