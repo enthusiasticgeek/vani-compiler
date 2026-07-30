@@ -3765,4 +3765,45 @@ verifying the four fixes above against their tutorial worked examples
   warning in the same file (bare `Option<T>` in an H2 heading,
   outside backticks).
 
+- [ ] **BUG-45 (found, NOT fixed — deep, sensitive language-feature
+  machinery; high risk to touch under time pressure, matching the
+  BUG-33/34/36 precedent). A function with a heap-owning parameter
+  (`OwnedStr`, presumably `Vec<T>`/other affine types too) crashes
+  (exit 116, both backends) the instant a `try`/`?` INSIDE that same
+  function actually takes its early-return path — even when the
+  heap-owning parameter is completely unused by the `try`/`?` call
+  itself.** Found while building a corrected, working example for
+  `intermediate/10b_runtime_errors_primer.md`'s `?`-propagation
+  section (the file's ORIGINAL example used `Result<T,E>` with `?`,
+  already known broken per the 10a entry above — while fixing it
+  with the real, working `Option<T>` + `?` pattern, hit this SEPARATE
+  crash). Bisected extensively — confirmed the trigger is exactly
+  "function has an `OwnedStr`-typed parameter" AND "a `?`/`try` in
+  that function's body propagates `None`" (both conditions
+  required; either alone is fine):
+  - `fn f(s: OwnedStr) -> Option<i64> { let n = try parse_int(s); return Some(n); }` — fine (single `try`, no second early-return path).
+  - `fn f(x: i64) -> Option<i64> { let n = try lookup(x); let r = safe_div(100, n)?; ... }` (no `OwnedStr` anywhere) — fine, even though `safe_div`'s `?` DOES propagate `None`.
+  - `fn f(s: OwnedStr, x: i64) -> Option<i64> { let a = try lookup(x); let b = try lookup2(x); ... }` — fine when NEITHER `try` ever hits `None` (only ever takes the `Some` path).
+  - `fn f(s: OwnedStr, x: i64) -> Option<i64> { let a = try parse_int(s); let b = safe_div(100, x)?; ... }` called such that the SECOND `?` hits `None` — **crashes**, exit 116, both backends. The `OwnedStr` parameter `s` is never even read after the first `try` extracts its scalar — its mere PRESENCE as a parameter is enough to trigger the crash once any later early-return fires.
+  Strongly suggests the `try`/`?` desugar's synthesized early-return
+  path doesn't correctly emit the drop/cleanup sequence for
+  affine (heap-owning) parameters that are still in scope at that
+  point — likely a double-free or a skipped free racing against the
+  function's normal-path epilogue, matching the exit-116 signature
+  this session has repeatedly traced back to LLVM heap corruption
+  (BUG-37, others). **Not fixed this session** — the `try`/`?`
+  desugar (T2.6 Phase 2) is new, sensitive, partially-shipped
+  machinery; a wrong fix risks silently breaking the cases that DO
+  work today. Worked around in the tutorial fix by keeping
+  `?`/`try`-using functions to scalar parameters only, extracting any
+  `OwnedStr` input via `if let` *before* calling into them —
+  documented as an explicit callout in
+  `10b_runtime_errors_primer.md` so readers don't independently
+  rediscover this the hard way. Whoever picks this up next: start
+  by checking whether the early-return codegen site (wherever T2.6
+  phase 2's desugar emits the synthetic "if payload-less variant,
+  return it" branch) walks the function's live affine bindings for
+  a drop sequence the way the normal `return` path does, and
+  whether parameters specifically are included in that walk.
+
 ---

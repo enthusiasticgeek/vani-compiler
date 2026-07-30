@@ -268,35 +268,55 @@ The split is a design choice, not a compiler decision.
 
 ### Propagation with `?` / `try`
 
-When a function's body calls many `Result`-returning
-functions, the postfix `?` operator (or the `try EXPR`
-keyword -- same AST node, two surface spellings) propagates
-failures up:
+When a function's body calls many fallible functions, the
+postfix `?` operator (or the `try EXPR` keyword -- same AST
+node, two surface spellings) propagates failures up. **As
+[Intermediate 10a](10a_result_try_primer.md) covers in detail,
+this works today for `Option<T>`-shaped returns, not yet for
+`Result<T, E>`** (confirmed directly: a
+two-payloaded-variant enum like `Result` is rejected --
+`try`/`?` need exactly one payloaded + one payload-less
+variant). The built-in `parse_int(s: Str) -> Option<i64>`
+already returns the supported shape, so it's a working example
+today, no "intended future syntax" caveat needed:
 
 ```vani
-fn handle_request(s: Str) -> Result<i64, OwnedStr> {
-  let parts: Vec<Str> = split(s, ":");
-  let key: Str = parts[0];           // contract: parts has >= 1
-  let value: i64 = parse_int(parts[1])?;
-  let id: i64 = lookup_key(ref state, key)?;
-  return Ok(id + value);
+fn safe_div(num: i64, den: i64) -> Option<i64> {
+  if den == 0 { return Option.None; }
+  return Option.Some(num / den);
+}
+
+fn compute(n: i64) -> Option<i64> {
+  let r: i64 = safe_div(100, n)?;
+  return Option.Some(r);
 }
 ```
 
 Three things to notice:
 
-1. Each `?` desugars to "if Err, return Err immediately;
-   if Ok, unwrap to the value." Propagation is automatic.
-2. The function's own return type is `Result<...>`, so the
-   propagated error gets wrapped naturally.
-3. `parts[0]` is a CONTRACT slot -- the caller is expected
-   to know that the split produced at least one piece. If
-   it didn't, the bounds check aborts. The author has to
-   *think* about whether that's right.
+1. Each `?` desugars to "if `None`, return `None`
+   immediately; if `Some`, unwrap to the value." Propagation
+   is automatic.
+2. The function's own return type is `Option<...>`, so the
+   propagated absence is already the right shape -- no
+   re-wrapping needed.
+3. **A real, confirmed v1 gap worth knowing before you lean on
+   this**: a function with a heap-owning (`OwnedStr`, `Vec<T>`,
+   ...) PARAMETER, combined with a `?`/`try` that actually takes
+   the early-return path inside that same function, crashes
+   (confirmed both backends, unrelated to whether the parameter
+   is even used by the `try`/`?` call). Keep functions that use
+   `?`/`try` to scalar (`i64`/`f64`/`bool`) parameters only;
+   parse/extract any `OwnedStr` input with `if let` *before*
+   calling into a `?`-using helper, the way the worked example in
+   [Intermediate 10](10_result_try.md) does.
 
-A common refactor: if `parts[0]` could plausibly fail with
-caller-provided input, change the index to
-`validated_at(parts, 0)?` to make the failure recoverable.
+Once `Result<T, E>` support lands, the equivalent
+`Result`-returning chain (`parse_int`-style parsing, a lookup,
+each propagated with `?`) will read the same way -- for now,
+write `Result` propagation by hand with `if let` / `else if let`
+per the previous section, or reshape the fallible step to return
+`Option<T>` if "why" doesn't matter to the caller.
 
 ## Row 4: lifting runtime checks to compile time
 
@@ -467,34 +487,65 @@ for pure-Python code).
 
 ### vāṇी
 
+<img class="manas" src="../images/mascot/manas_mascot_caution.png" title="adapted, not a literal port -- see the notes below"/>
+
+vāṇी's `main` can't take `argv` directly -- `fn main() -> i64`
+takes no parameters at all (command-line args need an `extern`
+FFI declaration for the C runtime's `argc`/`argv`, out of scope
+here); and `parse_int` returns `Option<i64>`, not `Result`, so
+the comparison reaches for `stdin_read_line()` (the native,
+FFI-free way to get user input -- see
+[Intermediate 9c](09c_file_io.md)) and `Option` instead. Verified
+end-to-end on both backends, all three paths (valid divide,
+divide-by-zero, non-numeric input):
+
 ```vani
-fn main(argv: Vec<Str>) -> i64 {
-  if len(argv) < 2 {
-    print "usage: divide <n>";
-    return 1;
+fn safe_div(num: i64, den: i64) -> Option<i64> {
+  if den == 0 {
+    return Option.None;
   }
-  match parse_int(argv[1]) {
-    Err(_) then { print "not a number"; return 2; },
-    Ok(n) then match safe_div(100, n) {
-      Err(_) then { print "divide by zero"; return 3; },
-      Ok(r) then { print r; return 0; },
-    },
-  }
+  return Option.Some(num / den);
 }
 
-fn safe_div(num: i64, den: i64) -> Result<i64, OwnedStr> {
-  if den == 0 {
-    return Err("divide by zero" + "");
+fn compute(n: i64) -> Option<i64> {
+  let r: i64 = safe_div(100, n)?;
+  return Option.Some(r);
+}
+
+fn main() -> i64 {
+  let _ = flush_stdout();
+  print "n:";
+  let _ = flush_stdout();
+  let line: OwnedStr = stdin_read_line();
+
+  // Extract `n` BEFORE calling into any `?`/`try`-using
+  // function -- see the callout in the previous section for
+  // why an OwnedStr parameter can't safely sit alongside a
+  // `?`/`try` that early-returns in the same function today.
+  let parsed: Option<i64> = parse_int(line);
+  let n: i64 = 0;
+  if let Option.None = parsed {
+    print "not a number";
+    return 2;
+  } else if let Option.Some(v) = parsed {
+    n = v;
   }
-  return Ok(num / den);
+
+  let result: Option<i64> = compute(n);
+  if let Option.Some(r) = result {
+    print r;
+    return 0;
+  }
+  print "divide by zero";
+  return 3;
 }
 ```
 
 Each failure mode is a named return code with a printed
-message. Bounds check on `argv[1]` is elided after the
-`len(argv) < 2` guard. `parse_int` is `Result` -- bad text
-goes to the `Err` arm. `safe_div` rejects zero up front.
-The program cannot segfault, cannot panic, cannot abort.
+message. `parse_int` is `Option` -- bad text goes to the `None`
+arm. `safe_div` rejects zero up front, propagated through
+`compute` via `?`. The program cannot segfault, cannot panic,
+cannot abort.
 
 Trade: more code than the C / Rust / Python versions. In
 return: every failure mode is *visible at the type level*

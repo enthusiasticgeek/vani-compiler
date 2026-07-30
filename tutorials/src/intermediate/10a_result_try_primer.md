@@ -173,37 +173,71 @@ This works but is repetitive. Every fallible call has the same
 pattern: "if Ok, continue; if Err, bail out propagating the
 error."
 
-## The `try` keyword and `?` operator -- intended sugar
+## The `try` keyword and `?` operator -- works today for `Option<T>`, not yet for `Result<T, E>`
 
 vāṇी reserves `try EXPR` and the postfix `?` operator for
-exactly this pattern:
+exactly this pattern. **The real v1 boundary is narrower than
+"not implemented" -- it already works, but only for enums
+shaped like `Option<T>`** (exactly one payloaded variant plus
+one payload-less variant). Confirmed directly, both forms, both
+backends:
 
 ```vani
-// INTENDED future syntax (T2.6 Phase 2 -- not yet active in v1)
+fn lookup(x: i64) -> Option<i64> {
+  if x > 0 { return Option.Some(x * 2); }
+  return Option.None;
+}
+
+fn pipeline(x: i64) -> Option<i64> {
+  let a: i64 = try lookup(x);      // prefix form -- if None, return it
+  let b: i64 = lookup(a)?;         // postfix form -- same meaning
+  return Option.Some(b + 1);
+}
+```
+
+This compiles and runs correctly today, both `try` and `?`,
+both backends.
+
+**`Result<T, E>` is where it's still unimplemented**, because
+`Result`'s `Err(E)` variant is ALSO payloaded (unlike `Option`'s
+payload-less `None`) -- `try`/`?` require exactly one payloaded
++ one payload-less variant, and `Result<T, E>` has two payloaded
+variants:
+
+```vani
+// Rejected today -- Result has 2 payloaded variants, try/? need 1+1:
 fn pipeline(s: Str) -> Result<i64, ParseError> {
-  let n: i64 = try parse_int(s);   // if Err, return it
+  let n: i64 = try parse_num(s);   // if Err, return it
   let v: i64 = validate(n)?;       // postfix form -- same meaning
   return Result.Ok(v * 2);
 }
 ```
 
-Both forms parse without error, but **in v1 the desugar for
-synchronous functions is not yet implemented** (tracked as
-T2.6 Phase 2). Using `try` or `?` in a sync function body
-currently produces a clear diagnostic:
-
 <img class="manas" src="../images/mascot/manas_mascot_error.png" title="this code does not compile!"/>
 
 ```
+`try` requires the enum 'Result' to have exactly one payloaded
+variant and one payload-less variant; got 2 payloaded and 0
+payload-less.
 `try EXPR` is reserved as a keyword but the desugar to
 match-with-early-return is still in progress (T2.6 Phase 2).
 Write the pattern manually: `match opt { Opt.Some(v) then v,
 Opt.None then return Opt.None };`
 ```
 
-**Until T2.6 Phase 2 lands, write propagation by hand** using
-the match-then-bail pattern from the previous section. The
-manual form is what [Intermediate 10](10_result_try.md) shows.
+There's a second restriction even for the working `Option<T>`
+case, worth knowing before you rely on it: **between the
+`try`-let and the function's final `return`, only `let`,
+`print`, and simple reassignments are permitted** -- `if`,
+`while`, and `for` in that span aren't supported yet (T2.6
+phase 2 again, a narrower gap than the whole feature). Keep any
+conditional logic before the first `try`/`?` or after the last
+one, not straddling it.
+
+**Until `Result<T, E>` support lands, write `Result` propagation
+by hand** using the match-then-bail pattern from the previous
+section. The manual form is what [Intermediate 10](10_result_try.md)
+shows.
 
 ## "`Option<T>`" -- for "absent" rather than "failed"
 
